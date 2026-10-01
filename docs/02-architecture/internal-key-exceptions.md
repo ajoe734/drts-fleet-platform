@@ -918,3 +918,177 @@ made for it here.
   should not enable `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` for the live
   map's acceptance environment until this is resolved, or should otherwise
   sequence the two rollouts so this caller is not broken in between.
+
+## 8. `SR-MAIL-SCHEDULER-PROVISION-20261001`: scheduler service account (Entry C)
+
+`SR-MAIL-RETRY-SCHEDULE-20261001` (PR #2261, merged to `dev`) added two
+`system`-realm-only HTTP routes so an external scheduler can trigger the
+retryable mail outbox drain and the approval-timeout reminder sweep while
+`apps/api`'s Cloud Run service is scaled to zero
+(`apps/api/src/modules/tenant-partner/tenant-partner.controller.ts:239,281`,
+policy in `apps/api/src/common/auth/auth.policy.ts:936-958`):
+
+| Route | Required scope | Allowed realm |
+| --- | --- | --- |
+| `POST internal/scheduled-tasks/mail-outbox/drain` | `notification-delivery:drain` | `system` only |
+| `POST internal/scheduled-tasks/approval-timeout-reminders/run` | `tenant-partner:approval-timeout-reminders:run` | `system` only |
+
+Cloud Scheduler presents its OIDC identity token as a plain
+`Authorization: Bearer <token>` header (it cannot be redirected to the
+custom `x-drts-google-id-token` header `GoogleWorkloadIdentityAdapter` was
+originally built for). `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback`
+(`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-696`) already
+re-offers that bearer token to the same adapter, but only for a route whose
+resolved policy's `allowedRealms` is exactly `["system"]` — both routes
+above qualify, and no user-facing tenant/ops/platform/driver/partner route
+does, so this fallback cannot be used to reach anything else. Every other
+verification step (signature, issuer, audience, registered principal, route
+scope, one-time replay) is unchanged and still fail-closed. This call site
+does not pass `enforceReplayProtection: false`, so the default `true`
+applies, same as every other `verifyServicePrincipal` call site except the
+general-proxy one §7.9 fixed (`InternalKeyMiddleware`'s, which must tolerate
+a cached, repeated token). That default is correct here: Cloud Scheduler
+mints a fresh OIDC token for every invocation, so there is no legitimate
+case of the identical assertion arriving twice, unlike the cached-token
+proxy scenario §7.9 fixed.
+
+### 8.1 Registry entry C
+
+A third `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` entry, for a new
+dedicated service account `drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+(not yet created; `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` §8.2
+creates it). `routeScopes` lists exactly the two routes above and nothing
+else — including `* *` or a prefix pattern would let a compromised or
+misconfigured scheduler credential reach every other internal route this
+fallback guards against; `scopes` lists exactly the two scopes those routes
+require, nothing broader. Re-verified against this sandbox's read-only
+`gcloud` credentials on 2026-10-01: `gcloud iam service-accounts list
+--project=drts-dev-devcc-20260825` still returns only the three service
+accounts listed in §7.9.1 (no `drts-dev-scheduler` yet); `gcloud services
+list --project=drts-dev-devcc-20260825 --filter="name:cloudscheduler.googleapis.com"`
+returns no rows, confirming the API is still disabled; `gcloud run services
+describe drts-dev-api ... --format='value(status.url)'` still returns
+`https://drts-dev-api-r6ykdme3wa-uc.a.run.app`, matching Entries A/B's
+audience unchanged; `gcloud secrets list --project=drts-dev-devcc-20260825
+--filter="name:workload-identity-google"` returns no rows, confirming the
+registry secret is still unpopulated (this task does not populate it either
+— see the runbook).
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-scheduler",
+  "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+  "routeScopes": [
+    "POST internal/scheduled-tasks/mail-outbox/drain",
+    "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+  ],
+  "scopes": [
+    "notification-delivery:drain",
+    "tenant-partner:approval-timeout-reminders:run"
+  ]
+}
+```
+
+`routeScopes`' "`METHOD path`" format and matching rules are
+`matchesScope`'s (`apps/api/src/common/auth/internal-key-exception-registry.ts:159-203`),
+the same matcher `INTERNAL_KEY_EXCEPTION_REGISTRY.scope` and Entries A/B's
+`routeScopes` already use — not a new DSL invented for this entry.
+`tests/unit/sr-mail-scheduler-provision-20261001.test.ts` locks this: both
+declared routes verify successfully through the real
+`GoogleWorkloadIdentityAdapter.verifyServicePrincipal` with a freshly
+signed, otherwise-valid Entry-C token, and every other probed route (wrong
+method on an in-scope path, `POST auth/token`, a generic tenant route, a
+"drain" path with a trailing-slash variant) is rejected with
+`WORKLOAD_ROUTE_SCOPE_DENIED`.
+
+No `ciTenantActorGrants` are declared: that field only gates
+`POST auth/token`'s CI-tenant-actor-impersonation branch
+(`auth.controller.ts`, `isCiTenantActorGateEnabled()`), which this
+principal's `routeScopes` does not even grant access to — a Google
+assertion from this service account presented at `POST /api/auth/token`
+is rejected by the route-scope check before `ciTenantActorGrants` is ever
+consulted.
+
+### 8.2 Full three-entry pasteable registry JSON
+
+Entries A and B below are copied verbatim from §7.9.1 (unchanged by this
+task); Entry C is new. This is the complete value for ops to paste as the
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret once
+`infra/gcp/dev/scheduler/provision-dev-scheduler.sh` has created the
+service account (the secret write itself is a separate operator step this
+task does not perform — see the runbook, `docs/03-runbooks/dev-scheduled-tasks-20261001.md`):
+
+```json
+[
+  {
+    "serviceAccountEmail": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-web-runtime",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["* *"]
+  },
+  {
+    "serviceAccountEmail": "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-ci-deployer",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["POST auth/token"],
+    "ciTenantActorGrants": [
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000901"
+      },
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000902"
+      }
+    ]
+  },
+  {
+    "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-scheduler",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": [
+      "POST internal/scheduled-tasks/mail-outbox/drain",
+      "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+    ],
+    "scopes": [
+      "notification-delivery:drain",
+      "tenant-partner:approval-timeout-reminders:run"
+    ]
+  }
+]
+```
+
+`loadRegistry()`'s lookup is first-match-only on `serviceAccountEmail`/
+`principalId` (§7.6), and all three entries above use distinct service
+accounts, so ordering within the array does not matter.
+
+### 8.3 Schedule-frequency rationale (for `provision-dev-scheduler.sh`)
+
+- **`mail-outbox/drain`, every 1 minute (`* * * * *`)**: every caller of
+  `NotificationDeliveryService.enqueue` in this repo (`audit-notification.email-adapter.ts:120-134`,
+  `regulatory-registry.service.ts:4171-4183`) immediately calls `.dispatch()`
+  in the same request, so `drain()` is a safety net for retries and for any
+  delivery that was enqueued but never got its first dispatch (e.g. a crash
+  between the two calls), not the primary send path. Its own retry backoff
+  (`apps/api/src/modules/notification-delivery/notification-delivery.service.ts:33-34,216-219`,
+  default `retryDelayMs=1000`, `maxAttempts=5`) produces delays of 1s, 2s,
+  4s, 8s between attempts — all under Cloud Scheduler's 1-minute minimum
+  granularity, so a 1-minute cadence is as tight as it is useful: a shorter
+  interval would not make any already-due retry fire sooner, it would only
+  add Cloud Run wake-ups between runs where nothing is due yet.
+- **`approval-timeout-reminders/run`, every 5 minutes (`*/5 * * * *`)**:
+  the sweep's own lead time is `APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS = 12h`
+  (`apps/api/src/modules/tenant-partner/tenant-partner.service.ts:479`); the
+  retired in-process poll ran every 60s
+  (`APPROVAL_NOTIFICATION_POLL_INTERVAL_MS`, same file, line 478) purely
+  because an in-memory interval is free to run that often, not because the
+  reminder is time-critical at that granularity. A 5-minute cadence bounds
+  any reminder to at most 5 minutes after it first became due against a
+  12-hour lead — negligible — while triggering the Cloud Run service a
+  fifth as often. The sweep is idempotent either way
+  (`hasApprovalNotificationDispatch` plus the outbox's idempotency key,
+  documented at `tenant-partner.controller.ts:276-285`), so a tighter or
+  looser cadence is a cost/latency trade, not a correctness one.
