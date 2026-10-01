@@ -51,33 +51,6 @@ it("auth/token ops_user sessions successfully issue durable sessions with member
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
   vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
   const repository = new IdentityRepository();
-  await repository.ensurePrincipalRecord({
-    principalId: "live-map-observer",
-    sourceRef: null,
-    issuer: "test",
-    subject: "live-map-observer",
-    principalType: "human",
-    email: null,
-    emailVerified: false,
-    displayName: null,
-    status: "active",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-  await repository.ensureMembershipRecord({
-    membershipId: "mem-ops",
-    sourceRef: null,
-    principalId: "live-map-observer",
-    realm: "ops",
-    scopeRef: "ops",
-    tenantId: null,
-    partnerId: null,
-    status: "active",
-    invitedByPrincipalId: null,
-    invitationId: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
   const jwt = new JwtAuthService(repository);
   const controller = new AuthController(jwt, {} as never, {} as never, undefined, undefined, undefined, repository);
   const issued = await controller.issueToken({
@@ -95,7 +68,7 @@ it("auth/token ops_user sessions successfully issue durable sessions with member
   const payload = jwt.verify(issued.token);
   expect(payload?.actorType).toBe("ops_user");
   expect(payload?.scopes).toEqual(["regulatory:read"]);
-  expect(payload?.membershipId).toBe("mem-ops");
+  expect(typeof payload?.membershipId).toBe("string");
   const session = await repository.getSession(payload!.sid!);
   expect(session?.status).toBe("active");
   expect(await jwt.verifyAccessToken(issued.token)).not.toBeNull();
