@@ -33,9 +33,33 @@
 #     and classifies it: exactly `"OK"` is success; a recognized
 #     `google.rpc.Code` name other than `OK` is a confirmed failure; anything
 #     else (empty, or a string this script does not recognize) is NOT treated
-#     as success -- it falls through to UNCONFIRMED, because Google has not
-#     published a complete schema for this field and guessing would risk the
-#     same false-success failure mode this fix exists to close.
+#     as success on its own -- see the R5 note below for the one additional
+#     signal that can still confirm success from the same record.
+#
+# Why R5 changed the success path again (F2, success-path gap): a
+# successful HTTP-target `AttemptFinished` record can omit the scalar
+# `jsonPayload.status` field entirely while still carrying
+# `httpRequest.status=200` (or another 2xx) on that SAME log entry -- a
+# published operator log shows this exact shape
+# (https://stackoverflow.com/questions/70882319/google-cloud-scheduler-getting-returned-message-in-logs),
+# and Cloud Scheduler's own `HttpTarget` contract treats any 2xx response as
+# a successful invocation
+# (https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs#HttpTarget).
+# Google has not documented every record shape, so this script does not
+# assume an empty scalar status always means a 2xx was returned -- it reads
+# `httpRequest.status` (https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest)
+# from the *same* Scheduler `AttemptFinished` record (not the diagnostic
+# Cloud Run query below, which stays non-decisive) and treats a 2xx value
+# there as success ONLY when the scalar status is empty/unrecognized. A
+# recognized scalar status is still checked first and always wins --
+# Scheduler's own `google.rpc.Code` classification is the more authoritative
+# signal, so a record that improbably carries both a recognized failure
+# status AND an HTTP 2xx is still reported as the confirmed failure, not
+# success (fail-closed on conflicting evidence, per the "F2 success-path
+# gap" repair scope: this adds one additional success signal, it does not
+# add new failure-classification paths from `httpRequest.status` alone --
+# a non-2xx/absent `httpRequest.status` alongside an empty/unrecognized
+# scalar status still falls through to UNCONFIRMED, exactly as before).
 #   - Cloud Run corroboration (F2 part B): `apps/api/src/main.ts` enables
 #     CORS, so an unrelated OPTIONS preflight to the same route can return a
 #     2xx while the actual scheduler-triggered POST is still in flight or
@@ -54,15 +78,17 @@
 #
 # Exit codes:
 #   0 = confirmed COMPLETED successfully (matching AttemptFinished
-#       status="OK")
+#       status="OK", OR status empty/unrecognized with the same record's
+#       httpRequest.status in the 2xx range)
 #   1 = confirmed COMPLETED but FAILED (matching AttemptFinished status is a
-#       recognized non-OK google.rpc.Code name)
+#       recognized non-OK google.rpc.Code name -- checked before, and takes
+#       priority over, httpRequest.status)
 #   2 = UNCONFIRMED -- no completion evidence found at/after invocation time
 #       within the timeout, or a matching record's status field was empty or
-#       unrecognized. This is NOT success; absent/pending/stale/wrong-job/
-#       unrecognized evidence all fall through to this outcome. A diagnostic
-#       Cloud Run POST record, if one was seen, is reported here but never
-#       changes the exit code.
+#       unrecognized AND its httpRequest.status was not a 2xx. This is NOT
+#       success; absent/pending/stale/wrong-job/unrecognized evidence all
+#       fall through to this outcome. A diagnostic Cloud Run POST record, if
+#       one was seen, is reported here but never changes the exit code.
 set -euo pipefail
 
 JOB_NAME="${1:?usage: confirm-job-attempt.sh <job-name> <route-path-substring> [timeout-seconds]}"
@@ -95,10 +121,11 @@ while :; do
      jsonPayload.\"@type\"=\"type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished\"
      timestamp>=\"${T0}\"" \
     --project="$PROJECT_ID" --freshness=10m --limit=1 \
-    --format='value(timestamp,jsonPayload.status)' 2>/dev/null || true)"
+    --format='value(timestamp,jsonPayload.status,httpRequest.status)' 2>/dev/null || true)"
 
   if [ -n "$scheduler_result" ]; then
     status_value="$(printf '%s' "$scheduler_result" | cut -f2)"
+    http_status_value="$(printf '%s' "$scheduler_result" | cut -f3)"
     case "$status_value" in
       OK)
         echo "CONFIRMED COMPLETED (success, Scheduler AttemptFinished status=OK): ${scheduler_result}"
@@ -112,7 +139,16 @@ while :; do
         exit 1
         ;;
       *)
-        echo "WARNING: matching Scheduler AttemptFinished record found but its status ('${status_value}') is empty or not a recognized google.rpc.Code name -- not treating this as success; continuing to poll: ${scheduler_result}" >&2
+        # No decisive scalar status on this record. Fall back to the same
+        # record's httpRequest.status: a 2xx there is still decisive success
+        # evidence from Scheduler itself (see the R5 header note above) --
+        # but only here, never as a new failure signal, so a non-2xx or
+        # absent httpRequest.status still falls through to UNCONFIRMED below.
+        if [[ "$http_status_value" =~ ^2[0-9][0-9]$ ]]; then
+          echo "CONFIRMED COMPLETED (success, Scheduler AttemptFinished httpRequest.status=${http_status_value}, jsonPayload.status empty/unrecognized): ${scheduler_result}"
+          exit 0
+        fi
+        echo "WARNING: matching Scheduler AttemptFinished record found but neither its status ('${status_value}') nor its httpRequest.status ('${http_status_value}') is decisive -- not treating this as success; continuing to poll: ${scheduler_result}" >&2
         ;;
     esac
   fi

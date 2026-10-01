@@ -425,6 +425,10 @@ type FakeGcloudRecord =
       location?: string;
       timestamp: string;
       status?: string;
+      /** The same AttemptFinished record's httpRequest.status -- present on
+       * a real HTTP-target record alongside (or, per the R5 fix below,
+       * instead of) the jsonPayload.status scalar. */
+      httpStatus?: string;
     }
   | {
       type: "run";
@@ -613,6 +617,49 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: confirm-job-attempt.sh's complet
       },
     ]);
     expect(result.exitCode).toBe(2);
+    expect(result.output).not.toContain("CONFIRMED COMPLETED (success");
+  });
+
+  it("accepts a matching Scheduler AttemptFinished record with an omitted scalar status but a 2xx httpRequest.status (regression: R4's scalar-only check always reported UNCONFIRMED for this successful HTTP-target response shape)", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        httpStatus: "200",
+      },
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("CONFIRMED COMPLETED (success");
+    expect(result.output).toContain("httpRequest.status=200");
+  });
+
+  it("does not treat a non-2xx httpRequest.status on the Scheduler record as decisive on its own -- stays unconfirmed, not a new failure signal", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        httpStatus: "500",
+      },
+    ]);
+    expect(result.exitCode).toBe(2);
+    expect(result.output).not.toContain("CONFIRMED COMPLETED");
+  });
+
+  it("prefers a recognized scalar failure status over a conflicting 2xx httpRequest.status on the same record (fail-closed on conflicting evidence)", () => {
+    const result = runConfirmJobAttempt([
+      {
+        type: "scheduler",
+        jobId: "drts-dev-mail-outbox-drain",
+        timestamp: "2099-01-01T00:00:00Z",
+        status: "NOT_FOUND",
+        httpStatus: "200",
+      },
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain("FAILED");
+    expect(result.output).toContain("status=NOT_FOUND");
     expect(result.output).not.toContain("CONFIRMED COMPLETED (success");
   });
 

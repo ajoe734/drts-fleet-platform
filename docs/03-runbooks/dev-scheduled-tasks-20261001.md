@@ -162,16 +162,26 @@ infra/gcp/dev/scheduler/confirm-job-attempt.sh \
 ```
 
 Exit `0` means a matching Scheduler `AttemptFinished` record with
-`status="OK"` was found; exit `1` means a matching record with a recognized
-non-`OK` `google.rpc.Code` name was found (the script prints it); exit `2`
+`status="OK"` was found, **or** one whose scalar `status` was empty or
+unrecognized but whose own `httpRequest.status` was in the 2xx range — a
+successful HTTP-target invocation can omit the scalar field entirely and
+report the outcome only via `httpRequest.status`
+(https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs#HttpTarget),
+and this script checks that field on the *same* record before giving up, not
+the separate (and never decisive) Cloud Run diagnostic described above. Exit
+`1` means a matching record with a recognized non-`OK` `google.rpc.Code`
+name was found (the script prints it) — a recognized scalar failure always
+wins even if `httpRequest.status` on the same record looks like a success,
+since Scheduler's own outcome classification is checked first. Exit `2`
 means no such record was found within the timeout — either no evidence at
-all, or only a record whose `status` field was empty/unrecognized, or only
-the non-decisive Cloud Run diagnostic. Exit `2` is **not** success, it means
-completion is still unproven (keep investigating, or re-run with a longer
-timeout via the script's third argument). A timeout/exit-`2` result does not
-by itself mean nothing downstream ran either — the handler may still
-complete after the poll window closes, which is exactly why this is reported
-as "unconfirmed," not "failed."
+all, or only a record whose `status` field was empty/unrecognized **and**
+whose `httpRequest.status` was not a 2xx either, or only the non-decisive
+Cloud Run diagnostic. Exit `2` is **not** success, it means completion is
+still unproven (keep investigating, or re-run with a longer timeout via the
+script's third argument). A timeout/exit-`2` result does not by itself mean
+nothing downstream ran either — the handler may still complete after the
+poll window closes, which is exactly why this is reported as "unconfirmed,"
+not "failed."
 
 A completed-success result is still not proof the request was authenticated
 and authorized as the scheduler identity: cross-check the application's own

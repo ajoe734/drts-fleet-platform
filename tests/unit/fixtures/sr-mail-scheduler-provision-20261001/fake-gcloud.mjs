@@ -13,6 +13,19 @@
 // google.rpc.Code name string, e.g. "OK"/"NOT_FOUND") mirroring the real
 // AttemptFinished log's `jsonPayload.status` shape -- not a nested
 // `status.code` object, which belongs to the unrelated `Job` REST resource.
+//
+// R5 fix (SR-MAIL-SCHEDULER-PROVISION-20261001 F2, success-path gap): this
+// used to hard-code its output shape per record `type` regardless of the
+// `--format=value(...)` string the script under test actually passed, so it
+// could not have caught a mismatch between that selector and the real
+// `confirm-job-attempt.sh` projection -- it was validating the script's
+// *filter* logic, not its *field selection*. It now parses the requested
+// `value(...)` field list out of the real `--format` argument and projects
+// each field from the matched record generically (`projectField` below), so
+// changing the selector in confirm-job-attempt.sh without updating this
+// fixture's field map is the only way to get a wrong column out of this
+// stand-in -- the same failure mode a live `gcloud logging read` would
+// produce.
 
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -74,11 +87,32 @@ if (args[0] === "logging" && args[1] === "read") {
     process.exit(0);
   }
   const record = candidates[0];
-  if (record.type === "scheduler") {
-    process.stdout.write(`${record.timestamp}\t${record.status ?? ""}\n`);
-  } else {
-    process.stdout.write(`${record.timestamp}\t${record.httpStatus}\n`);
-  }
+
+  // Field map mirrors exactly what each gcloud `value(...)` selector token
+  // means against a real AttemptFinished / Cloud Run HTTP request-log
+  // record -- `jsonPayload.status` is the Scheduler outcome scalar,
+  // `httpRequest.status` is the HTTP response code on either record type.
+  const fieldValue = (field) => {
+    switch (field) {
+      case "timestamp":
+        return record.timestamp ?? "";
+      case "jsonPayload.status":
+        return record.status ?? "";
+      case "httpRequest.status":
+        return record.httpStatus ?? "";
+      default:
+        return "";
+    }
+  };
+
+  const formatArg = args.find((arg) => arg.startsWith("--format="));
+  const formatValue = formatArg ? formatArg.slice("--format=".length) : "";
+  const fieldListMatch = formatValue.match(/^value\((.*)\)$/);
+  const fields = fieldListMatch
+    ? fieldListMatch[1].split(",").map((field) => field.trim())
+    : ["timestamp"];
+
+  process.stdout.write(`${fields.map(fieldValue).join("\t")}\n`);
   process.exit(0);
 }
 
