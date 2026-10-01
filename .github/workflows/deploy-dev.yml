@@ -1566,8 +1566,25 @@ jobs:
       # is set for this environment. Until then apps/api ignores this header
       # and falls back to the internal key sent alongside it below, so this
       # step keeps working either way during the rollout.
-      - name: Mint identity token — API operational acceptance
+      - name: Mint identity token — API operational acceptance (Tenant Admin)
         id: id_token_api_operational
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.api }}
+          id_token_include_email: true
+      # SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: a second, independently
+      # minted assertion for the Tenant Ops call below. GoogleWorkloadIdentityAdapter
+      # consumes each assertion exactly once (sha256(token)-keyed replay
+      # guard), so reusing the Tenant Admin token above for this second
+      # POST /api/auth/token call would fail closed with
+      # WORKLOAD_ASSERTION_REPLAYED once the registry is populated and this
+      # header stops being ignored.
+      - name: Mint identity token — API operational acceptance (Tenant Ops)
+        id: id_token_api_operational_ops
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
@@ -1581,7 +1598,8 @@ jobs:
           API_URL: ${{ needs.health-check.outputs.api }}
           PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
           SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
-          GOOGLE_ID_TOKEN: ${{ steps.id_token_api_operational.outputs.id_token }}
+          GOOGLE_ID_TOKEN_TENANT_ADMIN: ${{ steps.id_token_api_operational.outputs.id_token }}
+          GOOGLE_ID_TOKEN_TENANT_OPS: ${{ steps.id_token_api_operational_ops.outputs.id_token }}
         run: |
           set -euo pipefail
 
@@ -1589,7 +1607,8 @@ jobs:
             --secret="${SECRET_PREFIX}-jwt-secret" \
             --project="$PROJECT_ID" | tr -d '\r\n')"
           echo "::add-mask::$internal_key"
-          echo "::add-mask::$GOOGLE_ID_TOKEN"
+          echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_ADMIN"
+          echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_OPS"
 
           assert_tenant_session() {
             local token="$1"
@@ -1630,7 +1649,7 @@ jobs:
             --request POST "${API_URL}/api/auth/token" \
             --header 'content-type: application/json' \
             --header "x-drts-internal-key: ${internal_key}" \
-            --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN}" \
+            --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN_TENANT_ADMIN}" \
             --header 'x-actor-type: tenant_admin' \
             --header 'x-actor-id: 10000000-0000-0000-0000-000000000901' \
             --header 'x-realm: tenant' \
@@ -1651,7 +1670,7 @@ jobs:
             --request POST "${API_URL}/api/auth/token" \
             --header 'content-type: application/json' \
             --header "x-drts-internal-key: ${internal_key}" \
-            --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN}" \
+            --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN_TENANT_OPS}" \
             --header 'x-actor-type: tenant_admin' \
             --header 'x-actor-id: 10000000-0000-0000-0000-000000000902' \
             --header 'x-realm: tenant' \
