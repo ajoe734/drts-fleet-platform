@@ -810,10 +810,21 @@ writes were made):
   `https://drts-dev-api-r6ykdme3wa-uc.a.run.app` at the time of this
   writing. Cloud Run service URLs are stable for the life of the service
   (they do not change per revision/deploy), but ops should re-run this exact
-  command before pasting the JSON below if there is any doubt, and must
-  switch both entries to `vars.DEV_IAP_CLIENT_ID` instead if that variable
-  is ever set (see §7.6's `DEV_IAP_CLIENT_ID` caveat -- it would change Entry
-  A's audience but not Entry B's).
+  command before pasting the JSON below if there is any doubt. If
+  `vars.DEV_IAP_CLIENT_ID` is ever set, only **Entry A**'s
+  `allowedTokenAudiences` must switch to that client ID (callers #1-8 read
+  `DRTS_API_AUTH_AUDIENCE`, which is only populated from `DEV_IAP_CLIENT_ID`);
+  **Entry B** must stay on the live API origin URL regardless, because
+  `deploy-dev.yml`'s two `Mint identity token -- API operational acceptance`
+  steps hardcode `id_token_audience: ${{ needs.health-check.outputs.api }}`
+  and never read `DEV_IAP_CLIENT_ID` (see §7.6's `DEV_IAP_CLIENT_ID` caveat).
+  Switching both entries, as an earlier draft of this note incorrectly said,
+  would make Entry B's token's `aud` claim stop matching its
+  `allowedTokenAudiences` and fail every CI operational-acceptance call
+  closed with `WORKLOAD_AUDIENCE_MISMATCH` (403), including for a caller
+  that also has a valid legacy internal key, since that check is
+  intentionally not covered by the unregistered-caller fallback in the row
+  below.
 
 ```json
 [
@@ -851,3 +862,59 @@ per §7.5), alongside setting
 `vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`. This section
 documents the values; it does not and cannot write the GCP secret or GitHub
 variable itself (same reservation as every prior round in this section).
+
+### 7.9.2 Open blocker: live-map observer onboarding is not covered by the two-entry registry
+
+A third caller mints a Google assertion against the **same** service account
+as Entry B and is not satisfied by either Entry B's `ciTenantActorGrants` or
+the unregistered-caller fallback in §7.9's table, so it will fail closed the
+moment the registry above is populated. This is a coordination blocker, not
+a defect fixed in this candidate -- no registry, code, or workflow change is
+made for it here.
+
+- **Caller**: `.github/workflows/live-entry-map-acceptance.yml:265` mints its
+  identity token via `secrets.DEV_WIF_SERVICE_ACCOUNT` -- the same
+  `github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+  identity as Entry B (§7.9.1 verified this is the only SA this repo's
+  GitHub Actions can impersonate via WIF). `tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts:69-78`
+  then posts `POST auth/token` for actor `live-map-observer`, role
+  `ops_observer`, realm `ops`, with `x-drts-google-id-token` set and **no**
+  `x-drts-internal-key`.
+- **Why Entry B as documented does not cover it**: Entry B's
+  `ciTenantActorGrants` lists only the two `tenant_admin` tuples for actorIds
+  `...901`/`...902` (§7.9.1). `resolveCiTenantActorGrant`'s exact-tuple match
+  (`google-workload-identity.adapter.ts:489-496`) has no entry for
+  `(realm: ops, actorType: ops_observer/system, actorId: live-map-observer)`,
+  so `auth.controller.ts` throws `WORKLOAD_CI_TENANT_ACTOR_DENIED` (403) --
+  confirmed by a read-only reviewer probe through the real `AuthController.issueToken`,
+  adapter, and `IdentityRepository` with the §7.9.1 registry and a freshly
+  signed, otherwise-valid Entry B token carrying this actor.
+- **Why the unregistered-caller fallback (§7.9's third row) does not help
+  either**: that fallback only applies when the assertion's service account
+  is *not* one of the registered entries at all (`WORKLOAD_PRINCIPAL_NOT_REGISTERED`),
+  letting such a caller fall through to a legacy `x-drts-internal-key` it
+  may also send. This caller's service account **is** registered (as Entry
+  B); it fails a *different*, intentionally fail-closed check
+  (`ciTenantActorGrants` tuple match on an already-registered principal), and
+  it sends no internal key to fall back to regardless.
+- **What this task does not do about it, and why**: per this task's own
+  integration notes, widening Entry B's grants (or adding route scopes) to
+  cover this actor without the live-map task owner's agreement is explicitly
+  out of scope here, and a second registry entry for the same
+  `serviceAccountEmail` would be dead code -- `loadRegistry()`'s lookup
+  (`google-workload-identity.adapter.ts:223`) is `Array.prototype.find`,
+  first match only (§7.6), so only the first entry sharing that email would
+  ever be live.
+- **What the eventual fix needs**: a direct-identity mapping for this
+  caller, coordinated with the live-map task owner before it is added --
+  not a blanket widening of Entry B. Concretely, a `ciTenantActorGrants`-style
+  tuple (or an equivalent least-privilege grant) keyed on this caller's own
+  `actorId`/`principalId` (`live-map-observer`), its `ops_observer` role,
+  scoped to the minimum it needs (the live-map acceptance suite reads
+  `regulatory:read`), with the same Entry B audience and restricted to
+  `POST auth/token`, added only once the map task owner confirms the
+  identity and scope. Until that coordination lands, `live-entry-map-acceptance.yml`'s
+  session bootstrap will 403 once ops populates the registry above; ops
+  should not enable `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` for the live
+  map's acceptance environment until this is resolved, or should otherwise
+  sequence the two rollouts so this caller is not broken in between.

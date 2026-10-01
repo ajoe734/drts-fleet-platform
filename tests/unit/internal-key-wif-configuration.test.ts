@@ -153,4 +153,41 @@ describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: registry doc documents a p
     expect(doc).toContain("WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=");
     expect(doc).toMatch(/```json\n\[\s*\n\s*\{/);
   });
+
+  it("tells ops to switch only Entry A's audience to DEV_IAP_CLIENT_ID, keeping Entry B on the API origin (deploy-dev.yml's CI mint steps never read that variable)", () => {
+    const doc = readFileSync(registryDocPath, "utf8");
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    // The wrong instruction said to switch *both* entries; that would make
+    // Entry B's token audience stop matching its allowedTokenAudiences and
+    // 403 every CI operational-acceptance call the moment ops set the var.
+    expect(doc).not.toMatch(
+      /switch both entries to `vars\.DEV_IAP_CLIENT_ID`/,
+    );
+    expect(doc).toMatch(/only \*\*Entry A\*\*'s[\s\S]*must switch/);
+    expect(doc).toMatch(/\*\*Entry B\*\* must stay on the live API origin/);
+
+    // Lock the premise the corrected instruction depends on: both CI mint
+    // steps stay keyed to the health-check API output, not an IAP client id.
+    const mintAudiences = workflow.match(
+      /id_token_audience: \$\{\{ needs\.health-check\.outputs\.api \}\}/g,
+    );
+    expect(mintAudiences).not.toBeNull();
+    expect(mintAudiences).toHaveLength(2);
+    expect(workflow).not.toMatch(/id_token_audience:.*DEV_IAP_CLIENT_ID/);
+  });
+
+  it("documents the live-map observer caller as an unresolved coordination blocker, not a silent Entry B widening or a duplicate-email entry", () => {
+    const doc = readFileSync(registryDocPath, "utf8");
+
+    expect(doc).toContain("live-map-observer");
+    expect(doc).toContain("WORKLOAD_CI_TENANT_ACTOR_DENIED");
+    expect(doc).toMatch(
+      /coordinated with the live-map task owner|live-map task owner's agreement/,
+    );
+    // Must not instruct silently widening Entry B or duplicating its email.
+    expect(doc).not.toMatch(
+      /add (the )?observer (permission|grant) to (deployer )?(entry )?B/i,
+    );
+  });
 });
