@@ -337,7 +337,7 @@ export class AuthController {
       requestUrl: request.originalUrl ?? request.url,
     });
 
-    if (strictEnvironment && bootstrapIdentity) {
+    if (strictEnvironment && bootstrapIdentity && !rawGoogleAssertion) {
       throw new ApiRequestError(
         401,
         "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
@@ -557,7 +557,7 @@ export class AuthController {
       );
     }
 
-    if (isStrictIap) {
+    if (isStrictIap && !googleCiTenantActorVerified) {
       throw new ApiRequestError(
         401,
         "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",

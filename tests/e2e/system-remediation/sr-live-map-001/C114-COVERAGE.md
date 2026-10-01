@@ -343,3 +343,9 @@ The JSON format is shown below (secret/actual values omitted):
   }
 ]
 ```
+
+### R2 Remediation (2026-10-01)
+
+| Finding / required acceptance                         | Source / change                                                                                                    | Previous → rework result                                                                                                                                                                     | Commands / evidence                                                                                                    | Remaining limitation                                                                                                              |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| WIF issueToken rejection in strict environments | AuthController.issueToken | WIF authenticated ops requests rejected due to strictEnvironment/isStrictIap checks → bypassed for valid Google assertions | Unit tests passed | **Pending live**: shared Cloud Run verification required |
