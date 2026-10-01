@@ -198,7 +198,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
           },
           body: JSON.stringify({ registrationCode }),
         });
-      } catch (cleanupError) {
+      } catch {
         // Best effort cleanup, do not mask original error
       }
       throw error;
