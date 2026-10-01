@@ -144,48 +144,65 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     const registrationCode = invite.data.registrationCode;
     deps.mask(registrationCode);
     
-    evidence.stage = `driver:register-device`;
-    const deviceId = `live-map-run-${Date.now()}`;
-    const driverSession = await request<{ data: { accessToken: { token: string; expiresIn: string } } }>(
-      "auth/driver/device/register",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
+    try {
+      evidence.stage = `driver:register-device`;
+      const deviceId = `live-map-run-${Date.now()}`;
+      const driverSession = await request<{ data: { accessToken: { token: string; expiresIn: string } } }>(
+        "auth/driver/device/register",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ registrationCode, deviceId }),
         },
-        body: JSON.stringify({ registrationCode, deviceId }),
-      },
-    );
-    const driverToken = driverSession.data.accessToken.token;
-    deps.mask(driverToken);
-    
-    evidence.stage = `driver:verify-session`;
-    session = await request<{
-      data: {
-        active: boolean;
-        identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
-      };
-    }>("auth/session", {
-      headers: { authorization: `Bearer ${driverToken}` },
-    });
-    assert(session.data.active);
-    assert.equal(session.data.identity.realm, "driver");
-    assert.equal(session.data.identity.actorType, "driver_user");
-    assert.equal(session.data.identity.actorId, config.driverId);
-    assert.deepEqual([...session.data.identity.scopes].sort(), ["driver:read"]);
-    
-    verified.push({ name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", token: driverToken });
-    evidence.sessions.push({
-      realm: "driver",
-      actor_type: "driver_user",
-      actor_id: config.driverId,
-      scopes: ["driver:read"],
-      expires_in: driverSession.data.accessToken.expiresIn,
-    });
-    
-    // Neither token reaches subsequent steps unless both session checks pass.
-    for (const { name, token } of verified) deps.exportSession(name, token);
-    deps.exportSession("DRTS_LIVE_MAP_DRIVER_DEVICE_ID", deviceId);
+      );
+      const driverToken = driverSession.data.accessToken.token;
+      deps.mask(driverToken);
+      
+      evidence.stage = `driver:verify-session`;
+      session = await request<{
+        data: {
+          active: boolean;
+          identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+        };
+      }>("auth/session", {
+        headers: { authorization: `Bearer ${driverToken}` },
+      });
+      assert(session.data.active);
+      assert.equal(session.data.identity.realm, "driver");
+      assert.equal(session.data.identity.actorType, "driver_user");
+      assert.equal(session.data.identity.actorId, config.driverId);
+      assert.deepEqual([...session.data.identity.scopes].sort(), ["driver:read"]);
+      
+      verified.push({ name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", token: driverToken });
+      evidence.sessions.push({
+        realm: "driver",
+        actor_type: "driver_user",
+        actor_id: config.driverId,
+        scopes: ["driver:read"],
+        expires_in: driverSession.data.accessToken.expiresIn,
+      });
+      
+      // Neither token reaches subsequent steps unless both session checks pass.
+      for (const { name, token } of verified) deps.exportSession(name, token);
+      deps.exportSession("DRTS_LIVE_MAP_DRIVER_DEVICE_ID", deviceId);
+      deps.exportSession("DRTS_LIVE_MAP_INVITE_CODE", registrationCode);
+    } catch (error) {
+      try {
+        await request("auth/driver/device/invite/revoke", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${tempOpsIssued.token}`,
+          },
+          body: JSON.stringify({ registrationCode }),
+        });
+      } catch (cleanupError) {
+        // Best effort cleanup, do not mask original error
+      }
+      throw error;
+    }
     
     evidence.status = "passed";
     evidence.stage = "complete";

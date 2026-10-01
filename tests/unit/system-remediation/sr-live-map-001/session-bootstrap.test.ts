@@ -155,6 +155,7 @@ it.each([true, false])(
       ["DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", "ops-test-secret"],
       ["DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", "driver-test-secret"],
       ["DRTS_LIVE_MAP_DRIVER_DEVICE_ID", expect.any(String)],
+      ["DRTS_LIVE_MAP_INVITE_CODE", "test-reg-code"],
     ]);
     expect(deps.evidence.sessions).toMatchObject({
       status: "passed",

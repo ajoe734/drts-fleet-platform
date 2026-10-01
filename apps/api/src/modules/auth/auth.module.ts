@@ -16,6 +16,8 @@ import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
 import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adapter";
 
+import { IdempotencyModule } from "../../common/idempotency/idempotency.module";
+
 @Module({
   imports: [
     DatabaseModule,
@@ -23,6 +25,7 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
     DriverProfileModule,
     RegulatoryRegistryModule,
     IdentityModule,
+    IdempotencyModule,
   ],
   controllers: [AuthController, BreakGlassController],
   providers: [

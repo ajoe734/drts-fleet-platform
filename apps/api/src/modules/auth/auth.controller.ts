@@ -71,6 +71,7 @@ import {
   isCiTenantActorGateEnabled,
   resolveCiTenantActorGrant,
 } from "./google-workload-identity.adapter";
+import { IdempotencyService } from "../../common/idempotency";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -145,6 +146,8 @@ export class AuthController {
     // Appended, and optional, for the same reason as `oidcPkceService` above.
     @Optional()
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -156,6 +159,17 @@ export class AuthController {
       );
     }
     return this.oidcPkceService;
+  }
+
+  private requireIdempotencyService(): IdempotencyService {
+    if (!this.idempotencyService) {
+      throw new ApiRequestError(
+        500,
+        "IDEMPOTENCY_UNAVAILABLE",
+        "Idempotency service is required for this operation.",
+      );
+    }
+    return this.idempotencyService;
   }
 
   @OpenRoute()
@@ -617,10 +631,17 @@ export class AuthController {
   @RequireScopes("driver:provision") // Fits the control path requirement for driver identity overrides
   async issueDriverDeviceInvitation(
     @Body() command: IssueDriverDeviceInvitationCommand,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.driverDeviceSessionService.issueRegistrationInvitation(command);
-    return toApiSuccessEnvelope(result, requestId);
+    const result = await this.requireIdempotencyService().execute({
+      scope: "auth:driver_invite:issue",
+      idempotencyKey,
+      requestPath: "auth/driver/device/invite",
+      payload: command,
+      execute: async () => this.driverDeviceSessionService.issueRegistrationInvitation(command),
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("driver/device/invite/revoke")
@@ -628,10 +649,17 @@ export class AuthController {
   @RequireScopes("driver:provision")
   async revokeDriverDeviceInvitation(
     @Body() command: { registrationCode: string },
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.driverDeviceSessionService.revokeInvitation(command);
-    return toApiSuccessEnvelope(result, requestId);
+    const result = await this.requireIdempotencyService().execute({
+      scope: "auth:driver_invite:revoke",
+      idempotencyKey,
+      requestPath: "auth/driver/device/invite/revoke",
+      payload: command,
+      execute: async () => this.driverDeviceSessionService.revokeInvitation(command),
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @OpenRoute()
