@@ -152,7 +152,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
 
     if (invitation.boundBindingId) {
       const binding = (await this.repository?.findBindingById?.(invitation.boundBindingId)) ?? this.bindingsById.get(invitation.boundBindingId);
-      if (binding && binding.status === "active") {
+      if (binding) {
         await this.revokeBindingAndFamily(
           invitation.boundBindingId,
           invitation.revokedAt ?? new Date().toISOString(),
@@ -795,7 +795,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       (await this.repository?.findBindingById?.(bindingId)) ??
       this.bindingsById.get(bindingId);
 
-    if (binding) {
+    if (binding && binding.status !== "revoked") {
       binding.status = "revoked";
       binding.revokedAt = revokedAt;
       binding.updatedAt = revokedAt;

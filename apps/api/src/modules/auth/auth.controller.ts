@@ -431,7 +431,7 @@ export class AuthController {
     // match a registered grant, that is a real access decision and must fail
     // closed, not silently degrade to the internal key.
     let googleCiTenantActorVerified = false;
-    if (rawGoogleAssertion && isCiTenantActorGateEnabled()) {
+    if (rawGoogleAssertion) {
       if (!bootstrapIdentity) {
         throw new ApiRequestError(
           400,
@@ -455,22 +455,35 @@ export class AuthController {
           "Google workload identity validation is not configured for this environment.",
         );
       }
-      const grant = resolveCiTenantActorGrant(resolvedGoogle, {
-        tenantId: bootstrapIdentity.tenantId ?? "",
-        actorType: bootstrapIdentity.actorType,
-        actorId: bootstrapIdentity.actorId ?? "",
-      });
-      if (!grant) {
+
+      if (
+        (bootstrapIdentity.actorId === resolvedGoogle.principalId ||
+         bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
+        resolvedGoogle.roles.includes(bootstrapIdentity.actorType)
+      ) {
+        // Direct authentication! The Google SA is asking for a token for ITSELF.
+        googleCiTenantActorVerified = true;
+      } else if (isCiTenantActorGateEnabled()) {
+        const grant = resolveCiTenantActorGrant(resolvedGoogle, {
+          tenantId: bootstrapIdentity.tenantId ?? "",
+          actorType: bootstrapIdentity.actorType,
+          actorId: bootstrapIdentity.actorId ?? "",
+        });
+        if (!grant) {
+          throw new ApiRequestError(
+            403,
+            "WORKLOAD_CI_TENANT_ACTOR_DENIED",
+            "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
+          );
+        }
+        googleCiTenantActorVerified = true;
+      } else {
         throw new ApiRequestError(
           403,
           "WORKLOAD_CI_TENANT_ACTOR_DENIED",
-          "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
+          "Verified Google workload identity is not granted session issuance.",
         );
       }
-      // Fall through to the same durable-tenant-user-backed issuance path
-      // used for the internal-key bootstrap flow below; only the credential
-      // proof differs.
-      googleCiTenantActorVerified = true;
     }
     if (!googleCiTenantActorVerified) {
       // Require internal key to issue tokens when no workload proof is used.

@@ -327,7 +327,9 @@ it requires a new candidate SHA and fresh CI rather than reusing checkpoint CI.
 
 To successfully authenticate ops actors (e.g., `ops_observer`) via Google Workload Identity Federation, the operator must populate the `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` environment variable with a JSON array of registered principals.
 
-The JSON format must include empty string `tenantId` for ops grants, as shown below (secret/actual values omitted):
+With the latest identity remediation, `ciTenantActorGrants` are no longer required for `ops_user` or `ops_observer` principals as they can authenticate directly. The adapter will automatically persist their membership and role bindings based on the top-level roles.
+
+The JSON format is shown below (secret/actual values omitted):
 
 ```json
 [
@@ -339,13 +341,6 @@ The JSON format must include empty string `tenantId` for ops grants, as shown be
       "regulatory:read",
       "sandbox.compliance.read",
       "sandbox.investigation.read"
-    ],
-    "ciTenantActorGrants": [
-      {
-        "tenantId": "",
-        "actorType": "ops_observer",
-        "actorId": "<EXPECTED_ACTOR_ID>"
-      }
     ]
   }
 ]
