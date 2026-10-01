@@ -463,6 +463,7 @@ export class AuthController {
       ) {
         // Direct authentication! The Google SA is asking for a token for ITSELF.
         googleCiTenantActorVerified = true;
+        bootstrapIdentity.principalId = resolvedGoogle.principalId;
       } else if (isCiTenantActorGateEnabled()) {
         const grant = resolveCiTenantActorGrant(resolvedGoogle, {
           tenantId: bootstrapIdentity.tenantId ?? "",
@@ -611,7 +612,8 @@ export class AuthController {
       if (!this.identityRepository) {
         throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
       }
-      const memberships = await this.identityRepository.findMembershipsByPrincipalId(durableIdentity.actorId);
+      const principalToLookup = durableIdentity.principalId ?? durableIdentity.actorId;
+      const memberships = await this.identityRepository.findMembershipsByPrincipalId(principalToLookup);
       const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
       if (!membership) {
         throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");

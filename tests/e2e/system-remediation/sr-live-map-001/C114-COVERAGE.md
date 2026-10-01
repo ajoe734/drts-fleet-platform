@@ -336,6 +336,7 @@ The JSON format is shown below (secret/actual values omitted):
 [
   {
     "principalId": "<GOOGLE_SA_NUMERIC_ID_OR_EMAIL>",
+    "actorId": "live-map-observer",
     "displayName": "Live Map Operations Observer",
     "roles": ["ops_observer"],
     "scopes": ["regulatory:read"]
