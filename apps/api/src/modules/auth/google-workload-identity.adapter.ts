@@ -3,7 +3,6 @@ import { createHash, createPublicKey } from "node:crypto";
 import type {
   CanonicalIdentityPrincipalRecord,
   CanonicalIdentityMembershipRecord,
-  CanonicalIdentityRoleBindingRecord,
 } from "@drts/contracts";
 import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
