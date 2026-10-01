@@ -296,7 +296,7 @@ jobs:
         id: browser
         run: pnpm exec playwright test -c playwright.google-map-live.config.ts
 
-      - name: Revoke sessions
+      - name: Revoke per-run invitation and bound driver session
         if: always()
         id: teardown
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-teardown.ts
@@ -309,6 +309,7 @@ jobs:
           RUNNER_OUTCOME: ${{ steps.runner.outcome }}
           COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
           BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
         run: |
           python3 tests/e2e/system-remediation/sr-live-map-001/gate-evidence.py
 
@@ -323,6 +324,7 @@ jobs:
             .artifacts/live-map-acceptance/run-status.json
             .artifacts/live-map-acceptance/evidence-deployment.json
             .artifacts/live-map-acceptance/evidence-sessions.json
+            .artifacts/live-map-acceptance/evidence-cleanup.json
             .artifacts/live-map-acceptance/evidence-coverage.json
             .artifacts/live-map-acceptance/evidence-browser.json
             .artifacts/live-map-acceptance/map-*.png

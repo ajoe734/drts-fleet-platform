@@ -161,7 +161,12 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
     assert.deepEqual(observer.identity.scopes, ["regulatory:read"]);
     const session = await api<{
       active: boolean;
-      identity: { realm: string; actorId: string; actorType: string; scopes: string[] };
+      identity: {
+        realm: string;
+        actorId: string;
+        actorType: string;
+        scopes: string[];
+      };
     }>("auth/session", config.driverToken);
     assert(
       session.active &&

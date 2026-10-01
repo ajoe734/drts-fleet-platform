@@ -1,12 +1,20 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { required, validateCoverageTargets, writeEvidence, type LiveEnv } from "./live-map-config";
+import {
+  required,
+  validateCoverageTargets,
+  writeEvidence,
+  type LiveEnv,
+} from "./live-map-config";
 import { revokeMapInvitation } from "./session-cleanup";
 
-export async function teardownMapSessions(env: LiveEnv, deps: {
-  fetch: typeof fetch;
-  save: (evidence: unknown) => void;
-}) {
+export async function teardownMapSessions(
+  env: LiveEnv,
+  deps: {
+    fetch: typeof fetch;
+    save: (evidence: unknown) => void;
+  },
+) {
   const config = validateCoverageTargets(env);
   const evidence = {
     candidate_sha: config.candidateSha,
@@ -17,25 +25,37 @@ export async function teardownMapSessions(env: LiveEnv, deps: {
   };
   try {
     await revokeMapInvitation(
-      env, deps.fetch,
+      env,
+      deps.fetch,
       required(env, "DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN"),
       required(env, "DRTS_LIVE_MAP_INVITE_CODE"),
     );
     evidence.revoked = true;
     evidence.status = "passed";
   } catch {
-    throw new Error("Map session teardown failed; credentials and response withheld");
+    throw new Error(
+      "Map session teardown failed; credentials and response withheld",
+    );
   } finally {
     deps.save(evidence);
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   teardownMapSessions(process.env, {
     fetch,
-    save: (evidence) => writeEvidence(".artifacts/live-map-acceptance/evidence-cleanup.json", evidence),
+    save: (evidence) =>
+      writeEvidence(
+        ".artifacts/live-map-acceptance/evidence-cleanup.json",
+        evidence,
+      ),
   }).catch(() => {
-    console.error("Map session teardown failed; credentials and response withheld");
+    console.error(
+      "Map session teardown failed; credentials and response withheld",
+    );
     process.exitCode = 1;
   });
 }

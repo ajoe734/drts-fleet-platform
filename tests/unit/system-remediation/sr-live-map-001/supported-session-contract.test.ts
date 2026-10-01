@@ -15,6 +15,7 @@ import { GoogleWorkloadIdentityAdapter } from "../../../../apps/api/src/modules/
 import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { teardownMapSessions } from "../../../e2e/system-remediation/sr-live-map-001/session-teardown";
 import { bootstrapMapSessions } from "../../../e2e/system-remediation/sr-live-map-001/session-bootstrap";
 
 // One disposable issuer per file, matching the production adapter's JWKS cache.
@@ -196,7 +197,7 @@ it("rejects refresh from another device and revocation by another real driver", 
 });
 
 it.each(["ops_user", "ops_observer"])(
-  "does not turn a registered Google WIF principal into an %s observer session",
+  "issues a durable %s session through the registered Google WIF proof",
   async (actorType) => {
     // Only Google's JWKS/network boundary is replaced. A disposable signing key
     // models the external issuer in memory; no real token or secret is written.
@@ -204,6 +205,7 @@ it.each(["ops_user", "ops_observer"])(
     const jwk = publicKey.export({ format: "jwk" });
     const email = "unit-map-observer@example.iam.gserviceaccount.com";
     const audience = "https://api.example.test";
+    vi.stubEnv("STRICT_IAP_MODE", "true");
     vi.stubEnv("WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED", "true");
     vi.stubEnv(
       "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS",
@@ -212,6 +214,7 @@ it.each(["ops_user", "ops_observer"])(
           serviceAccountEmail: email,
           principalId: "unit-map-observer",
           actorId: "live-map-observer",
+          roles: [actorType],
           scopes: ["regulatory:read"],
           allowedTokenAudiences: [audience],
           routeScopes: ["POST auth/token"],
@@ -236,8 +239,9 @@ it.each(["ops_user", "ops_observer"])(
       { algorithm: "RS256", keyid: "unit-c114-key", expiresIn: "5m" },
     );
     const identities = new IdentityRepository();
+    const tokens = new JwtAuthService(identities);
     const controller = new AuthController(
-      new JwtAuthService(identities),
+      tokens,
       {} as never,
       {} as never,
       undefined,
@@ -247,25 +251,27 @@ it.each(["ops_user", "ops_observer"])(
       undefined,
       new GoogleWorkloadIdentityAdapter(identities),
     );
-    await expect(
-      controller.issueToken({
-        method: "POST",
-        originalUrl: "/api/auth/token",
-        headers: {
-          "x-drts-google-id-token": assertion,
-          "x-actor-type": actorType,
-          "x-actor-id": "live-map-observer",
-          "x-realm": "ops",
-        },
-      }),
-    ).rejects.toMatchObject({ code: "WORKLOAD_CI_TENANT_ACTOR_DENIED" });
-    // The principal was cryptographically verified and persisted; denial is the
-    // missing observer issuance contract, not a malformed fixture or bad key.
+    const issued = await controller.issueToken({
+      method: "POST",
+      originalUrl: "/api/auth/token",
+      headers: {
+        "x-drts-google-id-token": assertion,
+        "x-actor-type": actorType,
+        "x-actor-id": "live-map-observer",
+        "x-realm": "ops",
+      },
+    });
+    const verified = await tokens.verifyAccessToken(issued.token);
+    expect(verified).toMatchObject({
+      actorType,
+      realm: "ops",
+      sub: "live-map-observer",
+    });
+    if (actorType === "ops_observer")
+      expect(verified?.scopes).toEqual(["regulatory:read"]);
+    // The real verifier persists principal, membership and role bindings.
     expect(
-      await identities.findPrincipalBySubject(
-        "https://accounts.google.com",
-        "unit-c114-google-subject",
-      ),
+      await identities.findPrincipalById("unit-map-observer"),
     ).toMatchObject({ principalId: "unit-map-observer", status: "active" });
     // A later case can reuse the adapter's cached JWKS. Persisted principal
     // evidence above proves verification ran regardless of cache hits.
@@ -279,124 +285,163 @@ it.each(["ops_user", "ops_observer"])(
   },
 );
 
-it("reproduces bootstrap failure on the real driver registration wire shape and incomplete invite cleanup", async () => {
-  const f = driverFixture();
-  const sha = "a".repeat(40);
-  const env = {
-    GITHUB_ACTIONS: "true",
-    RUNNER_ENVIRONMENT: "github-hosted",
-    DRTS_CANDIDATE_SHA: sha,
-    WORKFLOW_SHA: sha,
-    DRTS_LIVE_MAP_TEST_AUTHORIZED: "true",
-    DRTS_LIVE_MAP_TEST_ORIGIN: "https://ops.example.test",
-    DRTS_LIVE_MAP_API_ORIGIN: "https://api.example.test",
-    DRTS_LIVE_MAP_ALLOWED_TARGETS:
-      "https://ops.example.test,https://api.example.test,https://maps.googleapis.com",
-    DRTS_LIVE_MAP_TEST_DRIVER_ID: "drv-demo-002",
-  };
-  let registered: Awaited<ReturnType<typeof f.devices.register>> | undefined;
-  let revoked: { revoked: boolean } | undefined;
-  const save = vi.fn();
-  const exportSession = vi.fn();
-  const mask = vi.fn((value: string) => {
-    // Matches the workflow mask boundary: a missing token is not maskable.
-    value.replace(/%/g, "%25");
-  });
-  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-    expect(init?.redirect).toBe("error");
-    const url = new URL(String(input));
-    expect(url.origin).toBe(env.DRTS_LIVE_MAP_API_ORIGIN);
-    const headers = new Headers(init?.headers);
-    const reply = (value: unknown) =>
-      Response.json(deepToSnakeCase(value), {
-        headers: { "x-drts-candidate-sha": sha },
-      });
-    // Health and observer/provisioner auth are deliberate boundary stubs so
-    // this probe can reach the independent driver wire/cleanup defect. They
-    // are NOT evidence that Google WIF or provisioner authorization succeeds.
-    if (url.pathname === "/api/health")
-      return reply({
-        candidateSha: sha,
-        mapProvider: { effectiveBackend: "google" },
-      });
-    if (url.pathname === "/api/auth/token")
-      return reply({ token: "unit-boundary-token", expiresIn: "15m" });
-    if (url.pathname === "/api/auth/session") {
-      expect(headers.get("authorization")).toBe("Bearer unit-boundary-token");
-      return reply({
-        data: {
-          active: true,
-          identity: {
-            realm: "ops",
-            actorType: "ops_observer",
-            actorId: "live-map-observer",
-            scopes: ["regulatory:read"],
+it.each(["success", "lost-response", "invalid-session", "cleanup-retry"])(
+  "uses real registration, retains recovery and revokes binding/refresh family: %s",
+  async (scenario) => {
+    const f = driverFixture();
+    const sha = "a".repeat(40);
+    const env: Record<string, string> = {
+      GITHUB_ACTIONS: "true",
+      RUNNER_ENVIRONMENT: "github-hosted",
+      DRTS_CANDIDATE_SHA: sha,
+      WORKFLOW_SHA: sha,
+      DRTS_LIVE_MAP_TEST_AUTHORIZED: "true",
+      DRTS_LIVE_MAP_TEST_ORIGIN: "https://ops.example.test",
+      DRTS_LIVE_MAP_API_ORIGIN: "https://api.example.test",
+      DRTS_LIVE_MAP_ALLOWED_TARGETS:
+        "https://ops.example.test,https://api.example.test,https://maps.googleapis.com",
+      DRTS_LIVE_MAP_TEST_DRIVER_ID: "drv-demo-002",
+    };
+    let registered: Awaited<ReturnType<typeof f.devices.register>> | undefined;
+    let cleanupCalls = 0;
+    const save = vi.fn();
+    const exportSession = vi.fn((name: string, value: string) => {
+      env[name] = value;
+    });
+    const mask = vi.fn((value: string) => {
+      value.replace(/%/g, "%25");
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      expect(init?.redirect).toBe("error");
+      const url = new URL(String(input));
+      expect(url.origin).toBe(env.DRTS_LIVE_MAP_API_ORIGIN);
+      const headers = new Headers(init?.headers);
+      const reply = (value: unknown) =>
+        Response.json(deepToSnakeCase(value), {
+          headers: { "x-drts-candidate-sha": sha },
+        });
+      // External health/observer/provisioner auth are explicit boundary stubs.
+      // Driver issuance, verification, recovery and serializer remain real.
+      if (url.pathname === "/api/health")
+        return reply({
+          candidateSha: sha,
+          mapProvider: { effectiveBackend: "google" },
+        });
+      if (url.pathname === "/api/regulatory-registry/drivers")
+        return reply({
+          data: {
+            items: [
+              {
+                driverId: "drv-demo-002",
+                workState: "offline",
+                dispatchEligible: false,
+              },
+            ],
           },
-        },
-      });
-    }
-    const command = JSON.parse(String(init?.body));
-    if (url.pathname === "/api/auth/driver/device/invite") {
-      // Real invitation issuer, real idempotency service, no invented code.
-      return reply(
-        await f.controller.issueDriverDeviceInvitation(command, undefined),
-      );
-    }
-    if (url.pathname === "/api/auth/driver/device/register") {
-      const result = await f.controller.issueDriverDeviceSession(command);
-      registered = result.data;
-      return reply(result);
-    }
-    if (url.pathname === "/api/auth/driver/device/invite/revoke") {
-      const result = await f.controller.revokeDriverDeviceInvitation(
-        command,
-        undefined,
-      );
-      revoked = result.data;
-      return reply(result);
-    }
-    throw new Error("Unexpected contract probe route");
-  });
-
-  await expect(
-    bootstrapMapSessions(env, {
+        });
+      if (url.pathname === "/api/auth/token")
+        return reply({ token: "unit-boundary-token", expiresIn: "8h" });
+      if (url.pathname === "/api/auth/session") {
+        if (headers.get("authorization") === "Bearer unit-boundary-token")
+          return reply({
+            data: {
+              active: true,
+              identity: {
+                realm: "ops",
+                actorType: "ops_observer",
+                actorId: "live-map-observer",
+                scopes: ["regulatory:read"],
+              },
+            },
+          });
+        const verified = await f.tokens.verifyAccessToken(
+          registered!.accessToken,
+        );
+        expect(verified).not.toBeNull();
+        const session = f.controller.getAuthSession(
+          f.tokens.toRequestIdentity(verified!),
+        );
+        if (scenario === "invalid-session") session.data.active = false;
+        return reply(session);
+      }
+      const command = JSON.parse(String(init?.body));
+      if (url.pathname === "/api/auth/driver/device/invite")
+        return reply(
+          await f.controller.issueDriverDeviceInvitation(command, undefined),
+        );
+      if (url.pathname === "/api/auth/driver/device/register") {
+        // Recovery state is already available to always() teardown before mutation.
+        expect(env.DRTS_LIVE_MAP_INVITE_CODE).toBe(command.registrationCode);
+        expect(env.DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN).toBe(
+          "unit-boundary-token",
+        );
+        const result = await f.controller.issueDriverDeviceSession(command);
+        registered = result.data;
+        if (scenario === "lost-response" || scenario === "cleanup-retry")
+          throw new Error("lost private response");
+        return reply(result);
+      }
+      if (url.pathname === "/api/auth/driver/device/invite/revoke") {
+        cleanupCalls += 1;
+        const result = await f.controller.revokeDriverDeviceInvitation(
+          command,
+          undefined,
+        );
+        if (scenario === "cleanup-retry" && cleanupCalls === 1)
+          throw new Error("lost cleanup response");
+        return reply(result);
+      }
+      throw new Error("Unexpected contract probe route");
+    });
+    const run = bootstrapMapSessions(env, {
       fetch,
       readGoogleIdToken: () => "unit-google-boundary",
       readInternalKey: () => "unit-internal-boundary",
       mask,
       exportSession,
       save,
-    }),
-  ).rejects.toThrow("Map session bootstrap failed at driver:register-device");
-  expect(registered).toBeDefined();
-  expect(typeof registered!.accessToken).toBe("string");
-  expect(registered!.expiresIn).toBe("15m");
-  expect(registered!.identity.scopes).toEqual([
-    "driver:read",
-    "driver:write",
-    "dispatch:read",
-  ]);
-  // The real service has already consumed the invite; revoking the invite
-  // cannot undo its active binding/access token/30-day refresh family.
-  expect(revoked).toEqual({ revoked: false });
-  const active = await f.tokens.verifyAccessToken(registered!.accessToken);
-  expect(active).not.toBeNull();
-  expect(
-    await f.repository.findBindingById(registered!.bindingId),
-  ).toMatchObject({ status: "active" });
-  expect(exportSession).not.toHaveBeenCalled();
-  expect(JSON.stringify(save.mock.calls)).not.toContain(
-    registered!.accessToken,
-  );
-  // Unit fixture cleanup uses the supported bound-driver revoke API. No live
-  // account is touched, and no persistent token is stored in this repository.
-  await f.controller.revokeDriverDeviceSession(
-    f.tokens.toRequestIdentity(active!),
-    {
-      bindingId: registered!.bindingId,
-      deviceId: registered!.deviceId,
-    },
-  );
-  expect(await f.tokens.verifyAccessToken(registered!.accessToken)).toBeNull();
-  expect(f.emit).not.toHaveBeenCalled();
-});
+    });
+    if (scenario === "success") await run;
+    else {
+      await expect(run).rejects.toThrow("Map session bootstrap failed");
+      expect(env.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN).toBeUndefined();
+      expect(env.DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN).toBeUndefined();
+    }
+    expect(registered).toBeDefined();
+    expect(typeof registered!.accessToken).toBe("string");
+    expect(registered!.expiresIn).toBe("15m");
+    if (scenario === "cleanup-retry")
+      expect(save).toHaveBeenCalledWith(
+        "sessions",
+        expect.objectContaining({ cleanup: "failed" }),
+      );
+    await teardownMapSessions(env, {
+      fetch,
+      save: (value) => save("cleanup", value),
+    });
+    // Repeat teardown proves consumed-invite cleanup is idempotent in the product.
+    await teardownMapSessions(env, {
+      fetch,
+      save: (value) => save("cleanup", value),
+    });
+    expect(
+      await f.tokens.verifyAccessToken(registered!.accessToken),
+    ).toBeNull();
+    expect(
+      await f.repository.findBindingById(registered!.bindingId),
+    ).toMatchObject({ status: "revoked" });
+    await expect(
+      f.controller.refreshDriverDeviceSession({
+        deviceId: registered!.deviceId,
+        refreshToken: registered!.refreshToken,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_DEVICE_REFRESH_INVALID" });
+    expect(JSON.stringify(save.mock.calls)).not.toContain(
+      registered!.accessToken,
+    );
+    expect(JSON.stringify(save.mock.calls)).not.toContain(
+      registered!.refreshToken,
+    );
+    expect(f.emit).not.toHaveBeenCalled();
+  },
+);

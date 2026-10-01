@@ -17,7 +17,7 @@ const env = {
 };
 
 // External HTTP and Secret Manager boundaries only. The separate production
-// session-contract probe documents why real dev issuance is currently blocked.
+// session-contract probe verifies the real issuance and revocation contracts.
 function harness(
   options: {
     snake?: boolean;
@@ -25,6 +25,7 @@ function harness(
     backend?: string;
     status?: number;
     wrongScope?: boolean;
+    onDuty?: boolean;
     wrongRealm?: boolean;
     expiresIn?: string;
     headerSha?: string;
@@ -48,6 +49,18 @@ function harness(
       return reply({
         candidateSha: options.healthSha ?? sha,
         mapProvider: { effectiveBackend: options.backend ?? "google" },
+      });
+    if (url.pathname === "/api/regulatory-registry/drivers")
+      return reply({
+        data: {
+          items: [
+            {
+              driverId: "drv-demo-002",
+              workState: options.onDuty ? "available" : "offline",
+              dispatchEligible: Boolean(options.onDuty),
+            },
+          ],
+        },
       });
     if (url.pathname === "/api/auth/token") {
       const headers = new Headers(init?.headers);
@@ -102,7 +115,7 @@ function harness(
       return reply({
         data: {
           accessToken: "driver-test-secret",
-          expiresIn: options.expiresIn ?? "8h",
+          expiresIn: options.expiresIn ?? "15m",
         },
       });
     }
@@ -132,7 +145,7 @@ function harness(
               scopes: options.wrongScope
                 ? ["*"]
                 : isDriver
-                  ? ["driver:read"]
+                  ? ["driver:read", "driver:write", "dispatch:read"]
                   : ["regulatory:read"],
             },
           },
@@ -160,12 +173,13 @@ it.each([true, false])(
   async (snake) => {
     const deps = harness({ snake });
     await bootstrapMapSessions(env, deps);
-    expect(deps.fetch).toHaveBeenCalledTimes(7);
+    expect(deps.fetch).toHaveBeenCalledTimes(8);
     expect(deps.exportSession.mock.calls).toEqual([
+      ["DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN", "temp-ops-test-secret"],
+      ["DRTS_LIVE_MAP_INVITE_CODE", "test-reg-code"],
       ["DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", "ops-test-secret"],
       ["DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", "driver-test-secret"],
       ["DRTS_LIVE_MAP_DRIVER_DEVICE_ID", expect.any(String)],
-      ["DRTS_LIVE_MAP_INVITE_CODE", "test-reg-code"],
     ]);
     expect(deps.evidence.sessions).toMatchObject({
       status: "passed",
@@ -233,7 +247,18 @@ it("does not expose raw provider errors containing credentials", async () => {
     throw new Error("google-id-token-secret");
   });
   await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
-    "Map session bootstrap failed at internal-key; no credential details retained",
+    "Map session bootstrap failed at google-proof; no credential details retained",
   );
   expect(JSON.stringify(deps.evidence)).not.toContain("test-secret");
+});
+
+it("rejects an on-duty driver before invitation or binding mutation", async () => {
+  const deps = harness({ onDuty: true });
+  await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
+    "driver:isolation",
+  );
+  expect(deps.readInternalKey).not.toHaveBeenCalled();
+  expect(
+    deps.fetch.mock.calls.every(([url]) => !String(url).includes("device/")),
+  ).toBe(true);
 });

@@ -14,7 +14,11 @@ import {
 import { revokeMapInvitation } from "./session-cleanup";
 import { normalizeApiResponse } from "./wire-response";
 
-export const MAP_DRIVER_SCOPES = ["dispatch:read", "driver:read", "driver:write"];
+export const MAP_DRIVER_SCOPES = [
+  "dispatch:read",
+  "driver:read",
+  "driver:write",
+];
 export const MAP_OBSERVER_ID = "live-map-observer";
 type BootstrapDeps = {
   fetch: typeof fetch;
@@ -125,6 +129,29 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       expires_in: observerIssued.expiresIn,
     });
 
+    // Check the reserved driver's live isolation before creating any invitation
+    // or replacing its device binding, not only before telemetry writes.
+    evidence.stage = "driver:isolation";
+    const registry = await request<{
+      data: {
+        items: Array<{
+          driverId: string;
+          workState: string;
+          dispatchEligible: boolean;
+        }>;
+      };
+    }>("regulatory-registry/drivers", {
+      headers: { authorization: `Bearer ${observerIssued.token}` },
+    });
+    const driver = registry.data.items.find(
+      (item) => item.driverId === config.driverId,
+    );
+    assert(
+      driver &&
+        driver.workState === "offline" &&
+        driver.dispatchEligible === false,
+    );
+
     // 2. Get a temp platform session with driver:provision to issue driver invite
     evidence.stage = `driver:invite-setup`;
     const internalKey = deps.readInternalKey().trim();
@@ -146,11 +173,18 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       },
     );
 
-    assert(typeof tempOpsIssued.token === "string" && tempOpsIssued.token && !/\s/.test(tempOpsIssued.token));
+    assert(
+      typeof tempOpsIssued.token === "string" &&
+        tempOpsIssued.token &&
+        !/\s/.test(tempOpsIssued.token),
+    );
     deps.mask(tempOpsIssued.token);
     // Recovery credentials must survive failure of this step. They are masked
     // GITHUB_ENV values, never uploaded, and do not authorize the coverage step.
-    deps.exportSession("DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN", tempOpsIssued.token);
+    deps.exportSession(
+      "DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN",
+      tempOpsIssued.token,
+    );
     evidence.stage = `driver:issue-invite`;
     const invite = await request<{ data: { registrationCode: string } }>(
       "auth/driver/device/invite",
@@ -164,7 +198,11 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       },
     );
     const registrationCode = invite.data.registrationCode;
-    assert(typeof registrationCode === "string" && registrationCode && !/\s/.test(registrationCode));
+    assert(
+      typeof registrationCode === "string" &&
+        registrationCode &&
+        !/\s/.test(registrationCode),
+    );
     deps.mask(registrationCode);
 
     try {
@@ -182,7 +220,11 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         body: JSON.stringify({ registrationCode, deviceId }),
       });
       const driverToken = driverSession.data.accessToken;
-      assert(typeof driverToken === "string" && driverToken && !/\s/.test(driverToken));
+      assert(
+        typeof driverToken === "string" &&
+          driverToken &&
+          !/\s/.test(driverToken),
+      );
       deps.mask(driverToken);
       assert.equal(driverSession.data.expiresIn, "15m");
 
@@ -204,7 +246,10 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       assert.equal(session.data.identity.realm, "driver");
       assert.equal(session.data.identity.actorType, "driver_user");
       assert.equal(session.data.identity.actorId, config.driverId);
-      assert.deepEqual([...session.data.identity.scopes].sort(), MAP_DRIVER_SCOPES);
+      assert.deepEqual(
+        [...session.data.identity.scopes].sort(),
+        MAP_DRIVER_SCOPES,
+      );
 
       verified.push({
         name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN",
@@ -223,7 +268,12 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       deps.exportSession("DRTS_LIVE_MAP_DRIVER_DEVICE_ID", deviceId);
     } catch (error) {
       try {
-        await revokeMapInvitation(env, deps.fetch, tempOpsIssued.token, registrationCode);
+        await revokeMapInvitation(
+          env,
+          deps.fetch,
+          tempOpsIssued.token,
+          registrationCode,
+        );
         evidence.cleanup = "passed";
       } catch {
         evidence.cleanup = "failed";
