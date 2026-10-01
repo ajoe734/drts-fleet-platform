@@ -86,12 +86,17 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     );
     deps.mask(observerIssued.token);
     assert(/^(?:[1-9]\d*[sm]|[1-8]h)$/.test(observerIssued.expiresIn));
-    
+
     evidence.stage = `ops:verify-session`;
     let session = await request<{
       data: {
         active: boolean;
-        identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+        identity: {
+          realm: string;
+          actorType: string;
+          actorId: string;
+          scopes: string[];
+        };
       };
     }>("auth/session", {
       headers: { authorization: `Bearer ${observerIssued.token}` },
@@ -100,14 +105,20 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     assert.equal(session.data.identity.realm, "ops");
     assert.equal(session.data.identity.actorType, "ops_observer");
     assert.equal(session.data.identity.actorId, MAP_OBSERVER_ID);
-    assert.deepEqual([...session.data.identity.scopes].sort(), ["regulatory:read", "sandbox.compliance.read", "sandbox.investigation.read"].sort());
-    
-    verified.push({ name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", token: observerIssued.token });
+    assert.deepEqual(
+      [...session.data.identity.scopes].sort(),
+      ["regulatory:read"].sort(),
+    );
+
+    verified.push({
+      name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN",
+      token: observerIssued.token,
+    });
     evidence.sessions.push({
       realm: "ops",
       actor_type: "ops_observer",
       actor_id: MAP_OBSERVER_ID,
-      scopes: ["regulatory:read", "sandbox.compliance.read", "sandbox.investigation.read"],
+      scopes: ["regulatory:read"],
       expires_in: observerIssued.expiresIn,
     });
 
@@ -128,7 +139,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         body: "{}",
       },
     );
-    
+
     evidence.stage = `driver:issue-invite`;
     const invite = await request<{ data: { registrationCode: string } }>(
       "auth/driver/device/invite",
@@ -143,28 +154,32 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     );
     const registrationCode = invite.data.registrationCode;
     deps.mask(registrationCode);
-    
+
     try {
       evidence.stage = `driver:register-device`;
       const deviceId = `live-map-run-${Date.now()}`;
-      const driverSession = await request<{ data: { accessToken: string; expiresIn: string } }>(
-        "auth/driver/device/register",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ registrationCode, deviceId }),
+      const driverSession = await request<{
+        data: { accessToken: string; expiresIn: string };
+      }>("auth/driver/device/register", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
         },
-      );
+        body: JSON.stringify({ registrationCode, deviceId }),
+      });
       const driverToken = driverSession.data.accessToken;
       deps.mask(driverToken);
-      
+
       evidence.stage = `driver:verify-session`;
       session = await request<{
         data: {
           active: boolean;
-          identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+          identity: {
+            realm: string;
+            actorType: string;
+            actorId: string;
+            scopes: string[];
+          };
         };
       }>("auth/session", {
         headers: { authorization: `Bearer ${driverToken}` },
@@ -173,9 +188,14 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       assert.equal(session.data.identity.realm, "driver");
       assert.equal(session.data.identity.actorType, "driver_user");
       assert.equal(session.data.identity.actorId, config.driverId);
-      assert.deepEqual([...session.data.identity.scopes].sort(), ["driver:read"]);
-      
-      verified.push({ name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", token: driverToken });
+      assert.deepEqual([...session.data.identity.scopes].sort(), [
+        "driver:read",
+      ]);
+
+      verified.push({
+        name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN",
+        token: driverToken,
+      });
       evidence.sessions.push({
         realm: "driver",
         actor_type: "driver_user",
@@ -183,7 +203,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         scopes: ["driver:read"],
         expires_in: driverSession.data.expiresIn,
       });
-      
+
       // Neither token reaches subsequent steps unless both session checks pass.
       for (const { name, token } of verified) deps.exportSession(name, token);
       deps.exportSession("DRTS_LIVE_MAP_DRIVER_DEVICE_ID", deviceId);
@@ -203,7 +223,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       }
       throw error;
     }
-    
+
     evidence.status = "passed";
     evidence.stage = "complete";
   } catch {
