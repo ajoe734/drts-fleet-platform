@@ -1,10 +1,14 @@
 # SR-LIVE-MAP-C114-COVERAGE-20260930
 
-Current hold (2026-09-30 23:31 UTC): Supervisor reopened the owner task for
-F-SESSION-CONTRACT. The supported-path investigation below confirms two product
-prerequisites: renewable driver invitations and a WIF observer exchange. Do not
-dispatch the historical internal-key bootstrap recipe below. It remains unfixed
-in the harness pending those contracts, and all four live gates remain pending.
+Current hold (2026-10-01): the identity prerequisite helper merged as
+`8da27255f3c668af61a7fd28654198d59993f38b`, but the executable readback below
+still reproduces F-SESSION-CONTRACT on that product source. A verified Google
+principal cannot issue the requested observer session, and the real driver
+registration response breaks bootstrap after creating a binding that its catch
+does not revoke. The helper's historical "resolved" claims below are superseded
+by the [2026-10-01 readback](#identity-prerequisite-readback-2026-10-01).
+Do not dispatch a live run or the historical internal-key recipe while these
+defects remain. All four live gates remain pending.
 
 Planning follow-up (2026-09-30):
 [SD-DP-20260930-001](../../../../docs/01-decisions/SD-DP-20260930-001-c114-session-prerequisites.md)
@@ -168,7 +172,11 @@ Both wire shapes complete all 29 requests, five decisions, three heartbeat
 writes and four freshness observations. Logs: `.local/c114/rework/wire-before.log`
 and `wire-after.log`. Checkpoint commit is not a review candidate.
 
-### F-SESSION-CONTRACT: product prerequisites resolved
+### F-SESSION-CONTRACT: helper resolution claim (superseded by 2026-10-01 readback)
+
+The following claim arrived with helper PR #2251 and is retained for review
+traceability. It is **not** the current disposition; see the executable readback
+at the end of this artifact.
 
 The requested issuance path is now exercised correctly with real product prerequisites:
 1. **Ops Membership:** The `live-map-observer` account requires a persisted `ops` realm membership for `auth/token` to issue a valid durable session. This is conditionally provisioned by `IdentityRepository` on application start **only when `DRTS_E2E_PROVISIONING=true` is set**, preventing unauthorized creation in production. The role is restricted to a narrow `ops_observer` profile with only `regulatory:read`.
@@ -481,3 +489,76 @@ Route the concrete blockers to Claude2/Supervisor for the invitation product
 subtask and coordination with the WIF owner, then resume this same owner task
 after the supported contracts are available. Draft/scoped CI is not full
 candidate CI or any of the four live acceptance results.
+
+## Identity prerequisite readback (2026-10-01)
+
+Supervisor resumed the parent after helper PR #2251 candidate
+`f096e9da30381b8a73dbd4e6a349eeb2173cce79` was approved by Claude2 at
+05:09 UTC and merged as `8da27255f3c668af61a7fd28654198d59993f38b`.
+Owner read that complete approval and the prior reopen findings. In the assigned
+worktree, published checkpoint `ef7c304ec20168e847ee236468de42d7e90f7551`
+was normally merged with that dev head as
+`ada8b5371` (full SHA in git); no candidate was rewritten. PR #2247 remains a
+draft investigation checkpoint. The last parent acceptance candidate remains
+`e3c7ed02701c387d82786bcfd8877e2618851f3b`.
+
+The unchanged merged tree passes **67 scoped unit tests**, including the helper's
+new HTTP mocks. Those mocks do not prove the production issuance chain. The
+extended `supported-session-contract.test.ts` uses the real controller, Google
+adapter, signatures, driver service, idempotency service, serializer and memory
+repositories to identify the remaining boundaries:
+
+| Finding / trigger | Source and actual result on merged helper | Reproduction / evidence | Required repair boundary |
+| --- | --- | --- | --- |
+| F-SESSION-CONTRACT / Google observer, still unresolved | `AuthController.issueToken` always calls `resolveCiTenantActorGrant` for Google proofs; that resolver rejects the observer's empty tenant ID before issuing a session. Merely changing the header to `ops_observer` does not add a grant path. | Parameterized real Google-adapter probes for both `ops_user` and the exact new `ops_observer` request persist the verified Google principal, then receive `WORKLOAD_CI_TENANT_ACTOR_DENIED`. Only external JWKS/network is replaced with a disposable unit issuer. | Helper product owner must implement the registered observer proof/grant path, preserving audience/route/replay/durable checks. Do not add a fabricated tenant ID or internal-key fallback. Requires Supervisor-coordinated auth scope outside this parent. |
+| F-WIRE / real registration response | `DriverDeviceProvisioningSession.accessToken` is a string; `expiresIn` is a sibling. `DriverDeviceSessionService.buildSession` returns that shape. `bootstrapMapSessions` instead expects `{accessToken:{token,expiresIn}}`, so the real response fails at `driver:register-device` while masking an undefined token. Actual driver scopes are `driver:read`, `driver:write`, `dispatch:read`, not the single mocked scope. | Real invite -> register response passes through `deepToSnakeCase` -> the actual bootstrap normalizer. A boundary stub supplies observer/provisioner auth only to isolate this independent defect; this is explicitly not WIF/auth success evidence. | Parent Codex updates the actual consumer and scope assertion to the formal contract after the supported issuance/cleanup contract is settled. Reuse this real-service regression instead of the fabricated registration response in `session-bootstrap.test.ts`. |
+| F-SESSION-CONTRACT / partial registration cleanup, still unresolved | Bootstrap catch revokes only the registration code. `DriverDeviceSessionService.revokeInvitation` returns `revoked:false` for a consumed invite; the registered access token, binding and refresh family remain active. No environment values have been exported, so the workflow teardown cannot recover them. | The same real-service probe observes `revoked:false`, active binding and a token that still passes `verifyAccessToken`; ordinary bound-driver revoke at the end of the isolated unit fixture invalidates it. No live driver was touched. | Product owner must define supported recovery for lost registration responses. Parent must retain per-run recovery state before mutation, revoke binding/family on all partial failures and prove cleanup with the real service, including lost-response and failed-verification cases. |
+| F-SESSION-CONTRACT / provisioning transport and least scope | `session-bootstrap.ts` and `session-teardown.ts` still read `drts-dev-jwt-secret` and mint a platform session via `x-drts-internal-key` for invitations. Observer defaults in `iam-policy-catalog.ts` additionally contain sandbox read scopes, and `AuthController.issueToken` still returns 8h for this actor. | Exact source inspection; the helper's positive observer test uses the internal key plus explicit `x-scopes`, not the hosted WIF request. `DRTS_E2E_PROVISIONING=true` alone cannot add the absent Google observer/provisioner grants. | Supervisor/product owner specifies supported short-lived proof for both observer and per-run invitation authorization. Parent will consume that contract without inventing a new secret, requesting a long-lived token, or loosening checks. |
+| F-CONSUMER-DRIFT / later stages | Bootstrap records observer first with `ops_observer`, then driver. `runCoverage` still demands `ops_user`; `gate-evidence.py` still demands driver-first, `ops_user` and one driver scope. | Exact consumer/producer source comparison; these downstream stages are unreachable behind the current issuance failure. | Parent updates bootstrap, coverage, Python evidence gate and both-shape tests together once identity contract is corrected; no relaxed wildcard acceptance. |
+| F-CLEANUP-GATE / new teardown calls | `session-teardown.ts` fetches use default redirect handling, omit per-response candidate checking and can print raw error bodies. Invite revoke failure does not set a nonzero result; workflow does not pass `TEARDOWN_OUTCOME` to `gate-evidence.py`. | Exact source inspection against the original redirect:error/SHA/no-raw-credential and mandatory-cleanup contracts. This teardown arrived in helper PR #2251. | Parent must use the same allowed-target/no-redirect/SHA/sanitized-error boundary for every cleanup request and require positive cleanup evidence in the final gate. Do not enable hosted mutation until this is repaired with partial-failure tests. |
+
+The two new executable cases are defect reproductions: a green result confirms
+the documented failure, not a working session or live acceptance. The first
+parameterized draft regenerated its disposable signing key despite the adapter's
+module-level JWKS cache, giving `WORKLOAD_ASSERTION_INVALID` on the second case.
+The fixture now uses one in-memory issuer per file; both cases reach the intended
+grant denial. This fixture error is retained in `reproduction.log` and is not
+counted as product reproduction. The corrected six-case probe exits 0 in
+`reproduction-final.log`.
+
+### External prerequisites rechecked without live calls
+
+Read-only GitHub inspection at 05:13-05:16 UTC still finds:
+
+- `DRTS_LIVE_MAP_TEST_DRIVER_ID` absent; required value remains `drv-demo-002`,
+  reserved offline, non-dispatchable and without an active client.
+- `DRTS_LIVE_MAP_ALLOWED_TARGETS` still contains only API and ops origins.
+  The complete exact comma-separated Google-origin proposal above remains the
+  operator action; no worker variable or secret was written.
+- Live `DEV_GCP_PROJECT_ID=drts-dev-devcc-20260825` and
+  `DEV_GCP_REGION=us-central1` agree with the current authorized Cloud Run rail.
+  Latest successful deployment metadata is run `36792041310`, workflow head
+  `b7b6c16baede48821861b19cf1354434f1716eee`; this is not evidence that the
+  new map checkpoint or helper SHA is deployed.
+- Latest map run remains failed `36686169334`. No known-failing hosted retry,
+  deployment, local API call, product server, browser or Docker was started.
+
+No new secret is requested. Existing `DEV_WIF_PROVIDER` and
+`DEV_WIF_SERVICE_ACCOUNT` remain the external proof inputs. The observer and
+invitation-authorizer registry/proof contract is still a product coordination
+blocker; do not tell an operator that merely enabling E2E provisioning or adding
+Google origins resolves it.
+
+| Required acceptance | This readback result | Still required |
+| --- | --- | --- |
+| service_area_live_decisions_for_real_taiwan_addresses | Pending; retained production-oracle tests are unit evidence only | Correct supported sessions, same-SHA deployment and hosted real address/coordinate/decision artifacts |
+| location_freshness_live_states | Pending; no dev telemetry written | Isolated renewable driver session, safe recovery and real >90-second wait plus low-accuracy/restoration evidence |
+| browser_map_render_live | Pending; no browser started | Same-SHA hosted Chromium ready + decoded imagery + screenshots and no Google key/origin errors |
+| authorization_gate_and_allowed_targets_enforced | Pending; original negatives remain, helper cleanup gaps identified | Repair cleanup boundary/gate and obtain complete successful same-SHA hosted evidence; skipped work is not pass |
+
+Per §0.7, preserve the repeated F-SESSION-CONTRACT/cleanup findings and this
+minimal reproduction instead of redispatching unchanged acceptance. Claude2 and
+Supervisor must route the product portion back to the prerequisite owner and
+coordinate its scopes. The parent Codex owns the harness fixes listed above
+after that concrete supported contract is available. Keep PR #2247 draft and
+the parent blocked; this diagnostic checkpoint is not a repaired candidate.
