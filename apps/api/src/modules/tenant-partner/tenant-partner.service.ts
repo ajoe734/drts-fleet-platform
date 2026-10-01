@@ -44,6 +44,7 @@ import type {
   IssuerContractSlaTarget,
   IssuerContractStatus,
   IssuerContractStatusRecord,
+  MailDeliveryReceiptView,
   PartnerEligibilityAdapterAttemptRecord,
   PartnerChannelEntryRecord,
   PartnerEntryStatus,
@@ -275,6 +276,8 @@ import {
 } from "./webhook-dispatch.service";
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
 import { TenantInvitationDeliveryService } from "./tenant-invitation-delivery.service";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
+import type { DeliveryReceipt } from "../notification-delivery/notification-delivery.types";
 import type {
   PartnerReferralDashboardRecord,
   PartnerReferralRevenuePeriodRecord,
@@ -1426,6 +1429,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(TenantInvitationDeliveryService)
     private readonly tenantInvitationDelivery: TenantInvitationDeliveryService = new TenantInvitationDeliveryService(),
+    @Optional()
+    @Inject(NotificationDeliveryService)
+    private readonly notificationDeliveryService: NotificationDeliveryService | null = null,
   ) {
     this.securityEventsService =
       securityEventsService instanceof SecurityEventsService
@@ -6950,7 +6956,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         userRole,
         "create_tenant_user",
       );
-      await this.issueTenantInvitation(
+      const invitation = await this.issueTenantInvitation(
         userRole,
         identitySnapshot?.membership.membershipId ?? null,
         securityActor?.actorId ?? null,
@@ -6970,7 +6976,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         requestId,
       );
 
-      return this.cloneUserRole(userRole);
+      return {
+        ...this.cloneUserRole(userRole),
+        invitation: invitation ? this.toTenantInvitationView(invitation) : null,
+      };
     });
   }
 
@@ -9338,6 +9347,77 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
     return items;
+  }
+
+  /**
+   * Read-only mail delivery status/receipt lookup (SR-MAIL-DELIVERY-READBACK-20261001).
+   * Returns null for an unknown or cross-tenant deliveryId; callers map that to 404.
+   * Never returns message body, invitation token, SMTP credentials, or an
+   * unmasked provider response.
+   */
+  async getMailDeliveryReceipt(
+    tenantId: string,
+    deliveryId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): Promise<MailDeliveryReceiptView | null> {
+    const policy = assertEvidenceAccess({
+      family: "mail_delivery",
+      identity,
+      tenantId,
+    });
+    const receipt = this.notificationDeliveryService
+      ? await this.notificationDeliveryService.get(tenantId, deliveryId)
+      : null;
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: policy.auditAction,
+        resourceType: "mail_delivery",
+        resourceId: deliveryId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          found: Boolean(receipt),
+        }),
+      },
+      requestId,
+    );
+    return receipt ? this.toMailDeliveryReceiptView(receipt) : null;
+  }
+
+  private toMailDeliveryReceiptView(
+    receipt: DeliveryReceipt,
+  ): MailDeliveryReceiptView {
+    return {
+      deliveryId: receipt.deliveryId,
+      tenantId: receipt.tenantId,
+      status: receipt.status,
+      queuedAt: receipt.queuedAt,
+      sentAt: receipt.sentAt,
+      nextAttemptAt: receipt.nextAttemptAt,
+      attempts: receipt.attempts.map((attempt) => ({
+        attemptId: attempt.attemptId,
+        attemptNo: attempt.attemptNo,
+        startedAt: attempt.startedAt,
+        finishedAt: attempt.finishedAt,
+        outcome: attempt.outcome,
+        errorCode: attempt.errorCode,
+        retryable: attempt.retryable,
+        acknowledgement: attempt.acknowledgement
+          ? {
+              provider: attempt.acknowledgement.provider,
+              response:
+                maskOpaqueToken(attempt.acknowledgement.response, 24, 8) ?? "",
+              providerMessageId: attempt.acknowledgement.providerMessageId,
+              acceptedAt: attempt.acknowledgement.acceptedAt,
+            }
+          : null,
+      })),
+    };
   }
 
   rotateWebhookSecret(
@@ -15367,6 +15447,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       roleCode: userRole.roleCode,
       tokenHash: createHash("sha256").update(rawToken).digest("hex"),
       deliveryStatus: "pending_delivery",
+      deliveryId: null,
       expiresAt,
       acceptedAt: null,
       revokedAt: null,
@@ -15392,6 +15473,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...stored,
       deliveryStatus:
         delivery.status === "sent" ? "delivered" : "delivery_failed",
+      // Only a real, queryable NotificationDeliveryService id is retained; the
+      // synthetic unavailable-/error- sentinel ids never resolve to a record.
+      deliveryId: delivery.queryable ? delivery.deliveryId : null,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -15402,6 +15486,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return {
       invitationId: invitation.invitationId,
       deliveryStatus: invitation.deliveryStatus,
+      deliveryId: invitation.deliveryId,
       expiresAt: invitation.expiresAt,
       acceptedAt: invitation.acceptedAt,
       revokedAt: invitation.revokedAt,

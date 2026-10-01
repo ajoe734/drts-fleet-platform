@@ -20,6 +20,10 @@ export type TenantInvitationDeliveryRecord = Omit<
   "rawToken"
 > & {
   deliveryId: string;
+  /** True only when deliveryId is a real NotificationDeliveryService id retrievable
+   * via the mail delivery readback endpoint; false for the synthetic
+   * unavailable-/error- sentinel ids below, which never resolve to a stored record. */
+  queryable: boolean;
   messageId: string | null;
   status: TenantInvitationDeliveryStatus;
   sentAt: string | null;
@@ -100,6 +104,7 @@ export class TenantInvitationDeliveryService {
     base: Omit<
       TenantInvitationDeliveryRecord,
       | "deliveryId"
+      | "queryable"
       | "messageId"
       | "status"
       | "sentAt"
@@ -115,6 +120,7 @@ export class TenantInvitationDeliveryService {
       return {
         ...base,
         deliveryId: `unavailable-${toInvitationIdempotencyKey(request.invitationId)}`,
+        queryable: false,
         messageId: null,
         status: "unavailable",
         sentAt: null,
@@ -149,6 +155,7 @@ export class TenantInvitationDeliveryService {
       return {
         ...base,
         deliveryId: receipt.deliveryId,
+        queryable: true,
         messageId: receipt.messageId,
         status: receipt.status,
         sentAt: receipt.sentAt,
@@ -167,6 +174,7 @@ export class TenantInvitationDeliveryService {
       return {
         ...base,
         deliveryId: `error-${toInvitationIdempotencyKey(request.invitationId)}`,
+        queryable: false,
         messageId: null,
         status: "failed",
         sentAt: null,
