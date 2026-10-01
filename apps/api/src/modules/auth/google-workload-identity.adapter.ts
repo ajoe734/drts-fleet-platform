@@ -1,6 +1,9 @@
 import { createHash, createPublicKey } from "node:crypto";
 
-import type { CanonicalIdentityPrincipalRecord } from "@drts/contracts";
+import type {
+  CanonicalIdentityPrincipalRecord,
+  CanonicalIdentityMembershipRecord,
+} from "@drts/contracts";
 import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
@@ -44,20 +47,15 @@ export interface CiTenantActorGrant {
 }
 
 export interface RegisteredGooglePrincipal {
-  serviceAccountEmail: string;
   principalId: string;
+  serviceAccountEmail?: string;
   actorId?: string | null;
   displayName?: string | null;
   roles?: string[] | null;
   scopes?: string[] | null;
-  allowedTokenAudiences: string[];
+  allowedTokenAudiences?: string[];
   ciTenantActorGrants?: CiTenantActorGrant[] | null;
-  // Per-principal least-privilege route allowlist, using the same
-  // "METHOD path" scope pattern DSL (and matcher) as
-  // `InternalKeyExceptionMetadata.scope` -- a verified principal is only
-  // granted bypass of `InternalKeyMiddleware` for routes it is explicitly
-  // registered for, not every route the middleware guards.
-  routeScopes: string[];
+  routeScopes?: string[];
 }
 
 export interface ResolvedGoogleWorkloadIdentity {
@@ -220,7 +218,9 @@ export class GoogleWorkloadIdentityAdapter {
     }
 
     const principal = registry.find(
-      (entry) => entry.serviceAccountEmail?.trim().toLowerCase() === email,
+      (entry) =>
+        (entry.serviceAccountEmail && entry.serviceAccountEmail.trim().toLowerCase() === email) ||
+        (entry.principalId && (entry.principalId.trim().toLowerCase() === email || entry.principalId.trim() === subject))
     );
     if (!principal || !principal.principalId?.trim()) {
       throw new ApiRequestError(
@@ -230,7 +230,7 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    const allowedAudiences = unique(principal.allowedTokenAudiences);
+    const allowedAudiences = unique(principal.allowedTokenAudiences || []);
     if (!allowedAudiences.includes(audience)) {
       throw new ApiRequestError(
         403,
@@ -240,7 +240,7 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    const routeScopes = unique(principal.routeScopes);
+    const routeScopes = unique(principal.routeScopes || []);
     const routeAllowed = routeScopes.some((pattern) =>
       matchesScope(pattern, context.requestMethod, context.requestPath),
     );
@@ -294,6 +294,42 @@ export class GoogleWorkloadIdentityAdapter {
     };
     await this.identityRepository.ensurePrincipalRecord(principalRecord);
 
+    const opsRoles = unique(principal.roles).filter(
+      (r) => r === "ops_user" || r === "ops_observer",
+    );
+    if (opsRoles.length > 0) {
+      const membershipRecord: CanonicalIdentityMembershipRecord = {
+        membershipId: `membership_${principal.principalId}_ops`,
+        sourceRef: `google_workload_identity:${principal.principalId}:membership:ops`,
+        principalId: principal.principalId,
+        realm: "ops",
+        scopeRef: "ops",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: authTime,
+        updatedAt: authTime,
+      };
+      await this.identityRepository.ensureMembershipRecord(membershipRecord);
+
+      for (const role of opsRoles) {
+        await this.identityRepository.ensureRoleBindingRecord({
+          roleBindingId: `role_binding_${principal.principalId}_ops_${role}`,
+          sourceRef: `google_workload_identity:${principal.principalId}:role_binding:${role}`,
+          membershipId: membershipRecord.membershipId,
+          roleCode: role,
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: authTime,
+          validTo: null,
+          createdAt: authTime,
+          updatedAt: authTime,
+        });
+      }
+    }
+
     this.logger.log(
       `[AUTH_GOOGLE_WORKLOAD_IDENTITY_USED] principalId=${principal.principalId} email=${email} route=${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
     );
@@ -344,18 +380,17 @@ export class GoogleWorkloadIdentityAdapter {
 
     const invalid = (parsed as RegisteredGooglePrincipal[]).find(
       (entry) =>
-        !entry.serviceAccountEmail?.trim() ||
         !entry.principalId?.trim() ||
         !Array.isArray(entry.allowedTokenAudiences) ||
         entry.allowedTokenAudiences.length === 0 ||
         !Array.isArray(entry.routeScopes) ||
-        entry.routeScopes.length === 0,
+        entry.routeScopes.length === 0
     );
     if (invalid) {
       throw new ApiRequestError(
         503,
         "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-        "Google workload identity service principal registry entries must declare serviceAccountEmail, principalId, allowedTokenAudiences, and routeScopes.",
+        "Google workload identity service principal registry entries must declare principalId, allowedTokenAudiences, and routeScopes.",
       );
     }
 
@@ -448,7 +483,7 @@ export function resolveCiTenantActorGrant(
   if (!isCiTenantActorGateEnabled()) {
     return null;
   }
-  if (!requested.tenantId || !requested.actorType || !requested.actorId) {
+  if (requested.tenantId == null || !requested.actorType || !requested.actorId) {
     return null;
   }
   return (
