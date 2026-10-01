@@ -478,6 +478,16 @@ export function resolveRouteAuthPolicy(
       };
     }
 
+    if (routePath.startsWith("tenant/mail-deliveries")) {
+      return {
+        routeKey: `tenant:mail-deliveries:${upperMethod}`,
+        requiredScopes: ["audit:read"],
+        allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
+        description:
+          "Mail delivery receipt lookup. `audit:read` is held by platform_admin, ops_user, and tenant_admin alike; the tenant-vs-cross-tenant boundary is enforced by the mail_delivery evidence-governance scope at the service layer, not by this route gate.",
+      };
+    }
+
     return {
       routeKey: `tenant:${upperMethod}`,
       requiredScopes: methodScope("tenant:read", "tenant:write", upperMethod),

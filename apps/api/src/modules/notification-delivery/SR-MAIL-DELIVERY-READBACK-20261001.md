@@ -1,6 +1,6 @@
 # SR-MAIL-DELIVERY-READBACK-20261001
 
-Owner: Claude. Reviewer: Claude2. Candidate identity, independent review and
+Owner: Claude. Reviewer: Codex. Candidate identity, independent review and
 hosted CI remain governed by the task lifecycle; this artifact does not close
 the task.
 
@@ -151,3 +151,145 @@ made. `node_modules` is gitignored and not part of this diff.
   choice (`tenant:read`, reused from the existing `eligibility_verification`
   family) against whether a dedicated `tenant:mail:read` scope is preferred
   instead.
+
+## Round 2 remediation (candidate `990c6e472`, reviewer Codex, PR #2260 REJECT)
+
+Codex's independent read-only review rejected the round-1 candidate with two
+findings. Both are fixed on top of the same files; round-1 content above is
+left as-is per §0.7 (no "all fixed" overwrite of the prior record).
+
+### R1 [P1] — ops_user got a real 403 on the new HTTP route, fixed
+
+- Root cause: `resolveRouteAuthPolicy` (`apps/api/src/common/auth/auth.policy.ts`)
+  had no dedicated branch for `tenant/mail-deliveries`, so it fell through to
+  the generic `tenant/*` fallback, which requires `tenant:read` for every
+  realm including `ops`. `@RequireRealms("tenant","platform","ops")` on the
+  controller only *adds* allowed realms via `AUTH_ALLOWED_REALMS_KEY` — it
+  does not touch the scope requirement — so `BootstrapAuthGuard` still
+  demanded `tenant:read`, which the real `ops_user` IAM preset
+  (`packages/contracts/src/iam-policy-catalog.ts`) does not grant.
+- Fix: added a dedicated branch in `auth.policy.ts`
+  (`routePath.startsWith("tenant/mail-deliveries")`) requiring `audit:read`
+  instead of `tenant:read`. `audit:read` is held by `platform_admin`,
+  `tenant_admin`, and `ops_user` alike (confirmed directly in
+  `iam-policy-catalog.ts`), matching the existing `identity:read` pattern
+  used for the `identity/*` routes. The tenant-vs-cross-tenant boundary
+  stays enforced where it already was: the `mail_delivery`
+  evidence-governance access rule in
+  `apps/api/src/common/evidence-governance.ts` (unchanged), which already
+  correctly left `platform_admin`/`ops_user` unrestricted and only gated
+  `tenant_admin` on `tenant:read` + tenant-scoping. No other `tenant/*`
+  route's policy was loosened.
+- New coverage: `apps/api/tests/unit/mail-delivery-route-authorization.test.ts`
+  — calls the real `BootstrapAuthGuard.canActivate` with a real `Reflector`
+  reading the actual `@RequireRealms` metadata off
+  `TenantPartnerController.prototype.getMailDelivery`, and real IAM scope
+  presets (no `x-scopes` header, so each actor type's default preset is
+  what's checked). Cases: `ops_user` allow, `tenant_admin` allow,
+  `platform_admin` allow, tenant identity with an unrelated scope only →
+  403 `AUTH_SCOPE_DENIED`, `partner_api_key` → 403 `AUTH_REALM_DENIED`,
+  no headers/no bearer → 401 `AUTH_REQUIRED`. This file lives under
+  `apps/api/tests/unit/` (not the root `tests/unit/`) because `@nestjs/core`
+  only resolves inside the `apps/api` package boundary from this workspace's
+  pnpm layout — importing it from a root-level test file fails with
+  `Cannot find package '@nestjs/core'` (confirmed by trying it there first).
+  Also added `apps/api/tests/unit/tenant-partner.controller.test.ts` — "returns
+  404 MAIL_DELIVERY_NOT_FOUND for an unknown mail delivery id" (controller
+  handler path, same-tenant, no notificationDeliveryService wired so the
+  service returns null — exercises the controller's own 404 mapping, not the
+  guard). Cross-tenant denial and missing-scope denial for `tenant_admin` at
+  the service layer were already covered by the round-1
+  `mail-delivery-readback.test.ts` cases and still pass unchanged.
+
+### R2 [P2] — enqueue-succeeded invitations losing their real deliveryId on a later persist failure, fixed
+
+- Root cause: `TenantInvitationDeliveryService.deliver()`
+  (`apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts`)
+  wrapped `enqueue()` and `dispatch()` in one `try/catch`. If `enqueue()`
+  succeeded (a real, durable, queryable outbox row now exists) but something
+  after it threw — e.g. `dispatch()`'s post-send ack-persistence transaction —
+  the single `catch` always returned a synthetic `error-<idempotencyKey>` id
+  with `queryable: false`, discarding the real id. `tenant-partner.service.ts`
+  then persisted `invitation.deliveryId = null` for a delivery that actually
+  exists and is queryable.
+- Fix: split the one `try/catch` into two. The first wraps only `enqueue()`;
+  if that throws, nothing was ever durably created, so the synthetic
+  `error-`/`queryable: false` result is still correct and unchanged. The
+  second wraps the post-enqueue dispatch step; on failure there, the real
+  `queued.deliveryId` is returned with `queryable: true`, `status` and
+  `sentAt` taken verbatim from the last state `enqueue()` actually committed
+  (never a guessed `"sent"` or fabricated provider acknowledgement —
+  `providerMessageId: null`), and the real safe error code from the dispatch
+  exception. `issueTenantInvitation`/resend/revoke in `tenant-partner.service.ts`
+  were not touched; they already persist whatever `queryable` says, so this
+  fix alone restores a resolvable `deliveryId` on the invitation record for
+  this failure path.
+- New coverage:
+  `tests/unit/system-remediation/sr-mail-delivery-readback-20261001/mail-delivery-readback.test.ts`
+  — "keeps the real, queryable deliveryId when enqueue succeeds but the
+  ack-persistence transaction after dispatch throws". Reproduces the
+  reviewer's exact repro shape: a real `FileMailOutbox` (temp dir) wrapped by
+  a `MailOutbox` that forwards every `transaction()` call to the real outbox
+  except the 3rd (enqueue = #1, dispatch's claim = #2, dispatch's
+  post-send ack-persistence = #3), which throws once. Asserts: the returned
+  `TenantInvitationDeliveryRecord.deliveryId` is a real UUID (not
+  `error-*`), `queryable: true`, `status` is not `"sent"`,
+  `providerMessageId` is `null`; then calls the real
+  `TenantPartnerService.getMailDeliveryReceipt` (the actual readback path
+  added in round 1, same `notificationDeliveryService` instance) with that
+  id and asserts it resolves to `status: "queued"` with one attempt whose
+  `outcome` is `"started"` — i.e. the real outbox state, not a fabrication.
+
+### Checks run and read (this round, 2026-10-01)
+
+- PASS, exit 0 — `pnpm --filter @drts/contracts build` and
+  `pnpm --filter @drts/control-plane-auth build` (both needed again to clear
+  stale/missing dist output before `tsc`; same pre-existing environment gap
+  noted in round 1, not part of this diff).
+- PASS, exit 0 — `pnpm --filter @drts/api typecheck`.
+- PASS, exit 0 — scoped ESLint (`--max-warnings=0`) on every file touched
+  this round: `auth.policy.ts`, `tenant-invitation-delivery.service.ts`,
+  `tenant-partner.controller.test.ts`,
+  `apps/api/tests/unit/mail-delivery-route-authorization.test.ts`,
+  `tests/unit/system-remediation/sr-mail-delivery-readback-20261001/mail-delivery-readback.test.ts`.
+- PASS — Prettier `--check` on the same file set.
+- PASS, exit 0 — `git diff --check`.
+- PASS, exit 0, 100/100 across 6 files —
+  `pnpm --filter @drts/api exec vitest run` on
+  `mail-delivery-route-authorization.test.ts`,
+  `tenant-partner.controller.test.ts`, `tenant-partner.service.test.ts`,
+  `tenant-approval-notification.test.ts`, `audit-notification.service.test.ts`,
+  `evidence-governance.test.ts` (must run via the `@drts/api` filter, not the
+  repo root — same pre-existing root-`vitest.config.ts` `include`-glob gap
+  noted in round 1).
+- PASS, exit 0, 151/151 across 13 files — root `tests/unit`/`tests/security`
+  regression scope: the two `sr-mail-delivery-readback-20261001` files,
+  `tenant-invitation-lifecycle.test.ts`, `c099-evidence-governance-controlled-export.test.ts`,
+  `sr-mail-001`, `sr-mail-002`, `sr-notify-001`, `notification-delivery/*`,
+  `sr-credential-expiry-20260913/postgres-mail-outbox.test.ts`,
+  `identity-canonical-repository.test.ts`, `iam-min-accses-001.test.ts`,
+  `tenant-partner-foundation.test.ts`, `security-events.test.ts`,
+  `multi-tenant-header-routing.test.ts`.
+- PASS, exit 0, 32/32 — `tests/security/iam-route-inventory.test.ts`,
+  `tests/security/iam-route-map-negative.test.ts`,
+  `tests/security/iam-driver-authz-enforcement.test.ts` (these enumerate/
+  exercise `resolveRouteAuthPolicy` across the whole route table; run to
+  check the new `tenant/mail-deliveries` branch didn't regress any other
+  route's classification).
+- PASS, exit 0, 121/121 across 5 files —
+  `pnpm --filter @drts/api exec vitest run` on `auth-bootstrap.test.ts`,
+  `driver-sos-incident.test.ts`, `owned-mobility-task-events.test.ts`,
+  `multi-taxi-controlled-export.test.ts`, `ops-driver-tasks-scope.test.ts`
+  (other callers of `resolveRouteAuthPolicy`/route-policy-dependent
+  controllers, checked for collateral impact from the `auth.policy.ts`
+  change).
+- No server, Docker, SMTP/TLS listener, or browser was started this round
+  (VM restriction).
+
+### Not verified / remaining limits (round 2)
+
+- Hosted CI for this round's new candidate SHA has not run yet; this
+  artifact does not assert it passed. A new candidate handoff is required
+  after this commit.
+- Independent reviewer re-check of this round's fixes is pending (same
+  Owner/Reviewer split as round 1: Claude owns, Codex reviews).

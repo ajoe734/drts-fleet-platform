@@ -12,7 +12,9 @@ import { IdentityRepository } from "../../../../apps/api/src/modules/identity/id
 import { FileMailOutbox } from "../../../../apps/api/src/modules/notification-delivery/file-mail-outbox";
 import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import type {
+  MailOutbox,
   MailTransport,
+  OutboxState,
   ProviderAcknowledgement,
   TransportMessage,
 } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
@@ -317,5 +319,77 @@ describe("SR-MAIL-DELIVERY-READBACK-20261001 mail delivery readback", () => {
     );
 
     expect(result).toBeNull();
+  });
+
+  it("keeps the real, queryable deliveryId when enqueue succeeds but the ack-persistence transaction after dispatch throws", async () => {
+    // Wraps a real FileMailOutbox so enqueue (transaction #1) and dispatch's
+    // claim (transaction #2) commit for real, then injects a single
+    // transient failure on transaction #3 -- dispatch's post-send
+    // ack-persistence commit, after the provider has already been called.
+    // This is the exact point R2 flagged: `deliver()`'s single try/catch
+    // used to collapse this into a synthetic, non-queryable error id even
+    // though the outbox already has a durable, queryable record.
+    let transactionCount = 0;
+    const realOutbox = new FileMailOutbox(directory);
+    const flakyOutbox: MailOutbox = {
+      async transaction<T>(operation: (state: OutboxState) => T): Promise<T> {
+        transactionCount += 1;
+        if (transactionCount === 3) {
+          throw new Error("notification_outbox_transient_failure");
+        }
+        return realOutbox.transaction(operation);
+      },
+    };
+    const notificationDeliveryService = new NotificationDeliveryService(
+      flakyOutbox,
+      gmailStyleTransport(),
+    );
+    const tenantInvitationDelivery = new TenantInvitationDeliveryService(
+      notificationDeliveryService,
+    );
+
+    const result = await tenantInvitationDelivery.send({
+      invitationId: "invitation-ack-persist-failure",
+      tenantId: TENANT_A,
+      recipientEmail: "invitee-ack-failure@example.test",
+      displayName: "Invitee",
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      rawToken: "raw-token-not-logged",
+    });
+
+    expect(transactionCount).toBe(3);
+    // Never fabricate a delivered outcome just because dispatch was reached.
+    expect(result.status).not.toBe("sent");
+    expect(result.providerMessageId).toBeNull();
+    // The defect: a synthetic, never-queryable id discarded the real one.
+    expect(result.queryable).toBe(true);
+    expect(result.deliveryId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.deliveryId).not.toMatch(/^error-/);
+
+    // The real test: the same deliveryId resolves through the production
+    // readback path, not just through the raw outbox.
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new IdentityRepository(),
+      new IdentityRepository(),
+      tenantInvitationDelivery,
+      notificationDeliveryService,
+    );
+    const receipt = await service.getMailDeliveryReceipt(
+      TENANT_A,
+      result.deliveryId,
+      "req-read-after-ack-failure",
+      identity(),
+    );
+    expect(receipt).not.toBeNull();
+    expect(receipt!.status).toBe("queued");
+    expect(receipt!.attempts).toHaveLength(1);
+    expect(receipt!.attempts[0]!.outcome).toBe("started");
   });
 });
