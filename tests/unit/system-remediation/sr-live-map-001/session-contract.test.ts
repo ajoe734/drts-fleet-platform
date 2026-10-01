@@ -19,6 +19,7 @@ it("documents why auth/token driver_user sessions cannot yet authenticate live c
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
   vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
   const repository = new IdentityRepository();
+  await repository.onModuleInit();
   const jwt = new JwtAuthService(repository);
   const controller = new AuthController(jwt, {} as never, {} as never, undefined, undefined, undefined, repository);
   const issued = await controller.issueToken({
@@ -43,14 +44,16 @@ it("documents why auth/token driver_user sessions cannot yet authenticate live c
   expect(await jwt.verifyAccessToken(issued.token)).toBeNull();
 });
 
-it("auth/token ops_user sessions successfully issue durable sessions with membershipId", async () => {
+it("auth/token ops_observer sessions successfully issue durable sessions with membershipId", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-30T07:20:00.000Z"));
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("STRICT_IAP_MODE", "false");
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
   vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
+  vi.stubEnv("DRTS_E2E_PROVISIONING", "true");
   const repository = new IdentityRepository();
+  await repository.onModuleInit();
   const jwt = new JwtAuthService(repository);
   const controller = new AuthController(jwt, {} as never, {} as never, undefined, undefined, undefined, repository);
   const issued = await controller.issueToken({
@@ -58,7 +61,7 @@ it("auth/token ops_user sessions successfully issue durable sessions with member
     originalUrl: "/api/auth/token",
     headers: {
       "x-drts-internal-key": "unit-only-internal-key",
-      "x-actor-type": "ops_user",
+      "x-actor-type": "ops_observer",
       "x-actor-id": "live-map-observer",
       "x-realm": "ops",
       "x-scopes": "regulatory:read",
@@ -66,10 +69,38 @@ it("auth/token ops_user sessions successfully issue durable sessions with member
   });
   expect(issued.expiresIn).toBe("8h");
   const payload = jwt.verify(issued.token);
-  expect(payload?.actorType).toBe("ops_user");
+  expect(payload?.actorType).toBe("ops_observer");
   expect(payload?.scopes).toEqual(["regulatory:read"]);
   expect(typeof payload?.membershipId).toBe("string");
   const session = await repository.getSession(payload!.sid!);
   expect(session?.status).toBe("active");
   expect(await jwt.verifyAccessToken(issued.token)).not.toBeNull();
+});
+
+it("auth/token rejects elevated scopes for ops_observer", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-30T07:20:00.000Z"));
+  vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("STRICT_IAP_MODE", "false");
+  vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
+  vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
+  vi.stubEnv("DRTS_E2E_PROVISIONING", "true");
+  const repository = new IdentityRepository();
+  await repository.onModuleInit();
+  const jwt = new JwtAuthService(repository);
+  const controller = new AuthController(jwt, {} as never, {} as never, undefined, undefined, undefined, repository);
+  const issued = await controller.issueToken({
+    method: "POST",
+    originalUrl: "/api/auth/token",
+    headers: {
+      "x-drts-internal-key": "unit-only-internal-key",
+      "x-actor-type": "ops_observer",
+      "x-actor-id": "live-map-observer",
+      "x-realm": "ops",
+      "x-scopes": "regulatory:write",
+    },
+  });
+  // It issues successfully initially because controller doesn't reject on explicit request scopes during minting if WIF impersonation isn't overriding it
+  // BUT verifyAccessToken MUST reject it since it's not in roleBindings
+  expect(await jwt.verifyAccessToken(issued.token)).toBeNull();
 });

@@ -976,6 +976,10 @@ export interface IssueDriverDeviceInvitationCommand {
   expiresInHours?: number;
 }
 
+export interface RevokeDriverDeviceInvitationCommand {
+  registrationCode: string;
+}
+
 export interface TenantPartnerSummary {
   supportedRoots: Array<"tenant" | "partner" | "site" | "call_point">;
   sourceOfTruth: "tenant_partner_service" | "foundation_bootstrap_placeholder";

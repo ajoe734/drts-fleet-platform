@@ -16,6 +16,7 @@ import { normalizeApiResponse } from "./wire-response";
 export const MAP_OBSERVER_ID = "live-map-observer";
 type BootstrapDeps = {
   fetch: typeof fetch;
+  readGoogleIdToken: () => string;
   readInternalKey: () => string;
   mask: (value: string) => void;
   exportSession: (name: string, value: string) => void;
@@ -42,9 +43,9 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     }>,
   };
   try {
-    const internalKey = deps.readInternalKey().trim();
-    assert(internalKey && !/[\r\n]/.test(internalKey));
-    deps.mask(internalKey);
+    const idToken = deps.readGoogleIdToken().trim();
+    assert(idToken && !/[\r\n]/.test(idToken));
+    deps.mask(idToken);
     const request = async <T>(path: string, init: RequestInit): Promise<T> => {
       const url = `${config.apiOrigin}/api/${path}`;
       assertAllowedUrl(url, config.allowedTargets);
@@ -70,11 +71,10 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-drts-internal-key": internalKey,
-          "x-actor-type": "ops_user",
+          "x-drts-google-id-token": idToken,
+          "x-actor-type": "ops_observer",
           "x-actor-id": MAP_OBSERVER_ID,
           "x-realm": "ops",
-          "x-scopes": "regulatory:read",
         },
         body: "{}",
       },
@@ -98,20 +98,20 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     });
     assert(session.data.active);
     assert.equal(session.data.identity.realm, "ops");
-    assert.equal(session.data.identity.actorType, "ops_user");
+    assert.equal(session.data.identity.actorType, "ops_observer");
     assert.equal(session.data.identity.actorId, MAP_OBSERVER_ID);
     assert.deepEqual([...session.data.identity.scopes].sort(), ["regulatory:read"]);
     
     verified.push({ name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", token: observerIssued.token });
     evidence.sessions.push({
       realm: "ops",
-      actor_type: "ops_user",
+      actor_type: "ops_observer",
       actor_id: MAP_OBSERVER_ID,
       scopes: ["regulatory:read"],
       expires_in: observerIssued.expiresIn,
     });
 
-    // 2. Get a temp ops session with regulatory:write to issue driver invite
+    // 2. Get a temp platform session with driver:provision to issue driver invite
     evidence.stage = `driver:invite-setup`;
     const tempOpsIssued = await request<{ token: string; expiresIn: string }>(
       "auth/token",
@@ -119,11 +119,11 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-drts-internal-key": internalKey,
-          "x-actor-type": "ops_user",
-          "x-actor-id": MAP_OBSERVER_ID,
-          "x-realm": "ops",
-          "x-scopes": "regulatory:write",
+          "x-drts-internal-key": deps.readInternalKey().trim(),
+          "x-actor-type": "platform_admin",
+          "x-actor-id": "principal_platform_admin_default",
+          "x-realm": "platform",
+          "x-scopes": "driver:provision",
         },
         body: "{}",
       },
@@ -205,6 +205,16 @@ async function main() {
   const envPath = required(process.env, "GITHUB_ENV");
   await bootstrapMapSessions(process.env, {
     fetch,
+    readGoogleIdToken: () =>
+      execFileSync(
+        "gcloud",
+        [
+          "auth",
+          "print-identity-token",
+          `--audiences=${process.env.DRTS_LIVE_MAP_API_ORIGIN}`,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ),
     readInternalKey: () =>
       execFileSync(
         "gcloud",

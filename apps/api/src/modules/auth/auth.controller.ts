@@ -614,12 +614,23 @@ export class AuthController {
 
   @Post("driver/device/invite")
   @RequireRealms("system", "platform", "ops")
-  @RequireScopes("regulatory:write") // Fits the control path requirement for driver identity overrides
+  @RequireScopes("driver:provision") // Fits the control path requirement for driver identity overrides
   async issueDriverDeviceInvitation(
     @Body() command: IssueDriverDeviceInvitationCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     const result = await this.driverDeviceSessionService.issueRegistrationInvitation(command);
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Post("driver/device/invite/revoke")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("driver:provision")
+  async revokeDriverDeviceInvitation(
+    @Body() command: { registrationCode: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.driverDeviceSessionService.revokeInvitation(command);
     return toApiSuccessEnvelope(result, requestId);
   }
 

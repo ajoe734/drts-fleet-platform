@@ -165,9 +165,9 @@ and `wire-after.log`. Checkpoint commit is not a review candidate.
 ### F-SESSION-CONTRACT: product prerequisites resolved
 
 The requested issuance path is now exercised correctly with real product prerequisites:
-1. **Ops Membership:** The `live-map-observer` ops_user requires a persisted `ops` realm membership for `auth/token` to issue a valid durable session. This is now automatically provisioned by `IdentityRepository.onModuleInit()` (via `ensureLiveMapObserverAccount`) on application start, ensuring the membership is persisted before the hosted runner initiates requests.
-2. **Driver Binding:** The `drv-demo-002` driver_user session cannot simply be minted by `auth/token` since it lacks a `driverBindingId`. The hosted runner now correctly uses a temporary ops token with `regulatory:write` to call `/api/auth/driver/device/invite`, generating a `registrationCode`. This code is then exchanged via `/api/auth/driver/device/register` for a fully bound, durable driver session.
-Both valid sessions now pass `JwtAuthService.verifyAccessToken` and `auth/session` checks.
+1. **Ops Membership:** The `live-map-observer` account requires a persisted `ops` realm membership for `auth/token` to issue a valid durable session. This is conditionally provisioned by `IdentityRepository` on application start **only when `DRTS_E2E_PROVISIONING=true` is set**, preventing unauthorized creation in production. The role is restricted to a narrow `ops_observer` profile with only `regulatory:read`.
+2. **Driver Binding:** The `drv-demo-002` driver_user session cannot simply be minted by `auth/token` since it lacks a `driverBindingId`. The hosted runner now correctly uses a temporary platform session with `driver:provision` to call `/api/auth/driver/device/invite`, generating a `registrationCode`. This code is then exchanged via `/api/auth/driver/device/register` for a fully bound, durable driver session.
+Both valid sessions now pass `JwtAuthService.validateDurableState` which tightly clamps allowed scopes against the persistent role bindings, and teardown securely revokes both the device session and any pending invite.
 
 The harness implements the requested existing WIF + Secret Manager + auth/token
 path with separate least-scope driver and ops identities and refuses to export

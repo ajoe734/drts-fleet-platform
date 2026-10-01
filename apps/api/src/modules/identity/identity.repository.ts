@@ -251,7 +251,10 @@ export class IdentityRepository implements OnModuleInit {
   async ensureLiveMapObserverAccount(): Promise<{
     principal: CanonicalIdentityPrincipalRecord;
     membership: CanonicalIdentityMembershipRecord;
-  }> {
+  } | null> {
+    if (process.env.DRTS_E2E_PROVISIONING !== "true") {
+      return null;
+    }
     const existingPrincipal = await this.findPrincipalById("live-map-observer");
     const existingMemberships = existingPrincipal
       ? await this.findMembershipsByPrincipalId("live-map-observer")
@@ -289,10 +292,24 @@ export class IdentityRepository implements OnModuleInit {
       createdAt: existingMembership?.createdAt ?? now,
       updatedAt: existingMembership?.updatedAt ?? now,
     };
+    
+    const roleBindingDraft: CanonicalIdentityRoleBindingRecord = {
+      roleBindingId: `role_binding_ops_${randomUUID()}`,
+      sourceRef: "live_map_observer:role_binding:ops_observer",
+      membershipId: membershipDraft.membershipId,
+      roleCode: "ops_observer",
+      grantedByPrincipalId: null,
+      approvalId: null,
+      validFrom: now,
+      validTo: null,
+      createdAt: now,
+      updatedAt: now,
+    };
 
     if (!this.isEnabled()) {
       const principal = this.upsertFallbackPrincipal(principalDraft);
       const membership = this.upsertFallbackMembership(membershipDraft);
+      this.upsertFallbackRoleBinding(roleBindingDraft);
       return { principal, membership };
     }
 
@@ -303,6 +320,10 @@ export class IdentityRepository implements OnModuleInit {
       const membership = await this.upsertMembership(client, {
         ...membershipDraft,
         principalId: principal.principalId,
+      });
+      await this.upsertRoleBinding(client, {
+        ...roleBindingDraft,
+        membershipId: membership.membershipId,
       });
       await client.query("COMMIT");
       return { principal, membership };

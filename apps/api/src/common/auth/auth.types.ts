@@ -3,6 +3,7 @@ export const AUTH_ACTOR_TYPES = [
   "platform_admin",
   "tenant_admin",
   "ops_user",
+  "ops_observer",
   "driver_user",
   "partner_api_key",
   "partner_user",
