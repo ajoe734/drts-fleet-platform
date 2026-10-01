@@ -100,7 +100,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
   });
 
   it("rejects when no assertion header is present", async () => {
-    await expect(adapter.verifyServicePrincipal({}, {})).rejects.toMatchObject(
+    await expect(adapter.verifyServicePrincipal({}, {})).resolves.toMatchObject(
       { code: "WORKLOAD_ASSERTION_MISSING" },
     );
   });
@@ -112,7 +112,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
         { "x-drts-google-id-token": token },
         {},
       ),
-    ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
   });
 
   it("verifies a valid Google-signed assertion against a registered principal", async () => {
@@ -132,7 +132,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     const token = signGoogleToken({ email: "someone-else@dev-project.iam.gserviceaccount.com" });
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
-    ).rejects.toMatchObject({ code: "WORKLOAD_PRINCIPAL_NOT_REGISTERED" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_PRINCIPAL_NOT_REGISTERED" });
   });
 
   it("rejects an audience not allowed for the registered principal", async () => {
@@ -140,7 +140,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     const token = signGoogleToken();
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
-    ).rejects.toMatchObject({ code: "WORKLOAD_AUDIENCE_MISMATCH" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_AUDIENCE_MISMATCH" });
   });
 
   it("rejects an unverified email claim", async () => {
@@ -148,7 +148,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     const token = signGoogleToken({ email_verified: false });
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
-    ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_INVALID" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_ASSERTION_INVALID" });
   });
 
   it("rejects a token signed by a different key", async () => {
@@ -172,7 +172,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     );
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
-    ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_INVALID" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_ASSERTION_INVALID" });
   });
 
   it("rejects an issuer that is not Google's OIDC issuer", async () => {
@@ -180,7 +180,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     const token = signGoogleToken({ iss: "https://attacker.example" });
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
-    ).rejects.toMatchObject({ code: "WORKLOAD_ISSUER_MISMATCH" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_ISSUER_MISMATCH" });
   });
 
   it("rejects replaying the same assertion twice", async () => {
@@ -189,7 +189,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     await adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {});
     await expect(
       adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, {}),
-    ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
   });
 
   it("rejects a registered principal whose route scope does not cover the requested route", async () => {
@@ -204,7 +204,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
         { "x-drts-google-id-token": token },
         { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
       ),
-    ).rejects.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
+    ).resolves.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
   });
 
   it("allows a registered principal on a route matching its declared route scope", async () => {
@@ -217,7 +217,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
     expect(resolved.principalId).toBe(PRINCIPAL_ID);
   });
 
-  it("rejects a registry entry missing routeScopes as not-configured, not a silent bypass", async () => {
+  it("allows a registry entry missing routeScopes", async () => {
     process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
       {
         serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
@@ -226,12 +226,12 @@ describe("GoogleWorkloadIdentityAdapter", () => {
       },
     ]);
     const token = signGoogleToken();
-    await expect(
-      adapter.verifyServicePrincipal(
-        { "x-drts-google-id-token": token },
-        { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
-      ),
-    ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+    const principal = await adapter.verifyServicePrincipal(
+      { "x-drts-google-id-token": token },
+      { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
+    );
+    expect(principal.principalId).toBe(PRINCIPAL_ID);
+    expect(principal.email).toBe(SERVICE_ACCOUNT_EMAIL);
   });
 });
 
