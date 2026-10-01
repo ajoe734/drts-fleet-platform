@@ -2381,6 +2381,7 @@ export interface SandboxRegulatorCaseAccessLogRecord {
     | "ops_user"
     | "partner_api_key"
     | "partner_user"
+    | "ops_observer"
     | "referral_passenger";
   actionName: string;
   resourceType: string;
@@ -2913,6 +2914,7 @@ export type Phase2AuditActorType =
   | "ops_user"
   | "partner_api_key"
   | "partner_user"
+  | "ops_observer"
   | "referral_passenger";
 
 export interface Phase2AuditContext {
