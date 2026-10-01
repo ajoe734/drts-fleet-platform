@@ -34,6 +34,10 @@ import { AuditNotificationService } from "../../../../apps/api/src/modules/audit
 import { FileMailOutbox } from "../../../../apps/api/src/modules/notification-delivery/file-mail-outbox";
 import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import type { ProviderAcknowledgement } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
+import type {
+  TenantPartnerRepository,
+  TenantPartnerState,
+} from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
@@ -404,7 +408,12 @@ describe("SR-MAIL-RETRY-SCHEDULE-20261001 approval-timeout reminder trigger", ()
       resolvedApproverUserIds: ["user-sweep-001"],
       previousApprovers: [],
       decisions: [],
-      evaluationSnapshot: {} as never,
+      // R1-01's repository-refresh path clones every fetched request through
+      // the real `cloneApprovalRequest`/`cloneTenantApprovalEvaluationResult`,
+      // which indexes into `matchedRules`; an empty `{}` snapshot (fine for
+      // the older tests that assign `approvalRequests` directly, bypassing
+      // cloning) throws there.
+      evaluationSnapshot: { matchedRules: [] } as never,
       // 1h out, inside the 12h reminder lead window and not yet timed out.
       timeoutAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       escalatedAt: null,
@@ -522,5 +531,196 @@ describe("SR-MAIL-RETRY-SCHEDULE-20261001 approval-timeout reminder trigger", ()
     ]);
 
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  function emptyRepositoryState(): TenantPartnerState {
+    return {
+      notificationPreferences: [],
+      webhookEndpoints: [],
+      webhookDeliveries: [],
+      slaProfiles: [],
+      partnerEntries: [],
+      partnerIngressCredentials: [],
+      partnerEligibilityVerifications: [],
+      approvalRules: [],
+      approvalRequests: [],
+      approvalDecisions: [],
+      passengers: [],
+      addresses: [],
+      costCenters: [],
+      quotaPolicies: [],
+      quotaLedger: [],
+      quotaMonthlySnapshots: [],
+      userRoles: [],
+      apiKeys: [],
+    };
+  }
+
+  // SR-MAIL-RETRY-SCHEDULE-20261001 R1-01 (Codex review, candidate
+  // 90c6138ce8086e4f3659351b037171b00fc97c9e): the sweep used to read only
+  // `this.approvalRequests`/`this.userRoles`, populated once at
+  // `onModuleInit` and never refreshed. A warm instance that cold-started
+  // before a sibling instance created a new approval request (or changed a
+  // recipient's opt-out) would keep evaluating against that stale snapshot
+  // forever. These two tests reproduce that race against a fake repository
+  // and assert the sweep now reads the authoritative state fresh each run.
+  it("R1-01: pulls approval requests and recipients from the repository each sweep instead of the stale onModuleInit snapshot", async () => {
+    const send = vi.fn(async () => acknowledgement());
+    const deliveryService = new NotificationDeliveryService(
+      new FileMailOutbox(directory),
+      { provider: "test-provider", send },
+      { maxAttempts: 5, retryDelayMs: 1_000, leaseMs: 60_000 },
+    );
+    const emailAdapter = new AuditNotificationEmailAdapter(deliveryService);
+    const auditNotificationService = new AuditNotificationService(
+      undefined,
+      emailAdapter,
+    );
+
+    // Instance B cold-starts against an authoritative store that has no
+    // pending approvals yet.
+    let persisted = emptyRepositoryState();
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => persisted),
+    } as unknown as TenantPartnerRepository;
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository,
+    );
+    await service.onModuleInit();
+
+    const beforeCreate = await service.runApprovalTimeoutNotificationSweep();
+    expect(beforeCreate).toEqual({ evaluated: 0, dispatched: 0 });
+    expect(send).not.toHaveBeenCalled();
+
+    // Instance A creates the approval request and its approver directly in
+    // the authoritative store; instance B never re-runs onModuleInit.
+    persisted = {
+      ...emptyRepositoryState(),
+      approvalRequests: [approvalRequestNearingTimeout()],
+      userRoles: [approverUserRole()],
+    };
+
+    const afterCreate = await service.runApprovalTimeoutNotificationSweep();
+    expect(afterCreate).toEqual({ evaluated: 1, dispatched: 1 });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("R1-01: stops notifying once a sibling instance resolves the request, without re-reading the whole module init bootstrap", async () => {
+    const send = vi.fn(async () => acknowledgement());
+    const deliveryService = new NotificationDeliveryService(
+      new FileMailOutbox(directory),
+      { provider: "test-provider", send },
+      { maxAttempts: 5, retryDelayMs: 1_000, leaseMs: 60_000 },
+    );
+    const emailAdapter = new AuditNotificationEmailAdapter(deliveryService);
+    const auditNotificationService = new AuditNotificationService(
+      undefined,
+      emailAdapter,
+    );
+
+    let persisted: TenantPartnerState = {
+      ...emptyRepositoryState(),
+      approvalRequests: [approvalRequestNearingTimeout()],
+      userRoles: [approverUserRole()],
+    };
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => persisted),
+    } as unknown as TenantPartnerRepository;
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository,
+    );
+    await service.onModuleInit();
+
+    const firstSweep = await service.runApprovalTimeoutNotificationSweep();
+    expect(firstSweep).toEqual({ evaluated: 1, dispatched: 1 });
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // A sibling instance resolves the request after this sweep. Without a
+    // fresh read, the stale in-memory copy (still "pending") would try to
+    // notify it again on the next tick.
+    persisted = {
+      ...persisted,
+      approvalRequests: [
+        { ...approvalRequestNearingTimeout(), status: "approved" },
+      ],
+    };
+
+    const secondSweep = await service.runApprovalTimeoutNotificationSweep();
+    expect(secondSweep).toEqual({ evaluated: 0, dispatched: 0 });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  // SR-MAIL-RETRY-SCHEDULE-20261001 R1-02 (same review): the in-flight guard
+  // returned a hardcoded `{evaluated:0,dispatched:0}` to any caller that
+  // overlapped a sweep already running, instead of that sweep's real result.
+  // A scheduler-triggered HTTP call landing during a concurrent interval
+  // tick (or two overlapping scheduler calls) would get told "success, 0
+  // dispatched" even while real dispatch work was still in flight.
+  it("R1-02: a call that overlaps an in-flight sweep awaits and returns the real result instead of a stale zero", async () => {
+    const send = vi.fn(async () => acknowledgement());
+    const deliveryService = new NotificationDeliveryService(
+      new FileMailOutbox(directory),
+      { provider: "test-provider", send },
+      { maxAttempts: 5, retryDelayMs: 1_000, leaseMs: 60_000 },
+    );
+    const emailAdapter = new AuditNotificationEmailAdapter(deliveryService);
+    const auditNotificationService = new AuditNotificationService(
+      undefined,
+      emailAdapter,
+    );
+
+    let resolveLoadState!: (state: TenantPartnerState) => void;
+    const loadState = vi.fn(
+      () =>
+        new Promise<TenantPartnerState>((resolve) => {
+          resolveLoadState = resolve;
+        }),
+    );
+    const repository = {
+      isEnabled: () => true,
+      loadState,
+    } as unknown as TenantPartnerRepository;
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository,
+    );
+
+    const first = service.runApprovalTimeoutNotificationSweep();
+    const second = service.runApprovalTimeoutNotificationSweep();
+
+    resolveLoadState({
+      ...emptyRepositoryState(),
+      approvalRequests: [approvalRequestNearingTimeout()],
+      userRoles: [approverUserRole()],
+    });
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toEqual({ evaluated: 1, dispatched: 1 });
+    expect(secondResult).toEqual({ evaluated: 1, dispatched: 1 });
+    expect(loadState).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("R1-02: a repository failure during the sweep surfaces as a failure response, not a false-success zero result", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => {
+        throw new Error("simulated repository outage");
+      }),
+    } as unknown as TenantPartnerRepository;
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      repository,
+    );
+    const controller = buildController(service);
+
+    await expect(
+      controller.runApprovalTimeoutReminders(systemIdentity()),
+    ).rejects.toMatchObject({ code: "APPROVAL_TIMEOUT_SWEEP_FAILED" });
   });
 });

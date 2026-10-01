@@ -1387,7 +1387,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private approvalNotificationPollTimer: ReturnType<typeof setInterval> | null =
     null;
 
-  private approvalNotificationPollInFlight = false;
+  private approvalNotificationPollInFlight: Promise<{
+    evaluated: number;
+    dispatched: number;
+  }> | null = null;
 
   private readonly securityEventsService: SecurityEventsService | undefined;
 
@@ -1728,7 +1731,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         );
       }
       this.schedulePersistedWebhookRetries();
-      void this.pollPendingApprovalTimeoutNotifications();
+      // Fire-and-forget, same as the interval tick in
+      // `startApprovalNotificationPolling`: SR-MAIL-RETRY-SCHEDULE-20261001
+      // R1-02 made a sweep failure reject instead of resolving with a fake
+      // zero result, so this module-init warm-up call must not become an
+      // unhandled rejection.
+      this.pollPendingApprovalTimeoutNotifications().catch((error) => {
+        const message =
+          error instanceof Error ? error.message : "unknown polling failure";
+        this.logger.error(
+          `Module-init approval timeout notification poll failed: ${message}`,
+        );
+      });
     } catch (error) {
       this.tenantPartnerRepository.reportPersistenceFailure(
         error,
@@ -12686,11 +12700,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private findActiveTenantUser(tenantId: string, userId: string) {
+    return this.findActiveTenantUserIn(this.userRoles, tenantId, userId);
+  }
+
+  private findActiveTenantUserIn(
+    userRoles: readonly TenantUserRoleRecord[],
+    tenantId: string,
+    userId: string,
+  ) {
     const normalizedUserId = userId.trim();
     if (!normalizedUserId) {
       return null;
     }
-    const userRole = this.userRoles.find(
+    const userRole = userRoles.find(
       (candidate) =>
         candidate.tenantId === tenantId &&
         candidate.userId === normalizedUserId &&
@@ -12729,11 +12751,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private resolveApprovalNotificationRecipients(
     tenantId: string,
     userIds: readonly string[],
+    userRoles: readonly TenantUserRoleRecord[] = this.userRoles,
   ): ApprovalNotificationRecipient[] {
     const recipients = new Map<string, ApprovalNotificationRecipient>();
 
     for (const userId of userIds) {
-      const user = this.findActiveTenantUser(tenantId, userId);
+      const user = this.findActiveTenantUserIn(userRoles, tenantId, userId);
       if (!user || recipients.has(user.userId)) {
         continue;
       }
@@ -12770,7 +12793,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.approvalNotificationPollTimer = setInterval(() => {
-      void this.pollPendingApprovalTimeoutNotifications();
+      // Fire-and-forget: a rejected sweep must not become an unhandled
+      // promise rejection on this background tick. The HTTP-triggered path
+      // (`runApprovalTimeoutNotificationSweep`) does not catch here -- it
+      // lets the same rejection surface as a non-2xx response so an external
+      // scheduler can detect and retry a failed sweep instead of being told
+      // a failure was "0 evaluated, 0 dispatched".
+      this.pollPendingApprovalTimeoutNotifications().catch((error) => {
+        const message =
+          error instanceof Error ? error.message : "unknown polling failure";
+        this.logger.error(
+          `Background approval timeout notification poll failed: ${message}`,
+        );
+      });
     }, APPROVAL_NOTIFICATION_POLL_INTERVAL_MS);
     this.approvalNotificationPollTimer.unref?.();
   }
@@ -12794,18 +12829,98 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.pollPendingApprovalTimeoutNotifications();
   }
 
-  private async pollPendingApprovalTimeoutNotifications(): Promise<{
+  /**
+   * SR-MAIL-RETRY-SCHEDULE-20261001 R1-01/R1-02: a scheduler call and a
+   * concurrent interval tick (or two overlapping scheduler calls racing
+   * across instances) must share the one real sweep in flight rather than
+   * one of them short-circuiting on a fake `{evaluated:0,dispatched:0}` --
+   * that previously let a scheduler-triggered HTTP call return "success"
+   * before the durable work it asked for had actually run. Every caller
+   * while a sweep is running awaits the same promise and gets its real
+   * result.
+   */
+  private pollPendingApprovalTimeoutNotifications(): Promise<{
     evaluated: number;
     dispatched: number;
   }> {
     if (this.approvalNotificationPollInFlight) {
-      return { evaluated: 0, dispatched: 0 };
+      return this.approvalNotificationPollInFlight;
     }
 
-    this.approvalNotificationPollInFlight = true;
+    const run = this.executeApprovalTimeoutNotificationSweep().finally(() => {
+      this.approvalNotificationPollInFlight = null;
+    });
+    this.approvalNotificationPollInFlight = run;
+    return run;
+  }
+
+  /**
+   * SR-MAIL-RETRY-SCHEDULE-20261001 R1-01: this in-process service caches
+   * approval requests and user roles in memory, refreshed only at
+   * `onModuleInit`. On Cloud Run, a second instance that cold-starts after
+   * this one has handled new/resolved approvals or recipient opt-out
+   * changes would otherwise evaluate and notify against a stale snapshot.
+   * Each sweep pulls the current persisted approval requests/decisions and
+   * user roles straight from the repository instead, without re-running
+   * module-init's full seed/sanitize bootstrap. Falls back to the in-memory
+   * state when no repository is configured (in-memory/test mode, where
+   * `this.approvalRequests`/`this.userRoles` are already authoritative).
+   */
+  private async loadFreshApprovalNotificationState(): Promise<{
+    approvalRequests: readonly TenantBookingApprovalRequestRecord[];
+    userRoles: readonly TenantUserRoleRecord[];
+  } | null> {
+    if (!this.tenantPartnerRepository?.isEnabled()) {
+      return null;
+    }
+
+    const persistedState = await this.tenantPartnerRepository.loadState();
+    const strictAuth = isStrictAuthEnvironment();
+
+    const approvalDecisionsSource = persistedState.approvalDecisions ?? [];
+    const decisions = approvalDecisionsSource.map((decision) =>
+      this.cloneApprovalDecision(decision),
+    );
+    const approvalRequestsSource = strictAuth
+      ? (persistedState.approvalRequests ?? []).filter(
+          (request) => request.tenantId !== DEMO_TENANT_ID,
+        )
+      : (persistedState.approvalRequests ?? []);
+    const approvalRequests = approvalRequestsSource.map((request) =>
+      this.cloneApprovalRequest(
+        this.mergeApprovalRequestDecisions(
+          request,
+          decisions.filter(
+            (decision) =>
+              decision.approvalRequestId === request.approvalRequestId,
+          ),
+        ),
+      ),
+    );
+    const userRolesSource = strictAuth
+      ? (persistedState.userRoles ?? []).filter(
+          (userRole) => userRole.tenantId !== DEMO_TENANT_ID,
+        )
+      : (persistedState.userRoles ?? []);
+    const userRoles = userRolesSource.map((userRole) =>
+      this.cloneUserRole(userRole),
+    );
+
+    return { approvalRequests, userRoles };
+  }
+
+  private async executeApprovalTimeoutNotificationSweep(): Promise<{
+    evaluated: number;
+    dispatched: number;
+  }> {
     try {
+      const freshState = await this.loadFreshApprovalNotificationState();
+      const approvalRequests =
+        freshState?.approvalRequests ?? this.approvalRequests;
+      const userRoles = freshState?.userRoles ?? this.userRoles;
+
       const now = Date.now();
-      const eligibleRequests = this.approvalRequests.filter((request) => {
+      const eligibleRequests = approvalRequests.filter((request) => {
         if (request.status !== "pending" || request.escalatedAt) {
           return false;
         }
@@ -12828,6 +12943,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         await this.dispatchApprovalNotifications(
           "approaching_timeout",
           request,
+          { userRoles },
         );
       }
       return {
@@ -12840,9 +12956,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `Failed to poll pending approval timeout notifications: ${message}`,
       );
-      return { evaluated: 0, dispatched: 0 };
-    } finally {
-      this.approvalNotificationPollInFlight = false;
+      // SR-MAIL-RETRY-SCHEDULE-20261001 R1-02: do not swallow a scan failure
+      // into a fake successful zero-result -- the scheduler-triggered caller
+      // needs a non-2xx so it can tell a failed sweep apart from a sweep
+      // that genuinely found nothing eligible, and retry accordingly.
+      throw new ApiRequestError(
+        HttpStatus.BAD_GATEWAY,
+        "APPROVAL_TIMEOUT_SWEEP_FAILED",
+        `Approval timeout notification sweep failed: ${message}`,
+      );
     }
   }
 
@@ -12856,6 +12978,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       reasonCode?: string | null;
       reasonNote?: string | null;
       recipientUserIds?: readonly string[];
+      userRoles?: readonly TenantUserRoleRecord[];
     },
   ) {
     const recipientUserIds =
@@ -12863,6 +12986,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const recipients = this.resolveApprovalNotificationRecipients(
       request.tenantId,
       recipientUserIds,
+      options?.userRoles ?? this.userRoles,
     );
     const dispatchResult =
       await this.auditNotificationService.dispatchApprovalNotification({
