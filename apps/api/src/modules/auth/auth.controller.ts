@@ -10,6 +10,7 @@ import type {
   IamCallbackSessionExchangeCommand,
   IamSessionRevokeCommand,
   IdentityContext,
+  IssueDriverDeviceInvitationCommand,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
   RegisterDriverDeviceCommand,
@@ -29,6 +30,7 @@ import {
   CurrentIdentity,
   OpenRoute,
   RequireRealms,
+  RequireScopes,
 } from "../../common/auth";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import {
@@ -63,6 +65,13 @@ import {
   extractWorkloadIdentityAssertion,
   ServiceWorkloadIdentityAdapter,
 } from "./service-workload-identity.adapter";
+import {
+  extractGoogleWorkloadIdentityAssertion,
+  GoogleWorkloadIdentityAdapter,
+  isCiTenantActorGateEnabled,
+  resolveCiTenantActorGrant,
+} from "./google-workload-identity.adapter";
+import { IdempotencyService } from "../../common/idempotency";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -134,6 +143,11 @@ export class AuthController {
     // rather than a property access on undefined.
     @Optional()
     private readonly oidcPkceService?: OidcPkceService,
+    // Appended, and optional, for the same reason as `oidcPkceService` above.
+    @Optional()
+    private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -145,6 +159,17 @@ export class AuthController {
       );
     }
     return this.oidcPkceService;
+  }
+
+  private requireIdempotencyService(): IdempotencyService {
+    if (!this.idempotencyService) {
+      throw new ApiRequestError(
+        500,
+        "IDEMPOTENCY_UNAVAILABLE",
+        "Idempotency service is required for this operation.",
+      );
+    }
+    return this.idempotencyService;
   }
 
   @OpenRoute()
@@ -303,6 +328,9 @@ export class AuthController {
       request.headers as Record<string, string | string[] | undefined>,
     );
     const rawAssertion = extractIapJwtAssertion(request.headers);
+    const rawGoogleAssertion = extractGoogleWorkloadIdentityAssertion(
+      request.headers as Record<string, string | string[] | undefined>,
+    );
     const bootstrapIdentity = extractBootstrapRequestIdentity(request.headers, {
       allowAnonymous: false,
       method: request.method,
@@ -322,6 +350,14 @@ export class AuthController {
         401,
         "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
         "Bootstrap identity headers are disabled when workload identity proof is provided.",
+      );
+    }
+
+    if (rawGoogleAssertion && rawWorkloadAssertion) {
+      throw new ApiRequestError(
+        401,
+        "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN",
+        "Google workload identity proof cannot be combined with the service workload identity assertion.",
       );
     }
 
@@ -380,8 +416,66 @@ export class AuthController {
       return { token: issued.token, expiresIn };
     }
 
-    // Require internal key to issue tokens when workload proof is not used.
-    validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
+    // Google-native OIDC/WIF proof (a real Google-signed identity token, verified
+    // against Google's own public JWKS -- no invented long-term key material)
+    // only authorizes issuance for a fixed, pre-registered (tenantId, actorType,
+    // actorId) tuple in a non-production environment with the CI tenant actor
+    // gate explicitly enabled. It is deliberately narrower than the general
+    // `x-drts-internal-key` fallback it replaces for this one caller.
+    //
+    // While the gate is off or the registry isn't populated yet (rollout not
+    // complete for this environment), fall back to requiring the internal
+    // key below -- same transition safety as the InternalKeyMiddleware path
+    // -- so dev does not go red for callers that already send both. Once a
+    // Google assertion DOES verify against an active gate and still doesn't
+    // match a registered grant, that is a real access decision and must fail
+    // closed, not silently degrade to the internal key.
+    let googleCiTenantActorVerified = false;
+    if (rawGoogleAssertion && isCiTenantActorGateEnabled()) {
+      if (!bootstrapIdentity) {
+        throw new ApiRequestError(
+          400,
+          "IDENTITY_REQUIRED",
+          "Bootstrap identity headers (x-actor-type, x-actor-id, x-realm) are required.",
+          {},
+        );
+      }
+      const resolvedGoogle =
+        await this.googleWorkloadIdentityAdapter?.verifyServicePrincipal(
+          request.headers as Record<string, string | string[] | undefined>,
+          {
+            requestPath: request.originalUrl ?? request.url,
+            requestMethod: request.method,
+          },
+        );
+      if (!resolvedGoogle) {
+        throw new ApiRequestError(
+          503,
+          "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+          "Google workload identity validation is not configured for this environment.",
+        );
+      }
+      const grant = resolveCiTenantActorGrant(resolvedGoogle, {
+        tenantId: bootstrapIdentity.tenantId ?? "",
+        actorType: bootstrapIdentity.actorType,
+        actorId: bootstrapIdentity.actorId ?? "",
+      });
+      if (!grant) {
+        throw new ApiRequestError(
+          403,
+          "WORKLOAD_CI_TENANT_ACTOR_DENIED",
+          "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
+        );
+      }
+      // Fall through to the same durable-tenant-user-backed issuance path
+      // used for the internal-key bootstrap flow below; only the credential
+      // proof differs.
+      googleCiTenantActorVerified = true;
+    }
+    if (!googleCiTenantActorVerified) {
+      // Require internal key to issue tokens when no workload proof is used.
+      await validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
+    }
 
     if (rawAssertion && this.iapSubjectAdapter) {
       const expectedAudience =
@@ -495,6 +589,23 @@ export class AuthController {
           scopes: [...durableTenantScopes],
         }
       : identity;
+
+    if (
+      (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
+      !durableIdentity.membershipId &&
+      durableIdentity.actorId
+    ) {
+      if (!this.identityRepository) {
+        throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
+      }
+      const memberships = await this.identityRepository.findMembershipsByPrincipalId(durableIdentity.actorId);
+      const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
+      if (!membership) {
+        throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
+      }
+      durableIdentity.membershipId = membership.membershipId;
+    }
+
     const expiresIn: JwtExpiresIn =
       durableIdentity.actorType === "system" ? "15m" : "8h";
     const issuedAt = new Date().toISOString();
@@ -513,6 +624,44 @@ export class AuthController {
         : Date.parse(issuedAt),
     });
     return { token: issued.token, expiresIn };
+  }
+
+  @Post("driver/device/invite")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("driver:provision") // Fits the control path requirement for driver identity overrides
+  async issueDriverDeviceInvitation(
+    @Body() command: IssueDriverDeviceInvitationCommand,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.requireIdempotencyService().execute({
+      scope: "auth:driver_invite:issue",
+      idempotencyKey,
+      required: false,
+      requestPath: "auth/driver/device/invite",
+      payload: command,
+      execute: async () => this.driverDeviceSessionService.issueRegistrationInvitation(command),
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Post("driver/device/invite/revoke")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("driver:provision")
+  async revokeDriverDeviceInvitation(
+    @Body() command: { registrationCode: string },
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.requireIdempotencyService().execute({
+      scope: "auth:driver_invite:revoke",
+      idempotencyKey,
+      required: false,
+      requestPath: "auth/driver/device/invite/revoke",
+      payload: command,
+      execute: async () => this.driverDeviceSessionService.revokeInvitation(command),
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @OpenRoute()

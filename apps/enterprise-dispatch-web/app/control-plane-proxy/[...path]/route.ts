@@ -18,6 +18,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "host",
   "transfer-encoding",
   "x-drts-internal-key",
+  "x-drts-google-id-token",
   "x-actor-id",
   "x-actor-type",
   "x-auth-mode",
@@ -210,6 +211,11 @@ async function mintMetadataIdentityToken(
 }
 
 async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
+  // TODO(SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up): drop this send
+  // once dev has proven the `x-drts-google-id-token` path below end-to-end
+  // and INTERNAL_KEY_EXCP_002 is retired. Kept for now so requests still
+  // succeed if the API's WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS
+  // registry has not been populated for this environment yet.
   const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
   if (internalKey) {
     headers.set("x-drts-internal-key", internalKey);
@@ -220,6 +226,7 @@ async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
     const metadataToken = await mintMetadataIdentityToken(protectedAudience);
     if (metadataToken) {
       headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
+      headers.set("x-drts-google-id-token", metadataToken);
     }
     return;
   }
@@ -231,6 +238,7 @@ async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
   const metadataToken = await mintMetadataIdentityToken(targetUrl.origin);
   if (metadataToken) {
     headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
+    headers.set("x-drts-google-id-token", metadataToken);
   }
 }
 

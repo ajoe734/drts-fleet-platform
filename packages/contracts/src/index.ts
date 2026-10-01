@@ -797,6 +797,7 @@ export interface IdentityContext {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
+    | "ops_observer"
     | "driver_user"
     | "partner_api_key"
     | "partner_user"
@@ -974,6 +975,10 @@ export interface IssueDriverDeviceInvitationCommand {
   driverId: string;
   registrationCode?: string;
   expiresInHours?: number;
+}
+
+export interface RevokeDriverDeviceInvitationCommand {
+  registrationCode: string;
 }
 
 export interface TenantPartnerSummary {
@@ -1328,6 +1333,7 @@ export interface AuditLogRecord {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
+    | "ops_observer"
     | "partner_api_key"
     | "partner_user"
     | "referral_passenger";

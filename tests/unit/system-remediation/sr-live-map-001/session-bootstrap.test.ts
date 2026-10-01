@@ -30,13 +30,8 @@ function harness(
     headerSha?: string;
   } = {},
 ) {
-  let subject: {
-    realm: string;
-    actorType: string;
-    actorId: string;
-    scopes: string[];
-  };
   const readInternalKey = vi.fn(() => "internal-test-secret");
+  const readGoogleIdToken = vi.fn(() => "google-id-token");
   const mask = vi.fn();
   const exportSession = vi.fn();
   const evidence: Record<string, unknown> = {};
@@ -56,48 +51,79 @@ function harness(
       });
     if (url.pathname === "/api/auth/token") {
       const headers = new Headers(init?.headers);
-      expect(headers.get("x-drts-internal-key")).toBe("internal-test-secret");
+      const realm = headers.get("x-realm")!;
+      const actorType = headers.get("x-actor-type")!;
+      
+      if (actorType === "ops_observer") {
+        expect(headers.get("x-drts-google-id-token")).toBe("google-id-token");
+      } else {
+        expect(headers.get("x-drts-internal-key")).toBe("internal-test-secret");
+      }
       expect(init?.body).toBe("{}");
-      subject = {
-        realm: headers.get("x-realm")!,
-        actorType: headers.get("x-actor-type")!,
-        actorId: headers.get("x-actor-id")!,
-        scopes: headers.get("x-scopes")!.split(","),
-      };
-      expect(subject).toEqual(
-        subject.realm === "driver"
-          ? {
-              realm: "driver",
-              actorType: "driver_user",
-              actorId: "drv-demo-002",
-              scopes: ["driver:read"],
-            }
-          : {
-              realm: "ops",
-              actorType: "ops_user",
-              actorId: "live-map-observer",
-              scopes: ["regulatory:read"],
-            },
-      );
-      expect(mask).toHaveBeenCalledWith("internal-test-secret");
+      const actorId = headers.get("x-actor-id")!;
+      const scopes = headers.get("x-scopes");
+      
+      if (actorType === "platform_admin") {
+        expect(realm).toBe("platform");
+        expect(actorId).toBe("principal_platform_admin_default");
+        expect(scopes).toBe("driver:provision");
+        return reply({
+          token: "temp-ops-test-secret",
+          expiresIn: options.expiresIn ?? "8h",
+        });
+      }
+      
+      expect(realm).toBe("ops");
+      expect(actorType).toBe("ops_observer");
+      expect(actorId).toBe("live-map-observer");
+      expect(scopes).toBeNull();
+      
+      expect(mask).toHaveBeenCalledWith("google-id-token");
       return reply({
-        token: `${subject.realm}-test-secret`,
+        token: "ops-test-secret",
         expiresIn: options.expiresIn ?? "8h",
       });
     }
+    
+    if (url.pathname === "/api/auth/driver/device/invite") {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer temp-ops-test-secret");
+      const body = JSON.parse(String(init?.body));
+      expect(body.driverId).toBe("drv-demo-002");
+      return reply({
+        data: { registrationCode: "test-reg-code" }
+      });
+    }
+    
+    if (url.pathname === "/api/auth/driver/device/register") {
+      const body = JSON.parse(String(init?.body));
+      expect(body.registrationCode).toBe("test-reg-code");
+      expect(typeof body.deviceId).toBe("string");
+      return reply({
+        data: {
+          accessToken: {
+            token: "driver-test-secret",
+            expiresIn: options.expiresIn ?? "8h",
+          }
+        }
+      });
+    }
+    
     if (url.pathname === "/api/auth/session") {
-      expect(mask).toHaveBeenCalledWith(`${subject.realm}-test-secret`);
-      expect(new Headers(init?.headers).get("authorization")).toBe(
-        `Bearer ${subject.realm}-test-secret`,
-      );
+      const auth = new Headers(init?.headers).get("authorization");
+      expect(auth).toMatch(/^Bearer (ops-test-secret|driver-test-secret)$/);
+      const isDriver = auth === "Bearer driver-test-secret";
+      expect(mask).toHaveBeenCalledWith(isDriver ? "driver-test-secret" : "ops-test-secret");
+      
       return reply(
         {
           data: {
             active: true,
             identity: {
-              ...subject,
-              ...(options.wrongScope ? { scopes: ["*"] } : {}),
-              ...(options.wrongRealm ? { realm: "system" } : {}),
+              realm: isDriver ? (options.wrongRealm ? "system" : "driver") : (options.wrongRealm ? "system" : "ops"),
+              actorType: isDriver ? "driver_user" : "ops_observer",
+              actorId: isDriver ? "drv-demo-002" : "live-map-observer",
+              scopes: options.wrongScope ? ["*"] : (isDriver ? ["driver:read"] : ["regulatory:read"]),
             },
           },
         },
@@ -109,6 +135,7 @@ function harness(
   return {
     fetch,
     readInternalKey,
+    readGoogleIdToken,
     mask,
     exportSession,
     save: (name: string, value: unknown) => {
@@ -123,10 +150,12 @@ it.each([true, false])(
   async (snake) => {
     const deps = harness({ snake });
     await bootstrapMapSessions(env, deps);
-    expect(deps.fetch).toHaveBeenCalledTimes(5);
+    expect(deps.fetch).toHaveBeenCalledTimes(7);
     expect(deps.exportSession.mock.calls).toEqual([
-      ["DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", "driver-test-secret"],
       ["DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", "ops-test-secret"],
+      ["DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", "driver-test-secret"],
+      ["DRTS_LIVE_MAP_DRIVER_DEVICE_ID", expect.any(String)],
+      ["DRTS_LIVE_MAP_INVITE_CODE", "test-reg-code"],
     ]);
     expect(deps.evidence.sessions).toMatchObject({
       status: "passed",
@@ -190,8 +219,8 @@ it.each([
 
 it("does not expose raw provider errors containing credentials", async () => {
   const deps = harness();
-  deps.readInternalKey.mockImplementation(() => {
-    throw new Error("internal-test-secret");
+  deps.readGoogleIdToken.mockImplementation(() => {
+    throw new Error("google-id-token-secret");
   });
   await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
     "Map session bootstrap failed at internal-key; no credential details retained",
