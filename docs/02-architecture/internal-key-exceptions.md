@@ -918,3 +918,292 @@ made for it here.
   should not enable `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` for the live
   map's acceptance environment until this is resolved, or should otherwise
   sequence the two rollouts so this caller is not broken in between.
+
+## 8. `SR-MAIL-SCHEDULER-PROVISION-20261001`: scheduler service account (Entry C)
+
+`SR-MAIL-RETRY-SCHEDULE-20261001` (PR #2261, merged to `dev`) added two
+`system`-realm-only HTTP routes so an external scheduler can trigger the
+retryable mail outbox drain and the approval-timeout reminder sweep while
+`apps/api`'s Cloud Run service is scaled to zero
+(`apps/api/src/modules/tenant-partner/tenant-partner.controller.ts:239,281`,
+policy in `apps/api/src/common/auth/auth.policy.ts:936-958`):
+
+| Route | Required scope | Allowed realm |
+| --- | --- | --- |
+| `POST internal/scheduled-tasks/mail-outbox/drain` | `notification-delivery:drain` | `system` only |
+| `POST internal/scheduled-tasks/approval-timeout-reminders/run` | `tenant-partner:approval-timeout-reminders:run` | `system` only |
+
+Cloud Scheduler presents its OIDC identity token as a plain
+`Authorization: Bearer <token>` header (it cannot be redirected to the
+custom `x-drts-google-id-token` header `GoogleWorkloadIdentityAdapter` was
+originally built for). `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback`
+(`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-696`) already
+re-offers that bearer token to the same adapter, but only for a route whose
+resolved policy's `allowedRealms` is exactly `["system"]` — both routes
+above qualify, and no user-facing tenant/ops/platform/driver/partner route
+does, so this fallback cannot be used to reach anything else. Every other
+verification step (signature, issuer, audience, registered principal, route
+scope, one-time replay) is unchanged and still fail-closed. This call site
+does not pass `enforceReplayProtection: false`, so the default `true`
+applies, same as every other `verifyServicePrincipal` call site except the
+general-proxy one §7.9 fixed (`InternalKeyMiddleware`'s, which must tolerate
+a cached, repeated token). That default is correct here: Cloud Scheduler
+mints a fresh OIDC token for every invocation, so there is no legitimate
+case of the identical assertion arriving twice, unlike the cached-token
+proxy scenario §7.9 fixed.
+
+### 8.1 Registry entry C
+
+A third `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` entry, for a new
+dedicated service account `drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+(not yet created; `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` §8.2
+creates it). `routeScopes` lists exactly the two routes above and nothing
+else — including `* *` or a prefix pattern would let a compromised or
+misconfigured scheduler credential reach every other internal route this
+fallback guards against; `scopes` lists exactly the two scopes those routes
+require, nothing broader. Re-verified against this sandbox's read-only
+`gcloud` credentials on 2026-10-01: `gcloud iam service-accounts list
+--project=drts-dev-devcc-20260825` still returns only the three service
+accounts listed in §7.9.1 (no `drts-dev-scheduler` yet); `gcloud services
+list --project=drts-dev-devcc-20260825 --filter="name:cloudscheduler.googleapis.com"`
+returns no rows, confirming the API is still disabled; `gcloud run services
+describe drts-dev-api ... --format='value(status.url)'` still returns
+`https://drts-dev-api-r6ykdme3wa-uc.a.run.app`, matching Entries A/B's
+audience unchanged; `gcloud secrets list --project=drts-dev-devcc-20260825
+--filter="name:workload-identity-google"` returns no rows, confirming the
+registry secret is still unpopulated (this task does not populate it either
+— see the runbook).
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-scheduler",
+  "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+  "routeScopes": [
+    "POST internal/scheduled-tasks/mail-outbox/drain",
+    "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+  ],
+  "scopes": [
+    "notification-delivery:drain",
+    "tenant-partner:approval-timeout-reminders:run"
+  ]
+}
+```
+
+`routeScopes`' "`METHOD path`" format and matching rules are
+`matchesScope`'s (`apps/api/src/common/auth/internal-key-exception-registry.ts:159-203`),
+the same matcher `INTERNAL_KEY_EXCEPTION_REGISTRY.scope` and Entries A/B's
+`routeScopes` already use — not a new DSL invented for this entry.
+`tests/unit/sr-mail-scheduler-provision-20261001.test.ts` locks this: both
+declared routes verify successfully through the real
+`GoogleWorkloadIdentityAdapter.verifyServicePrincipal` with a freshly
+signed, otherwise-valid Entry-C token, and every other probed route (wrong
+method on an in-scope path, `POST auth/token`, a generic tenant route, a
+"drain" path with a trailing-slash variant) is rejected with
+`WORKLOAD_ROUTE_SCOPE_DENIED`.
+
+No `ciTenantActorGrants` are declared: that field only gates
+`POST auth/token`'s CI-tenant-actor-impersonation branch
+(`auth.controller.ts`, `isCiTenantActorGateEnabled()`), which this
+principal's `routeScopes` does not even grant access to — a Google
+assertion from this service account presented at `POST /api/auth/token`
+is rejected by the route-scope check before `ciTenantActorGrants` is ever
+consulted.
+
+### 8.2 Full three-entry pasteable registry JSON
+
+Entries A and B below are copied verbatim from §7.9.1 (unchanged by this
+task); Entry C is new. This is the complete value for ops to paste as the
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret once
+`infra/gcp/dev/scheduler/provision-dev-scheduler.sh` has created the
+service account (the secret write itself is a separate operator step this
+task does not perform — see the runbook, `docs/03-runbooks/dev-scheduled-tasks-20261001.md`):
+
+```json
+[
+  {
+    "serviceAccountEmail": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-web-runtime",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["* *"]
+  },
+  {
+    "serviceAccountEmail": "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-ci-deployer",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["POST auth/token"],
+    "ciTenantActorGrants": [
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000901"
+      },
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000902"
+      }
+    ]
+  },
+  {
+    "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-scheduler",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": [
+      "POST internal/scheduled-tasks/mail-outbox/drain",
+      "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+    ],
+    "scopes": [
+      "notification-delivery:drain",
+      "tenant-partner:approval-timeout-reminders:run"
+    ]
+  }
+]
+```
+
+`loadRegistry()`'s lookup is first-match-only on `serviceAccountEmail`/
+`principalId` (§7.6), and all three entries above use distinct service
+accounts, so ordering within the array does not matter.
+
+### 8.3 Schedule-frequency rationale (for `provision-dev-scheduler.sh`)
+
+- **`mail-outbox/drain`, every 1 minute (`* * * * *`)**: every caller of
+  `NotificationDeliveryService.enqueue` in this repo (`audit-notification.email-adapter.ts:120-134`,
+  `regulatory-registry.service.ts:4171-4183`) immediately calls `.dispatch()`
+  in the same request, so `drain()` is a safety net for retries and for any
+  delivery that was enqueued but never got its first dispatch (e.g. a crash
+  between the two calls), not the primary send path. Its own retry backoff
+  (`apps/api/src/modules/notification-delivery/notification-delivery.service.ts:33-34,216-219`,
+  default `retryDelayMs=1000`, `maxAttempts=5`) produces delays of 1s, 2s,
+  4s, 8s between attempts — all under Cloud Scheduler's 1-minute minimum
+  granularity, so a 1-minute cadence is as tight as it is useful: a shorter
+  interval would not make any already-due retry fire sooner, it would only
+  add Cloud Run wake-ups between runs where nothing is due yet.
+- **`approval-timeout-reminders/run`, every 5 minutes (`*/5 * * * *`)**:
+  the sweep's own lead time is `APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS = 12h`
+  (`apps/api/src/modules/tenant-partner/tenant-partner.service.ts:479`); the
+  retired in-process poll ran every 60s
+  (`APPROVAL_NOTIFICATION_POLL_INTERVAL_MS`, same file, line 478) purely
+  because an in-memory interval is free to run that often, not because the
+  reminder is time-critical at that granularity. A 5-minute cadence bounds
+  any reminder to at most 5 minutes after it first became due against a
+  12-hour lead — negligible — while triggering the Cloud Run service a
+  fifth as often. The sweep is idempotent either way
+  (`hasApprovalNotificationDispatch` plus the outbox's idempotency key,
+  documented at `tenant-partner.controller.ts:276-285`), so a tighter or
+  looser cadence is a cost/latency trade, not a correctness one.
+
+### 8.4 Reopen fix (2026-10-01, R1): minimum privilege, unusable verification contract, and a test that didn't lock the delivered JSON
+
+Reviewer (`Codex`) reopened candidate `21da35f61efe0354a1aaa856c60affb28339e201`
+(generation `6e38e6c749fe45f996e09b685946de23`, PR #2263) with three P2
+findings. Fixed in this candidate, per `AI_COLLABORATION_GUIDE.md` §0.7:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F1: not minimum privilege — `roles/iam.serviceAccountTokenCreator` also grants unused `getAccessToken`/`signBlob`/`signJwt`/`implicitDelegation` | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` IAM-binding step: role changed to `roles/iam.serviceAccountOpenIdTokenCreator`, the SA-scoped role that grants exactly `iam.serviceAccounts.getOpenIdToken` and nothing else (https://docs.cloud.google.com/iam/docs/service-account-permissions#service_account_roles). `docs/03-runbooks/dev-scheduled-tasks-20261001.md` step 3 and `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`'s script-content test updated to match; binding stays scoped to the one service account, not a project role. | Old: `--role="roles/iam.serviceAccountTokenCreator"` (4 unused permissions beyond what an OIDC-only job needs). New: `--role="roles/iam.serviceAccountOpenIdTokenCreator"` (1 permission, `getOpenIdToken`, the only one these jobs use). | `bash -n infra/gcp/dev/scheduler/provision-dev-scheduler.sh` exit 0; `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts` exit 0, 21/21 passed, including the new "grants only the OIDC-token-minting role, not the broader token-creator role" assertion. | Role grant not actually applied against a live project — this task does not run the script (guardrail); the role name and its permission set are taken from the official IAM reference the reviewer cited, not re-derived from a live `gcloud iam roles describe`. |
+| F2: operator verification contract was unusable — wrong `Job` field nesting, `jsonPayload` filter on a plain-text logger, and troubleshooting that assumed error codes the guard never surfaces | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` handoff text and `docs/03-runbooks/dev-scheduled-tasks-20261001.md` §4 rewritten: `--format=value(...)` now reads `lastAttemptTime,state,status.code` (top-level `Job` fields plus `google.rpc.Status.code`, not nested `status.lastAttemptTime`/`status.state`, which print nothing); the `gcloud logging read` filter and output format use `textPayload`, not `jsonPayload.message` (`apps/api/src/main.ts` uses Nest's default logger, and `google-workload-identity.adapter.ts:374-375`'s `this.logger.log(...)` emits a plain string, so Cloud Run stores it as `textPayload`); troubleshooting now explains that `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback` (`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-698`) catches every adapter rejection and falls through to a generic `JWT_INVALID`, so `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`/`WORKLOAD_PRINCIPAL_NOT_REGISTERED`/`WORKLOAD_AUDIENCE_MISMATCH` never appear in the HTTP response or logs — only `WORKLOAD_ROUTE_SCOPE_DENIED` is log-visible, because the adapter logs it via `this.logger.warn` before throwing. | Old: `--format='value(status.lastAttemptTime,status.state)'` (prints nothing — wrong nesting) and a `jsonPayload.message=~...` log filter (matches nothing — wrong payload type) presented as sufficient proof of success; troubleshooting listed three error codes as if they would appear in the logs. New: correct field names, `textPayload` filter scoped to the specific route per job, and troubleshooting that only promises a distinguishable log line for route-scope denial, with the other three causes diagnosed by re-reading the live secret/deployed revision instead. | `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts` exit 0, including the new "documents the job-describe verification with the real top-level Job fields" (script) and "uses the real top-level Job fields and textPayload, not status.* or jsonPayload" / "documents that BootstrapAuthGuard swallows adapter errors to JWT_INVALID" (runbook) assertions. | Verification is offline/static (string assertions on the script/runbook text and a read of the real adapter/guard source) — no live Cloud Scheduler job was run and no live Cloud Run log query was issued; this task's guardrails forbid both. |
+| F3: delivered registry JSON was not locked by the tests — adapter tests used hand-built constants, and the doc-content tests slice-matched prose instead of parsing the fenced JSON | `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: added `parseJsonFences()`, scoped to ```` ```json ```` fences only (so it cannot match the narrative prose above §8.1, which is where the old 600-char slice from `doc.indexOf(SCHEDULER_SA_EMAIL)` actually landed). The real-adapter `setUp()` now signs its test token against and feeds `process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` from the §8.2 array's parsed entry C, not a local literal — so the existing positive/negative adapter tests are now driven by the delivered content. A new describe block asserts the §8.1 standalone entry and the §8.2 array's entry C parse and deep-equal each other, and that the entry has exactly the two documented routes/scopes, the verified audience, and no `ciTenantActorGrants`/extra key. | Old: `setUp()` built `{ routeScopes: ENTRY_C_ROUTE_SCOPES, scopes: ENTRY_C_SCOPES, ... }` from local constants regardless of doc content; doc-content assertions used `doc.slice(doc.indexOf(SCHEDULER_SA_EMAIL), +600)`, which the reviewer showed lands in prose (`internal-key-exceptions.md:958`), not either JSON entry, so mutating §8.2's `routeScopes` to `["* *"]` left every assertion green. New: adapter tests and content assertions both read the same parsed §8.2 object; the reviewer's exact wildcard mutation was reproduced locally (sandbox-only, reverted before commit) and now fails 4 assertions — the §8.1/§8.2 agreement check, the exact-routeScopes check, and the two real-adapter denial tests that would otherwise wrongly accept `/api/auth/token` and `/api/tenant/passengers` under a `"* *"` grant. | `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts` exit 0, 21/21 passed against the real (unmutated) doc. Reproduction of the reviewer's exact mutation (`routeScopes` → `["* *"]` in the §8.2 array only) run locally and reverted: 4/21 failed as described above, confirming the new tests are not independent of the delivered content; `git status`/`git diff` confirmed clean after revert (the mutation was never committed). | The malformed-JSON case (a syntax error in a fence) is exercised by code path only (the `try`/`catch` in `parseJsonFences` plus the downstream "not found" `toBeDefined()` failure) — not separately reproduced locally, since reproducing it means editing the same file as the real content and the wildcard case already demonstrates the lock works. |
+
+Acceptance evidence on this candidate otherwise unchanged from §8.1–§8.3 (entry
+C's content, the three-entry array, and the schedule rationale were not
+findings in this reopen and were not touched beyond the F1 role-name edit).
+No runtime/cloud changes were made or are authorized by this fix — same
+guardrail as the original candidate.
+
+### 8.5 Reopen fix (2026-10-01, R2): CI typecheck regression in the test's own fence parser (F4)
+
+Reviewer (`Codex`) reopened candidate `fc988cd4f5991a4201e0b31daf1b78c2db71249c`
+(generation `b8922c9dc3a14921b4ca9b3904a4ee3e`, PR #2263) with one P1 finding:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F4: candidate did not typecheck — `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`'s `parseJsonFences()` passed a possibly-`undefined` regex capture group straight into `JSON.parse`, which `noUncheckedIndexedAccess` (this repo's `tsconfig.base.json`) rejects | `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`'s `parseJsonFences()`: added an explicit `if (body === undefined) continue;` guard before `JSON.parse(body)`, narrowing `match[1]` from `string \| undefined` to `string` before use. No other lines changed. | Old: `const body = match[1]; try { parsed.push(JSON.parse(body)); } ...` — `body` typed `string \| undefined`, `JSON.parse` requires `string`, `tsc` reports `TS2345`. New: `undefined` is excluded by the guard before the `try`, so the same call now type-checks. | Reviewer's independent TypeScript compiler API probe (Node v22.23.2, TS 5.9.3, `strict`/`noUncheckedIndexedAccess`/`noEmit` all `true`) on the unchanged function text: old candidate → exactly `TS2345`; new candidate → zero diagnostics, probe exit 0. Hosted CI on the old candidate: `Product smoke` Typecheck job `110457825263` failed with the identical `TS2345` (run https://github.com/ajoe734/drts-fleet-platform/actions/runs/36888440094); integration-trunk Typecheck job `110458553179` failed identically on the same SHA. `pnpm exec vitest run` on the fixed candidate: 6 files, 69/69 passed (unchanged test behavior, only the type-level guard added). | Same-SHA hosted full typecheck for the fixed candidate (`a41645274edfe5225d176ecf52968cebaf4b47fe`) was still in progress when R3 read it (next section) — not claimed green by this fix alone, only the isolated parser-compile regression is claimed resolved. |
+
+No other content changed in this candidate; F1/F3 from §8.4 remain as fixed
+there, and F2 (below) was carried forward unresolved into R3.
+
+### 8.6 Reopen fix (2026-10-01, R3): operator verification proved only that an attempt *started*, not that it *completed* (F2)
+
+Reviewer (`Codex`) reopened candidate `a41645274edfe5225d176ecf52968cebaf4b47fe`
+(generation `876dc662a7c54a74af86b3b642aa95c5`, PR #2263) a third time. F1/F3/F4
+were confirmed fixed (§8.4, §8.5); one P2 finding, carried over unresolved
+from R2, remained:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F2 (unresolved from R1/R2): `jobs run` only dispatches a job and returns before the target responds; `Job.lastAttemptTime` is bumped the instant an attempt *starts*. The runbook and script both treated a fresh `lastAttemptTime` + `state=ENABLED` + `status.code` absent/`0`, read immediately after `jobs run`, as proof the request had *completed* successfully — indistinguishable from "still in flight." The diagnostic branch also told operators the success-only `textPayload` query could find a route-scope-denial log line it was never built to match. | New `infra/gcp/dev/scheduler/confirm-job-attempt.sh` (executable, mode 755): fires the job, records invocation time `T0` (`confirm-job-attempt.sh:50`), then polls (bounded by a timeout, default 90s) for actual completion evidence bound to `timestamp>="${T0}"` — either Cloud Scheduler's own `AttemptFinished` log entry for the exact `job_id` (`confirm-job-attempt.sh:59-76`, matching Google's troubleshooting guidance to pair `AttemptStarted` with a later `AttemptFinished`) or a corroborating Cloud Run HTTP request-log entry for the route (`confirm-job-attempt.sh:84-99`), distinguishing confirmed-success (exit 0) from confirmed-failure (exit 1, prints the actual status/HTTP code) from unconfirmed/timeout (exit 2, explicitly logged as "This does NOT mean the attempt failed"). `docs/03-runbooks/dev-scheduled-tasks-20261001.md` step 4 rewritten to lead with this script instead of the raw `jobs run`/`jobs describe` pair (kept only as a labeled "attempt started, not completion" explanation), and `provision-dev-scheduler.sh`'s handoff text updated to match. The diagnostic `textPayload` query changed from an `AUTH_GOOGLE_WORKLOAD_IDENTITY_USED`-only literal to `AUTH_GOOGLE_WORKLOAD_IDENTITY_(USED\|ROUTE_SCOPE_DENIED)\].*principalId=dev-scheduler.*route=...`, which matches either of the adapter's two actual log templates (`google-workload-identity.adapter.ts:287` denial, `:375` success — line numbers as read by this fix; see note below), so a logged denial is now discoverable by the one documented query instead of silently falling into the "nothing matched" branch. | Old: `gcloud scheduler jobs run ...; gcloud scheduler jobs describe ... --format='value(lastAttemptTime,state,status.code)'` presented as sufficient proof of success; `textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_USED..."` presented as able to surface a route-scope-denial line it cannot match. New: `infra/gcp/dev/scheduler/confirm-job-attempt.sh <job> <route>` — exit code and printed evidence are the completion proof; combined regex matches both log templates. | Offline, no live Scheduler/Cloud Run calls (forbidden by this task's guardrails): `tests/unit/sr-mail-scheduler-provision-20261001.test.ts` spawns the real `confirm-job-attempt.sh` against a synthetic `gcloud` on `PATH` (`tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs`) that answers only from an in-memory fixture, filtered the same way the real `gcloud logging read` filter text would filter it (job_id/route match, `timestamp>=` the script's own invocation time). New describe block "confirm-job-attempt.sh's completion check is bounded, not just lastAttemptTime/state" (7 cases): no evidence at all → exit 2; a record that predates invocation (stale) → exit 2; a fresh record for a different job (wrong-job) → exit 2; a fresh matching Scheduler success record → exit 0; a fresh matching Scheduler failure record → exit 1 with the status code in the output; a fresh matching Cloud Run 2xx record (no Scheduler record) → exit 0; a fresh matching Cloud Run non-2xx record → exit 1. New describe block "documented diagnostic query finds both success and denial log lines" extracts the actual `textPayload=~"..."` pattern from the runbook text (not a hand-reproduced copy) and confirms it matches literal strings built from the real adapter's two log templates, and does not match an unrelated principal/route. `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: 31/31 passed; full regression set (same 6 files as prior rounds): 79/79 passed. `bash -n` on both scripts: exit 0. `pnpm exec eslint` on the changed test file and the new fixture module: exit 0. `python3 operations/security/verify-internal-key-exceptions.py`: PASSED. `pnpm typecheck:root`: fails only on the same pre-existing, unrelated-package errors already called out in §8.4/prior rounds (missing `@drts/ui-tokens`/`@drts/api-client` build output, a few `noImplicitAny` spots in unrelated apps, and an unrelated `tests/unit/system-remediation/sr-qa-ux-001` file) — zero errors in any file this fix touched. `git diff --check`: exit 0. | No live Cloud Scheduler job was run and no live Cloud Logging query was issued — this task's guardrails forbid both, so `confirm-job-attempt.sh`'s real `gcloud` invocations are verified only via `bash -n` and the fake-`gcloud` harness above, not against the live API's actual `AttemptFinished` log shape. The exact `google.cloud.scheduler.logging.AttemptFinished` JSON shape is taken from Google's published troubleshooting documentation (https://docs.cloud.google.com/scheduler/docs/troubleshooting) and the `Job`/`status` field contract (https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs), not re-derived from a live log export. Cloud Run's `httpRequest.status` request-log field is standard Cloud Run platform logging and was not independently re-verified against a live `drts-dev-api` log export in this fix. |
+
+No source changes were made beyond the files listed above (the new
+`confirm-job-attempt.sh`, the new test fixture, the runbook, the
+provisioning script's handoff text, and the test file). No GCP resources
+were created, no secrets or GitHub variables were touched, no deploy was
+triggered, and no local server or Docker container was started — same
+guardrails as every prior round on this task.
+
+### 8.7 Reopen fix (2026-10-01, R4): the completion check itself could be fooled into reporting false success, and a handoff heredoc executed a stray command (F2 part A, F2 part B, F5)
+
+Reviewer (`Codex`) reopened candidate `975f9de91a5041afaa651c6f7b41e4ba96762c3a`
+(generation `a5f82cf246b14941b9869020c7df4c74`, PR #2263) a fourth time. F1/
+F3/F4 remained fixed (§8.4, §8.5); the §8.6 `confirm-job-attempt.sh` repair
+closed the *started-vs-completed* gap but introduced two new false-success
+paths in the completion check itself, plus a new handoff-text regression:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F2 part A: the real `AttemptFinished` log's `jsonPayload.status` field is a scalar `google.rpc.Code` NAME STRING (e.g. `"OK"`, `"NOT_FOUND"`), not the nested `{code, message}` `google.rpc.Status` object the unrelated `Job.status` REST field uses. Selecting `jsonPayload.status.code` against a scalar field prints an empty second column for *every* outcome — success, every failure code, and a malformed record alike — and the script treated "empty" as success, so a failed or unauthenticated attempt (`NOT_FOUND`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, …) was certified `CONFIRMED COMPLETED (success...)`. | `infra/gcp/dev/scheduler/confirm-job-attempt.sh`: `--format=value(...)` now selects `jsonPayload.status` directly (`confirm-job-attempt.sh:91-98`); a `case` statement (`:102-117`) classifies it — exactly `OK` → success (exit 0); a recognized non-`OK` `google.rpc.Code` name → confirmed failure (exit 1, prints the value); anything else (empty, or an unrecognized string) → logged as a warning and treated as unconfirmed (the loop keeps polling rather than guessing). Header comment rewritten to document the real scalar shape and cite the evidence. `tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs` renamed its synthetic field from `statusCode` to `status` to match the real selector, so the fixture now exercises the actual projection instead of bypassing it. | Old: `--format=value(timestamp,jsonPayload.status.code)`; `status_code=""` or `"0"` → `exit 0` (success). New: `--format=value(timestamp,jsonPayload.status)`; `status="OK"` → `exit 0`; `status` one of the 16 other `google.rpc.Code` names → `exit 1`; empty/unrecognized → unconfirmed, never success. | Independent reproduction using the installed Google Cloud SDK's own `googlecloudsdk.core.resource.resource_printer` (not a hand-written stub) against a literal `{"status": "NOT_FOUND"}` `jsonPayload`: the OLD selector `value(timestamp,jsonPayload.status.code)` produced `'2099-01-01T00:00:00Z\t\n'` (empty second column — the false-success input); the NEW selector `value(timestamp,jsonPayload.status)` produced `'2099-01-01T00:00:00Z\tNOT_FOUND\n'`. `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: new cases cover `status=OK` (exit 0), `status=NOT_FOUND`/`PERMISSION_DENIED`/`UNAUTHENTICATED` (exit 1, each asserting the specific `status=...` string in the output), an absent `status` field (exit 2, not success), and an unrecognized future value `SOME_FUTURE_UNDOCUMENTED_VALUE` (exit 2, not success) — 37/37 passed in this file, 85/85 in the full regression set below. | Google has not published a complete enumeration of every value `AttemptFinished.jsonPayload.status` can take; this fix classifies the 17 standard `google.rpc.Code` names (cited from the general gRPC/Google API status-code set, since the Scheduler-specific troubleshooting page does not itself enumerate them) and treats anything else as unconfirmed by design, so an outcome using a name outside that set will report exit 2 rather than a wrong exit 0/1 — a conservative, not a precise, classification. No live Scheduler job was run; the real selector was verified via the installed SDK's own formatter, not a live log export. |
+| F2 part B: the Cloud Run HTTP-log fallback had no `requestMethod` filter and no way to correlate a given Cloud Run request to this specific Scheduler attempt. `apps/api/src/main.ts` enables CORS, so an unrelated `OPTIONS` preflight to the same route (or any other unrelated caller) could return 2xx and be accepted as proof this attempt succeeded, independent of what the actual scheduler-triggered `POST` did. | `infra/gcp/dev/scheduler/confirm-job-attempt.sh`: the Cloud Run lookup (`:124-137`) now adds `httpRequest.requestMethod="POST"` to the filter and is demoted to a **non-decisive diagnostic** — it is printed (once, to stderr, tagged `DIAGNOSTIC`) if found, but never produces an `exit 0`/`exit 1` on its own; only a matching Scheduler `AttemptFinished` record decides the exit code. The Scheduler query also gained `resource.labels.location="${REGION}"` (`:94`) so a same-`job_id` record from the wrong region can't match either. `docs/03-runbooks/dev-scheduled-tasks-20261001.md` §4 and `provision-dev-scheduler.sh`'s handoff text rewritten to describe the Cloud Run log as diagnostic-only, not corroborating proof. | Old: a matching Cloud Run 2xx record alone → `exit 0` ("CONFIRMED COMPLETED (success, Cloud Run HTTP 200)"), no method filter, no region filter on the Scheduler query. New: a matching Cloud Run 2xx record alone → `exit 2` (unconfirmed, with a `DIAGNOSTIC` line noting it was seen but not decisive); a non-`POST` Cloud Run record (e.g. an `OPTIONS` preflight) is excluded from even the diagnostic path; a same-`job_id` Scheduler record from a different `location` is excluded. | `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: new cases — Cloud Run 2xx alone → exit 2, output contains `DIAGNOSTIC` and `Cloud Run`, not `CONFIRMED COMPLETED` (regression test, named after the false-positive it closes); an `OPTIONS`/204 Cloud Run record → exit 2, output does *not* contain `DIAGNOSTIC` (excluded by the method filter before it can even become a diagnostic); a same-job record from `location=europe-west1` → exit 2 (wrong-region evidence); a scenario with both a decisive Scheduler `OK` record and a failing Cloud Run record present → exit 0 (Scheduler evidence is checked first and decides, the loop never reaches the Cloud Run query that pass). `tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs` extended to parse `resource.labels.location=` and `httpRequest.requestMethod=` out of the filter text and apply them, mirroring the real `gcloud logging read` filter the script now sends (not a hand-picked subset). 37/37 passed in this file, 85/85 full regression. | Cloud Logging's structured `httpRequest` fields do not expose a field that would let this script correlate a Cloud Run request to a specific Scheduler attempt even with the tightened filter (method + route + time window is the closest available signal without app-side changes, which are out of this task's scope); this is why the fix demotes Cloud Run to diagnostic rather than trying to fully close the correlation gap. No live Cloud Run/Scheduler logs were queried. |
+| F5 (new, introduced by this candidate's own prior round): `provision-dev-scheduler.sh`'s unquoted `cat <<EOF` handoff heredoc (`:143`) contained literal Markdown backticks around `` `gcloud scheduler jobs run` `` (`:152`). Bash evaluates backtick-delimited text as command substitution inside an unquoted heredoc, so printing the handoff text actually *executed* `gcloud scheduler jobs run` with no job argument and silently dropped the phrase from the rendered output. | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh:152`: the two backticks are now backslash-escaped (`` \`gcloud scheduler jobs run\` ``), which Bash renders as literal backtick characters in heredoc output without triggering command substitution, while the heredoc stays unquoted so `${MAIL_OUTBOX_JOB}`/`${APPROVAL_REMINDER_JOB}`/`${SCHEDULER_SA}` interpolation in the same block (needed for the job-name arguments on the following lines) is preserved. | Old: `` `gcloud scheduler jobs run` `` inside unquoted `<<EOF` → Bash executes it as a command substitution when the heredoc is printed. New: `` \`gcloud scheduler jobs run\` `` → prints the literal backtick-quoted phrase, no command executed. | Independent reproduction: extracted *only* the handoff heredoc text (lines 143-171, unmodified from the file) into a standalone `bash -c` script with `gcloud` replaced by an exported shell function that records every invocation and exits 99 (`UNEXPECTED_GCLOUD_INVOCATION: $*`). Old candidate text: stderr `UNEXPECTED_GCLOUD_INVOCATION: scheduler jobs run`, rendered text missing the phrase, script exit 0 (the substitution's own exit code was swallowed by heredoc evaluation, masking the problem). New (fixed) text: no `gcloud` invocation, rendered output contains the literal `` `gcloud scheduler jobs run` `` phrase verbatim, exit 0. `bash -n infra/gcp/dev/scheduler/provision-dev-scheduler.sh`: exit 0 (syntax check alone does not catch command substitution in prose — this is exactly why the independent heredoc-only reproduction above was necessary). The provisioning script itself was not executed, even under mocks. | This reproduction extracted the heredoc in isolation rather than running the full script end-to-end under a complete `gcloud` mock (the script's guardrails forbid executing it, including under mocks, since earlier steps make real-shaped `gcloud` calls this task is not authorized to simulate as if-real); the isolated extraction is a faithful copy of the unmodified lines, not a paraphrase. |
+
+Acceptance evidence on routeScopes (F3, §8.4), the three-entry registry JSON
+(§8.2), the schedule rationale (§8.3), and the minimum-privilege IAM role
+(F1, §8.4) is unchanged from prior rounds — none were findings in this
+reopen and none were touched by this fix.
+
+All checks started locally for this round were completed and read before
+this candidate was handed off: `pnpm exec vitest run` on the six-file
+regression set (same files as §8.6) — 6 files, 85/85 passed (37/37 in
+`sr-mail-scheduler-provision-20261001.test.ts`, up from 31, reflecting the
+12 new cases above); `bash -n` on both scheduler scripts — exit 0;
+`python3 operations/security/verify-internal-key-exceptions.py` — PASSED;
+`pnpm exec eslint` on the changed test file and the fixture module — exit 0;
+`git diff --check` against the merge-base — exit 0. No source changes were
+made beyond `confirm-job-attempt.sh`, `provision-dev-scheduler.sh`'s handoff
+text, the test fixture, the test file, this document, and the runbook. No
+GCP resources were created, no secrets or GitHub variables were touched, no
+deploy was triggered, the provisioning script was not executed, and no
+local server or Docker container was started — same guardrails as every
+prior round on this task.
+
+### 8.8 Reopen fix (2026-10-01, R5): the completion check's success path still had a format-shape gap (F2 again)
+
+Reviewer (`Codex`) reopened candidate `8bc7ec1667eac94aea7143948867d0003553959f`
+(generation `5995d7635b8448e7a9f886d3e8d93d12`, PR #2263) a fifth time. F1/F3/
+F4/F5 remained fixed (§8.4, §8.5, §8.7); F2 part A/part B from §8.7 (scalar
+failure classification, Cloud Run demoted to diagnostic-only) were confirmed
+still fixed, but the reviewer identified that the scalar-only success check
+left a *different* false-negative gap, distinguished explicitly from the
+false-positive gaps §8.7 closed:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F2 (success-path gap, new in R5): a successful Cloud Scheduler HTTP-target invocation can produce an `AttemptFinished` log record that omits the scalar `jsonPayload.status` field entirely while carrying `httpRequest.status=200` (or another 2xx) on that *same* record — this is decisive completion evidence from Scheduler itself, not the unrelated, never-decisive `cloud_run_revision` diagnostic §8.7 demoted. The §8.7 selector (`value(timestamp,jsonPayload.status)`) never read this field, so a genuinely successful attempt in this response shape always fell through to the empty/unrecognized branch and reported exit 2 (UNCONFIRMED) no matter how long the operator waited or how many times they re-ran the check. | `infra/gcp/dev/scheduler/confirm-job-attempt.sh`: `--format=value(...)` now also selects `httpRequest.status` (`:91-98`), and the `case` statement's default branch (`:114-122`, reached only when the scalar `status` is empty/unrecognized) checks that third column with `[[ "$http_status_value" =~ ^2[0-9][0-9]$ ]]` — a match prints `CONFIRMED COMPLETED (success, ... httpRequest.status=...)` and exits 0; otherwise the prior "not decisive, continue polling" warning is unchanged. A recognized scalar `status` (`OK` or a failure code) is still checked *first* and always decides the outcome regardless of `httpRequest.status`, so a record that improbably carries both a recognized failure code and a 2xx HTTP status still reports the failure (fail-closed on conflicting evidence — this fix adds one new *success* signal, it does not add a new failure-classification path from `httpRequest.status` alone: a non-2xx or absent `httpRequest.status` paired with an empty/unrecognized scalar still falls through to UNCONFIRMED exactly as in §8.7). Header comment (new "Why R5 changed the success path again" block) and the exit-code summary comment updated to match. `docs/03-runbooks/dev-scheduled-tasks-20261001.md`'s exit-code explanation (the paragraph after the `confirm-job-attempt.sh` invocation example) rewritten to describe this third outcome path and its priority ordering. `tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs` no longer hard-codes its output columns per record `type`; it now parses the actual `--format=value(...)` field list out of `args` and projects `timestamp`/`jsonPayload.status`/`httpRequest.status` generically from the matched record, so a future selector change in the real script that isn't mirrored in this fixture's field map produces a wrong column instead of being silently absorbed by type-based branching — closing the "Test blind spot" the reviewer identified (the old fixture emitted `timestamp`+`status` for every scheduler record regardless of what `--format` the script actually requested, so it could not have caught this exact gap). | Old: `--format=value(timestamp,jsonPayload.status)`; a record with `status` empty and `httpRequest.status=200` → exit 2 (false negative — this was a real success being reported as unconfirmed). New: same record → exit 0, output contains `httpRequest.status=200`. A record with `status=NOT_FOUND` and (hypothetically) `httpRequest.status=200` → still exit 1 (scalar wins). A record with `status` empty and `httpRequest.status=500` → still exit 2 (no new failure path added). | Source evidence, not a fabricated success assumption: a published first-hand operator log showing exactly this shape (`cloud_scheduler_job`, `AttemptFinished`, `httpRequest.status=200`, no `jsonPayload.status`) at https://stackoverflow.com/questions/70882319/google-cloud-scheduler-getting-returned-message-in-logs ; Cloud Scheduler's `HttpTarget` REST contract documenting 2xx as the acknowledged-success range at https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs#HttpTarget ; the general `LogEntry.HttpRequest.status` field at https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest . Independent offline reproduction using the installed Google Cloud SDK's own `googlecloudsdk.core.resource.resource_printer` against the unchanged §8.7 selector and a literal payload matching the published shape (status omitted, `httpRequest.status=200`) reproduced the old false-negative projection; the same reproduction harness, re-run conceptually against the new three-field selector in this fix, yields the needed third column. `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key-alerts.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts tests/unit/system-remediation/sr-mail-retry-schedule-20261001/sr-mail-retry-schedule-20261001.test.ts`: exit 0, 6 files, 88/88 passed (40/40 in this task's test file, up from 37 — 3 new cases: HTTP-only success with omitted scalar status now exit 0 and prints `httpRequest.status=200`; a non-2xx `httpRequest.status` alone stays exit 2/UNCONFIRMED, not a new failure; a conflicting record — recognized scalar failure plus a 2xx `httpRequest.status` — still exits 1 with `status=NOT_FOUND`, never claiming success). `bash -n` both scheduler scripts: exit 0. `pnpm exec eslint` on the changed test file and the rewritten fixture module: exit 0. | No live Cloud Scheduler job was run and no live Cloud Logging query was issued — this task's guardrails forbid both. The published Stack Overflow log is a third-party operator observation, not a live `drts-dev` capture, and Google has not published a complete enumeration of every `AttemptFinished` record shape; this fix therefore still does not invent a complete taxonomy — it adds exactly the one additional, narrowly-scoped success signal the reviewer identified and documented, leaving every other branch (including the fail-closed UNCONFIRMED default) unchanged from §8.7. |
+
+Acceptance evidence on routeScopes (F3, §8.4), the three-entry registry JSON
+(§8.2), the schedule rationale (§8.3), the minimum-privilege IAM role (F1,
+§8.4), and the §8.7 F2 part A/part B/F5 fixes is unchanged from prior
+rounds — none were findings in this reopen and none were touched by this
+fix beyond what the table above describes.
+
+All checks started locally for this round were completed and read before
+this candidate was handed off: `pnpm exec vitest run` on the six-file
+regression set (same files as §8.6/§8.7) — 6 files, 88/88 passed (40/40 in
+`sr-mail-scheduler-provision-20261001.test.ts`, up from 37, reflecting the
+3 new cases above); `bash -n` on both scheduler scripts — exit 0;
+`pnpm exec eslint` on the changed test file and the fixture module — exit 0.
+No source changes were made beyond `confirm-job-attempt.sh`, the test
+fixture, the test file, this document, and the runbook. No GCP resources
+were created, no secrets or GitHub variables were touched, no deploy was
+triggered, the provisioning script was not executed/modified, and no local
+server or Docker container was started — same guardrails as every prior
+round on this task.
