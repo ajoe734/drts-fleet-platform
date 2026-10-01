@@ -69,8 +69,10 @@ function parseJsonFences(doc: string): unknown[] {
   const parsed: unknown[] = [];
   let match: RegExpExecArray | null;
   while ((match = fenceRe.exec(doc)) !== null) {
+    const body = match[1];
+    if (body === undefined) continue;
     try {
-      parsed.push(JSON.parse(match[1]));
+      parsed.push(JSON.parse(body));
     } catch {
       // Malformed JSON in a fence is a real authoring defect; the lookups
       // below will report it as "entry C not found" rather than silently
