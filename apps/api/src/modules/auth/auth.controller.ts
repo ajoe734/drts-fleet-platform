@@ -70,6 +70,7 @@ import {
   GoogleWorkloadIdentityAdapter,
   isCiTenantActorGateEnabled,
   resolveCiTenantActorGrant,
+  isGoogleWorkloadIdentityNotConfigured,
 } from "./google-workload-identity.adapter";
 import { IdempotencyService } from "../../common/idempotency";
 
@@ -440,50 +441,63 @@ export class AuthController {
           {},
         );
       }
-      const resolvedGoogle =
-        await this.googleWorkloadIdentityAdapter?.verifyServicePrincipal(
+      
+      let resolvedGoogle = null;
+      try {
+        if (!this.googleWorkloadIdentityAdapter) {
+          throw new ApiRequestError(
+            503,
+            "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+            "Google workload identity validation is not configured for this environment.",
+          );
+        }
+        resolvedGoogle = await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
           request.headers as Record<string, string | string[] | undefined>,
           {
             requestPath: request.originalUrl ?? request.url,
             requestMethod: request.method,
           },
         );
-      if (!resolvedGoogle) {
-        throw new ApiRequestError(
-          503,
-          "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-          "Google workload identity validation is not configured for this environment.",
-        );
+      } catch (error) {
+        if (isGoogleWorkloadIdentityNotConfigured(error)) {
+          // If the WIF gate/registry is not configured but a token was sent, we ignore it and
+          // let it fall back to internal key (for dual-send transition safety).
+          resolvedGoogle = null;
+        } else {
+          throw error;
+        }
       }
 
-      if (
-        (bootstrapIdentity.actorId === resolvedGoogle.principalId ||
-         bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
-        resolvedGoogle.roles.includes(bootstrapIdentity.actorType)
-      ) {
-        // Direct authentication! The Google SA is asking for a token for ITSELF.
-        googleCiTenantActorVerified = true;
-        bootstrapIdentity.principalId = resolvedGoogle.principalId;
-      } else if (isCiTenantActorGateEnabled()) {
-        const grant = resolveCiTenantActorGrant(resolvedGoogle, {
-          tenantId: bootstrapIdentity.tenantId ?? "",
-          actorType: bootstrapIdentity.actorType,
-          actorId: bootstrapIdentity.actorId ?? "",
-        });
-        if (!grant) {
+      if (resolvedGoogle) {
+        if (
+          (bootstrapIdentity.actorId === resolvedGoogle.principalId ||
+           bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
+          resolvedGoogle.roles.includes(bootstrapIdentity.actorType)
+        ) {
+          // Direct authentication! The Google SA is asking for a token for ITSELF.
+          googleCiTenantActorVerified = true;
+          bootstrapIdentity.principalId = resolvedGoogle.principalId;
+        } else if (isCiTenantActorGateEnabled()) {
+          const grant = resolveCiTenantActorGrant(resolvedGoogle, {
+            tenantId: bootstrapIdentity.tenantId ?? "",
+            actorType: bootstrapIdentity.actorType,
+            actorId: bootstrapIdentity.actorId ?? "",
+          });
+          if (!grant) {
+            throw new ApiRequestError(
+              403,
+              "WORKLOAD_CI_TENANT_ACTOR_DENIED",
+              "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
+            );
+          }
+          googleCiTenantActorVerified = true;
+        } else {
           throw new ApiRequestError(
             403,
             "WORKLOAD_CI_TENANT_ACTOR_DENIED",
-            "Verified Google workload identity is not granted session issuance for the requested tenant actor.",
+            "Verified Google workload identity is not granted session issuance.",
           );
         }
-        googleCiTenantActorVerified = true;
-      } else {
-        throw new ApiRequestError(
-          403,
-          "WORKLOAD_CI_TENANT_ACTOR_DENIED",
-          "Verified Google workload identity is not granted session issuance.",
-        );
       }
     }
     if (!googleCiTenantActorVerified) {
