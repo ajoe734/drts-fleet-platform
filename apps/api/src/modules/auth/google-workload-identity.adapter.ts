@@ -1,6 +1,9 @@
 import { createHash, createPublicKey } from "node:crypto";
 
-import type { CanonicalIdentityPrincipalRecord } from "@drts/contracts";
+import type {
+  CanonicalIdentityPrincipalRecord,
+  CanonicalIdentityMembershipRecord,
+} from "@drts/contracts";
 import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
@@ -294,6 +297,42 @@ export class GoogleWorkloadIdentityAdapter {
     };
     await this.identityRepository.ensurePrincipalRecord(principalRecord);
 
+    const opsRoles = unique(principal.roles).filter(
+      (r) => r === "ops_user" || r === "ops_observer",
+    );
+    if (opsRoles.length > 0) {
+      const membershipRecord: CanonicalIdentityMembershipRecord = {
+        membershipId: `membership_${principal.principalId}_ops`,
+        sourceRef: `google_workload_identity:${principal.principalId}:membership:ops`,
+        principalId: principal.principalId,
+        realm: "ops",
+        scopeRef: "ops",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: authTime,
+        updatedAt: authTime,
+      };
+      await this.identityRepository.ensureMembershipRecord(membershipRecord);
+
+      for (const role of opsRoles) {
+        await this.identityRepository.ensureRoleBindingRecord({
+          roleBindingId: `role_binding_${principal.principalId}_ops_${role}`,
+          sourceRef: `google_workload_identity:${principal.principalId}:role_binding:${role}`,
+          membershipId: membershipRecord.membershipId,
+          roleCode: role,
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: authTime,
+          validTo: null,
+          createdAt: authTime,
+          updatedAt: authTime,
+        });
+      }
+    }
+
     this.logger.log(
       `[AUTH_GOOGLE_WORKLOAD_IDENTITY_USED] principalId=${principal.principalId} email=${email} route=${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
     );
@@ -448,7 +487,7 @@ export function resolveCiTenantActorGrant(
   if (!isCiTenantActorGateEnabled()) {
     return null;
   }
-  if (!requested.tenantId || !requested.actorType || !requested.actorId) {
+  if (requested.tenantId == null || !requested.actorType || !requested.actorId) {
     return null;
   }
   return (
