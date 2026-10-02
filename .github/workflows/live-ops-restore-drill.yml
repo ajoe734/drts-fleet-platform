@@ -1,0 +1,50 @@
+name: "Live Ops Restore Drill"
+on:
+  schedule:
+    - cron: '0 2 * * 0' # Every Sunday at 2 AM
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: "Target environment for restore drill (e.g. dev-ops-drill)"
+        required: true
+        default: "dev-ops-drill"
+      backup_point:
+        description: "Point-in-time timestamp (ISO8601) or 'latest' (latest successful backup)"
+        required: true
+        default: "latest"
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_OPS_SA }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run Restore Drill Script
+        working-directory: infra/gcp/dev/ops-drill
+        run: ./run-restore-drill.sh --env "${{ github.event.inputs.target_env || 'dev-ops-drill' }}" --backup-point "${{ github.event.inputs.backup_point || 'latest' }}"
+        env:
+          OPS_TARGET_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          # Assuming required vars for the script are set here
+
+      - name: Notify on Failure
+        if: failure()
+        run: echo "Restore drill failed. Needs immediate attention."
