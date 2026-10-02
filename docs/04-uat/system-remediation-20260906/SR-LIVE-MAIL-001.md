@@ -1,8 +1,39 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：**hosted harness 已實作並驗證，準備交 Claude2 review；live acceptance 尚未執行。** Supervisor 12:50Z 已解除 workflow scope／發布入口疑義，指定 promotion 後 dispatch。本輪沒有寄真郵件、部署、呼叫 `done` 或 `record-acceptance`。
-- **§0.1 是最新结果**；§0 為早先 checkpoint，§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 歷史觀察。歷史 scope blocker、IMAP 套件缺口、部署狀態與 acceptance 判定不能代替本輪證據。
+- 現況：**候選 a03b4b34 的 CI 因 Python 測試未接入 CI discovery 失敗；修正需 Supervisor 擴充 ci-integ.yml scope。** hosted harness 的既有 scoped checks 保留；live acceptance 尚未執行。Supervisor 12:50Z 指定 promotion 後 dispatch。本輪沒有寄真郵件、部署、呼叫 `done` 或 `record-acceptance`。
+- **§0.2 是最新結果**；§0.1 是前輪交審，§0 為早先 checkpoint，§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 歷史觀察。歷史 scope blocker、IMAP 套件缺口、部署狀態與 acceptance 判定不能代替本輪證據。
+
+## 0.2 CI 退回定位與 scope 待辦（2026-10-02）
+
+- 本輪 `git fetch origin` 後 base `origin/dev` 仍為 `210c0beaed9f19bd12442f247265c8f3307a9c93`；local／remote／[PR #2275](https://github.com/ajoe734/drts-fleet-platform/pull/2275) head 均為 `a03b4b34e8da1a430b3d3167ea816955352af96b`。未因 trunk 移動而 merge/rebase，沒有重寫 published history。
+- canonical task 是 `in_progress`、`ci_status=failure`；GitHub reviews 為空。這是新定位的 **F12 CI wiring 缺口**，不是兩次獨立 reviewer 對同一 finding 的退修；§0／§0.1 的 F01–F11 與未驗事項全部保留。
+- [CI run 37011504250](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37011504250/job/110852087854) 的 `Change scope` 與 [integration run 37011504184](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37011504184/job/110852120326) 的 `changes` 均執行 `python3 tools/ci/check_test_coverage.py` 後 exit **1**：`test_hosted_gate.py`、`test_mailbox_observer.py` 都不在 discovery roots。後續 lint／typecheck／unit 等 job 是 **skipped**；Smoke／E2E aggregate 因上游 gate 失敗而紅燈，不能解讀為產品測試已跑完失敗或通過。
+
+### F12 最小重現、修正邊界與驗證
+
+正式呼叫路徑：`ci.yml: jobs.scope`／`ci-integ.yml: jobs.changes` → `tools/ci/check_test_coverage.py: main` → `covered_targets`／`tracked_test_files`／`collected_files`。`WORKFLOWS` 僅包含 `ci.yml`、`ci-integ.yml`；單加已授權的 `live-mail-acceptance.yml` 手動 workflow 步驟無法讓 PR CI 收集這兩個測試。
+
+最小修正是於 **`.github/workflows/ci-integ.yml` 的 `changes` job、coverage checker 前**新增一個 step：
+
+```yaml
+- name: Verify live mail Python unit tests
+  run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
+```
+
+這會讓 CI 實際執行既有 15 tests，失敗即 nonzero，並讓 coverage checker 發現其真實執行路徑。無須修改 checker、移動／改名 tests、加豁免或降低 acceptance。**目前尚未套用到 task workflow**：machine write scopes 不含 `ci-integ.yml`；已用 owner `progress` 請 **Supervisor** 核對共用檔案衝突、擴 scope 並加入必要 dependencies，之後由原 owner Codex 套用。
+
+| Finding／驗收項 | 正式依據與修改位置 | 舊版 → 提議修正結果 | 命令、退出碼與證據 | 未驗與限制 |
+| --- | --- | --- | --- | --- |
+| F12 Python tests 未進 CI discovery | 正式 checker 的 `WORKFLOWS`／`covered_targets`；提議 `ci-integ.yml: jobs.changes` | `a03b4b34` 正式 worktree gate exit **1**，與兩個 hosted runs 同錯；隔離最小副本套提議 patch 後 gate exit **0**，收集兩個檔案，既有 15 tests pass | `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py` → **1**；`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v` → **0**, 15 tests；`.local/sr-live-mail-001/ci-discovery-20261002/probe.py` → **0** | 隔離副本只有受影響 tests、正式 Python modules、checker 與兩份 workflow，證明修正方向；**不是全庫 gate／新 candidate CI pass**。scope 到位後須在正式 worktree 重跑 checker、15 tests、workflow 適用檢查，再普通 push／handoff |
+| `authorized_test_mailbox` | §0.1 授權與 IMAP observer | 本輪未連 IMAP；無新 live 證據 | 沿用 §0.1 可取回入口，未呼叫 `record-acceptance` | Supervisor promotion 後 dispatch；operator 提供 approval 資源 |
+| `configured_mail_provider` | §0.1 provider metadata runner | 本輪未讀 cloud secrets 或 metadata；無新 live 證據 | 既有設定證據不等於當前 candidate 寄達 | 同 live SHA 的 `evidence-provider.json` 待驗 |
+| `provider_message_receipts` | 正式 delivery readback／approval audit／retry | 本輪零真回執；15 unit tests 只模擬外部邊界 | 不以 unit pass 充當 inbox／SMTP pass | approval request、真 24h expiry、queued retryable delivery 與 hosted 執行仍待 Supervisor/operator |
+| `live_candidate_sha` | §0.1 checkout／API SHA gate | `a03b4b34` CI failure，未 merge／部署／live | 本節兩個 same-SHA CI run 可取回 | 新修正須重新 review／CI，之後走原 promotion／shared-dev 路徑 |
+
+最小 probe 只在 `.local/sr-live-mail-001/ci-discovery-20261002/` 的暫存 git 副本套 patch；沒有修改 scope 外 workflow。保留 `proposed-ci-integ.patch`、`minimal-before.log`、`minimal-after.log`、`minimal-python-tests.log` 與兩個 `run-*-failed.log`，沒有 reset 活躍樹。副本直接匯入原 production Python modules，沒有複製驗收業務邏輯。此 session 沒有啟動任何 VM 產品／browser／Docker 服務。
+
+本節只形成 **證據 checkpoint**，不是修正版 review candidate；先 commit／普通 push 保存定位，scope 未核准前不把同一未修 CI 缺口重新 handoff。
 
 ## 0.1 續作交審：hosted workflow 與真郵件 profiles（2026-10-02）
 
