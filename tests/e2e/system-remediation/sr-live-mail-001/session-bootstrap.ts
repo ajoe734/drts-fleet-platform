@@ -113,7 +113,7 @@ async function request(
   });
   if (!response.ok) {
     if (path === "auth/token" && response.status === 409) {
-      const body = await response.json() as { error?: { code?: string } };
+      const body = (await response.json()) as { error?: { code?: string } };
       if (body.error?.code === "WORKLOAD_ASSERTION_REPLAYED")
         throw new AssertionReplayError("Google assertion already consumed");
     }
@@ -276,13 +276,20 @@ async function main(): Promise<void> {
       "GITHUB_ENV is required to export the minted session to later workflow steps.",
     );
   }
-  const mask = (value: string) => console.log(
-    `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
-  );
+  const mask = (value: string) =>
+    console.log(
+      `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
+    );
   const assertions = googleAssertionSource(
     config.apiOrigin,
-    requireString(process.env.DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT, "WIF service account"),
-    requireString(process.env.DRTS_LIVE_MAIL_WIF_ACCESS_TOKEN, "WIF access token"),
+    requireString(
+      process.env.DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT,
+      "WIF service account",
+    ),
+    requireString(
+      process.env.DRTS_LIVE_MAIL_WIF_FEDERATED_TOKEN,
+      "WIF federated token",
+    ),
     mask,
   );
   let minted: MintedMailSession | undefined;
@@ -290,8 +297,14 @@ async function main(): Promise<void> {
     const assertion = await assertions.next();
     try {
       minted = await mintTenantAdminSession(config, {
-        fetch, mask, readGoogleIdToken: () => assertion,
-        onSessionIssued: (token) => appendFileSync(envPath, `DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=${token}\n`),
+        fetch,
+        mask,
+        readGoogleIdToken: () => assertion,
+        onSessionIssued: (token) =>
+          appendFileSync(
+            envPath,
+            `DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=${token}\n`,
+          ),
       });
       break;
     } catch (error) {
@@ -300,7 +313,8 @@ async function main(): Promise<void> {
       if (!(error instanceof AssertionReplayError)) throw error;
     }
   }
-  if (!minted) throw new Error("Assertion collisions exhausted bounded retries");
+  if (!minted)
+    throw new Error("Assertion collisions exhausted bounded retries");
   appendFileSync(
     envPath,
     `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`,

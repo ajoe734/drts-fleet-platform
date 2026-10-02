@@ -8,8 +8,12 @@ export function observeInvitationMailbox(
   deliveryId: string,
 ): Promise<Record<string, unknown>> {
   return observeMailbox(config, deliveryId, {
-    flow: "invite", subject: "You're invited to join your DRTS tenant workspace",
-    required_text: ["You have been invited to join a DRTS tenant workspace.", "This invitation expires at"],
+    flow: "invite",
+    subject: "You're invited to join your DRTS tenant workspace",
+    required_text: [
+      "You have been invited to join a DRTS tenant workspace.",
+      "This invitation expires at",
+    ],
   });
 }
 

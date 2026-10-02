@@ -89,7 +89,6 @@ jobs:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
           service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
-          token_format: access_token
       - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
@@ -102,12 +101,14 @@ jobs:
         id: sessions
         env:
           DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
-          DRTS_LIVE_MAIL_WIF_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          # Use the original federated identity (same as auth@v2's IAM call),
+          # not an impersonated SA access token requiring a new self-grant.
+          DRTS_LIVE_MAIL_WIF_FEDERATED_TOKEN: ${{ steps.auth.outputs.auth_token }}
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-mail-001/session-bootstrap.ts
 
       - name: Run invitation and optional approval observations
         id: runner
-        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-mail-001/mail-acceptance-runner.ts
+        run: pnpm exec playwright test -c tests/e2e/system-remediation/sr-live-mail-001/playwright.config.ts
 
       - name: Revoke this run's session even after partial bootstrap failure
         if: always() && steps.install.outcome == 'success'

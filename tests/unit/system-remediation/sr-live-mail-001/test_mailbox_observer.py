@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import io
+import json
+from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 from unittest.mock import Mock
 
@@ -58,6 +61,55 @@ class MailboxObservationTest(unittest.TestCase):
         client.uid.return_value = ('OK', [b'45 46'])
         with self.assertRaisesRegex(ValueError, 'duplicate'):
             observer.observe(client, MESSAGE_ID, 'unit+invite@gmail.com', 'unit@gmail.com', '邀請測試', ['Business id 123'])
+
+
+class InvitationConsumptionTest(unittest.TestCase):
+    token = 'tenant_invitation_PRIVATE_1234567890'
+    request = {'api_origin': 'https://drts-dev-api-r6ykdme3wa-uc.a.run.app', 'candidate_sha': 'a' * 40,
+               'user_id': 'tenant_user_expected', 'acceptance': 'expired'}
+
+    def body(self, expires):
+        return 'Invitation code: ' + self.token + '\nThis invitation expires at ' + expires.isoformat() + '.\n'
+
+    def response(self, status, payload, sha='a' * 40):
+        result = io.BytesIO(json.dumps(payload).encode())
+        result.status = status
+        result.headers = {'x-drts-candidate-sha': sha}
+        return result
+
+    def test_no_fake_fast_forward_or_http_before_real_expiry(self):
+        opener = Mock()
+        with self.assertRaisesRegex(ValueError, 'not elapsed'):
+            observer.accept_invitation(self.body(datetime.now(timezone.utc) + timedelta(hours=24)), self.request, opener)
+        opener.open.assert_not_called()
+
+    def test_actual_expired_denial_records_only_safe_metadata(self):
+        opener = Mock()
+        opener.open.return_value = self.response(403, {'error': {'code': 'TENANT_INVITATION_ACCEPTANCE_DENIED'}})
+        result = observer.accept_invitation(self.body(datetime.now(timezone.utc) - timedelta(hours=1)), self.request, opener)
+        self.assertEqual(result['acceptance_status'], 403)
+        self.assertNotIn(self.token, str(result))
+        call = opener.open.call_args.args[0]
+        self.assertEqual(call.full_url, self.request['api_origin'] + '/api/tenant/invitations/accept')
+        self.assertEqual(json.loads(call.data), {'invitationToken': self.token})
+
+    def test_link_token_is_parsed_but_link_is_never_followed(self):
+        body = 'Accept your invitation: https://untrusted.invalid/accept?token=' + self.token + '\nThis invitation expires at 2026-10-01T01:00:00Z.'
+        token, _ = observer.invitation_from_body(body)
+        self.assertEqual(token, self.token)
+
+    def test_unrelated_403_or_wrong_candidate_does_not_prove_expiry(self):
+        for code, sha in [('SCOPE_DENIED', 'a' * 40), ('TENANT_INVITATION_ACCEPTANCE_DENIED', 'b' * 40)]:
+            opener = Mock()
+            opener.open.return_value = self.response(403, {'error': {'code': code}}, sha)
+            with self.assertRaises(ValueError):
+                observer.accept_invitation(self.body(datetime.now(timezone.utc) - timedelta(hours=1)), self.request, opener)
+
+    def test_success_must_activate_the_expected_user_in_the_expected_tenant(self):
+        opener = Mock()
+        opener.open.return_value = self.response(201, {'data': {'accepted': True, 'user': {'user_id': 'other-user', 'tenant_id': '10000000-0000-0000-0000-000000000201', 'status': 'active'}}})
+        with self.assertRaisesRegex(ValueError, 'expected user'):
+            observer.accept_invitation(self.body(datetime.now(timezone.utc) + timedelta(hours=1)), {**self.request, 'acceptance': 'accepted'}, opener)
 
 
 if __name__ == '__main__':

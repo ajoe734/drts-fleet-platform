@@ -46,6 +46,9 @@ def main():
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     if timestamp(created) <= timestamp(alias_update["createTime"]):
         raise ValueError("Revision predates the authorized alias update")
+    for ref in refs.values():
+        if ref["mounted_version"] == "latest" and timestamp(created) <= timestamp(ref["created_at"]):
+            raise ValueError("Secret latest changed after revision creation; require a fresh revision")
     allowlist = refs["REMOTE_SMTP_RECIPIENT_ALLOWLIST"]
     if int(allowlist["resolved_version"].rsplit("/", 1)[1]) < 2:
         raise ValueError("Revision mounts the pre-alias allowlist")

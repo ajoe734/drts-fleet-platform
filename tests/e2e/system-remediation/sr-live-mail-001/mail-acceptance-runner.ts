@@ -8,7 +8,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
 import { observeInvitationMailbox } from "./mailbox-observer";
-import { prepareTaskInvitation, exerciseInvitationLifecycle, verifyExpiredInvitation, observeApproval } from "./live-profiles";
+import {
+  prepareTaskInvitation,
+  exerciseInvitationLifecycle,
+  verifyExpiredInvitation,
+  observeApproval,
+} from "./live-profiles";
 import {
   redactObject,
   UatEvidenceRecorder,
@@ -252,8 +257,15 @@ export async function runMailAcceptance(
     ...(deps.observeMailbox
       ? []
       : ["authorized mailbox content for invitation"]),
-    ...(deps.approval ? [] : ["authorized mailbox content for approval", "approval new_request, approaching_timeout and decision mail"]),
-    ...(deps.lifecycle ? [] : ["invitation accept, single use, resend and revoke"]),
+    ...(deps.approval
+      ? []
+      : [
+          "authorized mailbox content for approval",
+          "approval new_request, approaching_timeout and decision mail",
+        ]),
+    ...(deps.lifecycle
+      ? []
+      : ["invitation accept, single use, resend and revoke"]),
     ...(deps.expiryVerified ? [] : ["real 24-hour invitation expiry"]),
     "automatic retry after a real retryable failure (no authorized fault injection)",
   ];
@@ -419,17 +431,29 @@ async function main(): Promise<void> {
       throw new Error("Checkout SHA does not match requested candidate");
     await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
     recorder.setCandidateSha(config.candidateSha);
-    const expiryVerified = await verifyExpiredInvitation(config, process.env, recorder);
+    const expiryVerified = await verifyExpiredInvitation(
+      config,
+      process.env,
+      recorder,
+    );
     const result = await runMailAcceptance(config, {
       issueInvitation: (cfg, recipient) =>
         prepareTaskInvitation(cfg, recipient, recorder),
       pollDeliveryReceipt: (cfg, id) =>
         realPollDeliveryReceipt(cfg, id, recorder),
       observeMailbox: observeInvitationMailbox,
-      lifecycle: (issued) => exerciseInvitationLifecycle(config, issued, recorder),
-      ...(process.env.DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID?.trim() ? {
-        approval: () => observeApproval(config, process.env.DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID!.trim(), recorder),
-      } : {}),
+      lifecycle: (issued) =>
+        exerciseInvitationLifecycle(config, issued, recorder),
+      ...(process.env.DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID?.trim()
+        ? {
+            approval: () =>
+              observeApproval(
+                config,
+                process.env.DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID!.trim(),
+                recorder,
+              ),
+          }
+        : {}),
       expiryVerified,
       recorder,
     });

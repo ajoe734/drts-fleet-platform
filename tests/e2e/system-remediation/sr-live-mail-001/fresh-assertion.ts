@@ -1,4 +1,5 @@
-/** Mint through IAM with the runner's WIF access token. Never replay an assertion.
+/** Mint through IAM with the runner's original WIF federated token, as auth@v2
+ * does (its auth_token output). No service-account self-impersonation grant.
  * Decoded claims are used only to ensure uniqueness; auth/token verifies trust.
  */
 export class FreshAssertionSource {
@@ -17,7 +18,9 @@ export class FreshAssertionSource {
       const token = await this.mint();
       let claims: { iat?: number; aud?: string };
       try {
-        claims = JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString());
+        claims = JSON.parse(
+          Buffer.from(token.split(".")[1]!, "base64url").toString(),
+        );
       } catch {
         throw new Error("Malformed Google assertion; contents withheld");
       }
@@ -34,27 +37,37 @@ export class FreshAssertionSource {
 export function googleAssertionSource(
   audience: string,
   serviceAccount: string,
-  accessToken: string,
+  federatedToken: string,
   mask: (value: string) => void,
 ) {
-  if (!/^[a-z0-9-]+@drts-dev-devcc-20260825\.iam\.gserviceaccount\.com$/.test(serviceAccount))
+  if (
+    !/^[a-z0-9-]+@drts-dev-devcc-20260825\.iam\.gserviceaccount\.com$/.test(
+      serviceAccount,
+    )
+  )
     throw new Error("WIF service account is outside the authorized project");
-  if (!accessToken || /\s/.test(accessToken)) throw new Error("WIF access token missing");
-  mask(accessToken);
+  if (!federatedToken || /\s/.test(federatedToken))
+    throw new Error("WIF federated token missing");
+  mask(federatedToken);
   return new FreshAssertionSource(async () => {
     const response = await fetch(
       `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(serviceAccount)}:generateIdToken`,
       {
         method: "POST",
-        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        headers: {
+          authorization: `Bearer ${federatedToken}`,
+          "content-type": "application/json",
+        },
         body: JSON.stringify({ audience, includeEmail: true }),
         redirect: "error",
         signal: AbortSignal.timeout(15_000),
       },
     );
-    if (!response.ok) throw new Error(`Google assertion mint returned HTTP ${response.status}`);
-    const data = await response.json() as { token?: string };
-    if (!data.token || /\s/.test(data.token)) throw new Error("Google assertion absent");
+    if (!response.ok)
+      throw new Error(`Google assertion mint returned HTTP ${response.status}`);
+    const data = (await response.json()) as { token?: string };
+    if (!data.token || /\s/.test(data.token))
+      throw new Error("Google assertion absent");
     mask(data.token);
     return data.token;
   }, audience);
