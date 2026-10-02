@@ -151,7 +151,10 @@ describe("SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: operator documentation 
     repoRoot,
     "docs/02-architecture/internal-key-exceptions.md",
   );
-  const section10Marker = "## 10. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002";
+  // Renumbered from section 10 to section 13 by
+  // SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002's dev-sync merge (that
+  // task's own section 10 already existed first); content unchanged.
+  const section10Marker = "## 13. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002";
 
   function readSection10(): string {
     const doc = readFileSync(registryDocPath, "utf8");

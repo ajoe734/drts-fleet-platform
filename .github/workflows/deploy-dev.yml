@@ -731,13 +731,12 @@ jobs:
           web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
           referral_embed_secret_args="${referral_embed_secret_args},DRTS_INTERNAL_KEY=${internal_key_secret}:latest"
 
-          referral_handoff_secret="${secret_prefix}-referral-embed-handoff-key"
-          if ! gcloud secrets describe "$referral_handoff_secret" --project "$project_id" >/dev/null 2>&1; then
-            echo "::error::Required secret ${referral_handoff_secret} not found in project ${project_id}."
-            exit 1
-          fi
-          secret_args="${secret_args},DRTS_REFERRAL_EMBED_HANDOFF_KEY=${referral_handoff_secret}:latest"
-          referral_embed_secret_args="${referral_embed_secret_args},DRTS_REFERRAL_EMBED_HANDOFF_KEY=${referral_handoff_secret}:latest"
+          # SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: INTERNAL_KEY_EXCP_001
+          # is retired. Nothing in the API or referral-embed-web source reads
+          # DRTS_REFERRAL_EMBED_HANDOFF_KEY anymore (the three referral embed
+          # handoff routes verify a Google workload identity assertion
+          # instead -- see docs/02-architecture/internal-key-exceptions.md §9),
+          # so this deploy no longer requires or mounts that retired secret.
 
           referral_partner_ingress_secret="${secret_prefix}-referral-embed-partner-ingress-key"
           if ! gcloud secrets describe "$referral_partner_ingress_secret" --project "$project_id" >/dev/null 2>&1; then
@@ -1423,9 +1422,91 @@ jobs:
           service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
 
-      - name: Verify referral handoff session lifecycle
+      # SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: INTERNAL_KEY_EXCP_001
+      # (x-drts-referral-handoff-key) is retired and removed from
+      # INTERNAL_KEY_EXCEPTION_REGISTRY. The three referral embed handoff
+      # routes now verify a Google-signed workload identity assertion via
+      # GoogleWorkloadIdentityAdapter instead, same as the operational
+      # acceptance job's POST /api/auth/token calls above. This step's direct
+      # call to the issuance route authenticates as this workflow's own WIF
+      # service account (`github-actions-deployer`). That identity can only
+      # ever be impersonated as itself from GitHub Actions -- the deployer
+      # service account's only grant on the runtime service account is
+      # `roles/iam.serviceAccountUser` (act-as, for `gcloud run deploy
+      # --service-account`), not `roles/iam.serviceAccountTokenCreator`, so
+      # this workflow cannot mint a token as `drts-dev-runtime` instead (see
+      # infra/gcp/dev/provision-dev-project.sh's IAM bindings). Reaching the
+      # issuance route therefore requires ops to add
+      # `"POST partner/ingress/referral-embed-handoff"` to the
+      # github-actions-deployer principal's `routeScopes` in the deployed
+      # `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry secret -- see
+      # docs/02-architecture/internal-key-exceptions.md §10.3/§10.5 for the
+      # exact value and why this one-time registry rollout cannot be
+      # replaced by a code-only change. The read-only check below detects
+      # whether that rollout has already landed and only then runs the full
+      # issue/consume/replay/cross-host lifecycle as a hard gate; until it
+      # lands, this step still makes the real call and asserts the precise
+      # fail-closed rejection, but does not fail the deploy for that one
+      # documented, operator-actionable, pending condition. The consume call
+      # goes through referral-embed-web's own BFF, which already
+      # authenticates as `drts-dev-runtime` (routeScopes `["* *"]`, no
+      # registry change needed) and needs no registry rollout of its own --
+      # but it still cannot be exercised pre-rollout, because there is no
+      # issued artifact to consume until the issuance route itself is
+      # reachable. Pre-rollout, only the fail-closed issuance rejection runs
+      # as a hard gate; the full issue/consume/replay/cross-host lifecycle
+      # only becomes a hard gate once the registry rollout has landed. This
+      # is the one documented, operator-actionable external prerequisite
+      # this task cannot close by itself (see §10.3/§10.6) -- it is not a
+      # repaired condition, and the smoke test is not being skipped: the
+      # real rejection is asserted every run, before rollout, and the real
+      # positive lifecycle is asserted every run, after rollout.
+      - name: Check referral embed handoff WIF registry rollout state
+        id: referral_handoff_rollout
+        env:
+          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
         run: |
           set -euo pipefail
+          registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"
+          applied=false
+          if gcloud secrets describe "$registry_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            registry_json="$(gcloud secrets versions access latest \
+              --secret="$registry_secret" --project "$PROJECT_ID")"
+            if jq -e '
+                any(.[]?; (.principalId == "dev-ci-deployer" or
+                  (.serviceAccountEmail // "" | test("^github-actions-deployer@")))
+                  and (.routeScopes // [] | index("POST partner/ingress/referral-embed-handoff")))
+              ' >/dev/null 2>&1 <<<"$registry_json"; then
+              applied=true
+            fi
+          fi
+          echo "applied=${applied}" >> "$GITHUB_OUTPUT"
+          echo "::notice::referral embed handoff WIF registry rollout applied=${applied}"
+
+      - name: Mint identity token — referral embed handoff (API)
+        id: id_token_referral_handoff
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.api }}
+          id_token_include_email: true
+
+      - name: Verify referral handoff session lifecycle
+        env:
+          REFERRAL_HANDOFF_ID_TOKEN: ${{ steps.id_token_referral_handoff.outputs.id_token }}
+          ROLLOUT_APPLIED: ${{ steps.referral_handoff_rollout.outputs.applied }}
+        run: |
+          set -euo pipefail
+
+          echo "::add-mask::${REFERRAL_HANDOFF_ID_TOKEN}"
+          if [[ -z "${REFERRAL_HANDOFF_ID_TOKEN:-}" ]]; then
+            echo "::error::REFERRAL_HANDOFF_ID_TOKEN is empty; identity token minting failed upstream." >&2
+            exit 1
+          fi
 
           api_url="${{ steps.urls.outputs.api }}"
           referral_embed_url="${{ steps.urls.outputs.referral_embed }}"
@@ -1433,32 +1514,38 @@ jobs:
           entry_host="$(curl --fail --silent --show-error \
             "${api_url}/api/partner/entries/${entry_slug}" \
             | jq -er '.data.entry_host // .data.entryHost')"
-          handoff_secret="${{ needs.prepare.outputs.secret_prefix }}-referral-embed-handoff-key"
-          handoff_key="$(gcloud secrets versions access latest \
-            --secret="$handoff_secret" \
-            --project="${{ needs.prepare.outputs.project_id }}")"
-          echo "::add-mask::${handoff_key}"
 
           body_file="$(mktemp)"
           headers_file="$(mktemp)"
           trap 'rm -f "$body_file" "$headers_file"' EXIT
 
-          issue_artifact() {
+          issue_artifact_status() {
             local partner_user_ref="$1"
-            local response artifact
-            response="$(jq -nc \
+            jq -nc \
               --arg entrySlug "$entry_slug" \
               --arg entryHost "$entry_host" \
               --arg partnerUserRef "$partner_user_ref" \
               '{entrySlug: $entrySlug, entryHost: $entryHost, partnerUserRef: $partnerUserRef}' \
-              | curl --fail --silent --show-error \
+              | curl --silent --show-error \
                 --request POST \
                 --header "Content-Type: application/json" \
-                --header "x-drts-referral-handoff-key: ${handoff_key}" \
+                --header "x-drts-google-id-token: ${REFERRAL_HANDOFF_ID_TOKEN}" \
+                --dump-header "$headers_file" \
+                --output "$body_file" \
+                --write-out '%{http_code}' \
                 --data @- \
-                "${api_url}/api/partner/ingress/referral-embed-handoff")"
-            artifact="$(jq -er '.data.artifact' <<<"$response")"
-            printf '%s' "$artifact"
+                "${api_url}/api/partner/ingress/referral-embed-handoff"
+          }
+
+          issue_artifact() {
+            local partner_user_ref="$1"
+            local status
+            status="$(issue_artifact_status "$partner_user_ref")"
+            if [[ "$status" != "201" ]]; then
+              echo "::error::Referral embed handoff issuance returned HTTP ${status}: $(cat "$body_file")" >&2
+              exit 1
+            fi
+            jq -er '.data.artifact' "$body_file"
           }
 
           exchange_artifact() {
@@ -1479,20 +1566,33 @@ jobs:
                 "${referral_embed_url}/api/referral/session"
           }
 
-          artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
-          [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]
-          jq -e '.ok == true' "$body_file" >/dev/null
-          grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file"
+          if [[ "$ROLLOUT_APPLIED" != "true" ]]; then
+            # Registry rollout (docs §10.3) has not landed yet: the deployer
+            # principal is not yet scoped for this route. Prove the rejection
+            # is the exact, expected, fail-closed one -- not a different bug
+            # -- then stop without claiming the positive lifecycle passed.
+            status="$(issue_artifact_status "deploy-smoke-pending-rollout-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+            if [[ "$status" != "403" ]] || ! jq -e '.error.code == "WORKLOAD_ROUTE_SCOPE_DENIED"' "$body_file" >/dev/null 2>&1; then
+              echo "::error::Expected the documented pending-rollout rejection (403 WORKLOAD_ROUTE_SCOPE_DENIED) but got HTTP ${status}: $(cat "$body_file")" >&2
+              exit 1
+            fi
+            echo "::warning::referral embed handoff WIF registry rollout (docs/02-architecture/internal-key-exceptions.md §10.3) has not landed yet; fail-closed rejection confirmed, issue/consume/replay/cross-host lifecycle deferred until ops applies it."
+          else
+            artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+            [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]
+            jq -e '.ok == true' "$body_file" >/dev/null
+            grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file"
 
-          [[ "$(exchange_artifact "$artifact" "$entry_host")" == "400" ]]
-          jq -e \
-            '.ok == false and .message == "The referral handoff artifact has already been consumed."' \
-            "$body_file" >/dev/null
-          artifact_for_wrong_host="$(issue_artifact "deploy-smoke-cross-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
-          [[ "$(exchange_artifact "$artifact_for_wrong_host" "evil.example")" == "400" ]]
-          jq -e \
-            '.ok == false and .message == "The referral handoff artifact is not valid for this entry host."' \
-            "$body_file" >/dev/null
+            [[ "$(exchange_artifact "$artifact" "$entry_host")" == "400" ]]
+            jq -e \
+              '.ok == false and .message == "The referral handoff artifact has already been consumed."' \
+              "$body_file" >/dev/null
+            artifact_for_wrong_host="$(issue_artifact "deploy-smoke-cross-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+            [[ "$(exchange_artifact "$artifact_for_wrong_host" "evil.example")" == "400" ]]
+            jq -e \
+              '.ok == false and .message == "The referral handoff artifact is not valid for this entry host."' \
+              "$body_file" >/dev/null
+          fi
 
       - name: Print dev URLs
         run: |
