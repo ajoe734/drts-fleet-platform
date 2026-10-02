@@ -651,6 +651,12 @@ export class AuthController {
         }
       : identity;
 
+    // Only the principal row is mutated by this same issuance call (via
+    // ensurePrincipal below), so its post-write updatedAt would race a
+    // timestamp guessed here. Membership and role bindings are read-only in
+    // this request, so their already-fetched updatedAt values are safe to
+    // carry forward unchanged for the durable-version computation.
+    let workforceVersionTimestamps: string[] | undefined;
     if (
       (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
       !durableIdentity.membershipId &&
@@ -672,7 +678,7 @@ export class AuthController {
       const activeBindings = roleBindings.filter(
         (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
       );
-      
+
       const allowedRoles = activeBindings.map((b) => b.roleCode);
       const allowedScopes = new Set<string>();
       for (const binding of activeBindings) {
@@ -684,6 +690,12 @@ export class AuthController {
 
       durableIdentity.roles = allowedRoles;
       durableIdentity.scopes = Array.from(allowedScopes);
+      // Mirrors the full (not just active-filtered) binding set that
+      // validateDurableState recomputes from at verification time.
+      workforceVersionTimestamps = [
+        membership.updatedAt,
+        ...roleBindings.map((b) => b.updatedAt),
+      ];
     }
 
     const expiresIn: JwtExpiresIn =
@@ -702,6 +714,7 @@ export class AuthController {
       tokenVersion: tenantUser
         ? Date.parse(tenantUser.updatedAt)
         : Date.parse(issuedAt),
+      ...(workforceVersionTimestamps ? { workforceVersionTimestamps } : {}),
     });
     return { token: issued.token, expiresIn };
   }
