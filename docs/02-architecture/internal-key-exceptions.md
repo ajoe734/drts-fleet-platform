@@ -2358,3 +2358,79 @@ server or Docker container was started. Acceptance 四 (two consecutive real
 `deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
 plus independent reviewer approval) remain Supervisor's and the reviewer's
 steps, not this worker's.
+
+### 13.3 Reopen fix (2026-10-02, R3): the F3 fix's raw federated base credential was overwritten by an intervening credential writer before the Ops command ever ran (F3 follow-up)
+
+Independent reviewer Codex reopened the third candidate (`4d3e94813`) with
+one new finding; F1, F2, and F3 above were reconfirmed fixed in isolation
+and are unaffected.
+
+**F3 follow-up [P1]:** §13.2's fix correctly made the job-level
+"Authenticate to GCP" step export a raw, non-impersonating federated
+credential, and correctly added `--impersonate-service-account` to the
+Tenant Ops `gcloud` call. But between those two steps sits
+`Mint identity token — API operational acceptance (Tenant Admin)`, a
+`service_account:`-bearing `google-github-actions/auth@v2` step whose only
+consumed output is `outputs.id_token`. Both `create_credentials_file` and
+`export_environment_variables` default to `true` on that action
+(`action.yml`, read at the pinned action SHA
+`c200f3691d83b41bf9bbd8638997a462592937ed`), and the action writes/exports a
+credential file before token generation regardless of `token_format`
+(`src/main.ts`). With `service_account:` set, that file is a new
+`external_account` JSON whose `service_account_impersonation_url` already
+targets `$SERVICE_ACCOUNT` (`src/client/workload_identity_federation.ts`),
+and the step overwrites `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`,
+`GOOGLE_APPLICATION_CREDENTIALS`, and `GOOGLE_GHA_CREDS_PATH` for every
+later step in the job -- including the Tenant Ops step, which loads its
+*base* credential from that same override. So by the time the Ops step's
+`gcloud auth print-identity-token --impersonate-service-account="$SERVICE_ACCOUNT"`
+ran, its base credential was already impersonating `$SERVICE_ACCOUNT`; the
+explicit flag made it try to impersonate itself, which needs a
+`roles/iam.serviceAccountTokenCreator` self-grant this task's IAM does not
+have and must not add. Codex reproduced this against the real, installed
+Cloud SDK (587.0.0) and the pinned `google-github-actions/auth` source (no
+repository files edited, no real cloud calls, only outbound HTTP mocked via
+`google.auth.transport.requests` fixtures with `socket.connect` denied):
+walked the job's steps applying both action defaults up to the Ops command,
+built a `google.auth.identity_pool.Credentials` matching the Tenant Admin
+step's exported shape, and called the actual
+`ImpersonationAccessTokenProvider.GetElevationAccessTokenGoogleAuth`. The
+captured IAM-caller sequence was federated principal → federated principal →
+target service account, failing with a synthetic 403 before any ID token
+was generated. A positive control that left only the Tenant Admin step's
+`create_credentials_file` flipped to `false` (in-memory only) made the same
+real SDK code path succeed with a single `generateAccessToken` call
+authenticated as the federated principal -- isolating the missing
+prerequisite without touching the locked candidate. The existing tests
+(§13.2's `extracted shell` cases) did not catch this because they mock
+`gcloud` directly and never model the ordered chain of credential
+*writers* the real binary would actually load from disk.
+
+**F3 follow-up fix:** one change, inside this job's existing WIF grant (no
+IAM, secret, or GitHub-variable change):
+
+1. The `Mint identity token — API operational acceptance (Tenant Admin)`
+   step gained `create_credentials_file: false` and
+   `export_environment_variables: false`. It still returns
+   `outputs.id_token` (ID-token minting in `google-github-actions/auth@v2`
+   happens via the action's own API client before the optional file/env
+   export, independent of these two flags), but it no longer replaces the
+   base credential the later Ops `gcloud` call depends on. The raw
+   Direct-WIF credential exported by the earlier "Authenticate to GCP" step
+   (§13.2) therefore survives, unmodified, all the way to the Ops command.
+   No other step between "Authenticate to GCP" and the Ops mint sets
+   `service_account:`, so no other intervening writer needed the same
+   guard.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F3 follow-up / acceptance 一: the effective base credential at the Ops `gcloud` call must remain the raw federated principal across every intervening action, not just the first "Authenticate to GCP" step | `.github/workflows/deploy-dev.yml`: `Mint identity token — API operational acceptance (Tenant Admin)` step gained `create_credentials_file: false` and `export_environment_variables: false`. | Before: this step's default-`true` file/env export silently replaced the raw federated credential with an already-impersonated one before the Ops step ran, turning `--impersonate-service-account` into self-impersonation. After: the step still mints and returns `outputs.id_token`, but no longer writes a credential file or exports env vars, so the Ops step's `gcloud` call loads the same raw federated credential the "Authenticate to GCP" step exported. | Re-ran the same offline reproduction described above with the candidate's actual YAML (not an in-memory patch): walked the full ordered credential-export chain up to the Ops command with both action defaults applied everywhere except the now-explicit `create_credentials_file: false` / `export_environment_variables: false` on the Tenant Admin step; the real SDK `ImpersonationAccessTokenProvider` succeeded with a single `generateAccessToken` call authenticated as the federated principal, matching the positive control. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` and `bash -n` on the extracted Ops step body: both exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud` CLI with real WIF credentials (no GCP credentials or deploy trigger available to this worker). The SDK call sequence was exercised through the real installed library with only outbound HTTP mocked, not a live call to Google's STS/IAM Credentials API; Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI end to end. |
+| F3 follow-up / acceptance 三: lock the complete ordered credential-export chain, not just the first auth step or the presence of `--impersonate-service-account` | `tests/unit/internal-key-wif-configuration.test.ts`: new test `F3 follow-up regression guard: the intervening Tenant Admin mint step does not overwrite the base Direct-WIF credential the Ops step depends on` asserts the Tenant Admin step's body contains `create_credentials_file: false` and `export_environment_variables: false` while still requesting `token_format: id_token`, and separately counts every `service_account:`-bearing step between "Authenticate to GCP" and the Ops mint, asserting each one carries both guard flags (not just the named Tenant Admin step). | Before: the only regression guard for this chain was the §13.2 test asserting "Authenticate to GCP" itself has no `service_account:` -- insufficient, since it says nothing about later writers in the chain. After: any `service_account:`-bearing step reintroduced between those two steps without both guard flags fails the count-based assertion. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`: exit 0, 46/46 passed (16 workflow/config + 29 provisioning/session, one new workflow test versus §13.2's 45). | The test is textual/structural (string search over the YAML, like every other test in this file); it does not execute the real `google-github-actions/auth` action or the real Cloud SDK as part of the automated suite -- that was verified manually (see the row above) but is not itself asserted by a test in this repository. |
+| F3 follow-up / regression check: audit, lint, format, diff hygiene | `operations/security/verify-internal-key-exceptions.py`; `pnpm exec eslint`; `pnpm exec prettier --check`; `git diff <prev> HEAD --check` | Unchanged mechanism from §13.1/§13.2, re-run on this candidate. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`. `pnpm exec eslint tests/unit/internal-key-wif-configuration.test.ts`: exit 0. `pnpm exec prettier --check tests/unit/internal-key-wif-configuration.test.ts .github/workflows/deploy-dev.yml`: exit 0. `git diff 210c0beaed9f19bd12442f247265c8f3307a9c93 HEAD --check`: exit 0. | None. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+reopen fix mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) remain Supervisor's and the reviewer's
+steps, not this worker's.

@@ -225,6 +225,66 @@ describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-ac
     expect(authStepBody).toContain("workload_identity_provider:");
   });
 
+  it("F3 follow-up regression guard: the intervening Tenant Admin mint step does not overwrite the base Direct-WIF credential the Ops step depends on", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    // google-github-actions/auth@v2 defaults both `create_credentials_file`
+    // and `export_environment_variables` to true (action.yml), so a
+    // `service_account:`-bearing step between "Authenticate to GCP" and the
+    // Ops step silently replaces CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE /
+    // GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_GHA_CREDS_PATH with a new,
+    // already-impersonated credential file -- the Ops step's
+    // `--impersonate-service-account` call would then be the service
+    // account impersonating itself. Checking only the first "Authenticate to
+    // GCP" step (as the prior test does) misses this: it is the ordered
+    // *chain* of credential writers up to the Ops step that matters, not
+    // any single step in isolation.
+    const adminStepHeader =
+      "- name: Mint identity token — API operational acceptance (Tenant Admin)";
+    const opsStepHeader =
+      "- name: Mint identity token — API operational acceptance (Tenant Ops)";
+    const adminStepStart = workflow.indexOf(adminStepHeader);
+    const opsStepStart = workflow.indexOf(opsStepHeader);
+    expect(adminStepStart).toBeGreaterThan(-1);
+    expect(opsStepStart).toBeGreaterThan(adminStepStart);
+
+    const adminStepBody = workflow.slice(adminStepStart, opsStepStart);
+
+    // It must still mint the id_token this job actually consumes.
+    expect(adminStepBody).toContain("token_format: id_token");
+    // It must not become a new base credential for later steps.
+    expect(adminStepBody).toContain("create_credentials_file: false");
+    expect(adminStepBody).toContain("export_environment_variables: false");
+
+    // No other `service_account:`-bearing auth@v2 step may sit between
+    // "Authenticate to GCP" and the Ops step without the same guard --
+    // otherwise it would reintroduce the same self-impersonation failure
+    // even if the named Tenant Admin step above stays fixed.
+    const jobStart = workflow.indexOf("  operational-candidate-acceptance:");
+    const authStepStart = workflow.indexOf(
+      "- name: Authenticate to GCP",
+      jobStart,
+    );
+    // Strip comment lines first -- this workflow documents the fix in `#`
+    // prose that itself mentions `create_credentials_file: false`, which
+    // would otherwise double-count against the real YAML keys below.
+    const interveningCode = workflow
+      .slice(authStepStart, opsStepStart)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+    const serviceAccountSteps = interveningCode.match(
+      /service_account: \$\{\{[^}]*\}\}/g,
+    );
+    expect(serviceAccountSteps).not.toBeNull();
+    expect(
+      interveningCode.match(/create_credentials_file: false/g),
+    ).toHaveLength(serviceAccountSteps?.length ?? 0);
+    expect(
+      interveningCode.match(/export_environment_variables: false/g),
+    ).toHaveLength(serviceAccountSteps?.length ?? 0);
+  });
+
   it("extracted shell: re-mints and compares actual token bytes until distinct, not just a fixed number of retries or a time guess", () => {
     const workflow = readFileSync(workflowPath, "utf8");
     const body = extractStepRunBody(workflow, opsStepHeader);
