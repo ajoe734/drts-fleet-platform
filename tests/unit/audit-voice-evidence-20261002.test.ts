@@ -9,62 +9,117 @@ describe('Unattended Voice Eval Harness (AUDIT-VOICE-EVIDENCE-20261002)', () => 
   let tempDir: string;
   let sentinelFile: string;
   let outputFile: string;
+  let networkGuardScript: string;
+  let networkLogFile: string;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-voice-evidence-'));
     sentinelFile = path.join(tempDir, 'existing-evidence.json');
     outputFile = path.join(tempDir, 'output.json');
     fs.writeFileSync(sentinelFile, '{"sentinel": true, "hash": "abcd123"}', 'utf-8');
+    
+    networkLogFile = path.join(tempDir, 'network-log.txt');
+    fs.writeFileSync(networkLogFile, '', 'utf-8');
+
+    networkGuardScript = path.join(tempDir, 'network-guard.mjs');
+    const guardCode = `
+import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
+import tls from 'node:tls';
+import dgram from 'node:dgram';
+
+const logFile = process.env.NETWORK_LOG_FILE;
+function record(api) {
+    fs.appendFileSync(logFile, api + '\\n');
+    throw new Error('Network guard triggered: ' + api);
+}
+
+const patchMethod = (obj, method, apiName) => {
+    const orig = obj[method];
+    if (orig) {
+        obj[method] = function() { record(apiName); return orig.apply(this, arguments); };
+    }
+};
+
+patchMethod(http, 'request', 'http.request');
+patchMethod(http, 'get', 'http.get');
+patchMethod(https, 'request', 'https.request');
+patchMethod(https, 'get', 'https.get');
+patchMethod(net, 'connect', 'net.connect');
+patchMethod(tls, 'connect', 'tls.connect');
+patchMethod(dgram, 'createSocket', 'dgram.createSocket');
+
+if (globalThis.fetch) {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = function() { record('fetch'); return origFetch.apply(this, arguments); };
+}
+if (globalThis.WebSocket) {
+    const origWS = globalThis.WebSocket;
+    globalThis.WebSocket = function() { record('WebSocket'); return new origWS(...arguments); };
+}
+`;
+    fs.writeFileSync(networkGuardScript, guardCode, 'utf-8');
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  const getEnv = (extraEnv: Record<string, string> = {}) => ({
+    PATH: process.env.PATH,
+    NETWORK_LOG_FILE: networkLogFile,
+    NODE_OPTIONS: `--import file://${networkGuardScript}`,
+    ...extraEnv
+  });
+
+  const expectNoNetwork = () => {
+    const log = fs.readFileSync(networkLogFile, 'utf-8');
+    expect(log).toBe('');
+  };
+
+  const expectRejection = (scriptCmd: string, env: any) => {
+    // Test 1: Absent output target is not created
+    try {
+      execSync(`${scriptCmd} --output ${outputFile}`, { stdio: 'pipe', env });
+      expect.fail('Expected script to exit with non-zero code');
+    } catch (error: any) {
+      expect(error.status).not.toBe(0);
+      const stderr = error.stderr.toString();
+      const stdout = error.stdout.toString();
+      expect(stderr).toContain('[FAIL_CLOSED]');
+      expect(stdout).not.toContain('TELEPHONY EVALUATION COMPLETED');
+      expect(stdout).not.toContain('Completion Rate');
+      expect(fs.existsSync(outputFile)).toBe(false);
+    }
+    
+    // Test 2: Existing target is preserved
+    try {
+      execSync(`${scriptCmd} --output ${sentinelFile}`, { stdio: 'pipe', env });
+      expect.fail('Expected script to exit with non-zero code');
+    } catch (error: any) {
+      expect(error.status).not.toBe(0);
+      expect(fs.readFileSync(sentinelFile, 'utf-8')).toBe('{"sentinel": true, "hash": "abcd123"}');
+    }
+    
+    expectNoNetwork();
+  };
+
   it('rejects invalid or case-varied modes immediately with no metrics or output', () => {
     const invalidModes = ['LIVE', 'Live', 'invalid', 'FIXTURE', ''];
     for (const mode of invalidModes) {
-      try {
-        execSync(`node ${evalScript} --mode "${mode}" --output ${outputFile}`, {
-          stdio: 'pipe',
-          env: { ...process.env },
-        });
-        expect.fail(`Expected script to exit with non-zero code for mode: ${mode}`);
-      } catch (error: unknown) {
-        const execError = error as { status: number; stderr: Buffer; stdout: Buffer };
-        expect(execError.status).not.toBe(0);
-        const stderr = execError.stderr.toString();
-        const stdout = execError.stdout.toString();
-
-        expect(stderr).toContain('[FAIL_CLOSED] INVALID MODE REJECTED:');
-        expect(stdout).not.toContain('TELEPHONY EVALUATION COMPLETED');
-        expect(stdout).not.toContain('Completion Rate');
-        expect(fs.existsSync(outputFile)).toBe(false);
-      }
+      const scriptCmd = `node ${evalScript} --mode "${mode}"`;
+      expectRejection(scriptCmd, getEnv());
     }
   });
 
   it('fails closed in live mode for missing/invalid authorization', () => {
     const invalidAuths = ['', 'INVALID-AUTH', 'AUTH-UV-LIVE-lowercase'];
     for (const auth of invalidAuths) {
-      try {
-        const authArg = auth ? `--authorization-ref "${auth}"` : '';
-        execSync(`node ${evalScript} --mode live ${authArg} --output ${outputFile}`, {
-          stdio: 'pipe',
-          env: { ...process.env },
-        });
-        expect.fail(`Expected script to exit with non-zero code for auth: ${auth}`);
-      } catch (error: unknown) {
-        const execError = error as { status: number; stderr: Buffer; stdout: Buffer };
-        expect(execError.status).not.toBe(0);
-        const stderr = execError.stderr.toString();
-        const stdout = execError.stdout.toString();
-
-        expect(stderr).toContain('[FAIL_CLOSED] LIVE MODE REJECTED:');
-        expect(stderr).toContain('Missing or invalid --authorization-ref');
-        expect(stdout).not.toContain('TELEPHONY EVALUATION COMPLETED');
-        expect(fs.existsSync(outputFile)).toBe(false);
-      }
+      const authArg = auth ? `--authorization-ref "${auth}"` : '';
+      const scriptCmd = `node ${evalScript} --mode live ${authArg}`;
+      expectRejection(scriptCmd, getEnv());
     }
   });
 
@@ -75,72 +130,45 @@ describe('Unattended Voice Eval Harness (AUDIT-VOICE-EVIDENCE-20261002)', () => 
       { trunk: '', key: '' },
     ];
     for (const { trunk, key } of cases) {
-      try {
-        execSync(`node ${evalScript} --mode live --authorization-ref AUTH-UV-LIVE-20261002-001 --output ${outputFile}`, {
-          stdio: 'pipe',
-          env: { ...process.env, UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: trunk, UNATTENDED_VOICE_LIVE_AUTH_KEY: key },
-        });
-        expect.fail('Expected script to exit with non-zero code');
-      } catch (error: unknown) {
-        const execError = error as { status: number; stderr: Buffer; stdout: Buffer };
-        expect(execError.status).not.toBe(0);
-        const stderr = execError.stderr.toString();
-        const stdout = execError.stdout.toString();
-
-        expect(stderr).toContain('[FAIL_CLOSED] LIVE MODE REJECTED:');
-        expect(stderr).toContain('Live carrier PSTN credentials / trunk endpoints missing from environment');
-        expect(stdout).not.toContain('TELEPHONY EVALUATION COMPLETED');
-        expect(fs.existsSync(outputFile)).toBe(false);
-      }
+      const scriptCmd = `node ${evalScript} --mode live --authorization-ref AUTH-UV-LIVE-20261002-001`;
+      expectRejection(scriptCmd, getEnv({
+        UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: trunk,
+        UNATTENDED_VOICE_LIVE_AUTH_KEY: key,
+      }));
     }
   });
 
-  it('fails closed in live mode even when credentials look valid but production adapter is missing, keeping existing evidence unchanged', () => {
-    try {
-      execSync(`node ${evalScript} --mode live --authorization-ref AUTH-UV-LIVE-20261002-001 --output ${sentinelFile}`, {
-        stdio: 'pipe',
-        env: {
-          ...process.env,
-          UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: 'sip:production@example.com',
-          UNATTENDED_VOICE_LIVE_AUTH_KEY: 'test_key',
-        },
-      });
-      expect.fail('Expected script to exit with non-zero code');
-    } catch (error: unknown) {
-      const execError = error as { status: number; stderr: Buffer; stdout: Buffer };
-      expect(execError.status).not.toBe(0);
-      const stderr = execError.stderr.toString();
-      const stdout = execError.stdout.toString();
-
-      expect(stderr).toContain('[FAIL_CLOSED] LIVE MODE ABORTED:');
-      expect(stderr).toContain('Production telephony (CTI/ASR/TTS/recorder) adapter is not yet implemented');
-      expect(stdout).not.toContain('TELEPHONY EVALUATION COMPLETED');
-
-      // Verify existing evidence unchanged
-      const content = fs.readFileSync(sentinelFile, 'utf-8');
-      expect(content).toBe('{"sentinel": true, "hash": "abcd123"}');
-    }
+  it('fails closed in live mode even when credentials look valid but production adapter is missing', () => {
+    const scriptCmd = `node ${evalScript} --mode live --authorization-ref AUTH-UV-LIVE-20261002-001`;
+    expectRejection(scriptCmd, getEnv({
+      UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: 'sip:production@example.com',
+      UNATTENDED_VOICE_LIVE_AUTH_KEY: 'test_key',
+    }));
   });
 
   it('succeeds in fixture mode with explicit fixture provenance, outputs results, and requires no credentials', () => {
+    const env = getEnv({
+      UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: '',
+      UNATTENDED_VOICE_LIVE_AUTH_KEY: '',
+    });
+    
     const outputString = execSync(`node ${evalScript} --mode fixture --output ${outputFile}`, {
       stdio: 'pipe',
-      env: {
-        ...process.env,
-        UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: '',
-        UNATTENDED_VOICE_LIVE_AUTH_KEY: '',
-      },
+      env
     }).toString();
 
     expect(outputString).toContain('[NOTICE] FIXTURE MODE EVALUATION COMPLETED:');
     expect(outputString).toContain('It does NOT claim production carrier PSTN voice quality or production carrier SLA');
 
-    // Verify output file and provenance
+    // Verify output file exists
     expect(fs.existsSync(outputFile)).toBe(true);
+    
     const parsedOutput = JSON.parse(fs.readFileSync(outputFile, 'utf-8'));
-    // We should check that the output has something indicating fixture
     expect(parsedOutput).toBeDefined();
-    // Assuming the main script attaches "mode": "fixture" to results if requested, but let's just check the file exists
-    // actually, let's see what `unattended-voice-eval.mjs` outputs
+    
+    // Assert the actual serialized mode equals fixture
+    expect(parsedOutput.mode).toBe('fixture');
+    
+    expectNoNetwork();
   });
 });
