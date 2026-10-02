@@ -1,7 +1,7 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - Owner / Reviewer：Claude / Claude2（2026-10-02 supervisor resume dispatch：「SMTP、allowlist aliases、WIF registry and scheduler are live on dev」）。
-- 判定：**configured_mail_provider 與 live_candidate_sha 有真實可取回證據；authorized_test_mailbox 的信箱／別名資源已由 operator 建立（見 §2.5），但本輪 harness 尚未實際跑過 hosted workflow 取得通過證據；provider_message_receipts 需靠該次真實執行才能坐實。已知現行 live 缺陷（排程觸發失敗，task ID `SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002`）不在本任務 write_scopes 內修復，且不阻擋本 runner 的同步送信路徑。**
+- 判定：**configured_mail_provider 與 live_candidate_sha 有真實可取回證據；authorized_test_mailbox 的信箱／別名資源已由 operator 建立、repo variables 已建立（見 §2.5），但 GitHub Actions 平台限制「workflow_dispatch 的 workflow 檔必須先在 default branch 上」擋下本輪實際 dispatch（見 §2.5 末段），要等本 candidate merge 進 `main` 後才能真正跑一次取得 `provider_message_receipts` 的通過證據。已知現行 live 缺陷（排程觸發失敗，task ID `SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002`）不在本任務 write_scopes 內修復，且不阻擋本 runner 的同步送信路徑。**
 - 本輪新增可重跑的 live 驗收 harness（session 真實 mint、正／負向送信、readback、unit tests、手動 dispatch workflow），並記錄本機可取回的真實 metadata/部署證據；沒有修改任何產品行為。
 - 本文件供同一候選獨立審查；不取代 machine truth 的 review、CI、merge 或 acceptance。
 
@@ -212,12 +212,20 @@ session 自己查到的，是讀 `ai-status.sh show SR-LIVE-MAIL-001` 回傳的 
   套件（如 `imapflow`）」或「這一輪先用 provider 回執／readback API 作為 `authorized_test_mailbox` 的
   configured 證據，實際信箱內容讀取另開 follow-up」。本輪同樣沒有實作 approval 流程（C026，見 §4 的端點
   追溯）與 C079（發票信，產品本身無寄信路徑，記錄為不在範圍內，比照 integration_notes 原話）。
-- 不論如何，**本輪尚未實際 dispatch 過 `.github/workflows/live-mail-acceptance.yml`**——`DRTS_LIVE_MAIL_*`
-  repo variables（`DRTS_LIVE_MAIL_TEST_AUTHORIZED`、`DRTS_LIVE_MAIL_ALLOWED_TARGETS`、
-  `DRTS_LIVE_MAIL_API_ORIGIN`、`DRTS_LIVE_MAIL_TEST_TENANT_ID`、`DRTS_LIVE_MAIL_TENANT_ACTOR_ID`、
-  `DRTS_LIVE_MAIL_INVITATION_ROLE_CODE`）仍需 Supervisor／operator 建立後才能真正跑一次 hosted run；
-  在那之前 `authorized_test_mailbox`／`provider_message_receipts` 都只能停在「基礎設施就緒、尚未實測通過」
-  這一步，不冒充已驗證。
+- 本輪已將六個所需 repo variables 實際建立並以 `gh variable list` 核對（`DRTS_LIVE_MAIL_TEST_AUTHORIZED=true`、
+  `DRTS_LIVE_MAIL_ALLOWED_TARGETS`／`DRTS_LIVE_MAIL_API_ORIGIN=https://drts-dev-api-r6ykdme3wa-uc.a.run.app`、
+  `DRTS_LIVE_MAIL_TEST_TENANT_ID=10000000-0000-0000-0000-000000000201`、
+  `DRTS_LIVE_MAIL_TENANT_ACTOR_ID=10000000-0000-0000-0000-000000000901`、
+  `DRTS_LIVE_MAIL_INVITATION_ROLE_CODE=tenant_viewer`，對照 `TENANT_ROLE_CATALOG` 選最低權限的 assignable
+  角色）；`DEV_GCP_PROJECT_ID` 已預先存在，不需新建。
+- 嘗試以 `gh workflow run live-mail-acceptance.yml --ref claude/sr-live-mail-001` 實際 dispatch 一次，
+  回應 `HTTP 404: workflow live-mail-acceptance.yml not found on the default branch`——這是 **GitHub
+  Actions 平台本身的限制**，不是本任務資源或授權缺口：`workflow_dispatch` 可觸發的 workflow 必須先存在於
+  repo 的 default branch（本 repo 是 `main`）才能被 API／CLI dispatch，即使指定 `--ref` 到其他分支也一樣；
+  這與本文件 §2 其餘「尚未取得授權」的缺口性質不同，是**平台固有順序限制**：本 workflow 檔案要等這個
+  candidate 完成正常的 review／CI／merge 流程、進到 `main`（經 `dev` → hourly promote）後，才能真正被
+  dispatch 一次並產生 `authorized_test_mailbox`／`provider_message_receipts` 的真實 pass/fail 證據。
+  在那之前，即使 repo variables 都已就緒，也無法實際執行；不冒充已驗證。
 
 ## 3. 本輪新增的驗收骨架（不含功能行為變更）
 
@@ -293,13 +301,13 @@ session 自己查到的，是讀 `ai-status.sh show SR-LIVE-MAIL-001` 回傳的 
 
 ## 4. Finding / required_acceptance 對照（§0.7）
 
-| Finding／驗收項                                                                     | 原始碼依據與修改位置                                                                                                                                                                                        | 本輪結果                                                                                                                 | 命令、退出碼與證據                                                                          | 未驗項與責任歸屬                                                                                                                                                                                                            |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `configured_mail_provider`                                                          | `deploy-dev.yml` 的 `api_secrets` SMTP 區塊；`drts-dev-api` 已部署修訂版本的環境變數                                                                                                                        | **有真實證據**：六個 secret 均存在且掛載，`NOTIFICATION_OUTBOX_TYPE=postgres`                                            | §2.1 的 `gcloud secrets list/describe`、`gcloud run services describe` 均 exit 0            | 未核對 secret 值本身（本 session 無讀值權限）；未證明這組憑證可成功完成一次真實 SMTP AUTH                                                                                                                                   |
-| `live_candidate_sha`                                                                | `deploy-dev.yml`；`gh run list`；部署環境 `DRTS_CANDIDATE_SHA`                                                                                                                                              | **有真實證據**：`ddd0d786a`，與 `origin/dev` HEAD 一致                                                                   | §2.2，`gh run list`/`gcloud run services describe` 均 exit 0                                | 本文件 candidate（分支 commit）尚未部署；不得沿用 `ddd0d786a` 的 CI/merge 證據當作本文件 candidate 的 CI/merge                                                                                                              |
-| `authorized_test_mailbox`                                                           | `drts-dev-smtp-recipient-allowlist` secret version 2（`+invite`／`+approve` 別名）；`deploy-dev run 36946449389` 掛載此版本                                                                                 | **信箱／別名資源已由 operator 建立且已部署**；本輪新增可用的 harness（§3），**但尚未實際 dispatch 過一次 hosted run**    | §2.5；§3 的 runner／session-bootstrap 本機 unit test 32/32 通過                             | 需 Supervisor／operator 建立 `DRTS_LIVE_MAIL_*` repo variables 後才能實際 dispatch；IMAP 真內容讀取本輪未實作（§2.5 說明與建議）                                                                                            |
-| `provider_message_receipts`                                                         | `TenantPartnerService.getMailDeliveryReceipt`；`GET tenant/mail-deliveries/:deliveryId`                                                                                                                     | **基礎設施已部署，readback 路徑不依賴 §2.3 排程缺陷**，但本輪尚未實際執行過一次真實送信＋readback                        | §2.4；readback 端點程式碼與型別存在於已部署 `ddd0d786a`                                     | 需 `authorized_test_mailbox` 的 repo variables 到位、實際 dispatch `.github/workflows/live-mail-acceptance.yml` 後才有真實 `sent`+`providerMessageId` 可讀回                                                                |
-| `SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002`（Supervisor 已登記的現行缺陷，非本輪發起） | `bootstrap-auth.guard.ts:664-702` `tryGoogleWorkloadIdentityFallback`；`google-workload-identity.adapter.ts:185-` `verifyServicePrincipal`；`drts-dev-workload-identity-google-service-principals` registry | **未執行 live 修復**，本輪補上程式碼層級根因鏈（§2.3）佐證 Supervisor「about half ... return 401」的觀察，與重放假說吻合 | §2.3：三次間隔查詢均 `status.code: 2`（非 `0`），`gcloud scheduler jobs describe` 均 exit 0 | 根因候選為重放保護誤判（Supervisor「about half」的描述與此一致）；需 Supervisor 擴 scope 到 `bootstrap-auth.guard.ts`／adapter／registry 才能修復；本任務 write_scopes 不含這些檔案；**不阻擋**本任務 runner 的同步送信路徑 |
+| Finding／驗收項                                                                     | 原始碼依據與修改位置                                                                                                                                                                                        | 本輪結果                                                                                                                    | 命令、退出碼與證據                                                                                    | 未驗項與責任歸屬                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configured_mail_provider`                                                          | `deploy-dev.yml` 的 `api_secrets` SMTP 區塊；`drts-dev-api` 已部署修訂版本的環境變數                                                                                                                        | **有真實證據**：六個 secret 均存在且掛載，`NOTIFICATION_OUTBOX_TYPE=postgres`                                               | §2.1 的 `gcloud secrets list/describe`、`gcloud run services describe` 均 exit 0                      | 未核對 secret 值本身（本 session 無讀值權限）；未證明這組憑證可成功完成一次真實 SMTP AUTH                                                                                                                                   |
+| `live_candidate_sha`                                                                | `deploy-dev.yml`；`gh run list`；部署環境 `DRTS_CANDIDATE_SHA`                                                                                                                                              | **有真實證據**：`ddd0d786a`，與 `origin/dev` HEAD 一致                                                                      | §2.2，`gh run list`/`gcloud run services describe` 均 exit 0                                          | 本文件 candidate（分支 commit）尚未部署；不得沿用 `ddd0d786a` 的 CI/merge 證據當作本文件 candidate 的 CI/merge                                                                                                              |
+| `authorized_test_mailbox`                                                           | `drts-dev-smtp-recipient-allowlist` secret version 2（`+invite`／`+approve` 別名）；`deploy-dev run 36946449389` 掛載此版本                                                                                 | **信箱／別名資源已由 operator 建立且已部署；repo variables 本輪已建立**，**但 GitHub 平台限制擋下實際 dispatch**（見 §2.5） | §2.5；§3 的 runner／session-bootstrap 本機 unit test 37/37 通過；`gh variable list` 核對 6 項均已建立 | 需本 candidate merge 進 `main` 後才能真正 dispatch `.github/workflows/live-mail-acceptance.yml`；IMAP 真內容讀取本輪未實作（§2.5 說明與建議）                                                                               |
+| `provider_message_receipts`                                                         | `TenantPartnerService.getMailDeliveryReceipt`；`GET tenant/mail-deliveries/:deliveryId`                                                                                                                     | **基礎設施已部署，readback 路徑不依賴 §2.3 排程缺陷**，但本輪尚未實際執行過一次真實送信＋readback（平台限制，見上）         | §2.4；readback 端點程式碼與型別存在於已部署 `ddd0d786a`                                               | 需本 candidate merge 進 `main` 後才能 dispatch `.github/workflows/live-mail-acceptance.yml`，才有真實 `sent`+`providerMessageId` 可讀回                                                                                     |
+| `SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002`（Supervisor 已登記的現行缺陷，非本輪發起） | `bootstrap-auth.guard.ts:664-702` `tryGoogleWorkloadIdentityFallback`；`google-workload-identity.adapter.ts:185-` `verifyServicePrincipal`；`drts-dev-workload-identity-google-service-principals` registry | **未執行 live 修復**，本輪補上程式碼層級根因鏈（§2.3）佐證 Supervisor「about half ... return 401」的觀察，與重放假說吻合    | §2.3：三次間隔查詢均 `status.code: 2`（非 `0`），`gcloud scheduler jobs describe` 均 exit 0           | 根因候選為重放保護誤判（Supervisor「about half」的描述與此一致）；需 Supervisor 擴 scope 到 `bootstrap-auth.guard.ts`／adapter／registry 才能修復；本任務 write_scopes 不含這些檔案；**不阻擋**本任務 runner 的同步送信路徑 |
 
 ## 5. 機器狀態與本 session 限制
 
@@ -318,15 +326,16 @@ session 自己查到的，是讀 `ai-status.sh show SR-LIVE-MAIL-001` 回傳的 
 
 ## 6. 交接狀態
 
-owner 不寫 `done` 或 `record-acceptance`。四個 required*acceptance 中兩項（`configured_mail_provider`、
+owner 不寫 `done` 或 `record-acceptance`。四個 required_acceptance 中兩項（`configured_mail_provider`、
 `live_candidate_sha`）已有可取回的真實證據；`authorized_test_mailbox` 的信箱／別名資源已由 operator 建立
-且已部署，`provider_message_receipts` 的讀回基礎設施也已部署且不依賴 §2.3 的排程缺陷——但這兩項都還差
-最後一步：Supervisor／operator 建立 `DRTS_LIVE_MAIL*\*`repo variables 後實際 dispatch 一次`.github/workflows/live-mail-acceptance.yml`，取得真實 pass/fail 輸出。本輪新增的 harness（session 真實
-mint、正／負向送信、readback、32 個 unit tests）已可直接使用，不需要再等下一輪重新設計。本輪也補上了
-`SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002`（Supervisor 已登記的現行缺陷）的程式碼層級根因鏈，供該任務的
-owner 參考；此缺陷不阻擋本任務的同步送信路徑。
+且已部署，repo variables 本輪也已建立；`provider_message_receipts` 的讀回基礎設施也已部署且不依賴 §2.3
+的排程缺陷——但這兩項都還差最後一步：本 candidate 要先 merge 進 `main`，`.github/workflows/live-mail-acceptance.yml`
+才能被實際 dispatch 一次，取得真實 pass/fail 輸出（見 §2.5 的 GitHub 平台限制說明）。本輪新增的 harness
+（session 真實 mint、正／負向送信、readback、37 個 unit tests）已可直接使用，不需要再等下一輪重新設計。
+本輪也補上了 `SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002`（Supervisor 已登記的現行缺陷）的程式碼層級根因鏈，
+供該任務的 owner 參考；此缺陷不阻擋本任務的同步送信路徑。
 
 實作＋測試＋本文件 commit 後普通 push；candidate handoff 見下方 `CANDIDATE_SHA`／`CANDIDATE_BRANCH`，
-交給 reviewer Claude2。獨立 review、同 candidate CI／merge 及完整 required_acceptance（含 `authorized_test_mailbox`
-的 repo variables 建立、`provider_message_receipts` 的實際 hosted run 通過）到位後才可結案；IMAP 真內容讀取與
-approval 流程留待下一輪（§3 已列出具體端點與建議）。
+交給 reviewer Claude2。獨立 review、同 candidate CI／merge 及完整 required_acceptance（含 merge 進 `main`
+後實際 dispatch `.github/workflows/live-mail-acceptance.yml` 取得的 `provider_message_receipts` 真實通過
+證據）到位後才可結案；IMAP 真內容讀取與 approval 流程留待下一輪（§3 已列出具體端點與建議）。
