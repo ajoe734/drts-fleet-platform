@@ -198,7 +198,12 @@ session 自己查到的，是讀 `ai-status.sh show SR-LIVE-MAIL-001` 回傳的 
   Google ID token → `POST auth/token` 的 CI tenant-actor 授權 → `POST identity/step-up-proofs` 取得
   `tenant:users:create` 的 step-up reference），`mail-acceptance-runner.ts` 則用這組真實 session 呼叫
   `POST tenant/users` 送信給授權別名、輪詢 readback，並新增一組「寄給 allowlist 外位址」的負向案例驗證
-  `SMTP_RECIPIENT_NOT_ALLOWLISTED` 確實被記錄（不實際發信，因為 transport 在送網路前就擋下）。
+  `SMTP_RECIPIENT_NOT_ALLOWLISTED` 確實被記錄（不實際發信，因為 transport 在送網路前就擋下）。修正一版：
+  授權收件地址不再是手動填入的 repo variable，改由 `session-bootstrap.ts` 在 hosted runner 內以 WIF 認證後
+  讀取真實 `drts-dev-smtp-username` secret（立即 masked）、用新函式 `deriveAliasRecipient` 衍生
+  `<username>+invite@...` 別名並寫入 `GITHUB_ENV`——完全比照 Supervisor 筆記「the hosted runner derives the
+  alias addresses from drts-dev-smtp-username」的原話，而不是另外存一份明文地址當 repo variable。負向案例的
+  收件地址固定為 RFC 2606 保留網域（`reserved.invalid`），不需要任何授權，也不需要 repo variable。
 - **未完成**：實際讀信箱內容（IMAP `[Gmail]/All Mail` 搜尋＋確認真實送達內容，Supervisor 筆記裡「兩種流程
   收到真內容」的那一半）本輪**沒有實作**——理由不是資源不存在（§2.5 已證明存在），而是這段程式只能在 hosted
   runner 內用真實 IMAP 連線驗證，且新增 IMAP 用戶端在目前 write_scopes（不含 `package.json`／
@@ -208,9 +213,9 @@ session 自己查到的，是讀 `ai-status.sh show SR-LIVE-MAIL-001` 回傳的 
   configured 證據，實際信箱內容讀取另開 follow-up」。本輪同樣沒有實作 approval 流程（C026，見 §4 的端點
   追溯）與 C079（發票信，產品本身無寄信路徑，記錄為不在範圍內，比照 integration_notes 原話）。
 - 不論如何，**本輪尚未實際 dispatch 過 `.github/workflows/live-mail-acceptance.yml`**——`DRTS_LIVE_MAIL_*`
-  repo variables（`DRTS_LIVE_MAIL_TEST_AUTHORIZED`、`DRTS_LIVE_MAIL_API_ORIGIN`、
-  `DRTS_LIVE_MAIL_TEST_TENANT_ID`、`DRTS_LIVE_MAIL_TENANT_ACTOR_ID`、`DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT`、
-  `DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT`）仍需 Supervisor／operator 建立後才能真正跑一次 hosted run；
+  repo variables（`DRTS_LIVE_MAIL_TEST_AUTHORIZED`、`DRTS_LIVE_MAIL_ALLOWED_TARGETS`、
+  `DRTS_LIVE_MAIL_API_ORIGIN`、`DRTS_LIVE_MAIL_TEST_TENANT_ID`、`DRTS_LIVE_MAIL_TENANT_ACTOR_ID`、
+  `DRTS_LIVE_MAIL_INVITATION_ROLE_CODE`）仍需 Supervisor／operator 建立後才能真正跑一次 hosted run；
   在那之前 `authorized_test_mailbox`／`provider_message_receipts` 都只能停在「基礎設施就緒、尚未實測通過」
   這一步，不冒充已驗證。
 

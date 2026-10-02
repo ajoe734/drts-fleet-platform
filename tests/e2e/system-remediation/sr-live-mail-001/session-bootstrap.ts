@@ -35,6 +35,7 @@ export interface MailSessionConfig {
   tenantId: string;
   actorId: string;
   stepUpActionId: string;
+  gcpProjectId: string;
 }
 
 export type MailSessionEnv = Record<string, string | undefined>;
@@ -68,6 +69,7 @@ export function validateMailSessionInputs(
     ),
     stepUpActionId:
       env.DRTS_LIVE_MAIL_STEP_UP_ACTION_ID?.trim() || "tenant:users:create",
+    gcpProjectId: requireString(env.DEV_GCP_PROJECT_ID, "DEV_GCP_PROJECT_ID"),
   };
 }
 
@@ -206,6 +208,25 @@ export async function mintTenantAdminSession(
   return { sessionToken, stepUpReference: proofData.stepUpReference };
 }
 
+/**
+ * Derives the Gmail plus-addressing alias (e.g. `person+invite@gmail.com`)
+ * Supervisor's integration_notes describe: the authorized test mailbox is
+ * the dedicated SMTP sender mailbox itself, and the recipient allowlist
+ * (`drts-dev-smtp-recipient-allowlist` version 2) adds that mailbox's own
+ * `+invite`/`+approve` aliases rather than a separate inbox. The base
+ * address comes from the real `drts-dev-smtp-username` secret at run time
+ * (masked immediately); it is never derived from a fixture or hardcoded.
+ */
+export function deriveAliasRecipient(baseEmail: string, tag: string): string {
+  const at = baseEmail.indexOf("@");
+  if (at <= 0 || at === baseEmail.length - 1) {
+    throw new Error(
+      `Cannot derive a "${tag}" alias from a malformed base mailbox address.`,
+    );
+  }
+  return `${baseEmail.slice(0, at)}+${tag}@${baseEmail.slice(at + 1)}`;
+}
+
 async function main(): Promise<void> {
   const config = validateMailSessionInputs(process.env);
   const envPath = process.env.GITHUB_ENV;
@@ -235,8 +256,40 @@ async function main(): Promise<void> {
     envPath,
     `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`,
   );
+
+  const baseMailbox = execFileSync(
+    "gcloud",
+    [
+      "secrets",
+      "versions",
+      "access",
+      "latest",
+      "--secret=drts-dev-smtp-username",
+      `--project=${config.gcpProjectId}`,
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  ).trim();
   console.log(
-    "Mail session bootstrap: minted and verified a live tenant_admin session.",
+    `::add-mask::${baseMailbox.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
+  );
+  const authorizedRecipient = deriveAliasRecipient(baseMailbox, "invite");
+  console.log(
+    `::add-mask::${authorizedRecipient.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
+  );
+  appendFileSync(
+    envPath,
+    `DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT=${authorizedRecipient}\n`,
+  );
+  // RFC 2606 reserved TLD: guaranteed to never resolve or accept real mail,
+  // so this needs no operator authorization -- it only proves the
+  // allowlist gate rejects an address outside it.
+  appendFileSync(
+    envPath,
+    "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-mail-001-negative@reserved.invalid\n",
+  );
+
+  console.log(
+    "Mail session bootstrap: minted and verified a live tenant_admin session, and derived the authorized test recipient.",
   );
 }
 

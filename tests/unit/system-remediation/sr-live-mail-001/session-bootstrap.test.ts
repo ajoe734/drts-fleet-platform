@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   MailSessionInputError,
+  deriveAliasRecipient,
   mintTenantAdminSession,
   validateMailSessionInputs,
   type MailSessionConfig,
@@ -16,6 +17,7 @@ function baseEnv(overrides: Partial<MailSessionEnv> = {}): MailSessionEnv {
     DRTS_CANDIDATE_SHA: VALID_SHA,
     DRTS_LIVE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
     DRTS_LIVE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+    DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
     ...overrides,
   };
 }
@@ -46,6 +48,40 @@ describe("validateMailSessionInputs", () => {
     const env = baseEnv({ DRTS_LIVE_MAIL_TENANT_ACTOR_ID: undefined });
     expect(() => validateMailSessionInputs(env)).toThrow(
       /DRTS_LIVE_MAIL_TENANT_ACTOR_ID/,
+    );
+  });
+
+  it("fails closed when the GCP project id is missing", () => {
+    const env = baseEnv({ DEV_GCP_PROJECT_ID: undefined });
+    expect(() => validateMailSessionInputs(env)).toThrow(/DEV_GCP_PROJECT_ID/);
+  });
+});
+
+describe("deriveAliasRecipient", () => {
+  it("inserts a plus-addressing tag before the domain", () => {
+    expect(deriveAliasRecipient("person@gmail.com", "invite")).toBe(
+      "person+invite@gmail.com",
+    );
+    expect(deriveAliasRecipient("person@gmail.com", "approve")).toBe(
+      "person+approve@gmail.com",
+    );
+  });
+
+  it("fails closed on a base address with no local part", () => {
+    expect(() => deriveAliasRecipient("@gmail.com", "invite")).toThrow(
+      /malformed base mailbox address/,
+    );
+  });
+
+  it("fails closed on a base address with no domain", () => {
+    expect(() => deriveAliasRecipient("person@", "invite")).toThrow(
+      /malformed base mailbox address/,
+    );
+  });
+
+  it("fails closed on a base address with no @ at all", () => {
+    expect(() => deriveAliasRecipient("not-an-email", "invite")).toThrow(
+      /malformed base mailbox address/,
     );
   });
 });

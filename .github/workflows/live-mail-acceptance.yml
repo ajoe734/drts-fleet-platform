@@ -26,11 +26,16 @@ name: Live Mail Acceptance (SR-LIVE-MAIL-001)
 # uses -- see session-bootstrap.ts. A `tenant:users:create` step-up proof is
 # obtained once and reused for every privileged call this run makes.
 #
-# As of 2026-10-02 DRTS_LIVE_MAIL_TEST_AUTHORIZED, DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT,
-# DRTS_LIVE_MAIL_TEST_TENANT_ID, DRTS_LIVE_MAIL_TENANT_ACTOR_ID and
-# DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT are not yet provisioned as
-# repository variables; the runner's own input validation fails closed with
-# a clear reason rather than skipping when they are absent. See
+# The authorized recipient is never a repository variable: session-bootstrap.ts
+# derives it at run time (Gmail plus-addressing, e.g. `+invite`) from the real
+# `drts-dev-smtp-username` secret, which recipient-allowlist version 2 already
+# covers. The non-allowlisted negative-path recipient is a fixed RFC 2606
+# reserved address and needs no provisioning either.
+#
+# As of 2026-10-02 DRTS_LIVE_MAIL_TEST_AUTHORIZED, DRTS_LIVE_MAIL_TEST_TENANT_ID
+# and DRTS_LIVE_MAIL_TENANT_ACTOR_ID are not yet provisioned as repository
+# variables; the runner's own input validation fails closed with a clear
+# reason rather than skipping when they are absent. See
 # docs/04-uat/system-remediation-20260906/SR-LIVE-MAIL-001.md for what is and
 # is not live yet, including a known scheduler-trigger defect
 # (SR-MAIL-SCHEDULER-TOKEN-REUSE-20261002) that does not block this
@@ -72,8 +77,6 @@ jobs:
       DRTS_LIVE_MAIL_TEST_TENANT_ID: ${{ vars.DRTS_LIVE_MAIL_TEST_TENANT_ID }}
       DRTS_LIVE_MAIL_TENANT_ACTOR_ID: ${{ vars.DRTS_LIVE_MAIL_TENANT_ACTOR_ID }}
       DRTS_LIVE_MAIL_STEP_UP_ACTION_ID: ${{ vars.DRTS_LIVE_MAIL_STEP_UP_ACTION_ID }}
-      DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: ${{ vars.DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT }}
-      DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT: ${{ vars.DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT }}
       DRTS_LIVE_MAIL_INVITATION_ROLE_CODE: ${{ vars.DRTS_LIVE_MAIL_INVITATION_ROLE_CODE }}
       DRTS_LIVE_MAIL_POLL_TIMEOUT_MS: ${{ vars.DRTS_LIVE_MAIL_POLL_TIMEOUT_MS }}
       DRTS_LIVE_MAIL_POLL_INTERVAL_MS: ${{ vars.DRTS_LIVE_MAIL_POLL_INTERVAL_MS }}
