@@ -708,15 +708,19 @@ jobs:
           # GoogleWorkloadIdentityAdapter (apps/api/src/modules/auth/google-workload-identity.adapter.ts),
           # which reads WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS -- a
           # distinct env var from WORKLOAD_IDENTITY_SERVICE_PRINCIPALS above,
-          # which only ServiceWorkloadIdentityAdapter reads. Same
-          # absent-is-safe pattern: InternalKeyMiddleware treats this
-          # adapter's WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED as "fall back
-          # to x-drts-internal-key", so every EXCP_002 caller's dual-send
-          # keeps working whether or not ops has populated this yet.
+          # which only ServiceWorkloadIdentityAdapter reads. INTERNAL_KEY_EXCP_002
+          # (the x-drts-internal-key fallback InternalKeyMiddleware used to fall
+          # back to when this registry was absent) is retired: every
+          # control-plane proxy, auth/token caller, and partner/ingress/handoff
+          # bootstrap caller now depends solely on this registry. If the secret
+          # below is absent, those callers fail closed (401
+          # INTERNAL_KEY_UNDOCUMENTED), including this job's own operational
+          # acceptance step further down.
           if gcloud secrets describe "$workload_google_registry_secret" --project "$project_id" >/dev/null 2>&1; then
             workload_mounts="${workload_mounts},WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
           else
-            echo "::notice::${workload_google_registry_secret} is absent; dev deploys without the Google workload identity service principal registry (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 callers stay on x-drts-internal-key)."
+            echo "::error::${workload_google_registry_secret} is absent; INTERNAL_KEY_EXCP_002 is retired so dev's control-plane proxies and auth/token callers have no fallback and will fail closed without this registry."
+            exit 1
           fi
           secret_args="${secret_args}${workload_mounts}"
 
@@ -1558,14 +1562,13 @@ jobs:
           project_id: ${{ needs.prepare.outputs.project_id }}
       # SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: this real Google-signed
       # identity token (Google holds the signing key; nothing here invents
-      # one) replaces x-drts-internal-key for this step's two
-      # POST /api/auth/token calls once apps/api's
-      # WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS registry grants this
-      # service account (DEV_WIF_SERVICE_ACCOUNT) the two fixed tenant/ops
-      # actor tuples below and WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true
-      # is set for this environment. Until then apps/api ignores this header
-      # and falls back to the internal key sent alongside it below, so this
-      # step keeps working either way during the rollout.
+      # one) is this step's only credential for its two
+      # POST /api/auth/token calls, now that INTERNAL_KEY_EXCP_002 is
+      # retired. apps/api's WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS
+      # registry must grant this service account (DEV_WIF_SERVICE_ACCOUNT)
+      # the two fixed tenant/ops actor tuples below, and
+      # WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true must be set, or this
+      # step fails closed.
       - name: Mint identity token — API operational acceptance (Tenant Admin)
         id: id_token_api_operational
         uses: google-github-actions/auth@v2
@@ -1596,17 +1599,11 @@ jobs:
       - name: Issue deployment-machine Tenant acceptance session
         env:
           API_URL: ${{ needs.health-check.outputs.api }}
-          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
-          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
           GOOGLE_ID_TOKEN_TENANT_ADMIN: ${{ steps.id_token_api_operational.outputs.id_token }}
           GOOGLE_ID_TOKEN_TENANT_OPS: ${{ steps.id_token_api_operational_ops.outputs.id_token }}
         run: |
           set -euo pipefail
 
-          internal_key="$(gcloud secrets versions access latest \
-            --secret="${SECRET_PREFIX}-jwt-secret" \
-            --project="$PROJECT_ID" | tr -d '\r\n')"
-          echo "::add-mask::$internal_key"
           echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_ADMIN"
           echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_OPS"
 
@@ -1648,7 +1645,6 @@ jobs:
           session_response="$(curl --silent --show-error --write-out '\n%{http_code}' \
             --request POST "${API_URL}/api/auth/token" \
             --header 'content-type: application/json' \
-            --header "x-drts-internal-key: ${internal_key}" \
             --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN_TENANT_ADMIN}" \
             --header 'x-actor-type: tenant_admin' \
             --header 'x-actor-id: 10000000-0000-0000-0000-000000000901' \
@@ -1669,7 +1665,6 @@ jobs:
           dispatch_response="$(curl --silent --show-error --write-out '\n%{http_code}' \
             --request POST "${API_URL}/api/auth/token" \
             --header 'content-type: application/json' \
-            --header "x-drts-internal-key: ${internal_key}" \
             --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN_TENANT_OPS}" \
             --header 'x-actor-type: tenant_admin' \
             --header 'x-actor-id: 10000000-0000-0000-0000-000000000902' \

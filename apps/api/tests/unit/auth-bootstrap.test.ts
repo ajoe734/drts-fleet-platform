@@ -398,45 +398,31 @@ describe("bootstrap auth extraction", () => {
 });
 
 describe("auth token issuance", () => {
-  it("derives durable tenant claims for internal-key bootstrap sessions", async () => {
+  it("rejects internal-key bootstrap sessions now that INTERNAL_KEY_EXCP_002 is retired -- the granted Google workload identity CI probe test right below is the live equivalent (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
     process.env.DRTS_INTERNAL_KEY = "test-internal-secret";
     process.env.AUTH_MODE = "explicit";
 
-    const { controller, jwtAuthService, tenantPartnerService } =
-      createAuthFixture();
-    const tenantUser = tenantPartnerService.findTenantUser(
-      "tenant-demo-001",
-      "tenant-user-demo-001",
-    );
-    expect(tenantUser).not.toBeNull();
+    const { controller } = createAuthFixture();
 
-    const issued = await controller.issueToken({
-      headers: {
-        "x-drts-internal-key": "test-internal-secret",
-        "x-actor-type": "tenant_admin",
-        "x-actor-id": "tenant-user-demo-001",
-        "x-realm": "tenant",
-        "x-tenant-id": "tenant-demo-001",
-        "x-roles": "tenant_viewer",
-        "x-scopes": "tenant:read",
-      },
-      method: "POST",
-      originalUrl: "/api/auth/token",
-      url: "/api/auth/token",
-    });
-
-    const payload = jwtAuthService.verify(issued.token);
-    expect(payload).toMatchObject({
-      sub: "tenant-user-demo-001",
-      roles: [tenantUser!.roleCode],
-      tokenVersion: Date.parse(tenantUser!.updatedAt),
-    });
-    expect(await jwtAuthService.verifyAccessToken(issued.token)).toMatchObject({
-      sub: "tenant-user-demo-001",
-    });
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "test-internal-secret",
+          "x-actor-type": "tenant_admin",
+          "x-actor-id": "tenant-user-demo-001",
+          "x-realm": "tenant",
+          "x-tenant-id": "tenant-demo-001",
+          "x-roles": "tenant_viewer",
+          "x-scopes": "tenant:read",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+        url: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
@@ -801,7 +787,7 @@ describe("auth token issuance", () => {
     delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
   });
 
-  it("falls back to the internal key for a Google-assertion caller while the CI tenant actor gate is off (dual-send transition safety)", async () => {
+  it("rejects a Google-assertion caller while the CI tenant actor gate is off, with no internal-key fallback anymore (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired)", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -813,36 +799,23 @@ describe("auth token issuance", () => {
     delete process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED;
     delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
 
-    const { controller, jwtAuthService, tenantPartnerService } =
-      createAuthFixture();
-    const tenantUser = tenantPartnerService.findTenantUser(
-      "tenant-demo-001",
-      "tenant-user-demo-001",
-    );
-    expect(tenantUser).not.toBeNull();
+    const { controller } = createAuthFixture();
 
-    const issued = await controller.issueToken({
-      headers: {
-        // Sent by a caller mid-rollout that already dual-sends both
-        // credentials; this one is not real and must simply be ignored
-        // while the gate is off, not attempted and failed.
-        "x-drts-google-id-token": "not-a-real-google-token",
-        "x-drts-internal-key": "test-internal-secret",
-        "x-actor-type": "tenant_admin",
-        "x-actor-id": "tenant-user-demo-001",
-        "x-realm": "tenant",
-        "x-tenant-id": "tenant-demo-001",
-      },
-      method: "POST",
-      originalUrl: "/api/auth/token",
-      url: "/api/auth/token",
-    });
-
-    const payload = jwtAuthService.verify(issued.token);
-    expect(payload).toMatchObject({
-      sub: "tenant-user-demo-001",
-      roles: [tenantUser!.roleCode],
-    });
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-google-id-token": "not-a-real-google-token",
+          "x-drts-internal-key": "test-internal-secret",
+          "x-actor-type": "tenant_admin",
+          "x-actor-id": "tenant-user-demo-001",
+          "x-realm": "tenant",
+          "x-tenant-id": "tenant-demo-001",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+        url: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
@@ -851,7 +824,7 @@ describe("auth token issuance", () => {
     delete process.env.AUTH_MODE;
   });
 
-  it("falls back to the internal key when the registry is populated but does not list this caller's service account (unregistered caller must not take the route down)", async () => {
+  it("rejects an unregistered caller's dual-sent Google assertion + internal key alike, now that INTERNAL_KEY_EXCP_002 is retired (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -929,30 +902,28 @@ describe("auth token issuance", () => {
       { algorithm: "RS256", keyid: kid },
     );
 
-    const issued = await controllerWithGoogle.issueToken({
-      headers: {
-        // Dual-sent per the rollout pattern: a verified-but-unregistered
-        // Google assertion alongside a still-valid internal key. The
-        // registry already exists (unlike the gate-off case above), so this
-        // exercises WORKLOAD_PRINCIPAL_NOT_REGISTERED specifically, not
-        // WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED.
-        "x-drts-google-id-token": googleToken,
-        "x-drts-internal-key": "test-internal-secret",
-        "x-actor-type": "tenant_admin",
-        "x-actor-id": "tenant-user-demo-001",
-        "x-realm": "tenant",
-        "x-tenant-id": "tenant-demo-001",
-      },
-      method: "POST",
-      originalUrl: "/api/auth/token",
-      url: "/api/auth/token",
-    });
+    // AuthController.issueToken's internal-key fallback call (the line this
+    // test exercises) never passes googleWorkloadIdentityAdapter to
+    // validateInternalKey, so a dual-sent unregistered Google assertion
+    // never reaches WORKLOAD_PRINCIPAL_NOT_REGISTERED here regardless --
+    // it falls straight to the (now permanently undocumented) internal key.
+    await expect(
+      controllerWithGoogle.issueToken({
+        headers: {
+          "x-drts-google-id-token": googleToken,
+          "x-drts-internal-key": "test-internal-secret",
+          "x-actor-type": "tenant_admin",
+          "x-actor-id": "tenant-user-demo-001",
+          "x-realm": "tenant",
+          "x-tenant-id": "tenant-demo-001",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+        url: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
 
-    const payload = jwtAuthService.verify(issued.token);
-    expect(payload).toMatchObject({
-      sub: "tenant-user-demo-001",
-      roles: [tenantUser!.roleCode],
-    });
+    expect(tenantUser).not.toBeNull();
 
     vi.unstubAllGlobals();
     delete process.env.JWT_SECRET;
@@ -963,14 +934,14 @@ describe("auth token issuance", () => {
     delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
   });
 
-  it("issues trusted workforce MFA claims for internal-key bootstrap platform tokens", async () => {
+  it("rejects internal-key bootstrap platform tokens now that INTERNAL_KEY_EXCP_002 is retired (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
     process.env.DRTS_INTERNAL_KEY = "test-internal-secret";
     process.env.AUTH_MODE = "explicit";
 
-    const { controller, jwtAuthService, identityRepository } = createAuthFixture();
+    const { controller, identityRepository } = createAuthFixture();
 
     vi.spyOn(identityRepository, "findMembershipsByPrincipalId").mockResolvedValue([
       {
@@ -981,29 +952,20 @@ describe("auth token issuance", () => {
         status: "active",
       } as any,
     ]);
-    const issued = await controller.issueToken({
-      headers: {
-        "x-drts-internal-key": "test-internal-secret",
-        "x-actor-type": "platform_admin",
-        "x-actor-id": "platform-admin-001",
-        "x-realm": "platform",
-        "x-request-id": "req-auth-token-platform-001",
-      },
-      method: "POST",
-      originalUrl: "/api/auth/token",
-      url: "/api/auth/token",
-    });
-
-    const payload = jwtAuthService.verify(issued.token);
-
-    expect(issued.expiresIn).toBe("8h");
-    expect(payload).toMatchObject({
-      actorType: "platform_admin",
-      realm: "platform",
-      amr: ["verified_iap_workforce"],
-      acr: "aal2",
-    });
-    expect(typeof payload?.auth_time).toBe("number");
+    await expect(
+      controller.issueToken({
+        headers: {
+          "x-drts-internal-key": "test-internal-secret",
+          "x-actor-type": "platform_admin",
+          "x-actor-id": "platform-admin-001",
+          "x-realm": "platform",
+          "x-request-id": "req-auth-token-platform-001",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+        url: "/api/auth/token",
+      }),
+    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
@@ -2305,9 +2267,10 @@ describe("internal key middleware", () => {
     ).rejects.toBeInstanceOf(ApiRequestError);
   });
 
-  it("allows protected routes when the internal key header matches", async () => {
-    await expect(
-      validateInternalKey(
+  it("rejects a matching internal key header now that INTERNAL_KEY_EXCP_002 is retired -- no registry entry uses that header anymore (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
+    let error: ApiRequestError | null = null;
+    try {
+      await validateInternalKey(
         {
           headers: {
             "x-realm": "system",
@@ -2317,8 +2280,12 @@ describe("internal key middleware", () => {
           originalUrl: "/api/tenant/webhooks",
         },
         "staging-secret",
-      ),
-    ).resolves.not.toThrow();
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+    expect(error?.getStatus()).toBe(401);
+    expect(error?.code).toBe("INTERNAL_KEY_INVALID");
   });
 
   it("allows protected routes when the control-plane inner bearer header is present", async () => {
@@ -2336,9 +2303,10 @@ describe("internal key middleware", () => {
     ).resolves.not.toThrow();
   });
 
-  it("falls back to the internal key when Google workload identity verification is not configured", async () => {
-    await expect(
-      validateInternalKey(
+  it("no longer falls back to the internal key when Google workload identity verification is not configured (INTERNAL_KEY_EXCP_002 retired, SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
+    let error: ApiRequestError | null = null;
+    try {
+      await validateInternalKey(
         {
           headers: {
             "x-realm": "system",
@@ -2349,36 +2317,27 @@ describe("internal key middleware", () => {
           originalUrl: "/api/tenant/webhooks",
         },
         "staging-secret",
-      ),
-    ).resolves.not.toThrow();
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+    expect(error?.getStatus()).toBe(401);
+    expect(error?.code).toBe("INTERNAL_KEY_INVALID");
   });
 
-  it("invokes next() after successful validation", async () => {
+  it("invokes next() after successful validation (health endpoint bypass, unaffected by INTERNAL_KEY_EXCP_002's retirement)", async () => {
     const middleware = new InternalKeyMiddleware();
     const next = vi.fn();
 
-    const originalKey = process.env.DRTS_INTERNAL_KEY;
-    process.env.DRTS_INTERNAL_KEY = "staging-secret";
-    try {
-      await middleware.use(
-        {
-          headers: {
-            "x-realm": "system",
-            "x-drts-internal-key": "staging-secret",
-          },
-          method: "POST",
-          originalUrl: "/api/tenant/webhooks",
-        },
-        {},
-        next,
-      );
-    } finally {
-      if (originalKey === undefined) {
-        delete process.env.DRTS_INTERNAL_KEY;
-      } else {
-        process.env.DRTS_INTERNAL_KEY = originalKey;
-      }
-    }
+    await middleware.use(
+      {
+        headers: {},
+        method: "GET",
+        originalUrl: "/api/health",
+      },
+      {},
+      next,
+    );
 
     expect(next).toHaveBeenCalledOnce();
   });

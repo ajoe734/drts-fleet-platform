@@ -6,11 +6,40 @@ import {
   validateInternalKey,
 } from "../../apps/api/src/common/auth/internal-key.middleware";
 import {
+  evaluateInternalKey,
   INTERNAL_KEY_EXCEPTION_REGISTRY,
   validateExceptionMetadata,
+  type InternalKeyExceptionMetadata,
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 
 const ORIGINAL_ENV = { ...process.env };
+
+// INTERNAL_KEY_EXCP_002 was retired 2026-10-02 by
+// SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: every caller migrated to the
+// Google workload identity assertion, so no registry entry uses the
+// x-drts-internal-key header anymore. The dual-key rotation/revocation
+// mechanism itself is still generic, reusable code, so it keeps coverage
+// here via this retired fixture passed explicitly to evaluateInternalKey,
+// rather than depending on a live registry entry for that header.
+const RETIRED_CONTROL_PLANE_PROXY: InternalKeyExceptionMetadata = {
+  exceptionId: "INTERNAL_KEY_EXCP_002",
+  owner: "control-plane-ops",
+  purpose:
+    "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
+  scope: ["* *", "POST partner/ingress/handoff", "POST auth/token"],
+  ttl: "2026-10-31T23:59:59Z",
+  expiresAt: "2026-10-31T23:59:59Z",
+  networkBoundary: "control-plane-proxy-to-api",
+  rotationCadence: "14d",
+  usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
+  removalDate: "2026-10-31",
+  removalPlan: "Retired 2026-10-02 by SEC-INTERNAL-KEY-WIF-MIGRATION-20260930.",
+  header: "x-drts-internal-key",
+  envVar: "DRTS_INTERNAL_KEY",
+  rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
+  revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
+  status: "active",
+};
 
 describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)", () => {
   beforeEach(() => {
@@ -23,13 +52,14 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
   });
 
   it("verifies every production internal-key exception has complete metadata", () => {
-    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(2);
+    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(1);
 
     const ids = INTERNAL_KEY_EXCEPTION_REGISTRY.map((e) => e.exceptionId);
     expect(ids).toContain("INTERNAL_KEY_EXCP_001");
-    expect(ids).toContain("INTERNAL_KEY_EXCP_002");
-    // EXCP_003 retired 2026-09-01 to IAM-BG-001; see internal-key-exceptions.md.
+    // EXCP_003 retired 2026-09-01 to IAM-BG-001; EXCP_002 retired 2026-10-02
+    // to WIF assertions; see internal-key-exceptions.md.
     expect(ids).not.toContain("INTERNAL_KEY_EXCP_003");
+    expect(ids).not.toContain("INTERNAL_KEY_EXCP_002");
 
     for (const excp of INTERNAL_KEY_EXCEPTION_REGISTRY) {
       expect(() => validateExceptionMetadata(excp)).not.toThrow();
@@ -42,48 +72,9 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     }
   });
 
-  it("allows dual-key rotation overlap where both active primary and previous keys succeed", async () => {
+  it("validateInternalKey now rejects x-drts-internal-key outright (INTERNAL_KEY_EXCP_002 retired, no registry entry uses that header)", async () => {
     const primaryKey = "primary-key-32-chars-long-secret-key-1";
-    const previousKey = "previous-key-32-chars-long-secret-key-2";
-
     process.env.DRTS_INTERNAL_KEY = primaryKey;
-    process.env.DRTS_INTERNAL_KEY_PREVIOUS = previousKey;
-
-    // 1. Primary key request succeeds
-    await expect(
-      validateInternalKey(
-        {
-          method: "POST",
-          originalUrl: "/api/partner/ingress/handoff",
-          headers: {
-            "x-drts-internal-key": primaryKey,
-          },
-        },
-        primaryKey,
-      ),
-    ).resolves.not.toThrow();
-
-    // 2. Previous key request during rotation overlap succeeds
-    await expect(
-      validateInternalKey(
-        {
-          method: "POST",
-          originalUrl: "/api/partner/ingress/handoff",
-          headers: {
-            "x-drts-internal-key": previousKey,
-          },
-        },
-        primaryKey,
-      ),
-    ).resolves.not.toThrow();
-  });
-
-  it("rejects revoked key even during rotation window with generic 401 INTERNAL_KEY_INVALID and no leaked metadata", async () => {
-    const primaryKey = "primary-key-32-chars-long-secret-key-1";
-    const revokedKey = "revoked-key-32-chars-long-secret-key-x";
-
-    process.env.DRTS_INTERNAL_KEY = primaryKey;
-    process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS = `${revokedKey},some-other-revoked-key`;
 
     let caught: ApiRequestError | null = null;
     try {
@@ -92,7 +83,7 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
           method: "POST",
           originalUrl: "/api/partner/ingress/handoff",
           headers: {
-            "x-drts-internal-key": revokedKey,
+            "x-drts-internal-key": primaryKey,
           },
         },
         primaryKey,
@@ -103,9 +94,45 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
 
     expect(caught?.getStatus()).toBe(401);
     expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
-    const responsePayload = caught?.getResponse() as Record<string, unknown>;
-    expect(responsePayload).not.toHaveProperty("exceptionId");
-    expect(responsePayload).not.toHaveProperty("keyState");
+  });
+
+  it("the dual-key rotation/revocation mechanism itself still works, exercised directly via evaluateInternalKey against a retired fixture", () => {
+    const primaryKey = "primary-key-32-chars-long-secret-key-1";
+    const previousKey = "previous-key-32-chars-long-secret-key-2";
+    const revokedKey = "revoked-key-32-chars-long-secret-key-x";
+
+    // 1. Primary key request succeeds
+    expect(
+      evaluateInternalKey(primaryKey, primaryKey, {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/partner/ingress/handoff",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
+      }).valid,
+    ).toBe(true);
+
+    // 2. Previous key request during rotation overlap succeeds
+    expect(
+      evaluateInternalKey(previousKey, primaryKey, {
+        headerName: "x-drts-internal-key",
+        requestMethod: "POST",
+        requestPath: "/api/partner/ingress/handoff",
+        previousKey,
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
+      }).valid,
+    ).toBe(true);
+
+    // 3. Revoked key is rejected even though it matches neither primary nor
+    // previous -- revocation is checked up front.
+    const revokedResult = evaluateInternalKey(revokedKey, primaryKey, {
+      headerName: "x-drts-internal-key",
+      requestMethod: "POST",
+      requestPath: "/api/partner/ingress/handoff",
+      revokedKeys: [revokedKey, "some-other-revoked-key"],
+      registry: [RETIRED_CONTROL_PLANE_PROXY],
+    });
+    expect(revokedResult.valid).toBe(false);
+    expect(revokedResult.code).toBe("INTERNAL_KEY_REVOKED");
   });
 
   it("supports rotation overlap and revocation on scoped internal keys", () => {
@@ -174,40 +201,22 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
   });
 
-  it("fails closed when an internal key exception is expired with generic 401 INTERNAL_KEY_INVALID", async () => {
-    const targetExcp = INTERNAL_KEY_EXCEPTION_REGISTRY.find(
-      (e) => e.exceptionId === "INTERNAL_KEY_EXCP_002",
-    )!;
+  it("fails closed when an internal key exception is expired with generic 401 INTERNAL_KEY_INVALID", () => {
+    const expiredFixture: InternalKeyExceptionMetadata = {
+      ...RETIRED_CONTROL_PLANE_PROXY,
+      expiresAt: "2025-01-01T00:00:00Z",
+    };
+    const key = "valid-key-format-32-chars-value-x";
 
-    const originalExpiresAt = targetExcp.expiresAt;
-    try {
-      // Force exception expiration
-      targetExcp.expiresAt = "2025-01-01T00:00:00Z";
+    const result = evaluateInternalKey(key, key, {
+      headerName: "x-drts-internal-key",
+      requestMethod: "POST",
+      requestPath: "/api/partner/ingress/handoff",
+      registry: [expiredFixture],
+    });
 
-      const key = "valid-key-format-32-chars-value-x";
-      process.env.DRTS_INTERNAL_KEY = key;
-
-      let caught: ApiRequestError | null = null;
-      try {
-        await validateInternalKey(
-          {
-            method: "POST",
-            originalUrl: "/api/partner/ingress/handoff",
-            headers: {
-              "x-drts-internal-key": key,
-            },
-          },
-          key,
-        );
-      } catch (err) {
-        caught = err as ApiRequestError;
-      }
-
-      expect(caught?.getStatus()).toBe(401);
-      expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
-    } finally {
-      targetExcp.expiresAt = originalExpiresAt;
-    }
+    expect(result.valid).toBe(false);
+    expect(result.code).toBe("INTERNAL_KEY_EXPIRED");
   });
 
   it("fails closed when an undocumented internal key header is used", () => {

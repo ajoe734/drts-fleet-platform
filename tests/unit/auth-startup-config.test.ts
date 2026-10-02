@@ -34,8 +34,26 @@ function buildValidProductionEnv(): Record<string, string> {
       "https://app.drts.internal,https://admin.drts.internal",
     SESSION_STORE_URL: "redis://redis.internal:6379/0",
     AUDIT_STORE_URL: "postgres://user:pass@db.internal:5432/drts_audit",
-    DRTS_INTERNAL_KEY: VALID_STRONG_SECRET,
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 is
+    // retired, so a "fully configured production env" no longer sets
+    // DRTS_INTERNAL_KEY as a credential -- configuring it without a
+    // matching INTERNAL_KEY_EXCEPTION_REGISTRY entry now fails startup (see
+    // the "fails when DRTS_INTERNAL_KEY is configured without a documented
+    // exception" test below). The complete workload-identity validation set
+    // is the other half of the `!internalKey && !workloadIdentityConfigured`
+    // check and is what a real production deploy now configures instead.
     DRTS_INTERNAL_KEY_ENFORCED: "true",
+    WORKLOAD_IDENTITY_ISSUER: "https://workload.drts.internal",
+    WORKLOAD_IDENTITY_AUDIENCE: "https://api.drts.internal",
+    WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY: VALID_STRONG_SECRET,
+    WORKLOAD_IDENTITY_SERVICE_PRINCIPALS: JSON.stringify([
+      {
+        principalId: "prod-web-runtime",
+        subject: "prod-web-runtime@drts-prod.iam.gserviceaccount.com",
+        issuer: "https://workload.drts.internal",
+        allowedTokenAudiences: ["https://api.drts.internal"],
+      },
+    ]),
     PASSENGER_SUBJECT_PEPPER: VALID_STRONG_SECRET,
     PASSENGER_RIDE_TOKEN_PEPPER: VALID_STRONG_SECRET,
   };
@@ -416,6 +434,24 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
     const report = buildAuthStartupConfigReport(env);
     expect(
       report.issues.some((i) => i.control === "DRTS_INTERNAL_KEY_ENFORCED"),
+    ).toBe(true);
+  });
+
+  it("fails when DRTS_INTERNAL_KEY is configured without a documented exception (INTERNAL_KEY_EXCP_002 retired, SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      DRTS_INTERNAL_KEY: VALID_STRONG_SECRET,
+    };
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(report.valid).toBe(false);
+    expect(
+      report.issues.some(
+        (i) =>
+          i.control === "DRTS_INTERNAL_KEY" &&
+          i.code === "MISSING_CONTROL" &&
+          i.issue.includes("lacks a documented exception entry"),
+      ),
     ).toBe(true);
   });
 });

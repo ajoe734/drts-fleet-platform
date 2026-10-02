@@ -100,20 +100,23 @@ describe("SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: deploy-prod.yml mounts 
   });
 });
 
-describe("SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: dev keeps its own notice-only (non-fail-closed) degrade, unchanged", () => {
-  it("deploy-dev.yml still treats the Google registry secret as optional and does not exit 1 when it is absent", () => {
+describe("SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: dev now fails closed on the Google registry too, since INTERNAL_KEY_EXCP_002 is retired", () => {
+  it("deploy-dev.yml exits 1 when the Google workload identity registry secret is absent", () => {
     const workflow = readFileSync(devWorkflowPath, "utf8");
 
-    expect(workflow).toContain(
-      `::notice::\${workload_google_registry_secret} is absent; dev deploys without the Google workload identity service principal registry`,
-    );
-    // The dev branch for this specific secret must not itself exit 1 -- the
-    // check is "mount if present", not "fail if absent", unlike staging/prod.
+    // INTERNAL_KEY_EXCP_002 used to give this secret a safe notice-only
+    // degrade (callers fell back to x-drts-internal-key). That exception is
+    // retired, so an absent registry now means every control-plane proxy,
+    // auth/token caller, and partner/ingress/handoff bootstrap caller has no
+    // fallback -- this must fail the deploy before any API secret is set,
+    // the same fail-closed shape staging/prod already use.
     const devGoogleBlock = workflow.match(
       /if gcloud secrets describe "\$workload_google_registry_secret"[\s\S]*?\n {10}fi\n/,
     );
     expect(devGoogleBlock).not.toBeNull();
-    expect(devGoogleBlock![0]).not.toContain("exit 1");
+    expect(devGoogleBlock![0]).toContain("::error::");
+    expect(devGoogleBlock![0]).toContain("exit 1");
+    expect(devGoogleBlock![0]).not.toContain("::notice::");
   });
 });
 

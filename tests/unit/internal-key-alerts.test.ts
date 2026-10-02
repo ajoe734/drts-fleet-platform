@@ -7,7 +7,31 @@ import {
   evaluateInternalKey,
   internalKeyAuditRecorder,
   internalKeyMetrics,
+  type InternalKeyExceptionMetadata,
 } from "../../apps/api/src/common/auth";
+
+// INTERNAL_KEY_EXCP_002 was retired 2026-10-02 by
+// SEC-INTERNAL-KEY-WIF-MIGRATION-20260930. This test only needs some
+// registered exception on the x-drts-internal-key header to exercise the
+// evaluator/audit-recorder plumbing, so it keeps the retired exception's
+// shape as a local fixture rather than depending on the live registry.
+const RETIRED_CONTROL_PLANE_PROXY: InternalKeyExceptionMetadata = {
+  exceptionId: "INTERNAL_KEY_EXCP_002",
+  owner: "control-plane-ops",
+  purpose:
+    "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
+  scope: ["* *"],
+  ttl: "2026-10-31T23:59:59Z",
+  expiresAt: "2026-10-31T23:59:59Z",
+  networkBoundary: "control-plane-proxy-to-api",
+  rotationCadence: "14d",
+  usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
+  removalDate: "2026-10-31",
+  removalPlan: "Retired 2026-10-02 by SEC-INTERNAL-KEY-WIF-MIGRATION-20260930.",
+  header: "x-drts-internal-key",
+  envVar: "DRTS_INTERNAL_KEY",
+  status: "active",
+};
 
 const workspaceRoot = process.cwd();
 const alertsPath = path.resolve(
@@ -89,6 +113,7 @@ describe("internal key alert rules", () => {
       headerName: "x-drts-internal-key",
       requestPath: "/api/tenants",
       requestMethod: "GET",
+      registry: [RETIRED_CONTROL_PLANE_PROXY],
     });
     expect(validEval.valid).toBe(true);
 
@@ -105,6 +130,7 @@ describe("internal key alert rules", () => {
       headerName: "x-drts-internal-key",
       requestPath: "/api/tenants",
       requestMethod: "GET",
+      registry: [RETIRED_CONTROL_PLANE_PROXY],
     });
 
     const driftEvent = internalKeyAuditRecorder.recordDrift(invalidEval, {

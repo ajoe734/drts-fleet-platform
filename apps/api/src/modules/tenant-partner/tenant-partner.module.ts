@@ -1,6 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import { DatabaseModule, DatabaseService } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -53,6 +54,7 @@ export function createTenantInvitationNotificationDeliveryService(
   providers: [
     TenantPartnerService,
     JwtAuthService,
+    GoogleWorkloadIdentityAdapter,
     TenantPartnerRepository,
     {
       provide: NotificationDeliveryService,
