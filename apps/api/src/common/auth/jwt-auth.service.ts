@@ -158,6 +158,13 @@ export interface IssueSessionTokenOptions {
   audience?: string[] | null;
   workloadExchangeNonceHash?: string | null;
   breakGlassGrantId?: string | null;
+  // Already-fetched membership/role-binding updatedAt values for a workforce
+  // (platform/ops) principal. When set, the signed tokenVersion is derived
+  // from these plus the principal's actually-persisted updatedAt after
+  // ensurePrincipal runs below, instead of a timestamp guessed before the
+  // write happens — the guess and the write can land on different clock
+  // reads a tick apart, which fails the very session being issued.
+  workforceVersionTimestamps?: string[];
 }
 
 const SIGN_KEY_REQUIRED_ENV = ["JWT_PRIVATE_KEY", "JWT_SECRET"] as const;
@@ -616,7 +623,7 @@ export class JwtAuthService {
     const sessionId =
       options?.sessionId ?? identity.sessionId ?? this.createOpaqueId("sid");
     const tokenId = identity.tokenId ?? this.createOpaqueId("jti");
-    const tokenVersion =
+    let tokenVersion =
       options?.tokenVersion ?? identity.tokenVersion ?? Date.parse(issuedAt);
     const policyVersion = this.resolvePolicyVersion(
       options?.policyVersion ?? identity.policyVersion,
@@ -660,7 +667,7 @@ export class JwtAuthService {
       principalId &&
       (options?.ensurePrincipal ?? !membershipId)
     ) {
-      await this.identityRepository.ensurePrincipalRecord(
+      const ensuredPrincipal = await this.identityRepository.ensurePrincipalRecord(
         this.buildPrincipalRecord(
           identity,
           principalId,
@@ -668,6 +675,15 @@ export class JwtAuthService {
           issuedAt,
         ),
       );
+      if (options?.workforceVersionTimestamps) {
+        // Sign the version that was actually persisted, not the timestamp
+        // guessed before this write landed, so it matches what
+        // validateDurableState recomputes from the same rows later.
+        tokenVersion = this.computeWorkforceTokenVersion([
+          ensuredPrincipal.updatedAt,
+          ...options.workforceVersionTimestamps,
+        ]);
+      }
     }
 
     if (this.identityRepository && principalId) {
