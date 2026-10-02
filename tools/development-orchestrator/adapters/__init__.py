@@ -8,6 +8,7 @@ from adapters.codex import CodexAdapter
 from adapters.file_inbox import FileInboxAdapter
 from adapters.gemini import GeminiAdapter
 from adapters.antigravity import AntigravityAdapter
+from adapters.pi import PiAdapter
 
 
 ADAPTERS: dict[str, type[BaseAdapter]] = {
@@ -18,6 +19,7 @@ ADAPTERS: dict[str, type[BaseAdapter]] = {
     "gemini": GeminiAdapter,
     "antigravity": AntigravityAdapter,
     "codex": CodexAdapter,
+    "pi": PiAdapter,
 }
 
 
