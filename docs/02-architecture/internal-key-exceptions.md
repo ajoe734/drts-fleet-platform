@@ -2081,14 +2081,14 @@ two gaps none of the prior eight sessions' review rounds had caught:
 
 | Area | Change |
 | --- | --- |
-| Registry | INTERNAL_KEY_EXCP_002 entry deleted from `INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts`). Only `INTERNAL_KEY_EXCP_001` remains. |
+| Registry | INTERNAL_KEY_EXCP_002 entry deleted from `INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts`). Only INTERNAL_KEY_EXCP_001 remains. |
 | Finding 1 fix | `tenant-partner.controller.ts`'s `issuePartnerIngressHandoff` now calls a new exported `verifyGoogleAssertionOrInternalKey` (refactored out of `validateInternalKey`'s shared core, `internal-key.middleware.ts`) with `{ googleWorkloadIdentityAdapter, requireCredential: true }`. `GoogleWorkloadIdentityAdapter` is now a provider in `TenantPartnerModule` (write-scope expansion: `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts` and `tenant-partner.module.ts`, outside the task's original `write_scopes`; `IdentityModule` was already imported there so no circular dependency with `AuthModule` was introduced). `verifyGoogleAssertionOrInternalKey` deliberately does **not** inherit `validateInternalKey`'s `hasBearerAuthorization` bypass (this route has no downstream Bearer-verifying guard -- an arbitrary forged `Authorization: Bearer x` header must not satisfy this gate the way it safely can for the general proxy middleware) nor its dev-lenient "no key configured in non-strict env → allow" skip (`requireCredential: true` forces the original `requireInternalKey` behavior of always demanding *some* credential). Regression tests: `apps/api/tests/unit/tenant-partner.controller.test.ts` (WIF success, WIF-verification-failure non-masking, legacy-key-now-rejected) and a new `verifyGoogleAssertionOrInternalKey` describe block in `tests/unit/internal-key.middleware.test.ts` (bearer-bypass-does-not-apply, `requireCredential` fails closed even non-strict, accepts a real signed Google assertion). |
 | Finding 2 | Documented here (§12.1 item 2) and in a new regression test (`tests/unit/auth-startup-config.test.ts`'s "fails when DRTS_INTERNAL_KEY is configured without a documented exception"). Not a code fix -- `deploy-staging.yml`/`deploy-prod.yml` are outside this task's `write_scopes`, and this task cannot read either project's secrets to know whether to touch the mount. Both test files' own "fully configured production env" base fixture (`buildValidProductionEnv()` / `getValidProdEnv()`) was updated to the post-retirement valid shape: no `DRTS_INTERNAL_KEY`, full `WORKLOAD_IDENTITY_*` set instead -- this is what a real production deploy must configure now. |
 | Dual-send removal (callers #1-9) | Removed the `x-drts-internal-key` send from all 9 previously-inventoried callers: `apps/passenger-web`, `apps/enterprise-dispatch-web` (both the control-plane-proxy route and `enterprise-session.server.ts`), `apps/partner-booking-web` (both the proxy route and `api-client.ts`), `apps/tenant-console-web`'s proxy route, `apps/referral-embed-web` (`embed-api.ts` and `embed-booking-api.ts`), and `deploy-dev.yml`'s operational-acceptance step (removed the `internal_key=$(gcloud secrets versions access ...)` fetch and both `x-drts-internal-key` curl headers). Only `x-drts-google-id-token` remains on each. |
 | Callers #11-12 | `tests/smoke/lib/helpers.sh` (`SMOKE_INTERNAL_KEY`) and `tests/e2e/lib/helpers.sh` (`E2E_INTERNAL_KEY`) now `exit 1` with a clear message identifying the retirement and pointing at the WIF alternative, immediately on sourcing, if either var is set -- per Supervisor's integration_notes instruction -- rather than silently sending a header no environment will ever accept again. The now-dead `if [[ -n "$...INTERNAL_KEY" ]]; then curl_args+=(-H "x-drts-internal-key: ...")` blocks were removed from both files' `http_call`-style functions (unreachable once the fail-fast check passes). `tools/ci/run-smoke-tests.sh`'s usage comment updated to match. |
 | `deploy-dev.yml` fail-closed upgrade | The `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret mount (§7.5) changed from a notice-only degrade (safe while INTERNAL_KEY_EXCP_002 provided a fallback) to `::error::` + `exit 1` when the secret is absent -- the fallback it used to degrade to no longer exists, so an absent registry must now fail the deploy before any API secret is set, matching staging/prod's existing fail-closed pattern (§10.4). `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts`'s "dev keeps its own notice-only degrade" test inverted to assert the new fail-closed shape instead. |
 | Registry test coverage | `tests/unit/internal-key-exception-registry.test.ts`, `tests/unit/internal-key-alerts.test.ts`, and `tests/integration/internal-key-rotation-retirement.integration.test.ts` all had tests that implicitly depended on the live registry containing an `x-drts-internal-key`-headed exception (the generic `evaluateInternalKey`/rotation/revocation mechanism tests, not really about INTERNAL_KEY_EXCP_002 specifically) -- updated to pass an explicit retired-fixture `registry:` array, following the exact pattern already established for INTERNAL_KEY_EXCP_003's 2026-09-01 retirement (`RETIRED_STAGING_ONLY` in the first file). `tests/unit/internal-key-wif-configuration.test.ts`'s "does not remove INTERNAL_KEY_EXCP_002" test (whose entire premise this candidate intentionally reverses) rewritten to assert the removal. `apps/api/tests/unit/auth-bootstrap.test.ts` had several tests whose only path to a successful session was the now-retired plain internal-key bootstrap to `/api/auth/token` -- each converted to assert the new `INTERNAL_KEY_INVALID` rejection (the live WIF-equivalent coverage for the tenant-claims case already existed as the next test in the same file). `tests/unit/system-remediation/sr-live-map-001/session-contract.test.ts`'s two `ops_observer` tests rewritten to exercise the real Google workload identity path (mocked `verifyServicePrincipal`, same pattern as that file's own pre-existing "WIF direct login" test) instead of the retired internal key; its `driver_user` test (no live WIF equivalent exists for that actor type) kept on `validateInternalKey`'s dev-lenient bypass by simply no longer configuring `DRTS_INTERNAL_KEY` at all. `tests/integration/iap-subject-adapter.integration.test.ts` had three tests that used a valid internal key only to get past the gate before testing unrelated IAP-specific logic further downstream; stopped configuring `DRTS_INTERNAL_KEY` in those three (none set `APP_ENV` to a strict value, so the dev-lenient bypass already carries them through unchanged). |
-| CI audit script | `operations/security/verify-internal-key-exceptions.py` matches ``INTERNAL_KEY_EXCP_\d+`` wrapped in single backticks anywhere in this document against the registry array; removing the array entry without also touching the doc would fail CI ("documented in Markdown but missing in TypeScript registry"). All 19 remaining backtick-wrapped `` INTERNAL_KEY_EXCP_002 `` mentions throughout this document's history (sections 2, 6, 7.2, 7.6, 7.7, 7.9.1 table, 9.3, 9.4, 10, within this candidate's own prose) de-backticked to plain INTERNAL_KEY_EXCP_002, following the exact convention already established in the "Retired exceptions" paragraph for INTERNAL_KEY_EXCP_003. Re-ran `python3 operations/security/verify-internal-key-exceptions.py` after: `AUDIT PASSED`, one registered exception (`INTERNAL_KEY_EXCP_001`). |
+| CI audit script | `operations/security/verify-internal-key-exceptions.py` matches ``INTERNAL_KEY_EXCP_\d+`` wrapped in single backticks anywhere in this document against the registry array; removing the array entry without also touching the doc would fail CI ("documented in Markdown but missing in TypeScript registry"). All 19 remaining backtick-wrapped `` INTERNAL_KEY_EXCP_002 `` mentions throughout this document's history (sections 2, 6, 7.2, 7.6, 7.7, 7.9.1 table, 9.3, 9.4, 10, within this candidate's own prose) de-backticked to plain INTERNAL_KEY_EXCP_002, following the exact convention already established in the "Retired exceptions" paragraph for INTERNAL_KEY_EXCP_003. Re-ran `python3 operations/security/verify-internal-key-exceptions.py` after: `AUDIT PASSED`, one registered exception (INTERNAL_KEY_EXCP_001, plain text per §13.4 below). |
 
 ### 12.3 Verification
 
@@ -2268,7 +2268,7 @@ ever echoed outside its own `::add-mask::` registration line.
 | Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
 | --- | --- | --- | --- | --- |
 | F1 / acceptance 一: the two tokens must be provably distinct without relying on any clock comparison between this runner and Google's issuer | `.github/workflows/deploy-dev.yml`: `Mint identity token — API operational acceptance (Tenant Ops)` step rewritten from a second `auth@v2` action (preceded by a separate clock-wait step) to a `gcloud auth print-identity-token` call inside a bounded compare-and-retry loop, keyed off the actual token value returned, not any clock. | Before: wait step bounded only this runner's `date +%s`; a runner-ahead clock skew relative to Google's issuer could let the loop exit before the issuer's own second advanced. After: loop re-mints and re-compares up to 5 times against the real Tenant Admin token string; no clock read anywhere in the mechanism. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 14/14 passed, including three new tests that execute the extracted step body under `bash` with `gcloud`/`sleep` replaced by mock functions: (1) two identical mock responses followed by a distinct one still yields the distinct token in `GITHUB_OUTPUT` after exactly 3 `gcloud` calls; (2) 5 identical mock responses exits non-zero, calls `gcloud` exactly 5 times, writes no `id_token=` line, and emits `::error::`; (3) stdout contains no bare occurrence of either fake token outside an `::add-mask::`-prefixed line. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"`: exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud auth print-identity-token` CLI or real Google-issued tokens -- this worker has no GCP credentials or deploy trigger per the task's own guardrails, so the retry loop's interaction with Google's real issuer (e.g., whether a same-audience re-mint this close together always advances `iat`) is exercised only through the mocked-`gcloud` executable tests above, not end-to-end. Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI. |
-| F2 / CI audit regression | `docs/02-architecture/internal-key-exceptions.md` §13, de-backticked plain INTERNAL_KEY_EXCP_002 (commit `87c5d222b`, already present on this candidate SHA; re-confirmed here) | Before: backtick-wrapped INTERNAL_KEY_EXCP_002 tripped the audit script. After: plain INTERNAL_KEY_EXCP_002, matching every other mention in this document. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`, one registered exception (`INTERNAL_KEY_EXCP_001`). | None -- this is a documentation-only, already-landed fix; re-confirmed rather than re-done. |
+| F2 / CI audit regression | `docs/02-architecture/internal-key-exceptions.md` §13, de-backticked plain INTERNAL_KEY_EXCP_002 (commit `87c5d222b`, already present on this candidate SHA; re-confirmed here) | Before: backtick-wrapped INTERNAL_KEY_EXCP_002 tripped the audit script. After: plain INTERNAL_KEY_EXCP_002, matching every other mention in this document. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`, one registered exception (INTERNAL_KEY_EXCP_001). | None -- this is a documentation-only, already-landed fix; re-confirmed rather than re-done. |
 
 No GCP resources, secrets, or GitHub variables were touched; nothing in this
 reopen fix mounts, reads, or prints any secret or token value; no local
@@ -2434,3 +2434,63 @@ server or Docker container was started. Acceptance 四 (two consecutive real
 `deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
 plus independent reviewer approval) remain Supervisor's and the reviewer's
 steps, not this worker's.
+
+### 13.4 CI audit regression from a concurrent dev-side retirement (F4)
+
+The hosted `Verify Internal Key Exceptions` job failed on candidate
+`3b943ea1d8168` (run `37013696428`, job `110859289648`), on the
+`pull/2274/merge` ref, not on this branch's own HEAD:
+
+```
+Documented Exceptions in Markdown (docs/02-architecture/internal-key-exceptions.md): ['INTERNAL_KEY_EXCP_001']
+Registered Exceptions in Code (apps/api/src/common/auth/internal-key-exception-registry.ts): []
+--- AUDIT FAILED ---
+  ❌ Exception 'INTERNAL_KEY_EXCP_001' documented in Markdown but missing in TypeScript registry!
+```
+
+**Root cause:** unrelated task `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`
+(PR #2264, merged to `dev` at `7d3aeb9013a3`, after this candidate's branch
+point) retired `INTERNAL_KEY_EXCP_001` from both the registry and this
+document's own `dev`-side copy -- `python3 operations/security/verify-internal-key-exceptions.py`
+run standalone against `dev` HEAD passes with both lists empty. This
+candidate's own branch never touched the registry or section 2's exception
+table (confirmed identical to the merge-base `210c0bea`, so it merges
+cleanly with `dev`'s deletion there), but three of *this task's own* §12/§13
+evidence-table cells referred to the (at-the-time still-registered)
+`INTERNAL_KEY_EXCP_001` wrapped in single backticks -- the exact pattern
+`load_doc_exceptions` in `verify-internal-key-exceptions.py` matches
+(`` `(INTERNAL_KEY_EXCP_\d+)` ``), same class of false positive as F2 above,
+just for the other exception ID. Those three backtick-wrapped mentions
+survive the merge with `dev` untouched (`dev` never edited those lines), so
+the merge ref's markdown scan reports `INTERNAL_KEY_EXCP_001` as
+"documented" while the merged registry (now empty, from `dev`'s side) no
+longer has it.
+
+**Fix:** de-backticked the three self-introduced mentions (§12.2's "Only
+`INTERNAL_KEY_EXCP_001` remains" and two "one registered exception
+(`INTERNAL_KEY_EXCP_001`)" asides in §12.2 and §13.2's evidence tables),
+leaving them as plain prose, matching the existing convention established
+for retired-exception mentions (F2 above). No change to section 2's active
+exception table, the registry, or the workflow -- that section is owned by
+the other task and will merge cleanly.
+
+**Verification:** ``grep -n '`INTERNAL_KEY_EXCP_001`' docs/02-architecture/internal-key-exceptions.md``
+now matches only section 2's still-active table row (untouched by this
+branch, identical to the merge-base, and removed automatically once `dev`'s
+deletion applies on merge). `python3 operations/security/verify-internal-key-exceptions.py`
+run against this branch's own HEAD: exit 0, `AUDIT PASSED`, one registered
+exception (`INTERNAL_KEY_EXCP_001`, correct for this branch's own
+unmerged state). Simulated the actual merge locally with
+`git merge-file -p <this branch's doc> <merge-base '210c0bea' doc> <origin/dev doc>`
+(full files, no worktree/clone mutation) and re-ran the exact
+`` `(INTERNAL_KEY_EXCP_\d+)` `` regex against the merged output: zero
+matches (one unrelated hunk around this exact edit reports a textual
+conflict against `diff3`/`git merge-file`'s algorithm because `dev`
+independently rewrote the same explanatory sentence with near-identical
+wording while retiring its own exception, but both sides of that conflict
+already read as plain, non-backtick-wrapped text, so the audit regex matches
+nothing regardless of which side a real merge resolves to). Did not run
+`git merge origin/dev` on this branch (no conflict in files owned by this
+task; the only overlap is the cosmetic prose conflict above, which does not
+require resolving to pass CI). No GCP resource, secret, or GitHub variable
+touched; no local server or Docker started.
