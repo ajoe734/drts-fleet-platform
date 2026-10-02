@@ -1394,8 +1394,10 @@ every previously migrated caller are untouched.
 
 Owner Codex; reviewer Claude2. This task owns the live-map bootstrap and
 teardown authorization slice. C114 PR #2235 (`e3c7ed02701c387d82786bcfd8877e2618851f3b`)
-is already merged; its remaining hosted acceptance stays pending. No C114
-coverage geometry, freshness or browser assertions are changed here.
+is already merged; draft PR #2247 at `5d23550587b1bbb6ce33be0d8948cc50a6dbd07f`
+contains additional consumer/cleanup repairs. That draft was discovered during
+final GitHub cross-check and must be composed before candidate handoff. C114
+remaining hosted acceptance stays pending.
 
 Design: register a dedicated non-human live-map identity. A server-owned
 `driverProvisioningGrant.driverId` authorizes a 15-minute system session with
@@ -1403,8 +1405,7 @@ exactly `driver:provision`, no workforce role or membership. A signed driver
 restriction and an explicit route ceiling are required: system realm alone
 also reaches routes with no required scopes. Provision/revoke must enforce
 the target driver. Keep the observer identity separate from that session;
-do not add `platform_admin` to any service account. Operator steps and final
-verification follow in this section before candidate handoff.
+do not add `platform_admin` to any service account. Operator steps and verification are recorded below.
 
 Read-only dev check 2026-10-02: revision `drts-dev-api-00037-qx9`; live registry
 contains `dev-web-runtime`, `dev-ci-deployer`, `dev-scheduler`, no observer
@@ -1415,7 +1416,211 @@ observer WIF exchange. No new live session was issued in this task; current
 observer success is **not established**, and the observed registry denies its
 requested actor. Machine evidence: `.local/sec-live-map-wif/registry-summary.json`.
 
-| Finding / acceptance | Source and change | Before → after | Verification | Limits |
-| --- | --- | --- | --- | --- |
-| WIF cannot issue least-privilege provisioning session | `AuthController.issueToken`, Google registry adapter | Base `215d1facf`: production-path regression fails at `WORKLOAD_CI_TENANT_ACTOR_DENIED`; fix pending | `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`, exit 1; `.local/sec-live-map-wif/red.log` | External JWKS mocked with test RSA key; production signature, registry, controller and memory session repository used; no server/PG |
-| Teardown is also an internal-key caller | `session-teardown.ts` reads JWT secret and mints platform admin | Fix pending | Source inventory | Must migrate alongside bootstrap |
+| Finding / acceptance                                  | Source and change                                               | Before → after                                                                                                         | Verification                                                                                                                                 | Limits                                                                                                                              |
+| ----------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| WIF cannot issue least-privilege provisioning session | `AuthController.issueToken`, Google registry adapter            | Base `215d1facf`: production-path regression fails at `WORKLOAD_CI_TENANT_ACTOR_DENIED`; new grant/session path passes | `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`, exit 1; `.local/sec-live-map-wif/red.log` | External JWKS mocked with test RSA key; production signature, registry, controller and memory session repository used; no server/PG |
+| Teardown is also an internal-key caller               | `session-teardown.ts` reads JWT secret and mints platform admin | Migrated; see §10.2                                                                                                            | Source inventory                                                                                                                             | Must migrate alongside bootstrap                                                                                                    |
+
+### 10.1 Authorization and operator handoff
+
+Implemented boundary:
+
+- The workflow uses the existing provider with a **new dedicated**
+  `drts-dev-live-map` service account. Entry B / the deployer is unchanged.
+  Entry D below has no tenant impersonation grants, platform role, wildcard
+  scope, or generic system role. Its observer role serves the existing,
+  separate read-only map observer session; the provisioning session never
+  inherits that role or `regulatory:read`.
+- `AuthController.issueToken` accepts the explicit provisioning grant only
+  with the CI gate enabled outside staging/production. It constructs the
+  session claims from verified registry data, ignores no requested authority
+  silently, and rejects foreign actors/realms/tenant/partner selectors and
+  extra scopes/roles. Unregistered system requests cannot fall back to an
+  internal key. Google direct workforce issuance is restricted to ops actors
+  in the ops realm; CI tenant grants stay tenant-admin/tenant-realm only.
+  In particular, an observer cannot request `x-realm: system` and `x-scopes: *`.
+- The signed `driverProvisioningDriverId` claim survives JWT validation and
+  request-identity conversion. `BootstrapAuthGuard` caps **both** ordinary
+  and open routes to `GET auth/session`, `POST auth/driver/device/invite`,
+  and `POST auth/driver/device/invite/revoke`. Existing realm/scope checks
+  still run. This matters because some system-accessible routes have no
+  scope requirement. There is no generic platform-admin or system escape.
+- Invitation creation must match the granted driver and cannot choose a
+  registration code or lifetime. Revocation checks the stored invitation's
+  driver before mutation, including consumed invitations and refresh families.
+  Idempotency scopes include the restricted principal and driver, preventing
+  reuse of a privileged caller's cached response. A grant can revoke any
+  known invitation code for its one isolated driver; it cannot revoke another
+  driver's invitation. The existing C114 isolation check still applies.
+- Both JWT and registry-based checks are server-side. A registry grant
+  withdrawal prevents new exchanges; already-issued provisioning sessions
+  expire after 15 minutes (or can be revoked in the existing session store).
+  No new database schema is needed.
+- Bootstrap exports the masked invite code and provisioning JWT immediately
+  after invite creation, so the `always()` cleanup can retry partial failures.
+  Cleanup reuses the restricted session, or obtains a new one using a freshly
+  minted WIF assertion if it expired. Revoking a consumed invitation also
+  revokes the device session. All cleanup API calls enforce allowed targets,
+  candidate SHA, redirect rejection and timeouts; unsuccessful cleanup exits
+  nonzero without logging credentials or response bodies.
+
+The following is **operator-only, not executed by the worker**. Do not grant
+project roles, Secret Manager access, `serviceAccountTokenCreator`, or
+impersonation rights to the deployer. `roles/iam.workloadIdentityUser` is bound
+only on the new account, to this repository's existing provider/pool trust.
+It permits the auth action to mint ID tokens; the account itself has no GCP
+resource permissions. See Google's [WIF service-account setup](https://github.com/google-github-actions/auth/tree/v2#workload-identity-federation-through-a-service-account)
+and [deployment-pipeline federation guide](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines).
+
+Run after this candidate has been reviewed/merged and the authorization code
+is available on the shared dev API. Independently coordinate the authorized
+immutable-SHA deployment/revision rollout to load the new registry secret
+version; these instructions do not trigger it. The API workflow already
+mounts `drts-dev-workload-identity-google-service-principals:latest`.
+
+```bash
+set -euo pipefail
+LIVE_MAP_PROJECT=$(gh variable get DEV_GCP_PROJECT_ID --repo ajoe734/drts-fleet-platform)
+LIVE_MAP_REGION=$(gh variable get DEV_GCP_REGION --repo ajoe734/drts-fleet-platform)
+LIVE_MAP_API=$(gh variable get DEV_CONTROL_PLANE_API_ORIGIN --repo ajoe734/drts-fleet-platform)
+test "$LIVE_MAP_PROJECT" = drts-dev-devcc-20260825
+test "$LIVE_MAP_REGION" = us-central1
+test "$LIVE_MAP_API" = https://drts-dev-api-r6ykdme3wa-uc.a.run.app
+LIVE_MAP_PROJECT_NUMBER=$(gcloud projects describe "$LIVE_MAP_PROJECT" --format='value(projectNumber)')
+LIVE_MAP_SA="drts-dev-live-map@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
+mkdir -p .local/sec-live-map-wif/operator
+
+# Read back trust before using it; do not change the existing provider.
+gcloud iam workload-identity-pools providers describe github \
+  --project="$LIVE_MAP_PROJECT" --location=global --workload-identity-pool=github-actions \
+  --format=json > .local/sec-live-map-wif/operator/provider.json
+jq -e '.attributeMapping["attribute.repository"] == "assertion.repository" and
+  .attributeCondition == "assertion.repository==\u0027ajoe734/drts-fleet-platform\u0027"' \
+  .local/sec-live-map-wif/operator/provider.json
+
+gcloud iam service-accounts describe "$LIVE_MAP_SA" --project="$LIVE_MAP_PROJECT" >/dev/null 2>&1 || \
+  gcloud iam service-accounts create drts-dev-live-map --project="$LIVE_MAP_PROJECT" \
+    --display-name='Dev live map acceptance only'
+gcloud iam service-accounts add-iam-policy-binding "$LIVE_MAP_SA" \
+  --project="$LIVE_MAP_PROJECT" --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${LIVE_MAP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/attribute.repository/ajoe734/drts-fleet-platform"
+
+# Preserve A/B/C. Refuse duplicates instead of silently replacing an entry.
+gcloud secrets versions access latest --project="$LIVE_MAP_PROJECT" \
+  --secret=drts-dev-workload-identity-google-service-principals \
+  > .local/sec-live-map-wif/operator/registry-before.json
+jq -e --arg sa "$LIVE_MAP_SA" \
+  'type == "array" and all(.[]; .principalId != "dev-live-map" and .serviceAccountEmail != $sa)' \
+  .local/sec-live-map-wif/operator/registry-before.json
+jq --arg sa "$LIVE_MAP_SA" --arg api "$LIVE_MAP_API" '. + [{
+  serviceAccountEmail: $sa,
+  principalId: "dev-live-map",
+  actorId: "live-map-observer",
+  displayName: "Dev live map acceptance",
+  roles: ["ops_observer"],
+  scopes: [],
+  allowedTokenAudiences: [$api, ($api + "/driver-provisioning")],
+  routeScopes: ["POST auth/token"],
+  ciTenantActorGrants: [],
+  driverProvisioningGrant: {driverId: "drv-demo-002"}
+}]' .local/sec-live-map-wif/operator/registry-before.json \
+  > .local/sec-live-map-wif/operator/registry-after.json
+
+# Operator reviews the additive diff before publishing the new version.
+diff -u .local/sec-live-map-wif/operator/registry-before.json \
+  .local/sec-live-map-wif/operator/registry-after.json || test "$?" -eq 1
+# Avoid overwriting an intervening registry edit between read and publish.
+gcloud secrets versions access latest --project="$LIVE_MAP_PROJECT" \
+  --secret=drts-dev-workload-identity-google-service-principals \
+  > .local/sec-live-map-wif/operator/registry-current.json
+cmp .local/sec-live-map-wif/operator/registry-before.json .local/sec-live-map-wif/operator/registry-current.json
+gcloud secrets versions add drts-dev-workload-identity-google-service-principals \
+  --project="$LIVE_MAP_PROJECT" --data-file=.local/sec-live-map-wif/operator/registry-after.json
+```
+
+Exact additive entry D for operators maintaining JSON elsewhere:
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-live-map@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-live-map",
+  "actorId": "live-map-observer",
+  "displayName": "Dev live map acceptance",
+  "roles": ["ops_observer"],
+  "scopes": [],
+  "allowedTokenAudiences": [
+    "https://drts-dev-api-r6ykdme3wa-uc.a.run.app",
+    "https://drts-dev-api-r6ykdme3wa-uc.a.run.app/driver-provisioning"
+  ],
+  "routeScopes": ["POST auth/token"],
+  "ciTenantActorGrants": [],
+  "driverProvisioningGrant": { "driverId": "drv-demo-002" }
+}
+```
+
+No new GitHub variable or secret is required. Existing `DEV_WIF_PROVIDER` and
+`DEV_GCP_PROJECT_ID` select the provider and deterministic account name;
+`DEV_WIF_SERVICE_ACCOUNT` stays unchanged for deployment callers. The workflow
+creates its own observer/provisioning/cleanup Google ID tokens with
+`id_token_include_email: true`. Separate observer/provisioning audiences prevent
+the replay ledger from rejecting the second exchange as the same assertion.
+The `DRTS_LIVE_MAP_GOOGLE_*_ID_TOKEN` values are masked, per-step action outputs,
+not repository secrets or saved artifacts. A fresh cleanup assertion handles
+runs lasting longer than the provisioning session's 15-minute lifetime.
+
+The existing provider trusts this repository, not only this workflow. Any
+repository workflow allowed by that trust can request this account's narrow
+capabilities. This does not confer deployment, secret-reading, tenant admin,
+or platform admin privileges. Further workflow-specific federation isolation
+would require a separate trust-policy task; no existing provider is widened.
+
+`INTERNAL_KEY_EXCP_002` remains unchanged: §9.2–9.4's other callers and
+staging/production rollout still gate global removal. No exception extension
+or removal is part of this candidate. C114's remaining real map/observer/device
+acceptance (including its separately tracked workforce-version concern) is not
+claimed by the mocked external-boundary unit tests here.
+
+### 10.2 Candidate verification ledger
+
+Execution: Node 22.23.2, pnpm 10.33.0, 2026-10-02. Code baseline is
+`215d1facf`; implementation anchors `9755ae4cb`, `06266a1ab`. The final candidate
+is the immutable PR head / full SHA in the machine-truth handoff, not either
+anchor. Local evidence is under `.local/sec-live-map-wif/` in the assigned task
+worktree. The logs' paths are machine-specific; the commands and outcomes below
+are durable review evidence. All started local checks have finished.
+
+| Finding / required acceptance                | Source / change                                                                                                     | Before → after                                                                                                                              | Checks and result                                                                                                                                                                                                                                                                                                                            | Remaining limits                                                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live map runner不再使用x-drts-internal-key` | `session-bootstrap.ts`, `session-teardown.ts`, live-entry-map workflow                                              | Both read JWT secret and issued platform-admin sessions → WIF-only, purpose-limited system session, separate observer assertion             | Source search finds zero `x-drts-internal-key`, `readInternalKey`, `platform_admin` in session scripts. Runner tests assert no legacy header; expired cleanup remints WIF. 98/98 map tests pass                                                                                                                                              | Real Google token/hosted run not executed; operator entry D and account pending                                                                       |
+| `取代方案只授予driver:provision所需最小權限` | `AuthController.issueToken`, adapter, signed claim in `JwtAuthService`, `BootstrapAuthGuard`, invite/revoke service | Original could expand to durable platform role scopes → 15m, exactly `driver:provision`, no session roles, fixed driver and 3-route ceiling | 27 production-path tests: valid issuance, exact operator JSON, real signature/audience/replay, unregistered+legacy-key rejection, selector/scope/role escalation, staging/production, scope-less/open route denial, cross-driver create/revoke and idempotency isolation. 173/173 root regression tests; 115/115 existing API auth/WIF tests | Google JWKS mocked; memory repositories, no PG/server. Observer read grant is separate, never in provisioning session                                 |
+| `註冊表變更寫成可貼上內容交由操作者`         | §10.1 entry D, additive jq/gcloud sequence                                                                          | No usable observer or provisioning entry → exact operator-only account/WIF/registry steps                                                   | Bash syntax, JSON parse, workflow YAML and 3 verified-email action steps pass. Production adapter consumes the literal documented JSON in a passing test                                                                                                                                                                                     | Nothing applied; independent operator rollout required. No GitHub variables/secrets changed; no deployment dispatched                                 |
+| `同候選SHA CI通過且獨立reviewer審查`         | Final PR and `ai-status.sh handoff` identify exact head                                                             | Local checks complete; hosted CI/reviewer pending at commit time                                                                            | API typecheck pass after building local contracts/control-plane-auth. Scoped runner/tests typecheck pass. Full root typecheck with local workspace source mappings pass. Changed-code ESLint, changed runner/workflow Prettier and internal-key exception verification pass                                                                  | Same-SHA CI result and Claude2 review must be recorded by lifecycle; owner does not mark done                                                         |
+| C114 composition and observer status         | Merged PR #2235; §10 opening read-only registry/run evidence                                                        | Merged candidate plus draft PR #2247 → compose the draft repairs before locking this candidate                                    | Current live registry lacks observer grant; latest hosted map run skipped session issuance. No successful dev observer claim                                                                                                                                                                                                                 | C114 service-area/freshness/browser evidence and its separately scoped workforce-version investigation remain pending; no coverage assertions changed |
+
+Commands (all exit 0 unless noted):
+
+```bash
+pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001   tests/unit/auth-bootstrap.test.ts tests/unit/driver-device-session.test.ts   tests/unit/bootstrap-auth-guard-strict-env.test.ts   tests/unit/jwt-auth-controller-error-mapping.test.ts   tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts   tests/unit/sr-mail-scheduler-provision-20261001.test.ts
+# 15 files, 173 tests; regression.log. Scheduler tests use fake gcloud only.
+pnpm --dir apps/api exec vitest run tests/unit/auth-bootstrap.test.ts tests/unit/google-workload-identity.adapter.test.ts
+# 2 files, 115 tests; api-unit.log.
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/api typecheck
+pnpm exec tsc -p .local/sec-live-map-wif/tsconfig.scoped.json --noEmit
+pnpm exec tsc -p .local/sec-live-map-wif/tsconfig.root-local.json --noEmit
+python3 operations/security/verify-internal-key-exceptions.py
+```
+
+The first unmodified `pnpm typecheck:root` exited 2 because this supervisor
+worktree's shared `node_modules` links resolve other workspace packages to
+missing canonical-root outputs; the first API typecheck also lacked local
+built contracts. After building the API prerequisites and correcting this
+change's optional-property type, API/scoped checks passed. For the full root
+check, the local-only config extends `tsconfig.json` and maps `@drts/contracts`,
+`@drts/control-plane-auth`, `@drts/api-client`, `@drts/ui-web`, `@drts/ui-web/*`,
+and `@drts/ui-tokens` to this worktree's respective `packages/*/src` entrypoints
+(the wildcard maps to `src/*`). It changes no includes, strictness or product
+configuration. That full check passed; this does not replace clean-install
+hosted CI. Logs distinguish initial failures from final passes. No test server,
+browser, Docker, cloud resource change or actual scheduler invocation occurred.

@@ -61,7 +61,7 @@ export interface JwtIdentityPayload {
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
-  driverProvisioningDriverId?: string;
+  driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | undefined;
 }
 
@@ -137,7 +137,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
-  driverProvisioningDriverId?: string;
+  driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | null;
 };
 

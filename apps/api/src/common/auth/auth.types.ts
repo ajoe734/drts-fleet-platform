@@ -70,7 +70,7 @@ export interface BootstrapRequestIdentity {
   expiresAt?: string | null;
   breakGlassGrantId?: string | null;
   /** Server-issued ceiling for a driver provisioning service session. */
-  driverProvisioningDriverId?: string;
+  driverProvisioningDriverId?: string | undefined;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];

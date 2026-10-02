@@ -418,20 +418,11 @@ export class AuthController {
       return { token: issued.token, expiresIn };
     }
 
-    // Google-native OIDC/WIF proof (a real Google-signed identity token, verified
-    // against Google's own public JWKS -- no invented long-term key material)
-    // only authorizes issuance for a fixed, pre-registered (tenantId, actorType,
-    // actorId) tuple in a non-production environment with the CI tenant actor
-    // gate explicitly enabled. It is deliberately narrower than the general
-    // `x-drts-internal-key` fallback it replaces for this one caller.
-    //
-    // While the gate is off or the registry isn't populated yet (rollout not
-    // complete for this environment), fall back to requiring the internal
-    // key below -- same transition safety as the InternalKeyMiddleware path
-    // -- so dev does not go red for callers that already send both. Once a
-    // Google assertion DOES verify against an active gate and still doesn't
-    // match a registered grant, that is a real access decision and must fail
-    // closed, not silently degrade to the internal key.
+    // Verified Google proof authorizes fixed tenant grants, direct ops actors,
+    // or the driver-targeted provisioning session below. It never creates a
+    // general platform-admin or system session from caller-supplied headers.
+    // Transitional dual-send fallback remains for existing non-system callers
+    // only when the registry/identity is absent; provisioning fails closed.
     let googleCiTenantActorVerified = false;
     if (rawGoogleAssertion) {
       if (!bootstrapIdentity) {

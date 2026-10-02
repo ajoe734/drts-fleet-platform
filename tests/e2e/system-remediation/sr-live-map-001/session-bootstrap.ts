@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -309,15 +308,13 @@ export function readMapGoogleIdToken(
   env: LiveEnv,
   purpose: "observer" | "provisioning",
 ) {
-  // Separate audiences prevent the observer exchange consuming the same cached
-  // Google assertion as the provisioning exchange. Both are explicit in registry D.
-  const audience =
-    required(env, "DRTS_LIVE_MAP_API_ORIGIN") +
-    (purpose === "provisioning" ? "/driver-provisioning" : "");
-  return execFileSync(
-    "gcloud",
-    ["auth", "print-identity-token", `--audiences=${audience}`],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  // The auth action mints Google ID tokens with verified email. The two
+  // audiences keep the observer and provisioning one-time exchanges separate.
+  return required(
+    env,
+    purpose === "observer"
+      ? "DRTS_LIVE_MAP_GOOGLE_OBSERVER_ID_TOKEN"
+      : "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN",
   );
 }
 

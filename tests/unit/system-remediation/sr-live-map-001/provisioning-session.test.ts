@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Reflector } from "../../../../apps/api/node_modules/@nestjs/core";
 import jwt from "jsonwebtoken";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -209,7 +210,7 @@ it("rejects an unregistered Google identity even with a valid legacy key", async
 });
 
 it("does not grant provisioning to the deployer or to an observer without an explicit grant", async () => {
-  const { driverProvisioningGrant: _, ...entry } = registryEntry;
+  const entry = { ...registryEntry, driverProvisioningGrant: undefined };
   vi.stubEnv(
     "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS",
     JSON.stringify([entry]),
@@ -324,4 +325,58 @@ it("can create, consume and revoke its driver's invitation; cannot affect anothe
       })
     ).accessToken,
   ).toBeTruthy();
+});
+
+it("accepts the exact operator JSON with the real adapter and session service", async () => {
+  const doc = readFileSync(
+    "docs/02-architecture/internal-key-exceptions.md",
+    "utf8",
+  );
+  const blocks = [...doc.matchAll(/```json\n([\s\S]*?)```/g)];
+  const entry = blocks
+    .map((match) => {
+      try {
+        return JSON.parse(match[1]!);
+      } catch {
+        return null;
+      }
+    })
+    .find((value) => value?.principalId === principalId);
+  expect(entry).toBeDefined();
+  vi.stubEnv(
+    "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS",
+    JSON.stringify([entry]),
+  );
+  const f = fixture();
+  const issued = await f.issue(
+    {},
+    token({
+      email: entry.serviceAccountEmail,
+      aud: entry.allowedTokenAudiences[1],
+    }),
+  );
+  expect((await f.auth.verifyAccessToken(issued.token))?.scopes).toEqual([
+    "driver:provision",
+  ]);
+});
+
+it("cannot reuse an unrestricted caller's idempotency result for another driver's revoke", async () => {
+  const f = fixture();
+  const issued = await f.issue();
+  const identity = f.auth.toRequestIdentity(
+    (await f.auth.verifyAccessToken(issued.token))!,
+  );
+  const foreign = await f.devices.issueRegistrationInvitation({
+    driverId: "drv-demo-001",
+  });
+  const command = { registrationCode: foreign.registrationCode };
+  await f.controller.revokeDriverDeviceInvitation(command, "shared-key");
+  await expect(
+    f.controller.revokeDriverDeviceInvitation(
+      command,
+      "shared-key",
+      undefined,
+      identity,
+    ),
+  ).rejects.toMatchObject({ code: "WORKLOAD_DRIVER_TARGET_DENIED" });
 });
