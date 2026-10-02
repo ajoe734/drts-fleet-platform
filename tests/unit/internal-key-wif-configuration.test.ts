@@ -38,10 +38,25 @@ function extractStepRunBody(workflow: string, stepNameHeader: string): string {
 
 // Runs an extracted step body under bash with the real `gcloud`/`sleep`
 // commands replaced, so the collision-retry logic can be exercised without
-// calling Google or sleeping for real.
+// calling Google or sleeping for real. The mock enforces the actual gcloud
+// *contract* this step depends on (CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-
+// 20261002 F3): `gcloud auth print-identity-token` rejects a Direct-WIF
+// (no-service-account) base credential for `--audiences`/`--include-email`
+// unless `--impersonate-service-account=<email>` is also present (gcloud's
+// own auth_util.ValidIdTokenCredential / IsImpersonationCredential checks,
+// verified against the installed Cloud SDK at
+// /snap/google-cloud-cli/current/lib/googlecloudsdk/command_lib/auth/auth_util.py
+// and surface/auth/print_identity_token.py). A mock that accepted any
+// invocation whose first two words are "auth print-identity-token" would
+// pass even for the F3-broken command, so this one additionally checks the
+// full argv.
 function runStepBody(
   body: string,
-  opts: { env: Record<string, string>; mockGcloudResponses: string[] },
+  opts: {
+    env: Record<string, string>;
+    mockGcloudResponses: string[];
+    requireImpersonateServiceAccount?: string;
+  },
 ): {
   status: number | null;
   stdout: string;
@@ -58,12 +73,29 @@ function runStepBody(
   writeFileSync(callCountPath, "0");
   writeFileSync(responsesPath, opts.mockGcloudResponses.join("\n") + "\n");
 
+  const requiredImpersonation = opts.requireImpersonateServiceAccount;
+  const impersonationGuard = requiredImpersonation
+    ? `
+  local saw_flag=0
+  for arg in "$@"; do
+    if [[ "$arg" == "--impersonate-service-account=${requiredImpersonation}" ]]; then
+      saw_flag=1
+    fi
+  done
+  if [[ "$saw_flag" -ne 1 ]]; then
+    echo "ERROR: (gcloud.auth.print-identity-token) Invalid account type for \\\`--audiences\\\`. Requires valid service account." >&2
+    return 1
+  fi
+`
+    : "";
+
   const harness = `
 set -uo pipefail
 RESPONSES_FILE="${responsesPath}"
 CALL_COUNT_FILE="${callCountPath}"
 gcloud() {
   if [[ "$1" == "auth" && "$2" == "print-identity-token" ]]; then
+${impersonationGuard}
     local n
     n="$(cat "$CALL_COUNT_FILE")"
     n=$((n + 1))
@@ -139,6 +171,7 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: deploy-dev WIF assertion 
 describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-acceptance mints are provably distinct, not just two separate steps", () => {
   const opsStepHeader =
     "name: Mint identity token — API operational acceptance (Tenant Ops)";
+  const FAKE_SA = "ci-deployer@example.iam.gserviceaccount.com";
 
   it("mints the Tenant Ops token with gcloud after the Tenant Admin mint, not with a second auth@v2 action", () => {
     const workflow = readFileSync(workflowPath, "utf8");
@@ -164,8 +197,32 @@ describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-ac
     // token-issuing service.
     expect(opsStepBody).not.toContain("uses: google-github-actions/auth@v2");
     expect(opsStepBody).toContain(
-      "gcloud auth print-identity-token --audiences=",
+      "gcloud auth print-identity-token --impersonate-service-account=",
     );
+    expect(opsStepBody).toContain("--audiences=");
+    // SERVICE_ACCOUNT must be threaded in via env, the same expression every
+    // other auth@v2 step in this workflow uses, not a hardcoded account.
+    expect(opsStepBody).toContain(
+      "SERVICE_ACCOUNT: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}",
+    );
+  });
+
+  it("F3 regression guard: the job-level 'Authenticate to GCP' step for this job does not set service_account (would make the later --impersonate-service-account call self-impersonation)", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    const jobStart = workflow.indexOf("  operational-candidate-acceptance:");
+    expect(jobStart).toBeGreaterThan(-1);
+    const authStepHeader = "- name: Authenticate to GCP";
+    const authStepStart = workflow.indexOf(authStepHeader, jobStart);
+    expect(authStepStart).toBeGreaterThan(-1);
+    const authStepEnd = workflow.indexOf(
+      "- name: Set up Cloud SDK",
+      authStepStart,
+    );
+    const authStepBody = workflow.slice(authStepStart, authStepEnd);
+
+    expect(authStepBody).not.toContain("service_account:");
+    expect(authStepBody).toContain("workload_identity_provider:");
   });
 
   it("extracted shell: re-mints and compares actual token bytes until distinct, not just a fixed number of retries or a time guess", () => {
@@ -175,12 +232,17 @@ describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-ac
     // Simulates a real collision: the first two `gcloud` mints come back
     // byte-identical to the already-minted Tenant Admin token (the actual
     // failure mode from Supervisor's run 36988770406), and only the third
-    // mint is distinct.
+    // mint is distinct. The mock also enforces the F3 credential contract
+    // (--impersonate-service-account must be present), so this test would
+    // fail against the pre-F3-fix command just as much as against a
+    // fixed-time-guess reimplementation.
     const result = runStepBody(body, {
       env: {
         GOOGLE_ID_TOKEN_TENANT_ADMIN: "FAKE_ADMIN_TOKEN_abc123",
         OPS_TOKEN_AUDIENCE: "https://example.test/api",
+        SERVICE_ACCOUNT: FAKE_SA,
       },
+      requireImpersonateServiceAccount: FAKE_SA,
       mockGcloudResponses: [
         "FAKE_ADMIN_TOKEN_abc123",
         "FAKE_ADMIN_TOKEN_abc123",
@@ -194,6 +256,29 @@ describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-ac
     expect(result.githubOutput).not.toContain("FAKE_ADMIN_TOKEN_abc123");
   });
 
+  it("extracted shell: fails closed (not just a generic non-zero exit) when gcloud rejects the credential type, e.g. a regression that drops --impersonate-service-account", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+    const body = extractStepRunBody(workflow, opsStepHeader);
+
+    // Mock requires a *different* service account than the one the step
+    // actually passes, reproducing gcloud's real WrongAccountTypeError
+    // rejection path (auth_util.ValidIdTokenCredential /
+    // IsImpersonationCredential) for every attempt.
+    const result = runStepBody(body, {
+      env: {
+        GOOGLE_ID_TOKEN_TENANT_ADMIN: "FAKE_ADMIN_TOKEN_abc123",
+        OPS_TOKEN_AUDIENCE: "https://example.test/api",
+        SERVICE_ACCOUNT: FAKE_SA,
+      },
+      requireImpersonateServiceAccount:
+        "some-other-account@example.iam.gserviceaccount.com",
+      mockGcloudResponses: ["unused"],
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.githubOutput).not.toContain("id_token=");
+  });
+
   it("extracted shell: fails the job instead of looping forever if gcloud keeps returning the same token", () => {
     const workflow = readFileSync(workflowPath, "utf8");
     const body = extractStepRunBody(workflow, opsStepHeader);
@@ -202,7 +287,9 @@ describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-ac
       env: {
         GOOGLE_ID_TOKEN_TENANT_ADMIN: "FAKE_ADMIN_TOKEN_abc123",
         OPS_TOKEN_AUDIENCE: "https://example.test/api",
+        SERVICE_ACCOUNT: FAKE_SA,
       },
+      requireImpersonateServiceAccount: FAKE_SA,
       mockGcloudResponses: new Array(5).fill("FAKE_ADMIN_TOKEN_abc123"),
     });
 
@@ -222,7 +309,9 @@ describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-ac
       env: {
         GOOGLE_ID_TOKEN_TENANT_ADMIN: adminToken,
         OPS_TOKEN_AUDIENCE: "https://example.test/api",
+        SERVICE_ACCOUNT: FAKE_SA,
       },
+      requireImpersonateServiceAccount: FAKE_SA,
       mockGcloudResponses: [opsToken],
     });
 

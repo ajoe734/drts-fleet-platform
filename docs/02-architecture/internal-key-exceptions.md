@@ -2276,3 +2276,85 @@ server or Docker container was started. Acceptance 四 (two consecutive real
 `deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
 plus independent reviewer approval) remain Supervisor's and the reviewer's
 steps, not this worker's.
+
+### 13.2 Reopen fix (2026-10-02, R2): the F1 gcloud fix minted an ID token
+with a credential type gcloud's own CLI rejects (F3)
+
+Independent reviewer Codex rejected the second candidate (`299fdfd8b`) with
+one new finding; F1 and F2 above were reconfirmed fixed and are unaffected.
+
+**F3 [P1]:** the §13.1 `gcloud auth print-identity-token --audiences="$OPS_TOKEN_AUDIENCE" --include-email`
+command relied on the job's existing "Authenticate to GCP" step (which set
+`service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}`)
+to have already produced a service-account-impersonating credential for
+`gcloud` to use directly. It had not: that step's `google-github-actions/auth@v2`
+call, with `service_account:` set, exports a
+`google.auth.identity_pool.Credentials` (an "external_account" JSON with
+`service_account_impersonation_url` ending in `:generateAccessToken`) via
+`CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` -- still an `identity_pool.Credentials`
+instance, never a `google.auth.impersonated_credentials.Credentials`. Codex
+reproduced this against the actual installed Cloud SDK (no files changed,
+no network calls, no real credentials loaded): constructed exactly this
+credential shape via `identity_pool.Credentials.from_info`, patched only
+`c_store.Load` to return it and `_RefreshGoogleAuthIdToken` to raise if
+reached, and invoked the real `surface/auth/print_identity_token._Run`.
+Both `--audiences` (`auth_util.ValidIdTokenCredential`) and `--include-email`
+(`auth_util.IsImpersonationCredential`, which
+`api_lib/iamcredentials/util.py`'s `IsImpersonationCredential` implements as
+`isinstance(cred, impersonated_credentials.Credentials)`) rejected the
+credential with the exact `WrongAccountTypeError: Invalid account type for
+`--audiences`. Requires valid service account.` gcloud raises in production,
+before any network request. Because the mint step runs under `set -euo
+pipefail`, this is a deterministic failure on every run, not merely the
+original intermittent collision -- the prior fix regressed availability
+while fixing correctness. The existing executable shell tests (§13.1's three
+new tests) did not catch this because their `gcloud()` mock only checked
+`argv[1]`/`argv[2]` (`auth`, `print-identity-token`), which matches
+regardless of which flags follow.
+
+**F3 fix:** two changes, kept inside this job's existing WIF grant (no IAM,
+secret, or GitHub-variable change):
+
+1. The job-level "Authenticate to GCP" step for `operational-candidate-acceptance`
+   no longer sets `service_account:` -- it now performs a plain Direct
+   Workload Identity Federation exchange (`workload_identity_provider:` and
+   `project_id:` only), so its exported base credential is the raw
+   GitHub-OIDC-federated principal, with no embedded service-account
+   impersonation.
+2. The Tenant Ops mint step's `gcloud` command gained
+   `--impersonate-service-account="$SERVICE_ACCOUNT"` (a new `SERVICE_ACCOUNT`
+   env var, set from the same `${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}`
+   expression every other `auth@v2` step in this workflow already uses).
+   With that flag present, `gcloud`'s own `Load()` (`googlecloudsdk/core/credentials/store.py`)
+   wraps the raw federated base credential in a fresh
+   `google.auth.impersonated_credentials.Credentials(source_credentials=<raw federated cred>, target_principal=$SERVICE_ACCOUNT, ...)`
+   (`api_lib/iamcredentials/util.py`'s `GetElevationAccessTokenGoogleAuth`),
+   which satisfies both `IsImpersonationCredential` and
+   `ValidIdTokenCredential`. The resulting IAM Credentials API
+   `generateIdToken` call (`GetElevationIdTokenGoogleAuth`) is authenticated
+   with the *source* (raw federated) credential's own token, targeting
+   `$SERVICE_ACCOUNT` -- the same `roles/iam.workloadIdentityUser`-style
+   grant on the federated principal that every other `service_account:`-bearing
+   `auth@v2` step in this workflow already exercises, not a new
+   self-impersonation permission. (Keeping `service_account:` on the
+   job-level step while adding `--impersonate-service-account` targeting the
+   *same* account would instead have made the already-impersonated service
+   account try to impersonate itself, which needs a
+   `roles/iam.serviceAccountTokenCreator` self-grant that is not part of
+   this task's IAM and must not be added -- this is why both changes above
+   are required together, not just the second one.) The compare-actual-bytes,
+   bounded-retry, never-print-the-token mechanism from §13.1 is otherwise
+   unchanged.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F3 / acceptance 一: the mint mechanism must actually be able to mint an ID token with this job's WIF credential, not just compare-and-retry on paper | `.github/workflows/deploy-dev.yml`: `operational-candidate-acceptance` job's "Authenticate to GCP" step dropped `service_account:`; the `Mint identity token — API operational acceptance (Tenant Ops)` step's `gcloud` call gained `--impersonate-service-account="$SERVICE_ACCOUNT"` and a new `SERVICE_ACCOUNT` env var. | Before: base credential was an `identity_pool.Credentials` with an embedded (but ID-token-incompatible) impersonation URL; `gcloud auth print-identity-token --audiences=... --include-email` raised `WrongAccountTypeError` deterministically, before any network call. After: base credential is the raw federated identity; `--impersonate-service-account` makes gcloud wrap it in `impersonated_credentials.Credentials`, satisfying `IsImpersonationCredential`/`ValidIdTokenCredential`. | Read (not modified) the installed Cloud SDK at `/snap/google-cloud-cli/current/lib/surface/auth/print_identity_token.py`, `googlecloudsdk/command_lib/auth/auth_util.py`, `googlecloudsdk/core/credentials/store.py`, and `googlecloudsdk/api_lib/iamcredentials/util.py` to trace the exact `Load()` → `ImpersonationAccessTokenProvider.GetElevationAccessTokenGoogleAuth`/`GetElevationIdTokenGoogleAuth` call chain for `--impersonate-service-account`, confirming it authenticates the IAM Credentials API call with the *source* (federated) credential, not a self-impersonating one -- so the fix needs no new IAM grant. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` and `bash -n` on the extracted step body: both exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud` CLI with real WIF credentials (no GCP credentials or deploy trigger available to this worker). The SDK source trace is a static read of the installed library, not a live call to Google's STS/IAM Credentials API endpoints; Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI end to end. |
+| F3 / acceptance 三: the test mock must enforce the actual gcloud credential contract, not just the first two argv words | `tests/unit/internal-key-wif-configuration.test.ts`: `runStepBody`'s mock `gcloud()` function now takes an optional `requireImpersonateServiceAccount` and rejects (mirroring gcloud's real `WrongAccountTypeError` message) any invocation whose argv does not contain the exact `--impersonate-service-account=<expected>` flag; the three existing collision/retry/no-print tests now pass a fake service account through `SERVICE_ACCOUNT` env and `requireImpersonateServiceAccount`, and a new test asserts the step fails closed when the mock requires a *different* account than the one actually passed (reproducing the F3 rejection path). A static test also asserts the job-level "Authenticate to GCP" step's body contains no `service_account:` key. | Before: mock accepted any `argv[1]=="auth" && argv[2]=="print-identity-token"`, so it was green for both the F3-broken command (missing the flag entirely) and a correctly-flagged one -- it could not have caught F3. After: mock additionally validates the impersonation flag's exact value; a command missing it, or passing the wrong account, now fails the test the same way gcloud fails in production. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 16/16 passed (two new tests versus §13.1's 14; one pre-existing test gained an additional assertion on the `--impersonate-service-account=`/`SERVICE_ACCOUNT` text). `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`: exit 0, 45/45 passed. | The mock's rejection message/behavior is a hand-written approximation of gcloud's real error (confirmed to match the real `WrongAccountTypeError` text read from the installed SDK above), not the real CLI binary -- it cannot catch a *different* gcloud credential-contract regression this task did not anticipate. |
+| F3 / regression check: audit, lint, format, diff hygiene | `operations/security/verify-internal-key-exceptions.py`; `pnpm exec eslint`; `pnpm exec prettier --check`; `git diff <prev> HEAD --check` | Unchanged mechanism from §13.1, re-run on this candidate. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`. `pnpm exec eslint tests/unit/internal-key-wif-configuration.test.ts`: exit 0. `pnpm exec prettier --check tests/unit/internal-key-wif-configuration.test.ts .github/workflows/deploy-dev.yml`: exit 0. `git diff 210c0beaed9f19bd12442f247265c8f3307a9c93 HEAD --check`: exit 0. | None. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+reopen fix mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) remain Supervisor's and the reviewer's
+steps, not this worker's.
