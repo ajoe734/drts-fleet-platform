@@ -61,6 +61,7 @@ export interface JwtIdentityPayload {
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
+  driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | undefined;
 }
 
@@ -136,6 +137,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
+  driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | null;
 };
 
@@ -861,6 +863,7 @@ export class JwtAuthService {
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
+      driverProvisioningDriverId: identity.driverProvisioningDriverId,
     };
     const expiresIn =
       opts?.expiresIn ??
@@ -1103,6 +1106,7 @@ export class JwtAuthService {
   toRequestIdentity(payload: JwtIdentityPayload): BootstrapRequestIdentity {
     return {
       authMode: "jwt_bearer",
+      driverProvisioningDriverId: payload.driverProvisioningDriverId,
       actorType: payload.actorType,
       actorId: payload.sub,
       principalId: payload.principalId ?? payload.sub,

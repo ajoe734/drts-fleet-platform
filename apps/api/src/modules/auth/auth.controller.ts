@@ -418,20 +418,11 @@ export class AuthController {
       return { token: issued.token, expiresIn };
     }
 
-    // Google-native OIDC/WIF proof (a real Google-signed identity token, verified
-    // against Google's own public JWKS -- no invented long-term key material)
-    // only authorizes issuance for a fixed, pre-registered (tenantId, actorType,
-    // actorId) tuple in a non-production environment with the CI tenant actor
-    // gate explicitly enabled. It is deliberately narrower than the general
-    // `x-drts-internal-key` fallback it replaces for this one caller.
-    //
-    // While the gate is off or the registry isn't populated yet (rollout not
-    // complete for this environment), fall back to requiring the internal
-    // key below -- same transition safety as the InternalKeyMiddleware path
-    // -- so dev does not go red for callers that already send both. Once a
-    // Google assertion DOES verify against an active gate and still doesn't
-    // match a registered grant, that is a real access decision and must fail
-    // closed, not silently degrade to the internal key.
+    // Verified Google proof authorizes fixed tenant grants, direct ops actors,
+    // or the driver-targeted provisioning session below. It never creates a
+    // general platform-admin or system session from caller-supplied headers.
+    // Transitional dual-send fallback remains for existing non-system callers
+    // only when the registry/identity is absent; provisioning fails closed.
     let googleCiTenantActorVerified = false;
     if (rawGoogleAssertion) {
       if (!bootstrapIdentity) {
@@ -461,8 +452,9 @@ export class AuthController {
         );
       } catch (error) {
         if (
-          isGoogleWorkloadIdentityNotConfigured(error) ||
-          isGoogleWorkloadIdentityPrincipalNotRegistered(error)
+          bootstrapIdentity.actorType !== "system" &&
+          (isGoogleWorkloadIdentityNotConfigured(error) ||
+          isGoogleWorkloadIdentityPrincipalNotRegistered(error))
         ) {
           // Registry not configured yet, or this caller's verified identity
           // has no registry entry yet: ignore the Google assertion and let
@@ -477,15 +469,48 @@ export class AuthController {
       }
 
       if (resolvedGoogle) {
+        if (bootstrapIdentity.actorType === "system") {
+          const grant = resolvedGoogle.driverProvisioningGrant;
+          if (!grant || !isCiTenantActorGateEnabled() || strictEnvironment ||
+              bootstrapIdentity.realm !== "system" ||
+              bootstrapIdentity.actorId !== resolvedGoogle.principalId ||
+              bootstrapIdentity.tenantId || bootstrapIdentity.partnerId ||
+              rawAssertion ||
+              (request.headers["x-scopes"] && request.headers["x-scopes"] !== "driver:provision") ||
+              request.headers["x-roles"] || request.headers["x-role-families"]) {
+            throw new ApiRequestError(403, "WORKLOAD_DRIVER_PROVISIONING_DENIED",
+              "The workload is not granted the requested driver provisioning session.");
+          }
+          // Never spread bootstrap headers here: all authority comes from the
+          // verified registry grant, and the signed target survives JWT decode.
+          const expiresIn: JwtExpiresIn = "15m";
+          const issued = await this.issueJwtSession({
+            authMode: "jwt_bearer", actorType: "system",
+            actorId: resolvedGoogle.principalId, principalId: resolvedGoogle.principalId,
+            realm: "system", tenantId: null, roleFamilies: [], roles: [],
+            scopes: ["driver:provision"], requestId: null,
+            driverProvisioningDriverId: grant.driverId,
+          }, {
+            expiresIn, ensurePrincipal: false,
+            principalId: resolvedGoogle.principalId,
+            subject: resolvedGoogle.principalId,
+            authTime: resolvedGoogle.authTime,
+            amr: ["google_workload_identity"], acr: "aal1",
+          });
+          return { token: issued.token, expiresIn };
+        }
         if (
           (bootstrapIdentity.actorId === resolvedGoogle.principalId ||
            bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
-          resolvedGoogle.roles.includes(bootstrapIdentity.actorType)
+          resolvedGoogle.roles.includes(bootstrapIdentity.actorType) &&
+          (bootstrapIdentity.actorType === "ops_user" || bootstrapIdentity.actorType === "ops_observer") &&
+          bootstrapIdentity.realm === "ops" && !bootstrapIdentity.tenantId && !bootstrapIdentity.partnerId
         ) {
           // Direct authentication! The Google SA is asking for a token for ITSELF.
           googleCiTenantActorVerified = true;
           bootstrapIdentity.principalId = resolvedGoogle.principalId;
-        } else if (isCiTenantActorGateEnabled()) {
+          bootstrapIdentity.roleFamilies = ["ops"];
+        } else if (isCiTenantActorGateEnabled() && bootstrapIdentity.realm === "tenant" && bootstrapIdentity.actorType === "tenant_admin") {
           const grant = resolveCiTenantActorGrant(resolvedGoogle, {
             tenantId: bootstrapIdentity.tenantId ?? "",
             actorType: bootstrapIdentity.actorType,
@@ -688,9 +713,14 @@ export class AuthController {
     @Body() command: IssueDriverDeviceInvitationCommand,
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity,
   ) {
+    const driverId = identity?.driverProvisioningDriverId;
+    if (driverId && (command.driverId !== driverId || command.registrationCode !== undefined || command.expiresInHours !== undefined)) {
+      throw new ApiRequestError(403, "WORKLOAD_DRIVER_TARGET_DENIED", "Driver provisioning grant does not allow this invitation.");
+    }
     const result = await this.requireIdempotencyService().execute({
-      scope: "auth:driver_invite:issue",
+      scope: identity?.driverProvisioningDriverId ? `auth:driver_invite:issue:${identity.principalId}:${identity.driverProvisioningDriverId}` : "auth:driver_invite:issue",
       idempotencyKey,
       required: false,
       requestPath: "auth/driver/device/invite",
@@ -707,14 +737,15 @@ export class AuthController {
     @Body() command: { registrationCode: string },
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity,
   ) {
     const result = await this.requireIdempotencyService().execute({
-      scope: "auth:driver_invite:revoke",
+      scope: identity?.driverProvisioningDriverId ? `auth:driver_invite:revoke:${identity.principalId}:${identity.driverProvisioningDriverId}` : "auth:driver_invite:revoke",
       idempotencyKey,
       required: false,
       requestPath: "auth/driver/device/invite/revoke",
       payload: command,
-      execute: async () => this.driverDeviceSessionService.revokeInvitation(command),
+      execute: async () => this.driverDeviceSessionService.revokeInvitation(command, identity?.driverProvisioningDriverId),
     });
     return toApiSuccessEnvelope(result.data, requestId);
   }

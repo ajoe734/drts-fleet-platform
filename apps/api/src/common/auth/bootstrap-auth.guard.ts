@@ -435,6 +435,7 @@ export class BootstrapAuthGuard implements CanActivate {
             }
 
             const identity = this.jwtAuthService!.toRequestIdentity(payload);
+            this.assertDriverProvisioningRoute(identity, request);
             request.identity = identity;
             if (identity.breakGlassGrantId) {
               this.securityEventsService?.recordEvent({
@@ -580,7 +581,9 @@ export class BootstrapAuthGuard implements CanActivate {
                 { route: requestUrl },
               );
             }
-            request.identity = this.jwtAuthService!.toRequestIdentity(payload);
+            const identity = this.jwtAuthService!.toRequestIdentity(payload);
+            this.assertDriverProvisioningRoute(identity, request);
+            request.identity = identity;
           });
       }
     }
@@ -733,6 +736,17 @@ export class BootstrapAuthGuard implements CanActivate {
         `[AUTH_GOOGLE_WORKLOAD_IDENTITY_FALLBACK_DENIED] reason=${reasonCode} route=${requestMethod} ${requestUrl}`,
       );
       return null;
+    }
+  }
+
+  private assertDriverProvisioningRoute(identity: BootstrapRequestIdentity, request: AuthenticatedRequestLike) {
+    if (identity.driverProvisioningDriverId === undefined) return;
+    const path = normalizeRoutePath(request.originalUrl ?? request.url ?? "").replace(/^api\/+/, "");
+    const route = `${(request.method ?? "GET").toUpperCase()} ${path}`;
+    const allowed = ["GET auth/session", "POST auth/driver/device/invite", "POST auth/driver/device/invite/revoke"];
+    if (identity.actorType !== "system" || identity.realm !== "system" ||
+        !identity.driverProvisioningDriverId || !allowed.includes(route)) {
+      throw new ApiRequestError(403, "AUTH_SCOPE_DENIED", "Driver provisioning sessions cannot access this route.");
     }
   }
 

@@ -80,6 +80,8 @@ function harness(
   options: {
     wire?: "snake_case" | "camelCase";
     realm?: string;
+    observerType?: string;
+    driverScopes?: string[];
     actor?: string;
     workState?: string;
     wrongDecision?: boolean;
@@ -156,7 +158,7 @@ function harness(
         active: true,
         identity: {
           realm: "ops",
-          actorType: "ops_user",
+          actorType: options.observerType ?? "ops_observer",
           actorId: "live-map-observer",
           scopes: ["regulatory:read"],
         },
@@ -168,6 +170,11 @@ function harness(
           realm: options.realm ?? "driver",
           actorType: "driver_user",
           actorId: options.actor ?? env.DRTS_LIVE_MAP_TEST_DRIVER_ID,
+          scopes: options.driverScopes ?? [
+            "driver:read",
+            "driver:write",
+            "dispatch:read",
+          ],
         },
       });
     if (url.pathname.endsWith("regulatory-registry/drivers"))
@@ -285,6 +292,9 @@ describe("C114 coverage orchestration", () => {
   );
   it.each([
     { realm: "system" },
+    { observerType: "ops_user" },
+    { driverScopes: ["driver:read"] },
+    { driverScopes: ["*"] },
     { actor: "live-map-other" },
     { workState: "available" },
     { deployedSha: "c".repeat(40) },
