@@ -117,7 +117,13 @@ async function runEvaluation() {
       process.exit(1);
     }
 
-    console.log('[LIVE_GATE_PASSED] Authorization and credentials verified. Executing live mode...');
+    console.error('\n[FAIL_CLOSED] LIVE MODE ABORTED:');
+    console.error('Production telephony (CTI/ASR/TTS/recorder) adapter is not yet implemented.');
+    console.error('Fixture metrics must not be fabricated for live evaluation.');
+    console.error('Halting to prevent overwrite of historical evidence and fake success.\n');
+    process.exit(1);
+
+    // console.log('[LIVE_GATE_PASSED] Authorization and credentials verified. Executing live mode...');
   }
 
   // Load datasets, models, and rate cards
