@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -10,13 +12,90 @@ const registryDocPath = path.join(
   "docs/02-architecture/internal-key-exceptions.md",
 );
 
+// Pulls the literal `run: |` shell body out of a step, by its `name:` line,
+// so tests can execute the *actual* workflow shell logic (with mocked
+// external commands) instead of only pattern-matching the YAML text.
+function extractStepRunBody(workflow: string, stepNameHeader: string): string {
+  const stepStart = workflow.indexOf(stepNameHeader);
+  if (stepStart === -1) {
+    throw new Error(`step not found: ${stepNameHeader}`);
+  }
+  const runMarker = "run: |\n";
+  const runStart = workflow.indexOf(runMarker, stepStart);
+  if (runStart === -1) {
+    throw new Error(`run block not found for step: ${stepNameHeader}`);
+  }
+  const bodyStart = runStart + runMarker.length;
+  const nextStepMarker = "\n      - name:";
+  const nextStepIndex = workflow.indexOf(nextStepMarker, bodyStart);
+  const bodyEnd = nextStepIndex === -1 ? workflow.length : nextStepIndex;
+  return workflow
+    .slice(bodyStart, bodyEnd)
+    .split("\n")
+    .map((line) => (line.startsWith("          ") ? line.slice(10) : line))
+    .join("\n");
+}
+
+// Runs an extracted step body under bash with the real `gcloud`/`sleep`
+// commands replaced, so the collision-retry logic can be exercised without
+// calling Google or sleeping for real.
+function runStepBody(
+  body: string,
+  opts: { env: Record<string, string>; mockGcloudResponses: string[] },
+): {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  githubOutput: string;
+  gcloudCallCount: number;
+} {
+  const outDir = mkdtempSync(path.join(tmpdir(), "wif-collision-test-"));
+  const githubOutputPath = path.join(outDir, "github_output");
+  const callCountPath = path.join(outDir, "gcloud_call_count");
+  const responsesPath = path.join(outDir, "gcloud_responses");
+
+  writeFileSync(githubOutputPath, "");
+  writeFileSync(callCountPath, "0");
+  writeFileSync(responsesPath, opts.mockGcloudResponses.join("\n") + "\n");
+
+  const harness = `
+set -uo pipefail
+RESPONSES_FILE="${responsesPath}"
+CALL_COUNT_FILE="${callCountPath}"
+gcloud() {
+  if [[ "$1" == "auth" && "$2" == "print-identity-token" ]]; then
+    local n
+    n="$(cat "$CALL_COUNT_FILE")"
+    n=$((n + 1))
+    echo "$n" > "$CALL_COUNT_FILE"
+    sed -n "$n"p "$RESPONSES_FILE"
+    return 0
+  fi
+  return 1
+}
+sleep() { :; }
+${body}
+`;
+
+  const result = spawnSync("bash", ["-c", harness], {
+    encoding: "utf8",
+    env: { ...process.env, GITHUB_OUTPUT: githubOutputPath, ...opts.env },
+  });
+
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    githubOutput: readFileSync(githubOutputPath, "utf8"),
+    gcloudCallCount: Number(readFileSync(callCountPath, "utf8").trim() || "0"),
+  };
+}
+
 describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: deploy-dev WIF assertion reuse", () => {
   it("mints a separate Google identity token for each of the two operational POST /api/auth/token calls", () => {
     const workflow = readFileSync(workflowPath, "utf8");
 
-    const mintSteps = workflow.match(
-      /id: id_token_api_operational(_ops)?\n/g,
-    );
+    const mintSteps = workflow.match(/id: id_token_api_operational(_ops)?\n/g);
     expect(mintSteps).not.toBeNull();
     expect(mintSteps).toHaveLength(2);
 
@@ -58,73 +137,104 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: deploy-dev WIF assertion 
 });
 
 describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-acceptance mints are provably distinct, not just two separate steps", () => {
-  it("inserts a clock-advance wait step between the Tenant Admin and Tenant Ops mints", () => {
+  const opsStepHeader =
+    "name: Mint identity token — API operational acceptance (Tenant Ops)";
+
+  it("mints the Tenant Ops token with gcloud after the Tenant Admin mint, not with a second auth@v2 action", () => {
     const workflow = readFileSync(workflowPath, "utf8");
 
     const adminMintIndex = workflow.indexOf("id: id_token_api_operational\n");
-    const waitStepIndex = workflow.indexOf(
-      "name: Ensure second Google assertion mint lands in a new second",
-    );
     const opsMintIndex = workflow.indexOf("id: id_token_api_operational_ops");
 
     expect(adminMintIndex).toBeGreaterThan(-1);
-    expect(waitStepIndex).toBeGreaterThan(-1);
     expect(opsMintIndex).toBeGreaterThan(-1);
-    // Same-second mints of the same (service account, audience) tuple are
-    // byte-identical RS256 tokens, which the server's sha256(token)-keyed
-    // one-time-use guard then rejects as a replay on the second call -- so
-    // the wait step must run strictly between the two mints, not before or
-    // after both.
-    expect(adminMintIndex).toBeLessThan(waitStepIndex);
-    expect(waitStepIndex).toBeLessThan(opsMintIndex);
+    expect(adminMintIndex).toBeLessThan(opsMintIndex);
+
+    const opsStepStart = workflow.indexOf(opsStepHeader);
+    const opsStepEnd = workflow.indexOf(
+      "\n      - name: Issue deployment-machine Tenant acceptance session",
+      opsStepStart,
+    );
+    const opsStepBody = workflow.slice(opsStepStart, opsStepEnd);
+
+    // A second `uses: google-github-actions/auth@v2` here is exactly the
+    // clock-synchronization bug: it cannot compare the resulting token
+    // against the Tenant Admin token, only guess at timing via this
+    // runner's own clock, which does not share a clock with Google's
+    // token-issuing service.
+    expect(opsStepBody).not.toContain("uses: google-github-actions/auth@v2");
+    expect(opsStepBody).toContain(
+      "gcloud auth print-identity-token --audiences=",
+    );
   });
 
-  it("the wait step blocks on the Tenant Admin token's own iat, not a fixed sleep, so it degrades to a no-op once real clock time has already moved on", () => {
+  it("extracted shell: re-mints and compares actual token bytes until distinct, not just a fixed number of retries or a time guess", () => {
     const workflow = readFileSync(workflowPath, "utf8");
-    const waitStepStart = workflow.indexOf(
-      "name: Ensure second Google assertion mint lands in a new second",
-    );
-    const opsMintStart = workflow.indexOf(
-      "name: Mint identity token — API operational acceptance (Tenant Ops)",
-    );
-    const waitStepBody = workflow.slice(waitStepStart, opsMintStart);
+    const body = extractStepRunBody(workflow, opsStepHeader);
 
-    // Reads the first mint's own output -- not a fixed `sleep 1`, which
-    // would be a flaky guess about scheduler speed rather than a guarantee.
-    expect(waitStepBody).toContain(
-      "GOOGLE_ID_TOKEN_TENANT_ADMIN: ${{ steps.id_token_api_operational.outputs.id_token }}",
-    );
-    // Decodes the JWT payload to read `iat` and loops until the wall clock
-    // has moved past it, so the loop body only runs when the two mints
-    // actually land in the same second.
-    expect(waitStepBody).toMatch(/\.iat/);
-    expect(waitStepBody).toMatch(/while \[\[\s*"\$now"\s*-le\s*"\$iat"\s*\]\]/);
-    expect(waitStepBody).toContain("sleep 1");
+    // Simulates a real collision: the first two `gcloud` mints come back
+    // byte-identical to the already-minted Tenant Admin token (the actual
+    // failure mode from Supervisor's run 36988770406), and only the third
+    // mint is distinct.
+    const result = runStepBody(body, {
+      env: {
+        GOOGLE_ID_TOKEN_TENANT_ADMIN: "FAKE_ADMIN_TOKEN_abc123",
+        OPS_TOKEN_AUDIENCE: "https://example.test/api",
+      },
+      mockGcloudResponses: [
+        "FAKE_ADMIN_TOKEN_abc123",
+        "FAKE_ADMIN_TOKEN_abc123",
+        "FAKE_OPS_TOKEN_xyz789",
+      ],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.gcloudCallCount).toBe(3);
+    expect(result.githubOutput).toContain("id_token=FAKE_OPS_TOKEN_xyz789");
+    expect(result.githubOutput).not.toContain("FAKE_ADMIN_TOKEN_abc123");
   });
 
-  it("never echoes the raw token or its decoded JWT payload to the job log", () => {
+  it("extracted shell: fails the job instead of looping forever if gcloud keeps returning the same token", () => {
     const workflow = readFileSync(workflowPath, "utf8");
-    const waitStepStart = workflow.indexOf(
-      "name: Ensure second Google assertion mint lands in a new second",
-    );
-    const opsMintStart = workflow.indexOf(
-      "name: Mint identity token — API operational acceptance (Tenant Ops)",
-    );
-    const waitStepBody = workflow.slice(waitStepStart, opsMintStart);
+    const body = extractStepRunBody(workflow, opsStepHeader);
 
-    // The only line allowed to touch the raw token is the add-mask
-    // registration. `echo "$payload" | ...` as the first leg of the base64
-    // decode pipe is fine -- its stdout only ever reaches the next pipe
-    // stage or a command-substitution assignment, never the job log -- but
-    // no line may stand alone echoing the token, the decoded payload, or
-    // the extracted iat straight to the log.
-    expect(waitStepBody).toContain(
-      'echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_ADMIN"',
-    );
-    const bareVariablePrints = waitStepBody.match(
-      /^\s*echo\s+"\$(GOOGLE_ID_TOKEN_TENANT_ADMIN|payload|iat)"\s*$/gm,
-    );
-    expect(bareVariablePrints).toBeNull();
+    const result = runStepBody(body, {
+      env: {
+        GOOGLE_ID_TOKEN_TENANT_ADMIN: "FAKE_ADMIN_TOKEN_abc123",
+        OPS_TOKEN_AUDIENCE: "https://example.test/api",
+      },
+      mockGcloudResponses: new Array(5).fill("FAKE_ADMIN_TOKEN_abc123"),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.gcloudCallCount).toBe(5);
+    expect(result.githubOutput).not.toContain("id_token=");
+    expect(result.stderr).toContain("::error::");
+  });
+
+  it("extracted shell: never prints a raw token or payload outside the add-mask registration lines", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+    const body = extractStepRunBody(workflow, opsStepHeader);
+
+    const adminToken = "FAKE_ADMIN_TOKEN_abc123";
+    const opsToken = "FAKE_OPS_TOKEN_xyz789";
+    const result = runStepBody(body, {
+      env: {
+        GOOGLE_ID_TOKEN_TENANT_ADMIN: adminToken,
+        OPS_TOKEN_AUDIENCE: "https://example.test/api",
+      },
+      mockGcloudResponses: [opsToken],
+    });
+
+    expect(result.status).toBe(0);
+    const offendingLines = result.stdout
+      .split("\n")
+      .filter(
+        (line) =>
+          (line.includes(adminToken) || line.includes(opsToken)) &&
+          !line.startsWith("::add-mask::"),
+      );
+    expect(offendingLines).toEqual([]);
   });
 });
 
@@ -153,12 +263,8 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: WIF registry operator doc
 
     expect(doc).toContain("Audience correction");
     expect(doc).toContain("WORKLOAD_AUDIENCE_MISMATCH");
-    expect(doc).toContain(
-      "apps/partner-booking-web/lib/api-client.ts:100-104",
-    );
-    expect(doc).toContain(
-      "needs.health-check.outputs.api",
-    );
+    expect(doc).toContain("apps/partner-booking-web/lib/api-client.ts:100-104");
+    expect(doc).toContain("needs.health-check.outputs.api");
     expect(doc).toContain("DEV_IAP_CLIENT_ID");
   });
 
@@ -182,7 +288,9 @@ describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: deploy-dev CI authorizatio
     // this header -- so the registry's ciTenantActorGrants entry for ...902
     // must match the header's actual actorType (tenant_admin), not the
     // session's eventual role.
-    const actorTypeHeaders = workflow.match(/x-actor-type: (tenant_admin|tenant_ops_admin)'/g);
+    const actorTypeHeaders = workflow.match(
+      /x-actor-type: (tenant_admin|tenant_ops_admin)'/g,
+    );
     expect(actorTypeHeaders).not.toBeNull();
     expect(actorTypeHeaders).toHaveLength(2);
     for (const header of actorTypeHeaders!) {
@@ -202,7 +310,9 @@ describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: deploy-dev CI authorizatio
     // The old, wrong recommendation (a tenant_ops_admin *grant*, as opposed
     // to the still-correct tenant_ops_admin *resulting session role*) must
     // be gone from both places that previously stated it.
-    expect(doc).not.toMatch(/\.\.\.000902` \/ `tenant_ops_admin` pair\) and sets/);
+    expect(doc).not.toMatch(
+      /\.\.\.000902` \/ `tenant_ops_admin` pair\) and sets/,
+    );
     expect(doc).not.toMatch(
       /the `\.\.\.000902` \/ `tenant_ops_admin` pair, exactly as §7\.2 item 1 already specified\./,
     );
@@ -230,20 +340,29 @@ describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: registry doc documents a p
     // The wrong instruction said to switch *both* entries; that would make
     // Entry B's token audience stop matching its allowedTokenAudiences and
     // 403 every CI operational-acceptance call the moment ops set the var.
-    expect(doc).not.toMatch(
-      /switch both entries to `vars\.DEV_IAP_CLIENT_ID`/,
-    );
+    expect(doc).not.toMatch(/switch both entries to `vars\.DEV_IAP_CLIENT_ID`/);
     expect(doc).toMatch(/only \*\*Entry A\*\*'s[\s\S]*must switch/);
     expect(doc).toMatch(/\*\*Entry B\*\* must stay on the live API origin/);
 
     // Lock the premise the corrected instruction depends on: both CI mint
     // steps stay keyed to the health-check API output, not an IAP client id.
-    const mintAudiences = workflow.match(
+    // The Tenant Admin mint still sets `id_token_audience` directly on the
+    // auth@v2 action; the Tenant Ops mint (CI-DEPLOY-DEV-WIF-ASSERTION-
+    // COLLISION-20261002) instead passes the same value through to its
+    // `gcloud auth print-identity-token --audiences=` call via an
+    // OPS_TOKEN_AUDIENCE env var -- same audience, different plumbing.
+    const adminMintAudiences = workflow.match(
       /id_token_audience: \$\{\{ needs\.health-check\.outputs\.api \}\}/g,
     );
-    expect(mintAudiences).not.toBeNull();
-    expect(mintAudiences).toHaveLength(2);
+    const opsMintAudiences = workflow.match(
+      /OPS_TOKEN_AUDIENCE: \$\{\{ needs\.health-check\.outputs\.api \}\}/g,
+    );
+    expect(adminMintAudiences).not.toBeNull();
+    expect(adminMintAudiences).toHaveLength(1);
+    expect(opsMintAudiences).not.toBeNull();
+    expect(opsMintAudiences).toHaveLength(1);
     expect(workflow).not.toMatch(/id_token_audience:.*DEV_IAP_CLIENT_ID/);
+    expect(workflow).not.toMatch(/OPS_TOKEN_AUDIENCE:.*DEV_IAP_CLIENT_ID/);
   });
 
   it("documents the live-map observer caller as an unresolved coordination blocker, not a silent Entry B widening or a duplicate-email entry", () => {

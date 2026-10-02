@@ -2216,3 +2216,63 @@ server or Docker container was started. Acceptance 四 (two consecutive real
 plus independent reviewer approval) are Supervisor's and the reviewer's
 steps respectively, not this worker's -- per the task's own guardrails, this
 candidate does not and cannot dispatch `deploy-dev.yml` itself.
+
+### 13.1 Reopen fix (2026-10-02, R1): the clock-wait only bounded this
+runner's own clock, not Google's issuer clock (F1); a stray backtick
+regression in this section's own prose (F2)
+
+Independent reviewer Codex rejected the first candidate (`e925e1f24`) with
+two findings.
+
+**F1 [P1]:** the §13 wait step above compared `date +%s` (this GitHub
+Actions runner's own clock) against the Tenant Admin token's `iat` (a claim
+set by Google's remote identity-token issuer, a separate clock entirely).
+If the runner's clock reads a later wall-clock second than the issuer's
+clock still has, the `while [[ "$now" -le "$iat" ]]` loop can take its
+zero-wait exit while the issuer is still minting the prior second's tokens,
+so the following `auth@v2` mint can still come back byte-identical to the
+Tenant Admin token -- the wait bounded the wrong clock. Codex reproduced
+this in memory (no files changed): extracted the wait step's exact `run:`
+body, ran it under `bash -e -o pipefail` with `date`/`sleep` replaced by
+shell functions that model a runner clock one second ahead of a fixed
+`iat=2000000000` fixture, and confirmed the loop exits immediately with zero
+`sleep` calls precisely in the runner-ahead case.
+
+**F2 [P2]:** this section's own prose had re-wrapped the retired plain
+INTERNAL_KEY_EXCP_002 in backticks (reintroducing the exact pattern §12's
+own audit-script fix, documented two sections earlier, had just removed),
+which made `operations/security/verify-internal-key-exceptions.py` treat it
+as an actively-documented exception again and fail CI
+(`Exception 'INTERNAL_KEY_EXCP_002' documented in Markdown but missing in
+TypeScript registry!`, confirmed on hosted run `37007526551` at
+`2026-10-02T12:35:09Z`). Fixed in commit `87c5d222b` (de-backticked, plain
+INTERNAL_KEY_EXCP_002, matching every other mention in this document);
+`python3 operations/security/verify-internal-key-exceptions.py` now exits 0
+again (`--- AUDIT PASSED ---`, confirmed re-run above).
+
+**F1 fix:** replaced the clock-wait step and the Tenant Ops mint's second
+`google-github-actions/auth@v2` action with a single step that mints the
+Tenant Ops token with `gcloud auth print-identity-token --audiences="$OPS_TOKEN_AUDIENCE" --include-email`
+(the `gcloud` CLI already authenticated as the WIF-impersonated service
+account by the job's existing "Authenticate to GCP" / "Set up Cloud SDK"
+steps) and compares the *actual resulting token bytes* against the Tenant
+Admin token, in a bounded loop of up to 5 attempts with a 1-second sleep
+between retries. This no longer depends on any clock comparison at all --
+it mints, compares the literal string the issuer actually returned, and
+re-mints on a real collision -- so a runner/issuer clock skew of any size
+cannot produce a false "safe to proceed." A persistent collision across all
+5 attempts fails the step (`::error::` plus `exit 1`) rather than looping
+forever or silently proceeding with a colliding token. Neither raw token is
+ever echoed outside its own `::add-mask::` registration line.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F1 / acceptance 一: the two tokens must be provably distinct without relying on any clock comparison between this runner and Google's issuer | `.github/workflows/deploy-dev.yml`: `Mint identity token — API operational acceptance (Tenant Ops)` step rewritten from a second `auth@v2` action (preceded by a separate clock-wait step) to a `gcloud auth print-identity-token` call inside a bounded compare-and-retry loop, keyed off the actual token value returned, not any clock. | Before: wait step bounded only this runner's `date +%s`; a runner-ahead clock skew relative to Google's issuer could let the loop exit before the issuer's own second advanced. After: loop re-mints and re-compares up to 5 times against the real Tenant Admin token string; no clock read anywhere in the mechanism. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 14/14 passed, including three new tests that execute the extracted step body under `bash` with `gcloud`/`sleep` replaced by mock functions: (1) two identical mock responses followed by a distinct one still yields the distinct token in `GITHUB_OUTPUT` after exactly 3 `gcloud` calls; (2) 5 identical mock responses exits non-zero, calls `gcloud` exactly 5 times, writes no `id_token=` line, and emits `::error::`; (3) stdout contains no bare occurrence of either fake token outside an `::add-mask::`-prefixed line. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"`: exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud auth print-identity-token` CLI or real Google-issued tokens -- this worker has no GCP credentials or deploy trigger per the task's own guardrails, so the retry loop's interaction with Google's real issuer (e.g., whether a same-audience re-mint this close together always advances `iat`) is exercised only through the mocked-`gcloud` executable tests above, not end-to-end. Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI. |
+| F2 / CI audit regression | `docs/02-architecture/internal-key-exceptions.md` §13, de-backticked plain INTERNAL_KEY_EXCP_002 (commit `87c5d222b`, already present on this candidate SHA; re-confirmed here) | Before: backtick-wrapped INTERNAL_KEY_EXCP_002 tripped the audit script. After: plain INTERNAL_KEY_EXCP_002, matching every other mention in this document. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`, one registered exception (`INTERNAL_KEY_EXCP_001`). | None -- this is a documentation-only, already-landed fix; re-confirmed rather than re-done. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+reopen fix mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) remain Supervisor's and the reviewer's
+steps, not this worker's.
