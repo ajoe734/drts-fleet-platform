@@ -1635,3 +1635,64 @@ applies.
 F3 remains resolved; nothing in this round touched the retired-credential removal from §10.5.
 
 No files were edited beyond `.github/workflows/deploy-dev.yml`, `.github/workflows/tenant-uat-acceptance.yml`, `tools/ci/test_tenant_uat_acceptance_workflow.py`, the new `tests/unit/system-remediation/sr-referral-001/deploy-dev-referral-handoff-workflow.test.ts`, and this document. No GCP secrets, GCP IAM bindings, or GitHub variables were created or modified; no deploy, workflow dispatch, or live GCP/GitHub Actions run was triggered by this reviewer-fix round; no local server, browser, or Docker container was started.
+
+### 10.7 R4 review (2026-10-02): F1 confirmed persisting for a third consecutive round; routed to Supervisor per §0.7
+
+Reviewer (`Codex`) reopened candidate `6d39dac2e387359aba1caa02b5177d5f20407fea`
+(generation `d02c220f318a4401ad0e1a8622dd409c`, PR #2264) with R4. F4, F2a, F2b
+and F3 (§10.6) were independently re-verified and confirmed fixed with no new
+findings. F1 was reopened again.
+
+F1 has now failed to be eliminated across three consecutive independent
+review rounds on three different adjacent candidates:
+`566e08c058c04417e3d7969f2eb22a52792140a5` (R2), the merge-only
+`f440007edfa1107ff3ee093f3cb527315eee438c` (R3, same behavior, no code
+touched), and `6d39dac2e387359aba1caa02b5177d5f20407fea` (R4, comment-only
+correction, §10.6's F1 row). In every case the observed behavior is
+identical and structural, not a regression introduced by any of these
+rounds: `deploy-dev.yml`'s "Verify referral handoff session lifecycle" step
+cannot execute the positive issue/consume/replay/cross-host lifecycle in its
+pre-rollout branch, because there is no issued artifact to consume until
+`github-actions-deployer`'s registry grant includes the issuance route. R2
+built the pre/post-rollout branching itself (the correct shape, confirmed
+structurally sound by §10.6's F4 regression's call-count assertions); R4
+holds that the branching's pre-rollout half, no matter how accurately
+documented, still does not satisfy the "deployment must not go red before
+or after the change" / "before and after lifecycle" acceptance language
+on its own, and declines to treat a fourth owner round of unchanged
+behavior as a repair.
+
+Per AI_COLLABORATION_GUIDE §0.7's same-defect-two-rounds procedure (now
+triggered a third time on this exact finding), the reviewer localized the
+precise, closed boundary of what this task's owner can do: §10.3 already
+specifies the exact registry JSON ops must apply (`github-actions-deployer`'s
+`routeScopes` gains `"POST partner/ingress/referral-embed-handoff"`), and
+§10.5's F1 investigation already confirmed via
+`infra/gcp/dev/provision-dev-project.sh`'s actual IAM bindings that this
+deployer service account holds only `roles/iam.serviceAccountUser` (act-as)
+on `drts-dev-runtime`, not `roles/iam.serviceAccountTokenCreator` -- so no
+code-only path lets this workflow mint a token under `drts-dev-runtime`'s
+already-broad (`"* *"`) scope instead. There is no registry state reachable
+by this task's own guardrails (no GCP secret/IAM mutation, no GitHub
+variable mutation, no workflow dispatch) in which the pre-rollout branch
+could exercise a successful lifecycle; the grant that would make issuance
+succeed does not exist in any environment this task can reach.
+
+This task is moved to `blocked`, waiting on Supervisor to choose one of:
+
+- apply §10.3's registry change (or an equivalent `routeScopes` grant) to
+  the live `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret so a real
+  pre-and-post-rollout lifecycle can be exercised live and locked into a
+  regression before the next review round; or
+- issue an explicit disposition accepting the current fail-closed-with-
+  warning pre-rollout behavior (real call made and asserted every run;
+  real lifecycle hard-gated once the registry lands) as satisfying the
+  "must not go red" / "before and after" acceptance language, given the
+  independently-confirmed absence of any in-scope code path to do
+  otherwise -- recorded here rather than declared unilaterally by the
+  owner.
+
+No code change was made this round to `deploy-dev.yml`, any controller, or
+any adapter; no candidate file beyond this document was edited. No GCP
+secret/IAM mutation, GitHub variable mutation, workflow dispatch, product
+server/browser/Docker, or commit amend/rebase/force-push occurred.
