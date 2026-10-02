@@ -49,8 +49,10 @@ export interface MailRunnerConfig {
   workflowSha: string;
   apiOrigin: string;
   roleSessionToken: string;
+  stepUpReference: string;
   tenantId: string;
   authorizedRecipient: string;
+  nonAllowlistedRecipient: string;
   invitationRoleCode: string;
   pollTimeoutMs: number;
   pollIntervalMs: number;
@@ -159,6 +161,10 @@ export function validateMailRunnerInputs(env: MailRunnerEnv): MailRunnerConfig {
     env.DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN,
     "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN",
   );
+  const stepUpReference = requireString(
+    env.DRTS_LIVE_MAIL_STEP_UP_REFERENCE,
+    "DRTS_LIVE_MAIL_STEP_UP_REFERENCE",
+  );
   const tenantId = requireString(
     env.DRTS_LIVE_MAIL_TEST_TENANT_ID,
     "DRTS_LIVE_MAIL_TEST_TENANT_ID",
@@ -168,6 +174,20 @@ export function validateMailRunnerInputs(env: MailRunnerEnv): MailRunnerConfig {
     "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT",
   );
   assertNotFixtureRecipient(authorizedRecipient);
+  // Deliberately NOT run through assertNotFixtureRecipient: this address is
+  // meant to be outside the recipient allowlist (a reserved RFC 2606 domain
+  // is intentional here), used only to prove SMTP_RECIPIENT_NOT_ALLOWLISTED
+  // is recorded -- it is never actually reachable over SMTP because the
+  // transport rejects it before any network send.
+  const nonAllowlistedRecipient = requireString(
+    env.DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT,
+    "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT",
+  );
+  if (!EMAIL_PATTERN.test(nonAllowlistedRecipient)) {
+    throw new MailRunnerInputError(
+      `DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT "${nonAllowlistedRecipient}" is not a valid single email address.`,
+    );
+  }
   const invitationRoleCode = requireString(
     env.DRTS_LIVE_MAIL_INVITATION_ROLE_CODE,
     "DRTS_LIVE_MAIL_INVITATION_ROLE_CODE",
@@ -189,8 +209,10 @@ export function validateMailRunnerInputs(env: MailRunnerEnv): MailRunnerConfig {
     workflowSha,
     apiOrigin,
     roleSessionToken,
+    stepUpReference,
     tenantId,
     authorizedRecipient,
+    nonAllowlistedRecipient,
     invitationRoleCode,
     pollTimeoutMs,
     pollIntervalMs,
@@ -206,6 +228,7 @@ export interface IssueInvitationResult {
 
 export type IssueInvitationFn = (
   config: MailRunnerConfig,
+  recipient: string,
 ) => Promise<IssueInvitationResult>;
 
 export interface DeliveryReceipt {
@@ -213,6 +236,7 @@ export interface DeliveryReceipt {
   providerMessageId: string | null;
   attempts: number;
   lastOutcome: string | null;
+  errorCode: string | null;
 }
 
 export type PollDeliveryReceiptFn = (
@@ -246,7 +270,7 @@ export async function runMailAcceptance(
     );
   }
 
-  const issued = await deps.issueInvitation(config);
+  const issued = await deps.issueInvitation(config, config.authorizedRecipient);
   deps.recorder.recordHttpCall({
     method: "POST",
     url: `${config.apiOrigin}/api/tenant/users`,
@@ -296,6 +320,49 @@ export async function runMailAcceptance(
     }
   }
 
+  const negativeIssued = await deps.issueInvitation(
+    config,
+    config.nonAllowlistedRecipient,
+  );
+  deps.recorder.recordHttpCall({
+    method: "POST",
+    url: `${config.apiOrigin}/api/tenant/users`,
+    statusCode: negativeIssued.statusCode,
+    durationMs: 0,
+    actorRole: "tenant_admin_live",
+  });
+  if (negativeIssued.statusCode !== 200 && negativeIssued.statusCode !== 201) {
+    reasons.push(
+      `Issuing the negative (non-allowlisted) test invitation returned HTTP ${negativeIssued.statusCode}, expected 200/201 (the API must still create the invitation record; only the mail transport rejects the recipient).`,
+    );
+  } else if (!negativeIssued.deliveryId) {
+    reasons.push(
+      "Negative (non-allowlisted) invitation carried no deliveryId; cannot prove the rejection was durably recorded rather than silently dropped.",
+    );
+  } else {
+    deps.recorder.recordResourceId("mail_delivery", negativeIssued.deliveryId);
+    const negativeReceipt = await deps.pollDeliveryReceipt(
+      config,
+      negativeIssued.deliveryId,
+    );
+    deps.recorder.recordHttpCall({
+      method: "GET",
+      url: `${config.apiOrigin}/api/tenant/mail-deliveries/${negativeIssued.deliveryId}`,
+      statusCode: 200,
+      durationMs: 0,
+      actorRole: "tenant_admin_live",
+    });
+    if (negativeReceipt.status !== "failed") {
+      reasons.push(
+        `Negative (non-allowlisted) delivery ${negativeIssued.deliveryId} did not reach status "failed" (observed: "${negativeReceipt.status}") -- the recipient allowlist gate must reject this address without ever attempting a real send.`,
+      );
+    } else if (negativeReceipt.errorCode !== "SMTP_RECIPIENT_NOT_ALLOWLISTED") {
+      reasons.push(
+        `Negative (non-allowlisted) delivery ${negativeIssued.deliveryId} failed with errorCode "${negativeReceipt.errorCode ?? "(none)"}", expected "SMTP_RECIPIENT_NOT_ALLOWLISTED" -- a different failure reason does not prove the allowlist gate itself is what rejected this recipient.`,
+      );
+    }
+  }
+
   deps.recorder.recordLiveLimitation(
     "approval-timeout reminder mail flow",
     "This runner only exercises the tenant-invitation send path. The approval-timeout reminder flow is read back through the same GET tenant/mail-deliveries/:deliveryId endpoint, but has no dedicated send trigger wired into this runner yet.",
@@ -317,16 +384,18 @@ export async function runMailAcceptance(
 
 async function realIssueInvitation(
   config: MailRunnerConfig,
+  recipient: string,
 ): Promise<IssueInvitationResult> {
   const res = await fetch(new URL("/api/tenant/users", config.apiOrigin), {
     method: "POST",
     headers: {
       authorization: `Bearer ${config.roleSessionToken}`,
       "x-tenant-id": config.tenantId,
+      "x-drts-step-up-reference": config.stepUpReference,
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      email: config.authorizedRecipient,
+      email: recipient,
       displayName: "SR-LIVE-MAIL-001 live acceptance",
       roleCode: config.invitationRoleCode,
     }),
@@ -354,6 +423,7 @@ async function realPollDeliveryReceipt(
     providerMessageId: null,
     attempts: 0,
     lastOutcome: null,
+    errorCode: null,
   };
   while (Date.now() < deadline) {
     const res = await fetch(
@@ -371,6 +441,7 @@ async function realPollDeliveryReceipt(
           status?: "queued" | "sent" | "failed";
           attempts?: Array<{
             outcome?: string;
+            errorCode?: string | null;
             acknowledgement?: { providerMessageId?: string | null } | null;
           }>;
         };
@@ -384,6 +455,7 @@ async function realPollDeliveryReceipt(
           lastAttempt?.acknowledgement?.providerMessageId ?? null,
         attempts: receipt?.attempts?.length ?? 0,
         lastOutcome: lastAttempt?.outcome ?? null,
+        errorCode: lastAttempt?.errorCode ?? null,
       };
       if (last.status !== "queued") {
         return last;

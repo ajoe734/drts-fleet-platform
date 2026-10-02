@@ -13,6 +13,8 @@ import { UatEvidenceRecorder } from "../../../e2e/system-remediation/shared";
 
 const VALID_SHA = "a".repeat(40);
 const OTHER_SHA = "b".repeat(40);
+const POSITIVE_DELIVERY_ID = "11111111-1111-1111-1111-111111111111";
+const NEGATIVE_DELIVERY_ID = "99999999-9999-9999-9999-999999999999";
 
 function baseEnv(overrides: Partial<MailRunnerEnv> = {}): MailRunnerEnv {
   return {
@@ -22,16 +24,22 @@ function baseEnv(overrides: Partial<MailRunnerEnv> = {}): MailRunnerEnv {
     DRTS_LIVE_MAIL_API_ORIGIN: "https://api.dev.drts-fleet.example.com",
     DRTS_LIVE_MAIL_TEST_AUTHORIZED: "true",
     DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN: "real-deployment-issued-session-token",
+    DRTS_LIVE_MAIL_STEP_UP_REFERENCE: "stepup_real1234",
     DRTS_LIVE_MAIL_TEST_TENANT_ID: "tenant-live-uat-001",
     DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: "ops-uat@realdomain.test",
+    DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT:
+      "sr-live-mail-001-negative@reserved.invalid",
     DRTS_LIVE_MAIL_INVITATION_ROLE_CODE: "tenant_viewer",
     ...overrides,
   };
 }
 
-function passingIssueResult(candidateSha: string): IssueInvitationResult {
+function passingIssueResult(
+  candidateSha: string,
+  deliveryId: string = POSITIVE_DELIVERY_ID,
+): IssueInvitationResult {
   return {
-    deliveryId: "11111111-1111-1111-1111-111111111111",
+    deliveryId,
     invitationId: "22222222-2222-2222-2222-222222222222",
     statusCode: 201,
     deployedCandidateSha: candidateSha,
@@ -44,7 +52,39 @@ function sentReceipt(): DeliveryReceipt {
     providerMessageId: "queued-as-abc123",
     attempts: 1,
     lastOutcome: "sent",
+    errorCode: null,
   };
+}
+
+function failedAllowlistReceipt(): DeliveryReceipt {
+  return {
+    status: "failed",
+    providerMessageId: null,
+    attempts: 1,
+    lastOutcome: "failed",
+    errorCode: "SMTP_RECIPIENT_NOT_ALLOWLISTED",
+  };
+}
+
+// Shared happy-path deps: dispatches on the recipient/deliveryId so a single
+// mock pair can answer both the positive and negative phases correctly.
+function happyPathDeps(candidateSha: string) {
+  const issueInvitation = vi
+    .fn()
+    .mockImplementation(async (_config: MailRunnerConfig, recipient: string) =>
+      recipient === "ops-uat@realdomain.test"
+        ? passingIssueResult(candidateSha, POSITIVE_DELIVERY_ID)
+        : passingIssueResult(candidateSha, NEGATIVE_DELIVERY_ID),
+    );
+  const pollDeliveryReceipt = vi
+    .fn()
+    .mockImplementation(
+      async (_config: MailRunnerConfig, deliveryId: string) =>
+        deliveryId === POSITIVE_DELIVERY_ID
+          ? sentReceipt()
+          : failedAllowlistReceipt(),
+    );
+  return { issueInvitation, pollDeliveryReceipt };
 }
 
 describe("validateMailRunnerInputs", () => {
@@ -94,6 +134,13 @@ describe("validateMailRunnerInputs", () => {
     );
   });
 
+  it("fails closed when the step-up reference is absent (absent authorization)", () => {
+    const env = baseEnv({ DRTS_LIVE_MAIL_STEP_UP_REFERENCE: undefined });
+    expect(() => validateMailRunnerInputs(env)).toThrow(
+      /DRTS_LIVE_MAIL_STEP_UP_REFERENCE/,
+    );
+  });
+
   it("rejects a recipient that is not a valid single email address", () => {
     const env = baseEnv({
       DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: "not-an-email",
@@ -109,6 +156,15 @@ describe("validateMailRunnerInputs", () => {
     });
     expect(() => validateMailRunnerInputs(env)).toThrow(
       /fixture\/demo\/example address/,
+    );
+  });
+
+  it("rejects a malformed non-allowlisted recipient", () => {
+    const env = baseEnv({
+      DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT: "not-an-email",
+    });
+    expect(() => validateMailRunnerInputs(env)).toThrow(
+      /DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT/,
     );
   });
 
@@ -140,11 +196,10 @@ describe("runMailAcceptance", () => {
     fetchSpy.mockRestore();
   });
 
-  it("passes when invitation issuance and delivery readback both succeed with a provider message id", async () => {
-    const issueInvitation = vi
-      .fn()
-      .mockResolvedValue(passingIssueResult(config.candidateSha));
-    const pollDeliveryReceipt = vi.fn().mockResolvedValue(sentReceipt());
+  it("passes when the positive send/readback and the negative allowlist rejection both succeed", async () => {
+    const { issueInvitation, pollDeliveryReceipt } = happyPathDeps(
+      config.candidateSha,
+    );
 
     const result = await runMailAcceptance(config, {
       issueInvitation,
@@ -154,10 +209,23 @@ describe("runMailAcceptance", () => {
 
     expect(result.status).toBe("passed");
     expect(result.reasons).toEqual([]);
-    expect(issueInvitation).toHaveBeenCalledWith(config);
+    expect(issueInvitation).toHaveBeenNthCalledWith(
+      1,
+      config,
+      config.authorizedRecipient,
+    );
+    expect(issueInvitation).toHaveBeenNthCalledWith(
+      2,
+      config,
+      config.nonAllowlistedRecipient,
+    );
     expect(pollDeliveryReceipt).toHaveBeenCalledWith(
       config,
-      "11111111-1111-1111-1111-111111111111",
+      POSITIVE_DELIVERY_ID,
+    );
+    expect(pollDeliveryReceipt).toHaveBeenCalledWith(
+      config,
+      NEGATIVE_DELIVERY_ID,
     );
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(
@@ -167,10 +235,9 @@ describe("runMailAcceptance", () => {
 
   it("fails when the checked-out workflow SHA does not match the candidate SHA (wrong SHA)", async () => {
     const drifted: MailRunnerConfig = { ...config, workflowSha: OTHER_SHA };
-    const issueInvitation = vi
-      .fn()
-      .mockResolvedValue(passingIssueResult(drifted.candidateSha));
-    const pollDeliveryReceipt = vi.fn().mockResolvedValue(sentReceipt());
+    const { issueInvitation, pollDeliveryReceipt } = happyPathDeps(
+      drifted.candidateSha,
+    );
 
     const result = await runMailAcceptance(drifted, {
       issueInvitation,
@@ -185,12 +252,10 @@ describe("runMailAcceptance", () => {
   });
 
   it("fails when invitation issuance returns a non-2xx status", async () => {
-    const issueInvitation = vi
-      .fn()
-      .mockResolvedValue({
-        ...passingIssueResult(config.candidateSha),
-        statusCode: 403,
-      });
+    const issueInvitation = vi.fn().mockResolvedValue({
+      ...passingIssueResult(config.candidateSha),
+      statusCode: 403,
+    });
     const pollDeliveryReceipt = vi.fn().mockResolvedValue(sentReceipt());
 
     const result = await runMailAcceptance(config, {
@@ -223,12 +288,10 @@ describe("runMailAcceptance", () => {
   });
 
   it("fails and skips readback when no deliveryId was ever enqueued (unavailable provider)", async () => {
-    const issueInvitation = vi
-      .fn()
-      .mockResolvedValue({
-        ...passingIssueResult(config.candidateSha),
-        deliveryId: null,
-      });
+    const issueInvitation = vi.fn().mockResolvedValue({
+      ...passingIssueResult(config.candidateSha),
+      deliveryId: null,
+    });
     const pollDeliveryReceipt = vi.fn();
 
     const result = await runMailAcceptance(config, {
@@ -246,14 +309,13 @@ describe("runMailAcceptance", () => {
     const issueInvitation = vi
       .fn()
       .mockResolvedValue(passingIssueResult(config.candidateSha));
-    const pollDeliveryReceipt = vi
-      .fn()
-      .mockResolvedValue({
-        status: "queued",
-        providerMessageId: null,
-        attempts: 3,
-        lastOutcome: "started",
-      });
+    const pollDeliveryReceipt = vi.fn().mockResolvedValue({
+      status: "queued",
+      providerMessageId: null,
+      attempts: 3,
+      lastOutcome: "started",
+      errorCode: null,
+    });
 
     const result = await runMailAcceptance(config, {
       issueInvitation,
@@ -269,14 +331,13 @@ describe("runMailAcceptance", () => {
     const issueInvitation = vi
       .fn()
       .mockResolvedValue(passingIssueResult(config.candidateSha));
-    const pollDeliveryReceipt = vi
-      .fn()
-      .mockResolvedValue({
-        status: "failed",
-        providerMessageId: null,
-        attempts: 1,
-        lastOutcome: "failed",
-      });
+    const pollDeliveryReceipt = vi.fn().mockResolvedValue({
+      status: "failed",
+      providerMessageId: null,
+      attempts: 1,
+      lastOutcome: "failed",
+      errorCode: "SMTP_SEND_FAILED",
+    });
 
     const result = await runMailAcceptance(config, {
       issueInvitation,
@@ -292,14 +353,13 @@ describe("runMailAcceptance", () => {
     const issueInvitation = vi
       .fn()
       .mockResolvedValue(passingIssueResult(config.candidateSha));
-    const pollDeliveryReceipt = vi
-      .fn()
-      .mockResolvedValue({
-        status: "sent",
-        providerMessageId: null,
-        attempts: 1,
-        lastOutcome: "sent",
-      });
+    const pollDeliveryReceipt = vi.fn().mockResolvedValue({
+      status: "sent",
+      providerMessageId: null,
+      attempts: 1,
+      lastOutcome: "sent",
+      errorCode: null,
+    });
 
     const result = await runMailAcceptance(config, {
       issueInvitation,
@@ -311,20 +371,67 @@ describe("runMailAcceptance", () => {
     expect(result.reasons.join(" ")).toMatch(/no providerMessageId/);
   });
 
+  it("fails when the negative-path recipient is unexpectedly accepted as sent (allowlist gate bypassed)", async () => {
+    const { issueInvitation } = happyPathDeps(config.candidateSha);
+    const pollDeliveryReceipt = vi.fn().mockResolvedValue(sentReceipt());
+
+    const result = await runMailAcceptance(config, {
+      issueInvitation,
+      pollDeliveryReceipt,
+      recorder,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reasons.join(" ")).toMatch(
+      /did not reach status "failed".*allowlist gate must reject/,
+    );
+  });
+
+  it("fails when the negative-path delivery fails for a different reason than the allowlist gate", async () => {
+    const { issueInvitation } = happyPathDeps(config.candidateSha);
+    const pollDeliveryReceipt = vi
+      .fn()
+      .mockImplementation(
+        async (_config: MailRunnerConfig, deliveryId: string) =>
+          deliveryId === POSITIVE_DELIVERY_ID
+            ? sentReceipt()
+            : {
+                status: "failed",
+                providerMessageId: null,
+                attempts: 1,
+                lastOutcome: "failed",
+                errorCode: "SMTP_SEND_FAILED",
+              },
+      );
+
+    const result = await runMailAcceptance(config, {
+      issueInvitation,
+      pollDeliveryReceipt,
+      recorder,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.reasons.join(" ")).toMatch(
+      /expected "SMTP_RECIPIENT_NOT_ALLOWLISTED"/,
+    );
+  });
+
   it("records redacted evidence and never leaks the raw role session token into evidence", async () => {
     const secretToken = config.roleSessionToken;
+    const { pollDeliveryReceipt } = happyPathDeps(config.candidateSha);
     const issueInvitation = vi
       .fn()
-      .mockImplementation(async (cfg: MailRunnerConfig) => {
+      .mockImplementation(async (cfg: MailRunnerConfig, recipient: string) => {
         // Simulate a buggy transport that echoed the bearer token into a log line
         // captured as part of the result -- evidence must still redact it.
         recorder.recordConsole(
           "info",
           `Authorization: Bearer ${cfg.roleSessionToken}`,
         );
-        return passingIssueResult(cfg.candidateSha);
+        return recipient === cfg.authorizedRecipient
+          ? passingIssueResult(cfg.candidateSha, POSITIVE_DELIVERY_ID)
+          : passingIssueResult(cfg.candidateSha, NEGATIVE_DELIVERY_ID);
       });
-    const pollDeliveryReceipt = vi.fn().mockResolvedValue(sentReceipt());
 
     const result = await runMailAcceptance(config, {
       issueInvitation,
