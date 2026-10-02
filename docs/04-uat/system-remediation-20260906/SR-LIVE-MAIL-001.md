@@ -1,8 +1,79 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：**進度已保存，live acceptance 未完成；等待 Supervisor 校正 hosted workflow scope／發布入口。** 沒有鎖定 review candidate、沒有寄出本輪真郵件、沒有呼叫 `done` 或 `record-acceptance`。
-- 本節 §0 是本輪結果；§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 的歷史觀察，**不是本輪重跑或目前 gate 判定**。歷史文件的「需新增 IMAP 套件」、「runner 已可直接使用」、「兩項 acceptance 已滿足」及 branch／部署狀態均由 §0 更新。
+- 現況：**hosted harness 已實作並驗證，準備交 Claude2 review；live acceptance 尚未執行。** Supervisor 12:50Z 已解除 workflow scope／發布入口疑義，指定 promotion 後 dispatch。本輪沒有寄真郵件、部署、呼叫 `done` 或 `record-acceptance`。
+- **§0.1 是最新结果**；§0 為早先 checkpoint，§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 歷史觀察。歷史 scope blocker、IMAP 套件缺口、部署狀態與 acceptance 判定不能代替本輪證據。
+
+## 0.1 續作交審：hosted workflow 與真郵件 profiles（2026-10-02）
+
+### 版本、授權與範圍
+
+- 本次 fetch 的 `origin/dev`：`210c0beaed9f19bd12442f247265c8f3307a9c93`。開始時 task branch／remote 都是 `a19d1a5eead3feec28a8d3d12b93d9ed691e3b49`，PR 查詢為空，未鎖 candidate。
+- 為納入最新 WIF／scheduler 路徑，以普通 merge 產生 `1446409c388f8ff14274e14863e73c2a6ffc3f8f`，沒有 rebase/reset/amend/force push。程式／測試驗證 snapshot：`ce3ed8149d039e250f5909337ce62a6c9466d276`，與前述 anchors 均已普通 push。
+- 最終 candidate 為本文件 closeout commit 後的 branch HEAD，由 canonical `handoff.CANDIDATE_SHA` 與 PR head 鎖定；**anchor、review candidate、merge SHA 與 live source SHA 分開記錄**，不自填文件自己的 commit hash。
+- `gh variable list --json name,value`（只選 `DEV_GCP_*`、`DRTS_LIVE_MAIL_*`）exit 0：project `drts-dev-devcc-20260825`、region `us-central1`、tenant `...0201`、actor `...0901`、viewer role、authorization `true` 與既有 API allowlist 均存在。沒有讀本機 secret payload 或列印 recipient allowlist。
+- Supervisor integration_notes 12:50Z 指定先 review／merge／nightly publish→main promotion，之後才 dispatch。歷史 workflow HTTP 404 已有正常發布路徑，不反覆重試。
+- 只寫四個 machine scopes，沒有改業務碼、shared contracts、lockfile 或 deploy workflow。VM 只跑 repository checks，**未執行 Playwright、產品 server、Docker、SMTP send 或 IMAP 連線**。
+
+### Finding 與驗證對照（保留 §0 F01–F07）
+
+| Finding／驗收項                             | 正式依據／修改位置                                                                                    | 舊版 → 新版／證據                                                                                                                                                                                                                      | 未驗與責任                                                                                                                                                                                                                    |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F01–F04 wire、identity、receipt、SHA        | `SnakeCaseInterceptor`、`toApiSuccessEnvelope`；既有 bootstrap／runner／preflight                     | §0 原四項重現保留，本輪完整 82 TS tests 包含前 50 回歸通過                                                                                                                                                                             | 真 session／同 SHA HTTP 尚待 hosted                                                                                                                                                                                           |
+| F05 partial 誤稱 complete                   | `runMailAcceptance`、`gate-evidence.py`、`live-mail.spec.ts`                                          | 缺 approval／expiry／retry 任一項仍 failed/nonzero；missing/stale artifact、skipped step、teardown failure 均不能 pass；TS orchestration／Python gate checks pass                                                                      | 第一次 hosted run 的 partial artifact 不能當 task acceptance                                                                                                                                                                  |
+| F06 真信件與 token 消耗                     | `buildInvitationEmailBody`、`acceptTenantInvitation`；Python observer／live-profiles                  | READONLY All Mail、exact Message-ID、BODY.PEEK；核 alias／sender／subject／business text；token 只在 Python 記憶體，直送固定 accept API，不追蹤 email link。15 Python tests 與 TS lifecycle 正反向 pass                                | 真 Gmail UID／內容未取得；RFC Message-ID 不是 provider queue ID                                                                                                                                                               |
+| F07 assertion 同秒碰撞                      | 正式 `GoogleWorkloadIdentityAdapter` replay gate；fresh-assertion／bootstrap                          | Supervisor 已登錄 `CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002`。本 source 每次 IAM mint 的 iat 嚴格增加、1.1s 間隔；同 iat bounded fail；明確 replay 409 才限三次新 assertion exchange，其他錯誤不 retry；hosted-runner tests pass | 其他 deploy workflow 的歷史 409 未被本任務宣稱已修；未削弱產品 replay protection                                                                                                                                              |
+| F08 固定 alias 再次 create 衝突／誤改他人   | `createTenantUser`、`resendTenantInvitation`、`updateTenantUserRole`；`prepareTaskInvitation`         | 先讀 directory，只重用相同 tenant／alias／本 task displayName／viewer；invited 走 resend，active viewer 用正確 step-up 回 invited；wrong owner／admin／tenant 均拒絕；記實際 resend HTTP status                                        | 只修改本 task 測試 viewer，不刪 membership／資料；live 待驗                                                                                                                                                                   |
+| F09 本輪 expiry probe 曾讀 receipt 私有欄位 | `toMailDeliveryReceiptView` 不公開 idempotencyKey；`verifyExpiredInvitation`                          | 舊 `80b4085ed0f53835a6850a692296dd1281c8a579` 的函式＋同回歸案例：1 failed／12 filtered skips，定位 private idempotency_key assertion；修後同案例 1 pass／12 filtered skips，全套 82 pass                                              | 到期靠真 expiry／queued_at 與 denial 後 pending-only revoke 回傳同 delivery，排除先前 revoked／accepted；真 24h 未經過                                                                                                        |
+| F10 C026 三類郵件與 actor 限制              | `recordApprovalDecision` exact resolvedApproverUserIds；approval audit delivery ID；`observeApproval` | 真 decided request→唯一 active +approve user→new_request／approaching_timeout／decision audit→receipt→IMAP；missing reminder／wrong alias fail；subject 與正式 template 交叉核對。Unit pass                                            | **Supervisor/operator 需供真 approval_request_id**；目前 WIF 只 ...0901/...0902，不能冒用動態受邀 +approve membership 決策。自動建 rule／booking／decision 因身份資源缺口未實作，本 profile 唯讀                              |
+| F11 background retry                        | 正式 MailDeliveryReceiptView／既有 scheduler；retry-profile                                           | 先觀測 queued＋retryable failed，再 GET 等 due-time 後新 sent attempt／provider ID／IMAP；取得同 project/job/region/time-window Scheduler AttemptFinished，拒絕 stale/start-only/401/wrong-job。8 unit cases pass                      | **Supervisor/operator 需供尚 queued 的真 retryable invitation delivery，或安排受控故障資源**；未獲授權改共用 SMTP 製造失敗；allowlist permanent rejection 不能冒充 retry。Scheduler log 是同時段佐證，非逐 delivery causality |
+| provider／session 收尾                      | 正式 AuthController.logout；provider-metadata／session-teardown／workflow                             | 雲端 auth 前核 grant／health SHA；metadata 核單 revision 100% traffic、postgres、六 secret refs、allowlist v2／:latest freshness。token 取得即保留 cleanup handle，後續 bootstrap 失敗也撤銷；相關 unit pass                           | 真 WIF／metadata／Gmail／teardown 尚待 hosted；job 硬終止仍需 operator 查 session                                                                                                                                             |
+
+WIF 使用 auth@v2 的 **auth_token（原 federated token）**呼叫 IAM generateIdToken，沿用其官方呼叫身份，避免要求 SA 自身額外 impersonation grant。參考 [auth outputs](https://github.com/google-github-actions/auth#outputs)、[v2 source](https://github.com/google-github-actions/auth/blob/v2/src/main.ts)。GCP 仍簽章，API 照常驗 issuer/audience/registry/replay；decode iat 只判 uniqueness。跨 workflow 首顆碰撞由 API 拒絕後再 mint。credentials 不寫 artifact。
+
+### 已結束並讀取的 checks
+
+以下新版命令執行於 `ce3ed8149`（最終後續只有 evidence 文件）。HTTP／IMAP／IAM 邊界在 unit mock，不算 SMTP／PG／live pass。
+
+| 命令                                                                                                                                                                                                    | Exit／結果                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/`                                                                                                                                  | **0**；6 files／**82 tests passed**，Vitest 4.1.4                             |
+| `pnpm exec tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json`                                                                                                            | **0**，包含 hosted spec／profiles                                             |
+| `pnpm exec eslint --max-warnings=0 tests/e2e/system-remediation/sr-live-mail-001/ tests/unit/system-remediation/sr-live-mail-001/`                                                                      | **0**                                                                         |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v`                                                                            | **0**；**15 tests passed**                                                    |
+| `pnpm exec prettier --check .github/workflows/live-mail-acceptance.yml 'tests/e2e/system-remediation/sr-live-mail-001/*.ts' 'tests/unit/system-remediation/sr-live-mail-001/*.ts'`                      | **0**                                                                         |
+| Python `yaml.safe_load` workflow、hosted runner／step 結構核對                                                                                                                                          | **0**；ubuntu-latest／15 steps。VM 無 actionlint，未稱 actionlint pass        |
+| `git diff --check`                                                                                                                                                                                      | **0**                                                                         |
+| `pnpm exec vitest run --root .local/sr-live-mail-001/baseline-80b4085ed --config vitest.config.ts tests/unit/system-remediation/sr-live-mail-001/live-profiles.test.ts -t 'uses the real receipt view'` | **1**；舊函式的 private-field behavioral failure，1 failed／12 filtered skips |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/live-profiles.test.ts -t 'uses the real receipt view'`                                                                             | **0**；修後 1 pass／12 filtered skips；其餘已於全套 82 執行                   |
+| Playwright／SMTP／IMAP／PG／Cloud Run live                                                                                                                                                              | **未執行**；VM 限制＋Supervisor 指定先 promotion                              |
+
+F09 重現把舊函式放隔離 `.local/sr-live-mail-001/baseline-80b4085ed/`，沿用同案例與目前相依，沒有 reset 活躍樹；輸出 `expiry-before.log`／`expiry-after.log`。最初 config 路徑與 tsconfig.base 缺件兩次 setup 失敗不算重現；補齊後才取得上述行為失敗。
+
+### Promotion 後操作與 acceptance 缺項
+
+Supervisor 在 review／same-candidate CI／merge／正常 publish→main promotion 後，選**包含本 runner 且已部署的完整 source SHA**執行：
+
+```bash
+gh workflow run live-mail-acceptance.yml --ref dev -f candidate_sha=<deployed-full-source-sha>
+```
+
+Workflow checkout 精確 live source；`WORKFLOW_SHA` 保留既有 runner 的 checkout SHA 語義，`DISPATCH_WORKFLOW_SHA` 記真正 workflow source，`BASE_SHA=git merge-base HEAD origin/dev`。API 每次回應、IMAP 存取前均核 deployed SHA。首次 run 缺完整 profiles 時必須紅燈，但仍上傳 partial observations。
+
+首次產生 `invitation_expiry_checkpoint`（user/delivery/invitation/expires_at/SHA）；等真 24h 到期後加 `expiry_user_id`、`expiry_delivery_id`。**期間不要重送同 alias**，否則 checkpoint 被撤銷。新 run 先檢查 expiry，再做新 lifecycle。若部署版本改變，保留 checkpoint 的原 SHA 與新觀測 SHA，交 reviewer 判斷是否須重建同版本 checkpoint，不把歷史建立版本冒充當前候選。
+
+加 `approval_request_id` 觀測真 product flow 已決策且三類信俱全的 request，唯一 active approver 須是 +approve。本 runner 不自建 rule／booking／decision；Supervisor/operator 先提供 linked approver 身份與真 request，不能把此限制描述為完整自動 C026 已完成。加 `retry_delivery_id` 時必須尚為 queued retryable invitation；runner 先只讀 retry，再 expiry，再新 invitation，不 POST drain／jobs run／修改 SMTP。缺少任何 input 的 profile 為 incomplete，**不 skip 後 pass**。
+
+artifact：`live-mail-acceptance-<live-sha>-<run_id>-<run_attempt>`，保留 30 天，含 `evidence-mail.json`、`evidence-provider.json`、`run-status.json`；失敗也上傳，不含 raw mail body／secret／session／invitation token／allowlist。測試 viewer 回 invited 並留下 expiry 樣本；既有資料不刪。此 run 的 tenant session 一律 teardown，硬終止例外不能假稱已清理。
+
+| required_acceptance       | 本輪可取回入口                                                                | 尚缺的 live 證據／責任                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| authorized_test_mailbox   | 原 user option A、Supervisor notes、repo vars；只衍生 +invite/+approve        | 授權沿用不重問；待真 IMAP UIDVALIDITY/UID/content hash／candidate。Supervisor dispatch，operator 供 approval 資源                             |
+| configured_mail_provider  | 新 metadata runner；既有真部署配置來源仍保留 §0／歷史 §2                      | 待 live SHA 的 evidence-provider.json，沒有用 unit stub 代 cloud metadata                                                                     |
+| provider_message_receipts | 正式 delivery readback／approval audit／retry前後 attempt                     | **本輪零真回執**；待 hosted send、IMAP、approval request、real expiry 與真 retryable failure。Supervisor/operator 協調資源，Codex 維護 runner |
+| live_candidate_sha        | exact checkout、health／API headers、IMAP preflight、run/attempt/workflow SHA | review／CI／merge／promotion／部署後才有同 live source 的 evidence；由 Supervisor 依 lifecycle 收錄，owner 不 done                            |
+
+C079 發票信仍不涵蓋（Supervisor 明確排除，產品無 mail path）。本輪沒有獨立 review 結論、CI 或 live pass；新觀測能力不關閉 §0 尚未實測的 findings。
 
 ## 0. Codex 接手：契約修復與真信箱觀測準備（2026-10-02）
 
