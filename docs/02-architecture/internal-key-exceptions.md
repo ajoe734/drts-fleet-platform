@@ -1426,3 +1426,215 @@ itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
 in staging/production. No application or workflow code was changed in this
 session beyond this documentation; `EXCP_002`, the dual-send fallback, and
 every previously migrated caller are untouched.
+
+## 10. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`: staging/production deploy-wiring and operator templates
+
+This section is the follow-up §9.4 item 1 below asked for ("A
+staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` rollout ...
+outside this task's `write_scopes` ... a Supervisor decision on whether to
+fold that in ... or track it as its own follow-up task"): Supervisor
+dispatched it as the latter, a separate task
+(`SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`), rather than folding it
+into that session's `write_scopes`. §9.3's analysis of what breaks once
+`INTERNAL_KEY_EXCP_002` is removed is the authoritative statement of why this
+work matters and is not repeated in full here.
+
+Everything in §§7-8 above wired and populated
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` for **dev only**.
+`INTERNAL_KEY_EXCP_002` (§2, §6) is still active (expires
+`2026-10-31T23:59:59Z`) and unremoved in this candidate; removing it is a
+separate, not-yet-dispatched follow-up. While it remains active,
+`InternalKeyMiddleware`'s `catch` (`apps/api/src/common/auth/internal-key.middleware.ts:153-167`)
+falls back to the legacy `x-drts-internal-key` whenever the Google registry
+is absent or unpopulated, for every environment including staging/production
+— so this candidate does not change current runtime behavior for either
+environment. Neither has run recently enough for that to matter today: the
+most recent `deploy-staging.yml` dispatch (2026-08-16) and `deploy-prod.yml`
+dispatch (2026-05-17) both failed, confirmed by `gh run list --workflow=deploy-staging.yml --limit=5`
+and `gh run list --workflow=deploy-prod.yml --limit=5` from this sandbox's
+read-only `gh` access. The risk this task closes is forward-looking: once a
+follow-up task removes `INTERNAL_KEY_EXCP_002`'s fallback, the *next* deploy
+of either environment without a populated registry would make
+`GoogleWorkloadIdentityAdapter` the only verification path and reject every
+proxied request that cannot present a valid assertion — exactly the
+"invented values are worse than absent ones ... staging and prod keep their
+own checks" design intent `deploy-dev.yml`'s own `api_secrets` step comment
+already states (§7.5, `.github/workflows/deploy-dev.yml:690-695`).
+
+### 10.1 What shipped
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| `deploy-staging.yml` and `deploy-prod.yml` never mounted `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`, unlike `deploy-dev.yml` since §7.5 (`staging與prod部署流程掛載註冊表密鑰`) | `.github/workflows/deploy-staging.yml`'s `Resolve API secret mounts` step: added `workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"` alongside the two pre-existing required workload secrets, and added `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest` to `secret_args`. `.github/workflows/deploy-prod.yml`'s `Resolve API secret mounts` step: added the same `workload_google_registry_secret` variable and a dedicated `gcloud secrets describe` guard immediately after the pre-existing `for required_secret in "$workload_key_secret" "$workload_registry_secret"; do ... done` loop (kept as its original two-element loop, unchanged), plus the same mount onto `secret_args`. Both follow the exact `${SECRET_PREFIX}-workload-identity-google-service-principals` naming `deploy-dev.yml` uses for its own (optional) mount of the same env var. | Before: ops populating a secret named `drts-staging-workload-identity-google-service-principals` or `drts-prod-workload-identity-google-service-principals` in the respective GCP project would have had no effect on either deployed service — no env var wiring existed. After: the mount exists in both workflows, resolved from the same `SECRET_PREFIX` pattern every other staging/prod secret in these two files already uses (`vars.STAGING_SECRET_PREFIX \|\| 'drts-staging'`, `vars.PROD_SECRET_PREFIX \|\| 'drts-prod'`). | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-staging.yml')); yaml.safe_load(open('.github/workflows/deploy-prod.yml'))"` (exit 0, both valid YAML). `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, 1 file / 11 tests passed). `gh run list --workflow=deploy-staging.yml --limit=5` (most recent run `31930534031`, `2026-08-16T06:04:37Z`, conclusion `failure`) and `gh run list --workflow=deploy-prod.yml --limit=5` (only run on record `25988293601`, `2026-05-17T10:26:43Z`, conclusion `failure`) confirm the "neither environment has run recently" premise this section's preamble states. | Not run: an actual `deploy-staging.yml` or `deploy-prod.yml` execution (no trigger path from this branch; this task's guardrails forbid dispatching either deploy). No GCP secret was created or read in either project — this sandbox cannot read the staging/production projects (see §10.2/§10.3). |
+| 缺少註冊表密鑰時部署在部署 API 前明確失敗並說明原因，不得部署出會拒絕所有代理請求的 API (`註冊表密鑰不存在時部署明確失敗而非靜默放行`) | Both workflows' `Resolve API secret mounts` step runs and fails (`exit 1` with an `::error::` annotation naming the missing secret and pointing at this section) strictly before the later `Deploy — api` step that actually runs `gcloud run deploy` for `drts-api` — the resolve step's `secret_args` output is the only input the deploy step consumes (`--set-secrets "${{ steps.api_secrets.outputs.api }}"`), so a failed resolve step means the job stops before any `gcloud run deploy` call is reached, for either environment. This mirrors the pre-existing fail-closed pattern both files already use for `workload_key_secret`/`workload_registry_secret` (staging) and the `workload_key_secret`/`workload_registry_secret` loop (prod) — this task extends the same established pattern to the third, previously-unguarded registry rather than inventing a new one. | Before: no explicit guard existed for this secret in either file; absence was indistinguishable from presence until a request actually needed Google-assertion verification at runtime (and today, EXCP_002's fallback would mask even that). After: a missing registry secret stops the GitHub Actions job at the resolve step, before any Cloud Run deploy call, with a message naming the exact secret and this document section. | `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` "runs the registry guard inside the Resolve API secret mounts step, strictly before the Deploy — api step" (both describe blocks) asserts the guard and the `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` mount both appear, in order, between the `Resolve API secret mounts` step name and the `Deploy — api` step name in the raw workflow text. `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/internal-key-alerts.test.ts tests/unit/sr-mail-scheduler-provision-20261001.test.ts` (exit 0, 7 files / 93 tests passed — regression check confirming the pre-existing dev/staging/prod workflow and internal-key-middleware test suites are unaffected). `pnpm exec eslint tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, clean). | Static/text-level assertion only (parses the committed YAML as text, as every other test in this file does) — does not execute the `run:` block's bash in a real `gcloud`-equipped runner. No live GitHub Actions run exercised this guard (same reservation as the row above). |
+| 不得建立密鑰、GitHub 變數或觸發任何部署；本機不得啟動任何服務或Docker (guardrail, not an acceptance key) | N/A — process constraint, not a code change | N/A | This task created no GCP secret, no GitHub repository variable, and did not run `gh workflow run` / `workflow_dispatch` against either workflow. No local server, dev/preview server, or Docker container was started in this sandbox. | N/A |
+| **R1 reopen fix (2026-10-02)**: §10.2/§10.3's original operator templates told ops to resolve `drts-api`'s Cloud Run `status.url` as `allowedTokenAudiences` for the registry entry — wrong for every caller this task's own §10.2/§10.3 cover. | §10.2 steps 1-3 and §10.3's corresponding step rewritten below to resolve `vars.STAGING_IAP_CLIENT_ID` (falling back to the literal already committed at `deploy-staging.yml:56,447,672,770`) / `vars.PROD_IAP_CLIENT_ID` (required, no fallback — `deploy-prod.yml:57,113`) instead. | Before: the template, if followed literally, would have produced `allowedTokenAudiences=[<drts-api Cloud Run URL>]`. Every staging web-app deploy (`platform-admin-web`, `ops-console-web`, `tenant-console-web`) unconditionally sets `DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }}` (`deploy-staging.yml:603,620,636`; prod deploys only `platform-admin-web`/`ops-console-web`, same pattern at `deploy-prod.yml:605,622` — prod does not deploy `tenant-console-web`). Each app's own control-plane-proxy route mints its outbound Google ID token with `aud` set to that env var whenever it is present — `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts:197-204` (`x-drts-google-id-token`), `apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:148-156`, `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts:147-155` (both via `resolveTargetAudience(targetUrl)`, `route.ts:35`, which also returns `DRTS_API_AUTH_AUDIENCE` first) — the origin-fallback branch in any of these three never fires for a deployed staging/prod caller, since `DRTS_API_AUTH_AUDIENCE` is always populated there. The old template's audience would therefore match no token any live caller actually presents, so `GoogleWorkloadIdentityAdapter.verifyServicePrincipal` (`apps/api/src/modules/auth/google-workload-identity.adapter.ts:203-241`) would reject every one of those requests with `WORKLOAD_AUDIENCE_MISMATCH` the moment ops populated the registry per the old template and the secret got mounted — exactly the "deploy an API that rejects all proxied requests" outcome this task's acceptance key 2 forbids, not a hypothetical post-`EXCP_002`-removal risk. After: §10.2/§10.3 resolve the audience each environment's deployed proxies actually mint. | Independent reviewer reproduction (R1, same candidate generation, recorded in this task's review history): an in-memory `pnpm exec tsx --eval` probe invoked the real `validateInternalKey`/`GoogleWorkloadIdentityAdapter` with a correctly RS256-signed test assertion whose `aud` was a review IAP client ID; registering `allowedTokenAudiences=[<drts-api Cloud Run URL>]` produced `WORKLOAD_AUDIENCE_MISMATCH` for both environment modes, while `allowedTokenAudiences=[<the token's own aud>]` accepted it (4/4 assertions, exit 0). This session re-confirmed the cited call sites and line numbers by direct file inspection (`grep`/`Read`, listed above) rather than re-running that probe. New regression assertions added to `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (§10.2/§10.3 audience guidance, below); `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` — see updated evidence in that file's own test run. | Only `tenant-console-web` sends the Google-workload-identity header (`x-drts-google-id-token`) `apps/api`'s `GoogleWorkloadIdentityAdapter` actually reads; `platform-admin-web`/`ops-console-web` mint a Google ID token too but send it as a plain `authorization: Bearer` header consumed by a separate, non-registry `issueControlPlaneRequestAuth` IAP-JWT control-plane auth path (`apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:112-146`) that this task does not change or assess — including that path's own correctness is out of this task's scope. Since `deploy-prod.yml` does not deploy `tenant-console-web` at all, production currently has no live caller of the Google-workload-identity registry path regardless of this fix; the corrected template is still required so the registry is ready the day that changes (or `EXCP_002` is removed, whichever comes first). |
+
+### 10.2 Operator template: staging registry content (values 待填 by ops — not verified by this task)
+
+Supervisor's and this task's own credentials cannot read the staging GCP
+project (confirmed unreadable from this sandbox, same restriction noted in
+§7.2/§7.9.1 for dev's own project before ops populated it there). Every
+concrete identity value below is therefore marked 待填 (to-be-filled) rather
+than guessed. Do not copy §7.9.1's dev service-account emails or audience
+into staging — they name dev-project identities and would authorize the
+wrong principals here.
+
+- **Secret name**: `drts-staging-workload-identity-google-service-principals`
+  (or `${vars.STAGING_SECRET_PREFIX}-workload-identity-google-service-principals`
+  if that repository variable is set to something other than `drts-staging`
+  — check `vars.STAGING_SECRET_PREFIX` first).
+- **GCP project**: `vars.STAGING_GCP_PROJECT_ID` (or `vars.GCP_PROJECT_ID` if
+  that staging-specific variable is unset) — 待填, read the actual
+  repository variable value before provisioning.
+- **Steps for ops to populate it** (mirrors §7.6's corrected dev method — one
+  shared-identity entry, not one per caller — but with the audience resolved
+  the opposite way §7.6 explains, since staging's `IAP_CLIENT_ID` is always
+  populated, unlike dev's):
+  1. `gcloud run services list --project=<staging project id> --region=<vars.STAGING_GCP_REGION> --format='table(metadata.name,spec.template.spec.serviceAccountName)'`
+     to confirm every staging Cloud Run service (`drts-api`,
+     `drts-platform-admin-web`, `drts-ops-console-web`,
+     `drts-tenant-console-web`) runs as the single shared identity
+     `deploy-staging.yml` resolves via `RUNTIME_SERVICE_ACCOUNT`
+     (`vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT`, falling back to
+     `vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT` / `vars.GCP_RUNTIME_SERVICE_ACCOUNT`,
+     `deploy-staging.yml:43-44`) — this is the only `serviceAccountEmail`
+     the registry needs (Entry A) — 待填 the actual email. Do **not** add a
+     second entry for the deployer identity
+     (`secrets.STAGING_WIF_SERVICE_ACCOUNT`): `deploy-staging.yml`'s own
+     "Mint IAP verification token" / "Verify IAP-protected control-plane
+     API" steps (`:678-727`) use that identity's token only as the
+     `Authorization: Bearer` header against the IAP-protected
+     `platform-admin`/`ops-console` origins directly — it is never
+     forwarded to `apps/api` as `x-drts-google-id-token`, so
+     `GoogleWorkloadIdentityAdapter` never verifies it and it has no
+     registry entry to populate (unlike dev caller #9 / §7.6 Entry B, whose
+     token *is* checked by that adapter).
+  2. **Audience — corrected per R1 (2026-10-02), do not use `status.url`**:
+     every staging web-app Cloud Run deploy unconditionally sets
+     `DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }}`
+     (`deploy-staging.yml:603,620,636`), and `iap_client_id` itself resolves
+     from `${IAP_CLIENT_ID_ENV:-<literal fallback>}` with a nonempty literal
+     fallback already committed in this repo
+     (`deploy-staging.yml:56,447,672,770`:
+     `1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`)
+     — so `DRTS_API_AUTH_AUDIENCE` is always populated for every staging
+     proxy, and each app's control-plane-proxy route always mints its
+     outbound Google ID token with `aud = DRTS_API_AUTH_AUDIENCE`, never the
+     API's own Cloud Run origin (confirmed in
+     `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts:197-204`,
+     `apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:148-156`,
+     `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts:147-155`
+     — the origin-fallback branch each of these three also has is dead code
+     for every deployed staging caller). `allowedTokenAudiences` must
+     therefore be a single-element array containing
+     `vars.STAGING_IAP_CLIENT_ID` if that repository variable is set,
+     otherwise the literal fallback quoted above — this is a committed repo
+     value, not a guess, so it is not marked 待填, but ops must still check
+     whether `vars.STAGING_IAP_CLIENT_ID` is actually set before trusting
+     the fallback applies.
+  3. Build the JSON array with **one** object (not one per caller — see
+     step 1): `serviceAccountEmail` (step 1), `principalId`
+     (operator-chosen, e.g. `staging-web-runtime`), `allowedTokenAudiences`
+     (step 2), `routeScopes: ["* *"]` (the shared identity services every
+     proxy, so no caller-specific narrowing is possible here either — same
+     reasoning as §7.6 Entry A for dev). Store the compacted single-line
+     JSON as the secret's value.
+  4. Re-run `deploy-staging.yml` only after confirming the registry secret
+     exists — this task's guardrails do not permit triggering that run from
+     here.
+
+```
+drts-staging-workload-identity-google-service-principals = [
+  {
+    "serviceAccountEmail": "<待填: resolve vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT (or its fallback chain, deploy-staging.yml:43-44) via gcloud run services list — step 1>",
+    "principalId": "<待填: an operator-chosen stable label, e.g. staging-web-runtime>",
+    "allowedTokenAudiences": ["<vars.STAGING_IAP_CLIENT_ID if set, otherwise the literal fallback \"1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com\" already committed at deploy-staging.yml:56 — step 2, not status.url>"],
+    "routeScopes": ["* *"]
+  }
+]
+```
+
+### 10.3 Operator template: production registry content (values 待填 by ops — not verified by this task)
+
+Same reservation as §10.2: this sandbox cannot read the production GCP
+project. Production additionally enforces
+`isProductionAllowedBoundary` (§1, `internal-key-exception-registry.ts`) on
+any `DRTS_INTERNAL_KEY` exception's `networkBoundary` — this is unrelated to
+the Google registry itself, but is a reminder that production's checks are
+at least as strict as staging's, never looser; do not relax any
+`routeScopes` entry below "least privilege for that caller" to work around a
+missing value.
+
+- **Secret name**: `drts-prod-workload-identity-google-service-principals`
+  (or `${vars.PROD_SECRET_PREFIX}-workload-identity-google-service-principals`
+  if that repository variable is set to something other than `drts-prod`).
+- **GCP project**: `vars.PROD_GCP_PROJECT_ID` — 待填, read the actual
+  repository variable value before provisioning.
+- **Steps for ops to populate it**: same method as §10.2 steps 1-4,
+  substituting `vars.PROD_GCP_PROJECT_ID` / `vars.PROD_GCP_REGION` and
+  `vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT` (`deploy-prod.yml:46`, no fallback
+  chain — required, the workflow fails closed at its own config-validation
+  step if unset, `deploy-prod.yml:107`) for the project, region, and runtime
+  identity to inspect. Production currently deploys only `drts-api`,
+  `drts-platform-admin-web`, and `drts-ops-console-web`
+  (`deploy-prod.yml` has no `Deploy — tenant-console-web` step, unlike
+  staging) — all three still share the one `RUNTIME_SERVICE_ACCOUNT`, so
+  step 1's "one shared entry, not one per service" conclusion holds
+  unchanged. Production's `Deploy — api` step additionally sets
+  `DRTS_ENV=production` (not `staging`)/`AUTH_MODE=strict`, which is why
+  `auth-startup-config.ts`'s `isStrictEnvironment` treats it the same as
+  staging for every other strict-environment control in this document — this
+  template records only the registry-specific values that differ from
+  staging.
+
+  **Audience — corrected per R1 (2026-10-02), do not use `status.url`**:
+  unlike staging, `vars.PROD_IAP_CLIENT_ID` has **no** literal fallback —
+  `deploy-prod.yml:57` reads it verbatim and `:113` fails the whole deploy
+  closed (`missing+=("vars.PROD_IAP_CLIENT_ID")`) before anything else runs
+  if it is unset. Both deployed proxies
+  (`apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:148-156`,
+  `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts:147-155`)
+  set `DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }}`
+  unconditionally (`deploy-prod.yml:605,622`), so by the time either service
+  is live, `DRTS_API_AUTH_AUDIENCE` is guaranteed populated and every minted
+  token's `aud` is `vars.PROD_IAP_CLIENT_ID`'s actual value — never
+  `drts-api`'s Cloud Run origin. `allowedTokenAudiences` must be a
+  single-element array containing the exact value of
+  `vars.PROD_IAP_CLIENT_ID` — 待填, read the real repository variable value
+  before provisioning; there is no safe literal to fall back to here, unlike
+  staging's §10.2 step 2.
+
+```
+drts-prod-workload-identity-google-service-principals = [
+  {
+    "serviceAccountEmail": "<待填: resolve vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT via gcloud run services list, same method as §10.2 step 1>",
+    "principalId": "<待填: an operator-chosen stable label, e.g. prod-web-runtime>",
+    "allowedTokenAudiences": ["<待填: the exact value of vars.PROD_IAP_CLIENT_ID (deploy-prod.yml's IAP_CLIENT_ID_ENV, no fallback) — not status.url, not the drts-api Cloud Run URL>"],
+    "routeScopes": ["* *"]
+  }
+]
+```
+
+### 10.4 Why fail-closed here, unlike dev's notice-only degrade
+
+`deploy-dev.yml`'s own comment (§7.5, lines 690-695) already states the
+design intent this task implements for staging/production: inventing
+registry values for an environment this task cannot verify "is worse than
+absent ones", so dev mounts the secret only when it already exists and
+otherwise logs a notice and continues — dev's `INTERNAL_KEY_EXCP_002`
+fallback keeps it green either way, and a wrong invented entry there would
+look like configured security while authorizing a subject that does not
+exist. Staging and production differ in exactly the respect that comment
+flags as out of scope for dev: this task does not invent any value for
+either environment (§10.2/§10.3 mark every concrete identity 待填), but it does
+add the fail-closed deploy guard dev's comment says belongs to "staging and
+prod['s] own checks" — so that whenever a human operator populates the real
+secret (via §10.2/§10.3's steps, not this task), the deploy pipeline already
+requires it, instead of silently degrading the same way dev does right up
+until the day `INTERNAL_KEY_EXCP_002`'s fallback is removed and every
+proxied request starts failing with no advance warning.
+
+No GCP secret or GitHub repository variable was created, read, or modified
+for this task. No deploy was dispatched. No local server, dev/preview
+server, or Docker container was started.
