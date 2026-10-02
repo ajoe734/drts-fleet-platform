@@ -319,7 +319,7 @@ jobs:
           id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}/driver-provisioning
           id_token_include_email: true
 
-      - name: Revoke sessions
+      - name: Revoke per-run invitation and bound driver session
         if: always()
         id: teardown
         env:
@@ -334,6 +334,7 @@ jobs:
           RUNNER_OUTCOME: ${{ steps.runner.outcome }}
           COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
           BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
         run: |
           python3 tests/e2e/system-remediation/sr-live-map-001/gate-evidence.py
 
@@ -348,6 +349,7 @@ jobs:
             .artifacts/live-map-acceptance/run-status.json
             .artifacts/live-map-acceptance/evidence-deployment.json
             .artifacts/live-map-acceptance/evidence-sessions.json
+            .artifacts/live-map-acceptance/evidence-cleanup.json
             .artifacts/live-map-acceptance/evidence-coverage.json
             .artifacts/live-map-acceptance/evidence-browser.json
             .artifacts/live-map-acceptance/map-*.png

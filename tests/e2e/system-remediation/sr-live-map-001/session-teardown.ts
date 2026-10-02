@@ -1,7 +1,11 @@
-import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateCoverageTargets, type LiveEnv } from "./live-map-config";
+import {
+  required,
+  validateCoverageTargets,
+  writeEvidence,
+  type LiveEnv,
+} from "./live-map-config";
 import { verifyLiveDeployment } from "./deployment-check";
 import {
   createMapSessionRequest,
@@ -11,13 +15,26 @@ import {
   type BootstrapDeps,
 } from "./session-bootstrap";
 
-type TeardownDeps = Pick<BootstrapDeps, "fetch" | "readGoogleIdToken" | "mask">;
+import { revokeMapInvitation } from "./session-cleanup";
+
+type TeardownDeps = Pick<
+  BootstrapDeps,
+  "fetch" | "readGoogleIdToken" | "mask"
+> & {
+  save: (evidence: unknown) => void;
+};
 
 export async function teardownMapSessions(env: LiveEnv, deps: TeardownDeps) {
   const config = validateCoverageTargets(env);
-  const registrationCode = env.DRTS_LIVE_MAP_INVITE_CODE;
-  if (!registrationCode) return;
+  const evidence = {
+    candidate_sha: config.candidateSha,
+    status: "failed",
+    driver_id: config.driverId,
+    recovery: "consumed-invitation",
+    revoked: false,
+  };
   try {
+    const registrationCode = required(env, "DRTS_LIVE_MAP_INVITE_CODE");
     await verifyLiveDeployment(env, deps.fetch, () => {});
     const request = createMapSessionRequest(config, deps.fetch);
     let token = env.DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN;
@@ -32,23 +49,15 @@ export async function teardownMapSessions(env: LiveEnv, deps: TeardownDeps) {
     token ??= (
       await issueMapProvisioningSession(config.driverId, request, deps)
     ).token;
-    const response = await request<{ data: { revoked: boolean } }>(
-      "auth/driver/device/invite/revoke",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ registrationCode }),
-      },
-    );
-    // Revoking a consumed invite also revokes its binding and refresh family.
-    assert.equal(response.data.revoked, true);
+    await revokeMapInvitation(env, deps.fetch, token, registrationCode);
+    evidence.revoked = true;
+    evidence.status = "passed";
   } catch {
     throw new Error(
       "Map session cleanup failed; no credential details retained",
     );
+  } finally {
+    deps.save(evidence);
   }
 }
 
@@ -58,6 +67,11 @@ if (
 ) {
   teardownMapSessions(process.env, {
     fetch,
+    save: (evidence) =>
+      writeEvidence(
+        ".artifacts/live-map-acceptance/evidence-cleanup.json",
+        evidence,
+      ),
     readGoogleIdToken: (purpose) => readMapGoogleIdToken(process.env, purpose),
     mask: (value) =>
       console.log(

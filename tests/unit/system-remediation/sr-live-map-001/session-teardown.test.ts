@@ -1,6 +1,8 @@
 import { expect, it, vi } from "vitest";
 import { teardownMapSessions } from "../../../e2e/system-remediation/sr-live-map-001/session-teardown";
 
+import { revokeMapInvitation } from "../../../e2e/system-remediation/sr-live-map-001/session-cleanup";
+
 const sha = "a".repeat(40);
 const env = {
   GITHUB_ACTIONS: "true",
@@ -74,13 +76,21 @@ function harness(
     });
     return reply({ data: { revoked: !options.fail } });
   });
-  return { fetch, mask, readGoogleIdToken };
+  return { fetch, mask, readGoogleIdToken, save: vi.fn() };
 }
 it("revokes the invite and bound device using the existing restricted session", async () => {
   const deps = harness();
   await teardownMapSessions(env, deps);
   expect(deps.readGoogleIdToken).not.toHaveBeenCalled();
   expect(deps.fetch).toHaveBeenCalledTimes(3);
+  expect(deps.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      status: "passed",
+      revoked: true,
+      candidate_sha: sha,
+    }),
+  );
+  expect(JSON.stringify(deps.save.mock.calls)).not.toContain("private-code");
 });
 it("uses fresh WIF after expiry, without reading a secret or issuing a workforce session", async () => {
   const deps = harness({ expired: true });
@@ -96,9 +106,11 @@ it.each([{ fail: true }, { wrongSha: true }])(
     );
   },
 );
-it("does not call the API when there is no invite to clean up", async () => {
+it("fails closed without an API call when there is no invite to clean up", async () => {
   const deps = harness();
-  await teardownMapSessions({ ...env, DRTS_LIVE_MAP_INVITE_CODE: "" }, deps);
+  await expect(
+    teardownMapSessions({ ...env, DRTS_LIVE_MAP_INVITE_CODE: "" }, deps),
+  ).rejects.toThrow();
   expect(deps.fetch).not.toHaveBeenCalled();
 });
 it("checks hosted authorization before cleanup", async () => {
@@ -110,4 +122,43 @@ it("checks hosted authorization before cleanup", async () => {
     ),
   ).rejects.toThrow();
   expect(deps.fetch).not.toHaveBeenCalled();
+});
+
+it.each([
+  "http-error",
+  "redirect",
+  "wrong-sha",
+  "revoked-false",
+  "no-envelope",
+  "network",
+  "invalid-json",
+])("fails cleanup on %s without credential/body disclosure", async (mode) => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+    expect(init?.redirect).toBe("error");
+    if (mode === "network") throw new Error("private-secret-network");
+    if (mode === "invalid-json")
+      return new Response("private-secret-body", {
+        headers: { "x-drts-candidate-sha": sha },
+      });
+    return Response.json(
+      mode === "no-envelope"
+        ? { revoked: true }
+        : {
+            data: { revoked: mode !== "revoked-false" },
+            private: "private-secret-body",
+          },
+      {
+        status: mode === "http-error" ? 403 : mode === "redirect" ? 302 : 200,
+        headers: {
+          "x-drts-candidate-sha": mode === "wrong-sha" ? "b".repeat(40) : sha,
+          location: "https://evil.example.test",
+        },
+      },
+    );
+  });
+  await expect(
+    revokeMapInvitation(env, fetch, "cached-session", "private-code"),
+  ).rejects.toThrow(
+    "Map invitation cleanup failed; credentials and response withheld",
+  );
 });
