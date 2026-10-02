@@ -46,6 +46,77 @@ function wire(data: unknown) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("real mail HTTP adapters, using the production response serializer", () => {
+  it.each([
+    { DRTS_LIVE_MAIL_TEST_AUTHORIZED: "false" },
+    { DRTS_LIVE_MAIL_TEST_TENANT_ID: "another-tenant" },
+    { DRTS_LIVE_MAIL_API_ORIGIN: "https://attacker.invalid" },
+    { DEV_GCP_PROJECT_ID: "nodal-alloy-503700-s3" },
+  ])(
+    "rejects unauthorized bootstrap before obtaining any credential: %j",
+    (override) => {
+      expect(() =>
+        validateMailSessionInputs({ ...env, ...override }),
+      ).toThrow();
+    },
+  );
+
+  it("rejects a real third-party address even as a negative-path input", () => {
+    expect(() =>
+      validateMailRunnerInputs({
+        ...env,
+        DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT: "another@gmail.com",
+      }),
+    ).toThrow(/fixed reserved-domain/);
+  });
+
+  it("records a real non-2xx readback without inventing HTTP 200 or exposing its body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("secret SMTP password", {
+        status: 503,
+        headers: { "x-drts-candidate-sha": sha },
+      }),
+    );
+    const recorder = new UatEvidenceRecorder({
+      taskId: "sr-live-mail-001",
+      baseSha: sha,
+    });
+    await expect(
+      realPollDeliveryReceipt(
+        validateMailRunnerInputs(env),
+        "delivery_1",
+        recorder,
+      ),
+    ).rejects.toThrow(/HTTP 503/);
+    const evidence = recorder.finalize("failed");
+    expect(evidence.httpCalls.map((call) => call.statusCode)).toEqual([503]);
+    expect(JSON.stringify(evidence)).not.toContain("secret SMTP password");
+  });
+
+  it.each([
+    { tenantId: "other-tenant", deliveryId: "delivery_1" },
+    { tenantId, deliveryId: "other-delivery" },
+  ])(
+    "rejects a receipt for a different tenant or delivery",
+    async (override) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        wire({ ...override, status: "sent", attempts: [] }),
+      );
+      await expect(
+        realPollDeliveryReceipt(validateMailRunnerInputs(env), "delivery_1"),
+      ).rejects.toThrow(/cross-tenant/);
+    },
+  );
+
+  it("rejects deployment drift during polling", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("{}", {
+        headers: { "x-drts-candidate-sha": "b".repeat(40) },
+      }),
+    );
+    await expect(
+      realPollDeliveryReceipt(validateMailRunnerInputs(env), "delivery_1"),
+    ).rejects.toThrow(/candidate SHA changed/);
+  });
   it("verifies snake_case identity and reads the real step-up proof", async () => {
     const fetchMock = vi
       .fn()
