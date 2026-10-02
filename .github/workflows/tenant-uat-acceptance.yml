@@ -59,6 +59,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: tenant-uat-acceptance-${{ github.event.inputs.candidate_sha || github.sha }}
@@ -104,9 +105,18 @@ jobs:
       NOTIFICATION_FROM_EMAIL: qa-sender@qa-tenant-uat.example
       DRTS_UAT_API_URL: http://127.0.0.1:4102
       DRTS_REFERRAL_EMBED_BASE_URL: http://localhost:3002
-      DRTS_REFERRAL_EMBED_HANDOFF_KEY: hosted-uat-handoff-not-a-real-secret
       REFERRAL_EMBED_SESSION_SECRET: hosted-uat-session-not-a-real-secret
       REFERRAL_EMBED_ALLOWED_HOSTS: localhost:3002
+      # SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: INTERNAL_KEY_EXCP_001
+      # is retired; the referral embed handoff routes verify a Google
+      # workload identity assertion instead (see the "Mint Google workload
+      # identity token" and "Derive Google workload identity registry"
+      # steps below). This audience is an arbitrary opaque string -- Google
+      # ID token audiences do not need to resolve to anything -- scoped to
+      # this hosted harness's own self-provisioned registry entry only.
+      WORKLOAD_IDENTITY_GOOGLE_AUDIENCE: "https://tenant-uat-acceptance.drts.internal"
+      DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+      DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
       JWT_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
       JWT_ALGORITHMS: HS256
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: tenant-uat-acceptance-runner-not-a-real-secret-32-chars-min
@@ -143,6 +153,61 @@ jobs:
           mkdir -p .artifacts/tenant-uat-acceptance
           base_sha="$(git merge-base origin/dev HEAD)"
           echo "BASE_SHA=$base_sha" >> "$GITHUB_ENV"
+
+      # SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: the referral embed
+      # handoff routes now require a Google-signed workload identity
+      # assertion (GoogleWorkloadIdentityAdapter). This runner has no GCE/
+      # Cloud Run metadata server for referral-embed-web's BFF to mint one
+      # from, so mint a real token here via the same WIF identity
+      # deploy-dev.yml uses, then self-provision a
+      # WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS registry for the
+      # locally-started API process below -- entirely within this job's own
+      # disposable env, not the shared dev GCP secret.
+      - name: Mint Google workload identity token for hosted UAT referral handoff
+        id: id_token_referral_handoff_uat
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.WORKLOAD_IDENTITY_GOOGLE_AUDIENCE }}
+          id_token_include_email: true
+
+      - name: Derive Google workload identity registry for hosted UAT
+        env:
+          ID_TOKEN: ${{ steps.id_token_referral_handoff_uat.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${ID_TOKEN}"
+          if [[ -z "${ID_TOKEN:-}" ]]; then
+            echo "::error::ID_TOKEN is empty; identity token minting failed upstream." >&2
+            exit 1
+          fi
+          payload_b64url="$(cut -d. -f2 <<<"$ID_TOKEN" | tr '_-' '/+')"
+          case $(( ${#payload_b64url} % 4 )) in
+            2) payload_b64url="${payload_b64url}==" ;;
+            3) payload_b64url="${payload_b64url}=" ;;
+          esac
+          email="$(base64 -d <<<"$payload_b64url" | jq -er '.email')"
+          registry_json="$(jq -nc \
+            --arg email "$email" \
+            --arg aud "$WORKLOAD_IDENTITY_GOOGLE_AUDIENCE" \
+            '[{
+              serviceAccountEmail: $email,
+              principalId: "tenant-uat-ci-deployer",
+              allowedTokenAudiences: [$aud],
+              routeScopes: [
+                "POST partner/ingress/referral-embed-handoff",
+                "POST partner/ingress/referral-embed-handoff/consume",
+                "POST partner/ingress/referral-embed-handoff/consent"
+              ]
+            }]')"
+          {
+            echo "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON<<WIF_REGISTRY_EOF"
+            echo "$registry_json"
+            echo "WIF_REGISTRY_EOF"
+          } >> "$GITHUB_ENV"
+          echo "DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN=${ID_TOKEN}" >> "$GITHUB_ENV"
 
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
@@ -226,6 +291,7 @@ jobs:
           DRTS_ALLOW_LOCAL_WEBHOOKS: "true"
           API_PORT: "4102"
           API_HOST: "127.0.0.1"
+          WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS: ${{ env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON }}
         run: |
           set -o pipefail
           (
@@ -252,6 +318,7 @@ jobs:
           PORT: 3001
           DRTS_API_URL: http://127.0.0.1:4102
           DRTS_ENV: test
+          DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN: ${{ env.DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN }}
         run: |
           set -o pipefail
           (

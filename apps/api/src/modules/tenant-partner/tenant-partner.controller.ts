@@ -116,11 +116,7 @@ import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
-import {
-  REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-  requireInternalKey,
-  requireScopedInternalKey,
-} from "../../common/auth/internal-key.middleware";
+import { requireInternalKey } from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -2478,13 +2474,16 @@ export class TenantPartnerController {
 
     try {
       if (allowInternalBootstrap) {
-        requireScopedInternalKey(
-          request ?? {},
-          process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-          {
-            header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-            requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-          },
+        // INTERNAL_KEY_EXCP_001 retired (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002):
+        // this bootstrap branch never matched EXCP_001's registered scope
+        // (see docs/02-architecture/internal-key-exceptions.md §9.1 row 4),
+        // so it always rejected before the retired key existed and must keep
+        // rejecting explicitly now that the key is gone -- no caller may
+        // reach this route without a valid partner `x-api-key`/`x-tenant-api-key`.
+        throw new ApiRequestError(
+          401,
+          "INTERNAL_KEY_UNDOCUMENTED",
+          "No documented exception metadata found for this route.",
         );
       } else {
         const partnerEntry =

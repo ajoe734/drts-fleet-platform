@@ -292,7 +292,6 @@ for name in \
   "${SECRET_PREFIX}-api-key-salt" \
   "${SECRET_PREFIX}-jwt-secret" \
   "${SECRET_PREFIX}-controlled-download-signing-secret" \
-  "${SECRET_PREFIX}-referral-embed-handoff-key" \
   "${SECRET_PREFIX}-referral-embed-partner-ingress-key"
 do
   if gc secrets describe "$name" >/dev/null 2>&1; then

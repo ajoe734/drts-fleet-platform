@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 
 describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
@@ -8,7 +8,6 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
   let mockTenantPartnerService: any;
 
   beforeEach(() => {
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "test-handoff-key";
     mockIdentityLinkRepo = {
       find: vi.fn(),
       findByDrtsPassengerId: vi.fn(),
@@ -38,11 +37,32 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
     );
   });
 
-  afterEach(() => {
-    delete process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY;
-  });
-
   describe("resolvePartnerNotificationNavigation", () => {
+    // SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: INTERNAL_KEY_EXCP_001
+    // retired. This internal-bootstrap branch (no x-api-key/x-tenant-api-key)
+    // never had a legitimate caller -- EXCP_001's registered scope never
+    // matched this route (docs/02-architecture/internal-key-exceptions.md
+    // §9.1 row 4) -- so it must keep rejecting explicitly now that the
+    // retired credential is gone, without reading any leftover env var.
+    it("returns 403 for the internal-bootstrap branch with no api key, even if a legacy handoff key env var is set", async () => {
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "leftover-env-value";
+      try {
+        try {
+          await controller.resolvePartnerNotificationNavigation(
+            "entry1",
+            { rideRef: "ride1", partnerUserRef: "user1" },
+            { headers: {} },
+          );
+          expect.fail("Should have thrown");
+        } catch (err: any) {
+          expect(err.status).toBe(403);
+        }
+        expect(mockNavRepo.resolveRoute).not.toHaveBeenCalled();
+      } finally {
+        delete process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY;
+      }
+    });
+
     it("returns 403 when navigation route does not exist", async () => {
       mockTenantPartnerService.getPartnerEntry.mockResolvedValue({
         tenantId: "tenant1",

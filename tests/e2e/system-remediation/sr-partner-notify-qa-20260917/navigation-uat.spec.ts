@@ -335,15 +335,20 @@ test.describe("Hosted navigation and session boundaries", () => {
         );
       expect(statuses).toEqual([403, 400, 400]);
       // The protected API consumer is independently reachable; it must share
-      // the durable replay ledger used by both BFF handlers.
+      // the durable replay ledger used by both BFF handlers. EXCP_001 is
+      // retired: this caller authenticates with the same Google workload
+      // identity assertion deploy-dev.yml's own smoke test uses, minted by
+      // this workflow's "Mint Google workload identity token" step and
+      // self-registered for this run by "Derive Google workload identity
+      // registry" (see tenant-uat-acceptance.yml).
       const direct = await fetch(
         `${process.env.DRTS_UAT_API_URL}/api/partner/ingress/referral-embed-handoff/consume`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-drts-referral-handoff-key":
-              process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY!,
+            "x-drts-google-id-token":
+              process.env.DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN!,
           },
           body: JSON.stringify({
             artifact: nav.handoff.artifact,
