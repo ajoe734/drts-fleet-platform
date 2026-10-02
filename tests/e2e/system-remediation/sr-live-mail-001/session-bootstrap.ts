@@ -26,6 +26,7 @@ import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { validateTarget, verifyDeployedCandidate } from "./preflight";
 
 export class MailSessionInputError extends Error {}
 
@@ -53,6 +54,13 @@ function requireString(value: string | undefined, name: string): string {
 export function validateMailSessionInputs(
   env: MailSessionEnv,
 ): MailSessionConfig {
+  try {
+    validateTarget(env);
+  } catch (error) {
+    throw new MailSessionInputError(
+      error instanceof Error ? error.message : "Invalid mail target",
+    );
+  }
   return {
     apiOrigin: requireString(
       env.DRTS_LIVE_MAIL_API_ORIGIN,
@@ -165,16 +173,24 @@ export async function mintTenantAdminSession(
     deps,
     "auth/session",
     { headers: { authorization: `Bearer ${sessionToken}` } },
-    false,
+    true,
   );
   const identity = session.data?.identity as
-    | { realm?: string; actorType?: string; actorId?: string }
+    | {
+        realm?: string;
+        actor_type?: string;
+        actor_id?: string;
+        tenant_id?: string;
+        roles?: string[];
+      }
     | undefined;
   if (
     session.data?.active !== true ||
     identity?.realm !== "tenant" ||
-    identity?.actorType !== "tenant_admin" ||
-    identity?.actorId !== config.actorId
+    identity?.actor_type !== "tenant_admin" ||
+    identity?.actor_id !== config.actorId ||
+    identity?.tenant_id !== config.tenantId ||
+    !identity.roles?.includes("tenant_admin")
   ) {
     throw new Error(
       "Minted tenant_admin session failed live verification via auth/session.",
@@ -193,19 +209,27 @@ export async function mintTenantAdminSession(
       },
       body: JSON.stringify({ actionId: config.stepUpActionId }),
     },
-    false,
+    true,
   );
   const proofData = proof.data as
-    | { required?: boolean; stepUpReference?: string | null }
+    | {
+        required?: boolean;
+        step_up_reference?: string | null;
+        action_id?: string;
+      }
     | undefined;
-  if (!proofData?.required || !proofData.stepUpReference) {
+  if (
+    !proofData?.required ||
+    !proofData.step_up_reference ||
+    proofData.action_id !== config.stepUpActionId
+  ) {
     throw new Error(
       `Step-up proof for action "${config.stepUpActionId}" was not issued (required=${proofData?.required}); the minted session may lack a trusted MFA assertion.`,
     );
   }
-  deps.mask(proofData.stepUpReference);
+  deps.mask(proofData.step_up_reference);
 
-  return { sessionToken, stepUpReference: proofData.stepUpReference };
+  return { sessionToken, stepUpReference: proofData.step_up_reference };
 }
 
 /**
@@ -219,7 +243,10 @@ export async function mintTenantAdminSession(
  */
 export function deriveAliasRecipient(baseEmail: string, tag: string): string {
   const at = baseEmail.indexOf("@");
-  if (at <= 0 || at === baseEmail.length - 1) {
+  if (
+    !/^[a-zA-Z0-9._-]+@gmail\.com$/.test(baseEmail) ||
+    !["invite", "approve"].includes(tag)
+  ) {
     throw new Error(
       `Cannot derive a "${tag}" alias from a malformed base mailbox address.`,
     );
@@ -229,6 +256,7 @@ export function deriveAliasRecipient(baseEmail: string, tag: string): string {
 
 async function main(): Promise<void> {
   const config = validateMailSessionInputs(process.env);
+  await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
   const envPath = process.env.GITHUB_ENV;
   if (!envPath) {
     throw new Error(
@@ -237,11 +265,12 @@ async function main(): Promise<void> {
   }
   const minted = await mintTenantAdminSession(config, {
     fetch,
+    // Issued by google-github-actions/auth with token_format=id_token,
+    // id_token_audience=API origin. Never reuse an assertion from another call.
     readGoogleIdToken: () =>
-      execFileSync(
-        "gcloud",
-        ["auth", "print-identity-token", `--audiences=${config.apiOrigin}`],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      requireString(
+        process.env.DRTS_LIVE_MAIL_GOOGLE_ID_TOKEN,
+        "DRTS_LIVE_MAIL_GOOGLE_ID_TOKEN",
       ),
     mask: (value) =>
       console.log(

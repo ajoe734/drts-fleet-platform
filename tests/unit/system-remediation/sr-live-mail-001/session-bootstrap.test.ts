@@ -1,3 +1,5 @@
+import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -17,6 +19,8 @@ function baseEnv(overrides: Partial<MailSessionEnv> = {}): MailSessionEnv {
     DRTS_CANDIDATE_SHA: VALID_SHA,
     DRTS_LIVE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
     DRTS_LIVE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+    DRTS_LIVE_MAIL_TEST_AUTHORIZED: "true",
+    DRTS_LIVE_MAIL_ALLOWED_TARGETS: "https://api.dev.drts-fleet.example.com",
     DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
     ...overrides,
   };
@@ -26,9 +30,13 @@ function jsonResponse(
   body: unknown,
   headers: Record<string, string> = {},
 ): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(JSON.stringify(deepToSnakeCase(body)), {
     status: 200,
-    headers: { "content-type": "application/json", ...headers },
+    headers: {
+      "content-type": "application/json",
+      "x-drts-candidate-sha": VALID_SHA,
+      ...headers,
+    },
   });
 }
 
@@ -118,6 +126,8 @@ describe("mintTenantAdminSession", () => {
               realm: "tenant",
               actorType: "tenant_admin",
               actorId: config.actorId,
+              tenantId: config.tenantId,
+              roles: ["tenant_admin"],
             },
           },
         }),
@@ -225,6 +235,8 @@ describe("mintTenantAdminSession", () => {
               realm: "tenant",
               actorType: "tenant_admin",
               actorId: config.actorId,
+              tenantId: config.tenantId,
+              roles: ["tenant_admin"],
             },
           },
         }),

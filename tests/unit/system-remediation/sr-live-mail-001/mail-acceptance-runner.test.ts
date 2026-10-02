@@ -18,6 +18,9 @@ const NEGATIVE_DELIVERY_ID = "99999999-9999-9999-9999-999999999999";
 
 function baseEnv(overrides: Partial<MailRunnerEnv> = {}): MailRunnerEnv {
   return {
+    BASE_SHA: VALID_SHA,
+    DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+    DRTS_LIVE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
     DRTS_CANDIDATE_SHA: VALID_SHA,
     WORKFLOW_SHA: VALID_SHA,
     DRTS_LIVE_MAIL_ALLOWED_TARGETS: "https://api.dev.drts-fleet.example.com",
@@ -25,8 +28,8 @@ function baseEnv(overrides: Partial<MailRunnerEnv> = {}): MailRunnerEnv {
     DRTS_LIVE_MAIL_TEST_AUTHORIZED: "true",
     DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN: "real-deployment-issued-session-token",
     DRTS_LIVE_MAIL_STEP_UP_REFERENCE: "stepup_real1234",
-    DRTS_LIVE_MAIL_TEST_TENANT_ID: "tenant-live-uat-001",
-    DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: "ops-uat@realdomain.test",
+    DRTS_LIVE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+    DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: "unit+invite@gmail.com",
     DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT:
       "sr-live-mail-001-negative@reserved.invalid",
     DRTS_LIVE_MAIL_INVITATION_ROLE_CODE: "tenant_viewer",
@@ -72,7 +75,7 @@ function happyPathDeps(candidateSha: string) {
   const issueInvitation = vi
     .fn()
     .mockImplementation(async (_config: MailRunnerConfig, recipient: string) =>
-      recipient === "ops-uat@realdomain.test"
+      recipient === "unit+invite@gmail.com"
         ? passingIssueResult(candidateSha, POSITIVE_DELIVERY_ID)
         : passingIssueResult(candidateSha, NEGATIVE_DELIVERY_ID),
     );
@@ -145,9 +148,7 @@ describe("validateMailRunnerInputs", () => {
     const env = baseEnv({
       DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: "not-an-email",
     });
-    expect(() => validateMailRunnerInputs(env)).toThrow(
-      /not a valid single email address/,
-    );
+    expect(() => validateMailRunnerInputs(env)).toThrow(/malformed addresses/);
   });
 
   it("rejects a fixture/demo/example recipient even if syntactically valid (wrong recipient)", () => {
@@ -196,7 +197,7 @@ describe("runMailAcceptance", () => {
     fetchSpy.mockRestore();
   });
 
-  it("passes when the positive send/readback and the negative allowlist rejection both succeed", async () => {
+  it("does not claim complete acceptance for a successful transport-only probe", async () => {
     const { issueInvitation, pollDeliveryReceipt } = happyPathDeps(
       config.candidateSha,
     );
@@ -207,8 +208,8 @@ describe("runMailAcceptance", () => {
       recorder,
     });
 
-    expect(result.status).toBe("passed");
-    expect(result.reasons).toEqual([]);
+    expect(result.status).toBe("failed");
+    expect(result.reasons.join(" ")).toMatch(/Acceptance incomplete/);
     expect(issueInvitation).toHaveBeenNthCalledWith(
       1,
       config,
@@ -266,7 +267,7 @@ describe("runMailAcceptance", () => {
 
     expect(result.status).toBe("failed");
     expect(result.reasons.join(" ")).toMatch(/HTTP 403/);
-    expect(pollDeliveryReceipt).toHaveBeenCalled();
+    expect(pollDeliveryReceipt).not.toHaveBeenCalled();
   });
 
   it("fails when the deployed candidate SHA header does not match the requested candidate (wrong target/deploy)", async () => {

@@ -1,50 +1,22 @@
 /**
- * SR-LIVE-MAIL-001: live invitation-mail acceptance profile.
- *
- * Exercises the real, deployed tenant-invitation send path end to end:
- * `POST tenant/users` (issues a canonical invitation and enqueues a real
- * mail delivery through `NotificationDeliveryService`) then polls the real
- * `GET tenant/mail-deliveries/:deliveryId` readback (SR-MAIL-DELIVERY-READBACK-20261001)
- * until the deployed candidate reports a provider acknowledgement. This file
- * never contacts a network itself when imported for tests: `main()` -- the
- * only place real fetch calls happen -- only runs when this file is executed
- * directly, matching the GitHub-hosted workflow's invocation. Unit tests
- * import `validateMailRunnerInputs`/`runMailAcceptance` directly and inject
- * fake `issueInvitation`/`pollDeliveryReceipt` implementations.
- *
- * Explicitly out of scope for this runner (see recorded live limitations in
- * `runMailAcceptance`): it does not itself read the authorized test mailbox
- * over IMAP/Gmail API to confirm real content arrived, and it does not
- * trigger the approval-timeout reminder flow (same readback API, no
- * dedicated send trigger wired here yet).
+ * Invitation transport probe against the authorized deployed candidate.
+ * This is a partial profile: it never reports the complete mail task passed
+ * without inbox, approval, lifecycle and automatic retry observations.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { validateTarget, verifyDeployedCandidate } from "./preflight";
 import {
   redactObject,
   UatEvidenceRecorder,
   type UatEvidenceBundle,
 } from "../shared";
 
-const CANDIDATE_SHA_PATTERN = /^[0-9a-f]{40}$/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const FIXTURE_RECIPIENT_MARKERS = [
-  "demo",
-  "fixture",
-  "mock",
-  "sample",
-  "sandbox",
-  "example.com",
-  "example.test",
-  "example.org",
-  "test.invalid",
-];
-
 export class MailRunnerInputError extends Error {}
-
+export type MailRunnerEnv = Record<string, string | undefined>;
 export interface MailRunnerConfig {
+  baseSha: string;
   candidateSha: string;
   workflowSha: string;
   apiOrigin: string;
@@ -57,454 +29,403 @@ export interface MailRunnerConfig {
   pollTimeoutMs: number;
   pollIntervalMs: number;
 }
-
-export type MailRunnerEnv = Record<string, string | undefined>;
-
-function requireString(value: string | undefined, name: string): string {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    throw new MailRunnerInputError(
-      `${name} is required and must be non-empty.`,
-    );
-  }
-  return trimmed;
+function required(env: MailRunnerEnv, key: string) {
+  const value = env[key]?.trim();
+  if (!value) throw new MailRunnerInputError(`${key} is required`);
+  return value;
 }
-
-function requireCsv(value: string | undefined, name: string): string[] {
-  const raw = requireString(value, name);
-  const items = raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-  if (items.length === 0) {
-    throw new MailRunnerInputError(`${name} must contain at least one entry.`);
-  }
-  return items;
-}
-
-function requireAllowedOrigin(
+function positiveInteger(
   value: string | undefined,
-  name: string,
-  allowedTargets: string[],
-): string {
-  const origin = requireString(value, name).replace(/\/$/, "");
-  if (!allowedTargets.includes(origin)) {
-    throw new MailRunnerInputError(
-      `${name} "${origin}" is not present in DRTS_LIVE_MAIL_ALLOWED_TARGETS. Live acceptance never falls back to a historical staging default.`,
-    );
-  }
-  return origin;
-}
-
-function optionalPositiveInteger(
-  value: string | undefined,
-  name: string,
+  key: string,
   fallback: number,
-): number {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return fallback;
-  }
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+) {
+  if (!value?.trim()) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 300_000)
     throw new MailRunnerInputError(
-      `${name} must be a positive integer when set, got: ${trimmed}`,
+      `${key} must be a positive integer no greater than 300000`,
     );
-  }
   return parsed;
 }
-
-function assertNotFixtureRecipient(recipient: string): void {
-  if (!EMAIL_PATTERN.test(recipient)) {
-    throw new MailRunnerInputError(
-      `DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT "${recipient}" is not a valid single email address.`,
-    );
-  }
-  const lowered = recipient.toLowerCase();
-  if (FIXTURE_RECIPIENT_MARKERS.some((marker) => lowered.includes(marker))) {
-    throw new MailRunnerInputError(
-      `DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT "${recipient}" looks like a fixture/demo/example address; live-mode mail acceptance requires a real, operator-authorized test mailbox, not a placeholder.`,
-    );
-  }
-}
-
 export function validateMailRunnerInputs(env: MailRunnerEnv): MailRunnerConfig {
-  const candidateSha = requireString(
-    env.DRTS_CANDIDATE_SHA,
-    "DRTS_CANDIDATE_SHA",
-  );
-  if (!CANDIDATE_SHA_PATTERN.test(candidateSha)) {
+  let target: ReturnType<typeof validateTarget>;
+  try {
+    target = validateTarget(env);
+  } catch (error) {
     throw new MailRunnerInputError(
-      `DRTS_CANDIDATE_SHA must be a full 40-character lowercase commit SHA, got: "${candidateSha}"`,
+      error instanceof Error ? error.message : "Invalid mail target",
     );
   }
-  const workflowSha = requireString(env.WORKFLOW_SHA, "WORKFLOW_SHA");
-
-  const allowedTargets = requireCsv(
-    env.DRTS_LIVE_MAIL_ALLOWED_TARGETS,
-    "DRTS_LIVE_MAIL_ALLOWED_TARGETS",
-  ).map((origin) => origin.replace(/\/$/, ""));
-  const apiOrigin = requireAllowedOrigin(
-    env.DRTS_LIVE_MAIL_API_ORIGIN,
-    "DRTS_LIVE_MAIL_API_ORIGIN",
-    allowedTargets,
-  );
-
-  const authorized = env.DRTS_LIVE_MAIL_TEST_AUTHORIZED?.trim();
-  if (authorized !== "true") {
+  const baseSha = required(env, "BASE_SHA");
+  const workflowSha = required(env, "WORKFLOW_SHA");
+  if (![baseSha, workflowSha].every((sha) => /^[a-f0-9]{40}$/.test(sha)))
     throw new MailRunnerInputError(
-      'DRTS_LIVE_MAIL_TEST_AUTHORIZED must equal "true"',
+      "BASE_SHA and WORKFLOW_SHA must be full 40-character SHAs",
     );
-  }
-
-  const roleSessionToken = requireString(
-    env.DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN,
-    "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN",
-  );
-  const stepUpReference = requireString(
-    env.DRTS_LIVE_MAIL_STEP_UP_REFERENCE,
-    "DRTS_LIVE_MAIL_STEP_UP_REFERENCE",
-  );
-  const tenantId = requireString(
-    env.DRTS_LIVE_MAIL_TEST_TENANT_ID,
-    "DRTS_LIVE_MAIL_TEST_TENANT_ID",
-  );
-  const authorizedRecipient = requireString(
-    env.DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT,
+  const authorizedRecipient = required(
+    env,
     "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT",
   );
-  assertNotFixtureRecipient(authorizedRecipient);
-  // Deliberately NOT run through assertNotFixtureRecipient: this address is
-  // meant to be outside the recipient allowlist (a reserved RFC 2606 domain
-  // is intentional here), used only to prove SMTP_RECIPIENT_NOT_ALLOWLISTED
-  // is recorded -- it is never actually reachable over SMTP because the
-  // transport rejects it before any network send.
-  const nonAllowlistedRecipient = requireString(
-    env.DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT,
+  if (!/^[a-zA-Z0-9._-]+\+invite@gmail\.com$/.test(authorizedRecipient))
+    throw new MailRunnerInputError(
+      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT must be the dedicated Gmail sender invite alias; fixture/demo/example or malformed addresses are rejected",
+    );
+  const nonAllowlistedRecipient = required(
+    env,
     "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT",
   );
-  if (!EMAIL_PATTERN.test(nonAllowlistedRecipient)) {
+  if (nonAllowlistedRecipient !== "sr-live-mail-001-negative@reserved.invalid")
     throw new MailRunnerInputError(
-      `DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT "${nonAllowlistedRecipient}" is not a valid single email address.`,
+      "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT must be the fixed reserved-domain address",
     );
-  }
-  const invitationRoleCode = requireString(
-    env.DRTS_LIVE_MAIL_INVITATION_ROLE_CODE,
+  const invitationRoleCode = required(
+    env,
     "DRTS_LIVE_MAIL_INVITATION_ROLE_CODE",
   );
-
-  const pollTimeoutMs = optionalPositiveInteger(
-    env.DRTS_LIVE_MAIL_POLL_TIMEOUT_MS,
-    "DRTS_LIVE_MAIL_POLL_TIMEOUT_MS",
-    60_000,
-  );
-  const pollIntervalMs = optionalPositiveInteger(
-    env.DRTS_LIVE_MAIL_POLL_INTERVAL_MS,
-    "DRTS_LIVE_MAIL_POLL_INTERVAL_MS",
-    3_000,
-  );
-
+  if (invitationRoleCode !== "tenant_viewer")
+    throw new MailRunnerInputError(
+      "DRTS_LIVE_MAIL_INVITATION_ROLE_CODE must be tenant_viewer",
+    );
   return {
-    candidateSha,
+    baseSha,
+    candidateSha: target.sha,
     workflowSha,
-    apiOrigin,
-    roleSessionToken,
-    stepUpReference,
-    tenantId,
+    apiOrigin: target.origin,
+    roleSessionToken: required(env, "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN"),
+    stepUpReference: required(env, "DRTS_LIVE_MAIL_STEP_UP_REFERENCE"),
+    tenantId: required(env, "DRTS_LIVE_MAIL_TEST_TENANT_ID"),
     authorizedRecipient,
     nonAllowlistedRecipient,
     invitationRoleCode,
-    pollTimeoutMs,
-    pollIntervalMs,
+    pollTimeoutMs: positiveInteger(
+      env.DRTS_LIVE_MAIL_POLL_TIMEOUT_MS,
+      "DRTS_LIVE_MAIL_POLL_TIMEOUT_MS",
+      60_000,
+    ),
+    pollIntervalMs: positiveInteger(
+      env.DRTS_LIVE_MAIL_POLL_INTERVAL_MS,
+      "DRTS_LIVE_MAIL_POLL_INTERVAL_MS",
+      3_000,
+    ),
   };
 }
-
 export interface IssueInvitationResult {
   deliveryId: string | null;
   invitationId: string;
   statusCode: number;
   deployedCandidateSha: string | null;
 }
-
-export type IssueInvitationFn = (
-  config: MailRunnerConfig,
-  recipient: string,
-) => Promise<IssueInvitationResult>;
-
 export interface DeliveryReceipt {
   status: "queued" | "sent" | "failed";
   providerMessageId: string | null;
   attempts: number;
   lastOutcome: string | null;
   errorCode: string | null;
+  readback?: Record<string, unknown>;
 }
-
+export type IssueInvitationFn = (
+  config: MailRunnerConfig,
+  recipient: string,
+) => Promise<IssueInvitationResult>;
 export type PollDeliveryReceiptFn = (
   config: MailRunnerConfig,
   deliveryId: string,
 ) => Promise<DeliveryReceipt>;
-
 export interface MailRunnerDeps {
   issueInvitation: IssueInvitationFn;
   pollDeliveryReceipt: PollDeliveryReceiptFn;
   recorder: UatEvidenceRecorder;
 }
-
 export interface MailRunnerResult {
   status: "passed" | "failed";
   reasons: string[];
   evidence: UatEvidenceBundle;
 }
-
 export async function runMailAcceptance(
   config: MailRunnerConfig,
   deps: MailRunnerDeps,
 ): Promise<MailRunnerResult> {
   const reasons: string[] = [];
+  deps.recorder.setBaseSha(config.baseSha);
   deps.recorder.setCandidateSha(config.candidateSha);
   deps.recorder.recordRole("tenant_admin_live");
-
+  const finish = (): MailRunnerResult => {
+    for (const reason of reasons) deps.recorder.recordError(reason);
+    const status = reasons.length ? "failed" : "passed";
+    return { status, reasons, evidence: deps.recorder.finalize(status) };
+  };
   if (config.workflowSha !== config.candidateSha) {
     reasons.push(
-      `Checked-out workflow SHA "${config.workflowSha}" does not match the requested candidate SHA "${config.candidateSha}".`,
+      "Checked-out workflow SHA does not match the requested candidate SHA.",
     );
+    return finish();
   }
-
   const issued = await deps.issueInvitation(config, config.authorizedRecipient);
-  deps.recorder.recordHttpCall({
-    method: "POST",
-    url: `${config.apiOrigin}/api/tenant/users`,
-    statusCode: issued.statusCode,
-    durationMs: 0,
-    actorRole: "tenant_admin_live",
-  });
-
-  if (issued.statusCode !== 200 && issued.statusCode !== 201) {
+  if (![200, 201].includes(issued.statusCode))
     reasons.push(
       `Issuing the live test invitation returned HTTP ${issued.statusCode}, expected 200/201.`,
     );
-  }
-  if (issued.deployedCandidateSha !== config.candidateSha) {
+  if (issued.deployedCandidateSha !== config.candidateSha)
     reasons.push(
-      `Deployed candidate SHA header reported "${issued.deployedCandidateSha ?? "(missing)"}", expected "${config.candidateSha}".`,
+      "Deployed candidate SHA header reported a different candidate.",
     );
-  }
-  if (!issued.deliveryId) {
+  if (!issued.deliveryId || !issued.invitationId)
+    reasons.push("Invitation response carried no deliveryId or invitationId.");
+  if (reasons.length) return finish();
+  deps.recorder.recordResourceId("tenant_invitation", issued.invitationId);
+  deps.recorder.recordResourceId("mail_delivery", issued.deliveryId!);
+  const receipt = await deps.pollDeliveryReceipt(config, issued.deliveryId!);
+  deps.recorder.recordResourceId(
+    "provider_receipt",
+    issued.deliveryId!,
+    receipt.readback ?? { ...receipt },
+  );
+  if (receipt.status !== "sent")
     reasons.push(
-      "Invitation response carried no deliveryId; delivery was never durably enqueued (NotificationDeliveryService unavailable, or a synthetic error id was returned) -- cannot prove a real send occurred.",
+      `Mail delivery did not reach status "sent" (last observed status: "${receipt.status}").`,
     );
-  }
+  if (receipt.status === "sent" && !receipt.providerMessageId)
+    reasons.push("Sent receipt has no providerMessageId.");
+  if (
+    receipt.status === "sent" &&
+    (receipt.lastOutcome !== "sent" || receipt.attempts < 1)
+  )
+    reasons.push("Sent receipt lacks a successful provider attempt.");
+  if (reasons.length) return finish();
 
-  if (issued.deliveryId) {
-    deps.recorder.recordResourceId("tenant_invitation", issued.invitationId);
-    deps.recorder.recordResourceId("mail_delivery", issued.deliveryId);
-
-    const receipt = await deps.pollDeliveryReceipt(config, issued.deliveryId);
-    deps.recorder.recordHttpCall({
-      method: "GET",
-      url: `${config.apiOrigin}/api/tenant/mail-deliveries/${issued.deliveryId}`,
-      statusCode: 200,
-      durationMs: 0,
-      actorRole: "tenant_admin_live",
-    });
-
-    if (receipt.status !== "sent") {
-      reasons.push(
-        `Mail delivery ${issued.deliveryId} did not reach status "sent" within the poll window (last observed status: "${receipt.status}", attempts=${receipt.attempts}, lastOutcome=${receipt.lastOutcome ?? "(none)"}).`,
-      );
-    }
-    if (receipt.status === "sent" && !receipt.providerMessageId) {
-      reasons.push(
-        `Mail delivery ${issued.deliveryId} reports status "sent" but has no providerMessageId -- cannot prove a real provider acknowledgement was captured.`,
-      );
-    }
-  }
-
-  const negativeIssued = await deps.issueInvitation(
+  const negative = await deps.issueInvitation(
     config,
     config.nonAllowlistedRecipient,
   );
-  deps.recorder.recordHttpCall({
-    method: "POST",
-    url: `${config.apiOrigin}/api/tenant/users`,
-    statusCode: negativeIssued.statusCode,
-    durationMs: 0,
-    actorRole: "tenant_admin_live",
-  });
-  if (negativeIssued.statusCode !== 200 && negativeIssued.statusCode !== 201) {
-    reasons.push(
-      `Issuing the negative (non-allowlisted) test invitation returned HTTP ${negativeIssued.statusCode}, expected 200/201 (the API must still create the invitation record; only the mail transport rejects the recipient).`,
-    );
-  } else if (!negativeIssued.deliveryId) {
-    reasons.push(
-      "Negative (non-allowlisted) invitation carried no deliveryId; cannot prove the rejection was durably recorded rather than silently dropped.",
-    );
-  } else {
-    deps.recorder.recordResourceId("mail_delivery", negativeIssued.deliveryId);
-    const negativeReceipt = await deps.pollDeliveryReceipt(
-      config,
-      negativeIssued.deliveryId,
-    );
-    deps.recorder.recordHttpCall({
-      method: "GET",
-      url: `${config.apiOrigin}/api/tenant/mail-deliveries/${negativeIssued.deliveryId}`,
-      statusCode: 200,
-      durationMs: 0,
-      actorRole: "tenant_admin_live",
-    });
-    if (negativeReceipt.status !== "failed") {
-      reasons.push(
-        `Negative (non-allowlisted) delivery ${negativeIssued.deliveryId} did not reach status "failed" (observed: "${negativeReceipt.status}") -- the recipient allowlist gate must reject this address without ever attempting a real send.`,
-      );
-    } else if (negativeReceipt.errorCode !== "SMTP_RECIPIENT_NOT_ALLOWLISTED") {
-      reasons.push(
-        `Negative (non-allowlisted) delivery ${negativeIssued.deliveryId} failed with errorCode "${negativeReceipt.errorCode ?? "(none)"}", expected "SMTP_RECIPIENT_NOT_ALLOWLISTED" -- a different failure reason does not prove the allowlist gate itself is what rejected this recipient.`,
-      );
-    }
-  }
-
-  deps.recorder.recordLiveLimitation(
-    "approval-timeout reminder mail flow",
-    "This runner only exercises the tenant-invitation send path. The approval-timeout reminder flow is read back through the same GET tenant/mail-deliveries/:deliveryId endpoint, but has no dedicated send trigger wired into this runner yet.",
+  if (![200, 201].includes(negative.statusCode))
+    reasons.push(`Negative invitation returned HTTP ${negative.statusCode}.`);
+  if (negative.deployedCandidateSha !== config.candidateSha)
+    reasons.push("Negative response has a different deployed candidate SHA.");
+  if (!negative.deliveryId)
+    reasons.push("Negative invitation carried no deliveryId.");
+  if (reasons.length) return finish();
+  const rejected = await deps.pollDeliveryReceipt(config, negative.deliveryId!);
+  deps.recorder.recordResourceId("mail_delivery", negative.deliveryId!);
+  deps.recorder.recordResourceId(
+    "provider_receipt",
+    negative.deliveryId!,
+    rejected.readback ?? { ...rejected },
   );
-  deps.recorder.recordLiveLimitation(
-    "received-content verification inside the authorized test mailbox",
-    "This runner proves provider acceptance (SMTP DATA acknowledgement + providerMessageId) via the deployed readback API only. It does not itself connect to the authorized test mailbox over IMAP/Gmail API to confirm the message actually arrived with real content; that requires separate read credentials for the authorized mailbox that are not wired into this runner.",
-  );
+  if (rejected.status !== "failed")
+    reasons.push(
+      'Negative delivery did not reach status "failed"; allowlist gate must reject it.',
+    );
+  if (rejected.errorCode !== "SMTP_RECIPIENT_NOT_ALLOWLISTED")
+    reasons.push(
+      'Negative delivery expected "SMTP_RECIPIENT_NOT_ALLOWLISTED".',
+    );
+  if (
+    rejected.providerMessageId ||
+    rejected.attempts < 1 ||
+    rejected.lastOutcome !== "failed"
+  )
+    reasons.push(
+      "Negative delivery lacks a durable failed attempt or has an unexpected provider acknowledgement.",
+    );
 
-  for (const reason of reasons) {
-    deps.recorder.recordError(reason);
-  }
-
-  const status: "passed" | "failed" =
-    reasons.length === 0 ? "passed" : "failed";
-  const evidence = deps.recorder.finalize(status);
-  return { status, reasons, evidence };
+  const outstanding = [
+    "authorized mailbox content for invitation and approval",
+    "approval new_request, approaching_timeout and decision mail",
+    "invitation accept, single use, resend, revoke and real 24-hour expiry",
+    "automatic retry after scheduler fix deployment",
+  ];
+  for (const surface of outstanding)
+    deps.recorder.recordLiveLimitation(
+      surface,
+      "Not exercised by this invitation transport profile.",
+    );
+  reasons.push(`Acceptance incomplete: ${outstanding.join("; ")}.`);
+  return finish();
 }
 
-async function realIssueInvitation(
+/** Real HTTP status/timing is recorded here, never fabricated by orchestration. */
+async function mailRequest(
+  config: MailRunnerConfig,
+  path: string,
+  init: RequestInit,
+  recorder?: UatEvidenceRecorder,
+) {
+  const started = Date.now();
+  const response = await fetch(new URL(`/api/${path}`, config.apiOrigin), {
+    ...init,
+    redirect: "error",
+    signal: AbortSignal.timeout(15_000),
+  });
+  recorder?.recordHttpCall({
+    method: init.method ?? "GET",
+    url: `${config.apiOrigin}/api/${path}`,
+    statusCode: response.status,
+    durationMs: Date.now() - started,
+    responseHeaders: {
+      "x-drts-candidate-sha":
+        response.headers.get("x-drts-candidate-sha") ?? "",
+    },
+  });
+  if (response.headers.get("x-drts-candidate-sha") !== config.candidateSha)
+    throw new Error("Deployed candidate SHA changed during mail acceptance");
+  if (!response.ok)
+    throw new Error(
+      `Mail API returned HTTP ${response.status}; response body omitted`,
+    );
+  return response;
+}
+export async function realIssueInvitation(
   config: MailRunnerConfig,
   recipient: string,
+  recorder?: UatEvidenceRecorder,
 ): Promise<IssueInvitationResult> {
-  const res = await fetch(new URL("/api/tenant/users", config.apiOrigin), {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${config.roleSessionToken}`,
-      "x-tenant-id": config.tenantId,
-      "x-drts-step-up-reference": config.stepUpReference,
-      "content-type": "application/json",
+  if (
+    ![config.authorizedRecipient, config.nonAllowlistedRecipient].includes(
+      recipient,
+    )
+  )
+    throw new Error("Recipient is outside the task grant");
+  const res = await mailRequest(
+    config,
+    "tenant/users",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${config.roleSessionToken}`,
+        "x-tenant-id": config.tenantId,
+        "x-drts-step-up-reference": config.stepUpReference,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        email: recipient,
+        displayName: "SR-LIVE-MAIL-001 live acceptance",
+        roleCode: config.invitationRoleCode,
+      }),
     },
-    body: JSON.stringify({
-      email: recipient,
-      displayName: "SR-LIVE-MAIL-001 live acceptance",
-      roleCode: config.invitationRoleCode,
-    }),
-  });
-  const deployedCandidateSha = res.headers.get("x-drts-candidate-sha");
-  const body = (await res.json().catch(() => null)) as {
-    data?: { invitationId?: string; deliveryId?: string | null };
-  } | null;
-  const invitation = body?.data ?? null;
+    recorder,
+  );
+  const body = (await res.json()) as {
+    data?: {
+      user_id?: string;
+      invitation?: { invitation_id?: string; delivery_id?: string | null };
+    };
+  };
+  const invitation = body.data?.invitation;
+  if (body.data?.user_id)
+    recorder?.recordResourceId("tenant_user", body.data.user_id);
   return {
-    deliveryId: invitation?.deliveryId ?? null,
-    invitationId: invitation?.invitationId ?? "",
+    deliveryId: invitation?.delivery_id ?? null,
+    invitationId: invitation?.invitation_id ?? "",
     statusCode: res.status,
-    deployedCandidateSha,
+    deployedCandidateSha: res.headers.get("x-drts-candidate-sha"),
   };
 }
-
-async function realPollDeliveryReceipt(
+export async function realPollDeliveryReceipt(
   config: MailRunnerConfig,
   deliveryId: string,
+  recorder?: UatEvidenceRecorder,
 ): Promise<DeliveryReceipt> {
   const deadline = Date.now() + config.pollTimeoutMs;
-  let last: DeliveryReceipt = {
-    status: "queued",
-    providerMessageId: null,
-    attempts: 0,
-    lastOutcome: null,
-    errorCode: null,
-  };
   while (Date.now() < deadline) {
-    const res = await fetch(
-      new URL(`/api/tenant/mail-deliveries/${deliveryId}`, config.apiOrigin),
+    const res = await mailRequest(
+      config,
+      `tenant/mail-deliveries/${encodeURIComponent(deliveryId)}`,
       {
         headers: {
           authorization: `Bearer ${config.roleSessionToken}`,
           "x-tenant-id": config.tenantId,
         },
       },
+      recorder,
     );
-    if (res.ok) {
-      const body = (await res.json()) as {
-        data?: {
-          status?: "queued" | "sent" | "failed";
-          attempts?: Array<{
-            outcome?: string;
-            errorCode?: string | null;
-            acknowledgement?: { providerMessageId?: string | null } | null;
-          }>;
-        };
+    const body = (await res.json()) as {
+      data?: {
+        delivery_id?: string;
+        tenant_id?: string;
+        status?: "queued" | "sent" | "failed";
+        attempts?: Array<{
+          outcome?: string;
+          error_code?: string | null;
+          acknowledgement?: { provider_message_id?: string | null } | null;
+        }>;
       };
-      const receipt = body.data;
-      const lastAttempt =
-        receipt?.attempts?.[receipt.attempts.length - 1] ?? null;
-      last = {
-        status: receipt?.status ?? "queued",
-        providerMessageId:
-          lastAttempt?.acknowledgement?.providerMessageId ?? null,
-        attempts: receipt?.attempts?.length ?? 0,
-        lastOutcome: lastAttempt?.outcome ?? null,
-        errorCode: lastAttempt?.errorCode ?? null,
-      };
-      if (last.status !== "queued") {
-        return last;
-      }
-    }
-    await new Promise((r) => setTimeout(r, config.pollIntervalMs));
+    };
+    const receipt = body.data;
+    if (
+      receipt?.delivery_id !== deliveryId ||
+      receipt.tenant_id !== config.tenantId ||
+      !["queued", "sent", "failed"].includes(receipt.status ?? "") ||
+      !Array.isArray(receipt.attempts)
+    )
+      throw new Error("Invalid or cross-tenant delivery readback envelope");
+    const lastAttempt = receipt.attempts.at(-1);
+    const last: DeliveryReceipt = {
+      status: receipt.status!,
+      providerMessageId:
+        lastAttempt?.acknowledgement?.provider_message_id ?? null,
+      attempts: receipt.attempts.length,
+      lastOutcome: lastAttempt?.outcome ?? null,
+      errorCode: lastAttempt?.error_code ?? null,
+      readback: receipt,
+    };
+    if (
+      last.status !== "queued" ||
+      Date.now() + config.pollIntervalMs >= deadline
+    )
+      return last;
+    await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs));
   }
-  return last;
+  throw new Error("Delivery readback timed out without a terminal receipt");
 }
-
 async function main(): Promise<void> {
-  const config = validateMailRunnerInputs(process.env);
-  const recorder = new UatEvidenceRecorder({
-    taskId: "sr-live-mail-001",
-    candidateSha: config.candidateSha,
-  });
-  const result = await runMailAcceptance(config, {
-    issueInvitation: realIssueInvitation,
-    pollDeliveryReceipt: realPollDeliveryReceipt,
-    recorder,
-  });
-
   const outputPath = resolve(
     process.env.DRTS_LIVE_MAIL_EVIDENCE_PATH?.trim() ||
       ".artifacts/live-mail-acceptance/evidence-mail.json",
   );
+  const recorder = new UatEvidenceRecorder({
+    taskId: "sr-live-mail-001",
+    baseSha: process.env.BASE_SHA ?? "unknown",
+  });
+  let evidence: UatEvidenceBundle;
+  try {
+    const config = validateMailRunnerInputs(process.env);
+    if (process.env.GITHUB_ACTIONS !== "true")
+      throw new Error("Live mail requires the authorized GitHub-hosted runner");
+    if (config.workflowSha !== config.candidateSha)
+      throw new Error("Checkout SHA does not match requested candidate");
+    await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
+    const result = await runMailAcceptance(config, {
+      issueInvitation: (cfg, recipient) =>
+        realIssueInvitation(cfg, recipient, recorder),
+      pollDeliveryReceipt: (cfg, id) =>
+        realPollDeliveryReceipt(cfg, id, recorder),
+      recorder,
+    });
+    evidence = result.evidence;
+  } catch (error) {
+    // Network/server errors may contain credentials; HTTP status is separately
+    // recorded, but arbitrary error strings and response bodies are not retained.
+    recorder.recordError(
+      error instanceof MailRunnerInputError
+        ? error.message
+        : "Live mail execution failed; see recorded HTTP status and pending prerequisites.",
+    );
+    evidence = recorder.finalize("failed");
+  }
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(
     outputPath,
-    JSON.stringify(redactObject(result.evidence), null, 2),
+    JSON.stringify(redactObject(evidence), null, 2),
     "utf-8",
   );
-
-  console.log(`Mail acceptance status: ${result.status}`);
-  for (const reason of result.reasons) {
-    console.error(`  [FAIL] ${reason}`);
-  }
-  process.exitCode = result.status === "passed" ? 0 : 1;
+  console.log(`Mail acceptance status: ${evidence.status}`);
+  process.exitCode = evidence.status === "passed" ? 0 : 1;
 }
-
 const invokedDirectly =
   process.argv[1] !== undefined &&
   resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-
-if (invokedDirectly) {
-  main().catch((err: unknown) => {
-    console.error(
-      `Mail acceptance runner crashed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+if (invokedDirectly)
+  main().catch(() => {
+    console.error("Mail acceptance evidence could not be written.");
     process.exitCode = 1;
   });
-}
