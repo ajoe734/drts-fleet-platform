@@ -211,32 +211,49 @@ handler as the scheduler principal — an older, unrelated log for the same
 principal is not evidence the current attempt worked.
 
 Troubleshooting a failed or unconfirmed run: `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback`
-(`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-698`) wraps the
-adapter call in a bare `catch { return null; }` and falls through to the
-route's ordinary `JWT_INVALID` (401) rejection, so a failing scheduler
-request will **not** surface a specific `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`,
-`WORKLOAD_PRINCIPAL_NOT_REGISTERED`, or `WORKLOAD_AUDIENCE_MISMATCH` code in
-either the HTTP response or the Cloud Run logs — the adapter throws those
-without logging anything first. The two exceptions are the success and
-route-scope-denial lines above, both logged (`this.logger.log`/
-`this.logger.warn`, same file) before the guard discards whichever outcome
-applies and returns its own response. So:
+(`apps/api/src/common/auth/bootstrap-auth.guard.ts:688-737`) wraps the
+adapter call in a `catch` that logs a rejection reason code before falling
+through to the route's ordinary `JWT_INVALID` (401) rejection, so a failing
+scheduler request **does** surface a diagnostic line — just not in the HTTP
+response, and never with the bearer token itself. Query for it by route
+only, since this line is emitted before the adapter resolves a principal and
+therefore has no `principalId=` field to filter on:
 
-- If the combined query above finds
-  `AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED` for
-  `principalId=dev-scheduler`, the registry is live and the principal
-  resolves, but its `routeScopes` entry does not cover the route/method the
-  job is calling — re-check the pasted JSON for a typo in the route path or
-  method (step 2).
-- If the combined query finds nothing at all, the failure is one of the
-  three silent causes, roughly in order of likelihood: (a) step 2's secret
-  was never actually redeployed/mounted (the Cloud Run revision still has
-  the old or empty registry), (b) a typo in `serviceAccountEmail`/
-  `principalId` means no registry entry matches this service account, or
-  (c) `allowedTokenAudiences` does not match the job's audience. Confirm by
-  re-reading the live secret value and the deployed revision's environment
-  directly — none of those three are fixed by re-running the provisioning
-  script (step 3), since it never touches the registry secret.
+```bash
+gcloud logging read \
+  'resource.type="cloud_run_revision"
+   resource.labels.service_name="drts-dev-api"
+   textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_FALLBACK_DENIED\].*route=POST /api/internal/scheduled-tasks/mail-outbox/drain"' \
+  --project=drts-dev-devcc-20260825 --limit=5 --format='value(timestamp,textPayload)'
+```
+
+The logged `reason=` value is the adapter's `ApiRequestError` code (or
+`UNKNOWN_ERROR` if the adapter threw something else). So:
+
+- `reason=WORKLOAD_ASSERTION_REPLAYED` — a one-time-use token was reused
+  against a route that is not on the replay-tolerant allowlist
+  (`REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS` in `bootstrap-auth.guard.ts`). The two
+  scheduled-task routes in this runbook are on that allowlist; `POST
+  /api/auth/token` deliberately is not. If the drain/reminder jobs are
+  hitting this, confirm the deployed revision actually matches this fix
+  (step 5) and is not an older build still enforcing one-time use on them.
+- `reason=WORKLOAD_AUDIENCE_MISMATCH` — the job's OIDC audience does not
+  match `allowedTokenAudiences` for this principal's registry entry.
+- `reason=WORKLOAD_PRINCIPAL_NOT_REGISTERED` — no registry entry matches
+  this service account; check for a typo in `serviceAccountEmail`/
+  `principalId` (step 2).
+- `reason=WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` — step 2's secret was
+  never actually redeployed/mounted (the Cloud Run revision still has the
+  old or empty registry).
+- If the query above finds `AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED`
+  instead (from the combined success/scope-denial query earlier), the
+  registry is live and the principal resolves, but its `routeScopes` entry
+  does not cover the route/method the job is calling — re-check the pasted
+  JSON for a typo in the route path or method (step 2).
+- If both queries find nothing at all, re-read the live secret value and the
+  deployed revision's environment directly — none of the above are fixed by
+  re-running the provisioning script (step 3), since it never touches the
+  registry secret.
 
 Once `confirm-job-attempt.sh` reports a completed success (exit `0`) for
 both jobs and the combined query above shows a matching, route-specific

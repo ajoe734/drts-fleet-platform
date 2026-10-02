@@ -31,6 +31,10 @@ failures into indefinite manual lane bans. Existing auth/quota handling remains.
   within the existing transaction. Rollback also removes the receipt.
 - agy requests the existing worker-result schema. Native results and Codex result
   files share validation/consumption. Native SUCCESS alone proves no task change.
+- pi lanes (`adapter: "pi"`) load `pi/worker-result.ts`, whose `submit_worker_result`
+  tool writes the same schema to the run's Codex-style result file. `pi --mode json`
+  exits 0 on failure, so the detector reads its assistant `stopReason` and
+  `auto_retry_end` events instead of the exit code.
 - Briefs retain complete current feedback, specification, write scopes, acceptance
   and candidate identity. Report-only work is not told to create source commits.
   Workers must wait for their own checks before declaring results.

@@ -27,6 +27,10 @@ from common import (
 from provider_credentials import (
     copilot_plaintext_token as _copilot_plaintext_token,
     gemini_settings as _gemini_settings,
+    pi_agent_dir as _pi_agent_dir,
+    pi_env as _pi_env,
+    pi_model_provider as _pi_model_provider,
+    pi_model_ref as _pi_model_ref,
     truthy_env as _truthy_env,
 )
 
@@ -84,6 +88,48 @@ def _codex_identity(runtime: dict[str, Any]) -> dict[str, Any]:
         "fingerprint": fingerprint,
         "quota_pool": quota_pool_key("codex", fingerprint, quota_scope),
         "provider_family": "codex",
+    }
+
+
+def _pi_auth_ready(binary: str | None, settings: dict[str, Any]) -> bool:
+    if not binary:
+        return False
+    # --no-refresh keeps the probe read-only: a stored login whose access token
+    # has expired is still ready, and pi refreshes it under its own lock.
+    result = run_command(
+        [binary, "auth", "check", "--provider", _pi_model_provider(settings), "--json", "--no-refresh"],
+        env=_pi_env(settings),
+    )
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return False
+    return result.returncode == 0 and isinstance(payload, dict) and payload.get("status") == "ready"
+
+
+def _pi_identity(settings: dict[str, Any]) -> dict[str, Any]:
+    provider = _pi_model_provider(settings)
+    payload = load_json(_pi_agent_dir(settings) / "auth.json", default={}) or {}
+    credential = payload.get(provider) if isinstance(payload, dict) else None
+    account = None
+    organization = None
+    # A ChatGPT login draws on the same subscription quota as a Codex lane on
+    # that account, so it is fingerprinted as the codex family: a quota pause
+    # on the account then covers both lanes.
+    family = "codex" if provider == "openai-codex" else f"pi-{provider}"
+    if provider == "openai-codex" and isinstance(credential, dict) and credential.get("type") == "oauth":
+        claims = _jwt_claims(credential.get("access"))
+        auth = claims.get("https://api.openai.com/auth") if isinstance(claims.get("https://api.openai.com/auth"), dict) else {}
+        account = auth.get("chatgpt_account_id") or credential.get("accountId")
+        organization = auth.get("poid") or claims.get("organization_id")
+    fingerprint = identity_fingerprint(family, str(account or ""), str(organization or ""))
+    model = str(settings.get("model") or "").split("/", 1)[-1]
+    quota_scope = str(settings.get("quota_scope") or model or "default")
+    return {
+        "state": "auth_ready" if fingerprint else "identity_unknown",
+        "fingerprint": fingerprint,
+        "quota_pool": quota_pool_key(family, fingerprint, quota_scope),
+        "provider_family": family,
     }
 
 
@@ -566,6 +612,22 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             }
             host_layer = "Antigravity CLI"
             notes = "Readiness requires agy plus the OAuth token in this lane's isolated app-data directory."
+
+        elif adapter == "pi" or mode == "pi":
+            settings = provider_cfg.get("pi", {}) or {}
+            binary = command_exists(settings.get("cli") or "pi", search_roots=search_roots)
+            installed = bool(binary)
+            auth_ready = bool(binary and _pi_auth_ready(binary, settings))
+            identity = _pi_identity(settings)
+            selected_model = _pi_model_ref(settings)
+            agent_dir = _pi_agent_dir(settings)
+            paths = {
+                "binary": binary,
+                "agent_dir": str(agent_dir),
+                "auth_json": str(agent_dir / "auth.json") if (agent_dir / "auth.json").exists() else None,
+            }
+            host_layer = "Pi CLI"
+            notes = "Readiness requires the pi CLI and a stored login for the lane's pi provider (`pi` then /login)."
 
         elif adapter == "copilot_local" or mode == "copilot_local":
             local = provider_cfg.get("local", {}) or {}

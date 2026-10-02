@@ -56,6 +56,7 @@ export interface RegisteredGooglePrincipal {
   allowedTokenAudiences?: string[];
   ciTenantActorGrants?: CiTenantActorGrant[] | null;
   routeScopes?: string[];
+  driverProvisioningGrant?: { driverId: string };
 }
 
 export interface ResolvedGoogleWorkloadIdentity {
@@ -69,6 +70,7 @@ export interface ResolvedGoogleWorkloadIdentity {
   audience: string;
   authTime: string;
   ciTenantActorGrants: CiTenantActorGrant[];
+  driverProvisioningGrant?: { driverId: string };
 }
 
 type GooglePayload = jwt.JwtPayload & {
@@ -386,6 +388,9 @@ export class GoogleWorkloadIdentityAdapter {
       audience,
       authTime,
       ciTenantActorGrants: principal.ciTenantActorGrants ?? [],
+      ...(principal.driverProvisioningGrant
+        ? { driverProvisioningGrant: principal.driverProvisioningGrant }
+        : {}),
     };
   }
 
@@ -421,6 +426,9 @@ export class GoogleWorkloadIdentityAdapter {
 
     const invalid = (parsed as RegisteredGooglePrincipal[]).find(
       (entry) =>
+        (entry.driverProvisioningGrant !== undefined &&
+          (typeof entry.driverProvisioningGrant?.driverId !== "string" ||
+            !/^drv-[a-zA-Z0-9-]+$/.test(entry.driverProvisioningGrant.driverId))) ||
         !entry.principalId?.trim() ||
         !Array.isArray(entry.allowedTokenAudiences) ||
         entry.allowedTokenAudiences.length === 0 ||
