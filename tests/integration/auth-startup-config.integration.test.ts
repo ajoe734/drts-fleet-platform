@@ -30,18 +30,11 @@ function getValidProdEnv(): Record<string, string> {
     AUTH_ALLOWED_ORIGINS: "https://app.drts.internal",
     SESSION_STORE_URL: "redis://redis.internal:6379/0",
     AUDIT_STORE_URL: "postgres://db.internal:5432/drts_audit",
-    DRTS_INTERNAL_KEY: VALID_PROD_SECRET,
+    // INTERNAL_KEY_EXCP_002 (the only registry entry that documented
+    // DRTS_INTERNAL_KEY) was retired, so a "complete" production
+    // environment no longer configures a legacy internal key -- it
+    // authenticates workload callers via WIF instead.
     DRTS_INTERNAL_KEY_ENFORCED: "true",
-    PASSENGER_SUBJECT_PEPPER: VALID_PROD_SECRET,
-    PASSENGER_RIDE_TOKEN_PEPPER: VALID_PROD_SECRET,
-  };
-}
-
-function getValidProdWorkloadIdentityEnv(): Record<string, string> {
-  const env = getValidProdEnv();
-  delete env.DRTS_INTERNAL_KEY;
-  return {
-    ...env,
     WORKLOAD_IDENTITY_ISSUER: "https://workload.prod.drts.internal",
     WORKLOAD_IDENTITY_AUDIENCE:
       "https://auth.prod.drts.internal/token-exchange",
@@ -55,7 +48,13 @@ function getValidProdWorkloadIdentityEnv(): Record<string, string> {
         allowedTokenAudiences: ["https://api.drts.internal"],
       },
     ]),
+    PASSENGER_SUBJECT_PEPPER: VALID_PROD_SECRET,
+    PASSENGER_RIDE_TOKEN_PEPPER: VALID_PROD_SECRET,
   };
+}
+
+function getValidProdWorkloadIdentityEnv(): Record<string, string> {
+  return getValidProdEnv();
 }
 
 describe("Authentication Startup Configuration Integration Smoke", () => {
