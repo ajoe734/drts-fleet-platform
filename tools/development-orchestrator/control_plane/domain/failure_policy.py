@@ -74,6 +74,7 @@ QUOTA_TERMINAL_MARKERS = frozenset(
         "daily quota",
         "individual quota reached",
         "hit your usage limit",
+        "hit your chatgpt usage limit",
         "exceeded your monthly quota",
     }
 )
@@ -140,10 +141,11 @@ HUMAN_RESET_HINT_PATTERN = re.compile(
 )
 # Duration form, which is what the Antigravity CLI and several web consoles emit:
 #   "Resets in 29h35m13s"  "Resets in 5m3s"  "refreshes in 1 day, 5 hours"
+# pi approximates its ChatGPT reset: "Try again in ~42 min."
 # These are relative to when the failure was observed, so they resolve against
 # ``paused_at`` when the caller supplies it.
 DURATION_RESET_HINT_PATTERN = re.compile(
-    r"\b(?:resets?|refreshes?|retry|try again)\s+in\s+"
+    r"\b(?:resets?|refreshes?|retry|try again)\s+in\s+~?"
     r"(?P<body>\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?)"
     r"(?:[\s,]*\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?|s(?:ec(?:ond)?s?)?))*)",
     re.IGNORECASE,

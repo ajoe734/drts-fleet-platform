@@ -212,14 +212,12 @@ describe("partner-booking-web BFF wiring", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      API_URL + "/api/partner/entries/acme",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-drts-internal-key": "dev-internal-key",
-        }),
-      }),
-    );
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired,
+    // requestAuthority no longer sends the legacy internal key at all.
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(
+      (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
+    ).toBeUndefined();
   });
 
   it("normalizes snake_case public partner entries from the dev API envelope", async () => {
@@ -505,8 +503,7 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
-  it("lets public shells fallback when the mounted internal key is rejected", async () => {
-    process.env.DRTS_INTERNAL_KEY = "stale-dev-key";
+  it("lets public shells fallback when the authority rejects the request (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: no legacy internal key is sent anymore)", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       jsonResponse(
         {
@@ -536,14 +533,10 @@ describe("partner-booking-web BFF wiring", () => {
         slug: "acme",
       }),
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/api/partner/entries/acme`,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-drts-internal-key": "stale-dev-key",
-        }),
-      }),
-    );
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(
+      (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
+    ).toBeUndefined();
     await expect(getPartnerRouteContext("acme")).rejects.toMatchObject({
       code: "INTERNAL_KEY_INVALID",
       status: 401,
@@ -597,7 +590,6 @@ describe("partner-booking-web BFF wiring", () => {
   });
 
   it("lets public shells fallback when mounted authority returns a server error", async () => {
-    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
     const fetchMock = vi.fn().mockImplementation(() =>
       jsonResponse(
         {
@@ -633,14 +625,12 @@ describe("partner-booking-web BFF wiring", () => {
         fallbackStatus: 500,
       },
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      API_URL + "/api/partner/entries/adventureworks",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-drts-internal-key": "dev-internal-key",
-        }),
-      }),
-    );
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired,
+    // requestAuthority no longer sends the legacy internal key at all.
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(
+      (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
+    ).toBeUndefined();
     await expect(getPartnerRouteContext("adventureworks")).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_REQUEST_FAILED",
       status: 500,
@@ -725,7 +715,7 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
-  it("adds the server-only internal key to authority requests when configured", async () => {
+  it("no longer adds the legacy internal key to authority requests, even if DRTS_INTERNAL_KEY is still set (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired)", async () => {
     process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -740,14 +730,10 @@ describe("partner-booking-web BFF wiring", () => {
 
     await expect(getPublicPartnerEntry("acme")).resolves.toEqual(activeEntry);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${API_URL}/api/partner/entries/acme`,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-drts-internal-key": "dev-internal-key",
-        }),
-      }),
-    );
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(
+      (requestInit.headers as Record<string, string>)["x-drts-internal-key"],
+    ).toBeUndefined();
   });
 
   it("overlays backend branding metadata on top of the local template", () => {

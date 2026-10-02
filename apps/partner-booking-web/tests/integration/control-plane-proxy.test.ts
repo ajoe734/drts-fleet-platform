@@ -66,7 +66,9 @@ describe("partner-booking control-plane proxy", () => {
       "http://localhost:3001/api/tenant/bookings/booking-001",
     );
     expect(headers.get("authorization")).toBe("Bearer partner-session-token");
-    expect(headers.get("x-drts-internal-key")).toBe("dev-internal-key");
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired,
+    // the proxy no longer sends the legacy internal key at all.
+    expect(headers.has("x-drts-internal-key")).toBe(false);
     expect(headers.get("x-realm")).toBe("partner");
     expect(headers.get("x-roles")).toBeNull();
     expect(headers.get("x-tenant-id")).toBe("tenant-001");

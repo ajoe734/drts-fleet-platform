@@ -2051,6 +2051,9 @@ def extract_prompt_text(command: list[str]) -> str | None:
         index = command.index("--prompt")
         if index + 1 < len(command):
             return str(command[index + 1])
+    # `cli [options] -- <prompt>` (pi): the prompt is the one argument after `--`.
+    if len(command) >= 2 and command[-2] == "--":
+        return str(command[-1])
     if "-p" in command:
         index = command.index("-p")
         if index + 1 < len(command):

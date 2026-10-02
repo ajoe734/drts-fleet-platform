@@ -88,14 +88,7 @@ async function mintMetadataIdentityToken(
 }
 
 async function getServerAuthorityHeaders(): Promise<Record<string, string>> {
-  // TODO(SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up): drop the
-  // x-drts-internal-key send once dev has proven x-drts-google-id-token
-  // below end-to-end and INTERNAL_KEY_EXCP_002 is retired.
-  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
   const headers: Record<string, string> = {};
-  if (internalKey) {
-    headers["x-drts-internal-key"] = internalKey;
-  }
 
   const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   const targetUrl = new URL(API_URL);

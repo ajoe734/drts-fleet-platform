@@ -490,6 +490,16 @@ jobs:
           ops_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
           workload_key_secret="${SECRET_PREFIX}-workload-identity-jwt-public-key"
           workload_registry_secret="${SECRET_PREFIX}-workload-identity-service-principals"
+          # SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: Google-assertion
+          # registry read by GoogleWorkloadIdentityAdapter
+          # (WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS, distinct from
+          # WORKLOAD_IDENTITY_SERVICE_PRINCIPALS above). Dev treats this
+          # secret's absence as a notice and degrades to x-drts-internal-key
+          # (INTERNAL_KEY_EXCP_002 is still active there); production must
+          # not -- once EXCP_002 is retired, an unpopulated registry here
+          # would let the API start and then reject every proxied request at
+          # runtime. Fail the deploy before it reaches drts-api instead.
+          workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"
 
           for required_secret in "$workload_key_secret" "$workload_registry_secret"; do
             if ! gcloud secrets describe "$required_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
@@ -497,7 +507,11 @@ jobs:
               exit 1
             fi
           done
-          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest"
+          if ! gcloud secrets describe "$workload_google_registry_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "::error::Required secret ${workload_google_registry_secret} not found in project ${PROJECT_ID}. Populate it with the Google workload identity service principal registry before deploying production (see docs/02-architecture/internal-key-exceptions.md section 10.3); deploying without it risks every proxied request being rejected once INTERNAL_KEY_EXCP_002 is retired."
+            exit 1
+          fi
+          secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest,WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"
 
           if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"

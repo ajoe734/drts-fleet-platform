@@ -11,9 +11,9 @@ import {
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 
 // The registry entries expire on real dates -- EXCP_003 on 2026-08-31,
-// EXCP_002 and EXCP_001 on 2026-10-31. Assertions about which
-// exception matches are about the registry's shape, not about today, so
-// they are evaluated at a fixed instant inside every window. Cases that
+// EXCP_002 (retired 2026-10-02) and EXCP_001 on 2026-10-31. Assertions about
+// which exception matches are about the registry's shape, not about today,
+// so they are evaluated at a fixed instant inside every window. Cases that
 // are about expiry pin their own later `now` and are left alone.
 const WITHIN_ALL_EXCEPTION_WINDOWS = new Date("2026-08-15T00:00:00Z");
 
@@ -35,6 +35,34 @@ const RETIRED_STAGING_ONLY: InternalKeyExceptionMetadata = {
   removalDate: "2026-08-31",
   removalPlan:
     "Replace with IAM-BG-001 break-glass two-person approval and short session token",
+  header: "x-drts-internal-key",
+  envVar: "DRTS_INTERNAL_KEY",
+  rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
+  revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
+  status: "active",
+};
+
+// EXCP_002 was retired from the registry on 2026-10-02 by
+// SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 once every caller migrated to the
+// Google workload identity assertion. Several cases below are about the
+// evaluator's generic rotation/scope/expiry mechanics for the
+// `x-drts-internal-key` header, not about that particular exception, so they
+// keep their subject as a local fixture (passed explicitly via `registry:`)
+// rather than losing coverage with it.
+const RETIRED_CONTROL_PLANE_PROXY: InternalKeyExceptionMetadata = {
+  exceptionId: "INTERNAL_KEY_EXCP_002",
+  owner: "control-plane-ops",
+  purpose:
+    "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
+  scope: ["* *", "POST partner/ingress/handoff", "POST auth/token"],
+  ttl: "2026-10-31T23:59:59Z",
+  expiresAt: "2026-10-31T23:59:59Z",
+  networkBoundary: "control-plane-proxy-to-api",
+  rotationCadence: "14d",
+  usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
+  removalDate: "2026-10-31",
+  removalPlan:
+    "Full deprecation of DRTS_INTERNAL_KEY fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. Retired 2026-10-02 by SEC-INTERNAL-KEY-WIF-MIGRATION-20260930.",
   header: "x-drts-internal-key",
   envVar: "DRTS_INTERNAL_KEY",
   rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
@@ -118,6 +146,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "GET",
         requestPath: "/api/tenants",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
 
@@ -134,6 +163,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         previousKey: "old-rotated-key-123456789012345678",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
 
@@ -149,12 +179,30 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         revokedKeys: ["revoked-key-12345678901234567890123"],
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
 
     expect(result.valid).toBe(false);
     expect(result.code).toBe("INTERNAL_KEY_REVOKED");
     expect(result.keyState).toBe("revoked");
+  });
+
+  it("rejects x-drts-internal-key outright now that INTERNAL_KEY_EXCP_002 is retired (no registry entry uses that header)", () => {
+    const result = evaluateInternalKey(
+      "any-key-value-123456789012345678901",
+      "any-key-value-123456789012345678901",
+      {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
+        headerName: "x-drts-internal-key",
+        requestMethod: "GET",
+        requestPath: "/api/tenants",
+      },
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.code).toBe("INTERNAL_KEY_UNDOCUMENTED");
+    expect(result.keyState).toBe("undocumented");
   });
 
   it("rejects request with undocumented header", () => {
@@ -196,8 +244,10 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   });
 
   it("enforces scope metadata and matches control-plane proxy and break-glass routes correctly", () => {
-    // EXCP_003 covered these until it was retired; EXCP_002 scope `* *`
-    // has carried them since, on the same header.
+    // EXCP_003 covered these until it was retired; the retired EXCP_002
+    // fixture's scope `* *` carried them on the same header before EXCP_002
+    // itself was retired, so this stays a registry-mechanism test (explicit
+    // fixture) rather than a live-registry assertion.
     const resultHealth = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
@@ -207,6 +257,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         requestMethod: "GET",
         requestPath: "/health",
         environment: "staging",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(resultHealth.valid).toBe(true);
@@ -221,12 +272,14 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         requestMethod: "POST",
         requestPath: "/api/ops/breakglass/activate",
         environment: "staging",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(resultOps.valid).toBe(true);
     expect(resultOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
 
-    // EXCP_002 matches control-plane proxy routes like GET /api/tenants, POST /api/partner/bookings, etc.
+    // The retired EXCP_002 fixture's `* *` scope matches control-plane
+    // proxy routes like GET /api/tenants, POST /api/partner/bookings, etc.
     const resultTenants = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
@@ -235,6 +288,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "GET",
         requestPath: "/api/tenants",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(resultTenants.valid).toBe(true);
@@ -248,13 +302,14 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/partner/bookings",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(resultBookings.valid).toBe(true);
     expect(resultBookings.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
   });
 
-  it("enforces network boundary constraints and allows fallback to production-valid EXCP_002 for ops routes in production", () => {
+  it("enforces network boundary constraints using the retired EXCP_002 fixture for ops routes in production", () => {
     const resultProdOps = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
@@ -264,6 +319,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         requestMethod: "POST",
         requestPath: "/api/ops/dispatch",
         environment: "production",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(resultProdOps.valid).toBe(true);
@@ -300,7 +356,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     { now: "2026-10-31T23:59:59.000Z", valid: true },
     { now: "2026-10-31T23:59:59.001Z", valid: false },
   ])(
-    "evaluates EXCP_002 token exchange at $now as valid=$valid",
+    "evaluates retired EXCP_002 fixture token exchange at $now as valid=$valid",
     ({ now, valid }) => {
       const result = evaluateInternalKey(
         "secret-key-1234567890123456789012345",
@@ -311,6 +367,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
           requestPath: "/api/auth/token",
           now: new Date(now),
           environment: "staging",
+          registry: [RETIRED_CONTROL_PLANE_PROXY],
         },
       );
 
@@ -350,6 +407,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         requestPath: "/api/ops/test",
         now: new Date("2026-11-01T00:00:00Z"),
         environment: "staging",
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(resultAllExpired.valid).toBe(false);
@@ -387,6 +445,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         previousKey: "old-key-12345678901234567890",
         previousKeyExpiresAt: "2026-08-10T00:00:00Z",
         now: new Date("2026-08-05T00:00:00Z"),
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(validOverlap.valid).toBe(true);
@@ -402,6 +461,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         previousKey: "old-key-12345678901234567890",
         previousKeyExpiresAt: "2026-08-01T00:00:00Z",
         now: new Date("2026-08-05T00:00:00Z"),
+        registry: [RETIRED_CONTROL_PLANE_PROXY],
       },
     );
     expect(expiredOverlap.valid).toBe(false);

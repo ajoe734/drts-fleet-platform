@@ -940,6 +940,7 @@ export interface DriverDeviceInvitationRecord {
   revokedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  boundBindingId?: string | null;
 }
 
 export interface DriverRefreshFamilyRecord {
@@ -1434,6 +1435,7 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "audit_log",
   "webhook_delivery",
   "eligibility_verification",
+  "mail_delivery",
   "proof_bundle",
   "voice_booking_evidence",
   "voice_transcript",
@@ -2533,6 +2535,8 @@ export interface CanonicalIdentityInvitationRecord {
   roleCode: string;
   tokenHash: string;
   deliveryStatus: CanonicalInvitationDeliveryStatus;
+  /** NotificationDeliveryService deliveryId for this invitation's email send, retrievable via the mail delivery readback endpoint. Null when delivery was never enqueued (e.g. no identity authority at issuance time). */
+  deliveryId: string | null;
   expiresAt: string;
   acceptedAt: string | null;
   revokedAt: string | null;
@@ -2685,9 +2689,41 @@ export interface CreateTenantUserCommand {
 export interface TenantInvitationView {
   invitationId: string;
   deliveryStatus: CanonicalInvitationDeliveryStatus;
+  /** NotificationDeliveryService deliveryId for this invitation's email send; retrieve status and provider receipts via the mail delivery readback endpoint. Null when delivery was never enqueued. */
+  deliveryId: string | null;
   expiresAt: string;
   acceptedAt: string | null;
   revokedAt: string | null;
+}
+
+/** Provider acknowledgement as exposed to secondary evidence views: response is masked beyond the transport-level credential redaction. */
+export interface MailDeliveryProviderAcknowledgementView {
+  provider: string;
+  response: string;
+  providerMessageId: string | null;
+  acceptedAt: string;
+}
+
+export interface MailDeliveryAttemptView {
+  attemptId: string;
+  attemptNo: number;
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: "started" | "sent" | "failed" | "uncertain";
+  errorCode: string | null;
+  retryable: boolean;
+  acknowledgement: MailDeliveryProviderAcknowledgementView | null;
+}
+
+/** Read-only delivery status/receipt view. Never carries message body, invitation tokens, or SMTP credentials. */
+export interface MailDeliveryReceiptView {
+  deliveryId: string;
+  tenantId: string;
+  status: "queued" | "sent" | "failed";
+  queuedAt: string;
+  sentAt: string | null;
+  nextAttemptAt: string | null;
+  attempts: MailDeliveryAttemptView[];
 }
 
 export interface AcceptTenantInvitationCommand {

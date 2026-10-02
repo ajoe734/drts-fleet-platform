@@ -324,6 +324,60 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
     ],
   },
   {
+    family: "mail_delivery",
+    authorityModule: "tenant-partner",
+    description:
+      "Outbound notification email delivery status and provider acknowledgement evidence (tenant invitation, approval, and audit mail sends).",
+    hotRetentionDays: 30,
+    archiveAfterDays: 30,
+    archiveRetentionDays: 365,
+    archiveTier: "warm_archive",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["platform"],
+        actorTypes: ["platform_admin"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["ops"],
+        actorTypes: ["ops_user"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["tenant"],
+        actorTypes: ["tenant_admin"],
+        requiredScopes: ["tenant:read"],
+        tenantScoped: true,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Mail delivery receipts expose a masked provider acknowledgement response preview and provider message ID only; message bodies, invitation tokens, and SMTP credentials are never returned.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Delivery-receipt reads audit the delivery id and found/not-found outcome without raw provider response bodies.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
+    legalHold: DEFAULT_LEGAL_HOLD_POLICY,
+    deletionException:
+      "Mail delivery evidence is retained while a linked invitation, approval, or delivery dispute remains open.",
+    auditAction: "view_mail_delivery_evidence",
+    notes: [
+      "The provider acknowledgement response is already credential-redacted at the SMTP transport boundary; this surface applies an additional preview mask before API exposure.",
+    ],
+  },
+  {
     family: "eligibility_verification",
     authorityModule: "tenant-partner",
     description:
