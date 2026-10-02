@@ -67,6 +67,80 @@ function receipt(id = deliveryId, queuedAt = "2026-10-01T01:00:00Z") {
 afterEach(() => vi.restoreAllMocks());
 
 describe("repeatable fixed-alias invitation profile", () => {
+  it("exercises revoke, superseded-token denial, single-use acceptance and a new pending expiry checkpoint in order", async () => {
+    let replacement = 0;
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const path = String(input);
+        if (path.endsWith("/invitation/resend")) {
+          replacement++;
+          return wire({
+            invitationId: `invitation_${replacement}`,
+            deliveryId: `delivery_${replacement}`,
+            expiresAt: "2026-10-03T01:00:00Z",
+            acceptedAt: null,
+            revokedAt: null,
+          });
+        }
+        if (path.includes("/mail-deliveries/"))
+          return wire(receipt(path.split("/").at(-1)!));
+        if (path.endsWith("/invitation/revoke"))
+          return wire({
+            invitationId: "invitation_1",
+            revokedAt: "2026-10-02T01:00:00Z",
+          });
+        if (path.endsWith("/users"))
+          return wire({ items: [{ ...user, status: "active" }] });
+        if (path.endsWith("/step-up-proofs"))
+          return wire({
+            required: true,
+            actionId: "tenant:users:role:update",
+            stepUpReference: "role-proof",
+          });
+        if (path.endsWith("/role")) return wire(user);
+        throw new Error("Unexpected HTTP request in lifecycle");
+      });
+    const consume = vi
+      .spyOn(mailbox, "observeMailbox")
+      .mockImplementation(async (_config, _delivery, probe) => ({
+        acceptance: probe.acceptance,
+        acceptance_status: probe.acceptance === "accepted" ? 201 : 403,
+        acceptance_duration_ms: 3,
+      }));
+    vi.spyOn(mailbox, "observeInvitationMailbox").mockResolvedValue({
+      matched_content: true,
+    });
+    const log = recorder();
+    await exerciseInvitationLifecycle(
+      config,
+      {
+        userId,
+        invitationId: "initial",
+        deliveryId: "initial_delivery",
+        statusCode: 201,
+        deployedCandidateSha: sha,
+      },
+      log,
+    );
+    expect(
+      consume.mock.calls.map(([, id, probe]) => [id, probe.acceptance]),
+    ).toEqual([
+      ["initial_delivery", "denied"],
+      ["delivery_1", "denied"],
+      ["delivery_2", "accepted"],
+      ["delivery_2", "denied"],
+    ]);
+    expect(log.finalize("failed").trackedResources).toContainEqual(
+      expect.objectContaining({
+        type: "invitation_expiry_checkpoint",
+        id: "delivery_3",
+      }),
+    );
+    expect(
+      fetcher.mock.calls.some(([url]) => String(url).includes("/internal/")),
+    ).toBe(false);
+  });
   it("resends a task-owned pending viewer instead of creating a duplicate user", async () => {
     const fetcher = vi
       .spyOn(globalThis, "fetch")

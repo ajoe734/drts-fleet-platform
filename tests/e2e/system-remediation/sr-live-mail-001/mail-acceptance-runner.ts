@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
 import { observeInvitationMailbox } from "./mailbox-observer";
+import { observeBackgroundRetry } from "./retry-profile";
 import {
   prepareTaskInvitation,
   exerciseInvitationLifecycle,
@@ -150,6 +151,7 @@ export interface MailRunnerDeps {
   lifecycle?: (issued: IssueInvitationResult) => Promise<void>;
   approval?: () => Promise<void>;
   expiryVerified?: boolean;
+  retryVerified?: boolean;
 }
 export interface MailRunnerResult {
   status: "passed" | "failed";
@@ -267,14 +269,19 @@ export async function runMailAcceptance(
       ? []
       : ["invitation accept, single use, resend and revoke"]),
     ...(deps.expiryVerified ? [] : ["real 24-hour invitation expiry"]),
-    "automatic retry after a real retryable failure (no authorized fault injection)",
+    ...(deps.retryVerified
+      ? []
+      : [
+          "automatic retry after a real retryable failure (no authorized fault injection)",
+        ]),
   ];
   for (const surface of outstanding)
     deps.recorder.recordLiveLimitation(
       surface,
       "Not exercised by this invitation transport profile.",
     );
-  reasons.push(`Acceptance incomplete: ${outstanding.join("; ")}.`);
+  if (outstanding.length)
+    reasons.push(`Acceptance incomplete: ${outstanding.join("; ")}.`);
   return finish();
 }
 
@@ -356,6 +363,53 @@ export async function realIssueInvitation(
     ...(body.data?.user_id ? { userId: body.data.user_id } : {}),
   };
 }
+export async function realReadDeliveryReceipt(
+  config: MailRunnerConfig,
+  deliveryId: string,
+  recorder?: UatEvidenceRecorder,
+): Promise<DeliveryReceipt> {
+  const res = await mailRequest(
+    config,
+    `tenant/mail-deliveries/${encodeURIComponent(deliveryId)}`,
+    {
+      headers: {
+        authorization: `Bearer ${config.roleSessionToken}`,
+        "x-tenant-id": config.tenantId,
+      },
+    },
+    recorder,
+  );
+  const body = (await res.json()) as {
+    data?: {
+      delivery_id?: string;
+      tenant_id?: string;
+      status?: "queued" | "sent" | "failed";
+      attempts?: Array<{
+        outcome?: string;
+        error_code?: string | null;
+        acknowledgement?: { provider_message_id?: string | null } | null;
+      }>;
+    };
+  };
+  const receipt = body.data;
+  if (
+    receipt?.delivery_id !== deliveryId ||
+    receipt.tenant_id !== config.tenantId ||
+    !["queued", "sent", "failed"].includes(receipt.status ?? "") ||
+    !Array.isArray(receipt.attempts)
+  )
+    throw new Error("Invalid or cross-tenant delivery readback envelope");
+  const lastAttempt = receipt.attempts.at(-1);
+  return {
+    status: receipt.status!,
+    providerMessageId:
+      lastAttempt?.acknowledgement?.provider_message_id ?? null,
+    attempts: receipt.attempts.length,
+    lastOutcome: lastAttempt?.outcome ?? null,
+    errorCode: lastAttempt?.error_code ?? null,
+    readback: receipt,
+  };
+}
 export async function realPollDeliveryReceipt(
   config: MailRunnerConfig,
   deliveryId: string,
@@ -363,47 +417,7 @@ export async function realPollDeliveryReceipt(
 ): Promise<DeliveryReceipt> {
   const deadline = Date.now() + config.pollTimeoutMs;
   while (Date.now() < deadline) {
-    const res = await mailRequest(
-      config,
-      `tenant/mail-deliveries/${encodeURIComponent(deliveryId)}`,
-      {
-        headers: {
-          authorization: `Bearer ${config.roleSessionToken}`,
-          "x-tenant-id": config.tenantId,
-        },
-      },
-      recorder,
-    );
-    const body = (await res.json()) as {
-      data?: {
-        delivery_id?: string;
-        tenant_id?: string;
-        status?: "queued" | "sent" | "failed";
-        attempts?: Array<{
-          outcome?: string;
-          error_code?: string | null;
-          acknowledgement?: { provider_message_id?: string | null } | null;
-        }>;
-      };
-    };
-    const receipt = body.data;
-    if (
-      receipt?.delivery_id !== deliveryId ||
-      receipt.tenant_id !== config.tenantId ||
-      !["queued", "sent", "failed"].includes(receipt.status ?? "") ||
-      !Array.isArray(receipt.attempts)
-    )
-      throw new Error("Invalid or cross-tenant delivery readback envelope");
-    const lastAttempt = receipt.attempts.at(-1);
-    const last: DeliveryReceipt = {
-      status: receipt.status!,
-      providerMessageId:
-        lastAttempt?.acknowledgement?.provider_message_id ?? null,
-      attempts: receipt.attempts.length,
-      lastOutcome: lastAttempt?.outcome ?? null,
-      errorCode: lastAttempt?.error_code ?? null,
-      readback: receipt,
-    };
+    const last = await realReadDeliveryReceipt(config, deliveryId, recorder);
     if (
       last.status !== "queued" ||
       Date.now() + config.pollIntervalMs >= deadline
@@ -431,6 +445,11 @@ async function main(): Promise<void> {
       throw new Error("Checkout SHA does not match requested candidate");
     await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
     recorder.setCandidateSha(config.candidateSha);
+    const retryDeliveryId =
+      process.env.DRTS_LIVE_MAIL_RETRY_DELIVERY_ID?.trim();
+    const retryVerified = retryDeliveryId
+      ? await observeBackgroundRetry(config, retryDeliveryId, recorder)
+      : false;
     const expiryVerified = await verifyExpiredInvitation(
       config,
       process.env,
@@ -455,6 +474,7 @@ async function main(): Promise<void> {
           }
         : {}),
       expiryVerified,
+      retryVerified,
       recorder,
     });
     evidence = result.evidence;
