@@ -81,6 +81,11 @@ KNOWN_AGENTS = {
         "default_branch": "feat/copilot-spec-critique",
         "target_workload": 15,
     },
+    "Pi": {
+        "capability_lane": ["api-implementation", "contracts", "schema", "acceptance"],
+        "default_branch": "feat/pi-parallel-worker",
+        "target_workload": 15,
+    },
 }
 
 AGENT_ALIASES = {

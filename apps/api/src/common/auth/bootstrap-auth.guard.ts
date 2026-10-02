@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   Optional,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
@@ -156,8 +157,31 @@ function isStrictAuthEnvironment(): boolean {
   return environment === "production" || environment === "staging";
 }
 
+// Cloud Scheduler (like the Cloud Run metadata server InternalKeyMiddleware
+// already tolerates) caches and reuses the identical OIDC ID token across
+// every trigger firing for most of its validity window, not just concurrent
+// requests on one firing. These two scheduled-task routes are safe to accept
+// that same token repeatedly: both are idempotent sweeps with no side effect
+// tied to "this exact assertion has never been seen before", unlike
+// `POST /api/auth/token` (session issuance, must stay one-time-use) or the
+// identity privileged-role-grant expiry sweep (kept strict pending its own
+// idempotency review). Route-scope/audience/issuer/email checks below still
+// run unchanged; only the one-time-use ledger write is skipped for these.
+const REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS = new Set([
+  "internal:scheduled-tasks:mail-outbox:drain",
+  "internal:scheduled-tasks:approval-timeout-reminders:run",
+]);
+
+interface ResolvedBootstrapAuthPolicy {
+  requiredScopes: string[];
+  allowedRealms: string[];
+  routeKey?: string;
+}
+
 @Injectable()
 export class BootstrapAuthGuard implements CanActivate {
+  private readonly logger = new Logger(BootstrapAuthGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     @Optional() private readonly jwtAuthService?: JwtAuthService,
@@ -353,7 +377,7 @@ export class BootstrapAuthGuard implements CanActivate {
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
-    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+    policy: ResolvedBootstrapAuthPolicy | null,
   ): boolean | Promise<boolean> {
     const strictEnvironment = isStrictAuthEnvironment();
     // JWT fast-path: verify Bearer token if present
@@ -668,7 +692,7 @@ export class BootstrapAuthGuard implements CanActivate {
     token: string,
     requestUrl: string,
     requestMethod: string,
-    policy: { requiredScopes: string[]; allowedRealms: string[] },
+    policy: ResolvedBootstrapAuthPolicy,
   ): Promise<BootstrapRequestIdentity | null> {
     if (
       !this.googleWorkloadIdentityAdapter ||
@@ -678,11 +702,15 @@ export class BootstrapAuthGuard implements CanActivate {
       return null;
     }
 
+    const enforceReplayProtection = policy.routeKey
+      ? !REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS.has(policy.routeKey)
+      : true;
+
     try {
       const resolved =
         await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
           { [GOOGLE_WORKLOAD_IDENTITY_HEADER]: token },
-          { requestPath: requestUrl, requestMethod },
+          { requestPath: requestUrl, requestMethod, enforceReplayProtection },
         );
       return {
         authMode: "jwt_bearer",
@@ -699,7 +727,14 @@ export class BootstrapAuthGuard implements CanActivate {
         issuer: "https://accounts.google.com",
         authTime: resolved.authTime,
       };
-    } catch {
+    } catch (error) {
+      // Never log the token itself; the reason code is enough to diagnose a
+      // rejected scheduler/service trigger without leaking bearer material.
+      const reasonCode =
+        error instanceof ApiRequestError ? error.code : "UNKNOWN_ERROR";
+      this.logger.warn(
+        `[AUTH_GOOGLE_WORKLOAD_IDENTITY_FALLBACK_DENIED] reason=${reasonCode} route=${requestMethod} ${requestUrl}`,
+      );
       return null;
     }
   }

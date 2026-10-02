@@ -812,7 +812,7 @@ mandatory candidate-bound cleanup evidence, and all real device recovery probes.
 
 The earlier internal-key provisioner and illustrative observer registry steps
 above are historical. The current operator instructions are
-[`internal-key-exceptions.md` §10](../../../../docs/02-architecture/internal-key-exceptions.md#10-sec-internal-key-live-map-platform-session-wif-20261002).
+[`internal-key-exceptions.md` §11](../../../../docs/02-architecture/internal-key-exceptions.md#11-sec-internal-key-live-map-platform-session-wif-20261002).
 They define separate observer and provisioning accounts/principals; the latter
 has no workforce roles and only a fixed-driver provisioning grant. Recovery now
 uses masked `DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN` plus
