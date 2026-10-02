@@ -140,10 +140,12 @@ export class IdentityRepository implements OnModuleInit {
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {
     this.ensureDefaultPlatformAccount().catch(() => {});
+    this.ensureLiveMapObserverAccount().catch(() => {});
   }
 
   async onModuleInit() {
     await this.ensureDefaultPlatformAccount();
+    await this.ensureLiveMapObserverAccount();
   }
 
   isEnabled() {
@@ -246,6 +248,93 @@ export class IdentityRepository implements OnModuleInit {
     }
   }
 
+  async ensureLiveMapObserverAccount(): Promise<{
+    principal: CanonicalIdentityPrincipalRecord;
+    membership: CanonicalIdentityMembershipRecord;
+  } | null> {
+    if (process.env.DRTS_E2E_PROVISIONING !== "true") {
+      return null;
+    }
+    const existingPrincipal = await this.findPrincipalById("live-map-observer");
+    const existingMemberships = existingPrincipal
+      ? await this.findMembershipsByPrincipalId("live-map-observer")
+      : [];
+    const existingMembership = existingMemberships.find(
+      (m) => m.realm === "ops" && m.scopeRef === "ops",
+    );
+
+    const now = new Date().toISOString();
+    const principalDraft: CanonicalIdentityPrincipalRecord = {
+      principalId: "live-map-observer",
+      sourceRef: "live_map_observer:principal",
+      issuer: "system",
+      subject: "live-map-observer",
+      principalType: "human",
+      email: null,
+      emailVerified: false,
+      displayName: "Live Map Observer (E2E)",
+      status: "active",
+      createdAt: existingPrincipal?.createdAt ?? now,
+      updatedAt: existingPrincipal?.updatedAt ?? now,
+    };
+
+    const membershipDraft: CanonicalIdentityMembershipRecord = {
+      membershipId: existingMembership?.membershipId ?? `membership_ops_${randomUUID()}`,
+      sourceRef: "live_map_observer:membership:ops",
+      principalId: principalDraft.principalId,
+      realm: "ops",
+      scopeRef: "ops",
+      tenantId: null,
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: existingMembership?.createdAt ?? now,
+      updatedAt: existingMembership?.updatedAt ?? now,
+    };
+
+    const roleBindingDraft: CanonicalIdentityRoleBindingRecord = {
+      roleBindingId: `role_binding_ops_${randomUUID()}`,
+      sourceRef: "live_map_observer:role_binding:ops_observer",
+      membershipId: membershipDraft.membershipId,
+      roleCode: "ops_observer",
+      grantedByPrincipalId: null,
+      approvalId: null,
+      validFrom: now,
+      validTo: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (!this.isEnabled()) {
+      const principal = this.upsertFallbackPrincipal(principalDraft);
+      const membership = this.upsertFallbackMembership(membershipDraft);
+      this.upsertFallbackRoleBinding(roleBindingDraft);
+      return { principal, membership };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const principal = await this.upsertPrincipal(client, principalDraft);
+      const membership = await this.upsertMembership(client, {
+        ...membershipDraft,
+        principalId: principal.principalId,
+      });
+      await this.upsertRoleBinding(client, {
+        ...roleBindingDraft,
+        membershipId: membership.membershipId,
+      });
+      await client.query("COMMIT");
+      return { principal, membership };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async syncLegacyTenantUserRole(
     userRole: TenantUserRoleRecord,
   ): Promise<CanonicalTenantUserIdentitySnapshot> {
@@ -317,6 +406,7 @@ export class IdentityRepository implements OnModuleInit {
       roleCode: userRole.roleCode,
       tokenHash: this.hashLegacyInvitationSource(userRole.userId),
       deliveryStatus: "legacy_backfill",
+      deliveryId: null,
       expiresAt: invitationExpiresAt,
       acceptedAt: null,
       revokedAt: userRole.status === "invited" ? null : userRole.updatedAt,
@@ -2795,6 +2885,7 @@ export class IdentityRepository implements OnModuleInit {
           roleCode: record.roleCode,
           tokenHash: record.tokenHash,
           deliveryStatus: record.deliveryStatus,
+          deliveryId: record.deliveryId,
           expiresAt: record.expiresAt,
           acceptedAt: record.acceptedAt,
           revokedAt: record.revokedAt,

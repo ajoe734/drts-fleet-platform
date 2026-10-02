@@ -774,4 +774,31 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
       ),
     ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
   });
+
+  it("returns 404 MAIL_DELIVERY_NOT_FOUND for an unknown mail delivery id", async () => {
+    const { controller } = createController();
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:read"],
+      tenantId: "tenant-a",
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    await expect(
+      controller.getMailDelivery(
+        "00000000-0000-0000-0000-000000000000",
+        identity,
+        "tenant-a",
+        "req-mail-delivery-not-found",
+      ),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "MAIL_DELIVERY_NOT_FOUND",
+    });
+  });
 });

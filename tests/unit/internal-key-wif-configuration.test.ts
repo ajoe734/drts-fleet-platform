@@ -101,3 +101,93 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: WIF registry operator doc
     expect(workflow).toContain("x-drts-internal-key");
   });
 });
+
+describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: deploy-dev CI authorization actorType matches the documented registry grant", () => {
+  it("both operational-acceptance POST /api/auth/token calls send the literal x-actor-type header actually documented for their ciTenantActorGrants entry", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    // Both calls (Tenant Admin actor ...901 and the Tenant Ops dispatch actor
+    // ...902) send the same literal x-actor-type header; only x-actor-id
+    // differs. The resulting *session role* for ...902 comes out as
+    // tenant_ops_admin from the durable tenant-user fixture lookup, not from
+    // this header -- so the registry's ciTenantActorGrants entry for ...902
+    // must match the header's actual actorType (tenant_admin), not the
+    // session's eventual role.
+    const actorTypeHeaders = workflow.match(/x-actor-type: (tenant_admin|tenant_ops_admin)'/g);
+    expect(actorTypeHeaders).not.toBeNull();
+    expect(actorTypeHeaders).toHaveLength(2);
+    for (const header of actorTypeHeaders!) {
+      expect(header).toBe("x-actor-type: tenant_admin'");
+    }
+  });
+
+  it("documents both ciTenantActorGrants entries (actorId ...901 and ...902) with actorType tenant_admin, matching the workflow header", () => {
+    const doc = readFileSync(registryDocPath, "utf8");
+
+    expect(doc).toContain(
+      '{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}',
+    );
+    expect(doc).toContain(
+      '{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000902"}',
+    );
+    // The old, wrong recommendation (a tenant_ops_admin *grant*, as opposed
+    // to the still-correct tenant_ops_admin *resulting session role*) must
+    // be gone from both places that previously stated it.
+    expect(doc).not.toMatch(/\.\.\.000902` \/ `tenant_ops_admin` pair\) and sets/);
+    expect(doc).not.toMatch(
+      /the `\.\.\.000902` \/ `tenant_ops_admin` pair, exactly as §7\.2 item 1 already specified\./,
+    );
+  });
+});
+
+describe("SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001: registry doc documents a pasteable two-entry registry JSON", () => {
+  it("provides a directly pasteable WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS JSON array with the verified service accounts", () => {
+    const doc = readFileSync(registryDocPath, "utf8");
+
+    expect(doc).toContain(
+      "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    );
+    expect(doc).toContain(
+      "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    );
+    expect(doc).toContain("WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=");
+    expect(doc).toMatch(/```json\n\[\s*\n\s*\{/);
+  });
+
+  it("tells ops to switch only Entry A's audience to DEV_IAP_CLIENT_ID, keeping Entry B on the API origin (deploy-dev.yml's CI mint steps never read that variable)", () => {
+    const doc = readFileSync(registryDocPath, "utf8");
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    // The wrong instruction said to switch *both* entries; that would make
+    // Entry B's token audience stop matching its allowedTokenAudiences and
+    // 403 every CI operational-acceptance call the moment ops set the var.
+    expect(doc).not.toMatch(
+      /switch both entries to `vars\.DEV_IAP_CLIENT_ID`/,
+    );
+    expect(doc).toMatch(/only \*\*Entry A\*\*'s[\s\S]*must switch/);
+    expect(doc).toMatch(/\*\*Entry B\*\* must stay on the live API origin/);
+
+    // Lock the premise the corrected instruction depends on: both CI mint
+    // steps stay keyed to the health-check API output, not an IAP client id.
+    const mintAudiences = workflow.match(
+      /id_token_audience: \$\{\{ needs\.health-check\.outputs\.api \}\}/g,
+    );
+    expect(mintAudiences).not.toBeNull();
+    expect(mintAudiences).toHaveLength(2);
+    expect(workflow).not.toMatch(/id_token_audience:.*DEV_IAP_CLIENT_ID/);
+  });
+
+  it("documents the live-map observer caller as an unresolved coordination blocker, not a silent Entry B widening or a duplicate-email entry", () => {
+    const doc = readFileSync(registryDocPath, "utf8");
+
+    expect(doc).toContain("live-map-observer");
+    expect(doc).toContain("WORKLOAD_CI_TENANT_ACTOR_DENIED");
+    expect(doc).toMatch(
+      /coordinated with the live-map task owner|live-map task owner's agreement/,
+    );
+    // Must not instruct silently widening Entry B or duplicating its email.
+    expect(doc).not.toMatch(
+      /add (the )?observer (permission|grant) to (deployer )?(entry )?B/i,
+    );
+  });
+});

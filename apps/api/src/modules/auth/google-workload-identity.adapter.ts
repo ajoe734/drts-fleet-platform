@@ -1,6 +1,9 @@
 import { createHash, createPublicKey } from "node:crypto";
 
-import type { CanonicalIdentityPrincipalRecord } from "@drts/contracts";
+import type {
+  CanonicalIdentityPrincipalRecord,
+  CanonicalIdentityMembershipRecord,
+} from "@drts/contracts";
 import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
@@ -44,20 +47,15 @@ export interface CiTenantActorGrant {
 }
 
 export interface RegisteredGooglePrincipal {
-  serviceAccountEmail: string;
   principalId: string;
+  serviceAccountEmail?: string;
   actorId?: string | null;
   displayName?: string | null;
   roles?: string[] | null;
   scopes?: string[] | null;
-  allowedTokenAudiences: string[];
+  allowedTokenAudiences?: string[];
   ciTenantActorGrants?: CiTenantActorGrant[] | null;
-  // Per-principal least-privilege route allowlist, using the same
-  // "METHOD path" scope pattern DSL (and matcher) as
-  // `InternalKeyExceptionMetadata.scope` -- a verified principal is only
-  // granted bypass of `InternalKeyMiddleware` for routes it is explicitly
-  // registered for, not every route the middleware guards.
-  routeScopes: string[];
+  routeScopes?: string[];
 }
 
 export interface ResolvedGoogleWorkloadIdentity {
@@ -158,6 +156,26 @@ export function isGoogleWorkloadIdentityNotConfigured(
   );
 }
 
+/**
+ * True only for "this caller's verified identity has no registry entry".
+ * Distinct from `isGoogleWorkloadIdentityNotConfigured` (registry absent
+ * entirely), so a caller the registry simply hasn't onboarded yet (e.g. ops
+ * wrote the two documented entries but a future ninth caller starts
+ * dual-sending before being added) degrades to the still-enforced
+ * `x-drts-internal-key` check instead of taking every route behind
+ * `InternalKeyMiddleware` down. Genuine verification failures for an
+ * already-registered principal (bad signature, issuer/audience mismatch,
+ * route scope denial) are not covered here and must stay fail-closed.
+ */
+export function isGoogleWorkloadIdentityPrincipalNotRegistered(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof ApiRequestError &&
+    error.code === "WORKLOAD_PRINCIPAL_NOT_REGISTERED"
+  );
+}
+
 @Injectable()
 export class GoogleWorkloadIdentityAdapter {
   private readonly logger = new Logger(GoogleWorkloadIdentityAdapter.name);
@@ -166,7 +184,25 @@ export class GoogleWorkloadIdentityAdapter {
 
   async verifyServicePrincipal(
     headers: HeaderRecord,
-    context: { requestPath?: string | undefined; requestMethod?: string | undefined },
+    context: {
+      requestPath?: string | undefined;
+      requestMethod?: string | undefined;
+      /**
+       * Default `true`: the assertion is consumed exactly once (session
+       * issuance, e.g. `POST /api/auth/token`), so replaying the same
+       * Google-signed token a second time is rejected.
+       *
+       * Pass `false` for general proxied requests authenticated through
+       * `InternalKeyMiddleware`: a Cloud Run metadata server caches and
+       * returns the identical token for every call made within its
+       * validity window, so concurrent same-page requests legitimately
+       * present byte-identical assertions. Signature, issuer, audience,
+       * verified-email and route-scope checks below still run unchanged;
+       * only the one-time-use ledger write is skipped, so this also avoids
+       * an unbounded `iam.workload_identity_assertions` insert per request.
+       */
+      enforceReplayProtection?: boolean;
+    },
   ): Promise<ResolvedGoogleWorkloadIdentity> {
     const token = extractGoogleWorkloadIdentityAssertion(headers);
     if (!token) {
@@ -220,7 +256,9 @@ export class GoogleWorkloadIdentityAdapter {
     }
 
     const principal = registry.find(
-      (entry) => entry.serviceAccountEmail?.trim().toLowerCase() === email,
+      (entry) =>
+        (entry.serviceAccountEmail && entry.serviceAccountEmail.trim().toLowerCase() === email) ||
+        (entry.principalId && (entry.principalId.trim().toLowerCase() === email || entry.principalId.trim() === subject))
     );
     if (!principal || !principal.principalId?.trim()) {
       throw new ApiRequestError(
@@ -230,7 +268,7 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    const allowedAudiences = unique(principal.allowedTokenAudiences);
+    const allowedAudiences = unique(principal.allowedTokenAudiences || []);
     if (!allowedAudiences.includes(audience)) {
       throw new ApiRequestError(
         403,
@@ -240,7 +278,7 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    const routeScopes = unique(principal.routeScopes);
+    const routeScopes = unique(principal.routeScopes || []);
     const routeAllowed = routeScopes.some((pattern) =>
       matchesScope(pattern, context.requestMethod, context.requestPath),
     );
@@ -259,23 +297,26 @@ export class GoogleWorkloadIdentityAdapter {
       );
     }
 
-    const replayAccepted =
-      await this.identityRepository.consumeWorkloadIdentityAssertion({
-        assertionHash: hashAssertion(token),
-        issuer,
-        subject,
-        exchangeAudience: audience,
-        tokenAudience: audience,
-        exchangeNonceHash: null,
-        principalId: principal.principalId,
-        expiresAt: new Date(payload.exp * 1000).toISOString(),
-      });
-    if (!replayAccepted) {
-      throw new ApiRequestError(
-        409,
-        "WORKLOAD_ASSERTION_REPLAYED",
-        "Google workload identity assertion has already been consumed.",
-      );
+    const enforceReplayProtection = context.enforceReplayProtection ?? true;
+    if (enforceReplayProtection) {
+      const replayAccepted =
+        await this.identityRepository.consumeWorkloadIdentityAssertion({
+          assertionHash: hashAssertion(token),
+          issuer,
+          subject,
+          exchangeAudience: audience,
+          tokenAudience: audience,
+          exchangeNonceHash: null,
+          principalId: principal.principalId,
+          expiresAt: new Date(payload.exp * 1000).toISOString(),
+        });
+      if (!replayAccepted) {
+        throw new ApiRequestError(
+          409,
+          "WORKLOAD_ASSERTION_REPLAYED",
+          "Google workload identity assertion has already been consumed.",
+        );
+      }
     }
 
     const authTime = new Date(payload.iat * 1000).toISOString();
@@ -293,6 +334,42 @@ export class GoogleWorkloadIdentityAdapter {
       updatedAt: authTime,
     };
     await this.identityRepository.ensurePrincipalRecord(principalRecord);
+
+    const opsRoles = unique(principal.roles).filter(
+      (r) => r === "ops_user" || r === "ops_observer",
+    );
+    if (opsRoles.length > 0) {
+      const membershipRecord: CanonicalIdentityMembershipRecord = {
+        membershipId: `membership_${principal.principalId}_ops`,
+        sourceRef: `google_workload_identity:${principal.principalId}:membership:ops`,
+        principalId: principal.principalId,
+        realm: "ops",
+        scopeRef: "ops",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: authTime,
+        updatedAt: authTime,
+      };
+      await this.identityRepository.ensureMembershipRecord(membershipRecord);
+
+      for (const role of opsRoles) {
+        await this.identityRepository.ensureRoleBindingRecord({
+          roleBindingId: `role_binding_${principal.principalId}_ops_${role}`,
+          sourceRef: `google_workload_identity:${principal.principalId}:role_binding:${role}`,
+          membershipId: membershipRecord.membershipId,
+          roleCode: role,
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: authTime,
+          validTo: null,
+          createdAt: authTime,
+          updatedAt: authTime,
+        });
+      }
+    }
 
     this.logger.log(
       `[AUTH_GOOGLE_WORKLOAD_IDENTITY_USED] principalId=${principal.principalId} email=${email} route=${context.requestMethod ?? "GET"} ${context.requestPath ?? "*"}`,
@@ -344,18 +421,17 @@ export class GoogleWorkloadIdentityAdapter {
 
     const invalid = (parsed as RegisteredGooglePrincipal[]).find(
       (entry) =>
-        !entry.serviceAccountEmail?.trim() ||
         !entry.principalId?.trim() ||
         !Array.isArray(entry.allowedTokenAudiences) ||
         entry.allowedTokenAudiences.length === 0 ||
         !Array.isArray(entry.routeScopes) ||
-        entry.routeScopes.length === 0,
+        entry.routeScopes.length === 0
     );
     if (invalid) {
       throw new ApiRequestError(
         503,
         "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
-        "Google workload identity service principal registry entries must declare serviceAccountEmail, principalId, allowedTokenAudiences, and routeScopes.",
+        "Google workload identity service principal registry entries must declare principalId, allowedTokenAudiences, and routeScopes.",
       );
     }
 
@@ -448,7 +524,7 @@ export function resolveCiTenantActorGrant(
   if (!isCiTenantActorGateEnabled()) {
     return null;
   }
-  if (!requested.tenantId || !requested.actorType || !requested.actorId) {
+  if (requested.tenantId == null || !requested.actorType || !requested.actorId) {
     return null;
   }
   return (

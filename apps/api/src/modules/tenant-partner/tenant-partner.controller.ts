@@ -104,11 +104,13 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IdempotencyService } from "../../common/idempotency";
 import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
@@ -218,7 +220,83 @@ export class TenantPartnerController {
     @Optional()
     @Inject(PartnerNotificationNavigationRepository)
     private readonly partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository,
+    @Optional()
+    @Inject(NotificationDeliveryService)
+    private readonly notificationDeliveryService?: NotificationDeliveryService,
   ) {}
+
+  /**
+   * SR-MAIL-RETRY-SCHEDULE-20261001: scale-to-zero-safe trigger for the
+   * retryable mail outbox. `NotificationDeliveryService.drain()` already had
+   * correct retry/backoff/lease logic (SR-NOTIFY-001) -- nothing in the repo
+   * called it. All three NotificationDeliveryService instances in this app
+   * (this one, audit-notification's, regulatory-registry's) share the same
+   * `ops.phase1_notification_mail_deliveries` Postgres table and the same
+   * env-derived SMTP transport, so draining through any one of them drains
+   * every tenant's pending mail, including invitation/approval/audit/registry
+   * sends enqueued by the other two modules.
+   */
+  @Post("internal/scheduled-tasks/mail-outbox/drain")
+  async drainMailOutbox(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      !identity ||
+      (identity.realm !== "system" && identity.actorType !== "system")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Only internal system/scheduler authority can trigger the mail outbox drain.",
+      );
+    }
+    if (!this.notificationDeliveryService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Notification delivery outbox is not configured.",
+      );
+    }
+    const receipts = await this.notificationDeliveryService.drain();
+    return toApiSuccessEnvelope(
+      {
+        drained: receipts.length,
+        sent: receipts.filter((receipt) => receipt.status === "sent").length,
+        failed: receipts.filter((receipt) => receipt.status === "failed")
+          .length,
+      },
+      requestId,
+    );
+  }
+
+  /**
+   * SR-MAIL-RETRY-SCHEDULE-20261001: scale-to-zero-safe trigger for the
+   * approval-timeout reminder sweep (previously only an in-process 60s
+   * setInterval, inert while this Cloud Run instance is scaled to zero). See
+   * `TenantPartnerService.runApprovalTimeoutNotificationSweep` for why a
+   * concurrent interval tick or a repeated/overlapping scheduler trigger
+   * cannot double-send.
+   */
+  @Post("internal/scheduled-tasks/approval-timeout-reminders/run")
+  async runApprovalTimeoutReminders(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      !identity ||
+      (identity.realm !== "system" && identity.actorType !== "system")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Only internal system/scheduler authority can trigger the approval-timeout reminder sweep.",
+      );
+    }
+    const result =
+      await this.tenantPartnerService.runApprovalTimeoutNotificationSweep();
+    return toApiSuccessEnvelope(result, requestId);
+  }
 
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
@@ -2252,6 +2330,31 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/mail-deliveries/:deliveryId")
+  @RequireRealms("tenant", "platform", "ops")
+  async getMailDelivery(
+    @Param("deliveryId") deliveryId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const item = await this.tenantPartnerService.getMailDeliveryReceipt(
+      this.requireTenantId(tenantId),
+      deliveryId,
+      requestId,
+      identity,
+    );
+    if (!item) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MAIL_DELIVERY_NOT_FOUND",
+        "The mail delivery could not be found.",
+        { deliveryId },
+      );
+    }
+    return toApiSuccessEnvelope(item, requestId);
+  }
+
   @Get("tenant/sla")
   getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,
@@ -2425,11 +2528,11 @@ export class TenantPartnerController {
         route.status === "completed"
           ? "receipt"
           : route.status === "cancelled" ||
-            route.status === "dispatch_failed" ||
-            route.status === "dispatch_timeout" ||
-            route.status === "no_supply"
-          ? "cancelled"
-          : "trip";
+              route.status === "dispatch_failed" ||
+              route.status === "dispatch_timeout" ||
+              route.status === "no_supply"
+            ? "cancelled"
+            : "trip";
 
       const artifactCommand = {
         entrySlug,

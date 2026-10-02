@@ -1,16 +1,17 @@
 {
   "tenantServiceableBooking": {
     "booking": {
-      "orderId": "a8d264f1-5902-4577-b8fe-07fb0623daee",
-      "bookingId": "booking-000001",
+      "orderId": "68f77a84-898f-438c-ae19-98071a16687b",
+      "bookingId": "booking-6dd2bf98-ad95-479f-b424-51ae7e28f88d",
       "serviceBucket": "business_dispatch",
       "businessDispatchSubtype": "enterprise_dispatch",
       "dispatchSemantics": "reservation",
-      "status": "created"
+      "status": "created",
+      "replayed": false
     },
     "apiOrder": {
-      "orderId": "a8d264f1-5902-4577-b8fe-07fb0623daee",
-      "orderNo": "O-20260410-000001",
+      "orderId": "68f77a84-898f-438c-ae19-98071a16687b",
+      "orderNo": "O-4264fbc3-2196-495a-b745-7254f9cd2228",
       "orderSource": "portal",
       "orderDomain": "owned",
       "tenantId": "tenant-demo-001",
@@ -59,7 +60,7 @@
         "phone": "0912-000-401",
         "passengerId": null
       },
-      "bookingId": "booking-000001",
+      "bookingId": "booking-6dd2bf98-ad95-479f-b424-51ae7e28f88d",
       "bookingType": "oneway",
       "etaSnapshot": null,
       "callId": null,
@@ -81,7 +82,7 @@
       "notes": null,
       "fixedPrice": true,
       "quotedFare": {
-        "currency": "NTD",
+        "currency": "TWD",
         "amountMinor": 150000
       },
       "quotedFareSource": "platform_pricing_rule",
@@ -95,22 +96,24 @@
       },
       "approvalState": "not_required",
       "approvalRequestIds": [],
-      "complianceFlags": ["service_area_serviceable"],
+      "complianceFlags": [
+        "service_area_serviceable"
+      ],
       "cancelledAt": null,
       "cancelReason": null,
       "reservationHoldStatus": "requested",
-      "reservationHoldId": "5f8986e4-fc2a-4552-b2d9-0fdb673b8bc3",
+      "reservationHoldId": "54b3891b-70b9-49fc-a5d4-3ac85a217ce6",
       "reservationHoldExpiresAt": "2026-07-11T10:00:00.000Z",
       "dispatchAttemptCount": 0,
       "lastDispatchFailureReason": null,
       "noSupplyEscalation": null,
       "dispatchTimeout": null,
-      "createdAt": "2026-07-11T02:59:32.483Z",
-      "updatedAt": "2026-07-11T02:59:32.483Z",
+      "createdAt": "2026-07-11T02:38:29.000Z",
+      "updatedAt": "2026-07-11T02:38:29.000Z",
       "spatialAudit": {
-        "snapshotId": "fa9d96fd-faf3-4d44-bf59-6b24567aa2d5",
+        "snapshotId": "4b0d19e8-882f-47d9-b0fc-1a7ac64e3cb0",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-11T02:59:32.485Z",
+        "capturedAt": "2026-07-11T02:38:29.000Z",
         "capturedReason": "booking_creation",
         "actorId": "tenant-admin-001",
         "actorType": "tenant_admin",
@@ -160,7 +163,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "enterprise_dispatch",
-          "evaluatedAt": "2026-07-11T02:59:32.485Z",
+          "evaluatedAt": "2026-07-11T02:38:29.000Z",
           "stops": [
             {
               "kind": "pickup",
@@ -168,9 +171,13 @@
                 "lat": 25.037519,
                 "lng": 121.56368
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
@@ -181,21 +188,33 @@
                 "lat": 25.033879,
                 "lng": 121.568743
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "reasonMessages": []
         },
-        "serviceAreaCodes": ["TAIPEI_CORE"],
-        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "serviceAreaCodes": [
+          "TAIPEI_CORE"
+        ],
+        "geometryVersionRefs": [
+          "service_area:TAIPEI_CORE@1"
+        ],
         "reasonCodes": [],
         "reasonMessages": [],
         "missingItems": [],
@@ -218,7 +237,9 @@
           "required": true,
           "blocking": false,
           "evidenceState": "verified",
-          "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+          "evidenceRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "missingItems": [],
           "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
           "reviewerLabel": null,
@@ -250,7 +271,9 @@
           "blocking": false,
           "evidenceState": "missing",
           "evidenceRefs": [],
-          "missingItems": ["photos>=1"],
+          "missingItems": [
+            "photos>=1"
+          ],
           "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
           "reviewerLabel": "ops dispatch / finance review",
           "overrideAllowed": false,
@@ -276,15 +299,16 @@
       ],
       "mapFallbackReview": null,
       "queueFamily": null,
-      "queueEntryReason": null
+      "queueEntryReason": null,
+      "referralPassengerLifecycle": null
     },
     "persistedWrite": {
       "context": "persistChanges",
       "payload": {
         "orders": [
           {
-            "orderId": "a8d264f1-5902-4577-b8fe-07fb0623daee",
-            "orderNo": "O-20260410-000001",
+            "orderId": "68f77a84-898f-438c-ae19-98071a16687b",
+            "orderNo": "O-4264fbc3-2196-495a-b745-7254f9cd2228",
             "orderSource": "portal",
             "orderDomain": "owned",
             "tenantId": "tenant-demo-001",
@@ -333,7 +357,7 @@
               "phone": "0912-000-401",
               "passengerId": null
             },
-            "bookingId": "booking-000001",
+            "bookingId": "booking-6dd2bf98-ad95-479f-b424-51ae7e28f88d",
             "bookingType": "oneway",
             "etaSnapshot": null,
             "callId": null,
@@ -355,7 +379,7 @@
             "notes": null,
             "fixedPrice": true,
             "quotedFare": {
-              "currency": "NTD",
+              "currency": "TWD",
               "amountMinor": 150000
             },
             "quotedFareSource": "platform_pricing_rule",
@@ -369,22 +393,24 @@
             },
             "approvalState": "not_required",
             "approvalRequestIds": [],
-            "complianceFlags": ["service_area_serviceable"],
+            "complianceFlags": [
+              "service_area_serviceable"
+            ],
             "cancelledAt": null,
             "cancelReason": null,
             "reservationHoldStatus": "requested",
-            "reservationHoldId": "5f8986e4-fc2a-4552-b2d9-0fdb673b8bc3",
+            "reservationHoldId": "54b3891b-70b9-49fc-a5d4-3ac85a217ce6",
             "reservationHoldExpiresAt": "2026-07-11T10:00:00.000Z",
             "dispatchAttemptCount": 0,
             "lastDispatchFailureReason": null,
             "noSupplyEscalation": null,
             "dispatchTimeout": null,
-            "createdAt": "2026-07-11T02:59:32.483Z",
-            "updatedAt": "2026-07-11T02:59:32.483Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
+            "updatedAt": "2026-07-11T02:38:29.000Z",
             "spatialAudit": {
-              "snapshotId": "fa9d96fd-faf3-4d44-bf59-6b24567aa2d5",
+              "snapshotId": "4b0d19e8-882f-47d9-b0fc-1a7ac64e3cb0",
               "snapshotVersion": 1,
-              "capturedAt": "2026-07-11T02:59:32.485Z",
+              "capturedAt": "2026-07-11T02:38:29.000Z",
               "capturedReason": "booking_creation",
               "actorId": "tenant-admin-001",
               "actorType": "tenant_admin",
@@ -434,7 +460,7 @@
               "serviceAreaEvaluation": {
                 "decision": "serviceable",
                 "serviceProductType": "enterprise_dispatch",
-                "evaluatedAt": "2026-07-11T02:59:32.485Z",
+                "evaluatedAt": "2026-07-11T02:38:29.000Z",
                 "stops": [
                   {
                     "kind": "pickup",
@@ -442,9 +468,13 @@
                       "lat": 25.037519,
                       "lng": 121.56368
                     },
-                    "serviceAreaCodes": ["TAIPEI_CORE"],
+                    "serviceAreaCodes": [
+                      "TAIPEI_CORE"
+                    ],
                     "policyCodes": [],
-                    "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                    "geometryVersionRefs": [
+                      "service_area:TAIPEI_CORE@1"
+                    ],
                     "decision": "serviceable",
                     "reasonCodes": [],
                     "reasonMessages": []
@@ -455,21 +485,33 @@
                       "lat": 25.033879,
                       "lng": 121.568743
                     },
-                    "serviceAreaCodes": ["TAIPEI_CORE"],
+                    "serviceAreaCodes": [
+                      "TAIPEI_CORE"
+                    ],
                     "policyCodes": [],
-                    "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                    "geometryVersionRefs": [
+                      "service_area:TAIPEI_CORE@1"
+                    ],
                     "decision": "serviceable",
                     "reasonCodes": [],
                     "reasonMessages": []
                   }
                 ],
-                "serviceAreaCodes": ["TAIPEI_CORE"],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "reasonCodes": [],
                 "reasonMessages": []
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "reasonCodes": [],
               "reasonMessages": [],
               "missingItems": [],
@@ -491,7 +533,9 @@
                 "required": true,
                 "blocking": false,
                 "evidenceState": "verified",
-                "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+                "evidenceRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "missingItems": [],
                 "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
                 "reviewerLabel": null,
@@ -523,7 +567,9 @@
                 "blocking": false,
                 "evidenceState": "missing",
                 "evidenceRefs": [],
-                "missingItems": ["photos>=1"],
+                "missingItems": [
+                  "photos>=1"
+                ],
                 "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
                 "reviewerLabel": "ops dispatch / finance review",
                 "overrideAllowed": false,
@@ -549,31 +595,32 @@
             ],
             "mapFallbackReview": null,
             "queueFamily": null,
-            "queueEntryReason": null
+            "queueEntryReason": null,
+            "referralPassengerLifecycle": null
           }
         ],
         "dispatchTraceLogs": [
           {
-            "traceId": "ea20c672-b30b-4e79-80eb-a6d40c1cb7ad",
-            "orderId": "a8d264f1-5902-4577-b8fe-07fb0623daee",
+            "traceId": "ec2c592c-1493-4476-9f46-86d1b5ab092c",
+            "orderId": "68f77a84-898f-438c-ae19-98071a16687b",
             "eventType": "tenant.booking_created",
             "message": "tenant.booking_created",
-            "createdAt": "2026-07-11T02:59:32.486Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
             "details": {
-              "bookingId": "booking-000001",
+              "bookingId": "booking-6dd2bf98-ad95-479f-b424-51ae7e28f88d",
               "businessDispatchSubtype": "enterprise_dispatch",
               "dispatchSemantics": "reservation"
             }
           },
           {
-            "traceId": "4725ee98-6ea5-42cd-b557-c1eaad5ecfd3",
-            "orderId": "a8d264f1-5902-4577-b8fe-07fb0623daee",
+            "traceId": "8bd00d6a-e479-43da-b17a-88772b8fc3df",
+            "orderId": "68f77a84-898f-438c-ae19-98071a16687b",
             "eventType": "reservation.hold.created",
             "message": "reservation.hold.created",
-            "createdAt": "2026-07-11T02:59:32.486Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
             "details": {
-              "bookingId": "booking-000001",
-              "reservationHoldId": "5f8986e4-fc2a-4552-b2d9-0fdb673b8bc3",
+              "bookingId": "booking-6dd2bf98-ad95-479f-b424-51ae7e28f88d",
+              "reservationHoldId": "54b3891b-70b9-49fc-a5d4-3ac85a217ce6",
               "holdState": "requested",
               "confirmationWindowMinutes": 30
             }
@@ -592,15 +639,19 @@
         "moduleName": "order",
         "actionName": "order.spatial_audit.snapshot_created",
         "resourceType": "order",
-        "resourceId": "a8d264f1-5902-4577-b8fe-07fb0623daee",
+        "resourceId": "68f77a84-898f-438c-ae19-98071a16687b",
         "oldValuesSummary": null,
         "newValuesSummary": {
-          "snapshotId": "fa9d96fd-faf3-4d44-bf59-6b24567aa2d5",
+          "snapshotId": "4b0d19e8-882f-47d9-b0fc-1a7ac64e3cb0",
           "decision": "serviceable",
           "surface": "tenant_console",
           "serviceProductType": "enterprise_dispatch",
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "missingItems": [],
           "provenanceComplete": false
@@ -610,10 +661,10 @@
     ]
   },
   "conciergeServiceableOrder": {
-    "orderId": "c3b79e84-9d5d-43a9-a34a-d9f3f342eea3",
+    "orderId": "ce33a6b2-0f38-4a55-a932-682966d0997b",
     "apiOrder": {
-      "orderId": "c3b79e84-9d5d-43a9-a34a-d9f3f342eea3",
-      "orderNo": "O-20260410-000002",
+      "orderId": "ce33a6b2-0f38-4a55-a932-682966d0997b",
+      "orderNo": "O-522766e9-8ede-48c4-9170-e1fdc74b93fe",
       "orderSource": "phone",
       "orderDomain": "owned",
       "tenantId": null,
@@ -663,7 +714,7 @@
       "bookingType": null,
       "etaSnapshot": {
         "etaMinutes": 10,
-        "calculatedAt": "2026-07-11T02:59:32.497Z"
+        "calculatedAt": "2026-07-11T02:38:29.000Z"
       },
       "callId": "CALL-CONCIERGE-001",
       "recordingId": "REC-CONCIERGE-001",
@@ -695,7 +746,10 @@
       },
       "approvalState": "not_required",
       "approvalRequestIds": [],
-      "complianceFlags": ["recording_bound", "service_area_serviceable"],
+      "complianceFlags": [
+        "recording_bound",
+        "service_area_serviceable"
+      ],
       "cancelledAt": null,
       "cancelReason": null,
       "mapFallbackReview": null,
@@ -706,12 +760,12 @@
       "lastDispatchFailureReason": null,
       "noSupplyEscalation": null,
       "dispatchTimeout": null,
-      "createdAt": "2026-07-11T02:59:32.497Z",
-      "updatedAt": "2026-07-11T02:59:32.497Z",
+      "createdAt": "2026-07-11T02:38:29.000Z",
+      "updatedAt": "2026-07-11T02:38:29.000Z",
       "spatialAudit": {
-        "snapshotId": "1a844b1b-e86f-428b-9360-7657e4b41fd1",
+        "snapshotId": "816a5aa8-ebf4-4a35-9b38-4391ffdcf19c",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-11T02:59:32.498Z",
+        "capturedAt": "2026-07-11T02:38:29.000Z",
         "capturedReason": "booking_creation",
         "actorId": "concierge-ops-001",
         "actorType": "ops_user",
@@ -761,7 +815,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "taxi_realtime",
-          "evaluatedAt": "2026-07-11T02:59:32.498Z",
+          "evaluatedAt": "2026-07-11T02:38:29.000Z",
           "stops": [
             {
               "kind": "pickup",
@@ -769,9 +823,13 @@
                 "lat": 25.037519,
                 "lng": 121.56368
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
@@ -782,33 +840,37 @@
                 "lat": 25.047762,
                 "lng": 121.517017
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "reasonMessages": []
         },
-        "serviceAreaCodes": ["TAIPEI_CORE"],
-        "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+        "serviceAreaCodes": [
+          "TAIPEI_CORE"
+        ],
+        "geometryVersionRefs": [
+          "service_area:TAIPEI_CORE@1"
+        ],
         "reasonCodes": [],
         "reasonMessages": [],
         "missingItems": [],
-        "auditEvents": [
-          {
-            "auditId": "audit-003",
-            "actionName": "order.spatial_audit.snapshot_created",
-            "actorId": "concierge-ops-001",
-            "actorType": "ops_user",
-            "createdAt": "2026-07-11T02:38:02.000Z"
-          }
-        ]
+        "auditEvents": []
       },
       "serviceProductCode": "taxi_realtime",
       "complianceGates": [
@@ -819,7 +881,9 @@
           "required": true,
           "blocking": false,
           "evidenceState": "verified",
-          "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+          "evidenceRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "missingItems": [],
           "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
           "reviewerLabel": null,
@@ -850,7 +914,9 @@
           "required": true,
           "blocking": false,
           "evidenceState": "verified",
-          "evidenceRefs": ["REC-CONCIERGE-001"],
+          "evidenceRefs": [
+            "REC-CONCIERGE-001"
+          ],
           "missingItems": [],
           "nextAction": "Recording has been bound to the phone order.",
           "reviewerLabel": "callcenter / ops compliance",
@@ -876,15 +942,16 @@
         }
       ],
       "queueFamily": "realtime_ready_queue",
-      "queueEntryReason": "realtime_ready_for_dispatch"
+      "queueEntryReason": "realtime_ready_for_dispatch",
+      "referralPassengerLifecycle": null
     },
     "persistedWrite": {
       "context": "persistChanges",
       "payload": {
         "orders": [
           {
-            "orderId": "c3b79e84-9d5d-43a9-a34a-d9f3f342eea3",
-            "orderNo": "O-20260410-000002",
+            "orderId": "ce33a6b2-0f38-4a55-a932-682966d0997b",
+            "orderNo": "O-522766e9-8ede-48c4-9170-e1fdc74b93fe",
             "orderSource": "phone",
             "orderDomain": "owned",
             "tenantId": null,
@@ -934,7 +1001,7 @@
             "bookingType": null,
             "etaSnapshot": {
               "etaMinutes": 10,
-              "calculatedAt": "2026-07-11T02:59:32.497Z"
+              "calculatedAt": "2026-07-11T02:38:29.000Z"
             },
             "callId": "CALL-CONCIERGE-001",
             "recordingId": "REC-CONCIERGE-001",
@@ -966,7 +1033,10 @@
             },
             "approvalState": "not_required",
             "approvalRequestIds": [],
-            "complianceFlags": ["recording_bound", "service_area_serviceable"],
+            "complianceFlags": [
+              "recording_bound",
+              "service_area_serviceable"
+            ],
             "cancelledAt": null,
             "cancelReason": null,
             "mapFallbackReview": null,
@@ -977,12 +1047,12 @@
             "lastDispatchFailureReason": null,
             "noSupplyEscalation": null,
             "dispatchTimeout": null,
-            "createdAt": "2026-07-11T02:59:32.497Z",
-            "updatedAt": "2026-07-11T02:59:32.497Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
+            "updatedAt": "2026-07-11T02:38:29.000Z",
             "spatialAudit": {
-              "snapshotId": "1a844b1b-e86f-428b-9360-7657e4b41fd1",
+              "snapshotId": "816a5aa8-ebf4-4a35-9b38-4391ffdcf19c",
               "snapshotVersion": 1,
-              "capturedAt": "2026-07-11T02:59:32.498Z",
+              "capturedAt": "2026-07-11T02:38:29.000Z",
               "capturedReason": "booking_creation",
               "actorId": "concierge-ops-001",
               "actorType": "ops_user",
@@ -1032,7 +1102,7 @@
               "serviceAreaEvaluation": {
                 "decision": "serviceable",
                 "serviceProductType": "taxi_realtime",
-                "evaluatedAt": "2026-07-11T02:59:32.498Z",
+                "evaluatedAt": "2026-07-11T02:38:29.000Z",
                 "stops": [
                   {
                     "kind": "pickup",
@@ -1040,9 +1110,13 @@
                       "lat": 25.037519,
                       "lng": 121.56368
                     },
-                    "serviceAreaCodes": ["TAIPEI_CORE"],
+                    "serviceAreaCodes": [
+                      "TAIPEI_CORE"
+                    ],
                     "policyCodes": [],
-                    "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                    "geometryVersionRefs": [
+                      "service_area:TAIPEI_CORE@1"
+                    ],
                     "decision": "serviceable",
                     "reasonCodes": [],
                     "reasonMessages": []
@@ -1053,33 +1127,37 @@
                       "lat": 25.047762,
                       "lng": 121.517017
                     },
-                    "serviceAreaCodes": ["TAIPEI_CORE"],
+                    "serviceAreaCodes": [
+                      "TAIPEI_CORE"
+                    ],
                     "policyCodes": [],
-                    "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                    "geometryVersionRefs": [
+                      "service_area:TAIPEI_CORE@1"
+                    ],
                     "decision": "serviceable",
                     "reasonCodes": [],
                     "reasonMessages": []
                   }
                 ],
-                "serviceAreaCodes": ["TAIPEI_CORE"],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "reasonCodes": [],
                 "reasonMessages": []
               },
-              "serviceAreaCodes": ["TAIPEI_CORE"],
-              "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+              "serviceAreaCodes": [
+                "TAIPEI_CORE"
+              ],
+              "geometryVersionRefs": [
+                "service_area:TAIPEI_CORE@1"
+              ],
               "reasonCodes": [],
               "reasonMessages": [],
               "missingItems": [],
-              "auditEvents": [
-                {
-                  "auditId": "audit-003",
-                  "actionName": "order.spatial_audit.snapshot_created",
-                  "actorId": "concierge-ops-001",
-                  "actorType": "ops_user",
-                  "createdAt": "2026-07-11T02:38:02.000Z"
-                }
-              ]
+              "auditEvents": []
             },
             "complianceGates": [
               {
@@ -1089,7 +1167,9 @@
                 "required": true,
                 "blocking": false,
                 "evidenceState": "verified",
-                "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+                "evidenceRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "missingItems": [],
                 "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
                 "reviewerLabel": null,
@@ -1120,7 +1200,9 @@
                 "required": true,
                 "blocking": false,
                 "evidenceState": "verified",
-                "evidenceRefs": ["REC-CONCIERGE-001"],
+                "evidenceRefs": [
+                  "REC-CONCIERGE-001"
+                ],
                 "missingItems": [],
                 "nextAction": "Recording has been bound to the phone order.",
                 "reviewerLabel": "callcenter / ops compliance",
@@ -1146,16 +1228,17 @@
               }
             ],
             "queueFamily": "realtime_ready_queue",
-            "queueEntryReason": "realtime_ready_for_dispatch"
+            "queueEntryReason": "realtime_ready_for_dispatch",
+            "referralPassengerLifecycle": null
           }
         ],
         "dispatchTraceLogs": [
           {
-            "traceId": "1790ca7a-e0a1-487f-bb51-12f81e522084",
-            "orderId": "c3b79e84-9d5d-43a9-a34a-d9f3f342eea3",
+            "traceId": "4a3997ae-06c1-4126-bc38-a75f92ff30bf",
+            "orderId": "ce33a6b2-0f38-4a55-a932-682966d0997b",
             "eventType": "callcenter.order_created",
             "message": "callcenter.order_created",
-            "createdAt": "2026-07-11T02:59:32.498Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
             "details": {
               "callId": "CALL-CONCIERGE-001",
               "recordingId": "REC-CONCIERGE-001",
@@ -1176,7 +1259,7 @@
         "moduleName": "callcenter",
         "actionName": "create_phone_order",
         "resourceType": "order",
-        "resourceId": "c3b79e84-9d5d-43a9-a34a-d9f3f342eea3",
+        "resourceId": "ce33a6b2-0f38-4a55-a932-682966d0997b",
         "oldValuesSummary": null,
         "newValuesSummary": {
           "callId": "CALL-CONCIERGE-001",
@@ -1195,15 +1278,19 @@
         "moduleName": "order",
         "actionName": "order.spatial_audit.snapshot_created",
         "resourceType": "order",
-        "resourceId": "c3b79e84-9d5d-43a9-a34a-d9f3f342eea3",
+        "resourceId": "ce33a6b2-0f38-4a55-a932-682966d0997b",
         "oldValuesSummary": null,
         "newValuesSummary": {
-          "snapshotId": "1a844b1b-e86f-428b-9360-7657e4b41fd1",
+          "snapshotId": "816a5aa8-ebf4-4a35-9b38-4391ffdcf19c",
           "decision": "serviceable",
           "surface": "callcenter",
           "serviceProductType": "taxi_realtime",
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "missingItems": [],
           "provenanceComplete": false
@@ -1214,29 +1301,30 @@
   },
   "partnerServiceableBooking": {
     "booking": {
-      "orderId": "1efcf0a7-3154-49f3-86d1-9626ff0eaedc",
-      "bookingId": "booking-000002",
+      "orderId": "7c7c4ff7-e4ce-4232-b04d-9067680d1b6c",
+      "bookingId": "booking-133c0089-d9ac-46ca-bbfa-eeb97e310244",
       "serviceBucket": "business_dispatch",
       "businessDispatchSubtype": "credit_card_airport_transfer",
       "dispatchSemantics": "reservation",
-      "status": "created"
+      "status": "created",
+      "replayed": false
     },
     "eligibilityVerification": {
-      "eligibilityVerificationId": "elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5",
+      "eligibilityVerificationId": "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b",
       "verificationStatus": "eligible",
-      "partnerEntrySlug": "ctbc"
+      "partnerEntrySlug": "acme"
     },
     "apiOrder": {
-      "orderId": "1efcf0a7-3154-49f3-86d1-9626ff0eaedc",
-      "orderNo": "O-20260410-000003",
+      "orderId": "7c7c4ff7-e4ce-4232-b04d-9067680d1b6c",
+      "orderNo": "O-e972b253-2909-4b52-a2db-0c3c514ac5b5",
       "orderSource": "portal",
       "orderDomain": "owned",
       "tenantId": "tenant-demo-001",
-      "partnerId": "partner-ctbc-card-001",
-      "partnerProgramId": "program-ctbc-world-elite",
-      "partnerEntrySlug": "ctbc",
-      "eligibilityVerificationId": "elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5",
-      "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
+      "partnerId": "partner-acme-card-001",
+      "partnerProgramId": "program-acme-world-elite",
+      "partnerEntrySlug": "acme",
+      "eligibilityVerificationId": "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b",
+      "issuerAuthorizationRef": "issuer-auth-acme-2468",
       "passengerDisclosure": null,
       "serviceBucket": "business_dispatch",
       "dispatchSemantics": "reservation",
@@ -1277,7 +1365,7 @@
         "phone": "0912-000-403",
         "passengerId": null
       },
-      "bookingId": "booking-000002",
+      "bookingId": "booking-133c0089-d9ac-46ca-bbfa-eeb97e310244",
       "bookingType": "oneway",
       "etaSnapshot": null,
       "callId": null,
@@ -1291,7 +1379,7 @@
       "onsiteContact": null,
       "costCenter": null,
       "vehiclePreference": null,
-      "benefitReference": "benefit-ctbc-2468",
+      "benefitReference": "benefit-acme-2468",
       "direction": null,
       "flightNo": null,
       "terminal": null,
@@ -1299,7 +1387,7 @@
       "notes": null,
       "fixedPrice": true,
       "quotedFare": {
-        "currency": "NTD",
+        "currency": "TWD",
         "amountMinor": 150000
       },
       "quotedFareSource": "platform_pricing_rule",
@@ -1313,22 +1401,24 @@
       },
       "approvalState": "not_required",
       "approvalRequestIds": [],
-      "complianceFlags": ["service_area_serviceable"],
+      "complianceFlags": [
+        "service_area_serviceable"
+      ],
       "cancelledAt": null,
       "cancelReason": null,
       "reservationHoldStatus": "requested",
-      "reservationHoldId": "b35205f9-6e68-4481-9781-97034fed0243",
+      "reservationHoldId": "bb721509-fa01-45fe-898d-26bb9bec004f",
       "reservationHoldExpiresAt": "2026-07-11T12:00:00.000Z",
       "dispatchAttemptCount": 0,
       "lastDispatchFailureReason": null,
       "noSupplyEscalation": null,
       "dispatchTimeout": null,
-      "createdAt": "2026-07-11T02:59:32.500Z",
-      "updatedAt": "2026-07-11T02:59:32.500Z",
+      "createdAt": "2026-07-11T02:38:29.000Z",
+      "updatedAt": "2026-07-11T02:38:29.000Z",
       "spatialAudit": {
-        "snapshotId": "30c5841d-a63f-48ba-8d3e-837e317cc532",
+        "snapshotId": "097aec19-1ea0-4efd-a134-cc7dc506a2ff",
         "snapshotVersion": 1,
-        "capturedAt": "2026-07-11T02:59:32.500Z",
+        "capturedAt": "2026-07-11T02:38:29.000Z",
         "capturedReason": "booking_creation",
         "actorId": "partner-api-001",
         "actorType": "partner_api_key",
@@ -1378,7 +1468,7 @@
         "serviceAreaEvaluation": {
           "decision": "serviceable",
           "serviceProductType": "credit_card_airport_transfer",
-          "evaluatedAt": "2026-07-11T02:59:32.500Z",
+          "evaluatedAt": "2026-07-11T02:38:29.000Z",
           "stops": [
             {
               "kind": "pickup",
@@ -1386,9 +1476,13 @@
                 "lat": 25.0797,
                 "lng": 121.2342
               },
-              "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
+              "serviceAreaCodes": [
+                "TAOYUAN_AIRPORT"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+              "geometryVersionRefs": [
+                "service_area:TAOYUAN_AIRPORT@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
@@ -1399,21 +1493,33 @@
                 "lat": 25.0777,
                 "lng": 121.2328
               },
-              "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
+              "serviceAreaCodes": [
+                "TAOYUAN_AIRPORT"
+              ],
               "policyCodes": [],
-              "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+              "geometryVersionRefs": [
+                "service_area:TAOYUAN_AIRPORT@1"
+              ],
               "decision": "serviceable",
               "reasonCodes": [],
               "reasonMessages": []
             }
           ],
-          "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
-          "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+          "serviceAreaCodes": [
+            "TAOYUAN_AIRPORT"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAOYUAN_AIRPORT@1"
+          ],
           "reasonCodes": [],
           "reasonMessages": []
         },
-        "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
-        "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+        "serviceAreaCodes": [
+          "TAOYUAN_AIRPORT"
+        ],
+        "geometryVersionRefs": [
+          "service_area:TAOYUAN_AIRPORT@1"
+        ],
         "reasonCodes": [],
         "reasonMessages": [],
         "missingItems": [],
@@ -1436,7 +1542,9 @@
           "required": true,
           "blocking": false,
           "evidenceState": "verified",
-          "evidenceRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+          "evidenceRefs": [
+            "service_area:TAOYUAN_AIRPORT@1"
+          ],
           "missingItems": [],
           "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
           "reviewerLabel": null,
@@ -1468,7 +1576,9 @@
           "blocking": false,
           "evidenceState": "missing",
           "evidenceRefs": [],
-          "missingItems": ["photos>=1"],
+          "missingItems": [
+            "photos>=1"
+          ],
           "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
           "reviewerLabel": "ops dispatch / finance review",
           "overrideAllowed": false,
@@ -1498,12 +1608,17 @@
           "required": true,
           "blocking": false,
           "evidenceState": "verified",
-          "evidenceRefs": ["elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5"],
+          "evidenceRefs": [
+            "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b"
+          ],
           "missingItems": [],
           "nextAction": "Eligibility verification is approved and within TTL.",
           "reviewerLabel": "partner ops reviewer",
           "overrideAllowed": true,
-          "overrideActors": ["ops_user", "platform_admin"],
+          "overrideActors": [
+            "ops_user",
+            "platform_admin"
+          ],
           "impacts": [
             {
               "stage": "dispatch",
@@ -1525,23 +1640,24 @@
       ],
       "mapFallbackReview": null,
       "queueFamily": null,
-      "queueEntryReason": null
+      "queueEntryReason": null,
+      "referralPassengerLifecycle": null
     },
     "persistedWrite": {
       "context": "persistChanges",
       "payload": {
         "orders": [
           {
-            "orderId": "1efcf0a7-3154-49f3-86d1-9626ff0eaedc",
-            "orderNo": "O-20260410-000003",
+            "orderId": "7c7c4ff7-e4ce-4232-b04d-9067680d1b6c",
+            "orderNo": "O-e972b253-2909-4b52-a2db-0c3c514ac5b5",
             "orderSource": "portal",
             "orderDomain": "owned",
             "tenantId": "tenant-demo-001",
-            "partnerId": "partner-ctbc-card-001",
-            "partnerProgramId": "program-ctbc-world-elite",
-            "partnerEntrySlug": "ctbc",
-            "eligibilityVerificationId": "elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5",
-            "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
+            "partnerId": "partner-acme-card-001",
+            "partnerProgramId": "program-acme-world-elite",
+            "partnerEntrySlug": "acme",
+            "eligibilityVerificationId": "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b",
+            "issuerAuthorizationRef": "issuer-auth-acme-2468",
             "passengerDisclosure": null,
             "serviceBucket": "business_dispatch",
             "dispatchSemantics": "reservation",
@@ -1582,7 +1698,7 @@
               "phone": "0912-000-403",
               "passengerId": null
             },
-            "bookingId": "booking-000002",
+            "bookingId": "booking-133c0089-d9ac-46ca-bbfa-eeb97e310244",
             "bookingType": "oneway",
             "etaSnapshot": null,
             "callId": null,
@@ -1596,7 +1712,7 @@
             "onsiteContact": null,
             "costCenter": null,
             "vehiclePreference": null,
-            "benefitReference": "benefit-ctbc-2468",
+            "benefitReference": "benefit-acme-2468",
             "direction": null,
             "flightNo": null,
             "terminal": null,
@@ -1604,7 +1720,7 @@
             "notes": null,
             "fixedPrice": true,
             "quotedFare": {
-              "currency": "NTD",
+              "currency": "TWD",
               "amountMinor": 150000
             },
             "quotedFareSource": "platform_pricing_rule",
@@ -1618,22 +1734,24 @@
             },
             "approvalState": "not_required",
             "approvalRequestIds": [],
-            "complianceFlags": ["service_area_serviceable"],
+            "complianceFlags": [
+              "service_area_serviceable"
+            ],
             "cancelledAt": null,
             "cancelReason": null,
             "reservationHoldStatus": "requested",
-            "reservationHoldId": "b35205f9-6e68-4481-9781-97034fed0243",
+            "reservationHoldId": "bb721509-fa01-45fe-898d-26bb9bec004f",
             "reservationHoldExpiresAt": "2026-07-11T12:00:00.000Z",
             "dispatchAttemptCount": 0,
             "lastDispatchFailureReason": null,
             "noSupplyEscalation": null,
             "dispatchTimeout": null,
-            "createdAt": "2026-07-11T02:59:32.500Z",
-            "updatedAt": "2026-07-11T02:59:32.500Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
+            "updatedAt": "2026-07-11T02:38:29.000Z",
             "spatialAudit": {
-              "snapshotId": "30c5841d-a63f-48ba-8d3e-837e317cc532",
+              "snapshotId": "097aec19-1ea0-4efd-a134-cc7dc506a2ff",
               "snapshotVersion": 1,
-              "capturedAt": "2026-07-11T02:59:32.500Z",
+              "capturedAt": "2026-07-11T02:38:29.000Z",
               "capturedReason": "booking_creation",
               "actorId": "partner-api-001",
               "actorType": "partner_api_key",
@@ -1683,7 +1801,7 @@
               "serviceAreaEvaluation": {
                 "decision": "serviceable",
                 "serviceProductType": "credit_card_airport_transfer",
-                "evaluatedAt": "2026-07-11T02:59:32.500Z",
+                "evaluatedAt": "2026-07-11T02:38:29.000Z",
                 "stops": [
                   {
                     "kind": "pickup",
@@ -1691,9 +1809,13 @@
                       "lat": 25.0797,
                       "lng": 121.2342
                     },
-                    "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
+                    "serviceAreaCodes": [
+                      "TAOYUAN_AIRPORT"
+                    ],
                     "policyCodes": [],
-                    "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+                    "geometryVersionRefs": [
+                      "service_area:TAOYUAN_AIRPORT@1"
+                    ],
                     "decision": "serviceable",
                     "reasonCodes": [],
                     "reasonMessages": []
@@ -1704,21 +1826,33 @@
                       "lat": 25.0777,
                       "lng": 121.2328
                     },
-                    "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
+                    "serviceAreaCodes": [
+                      "TAOYUAN_AIRPORT"
+                    ],
                     "policyCodes": [],
-                    "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+                    "geometryVersionRefs": [
+                      "service_area:TAOYUAN_AIRPORT@1"
+                    ],
                     "decision": "serviceable",
                     "reasonCodes": [],
                     "reasonMessages": []
                   }
                 ],
-                "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
-                "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+                "serviceAreaCodes": [
+                  "TAOYUAN_AIRPORT"
+                ],
+                "geometryVersionRefs": [
+                  "service_area:TAOYUAN_AIRPORT@1"
+                ],
                 "reasonCodes": [],
                 "reasonMessages": []
               },
-              "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
-              "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+              "serviceAreaCodes": [
+                "TAOYUAN_AIRPORT"
+              ],
+              "geometryVersionRefs": [
+                "service_area:TAOYUAN_AIRPORT@1"
+              ],
               "reasonCodes": [],
               "reasonMessages": [],
               "missingItems": [],
@@ -1740,7 +1874,9 @@
                 "required": true,
                 "blocking": false,
                 "evidenceState": "verified",
-                "evidenceRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+                "evidenceRefs": [
+                  "service_area:TAOYUAN_AIRPORT@1"
+                ],
                 "missingItems": [],
                 "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
                 "reviewerLabel": null,
@@ -1772,7 +1908,9 @@
                 "blocking": false,
                 "evidenceState": "missing",
                 "evidenceRefs": [],
-                "missingItems": ["photos>=1"],
+                "missingItems": [
+                  "photos>=1"
+                ],
                 "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
                 "reviewerLabel": "ops dispatch / finance review",
                 "overrideAllowed": false,
@@ -1802,12 +1940,17 @@
                 "required": true,
                 "blocking": false,
                 "evidenceState": "verified",
-                "evidenceRefs": ["elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5"],
+                "evidenceRefs": [
+                  "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b"
+                ],
                 "missingItems": [],
                 "nextAction": "Eligibility verification is approved and within TTL.",
                 "reviewerLabel": "partner ops reviewer",
                 "overrideAllowed": true,
-                "overrideActors": ["ops_user", "platform_admin"],
+                "overrideActors": [
+                  "ops_user",
+                  "platform_admin"
+                ],
                 "impacts": [
                   {
                     "stage": "dispatch",
@@ -1829,31 +1972,32 @@
             ],
             "mapFallbackReview": null,
             "queueFamily": null,
-            "queueEntryReason": null
+            "queueEntryReason": null,
+            "referralPassengerLifecycle": null
           }
         ],
         "dispatchTraceLogs": [
           {
-            "traceId": "0c87b7cb-654e-4650-ac99-3d64a8142e8c",
-            "orderId": "1efcf0a7-3154-49f3-86d1-9626ff0eaedc",
+            "traceId": "2cd991d6-626c-4d64-bb5c-0df268462e42",
+            "orderId": "7c7c4ff7-e4ce-4232-b04d-9067680d1b6c",
             "eventType": "tenant.booking_created",
             "message": "tenant.booking_created",
-            "createdAt": "2026-07-11T02:59:32.500Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
             "details": {
-              "bookingId": "booking-000002",
+              "bookingId": "booking-133c0089-d9ac-46ca-bbfa-eeb97e310244",
               "businessDispatchSubtype": "credit_card_airport_transfer",
               "dispatchSemantics": "reservation"
             }
           },
           {
-            "traceId": "4062261d-f2fb-477b-822a-f1cb0813491f",
-            "orderId": "1efcf0a7-3154-49f3-86d1-9626ff0eaedc",
+            "traceId": "f24a3951-59c6-42b5-aded-c8566c41b62f",
+            "orderId": "7c7c4ff7-e4ce-4232-b04d-9067680d1b6c",
             "eventType": "reservation.hold.created",
             "message": "reservation.hold.created",
-            "createdAt": "2026-07-11T02:59:32.500Z",
+            "createdAt": "2026-07-11T02:38:29.000Z",
             "details": {
-              "bookingId": "booking-000002",
-              "reservationHoldId": "b35205f9-6e68-4481-9781-97034fed0243",
+              "bookingId": "booking-133c0089-d9ac-46ca-bbfa-eeb97e310244",
+              "reservationHoldId": "bb721509-fa01-45fe-898d-26bb9bec004f",
               "holdState": "requested",
               "confirmationWindowMinutes": 60
             }
@@ -1872,15 +2016,19 @@
         "moduleName": "order",
         "actionName": "order.spatial_audit.snapshot_created",
         "resourceType": "order",
-        "resourceId": "1efcf0a7-3154-49f3-86d1-9626ff0eaedc",
+        "resourceId": "7c7c4ff7-e4ce-4232-b04d-9067680d1b6c",
         "oldValuesSummary": null,
         "newValuesSummary": {
-          "snapshotId": "30c5841d-a63f-48ba-8d3e-837e317cc532",
+          "snapshotId": "097aec19-1ea0-4efd-a134-cc7dc506a2ff",
           "decision": "serviceable",
           "surface": "partner_booking",
           "serviceProductType": "credit_card_airport_transfer",
-          "serviceAreaCodes": ["TAOYUAN_AIRPORT"],
-          "geometryVersionRefs": ["service_area:TAOYUAN_AIRPORT@1"],
+          "serviceAreaCodes": [
+            "TAOYUAN_AIRPORT"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAOYUAN_AIRPORT@1"
+          ],
           "reasonCodes": [],
           "missingItems": [],
           "provenanceComplete": false
@@ -1891,10 +2039,10 @@
   },
   "providerOutageManualReview": {
     "callcenter": {
-      "orderId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
+      "orderId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
       "apiOrder": {
-        "orderId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
-        "orderNo": "O-20260410-000004",
+        "orderId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
+        "orderNo": "O-7c59ed33-cfb6-496b-9233-3eb41a73ce10",
         "orderSource": "phone",
         "orderDomain": "owned",
         "tenantId": null,
@@ -1952,7 +2100,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-11T02:59:32.503Z"
+          "calculatedAt": "2026-07-11T02:38:29.000Z"
         },
         "callId": "CALL-OUTAGE-001",
         "recordingId": "REC-OUTAGE-001",
@@ -1984,7 +2132,10 @@
         },
         "approvalState": "not_required",
         "approvalRequestIds": [],
-        "complianceFlags": ["recording_bound", "service_area_serviceable"],
+        "complianceFlags": [
+          "recording_bound",
+          "service_area_serviceable"
+        ],
         "cancelledAt": null,
         "cancelReason": null,
         "mapFallbackReview": {
@@ -2000,12 +2151,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-11T02:59:32.503Z",
-        "updatedAt": "2026-07-11T02:59:32.503Z",
+        "createdAt": "2026-07-11T02:38:29.000Z",
+        "updatedAt": "2026-07-11T02:38:29.000Z",
         "spatialAudit": {
-          "snapshotId": "7c7638f0-c46d-448e-84ac-fc9604ffb9b6",
+          "snapshotId": "74c5285f-78f7-4f47-a0b7-f5936565b2a0",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-11T02:59:32.503Z",
+          "capturedAt": "2026-07-11T02:38:29.000Z",
           "capturedReason": "booking_creation",
           "actorId": "ops-agent-001",
           "actorType": "ops_user",
@@ -2061,7 +2212,7 @@
           "serviceAreaEvaluation": {
             "decision": "serviceable",
             "serviceProductType": "taxi_realtime",
-            "evaluatedAt": "2026-07-11T02:59:32.503Z",
+            "evaluatedAt": "2026-07-11T02:38:29.000Z",
             "stops": [
               {
                 "kind": "pickup",
@@ -2069,9 +2220,13 @@
                   "lat": 25.037519,
                   "lng": 121.56368
                 },
-                "serviceAreaCodes": ["TAIPEI_CORE"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
                 "policyCodes": [],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "decision": "serviceable",
                 "reasonCodes": [],
                 "reasonMessages": []
@@ -2082,33 +2237,37 @@
                   "lat": 25.033879,
                   "lng": 121.568743
                 },
-                "serviceAreaCodes": ["TAIPEI_CORE"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
                 "policyCodes": [],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "decision": "serviceable",
                 "reasonCodes": [],
                 "reasonMessages": []
               }
             ],
-            "serviceAreaCodes": ["TAIPEI_CORE"],
-            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+            "serviceAreaCodes": [
+              "TAIPEI_CORE"
+            ],
+            "geometryVersionRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "reasonCodes": [],
             "reasonMessages": []
           },
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "reasonMessages": [],
           "missingItems": [],
-          "auditEvents": [
-            {
-              "auditId": "audit-007",
-              "actionName": "order.spatial_audit.snapshot_created",
-              "actorId": "ops-agent-001",
-              "actorType": "ops_user",
-              "createdAt": "2026-07-11T02:38:06.000Z"
-            }
-          ]
+          "auditEvents": []
         },
         "serviceProductCode": "taxi_realtime",
         "complianceGates": [
@@ -2119,7 +2278,9 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+            "evidenceRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "missingItems": [],
             "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
             "reviewerLabel": null,
@@ -2150,12 +2311,18 @@
             "required": true,
             "blocking": false,
             "evidenceState": "submitted",
-            "evidenceRefs": ["map_provider_unavailable", "request_failed"],
+            "evidenceRefs": [
+              "map_provider_unavailable",
+              "request_failed"
+            ],
             "missingItems": [],
             "nextAction": "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
             "reviewerLabel": "callcenter / dispatch mapping",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -2181,7 +2348,9 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["REC-OUTAGE-001"],
+            "evidenceRefs": [
+              "REC-OUTAGE-001"
+            ],
             "missingItems": [],
             "nextAction": "Recording has been bound to the phone order.",
             "reviewerLabel": "callcenter / ops compliance",
@@ -2207,15 +2376,16 @@
           }
         ],
         "queueFamily": "manual_review_queue",
-        "queueEntryReason": "dispatch_manual_review_required"
+        "queueEntryReason": "dispatch_manual_review_required",
+        "referralPassengerLifecycle": null
       },
       "persistedWrite": {
         "context": "persistChanges",
         "payload": {
           "orders": [
             {
-              "orderId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
-              "orderNo": "O-20260410-000004",
+              "orderId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
+              "orderNo": "O-7c59ed33-cfb6-496b-9233-3eb41a73ce10",
               "orderSource": "phone",
               "orderDomain": "owned",
               "tenantId": null,
@@ -2273,7 +2443,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-11T02:59:32.503Z"
+                "calculatedAt": "2026-07-11T02:38:29.000Z"
               },
               "callId": "CALL-OUTAGE-001",
               "recordingId": "REC-OUTAGE-001",
@@ -2324,12 +2494,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-11T02:59:32.503Z",
-              "updatedAt": "2026-07-11T02:59:32.503Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
+              "updatedAt": "2026-07-11T02:38:29.000Z",
               "spatialAudit": {
-                "snapshotId": "7c7638f0-c46d-448e-84ac-fc9604ffb9b6",
+                "snapshotId": "74c5285f-78f7-4f47-a0b7-f5936565b2a0",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-11T02:59:32.503Z",
+                "capturedAt": "2026-07-11T02:38:29.000Z",
                 "capturedReason": "booking_creation",
                 "actorId": "ops-agent-001",
                 "actorType": "ops_user",
@@ -2385,7 +2555,7 @@
                 "serviceAreaEvaluation": {
                   "decision": "serviceable",
                   "serviceProductType": "taxi_realtime",
-                  "evaluatedAt": "2026-07-11T02:59:32.503Z",
+                  "evaluatedAt": "2026-07-11T02:38:29.000Z",
                   "stops": [
                     {
                       "kind": "pickup",
@@ -2393,9 +2563,13 @@
                         "lat": 25.037519,
                         "lng": 121.56368
                       },
-                      "serviceAreaCodes": ["TAIPEI_CORE"],
+                      "serviceAreaCodes": [
+                        "TAIPEI_CORE"
+                      ],
                       "policyCodes": [],
-                      "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                      "geometryVersionRefs": [
+                        "service_area:TAIPEI_CORE@1"
+                      ],
                       "decision": "serviceable",
                       "reasonCodes": [],
                       "reasonMessages": []
@@ -2406,33 +2580,37 @@
                         "lat": 25.033879,
                         "lng": 121.568743
                       },
-                      "serviceAreaCodes": ["TAIPEI_CORE"],
+                      "serviceAreaCodes": [
+                        "TAIPEI_CORE"
+                      ],
                       "policyCodes": [],
-                      "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                      "geometryVersionRefs": [
+                        "service_area:TAIPEI_CORE@1"
+                      ],
                       "decision": "serviceable",
                       "reasonCodes": [],
                       "reasonMessages": []
                     }
                   ],
-                  "serviceAreaCodes": ["TAIPEI_CORE"],
-                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "serviceAreaCodes": [
+                    "TAIPEI_CORE"
+                  ],
+                  "geometryVersionRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "reasonCodes": [],
                   "reasonMessages": []
                 },
-                "serviceAreaCodes": ["TAIPEI_CORE"],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "reasonCodes": [],
                 "reasonMessages": [],
                 "missingItems": [],
-                "auditEvents": [
-                  {
-                    "auditId": "audit-007",
-                    "actionName": "order.spatial_audit.snapshot_created",
-                    "actorId": "ops-agent-001",
-                    "actorType": "ops_user",
-                    "createdAt": "2026-07-11T02:38:06.000Z"
-                  }
-                ]
+                "auditEvents": []
               },
               "complianceGates": [
                 {
@@ -2442,7 +2620,9 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+                  "evidenceRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "missingItems": [],
                   "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
                   "reviewerLabel": null,
@@ -2481,7 +2661,10 @@
                   "nextAction": "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
                   "reviewerLabel": "callcenter / dispatch mapping",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -2507,7 +2690,9 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["REC-OUTAGE-001"],
+                  "evidenceRefs": [
+                    "REC-OUTAGE-001"
+                  ],
                   "missingItems": [],
                   "nextAction": "Recording has been bound to the phone order.",
                   "reviewerLabel": "callcenter / ops compliance",
@@ -2533,16 +2718,17 @@
                 }
               ],
               "queueFamily": "manual_review_queue",
-              "queueEntryReason": "dispatch_manual_review_required"
+              "queueEntryReason": "dispatch_manual_review_required",
+              "referralPassengerLifecycle": null
             }
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "36c9fd0e-0de9-4e06-8ebe-3fa42f282343",
-              "orderId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
+              "traceId": "0ebd038d-9d19-46ef-b005-9471cf482a9e",
+              "orderId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-11T02:59:32.503Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
                 "callId": "CALL-OUTAGE-001",
                 "recordingId": "REC-OUTAGE-001",
@@ -2563,7 +2749,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
+          "resourceId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-OUTAGE-001",
@@ -2582,15 +2768,19 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
+          "resourceId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "7c7638f0-c46d-448e-84ac-fc9604ffb9b6",
+            "snapshotId": "74c5285f-78f7-4f47-a0b7-f5936565b2a0",
             "decision": "serviceable",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
-            "serviceAreaCodes": ["TAIPEI_CORE"],
-            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+            "serviceAreaCodes": [
+              "TAIPEI_CORE"
+            ],
+            "geometryVersionRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "reasonCodes": [],
             "missingItems": [],
             "provenanceComplete": false
@@ -2604,23 +2794,28 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "b35c383d-72d6-4d12-acf3-211c56c5daa6",
-              "gateTypes": ["address_capture"],
-              "reasonCodes": ["map_provider_unavailable", "request_failed"],
+              "orderId": "7b64dc78-1bab-4f96-971b-15aa25f7fe54",
+              "gateTypes": [
+                "address_capture"
+              ],
+              "reasonCodes": [
+                "map_provider_unavailable",
+                "request_failed"
+              ],
               "missingItems": []
             },
             "retryable": false,
-            "traceId": "b5f80620-2d85-4e68-8b28-087ee379cd15"
+            "traceId": "62a42f38-7cf1-46e6-8a00-1c0e7010c95e"
           }
         },
         "dispatchJobsForOrder": []
       }
     },
     "concierge": {
-      "orderId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
+      "orderId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
       "apiOrder": {
-        "orderId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
-        "orderNo": "O-20260410-000005",
+        "orderId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
+        "orderNo": "O-ead014f2-cde8-422d-80d8-aeb4d111fdbf",
         "orderSource": "phone",
         "orderDomain": "owned",
         "tenantId": null,
@@ -2678,7 +2873,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-11T02:59:32.504Z"
+          "calculatedAt": "2026-07-11T02:38:29.000Z"
         },
         "callId": "CALL-CONCIERGE-OUTAGE-001",
         "recordingId": "REC-CONCIERGE-OUTAGE-001",
@@ -2710,7 +2905,10 @@
         },
         "approvalState": "not_required",
         "approvalRequestIds": [],
-        "complianceFlags": ["recording_bound", "service_area_serviceable"],
+        "complianceFlags": [
+          "recording_bound",
+          "service_area_serviceable"
+        ],
         "cancelledAt": null,
         "cancelReason": null,
         "mapFallbackReview": {
@@ -2726,12 +2924,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-11T02:59:32.504Z",
-        "updatedAt": "2026-07-11T02:59:32.504Z",
+        "createdAt": "2026-07-11T02:38:29.000Z",
+        "updatedAt": "2026-07-11T02:38:29.000Z",
         "spatialAudit": {
-          "snapshotId": "4b658239-ef27-4ad8-97b2-a4549fb157c7",
+          "snapshotId": "8d678778-bca4-4af8-846c-c638e9758919",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-11T02:59:32.505Z",
+          "capturedAt": "2026-07-11T02:38:29.000Z",
           "capturedReason": "booking_creation",
           "actorId": "concierge-ops-002",
           "actorType": "ops_user",
@@ -2787,7 +2985,7 @@
           "serviceAreaEvaluation": {
             "decision": "serviceable",
             "serviceProductType": "taxi_realtime",
-            "evaluatedAt": "2026-07-11T02:59:32.505Z",
+            "evaluatedAt": "2026-07-11T02:38:29.000Z",
             "stops": [
               {
                 "kind": "pickup",
@@ -2795,9 +2993,13 @@
                   "lat": 25.034,
                   "lng": 121.568
                 },
-                "serviceAreaCodes": ["TAIPEI_CORE"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
                 "policyCodes": [],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "decision": "serviceable",
                 "reasonCodes": [],
                 "reasonMessages": []
@@ -2808,33 +3010,37 @@
                   "lat": 25.041,
                   "lng": 121.55
                 },
-                "serviceAreaCodes": ["TAIPEI_CORE"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
                 "policyCodes": [],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "decision": "serviceable",
                 "reasonCodes": [],
                 "reasonMessages": []
               }
             ],
-            "serviceAreaCodes": ["TAIPEI_CORE"],
-            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+            "serviceAreaCodes": [
+              "TAIPEI_CORE"
+            ],
+            "geometryVersionRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "reasonCodes": [],
             "reasonMessages": []
           },
-          "serviceAreaCodes": ["TAIPEI_CORE"],
-          "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+          "serviceAreaCodes": [
+            "TAIPEI_CORE"
+          ],
+          "geometryVersionRefs": [
+            "service_area:TAIPEI_CORE@1"
+          ],
           "reasonCodes": [],
           "reasonMessages": [],
           "missingItems": [],
-          "auditEvents": [
-            {
-              "auditId": "audit-009",
-              "actionName": "order.spatial_audit.snapshot_created",
-              "actorId": "concierge-ops-002",
-              "actorType": "ops_user",
-              "createdAt": "2026-07-11T02:38:08.000Z"
-            }
-          ]
+          "auditEvents": []
         },
         "serviceProductCode": "taxi_realtime",
         "complianceGates": [
@@ -2845,7 +3051,9 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+            "evidenceRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "missingItems": [],
             "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
             "reviewerLabel": null,
@@ -2876,12 +3084,18 @@
             "required": true,
             "blocking": false,
             "evidenceState": "submitted",
-            "evidenceRefs": ["map_provider_unavailable", "request_failed"],
+            "evidenceRefs": [
+              "map_provider_unavailable",
+              "request_failed"
+            ],
             "missingItems": [],
             "nextAction": "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
             "reviewerLabel": "callcenter / dispatch mapping",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -2907,7 +3121,9 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["REC-CONCIERGE-OUTAGE-001"],
+            "evidenceRefs": [
+              "REC-CONCIERGE-OUTAGE-001"
+            ],
             "missingItems": [],
             "nextAction": "Recording has been bound to the phone order.",
             "reviewerLabel": "callcenter / ops compliance",
@@ -2933,15 +3149,16 @@
           }
         ],
         "queueFamily": "manual_review_queue",
-        "queueEntryReason": "dispatch_manual_review_required"
+        "queueEntryReason": "dispatch_manual_review_required",
+        "referralPassengerLifecycle": null
       },
       "persistedWrite": {
         "context": "persistChanges",
         "payload": {
           "orders": [
             {
-              "orderId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
-              "orderNo": "O-20260410-000005",
+              "orderId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
+              "orderNo": "O-ead014f2-cde8-422d-80d8-aeb4d111fdbf",
               "orderSource": "phone",
               "orderDomain": "owned",
               "tenantId": null,
@@ -2999,7 +3216,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-11T02:59:32.504Z"
+                "calculatedAt": "2026-07-11T02:38:29.000Z"
               },
               "callId": "CALL-CONCIERGE-OUTAGE-001",
               "recordingId": "REC-CONCIERGE-OUTAGE-001",
@@ -3050,12 +3267,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-11T02:59:32.504Z",
-              "updatedAt": "2026-07-11T02:59:32.504Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
+              "updatedAt": "2026-07-11T02:38:29.000Z",
               "spatialAudit": {
-                "snapshotId": "4b658239-ef27-4ad8-97b2-a4549fb157c7",
+                "snapshotId": "8d678778-bca4-4af8-846c-c638e9758919",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-11T02:59:32.505Z",
+                "capturedAt": "2026-07-11T02:38:29.000Z",
                 "capturedReason": "booking_creation",
                 "actorId": "concierge-ops-002",
                 "actorType": "ops_user",
@@ -3111,7 +3328,7 @@
                 "serviceAreaEvaluation": {
                   "decision": "serviceable",
                   "serviceProductType": "taxi_realtime",
-                  "evaluatedAt": "2026-07-11T02:59:32.505Z",
+                  "evaluatedAt": "2026-07-11T02:38:29.000Z",
                   "stops": [
                     {
                       "kind": "pickup",
@@ -3119,9 +3336,13 @@
                         "lat": 25.034,
                         "lng": 121.568
                       },
-                      "serviceAreaCodes": ["TAIPEI_CORE"],
+                      "serviceAreaCodes": [
+                        "TAIPEI_CORE"
+                      ],
                       "policyCodes": [],
-                      "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                      "geometryVersionRefs": [
+                        "service_area:TAIPEI_CORE@1"
+                      ],
                       "decision": "serviceable",
                       "reasonCodes": [],
                       "reasonMessages": []
@@ -3132,33 +3353,37 @@
                         "lat": 25.041,
                         "lng": 121.55
                       },
-                      "serviceAreaCodes": ["TAIPEI_CORE"],
+                      "serviceAreaCodes": [
+                        "TAIPEI_CORE"
+                      ],
                       "policyCodes": [],
-                      "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                      "geometryVersionRefs": [
+                        "service_area:TAIPEI_CORE@1"
+                      ],
                       "decision": "serviceable",
                       "reasonCodes": [],
                       "reasonMessages": []
                     }
                   ],
-                  "serviceAreaCodes": ["TAIPEI_CORE"],
-                  "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                  "serviceAreaCodes": [
+                    "TAIPEI_CORE"
+                  ],
+                  "geometryVersionRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "reasonCodes": [],
                   "reasonMessages": []
                 },
-                "serviceAreaCodes": ["TAIPEI_CORE"],
-                "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+                "serviceAreaCodes": [
+                  "TAIPEI_CORE"
+                ],
+                "geometryVersionRefs": [
+                  "service_area:TAIPEI_CORE@1"
+                ],
                 "reasonCodes": [],
                 "reasonMessages": [],
                 "missingItems": [],
-                "auditEvents": [
-                  {
-                    "auditId": "audit-009",
-                    "actionName": "order.spatial_audit.snapshot_created",
-                    "actorId": "concierge-ops-002",
-                    "actorType": "ops_user",
-                    "createdAt": "2026-07-11T02:38:08.000Z"
-                  }
-                ]
+                "auditEvents": []
               },
               "complianceGates": [
                 {
@@ -3168,7 +3393,9 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["service_area:TAIPEI_CORE@1"],
+                  "evidenceRefs": [
+                    "service_area:TAIPEI_CORE@1"
+                  ],
                   "missingItems": [],
                   "nextAction": "Pickup and dropoff coordinates are serviceable for the selected service product.",
                   "reviewerLabel": null,
@@ -3207,7 +3434,10 @@
                   "nextAction": "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
                   "reviewerLabel": "callcenter / dispatch mapping",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -3233,7 +3463,9 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["REC-CONCIERGE-OUTAGE-001"],
+                  "evidenceRefs": [
+                    "REC-CONCIERGE-OUTAGE-001"
+                  ],
                   "missingItems": [],
                   "nextAction": "Recording has been bound to the phone order.",
                   "reviewerLabel": "callcenter / ops compliance",
@@ -3259,16 +3491,17 @@
                 }
               ],
               "queueFamily": "manual_review_queue",
-              "queueEntryReason": "dispatch_manual_review_required"
+              "queueEntryReason": "dispatch_manual_review_required",
+              "referralPassengerLifecycle": null
             }
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "8a394739-0bc5-40e7-aa88-21da2c90e8d0",
-              "orderId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
+              "traceId": "6ab14bdb-8ea6-420b-9326-04a834b0c4cd",
+              "orderId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-11T02:59:32.505Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
                 "callId": "CALL-CONCIERGE-OUTAGE-001",
                 "recordingId": "REC-CONCIERGE-OUTAGE-001",
@@ -3289,7 +3522,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
+          "resourceId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-CONCIERGE-OUTAGE-001",
@@ -3308,15 +3541,19 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
+          "resourceId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "4b658239-ef27-4ad8-97b2-a4549fb157c7",
+            "snapshotId": "8d678778-bca4-4af8-846c-c638e9758919",
             "decision": "serviceable",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
-            "serviceAreaCodes": ["TAIPEI_CORE"],
-            "geometryVersionRefs": ["service_area:TAIPEI_CORE@1"],
+            "serviceAreaCodes": [
+              "TAIPEI_CORE"
+            ],
+            "geometryVersionRefs": [
+              "service_area:TAIPEI_CORE@1"
+            ],
             "reasonCodes": [],
             "missingItems": [],
             "provenanceComplete": false
@@ -3330,13 +3567,18 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "ac1a79cd-d0ba-4681-a8fe-524b5d49acc6",
-              "gateTypes": ["address_capture"],
-              "reasonCodes": ["map_provider_unavailable", "request_failed"],
+              "orderId": "4b593e16-2a7d-4744-bc0d-511be9513fae",
+              "gateTypes": [
+                "address_capture"
+              ],
+              "reasonCodes": [
+                "map_provider_unavailable",
+                "request_failed"
+              ],
               "missingItems": []
             },
             "retryable": false,
-            "traceId": "91a7b1d6-f274-4b33-81ce-e584c140e1db"
+            "traceId": "8b4a9323-04fd-4ab4-ab06-d4fd588d3573"
           }
         },
         "dispatchJobsForOrder": []
@@ -3346,16 +3588,17 @@
   "coordinateLessAntiBypass": {
     "tenant": {
       "booking": {
-        "orderId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
-        "bookingId": "booking-000003",
+        "orderId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
+        "bookingId": "booking-a843f2fd-3048-4f42-b004-411d2d821da0",
         "serviceBucket": "business_dispatch",
         "businessDispatchSubtype": "enterprise_dispatch",
         "dispatchSemantics": "reservation",
-        "status": "created"
+        "status": "created",
+        "replayed": false
       },
       "apiOrder": {
-        "orderId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
-        "orderNo": "O-20260410-000006",
+        "orderId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
+        "orderNo": "O-77204a54-a613-4f0f-9879-63ea9a4099fe",
         "orderSource": "portal",
         "orderDomain": "owned",
         "tenantId": "tenant-demo-001",
@@ -3382,7 +3625,7 @@
           "phone": "0912-000-406",
           "passengerId": null
         },
-        "bookingId": "booking-000003",
+        "bookingId": "booking-a843f2fd-3048-4f42-b004-411d2d821da0",
         "bookingType": "oneway",
         "etaSnapshot": null,
         "callId": null,
@@ -3404,7 +3647,7 @@
         "notes": null,
         "fixedPrice": true,
         "quotedFare": {
-          "currency": "NTD",
+          "currency": "TWD",
           "amountMinor": 150000
         },
         "quotedFareSource": "platform_pricing_rule",
@@ -3418,22 +3661,24 @@
         },
         "approvalState": "not_required",
         "approvalRequestIds": [],
-        "complianceFlags": ["service_area_legacy_text_manual_review"],
+        "complianceFlags": [
+          "service_area_legacy_text_manual_review"
+        ],
         "cancelledAt": null,
         "cancelReason": null,
         "reservationHoldStatus": "requested",
-        "reservationHoldId": "a6f5e1c3-9cb3-4067-9b37-f3348f0b9293",
+        "reservationHoldId": "0d0de98e-34ab-4634-9991-8196f34af178",
         "reservationHoldExpiresAt": "2026-07-11T14:00:00.000Z",
         "dispatchAttemptCount": 0,
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-11T02:59:32.506Z",
-        "updatedAt": "2026-07-11T02:59:32.506Z",
+        "createdAt": "2026-07-11T02:38:29.000Z",
+        "updatedAt": "2026-07-11T02:38:29.000Z",
         "spatialAudit": {
-          "snapshotId": "bcd28844-8838-4e5d-903b-314d73004149",
+          "snapshotId": "af8c56e3-a62f-401d-a46c-403162f06783",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-11T02:59:32.506Z",
+          "capturedAt": "2026-07-11T02:38:29.000Z",
           "capturedReason": "booking_creation",
           "actorId": "tenant-admin-001",
           "actorType": "tenant_admin",
@@ -3460,7 +3705,9 @@
                 "surface": "tenant_console"
               },
               "provenanceComplete": false,
-              "missingItems": ["pickup_coordinates"]
+              "missingItems": [
+                "pickup_coordinates"
+              ]
             },
             {
               "kind": "dropoff",
@@ -3481,7 +3728,9 @@
                 "surface": "tenant_console"
               },
               "provenanceComplete": false,
-              "missingItems": ["dropoff_coordinates"]
+              "missingItems": [
+                "dropoff_coordinates"
+              ]
             }
           ],
           "serviceAreaEvaluation": null,
@@ -3489,7 +3738,10 @@
           "geometryVersionRefs": [],
           "reasonCodes": [],
           "reasonMessages": [],
-          "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+          "missingItems": [
+            "pickup_coordinates",
+            "dropoff_coordinates"
+          ],
           "auditEvents": [
             {
               "auditId": "audit-011",
@@ -3510,11 +3762,17 @@
             "blocking": false,
             "evidenceState": "missing",
             "evidenceRefs": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
             "reviewerLabel": "ops dispatch / service area",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -3541,7 +3799,9 @@
             "blocking": false,
             "evidenceState": "missing",
             "evidenceRefs": [],
-            "missingItems": ["photos>=1"],
+            "missingItems": [
+              "photos>=1"
+            ],
             "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
             "reviewerLabel": "ops dispatch / finance review",
             "overrideAllowed": false,
@@ -3567,15 +3827,16 @@
         ],
         "mapFallbackReview": null,
         "queueFamily": "manual_review_queue",
-        "queueEntryReason": "dispatch_manual_review_required"
+        "queueEntryReason": "dispatch_manual_review_required",
+        "referralPassengerLifecycle": null
       },
       "persistedWrite": {
         "context": "persistChanges",
         "payload": {
           "orders": [
             {
-              "orderId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
-              "orderNo": "O-20260410-000006",
+              "orderId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
+              "orderNo": "O-77204a54-a613-4f0f-9879-63ea9a4099fe",
               "orderSource": "portal",
               "orderDomain": "owned",
               "tenantId": "tenant-demo-001",
@@ -3602,7 +3863,7 @@
                 "phone": "0912-000-406",
                 "passengerId": null
               },
-              "bookingId": "booking-000003",
+              "bookingId": "booking-a843f2fd-3048-4f42-b004-411d2d821da0",
               "bookingType": "oneway",
               "etaSnapshot": null,
               "callId": null,
@@ -3624,7 +3885,7 @@
               "notes": null,
               "fixedPrice": true,
               "quotedFare": {
-                "currency": "NTD",
+                "currency": "TWD",
                 "amountMinor": 150000
               },
               "quotedFareSource": "platform_pricing_rule",
@@ -3638,22 +3899,24 @@
               },
               "approvalState": "not_required",
               "approvalRequestIds": [],
-              "complianceFlags": ["service_area_legacy_text_manual_review"],
+              "complianceFlags": [
+                "service_area_legacy_text_manual_review"
+              ],
               "cancelledAt": null,
               "cancelReason": null,
               "reservationHoldStatus": "requested",
-              "reservationHoldId": "a6f5e1c3-9cb3-4067-9b37-f3348f0b9293",
+              "reservationHoldId": "0d0de98e-34ab-4634-9991-8196f34af178",
               "reservationHoldExpiresAt": "2026-07-11T14:00:00.000Z",
               "dispatchAttemptCount": 0,
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-11T02:59:32.506Z",
-              "updatedAt": "2026-07-11T02:59:32.506Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
+              "updatedAt": "2026-07-11T02:38:29.000Z",
               "spatialAudit": {
-                "snapshotId": "bcd28844-8838-4e5d-903b-314d73004149",
+                "snapshotId": "af8c56e3-a62f-401d-a46c-403162f06783",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-11T02:59:32.506Z",
+                "capturedAt": "2026-07-11T02:38:29.000Z",
                 "capturedReason": "booking_creation",
                 "actorId": "tenant-admin-001",
                 "actorType": "tenant_admin",
@@ -3680,7 +3943,9 @@
                       "surface": "tenant_console"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["pickup_coordinates"]
+                    "missingItems": [
+                      "pickup_coordinates"
+                    ]
                   },
                   {
                     "kind": "dropoff",
@@ -3701,7 +3966,9 @@
                       "surface": "tenant_console"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["dropoff_coordinates"]
+                    "missingItems": [
+                      "dropoff_coordinates"
+                    ]
                   }
                 ],
                 "serviceAreaEvaluation": null,
@@ -3709,7 +3976,10 @@
                 "geometryVersionRefs": [],
                 "reasonCodes": [],
                 "reasonMessages": [],
-                "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+                "missingItems": [
+                  "pickup_coordinates",
+                  "dropoff_coordinates"
+                ],
                 "auditEvents": [
                   {
                     "auditId": "audit-011",
@@ -3729,11 +3999,17 @@
                   "blocking": false,
                   "evidenceState": "missing",
                   "evidenceRefs": [],
-                  "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+                  "missingItems": [
+                    "pickup_coordinates",
+                    "dropoff_coordinates"
+                  ],
                   "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
                   "reviewerLabel": "ops dispatch / service area",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -3760,7 +4036,9 @@
                   "blocking": false,
                   "evidenceState": "missing",
                   "evidenceRefs": [],
-                  "missingItems": ["photos>=1"],
+                  "missingItems": [
+                    "photos>=1"
+                  ],
                   "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
                   "reviewerLabel": "ops dispatch / finance review",
                   "overrideAllowed": false,
@@ -3786,31 +4064,32 @@
               ],
               "mapFallbackReview": null,
               "queueFamily": "manual_review_queue",
-              "queueEntryReason": "dispatch_manual_review_required"
+              "queueEntryReason": "dispatch_manual_review_required",
+              "referralPassengerLifecycle": null
             }
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "16ee4892-346b-4823-800e-6e452f1310c0",
-              "orderId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
+              "traceId": "d2dfeba0-27e7-4703-85d7-4293ddce3d5b",
+              "orderId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
               "eventType": "tenant.booking_created",
               "message": "tenant.booking_created",
-              "createdAt": "2026-07-11T02:59:32.506Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
-                "bookingId": "booking-000003",
+                "bookingId": "booking-a843f2fd-3048-4f42-b004-411d2d821da0",
                 "businessDispatchSubtype": "enterprise_dispatch",
                 "dispatchSemantics": "reservation"
               }
             },
             {
-              "traceId": "4dc3e72e-1de5-4f57-9e6c-8da41ade944c",
-              "orderId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
+              "traceId": "22672dc6-d39d-4508-a548-e4097330fca6",
+              "orderId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
               "eventType": "reservation.hold.created",
               "message": "reservation.hold.created",
-              "createdAt": "2026-07-11T02:59:32.506Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
-                "bookingId": "booking-000003",
-                "reservationHoldId": "a6f5e1c3-9cb3-4067-9b37-f3348f0b9293",
+                "bookingId": "booking-a843f2fd-3048-4f42-b004-411d2d821da0",
+                "reservationHoldId": "0d0de98e-34ab-4634-9991-8196f34af178",
                 "holdState": "requested",
                 "confirmationWindowMinutes": 30
               }
@@ -3829,17 +4108,20 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
+          "resourceId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "bcd28844-8838-4e5d-903b-314d73004149",
+            "snapshotId": "af8c56e3-a62f-401d-a46c-403162f06783",
             "decision": "manual_review",
             "surface": "tenant_console",
             "serviceProductType": "enterprise_dispatch",
             "serviceAreaCodes": [],
             "geometryVersionRefs": [],
             "reasonCodes": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "provenanceComplete": false
           },
           "metadata": null
@@ -3851,13 +4133,18 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "42bb6dd8-8fcc-4a63-a61e-a90d6622f4ec",
-              "gateTypes": ["service_area"],
+              "orderId": "ba18b1e0-b1f4-4136-83a4-dd26249cd7d3",
+              "gateTypes": [
+                "service_area"
+              ],
               "reasonCodes": [],
-              "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
+              "missingItems": [
+                "pickup_coordinates",
+                "dropoff_coordinates"
+              ]
             },
             "retryable": false,
-            "traceId": "e37e06bb-d841-4af8-bcc1-bbb698856a9f"
+            "traceId": "6234e1fd-7bc1-4b11-a0ad-974c61142a84"
           }
         },
         "dispatchJobsForOrder": []
@@ -3865,24 +4152,25 @@
     },
     "partner": {
       "booking": {
-        "orderId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
-        "bookingId": "booking-000004",
+        "orderId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
+        "bookingId": "booking-e980d362-f13e-45f0-bbde-684ecaebc893",
         "serviceBucket": "business_dispatch",
         "businessDispatchSubtype": "credit_card_airport_transfer",
         "dispatchSemantics": "reservation",
-        "status": "created"
+        "status": "created",
+        "replayed": false
       },
       "apiOrder": {
-        "orderId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
-        "orderNo": "O-20260410-000007",
+        "orderId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
+        "orderNo": "O-cb9db689-3635-4d70-989b-0d5a7a525e7d",
         "orderSource": "portal",
         "orderDomain": "owned",
         "tenantId": "tenant-demo-001",
-        "partnerId": "partner-ctbc-card-001",
-        "partnerProgramId": "program-ctbc-world-elite",
-        "partnerEntrySlug": "ctbc",
-        "eligibilityVerificationId": "elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5",
-        "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
+        "partnerId": "partner-acme-card-001",
+        "partnerProgramId": "program-acme-world-elite",
+        "partnerEntrySlug": "acme",
+        "eligibilityVerificationId": "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b",
+        "issuerAuthorizationRef": "issuer-auth-acme-2468",
         "passengerDisclosure": null,
         "serviceBucket": "business_dispatch",
         "dispatchSemantics": "reservation",
@@ -3901,7 +4189,7 @@
           "phone": "0912-000-407",
           "passengerId": null
         },
-        "bookingId": "booking-000004",
+        "bookingId": "booking-e980d362-f13e-45f0-bbde-684ecaebc893",
         "bookingType": "oneway",
         "etaSnapshot": null,
         "callId": null,
@@ -3915,7 +4203,7 @@
         "onsiteContact": null,
         "costCenter": null,
         "vehiclePreference": null,
-        "benefitReference": "benefit-ctbc-2468",
+        "benefitReference": "benefit-acme-2468",
         "direction": null,
         "flightNo": null,
         "terminal": null,
@@ -3923,7 +4211,7 @@
         "notes": null,
         "fixedPrice": true,
         "quotedFare": {
-          "currency": "NTD",
+          "currency": "TWD",
           "amountMinor": 150000
         },
         "quotedFareSource": "platform_pricing_rule",
@@ -3937,22 +4225,24 @@
         },
         "approvalState": "not_required",
         "approvalRequestIds": [],
-        "complianceFlags": ["service_area_legacy_text_manual_review"],
+        "complianceFlags": [
+          "service_area_legacy_text_manual_review"
+        ],
         "cancelledAt": null,
         "cancelReason": null,
         "reservationHoldStatus": "requested",
-        "reservationHoldId": "2f106c23-1ef7-44af-978a-eee1040ee708",
+        "reservationHoldId": "9d36a0b2-68a0-4152-aece-23886e36ffd6",
         "reservationHoldExpiresAt": "2026-07-11T16:00:00.000Z",
         "dispatchAttemptCount": 0,
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-11T02:59:32.508Z",
-        "updatedAt": "2026-07-11T02:59:32.508Z",
+        "createdAt": "2026-07-11T02:38:29.000Z",
+        "updatedAt": "2026-07-11T02:38:29.000Z",
         "spatialAudit": {
-          "snapshotId": "cacdd13d-c50b-4d37-b4d6-992eb593549d",
+          "snapshotId": "f17fc726-920c-4531-88d8-5fd1bf6c8de0",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-11T02:59:32.509Z",
+          "capturedAt": "2026-07-11T02:38:29.000Z",
           "capturedReason": "booking_creation",
           "actorId": "partner-api-001",
           "actorType": "partner_api_key",
@@ -3979,7 +4269,9 @@
                 "surface": "partner_booking"
               },
               "provenanceComplete": false,
-              "missingItems": ["pickup_coordinates"]
+              "missingItems": [
+                "pickup_coordinates"
+              ]
             },
             {
               "kind": "dropoff",
@@ -4000,7 +4292,9 @@
                 "surface": "partner_booking"
               },
               "provenanceComplete": false,
-              "missingItems": ["dropoff_coordinates"]
+              "missingItems": [
+                "dropoff_coordinates"
+              ]
             }
           ],
           "serviceAreaEvaluation": null,
@@ -4008,7 +4302,10 @@
           "geometryVersionRefs": [],
           "reasonCodes": [],
           "reasonMessages": [],
-          "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+          "missingItems": [
+            "pickup_coordinates",
+            "dropoff_coordinates"
+          ],
           "auditEvents": [
             {
               "auditId": "audit-013",
@@ -4029,11 +4326,17 @@
             "blocking": false,
             "evidenceState": "missing",
             "evidenceRefs": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
             "reviewerLabel": "ops dispatch / service area",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -4060,7 +4363,9 @@
             "blocking": false,
             "evidenceState": "missing",
             "evidenceRefs": [],
-            "missingItems": ["photos>=1"],
+            "missingItems": [
+              "photos>=1"
+            ],
             "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
             "reviewerLabel": "ops dispatch / finance review",
             "overrideAllowed": false,
@@ -4090,12 +4395,17 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5"],
+            "evidenceRefs": [
+              "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b"
+            ],
             "missingItems": [],
             "nextAction": "Eligibility verification is approved and within TTL.",
             "reviewerLabel": "partner ops reviewer",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -4117,23 +4427,24 @@
         ],
         "mapFallbackReview": null,
         "queueFamily": "manual_review_queue",
-        "queueEntryReason": "dispatch_manual_review_required"
+        "queueEntryReason": "dispatch_manual_review_required",
+        "referralPassengerLifecycle": null
       },
       "persistedWrite": {
         "context": "persistChanges",
         "payload": {
           "orders": [
             {
-              "orderId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
-              "orderNo": "O-20260410-000007",
+              "orderId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
+              "orderNo": "O-cb9db689-3635-4d70-989b-0d5a7a525e7d",
               "orderSource": "portal",
               "orderDomain": "owned",
               "tenantId": "tenant-demo-001",
-              "partnerId": "partner-ctbc-card-001",
-              "partnerProgramId": "program-ctbc-world-elite",
-              "partnerEntrySlug": "ctbc",
-              "eligibilityVerificationId": "elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5",
-              "issuerAuthorizationRef": "issuer-auth-ctbc-2468",
+              "partnerId": "partner-acme-card-001",
+              "partnerProgramId": "program-acme-world-elite",
+              "partnerEntrySlug": "acme",
+              "eligibilityVerificationId": "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b",
+              "issuerAuthorizationRef": "issuer-auth-acme-2468",
               "passengerDisclosure": null,
               "serviceBucket": "business_dispatch",
               "dispatchSemantics": "reservation",
@@ -4152,7 +4463,7 @@
                 "phone": "0912-000-407",
                 "passengerId": null
               },
-              "bookingId": "booking-000004",
+              "bookingId": "booking-e980d362-f13e-45f0-bbde-684ecaebc893",
               "bookingType": "oneway",
               "etaSnapshot": null,
               "callId": null,
@@ -4166,7 +4477,7 @@
               "onsiteContact": null,
               "costCenter": null,
               "vehiclePreference": null,
-              "benefitReference": "benefit-ctbc-2468",
+              "benefitReference": "benefit-acme-2468",
               "direction": null,
               "flightNo": null,
               "terminal": null,
@@ -4174,7 +4485,7 @@
               "notes": null,
               "fixedPrice": true,
               "quotedFare": {
-                "currency": "NTD",
+                "currency": "TWD",
                 "amountMinor": 150000
               },
               "quotedFareSource": "platform_pricing_rule",
@@ -4188,22 +4499,24 @@
               },
               "approvalState": "not_required",
               "approvalRequestIds": [],
-              "complianceFlags": ["service_area_legacy_text_manual_review"],
+              "complianceFlags": [
+                "service_area_legacy_text_manual_review"
+              ],
               "cancelledAt": null,
               "cancelReason": null,
               "reservationHoldStatus": "requested",
-              "reservationHoldId": "2f106c23-1ef7-44af-978a-eee1040ee708",
+              "reservationHoldId": "9d36a0b2-68a0-4152-aece-23886e36ffd6",
               "reservationHoldExpiresAt": "2026-07-11T16:00:00.000Z",
               "dispatchAttemptCount": 0,
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-11T02:59:32.508Z",
-              "updatedAt": "2026-07-11T02:59:32.508Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
+              "updatedAt": "2026-07-11T02:38:29.000Z",
               "spatialAudit": {
-                "snapshotId": "cacdd13d-c50b-4d37-b4d6-992eb593549d",
+                "snapshotId": "f17fc726-920c-4531-88d8-5fd1bf6c8de0",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-11T02:59:32.509Z",
+                "capturedAt": "2026-07-11T02:38:29.000Z",
                 "capturedReason": "booking_creation",
                 "actorId": "partner-api-001",
                 "actorType": "partner_api_key",
@@ -4230,7 +4543,9 @@
                       "surface": "partner_booking"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["pickup_coordinates"]
+                    "missingItems": [
+                      "pickup_coordinates"
+                    ]
                   },
                   {
                     "kind": "dropoff",
@@ -4251,7 +4566,9 @@
                       "surface": "partner_booking"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["dropoff_coordinates"]
+                    "missingItems": [
+                      "dropoff_coordinates"
+                    ]
                   }
                 ],
                 "serviceAreaEvaluation": null,
@@ -4259,7 +4576,10 @@
                 "geometryVersionRefs": [],
                 "reasonCodes": [],
                 "reasonMessages": [],
-                "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+                "missingItems": [
+                  "pickup_coordinates",
+                  "dropoff_coordinates"
+                ],
                 "auditEvents": [
                   {
                     "auditId": "audit-013",
@@ -4279,11 +4599,17 @@
                   "blocking": false,
                   "evidenceState": "missing",
                   "evidenceRefs": [],
-                  "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+                  "missingItems": [
+                    "pickup_coordinates",
+                    "dropoff_coordinates"
+                  ],
                   "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
                   "reviewerLabel": "ops dispatch / service area",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -4310,7 +4636,9 @@
                   "blocking": false,
                   "evidenceState": "missing",
                   "evidenceRefs": [],
-                  "missingItems": ["photos>=1"],
+                  "missingItems": [
+                    "photos>=1"
+                  ],
                   "nextAction": "Driver must submit the required proof bundle before trip completion and settlement closeout.",
                   "reviewerLabel": "ops dispatch / finance review",
                   "overrideAllowed": false,
@@ -4340,12 +4668,17 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["elig_a2cc9e73-15fa-4c75-b7f9-27199e8e04f5"],
+                  "evidenceRefs": [
+                    "elig_92f4cb42-bb70-41a2-9b8d-508eed1b909b"
+                  ],
                   "missingItems": [],
                   "nextAction": "Eligibility verification is approved and within TTL.",
                   "reviewerLabel": "partner ops reviewer",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -4367,31 +4700,32 @@
               ],
               "mapFallbackReview": null,
               "queueFamily": "manual_review_queue",
-              "queueEntryReason": "dispatch_manual_review_required"
+              "queueEntryReason": "dispatch_manual_review_required",
+              "referralPassengerLifecycle": null
             }
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "a8d77935-b3fd-4480-ac78-9baa037e6cb2",
-              "orderId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
+              "traceId": "1617f8ca-0fd4-4ec8-b885-53b8fda9adc1",
+              "orderId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
               "eventType": "tenant.booking_created",
               "message": "tenant.booking_created",
-              "createdAt": "2026-07-11T02:59:32.509Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
-                "bookingId": "booking-000004",
+                "bookingId": "booking-e980d362-f13e-45f0-bbde-684ecaebc893",
                 "businessDispatchSubtype": "credit_card_airport_transfer",
                 "dispatchSemantics": "reservation"
               }
             },
             {
-              "traceId": "f1921f17-ecca-4514-82f8-3f531241d4c7",
-              "orderId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
+              "traceId": "e4b98f8a-dfb4-411d-86e3-fe7bfddb3850",
+              "orderId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
               "eventType": "reservation.hold.created",
               "message": "reservation.hold.created",
-              "createdAt": "2026-07-11T02:59:32.509Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
-                "bookingId": "booking-000004",
-                "reservationHoldId": "2f106c23-1ef7-44af-978a-eee1040ee708",
+                "bookingId": "booking-e980d362-f13e-45f0-bbde-684ecaebc893",
+                "reservationHoldId": "9d36a0b2-68a0-4152-aece-23886e36ffd6",
                 "holdState": "requested",
                 "confirmationWindowMinutes": 60
               }
@@ -4410,17 +4744,20 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
+          "resourceId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "cacdd13d-c50b-4d37-b4d6-992eb593549d",
+            "snapshotId": "f17fc726-920c-4531-88d8-5fd1bf6c8de0",
             "decision": "manual_review",
             "surface": "partner_booking",
             "serviceProductType": "credit_card_airport_transfer",
             "serviceAreaCodes": [],
             "geometryVersionRefs": [],
             "reasonCodes": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "provenanceComplete": false
           },
           "metadata": null
@@ -4432,23 +4769,28 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "d9e1f997-ded5-4f99-84d0-bc31e7d82d11",
-              "gateTypes": ["service_area"],
+              "orderId": "c4fbc06c-9dbb-4904-93a3-9af06c3d9b93",
+              "gateTypes": [
+                "service_area"
+              ],
               "reasonCodes": [],
-              "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
+              "missingItems": [
+                "pickup_coordinates",
+                "dropoff_coordinates"
+              ]
             },
             "retryable": false,
-            "traceId": "b910b644-b1a3-40a2-a615-af9e5eac3d7c"
+            "traceId": "591582a8-9d13-4e3a-b580-311a94f21c99"
           }
         },
         "dispatchJobsForOrder": []
       }
     },
     "callcenter": {
-      "orderId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
+      "orderId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
       "apiOrder": {
-        "orderId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
-        "orderNo": "O-20260410-000008",
+        "orderId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
+        "orderNo": "O-005f7cbc-2874-442e-a8ca-06539c1896ac",
         "orderSource": "phone",
         "orderDomain": "owned",
         "tenantId": null,
@@ -4478,7 +4820,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-11T02:59:32.511Z"
+          "calculatedAt": "2026-07-11T02:38:29.000Z"
         },
         "callId": "CALL-COORDLESS-001",
         "recordingId": "REC-COORDLESS-001",
@@ -4524,12 +4866,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-11T02:59:32.511Z",
-        "updatedAt": "2026-07-11T02:59:32.511Z",
+        "createdAt": "2026-07-11T02:38:29.000Z",
+        "updatedAt": "2026-07-11T02:38:29.000Z",
         "spatialAudit": {
-          "snapshotId": "f78e14e8-9b59-46d1-9432-1773b320088f",
+          "snapshotId": "03744c37-b275-4b6b-8fe8-719ffbf020a4",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-11T02:59:32.511Z",
+          "capturedAt": "2026-07-11T02:38:29.000Z",
           "capturedReason": "booking_creation",
           "actorId": "ops-agent-001",
           "actorType": "ops_user",
@@ -4556,7 +4898,9 @@
                 "surface": "callcenter"
               },
               "provenanceComplete": false,
-              "missingItems": ["pickup_coordinates"]
+              "missingItems": [
+                "pickup_coordinates"
+              ]
             },
             {
               "kind": "dropoff",
@@ -4577,7 +4921,9 @@
                 "surface": "callcenter"
               },
               "provenanceComplete": false,
-              "missingItems": ["dropoff_coordinates"]
+              "missingItems": [
+                "dropoff_coordinates"
+              ]
             }
           ],
           "serviceAreaEvaluation": null,
@@ -4585,16 +4931,11 @@
           "geometryVersionRefs": [],
           "reasonCodes": [],
           "reasonMessages": [],
-          "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
-          "auditEvents": [
-            {
-              "auditId": "audit-015",
-              "actionName": "order.spatial_audit.snapshot_created",
-              "actorId": "ops-agent-001",
-              "actorType": "ops_user",
-              "createdAt": "2026-07-11T02:38:14.000Z"
-            }
-          ]
+          "missingItems": [
+            "pickup_coordinates",
+            "dropoff_coordinates"
+          ],
+          "auditEvents": []
         },
         "serviceProductCode": "taxi_realtime",
         "complianceGates": [
@@ -4606,11 +4947,17 @@
             "blocking": false,
             "evidenceState": "missing",
             "evidenceRefs": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
             "reviewerLabel": "ops dispatch / service area",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -4636,7 +4983,9 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["REC-COORDLESS-001"],
+            "evidenceRefs": [
+              "REC-COORDLESS-001"
+            ],
             "missingItems": [],
             "nextAction": "Recording has been bound to the phone order.",
             "reviewerLabel": "callcenter / ops compliance",
@@ -4662,15 +5011,16 @@
           }
         ],
         "queueFamily": "manual_review_queue",
-        "queueEntryReason": "dispatch_manual_review_required"
+        "queueEntryReason": "dispatch_manual_review_required",
+        "referralPassengerLifecycle": null
       },
       "persistedWrite": {
         "context": "persistChanges",
         "payload": {
           "orders": [
             {
-              "orderId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
-              "orderNo": "O-20260410-000008",
+              "orderId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
+              "orderNo": "O-005f7cbc-2874-442e-a8ca-06539c1896ac",
               "orderSource": "phone",
               "orderDomain": "owned",
               "tenantId": null,
@@ -4700,7 +5050,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-11T02:59:32.511Z"
+                "calculatedAt": "2026-07-11T02:38:29.000Z"
               },
               "callId": "CALL-COORDLESS-001",
               "recordingId": "REC-COORDLESS-001",
@@ -4746,12 +5096,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-11T02:59:32.511Z",
-              "updatedAt": "2026-07-11T02:59:32.511Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
+              "updatedAt": "2026-07-11T02:38:29.000Z",
               "spatialAudit": {
-                "snapshotId": "f78e14e8-9b59-46d1-9432-1773b320088f",
+                "snapshotId": "03744c37-b275-4b6b-8fe8-719ffbf020a4",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-11T02:59:32.511Z",
+                "capturedAt": "2026-07-11T02:38:29.000Z",
                 "capturedReason": "booking_creation",
                 "actorId": "ops-agent-001",
                 "actorType": "ops_user",
@@ -4778,7 +5128,9 @@
                       "surface": "callcenter"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["pickup_coordinates"]
+                    "missingItems": [
+                      "pickup_coordinates"
+                    ]
                   },
                   {
                     "kind": "dropoff",
@@ -4799,7 +5151,9 @@
                       "surface": "callcenter"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["dropoff_coordinates"]
+                    "missingItems": [
+                      "dropoff_coordinates"
+                    ]
                   }
                 ],
                 "serviceAreaEvaluation": null,
@@ -4807,16 +5161,11 @@
                 "geometryVersionRefs": [],
                 "reasonCodes": [],
                 "reasonMessages": [],
-                "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
-                "auditEvents": [
-                  {
-                    "auditId": "audit-015",
-                    "actionName": "order.spatial_audit.snapshot_created",
-                    "actorId": "ops-agent-001",
-                    "actorType": "ops_user",
-                    "createdAt": "2026-07-11T02:38:14.000Z"
-                  }
-                ]
+                "missingItems": [
+                  "pickup_coordinates",
+                  "dropoff_coordinates"
+                ],
+                "auditEvents": []
               },
               "complianceGates": [
                 {
@@ -4827,11 +5176,17 @@
                   "blocking": false,
                   "evidenceState": "missing",
                   "evidenceRefs": [],
-                  "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+                  "missingItems": [
+                    "pickup_coordinates",
+                    "dropoff_coordinates"
+                  ],
                   "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
                   "reviewerLabel": "ops dispatch / service area",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -4857,7 +5212,9 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["REC-COORDLESS-001"],
+                  "evidenceRefs": [
+                    "REC-COORDLESS-001"
+                  ],
                   "missingItems": [],
                   "nextAction": "Recording has been bound to the phone order.",
                   "reviewerLabel": "callcenter / ops compliance",
@@ -4883,16 +5240,17 @@
                 }
               ],
               "queueFamily": "manual_review_queue",
-              "queueEntryReason": "dispatch_manual_review_required"
+              "queueEntryReason": "dispatch_manual_review_required",
+              "referralPassengerLifecycle": null
             }
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "f047757b-247a-429a-b46d-3a86eb8ef41b",
-              "orderId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
+              "traceId": "56db59a6-bedd-44c1-8014-1f34aee05832",
+              "orderId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-11T02:59:32.511Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
                 "callId": "CALL-COORDLESS-001",
                 "recordingId": "REC-COORDLESS-001",
@@ -4913,7 +5271,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
+          "resourceId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-COORDLESS-001",
@@ -4932,17 +5290,20 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
+          "resourceId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "f78e14e8-9b59-46d1-9432-1773b320088f",
+            "snapshotId": "03744c37-b275-4b6b-8fe8-719ffbf020a4",
             "decision": "manual_review",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
             "serviceAreaCodes": [],
             "geometryVersionRefs": [],
             "reasonCodes": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "provenanceComplete": false
           },
           "metadata": null
@@ -4954,23 +5315,28 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "c608fbaa-cf21-49c2-98ce-a5d9f0b31a7a",
-              "gateTypes": ["service_area"],
+              "orderId": "d1370245-7a50-4bdd-aacc-aaf2f13a153c",
+              "gateTypes": [
+                "service_area"
+              ],
               "reasonCodes": [],
-              "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
+              "missingItems": [
+                "pickup_coordinates",
+                "dropoff_coordinates"
+              ]
             },
             "retryable": false,
-            "traceId": "6996f316-aa65-4f6c-9a87-0e98d15571e9"
+            "traceId": "f7b8f26b-7165-427f-ac4c-318b84d0082f"
           }
         },
         "dispatchJobsForOrder": []
       }
     },
     "concierge": {
-      "orderId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
+      "orderId": "041fc4b6-1108-4327-88d1-417206dc472f",
       "apiOrder": {
-        "orderId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
-        "orderNo": "O-20260410-000009",
+        "orderId": "041fc4b6-1108-4327-88d1-417206dc472f",
+        "orderNo": "O-e7835643-f6b1-4bdc-b1ae-da1db6a7edcf",
         "orderSource": "phone",
         "orderDomain": "owned",
         "tenantId": null,
@@ -5000,7 +5366,7 @@
         "bookingType": null,
         "etaSnapshot": {
           "etaMinutes": 10,
-          "calculatedAt": "2026-07-11T02:59:32.512Z"
+          "calculatedAt": "2026-07-11T02:38:29.000Z"
         },
         "callId": "CALL-CONCIERGE-COORDLESS-001",
         "recordingId": "REC-CONCIERGE-COORDLESS-001",
@@ -5046,12 +5412,12 @@
         "lastDispatchFailureReason": null,
         "noSupplyEscalation": null,
         "dispatchTimeout": null,
-        "createdAt": "2026-07-11T02:59:32.512Z",
-        "updatedAt": "2026-07-11T02:59:32.512Z",
+        "createdAt": "2026-07-11T02:38:29.000Z",
+        "updatedAt": "2026-07-11T02:38:29.000Z",
         "spatialAudit": {
-          "snapshotId": "d23f6f48-29f2-4f72-8d59-c766de2e4e56",
+          "snapshotId": "f7955c2b-9b9a-41d0-b212-792294a27498",
           "snapshotVersion": 1,
-          "capturedAt": "2026-07-11T02:59:32.512Z",
+          "capturedAt": "2026-07-11T02:38:29.000Z",
           "capturedReason": "booking_creation",
           "actorId": "concierge-ops-003",
           "actorType": "ops_user",
@@ -5078,7 +5444,9 @@
                 "surface": "concierge_portal"
               },
               "provenanceComplete": false,
-              "missingItems": ["pickup_coordinates"]
+              "missingItems": [
+                "pickup_coordinates"
+              ]
             },
             {
               "kind": "dropoff",
@@ -5099,7 +5467,9 @@
                 "surface": "concierge_portal"
               },
               "provenanceComplete": false,
-              "missingItems": ["dropoff_coordinates"]
+              "missingItems": [
+                "dropoff_coordinates"
+              ]
             }
           ],
           "serviceAreaEvaluation": null,
@@ -5107,16 +5477,11 @@
           "geometryVersionRefs": [],
           "reasonCodes": [],
           "reasonMessages": [],
-          "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
-          "auditEvents": [
-            {
-              "auditId": "audit-017",
-              "actionName": "order.spatial_audit.snapshot_created",
-              "actorId": "concierge-ops-003",
-              "actorType": "ops_user",
-              "createdAt": "2026-07-11T02:38:16.000Z"
-            }
-          ]
+          "missingItems": [
+            "pickup_coordinates",
+            "dropoff_coordinates"
+          ],
+          "auditEvents": []
         },
         "serviceProductCode": "taxi_realtime",
         "complianceGates": [
@@ -5128,11 +5493,17 @@
             "blocking": false,
             "evidenceState": "missing",
             "evidenceRefs": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
             "reviewerLabel": "ops dispatch / service area",
             "overrideAllowed": true,
-            "overrideActors": ["ops_user", "platform_admin"],
+            "overrideActors": [
+              "ops_user",
+              "platform_admin"
+            ],
             "impacts": [
               {
                 "stage": "dispatch",
@@ -5158,7 +5529,9 @@
             "required": true,
             "blocking": false,
             "evidenceState": "verified",
-            "evidenceRefs": ["REC-CONCIERGE-COORDLESS-001"],
+            "evidenceRefs": [
+              "REC-CONCIERGE-COORDLESS-001"
+            ],
             "missingItems": [],
             "nextAction": "Recording has been bound to the phone order.",
             "reviewerLabel": "callcenter / ops compliance",
@@ -5184,15 +5557,16 @@
           }
         ],
         "queueFamily": "manual_review_queue",
-        "queueEntryReason": "dispatch_manual_review_required"
+        "queueEntryReason": "dispatch_manual_review_required",
+        "referralPassengerLifecycle": null
       },
       "persistedWrite": {
         "context": "persistChanges",
         "payload": {
           "orders": [
             {
-              "orderId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
-              "orderNo": "O-20260410-000009",
+              "orderId": "041fc4b6-1108-4327-88d1-417206dc472f",
+              "orderNo": "O-e7835643-f6b1-4bdc-b1ae-da1db6a7edcf",
               "orderSource": "phone",
               "orderDomain": "owned",
               "tenantId": null,
@@ -5222,7 +5596,7 @@
               "bookingType": null,
               "etaSnapshot": {
                 "etaMinutes": 10,
-                "calculatedAt": "2026-07-11T02:59:32.512Z"
+                "calculatedAt": "2026-07-11T02:38:29.000Z"
               },
               "callId": "CALL-CONCIERGE-COORDLESS-001",
               "recordingId": "REC-CONCIERGE-COORDLESS-001",
@@ -5268,12 +5642,12 @@
               "lastDispatchFailureReason": null,
               "noSupplyEscalation": null,
               "dispatchTimeout": null,
-              "createdAt": "2026-07-11T02:59:32.512Z",
-              "updatedAt": "2026-07-11T02:59:32.512Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
+              "updatedAt": "2026-07-11T02:38:29.000Z",
               "spatialAudit": {
-                "snapshotId": "d23f6f48-29f2-4f72-8d59-c766de2e4e56",
+                "snapshotId": "f7955c2b-9b9a-41d0-b212-792294a27498",
                 "snapshotVersion": 1,
-                "capturedAt": "2026-07-11T02:59:32.512Z",
+                "capturedAt": "2026-07-11T02:38:29.000Z",
                 "capturedReason": "booking_creation",
                 "actorId": "concierge-ops-003",
                 "actorType": "ops_user",
@@ -5300,7 +5674,9 @@
                       "surface": "concierge_portal"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["pickup_coordinates"]
+                    "missingItems": [
+                      "pickup_coordinates"
+                    ]
                   },
                   {
                     "kind": "dropoff",
@@ -5321,7 +5697,9 @@
                       "surface": "concierge_portal"
                     },
                     "provenanceComplete": false,
-                    "missingItems": ["dropoff_coordinates"]
+                    "missingItems": [
+                      "dropoff_coordinates"
+                    ]
                   }
                 ],
                 "serviceAreaEvaluation": null,
@@ -5329,16 +5707,11 @@
                 "geometryVersionRefs": [],
                 "reasonCodes": [],
                 "reasonMessages": [],
-                "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
-                "auditEvents": [
-                  {
-                    "auditId": "audit-017",
-                    "actionName": "order.spatial_audit.snapshot_created",
-                    "actorId": "concierge-ops-003",
-                    "actorType": "ops_user",
-                    "createdAt": "2026-07-11T02:38:16.000Z"
-                  }
-                ]
+                "missingItems": [
+                  "pickup_coordinates",
+                  "dropoff_coordinates"
+                ],
+                "auditEvents": []
               },
               "complianceGates": [
                 {
@@ -5349,11 +5722,17 @@
                   "blocking": false,
                   "evidenceState": "missing",
                   "evidenceRefs": [],
-                  "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+                  "missingItems": [
+                    "pickup_coordinates",
+                    "dropoff_coordinates"
+                  ],
                   "nextAction": "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review.",
                   "reviewerLabel": "ops dispatch / service area",
                   "overrideAllowed": true,
-                  "overrideActors": ["ops_user", "platform_admin"],
+                  "overrideActors": [
+                    "ops_user",
+                    "platform_admin"
+                  ],
                   "impacts": [
                     {
                       "stage": "dispatch",
@@ -5379,7 +5758,9 @@
                   "required": true,
                   "blocking": false,
                   "evidenceState": "verified",
-                  "evidenceRefs": ["REC-CONCIERGE-COORDLESS-001"],
+                  "evidenceRefs": [
+                    "REC-CONCIERGE-COORDLESS-001"
+                  ],
                   "missingItems": [],
                   "nextAction": "Recording has been bound to the phone order.",
                   "reviewerLabel": "callcenter / ops compliance",
@@ -5405,16 +5786,17 @@
                 }
               ],
               "queueFamily": "manual_review_queue",
-              "queueEntryReason": "dispatch_manual_review_required"
+              "queueEntryReason": "dispatch_manual_review_required",
+              "referralPassengerLifecycle": null
             }
           ],
           "dispatchTraceLogs": [
             {
-              "traceId": "c923d6db-2ea9-4cef-96b2-1f855c83a5db",
-              "orderId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
+              "traceId": "094d68ee-471b-40c8-ba2c-76a303a04f17",
+              "orderId": "041fc4b6-1108-4327-88d1-417206dc472f",
               "eventType": "callcenter.order_created",
               "message": "callcenter.order_created",
-              "createdAt": "2026-07-11T02:59:32.512Z",
+              "createdAt": "2026-07-11T02:38:29.000Z",
               "details": {
                 "callId": "CALL-CONCIERGE-COORDLESS-001",
                 "recordingId": "REC-CONCIERGE-COORDLESS-001",
@@ -5435,7 +5817,7 @@
           "moduleName": "callcenter",
           "actionName": "create_phone_order",
           "resourceType": "order",
-          "resourceId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
+          "resourceId": "041fc4b6-1108-4327-88d1-417206dc472f",
           "oldValuesSummary": null,
           "newValuesSummary": {
             "callId": "CALL-CONCIERGE-COORDLESS-001",
@@ -5454,17 +5836,20 @@
           "moduleName": "order",
           "actionName": "order.spatial_audit.snapshot_created",
           "resourceType": "order",
-          "resourceId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
+          "resourceId": "041fc4b6-1108-4327-88d1-417206dc472f",
           "oldValuesSummary": null,
           "newValuesSummary": {
-            "snapshotId": "d23f6f48-29f2-4f72-8d59-c766de2e4e56",
+            "snapshotId": "f7955c2b-9b9a-41d0-b212-792294a27498",
             "decision": "manual_review",
             "surface": "callcenter",
             "serviceProductType": "taxi_realtime",
             "serviceAreaCodes": [],
             "geometryVersionRefs": [],
             "reasonCodes": [],
-            "missingItems": ["pickup_coordinates", "dropoff_coordinates"],
+            "missingItems": [
+              "pickup_coordinates",
+              "dropoff_coordinates"
+            ],
             "provenanceComplete": false
           },
           "metadata": null
@@ -5476,13 +5861,18 @@
             "code": "DISPATCH_REQUIRES_MANUAL_REVIEW",
             "message": "Order requires manual review before dispatch.",
             "details": {
-              "orderId": "2865b435-dcd2-4870-a1a7-b25f68915f22",
-              "gateTypes": ["service_area"],
+              "orderId": "041fc4b6-1108-4327-88d1-417206dc472f",
+              "gateTypes": [
+                "service_area"
+              ],
               "reasonCodes": [],
-              "missingItems": ["pickup_coordinates", "dropoff_coordinates"]
+              "missingItems": [
+                "pickup_coordinates",
+                "dropoff_coordinates"
+              ]
             },
             "retryable": false,
-            "traceId": "cc7eaadf-d570-46a1-91be-6adcd78c643a"
+            "traceId": "b7d1a0f0-a018-4de0-b9ba-64d6a7bcb11a"
           }
         },
         "dispatchJobsForOrder": []

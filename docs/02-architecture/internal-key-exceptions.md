@@ -387,9 +387,14 @@ order:
    service identities, plus `DEV_WIF_SERVICE_ACCOUNT` for caller #9 with a
    `ciTenantActorGrants` entry for both
    `{tenantId: "10000000-0000-0000-0000-000000000201", actorType:
-   "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and
-   the `...000902` / `tenant_ops_admin` pair) and sets
-   `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`.
+   "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and the
+   `...000902` pair -- **also** `actorType: "tenant_admin"`, not
+   `tenant_ops_admin` (corrected in §7.9: `deploy-dev.yml` sends the literal
+   header `x-actor-type: tenant_admin` on both `POST /api/auth/token` calls;
+   only `x-actor-id` differs between the two, and the resulting *session's*
+   role still comes out as `tenant_ops_admin` for `...902` from the durable
+   tenant-user fixture lookup, not from this header or this grant) -- and
+   sets `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`.
 2. A real dev deploy of this candidate (or later) confirms
    `AUTH_LEGACY_INTERNAL_KEY_USED` for `INTERNAL_KEY_EXCP_002` stops
    appearing in `apps/api` logs / `internalKeyMetrics` for all nine
@@ -578,7 +583,7 @@ two entries, not nine:
 | Entry | `serviceAccountEmail` | `routeScopes` | Covers |
 | --- | --- | --- | --- |
 | A | `drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com` | `["* *"]` | Callers #1-8 (every web app's control-plane proxy / API client in §6's inventory). `* *` is not a narrowing regression here: callers #1/2/4/6 already legitimately need `* *` as generic reverse proxies, and because #3/5/7/8 share that exact same Google identity in dev, there is no request-time signal that can distinguish them -- any `routeScopes` narrower than `* *` on this one entry would incorrectly 403 the broad proxies, and any second entry with the same email would never be reached. |
-| B | the email behind `secrets.DEV_WIF_SERVICE_ACCOUNT` (GitHub Actions deployer identity; this worker cannot read secret values and does not need to -- ops already has it) | `["POST auth/token"]` | Caller #9 (`deploy-dev` operational acceptance), with `ciTenantActorGrants` for both `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and the `...000902` / `tenant_ops_admin` pair, exactly as §7.2 item 1 already specified. |
+| B | `github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com` (verified in §7.9: this is the only service account in the project bound with `roles/iam.workloadIdentityUser` to the GitHub OIDC pool for this repo, i.e. the identity `secrets.DEV_WIF_SERVICE_ACCOUNT` names) | `["POST auth/token"]` | Caller #9 (`deploy-dev` operational acceptance), with `ciTenantActorGrants` for both `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000901"}` and `{tenantId: "10000000-0000-0000-0000-000000000201", actorType: "tenant_admin", actorId: "10000000-0000-0000-0000-000000000902"}` -- **both** grants use `actorType: "tenant_admin"` (corrected in §7.9; this table previously said the second grant was `tenant_ops_admin`, which does not match either `POST /api/auth/token` call's actual `x-actor-type: tenant_admin` header in `deploy-dev.yml` and would have made that grant lookup never match). |
 
 Both entries need `principalId` (any stable, human-readable identifier --
 e.g. `dev-web-runtime` / `dev-ci-deployer`).
@@ -662,137 +667,725 @@ by both fixes above -- neither the workflow edit nor the doc edit removes or
 weakens them, and this worker made no shared-dev writes or deployments while
 making them.
 
-### 7.8 Re-dispatch (2026-10-02, sixth session): three missed callers and a staging/production go/no-go finding
+### 7.8 Planning-blocker routing (2026-10-01): no new product/contract decision exists
+
+This section is the output of the chairman-auto-generated unblock-helper task
+`SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-PLANNING-DECISION`, whose brief
+asked this worker to "resolve or route the missing product/contract decision"
+behind the parent task's latest `blocked` state. Finding: there is no missing
+decision to make. The product decision was already made and recorded on
+2026-09-30 (registry row above: "Temporarily extended per user decision on
+2026-09-30 ... accepting the delay of scheduled security retirement"), and
+every subsequent round (§7.1-§7.7) has operated inside that decision without
+needing a new one. The parent's `blocked` state is correct and does not need
+re-litigation; it needed its root cause made explicit, which is what follows.
+
+**What the parent task's state actually is (re-verified 2026-10-01 from this
+worktree at `origin/dev` HEAD `5b0ec5283`, which contains merge_sha
+`c47ea39ac0131...` recorded on the candidate)**:
+
+- `required_acceptance` items 1-2 (`all_excp_002_callers_inventoried_with_usage_evidence`,
+  `callers_migrated_to_wif_assertion`) are met and merged; reviewer Claude2 has
+  independently re-confirmed this on every round through the `c47ea39ac`
+  merge.
+- `required_acceptance` item 3 (`excp_002_removed_and_deploy_dev_green`) is
+  **not** met: `grep -n "INTERNAL_KEY_EXCP_002"
+  apps/api/src/common/auth/internal-key-exception-registry.ts` still returns a
+  match at this HEAD, and the inventory table in §2 above still lists
+  `INTERNAL_KEY_EXCP_002` as active. The dual-send code path (send both
+  `x-drts-google-id-token` and the legacy `x-drts-internal-key`) is what
+  shipped; removing the legacy fallback is causally downstream of a real
+  `deploy-dev.yml` run that proves every caller lands on WIF, which itself
+  needs the §7.6 2-entry `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` GCP
+  secret to exist first (`gcloud secrets describe
+  drts-dev-workload-identity-google-service-principals --project
+  drts-dev-devcc-20260825` returns `NOT_FOUND` as of the most recent prior
+  session's check). Populating that secret, setting the
+  `DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` repo var, and dispatching a
+  real `deploy-dev.yml` run are GCP/GitHub admin writes outside sandbox write
+  reach, and at least one prior session confirmed this is a deliberate
+  reservation for a human operator (its own sandbox credentials technically
+  had `roles/owner` on the GCP project but it still declined to act, per
+  §7.6's session note) -- not a sandbox permission gap to work around.
+- The parent's most recent `blocked` worker-outcome entry
+  (`claude-20261001T025612Z-002820d9`, `2026-10-01T02:58:43Z`, summary
+  `"Claude2"`) is **not** a new finding and carries no decision content. Cross-
+  checked against `ai-activity-log.jsonl`: that worker run requested a Bash
+  approval at `02:57:41Z` (`apr-20261001T025741Z-ead31224`), never received a
+  decision, and was killed (`worker_superseded`) at `02:58:45Z` with the
+  approval `auto-pruned`/`deny`'d a moment later -- the standard failure
+  signature of the `orchestrator_approval_broker` MCP being unreachable, the
+  same `CONNECT_TIMEOUT` this unblock-helper's own session observed live on
+  2026-10-01. This is not isolated: the log holds 404 `approval_pruned` events
+  (`grep -c '"type": "approval_pruned"' ai-activity-log.jsonl`) spanning many
+  unrelated tasks, confirming an infra-wide outage, not a per-task content
+  problem. The synthetic `blocked`/`"Claude2"` receipt is a side effect of
+  that outage, not a signal that a new decision or reviewer input is pending.
+
+**Routing decision**: no entry is added to `PHASE1_OPEN_QUESTIONS.md` or
+`PHASE1_DECISION_LEDGER.md` -- there is no open product/contract question.
+The parent task should remain `blocked`, `waiting_for: Claude2` (the nearest
+valid lane agent; `human`/`Supervisor` are not accepted by
+`ensure_agent`), with its `next` field corrected to state plainly that the
+remaining gate is the human-operator ops action above, not further owner
+code work and not a reviewer decision. Any future dispatch of an owner onto
+the parent while that ops action is still outstanding should re-block
+immediately with the same message rather than re-attempt code changes.
+
+**Why this worker could not write that correction onto the parent task
+directly**: `TaskBoardCommandExecutor._guard_worker_command` restricts a
+dispatched worker (`ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID` set, as every task-brief
+dispatch has) to mutating only `ORCH_DISPATCH_TASK_ID` -- this helper's own
+id, not the parent's. `note <parent-id>` and `assign <parent-id> ...` both
+exit with "Dispatched worker cannot mutate a different task" /
+"Dispatched workers must use their assigned task lifecycle commands". A
+Supervisor-privileged interactive session (no `ORCH_DISPATCH_ROLE`/
+`ORCH_RUN_ID`) must run, in order, once this helper candidate is reviewed:
+
+```
+TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting_for":"Claude2","resolved_parent_next":"No open product/contract decision (user decision stands from 2026-09-30, see internal-key-exceptions.md §7.8). required_acceptance items 1-2 remain merged; item 3 (excp_002_removed_and_deploy_dev_green) remains blocked on a human operator populating the 2-entry WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS GCP secret, setting DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED, and running a real green deploy-dev. Do not redispatch an owner for code work until that ops action lands."}' \
+  AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py assign \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-PLANNING-DECISION Claude Claude2
+
+AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py note \
+  SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 'No open product/contract decision (user decision stands from 2026-09-30, see internal-key-exceptions.md §7.8). required_acceptance items 1-2 remain merged; item 3 remains blocked on a human operator GCP/GitHub ops action, not code or review work.'
+```
+
+The `assign` call sets `resolved_parent_status: blocked` on this helper task
+so that, once this helper itself reaches `done` via the normal candidate
+lifecycle (review by Claude2, CI, merge), `apply_unblock_parent_resolution`
+in `bin/ai_status.py` reads that field and keeps the parent correctly
+`blocked` (with the corrected `next` message and a fresh open blocker entry)
+instead of defaulting it to `todo` with a generic message, which is what
+happens when a completed `unblock` helper carries no `resolved_parent_*`
+metadata. The `note` call gives the parent's `next` field the corrected text
+immediately, without waiting for this helper's own merge.
+
+## 7.9 Pre-rollout fixes (2026-10-01, `SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001`): proxy replay false-positive, CI authorization mismatch, unregistered-caller blast radius
+
+This task was dispatched specifically because populating
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` (the still-outstanding step
+from §7.5/§7.6/§7.8) was found, on closer inspection, to be unsafe to do yet:
+three defects in the shipped WIF verification path would each have broken
+dev the moment ops turned the registry on, none of them visible from static
+review of the registry JSON alone. All three are fixed in this candidate;
+none required changing the exception registry's active/expired state in
+`internal-key-exception-registry.ts`, and `INTERNAL_KEY_EXCP_002` remains
+active and unremoved, same as every prior round in this section.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| A verified, correctly-registered, non-expired Google ID token is rejected as a replay on the second of two concurrent general proxy requests, because a Cloud Run metadata server returns the byte-identical cached token to every caller within its validity window (`一般代理請求...在Google ID token有效期內可重複使用同一token，並行相同token的請求全部成功`) | `apps/api/src/modules/auth/google-workload-identity.adapter.ts`: `verifyServicePrincipal`'s `context` parameter gains `enforceReplayProtection?: boolean` (default `true`); the `IdentityRepository.consumeWorkloadIdentityAssertion` call (and its `iam.workload_identity_assertions` / in-memory-fallback insert) is skipped entirely when `false`, so repeat presentation of the identical assertion is not rejected and adds no ledger row at all -- not merely a bounded/idempotent write, no write. `apps/api/src/common/auth/internal-key.middleware.ts`'s `validateInternalKey` (the only caller reached via `InternalKeyMiddleware`, i.e. every general proxied route) now passes `enforceReplayProtection: false`. `apps/api/src/modules/auth/auth.controller.ts`'s `POST /api/auth/token` call site is unchanged (no option passed, so the default `true` still applies) -- this is the only call site that mints a durable session from the assertion and must keep one-time-use semantics. | Before: entry A (§7.6/§7.7's shared `drts-dev-runtime@...` SA, `routeScopes: ["* *"]`, covering every one of callers #1-8's proxied requests) would 409 with `WORKLOAD_ASSERTION_REPLAYED` on every request after the first to reuse that SA's cached metadata-server token within its lifetime -- i.e. essentially every second-and-later parallel API call a browser page fires, for every page on every one of the five web apps behind callers #1-8. Populating the registry as §7.6 instructs would have made this fire immediately. After: `apps/api/tests/unit/google-workload-identity.adapter.test.ts` "allows reusing the identical assertion repeatedly when replay protection is disabled" fires 3 concurrent `verifyServicePrincipal` calls with one identical token and `enforceReplayProtection: false`; all 3 resolve. `tests/unit/internal-key.middleware.test.ts` "accepts the same cached Google ID token for concurrent general proxy requests" exercises the same path through the actual `validateInternalKey` entry point `InternalKeyMiddleware` calls. The pre-existing "rejects replaying the same assertion twice by default" test (now renamed, behavior unchanged) and the new "still enforces every other check (issuer, audience, route scope) when replay protection is disabled" test confirm session-issuance replay enforcement and the other verification checks are untouched. | `pnpm --filter @drts/contracts build` (exit 0); `pnpm --filter @drts/control-plane-auth build` (exit 0, pre-existing dependency, needed before `apps/api` typechecks in this worktree); from `apps/api`: `pnpm exec tsc --noEmit -p tsconfig.json` (exit 0, clean); `pnpm exec vitest run tests/unit/google-workload-identity.adapter.test.ts tests/unit/auth-bootstrap.test.ts` (exit 0, 2 files / 114 tests passed); `pnpm exec vitest run tests/unit` (exit 0, full `apps/api` unit suite, 119 files / 1168 tests passed -- confirms no regression anywhere else in the API from the fallback widening or the replay-flag default); from repo root: `pnpm exec vitest run tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts` (exit 0, 2 files / 19 tests passed); `pnpm exec vitest run tests/integration/internal-key-rotation-retirement.integration.test.ts` (exit 0, 1 file / 6 tests passed, confirms the unrelated dual-key rotation/retirement behavior in the same middleware is untouched); `pnpm exec eslint` on all five touched source/test files (clean, except the one pre-existing `no-unused-vars` hit on `apps/api/tests/unit/auth-bootstrap.test.ts:495`, confirmed present in this branch's base commit via `git show HEAD:apps/api/tests/unit/auth-bootstrap.test.ts` before this candidate's edits, same pre-existing issue §7.3 already recorded at its then-line-number 490). | Not run to completion: the full root `pnpm test:unit` (hundreds of files beyond this task's scope) was started and reached ~900 files before stalling with near-0% CPU on a DB-dependent e2e file after `tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`, consistent with this sandbox's no-Postgres restriction (§7.4's own prior finding); not claimed as passing. Also not run: a real Cloud Run metadata server / live dev deploy (no trigger path from this branch, same restriction as every prior round in this section); this fix is verified against a real generated RSA keypair and real `jsonwebtoken` verification, not a live Google-issued token. Separately observed and unrelated to this candidate: `tests/integration/control-plane-auth-prod-resolution.integration.test.ts` fails 2/4 in this specific worktree because `apps/api/node_modules/@drts/control-plane-auth` is a stale pnpm symlink pointing into a different task's worktree (`.../worktrees/auto/gemini-sr-live-map-c114-identity-remediation-r2-20261001/packages/control-plane-auth`), predating this session -- a workspace-linking artifact of this isolated worktree, not a code defect; confirmed by inspecting the symlink target directly. |
+| §7.6's corrected 2-entry registry plan would make the shared-proxy SA's own grant (entry A) also gate `POST auth/token`'s `ciTenantActorGrants` matching, which requires the caller's literal `x-actor-type` header to equal the registered grant's `actorType` -- but the two registered grants in §7.2 item 1 and §7.6 table row B were documented with `actorType: "tenant_admin"` for actorId `...901` and `actorType: "tenant_ops_admin"` for actorId `...902`, while `deploy-dev.yml`'s two `POST /api/auth/token` calls (lines 1653 and 1674) both literally send `x-actor-type: tenant_admin` -- only `x-actor-id` differs (`部署CI授權的actorType與實際header一致`) | `docs/02-architecture/internal-key-exceptions.md` §7.2 item 1 and §7.6's entry-B table row: corrected both to state the `...902` grant also uses `actorType: "tenant_admin"`, matching the header `deploy-dev.yml` actually sends. The *session role* that results for `...902` (`tenant_ops_admin`) is unaffected -- it comes from `TenantPartnerService.findTenantUser`'s durable fixture lookup by `(tenantId, actorId)` in `auth.controller.ts`, not from the bootstrap `x-actor-type` header or this grant's `actorType` field, which only gate `resolveCiTenantActorGrant`'s tuple match. No `apps/api` code changed for this finding -- `resolveCiTenantActorGrant`'s exact-tuple-match logic (`google-workload-identity.adapter.ts:489-496`) was already correct; only the ops-facing documentation of what to register was wrong. | Before: following §7.2/§7.6 literally, ops would have registered `{tenantId: "...201", actorType: "tenant_ops_admin", actorId: "...902"}`. The real request's tuple is `{tenantId: "...201", actorType: "tenant_admin", actorId: "...902"}` (from the header `deploy-dev.yml` sends) -- `actorType` would never match, so `resolveCiTenantActorGrant` returns `null`, and `auth.controller.ts:486-491` throws `WORKLOAD_CI_TENANT_ACTOR_DENIED` (403) for the Tenant Ops dispatch session every single run, once the gate is enabled. After: the doc's two documented grants both say `actorType: "tenant_admin"`, matching the header; the pasteable JSON in this section below reflects the fix directly. | `tests/unit/internal-key-wif-configuration.test.ts` "both operational-acceptance POST /api/auth/token calls send the literal x-actor-type header actually documented for their ciTenantActorGrants entry" parses both header lines from the live `deploy-dev.yml` and asserts both equal `tenant_admin`; "documents both ciTenantActorGrants entries (actorId ...901 and ...902) with actorType tenant_admin, matching the workflow header" asserts the doc text for both entries and asserts the old wrong `tenant_ops_admin`-grant phrasing is gone from both places it previously appeared. | Not run: an actual populated registry against a live `deploy-dev.yml` run (same reservation as §7.5/§7.6/§7.8 -- populating the GCP secret and enabling the gate are human-operator actions outside this sandbox's write reach). This finding was caught by re-deriving the real request tuple from the workflow file and comparing it character-for-character against the doc's prior text, not by exercising a live run. |
+| Once ops populates the registry (even correctly, per this section's corrected 2-entry plan), any future caller whose Google-signed token verifies (good signature, issuer, audience) but whose service-account email is not yet one of the two registered entries gets `WORKLOAD_PRINCIPAL_NOT_REGISTERED` (403) from `verifyServicePrincipal`, and both `InternalKeyMiddleware` and `auth.controller.ts`'s prior `catch` blocks re-threw everything except `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` -- so that 403 was hard, with no fallback to the legacy `x-drts-internal-key` the caller may also be dual-sending, for every route that caller's traffic touches (`註冊表未列出的呼叫者不會讓dev網站整體失效`) | `apps/api/src/modules/auth/google-workload-identity.adapter.ts`: new exported `isGoogleWorkloadIdentityPrincipalNotRegistered(error)` helper (mirrors the existing `isGoogleWorkloadIdentityNotConfigured`, checking `error.code === "WORKLOAD_PRINCIPAL_NOT_REGISTERED"`). `internal-key.middleware.ts`'s `validateInternalKey` and `auth.controller.ts`'s `issueToken` both now treat this the same as "registry not configured yet": fall through to the still-fully-enforced legacy `x-drts-internal-key` check instead of hard-denying. Every *other* verification failure for an already-registered principal (bad signature, issuer mismatch, audience mismatch, replay on the session-issuance path, route scope denial) is unchanged and still fails closed -- this widening is scoped to exactly one error code, not "any WIF failure falls back". | Before: a ninth caller (or a typo'd/rotated service-account email on an existing one) dual-sending a verified-but-unregistered Google assertion alongside a perfectly valid internal key would still get a hard 403 on every request -- the internal key was never even inspected. After: the same request resolves successfully via the internal-key path. Security property preserved: falling through does not grant any bypass -- the internal key is independently and fully validated on the fallback path exactly as it is today for any caller that never sent a Google token at all. | `tests/unit/internal-key.middleware.test.ts` "does not let an unregistered caller's Google assertion take the whole route down when a valid internal key is also present" (registry populated with one *other* SA, proxy request); `apps/api/tests/unit/auth-bootstrap.test.ts` "falls back to the internal key when the registry is populated but does not list this caller's service account" (same scenario through `POST /api/auth/token`). The adjacent boundary test "still fails closed for a registered principal's genuinely invalid assertion (wrong audience) even with a valid internal key present" confirms the widening did not accidentally cover audience mismatch, issuer mismatch, or route scope denial for a principal that *is* registered. | Audience mismatch and route-scope denial for an *already-registered* principal are deliberately left fail-closed (not widened) even though a misconfigured `allowedTokenAudiences` entry (e.g. after a Cloud Run redeploy changes the origin, see the `DEV_IAP_CLIENT_ID` caveat in §7.6/§7.7) could in principle also take down every caller sharing that entry. That scenario is a real but distinct configuration-drift risk this task was not asked to solve and did not investigate further; ops should treat the §7.6 "re-verify the live Cloud Run URL" guidance as load-bearing, not optional. |
+
+### 7.9.1 Pasteable `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry (verified 2026-10-01)
+
+Both values below were independently re-verified from this sandbox's
+read-only `gcloud` credentials (no secret values were read; no GCP/GitHub
+writes were made):
+
+- Entry A's `serviceAccountEmail` and Entry B's `serviceAccountEmail` are
+  confirmed distinct, real service accounts in `drts-dev-devcc-20260825`:
+  `gcloud iam service-accounts list --project=drts-dev-devcc-20260825`
+  returns exactly three service accounts in this project
+  (`github-actions-deployer@...`, the default compute SA, and
+  `drts-dev-runtime@...`). `gcloud run services list ... --format='table(metadata.name,spec.template.spec.serviceAccountName)'`
+  (§7.6's own command, re-run unchanged) confirms every one of the nine
+  Cloud Run services behind callers #1-8 runs as `drts-dev-runtime@...`
+  (Entry A). `gcloud iam service-accounts get-iam-policy github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+  shows it alone holds `roles/iam.workloadIdentityUser` for
+  `principalSet://iam.googleapis.com/projects/24645990627/locations/global/workloadIdentityPools/github-actions/attribute.repository/ajoe734/drts-fleet-platform`
+  -- i.e. it is the only service account this repo's GitHub Actions runs can
+  impersonate via WIF at all, confirming it is the identity
+  `secrets.DEV_WIF_SERVICE_ACCOUNT` names for Entry B. (`get-iam-policy` on
+  `drts-dev-runtime@...` separately shows only
+  `github-actions-deployer@...` is permitted to impersonate *it*, for
+  deploying Cloud Run services -- consistent, not conflicting, with the
+  above.)
+- The audience value is the live `drts-dev-api` Cloud Run service URL, per
+  §7.6's own audience correction: `gcloud run services describe drts-dev-api
+  --platform=managed --region=us-central1 --project=drts-dev-devcc-20260825
+  --format='value(status.url)'` returned
+  `https://drts-dev-api-r6ykdme3wa-uc.a.run.app` at the time of this
+  writing. Cloud Run service URLs are stable for the life of the service
+  (they do not change per revision/deploy), but ops should re-run this exact
+  command before pasting the JSON below if there is any doubt. If
+  `vars.DEV_IAP_CLIENT_ID` is ever set, only **Entry A**'s
+  `allowedTokenAudiences` must switch to that client ID (callers #1-8 read
+  `DRTS_API_AUTH_AUDIENCE`, which is only populated from `DEV_IAP_CLIENT_ID`);
+  **Entry B** must stay on the live API origin URL regardless, because
+  `deploy-dev.yml`'s two `Mint identity token -- API operational acceptance`
+  steps hardcode `id_token_audience: ${{ needs.health-check.outputs.api }}`
+  and never read `DEV_IAP_CLIENT_ID` (see §7.6's `DEV_IAP_CLIENT_ID` caveat).
+  Switching both entries, as an earlier draft of this note incorrectly said,
+  would make Entry B's token's `aud` claim stop matching its
+  `allowedTokenAudiences` and fail every CI operational-acceptance call
+  closed with `WORKLOAD_AUDIENCE_MISMATCH` (403), including for a caller
+  that also has a valid legacy internal key, since that check is
+  intentionally not covered by the unregistered-caller fallback in the row
+  below.
+
+```json
+[
+  {
+    "serviceAccountEmail": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-web-runtime",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["* *"]
+  },
+  {
+    "serviceAccountEmail": "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-ci-deployer",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["POST auth/token"],
+    "ciTenantActorGrants": [
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000901"
+      },
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000902"
+      }
+    ]
+  }
+]
+```
+
+To apply: `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=<the JSON above,
+compacted to one line>` as the Cloud Run secret value mounted by
+`deploy-dev.yml`'s `api_secrets` step (`${secret_prefix}-workload-identity-google-service-principals`,
+per §7.5), alongside setting
+`vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`. This section
+documents the values; it does not and cannot write the GCP secret or GitHub
+variable itself (same reservation as every prior round in this section).
+
+### 7.9.2 Open blocker: live-map observer onboarding is not covered by the two-entry registry
+
+A third caller mints a Google assertion against the **same** service account
+as Entry B and is not satisfied by either Entry B's `ciTenantActorGrants` or
+the unregistered-caller fallback in §7.9's table, so it will fail closed the
+moment the registry above is populated. This is a coordination blocker, not
+a defect fixed in this candidate -- no registry, code, or workflow change is
+made for it here.
+
+- **Caller**: `.github/workflows/live-entry-map-acceptance.yml:265` mints its
+  identity token via `secrets.DEV_WIF_SERVICE_ACCOUNT` -- the same
+  `github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+  identity as Entry B (§7.9.1 verified this is the only SA this repo's
+  GitHub Actions can impersonate via WIF). `tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts:69-78`
+  then posts `POST auth/token` for actor `live-map-observer`, role
+  `ops_observer`, realm `ops`, with `x-drts-google-id-token` set and **no**
+  `x-drts-internal-key`.
+- **Why Entry B as documented does not cover it**: Entry B's
+  `ciTenantActorGrants` lists only the two `tenant_admin` tuples for actorIds
+  `...901`/`...902` (§7.9.1). `resolveCiTenantActorGrant`'s exact-tuple match
+  (`google-workload-identity.adapter.ts:489-496`) has no entry for
+  `(realm: ops, actorType: ops_observer/system, actorId: live-map-observer)`,
+  so `auth.controller.ts` throws `WORKLOAD_CI_TENANT_ACTOR_DENIED` (403) --
+  confirmed by a read-only reviewer probe through the real `AuthController.issueToken`,
+  adapter, and `IdentityRepository` with the §7.9.1 registry and a freshly
+  signed, otherwise-valid Entry B token carrying this actor.
+- **Why the unregistered-caller fallback (§7.9's third row) does not help
+  either**: that fallback only applies when the assertion's service account
+  is *not* one of the registered entries at all (`WORKLOAD_PRINCIPAL_NOT_REGISTERED`),
+  letting such a caller fall through to a legacy `x-drts-internal-key` it
+  may also send. This caller's service account **is** registered (as Entry
+  B); it fails a *different*, intentionally fail-closed check
+  (`ciTenantActorGrants` tuple match on an already-registered principal), and
+  it sends no internal key to fall back to regardless.
+- **What this task does not do about it, and why**: per this task's own
+  integration notes, widening Entry B's grants (or adding route scopes) to
+  cover this actor without the live-map task owner's agreement is explicitly
+  out of scope here, and a second registry entry for the same
+  `serviceAccountEmail` would be dead code -- `loadRegistry()`'s lookup
+  (`google-workload-identity.adapter.ts:223`) is `Array.prototype.find`,
+  first match only (§7.6), so only the first entry sharing that email would
+  ever be live.
+- **What the eventual fix needs**: a direct-identity mapping for this
+  caller, coordinated with the live-map task owner before it is added --
+  not a blanket widening of Entry B. Concretely, a `ciTenantActorGrants`-style
+  tuple (or an equivalent least-privilege grant) keyed on this caller's own
+  `actorId`/`principalId` (`live-map-observer`), its `ops_observer` role,
+  scoped to the minimum it needs (the live-map acceptance suite reads
+  `regulatory:read`), with the same Entry B audience and restricted to
+  `POST auth/token`, added only once the map task owner confirms the
+  identity and scope. Until that coordination lands, `live-entry-map-acceptance.yml`'s
+  session bootstrap will 403 once ops populates the registry above; ops
+  should not enable `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` for the live
+  map's acceptance environment until this is resolved, or should otherwise
+  sequence the two rollouts so this caller is not broken in between.
+
+## 8. `SR-MAIL-SCHEDULER-PROVISION-20261001`: scheduler service account (Entry C)
+
+`SR-MAIL-RETRY-SCHEDULE-20261001` (PR #2261, merged to `dev`) added two
+`system`-realm-only HTTP routes so an external scheduler can trigger the
+retryable mail outbox drain and the approval-timeout reminder sweep while
+`apps/api`'s Cloud Run service is scaled to zero
+(`apps/api/src/modules/tenant-partner/tenant-partner.controller.ts:239,281`,
+policy in `apps/api/src/common/auth/auth.policy.ts:936-958`):
+
+| Route | Required scope | Allowed realm |
+| --- | --- | --- |
+| `POST internal/scheduled-tasks/mail-outbox/drain` | `notification-delivery:drain` | `system` only |
+| `POST internal/scheduled-tasks/approval-timeout-reminders/run` | `tenant-partner:approval-timeout-reminders:run` | `system` only |
+
+Cloud Scheduler presents its OIDC identity token as a plain
+`Authorization: Bearer <token>` header (it cannot be redirected to the
+custom `x-drts-google-id-token` header `GoogleWorkloadIdentityAdapter` was
+originally built for). `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback`
+(`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-696`) already
+re-offers that bearer token to the same adapter, but only for a route whose
+resolved policy's `allowedRealms` is exactly `["system"]` — both routes
+above qualify, and no user-facing tenant/ops/platform/driver/partner route
+does, so this fallback cannot be used to reach anything else. Every other
+verification step (signature, issuer, audience, registered principal, route
+scope, one-time replay) is unchanged and still fail-closed. This call site
+does not pass `enforceReplayProtection: false`, so the default `true`
+applies, same as every other `verifyServicePrincipal` call site except the
+general-proxy one §7.9 fixed (`InternalKeyMiddleware`'s, which must tolerate
+a cached, repeated token). That default is correct here: Cloud Scheduler
+mints a fresh OIDC token for every invocation, so there is no legitimate
+case of the identical assertion arriving twice, unlike the cached-token
+proxy scenario §7.9 fixed.
+
+### 8.1 Registry entry C
+
+A third `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` entry, for a new
+dedicated service account `drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+(not yet created; `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` §8.2
+creates it). `routeScopes` lists exactly the two routes above and nothing
+else — including `* *` or a prefix pattern would let a compromised or
+misconfigured scheduler credential reach every other internal route this
+fallback guards against; `scopes` lists exactly the two scopes those routes
+require, nothing broader. Re-verified against this sandbox's read-only
+`gcloud` credentials on 2026-10-01: `gcloud iam service-accounts list
+--project=drts-dev-devcc-20260825` still returns only the three service
+accounts listed in §7.9.1 (no `drts-dev-scheduler` yet); `gcloud services
+list --project=drts-dev-devcc-20260825 --filter="name:cloudscheduler.googleapis.com"`
+returns no rows, confirming the API is still disabled; `gcloud run services
+describe drts-dev-api ... --format='value(status.url)'` still returns
+`https://drts-dev-api-r6ykdme3wa-uc.a.run.app`, matching Entries A/B's
+audience unchanged; `gcloud secrets list --project=drts-dev-devcc-20260825
+--filter="name:workload-identity-google"` returns no rows, confirming the
+registry secret is still unpopulated (this task does not populate it either
+— see the runbook).
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-scheduler",
+  "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+  "routeScopes": [
+    "POST internal/scheduled-tasks/mail-outbox/drain",
+    "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+  ],
+  "scopes": [
+    "notification-delivery:drain",
+    "tenant-partner:approval-timeout-reminders:run"
+  ]
+}
+```
+
+`routeScopes`' "`METHOD path`" format and matching rules are
+`matchesScope`'s (`apps/api/src/common/auth/internal-key-exception-registry.ts:159-203`),
+the same matcher `INTERNAL_KEY_EXCEPTION_REGISTRY.scope` and Entries A/B's
+`routeScopes` already use — not a new DSL invented for this entry.
+`tests/unit/sr-mail-scheduler-provision-20261001.test.ts` locks this: both
+declared routes verify successfully through the real
+`GoogleWorkloadIdentityAdapter.verifyServicePrincipal` with a freshly
+signed, otherwise-valid Entry-C token, and every other probed route (wrong
+method on an in-scope path, `POST auth/token`, a generic tenant route, a
+"drain" path with a trailing-slash variant) is rejected with
+`WORKLOAD_ROUTE_SCOPE_DENIED`.
+
+No `ciTenantActorGrants` are declared: that field only gates
+`POST auth/token`'s CI-tenant-actor-impersonation branch
+(`auth.controller.ts`, `isCiTenantActorGateEnabled()`), which this
+principal's `routeScopes` does not even grant access to — a Google
+assertion from this service account presented at `POST /api/auth/token`
+is rejected by the route-scope check before `ciTenantActorGrants` is ever
+consulted.
+
+### 8.2 Full three-entry pasteable registry JSON
+
+Entries A and B below are copied verbatim from §7.9.1 (unchanged by this
+task); Entry C is new. This is the complete value for ops to paste as the
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret once
+`infra/gcp/dev/scheduler/provision-dev-scheduler.sh` has created the
+service account (the secret write itself is a separate operator step this
+task does not perform — see the runbook, `docs/03-runbooks/dev-scheduled-tasks-20261001.md`):
+
+```json
+[
+  {
+    "serviceAccountEmail": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-web-runtime",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["* *"]
+  },
+  {
+    "serviceAccountEmail": "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-ci-deployer",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["POST auth/token"],
+    "ciTenantActorGrants": [
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000901"
+      },
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000902"
+      }
+    ]
+  },
+  {
+    "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-scheduler",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": [
+      "POST internal/scheduled-tasks/mail-outbox/drain",
+      "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+    ],
+    "scopes": [
+      "notification-delivery:drain",
+      "tenant-partner:approval-timeout-reminders:run"
+    ]
+  }
+]
+```
+
+`loadRegistry()`'s lookup is first-match-only on `serviceAccountEmail`/
+`principalId` (§7.6), and all three entries above use distinct service
+accounts, so ordering within the array does not matter.
+
+### 8.3 Schedule-frequency rationale (for `provision-dev-scheduler.sh`)
+
+- **`mail-outbox/drain`, every 1 minute (`* * * * *`)**: every caller of
+  `NotificationDeliveryService.enqueue` in this repo (`audit-notification.email-adapter.ts:120-134`,
+  `regulatory-registry.service.ts:4171-4183`) immediately calls `.dispatch()`
+  in the same request, so `drain()` is a safety net for retries and for any
+  delivery that was enqueued but never got its first dispatch (e.g. a crash
+  between the two calls), not the primary send path. Its own retry backoff
+  (`apps/api/src/modules/notification-delivery/notification-delivery.service.ts:33-34,216-219`,
+  default `retryDelayMs=1000`, `maxAttempts=5`) produces delays of 1s, 2s,
+  4s, 8s between attempts — all under Cloud Scheduler's 1-minute minimum
+  granularity, so a 1-minute cadence is as tight as it is useful: a shorter
+  interval would not make any already-due retry fire sooner, it would only
+  add Cloud Run wake-ups between runs where nothing is due yet.
+- **`approval-timeout-reminders/run`, every 5 minutes (`*/5 * * * *`)**:
+  the sweep's own lead time is `APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS = 12h`
+  (`apps/api/src/modules/tenant-partner/tenant-partner.service.ts:479`); the
+  retired in-process poll ran every 60s
+  (`APPROVAL_NOTIFICATION_POLL_INTERVAL_MS`, same file, line 478) purely
+  because an in-memory interval is free to run that often, not because the
+  reminder is time-critical at that granularity. A 5-minute cadence bounds
+  any reminder to at most 5 minutes after it first became due against a
+  12-hour lead — negligible — while triggering the Cloud Run service a
+  fifth as often. The sweep is idempotent either way
+  (`hasApprovalNotificationDispatch` plus the outbox's idempotency key,
+  documented at `tenant-partner.controller.ts:276-285`), so a tighter or
+  looser cadence is a cost/latency trade, not a correctness one.
+
+### 8.4 Reopen fix (2026-10-01, R1): minimum privilege, unusable verification contract, and a test that didn't lock the delivered JSON
+
+Reviewer (`Codex`) reopened candidate `21da35f61efe0354a1aaa856c60affb28339e201`
+(generation `6e38e6c749fe45f996e09b685946de23`, PR #2263) with three P2
+findings. Fixed in this candidate, per `AI_COLLABORATION_GUIDE.md` §0.7:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F1: not minimum privilege — `roles/iam.serviceAccountTokenCreator` also grants unused `getAccessToken`/`signBlob`/`signJwt`/`implicitDelegation` | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` IAM-binding step: role changed to `roles/iam.serviceAccountOpenIdTokenCreator`, the SA-scoped role that grants exactly `iam.serviceAccounts.getOpenIdToken` and nothing else (https://docs.cloud.google.com/iam/docs/service-account-permissions#service_account_roles). `docs/03-runbooks/dev-scheduled-tasks-20261001.md` step 3 and `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`'s script-content test updated to match; binding stays scoped to the one service account, not a project role. | Old: `--role="roles/iam.serviceAccountTokenCreator"` (4 unused permissions beyond what an OIDC-only job needs). New: `--role="roles/iam.serviceAccountOpenIdTokenCreator"` (1 permission, `getOpenIdToken`, the only one these jobs use). | `bash -n infra/gcp/dev/scheduler/provision-dev-scheduler.sh` exit 0; `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts` exit 0, 21/21 passed, including the new "grants only the OIDC-token-minting role, not the broader token-creator role" assertion. | Role grant not actually applied against a live project — this task does not run the script (guardrail); the role name and its permission set are taken from the official IAM reference the reviewer cited, not re-derived from a live `gcloud iam roles describe`. |
+| F2: operator verification contract was unusable — wrong `Job` field nesting, `jsonPayload` filter on a plain-text logger, and troubleshooting that assumed error codes the guard never surfaces | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh` handoff text and `docs/03-runbooks/dev-scheduled-tasks-20261001.md` §4 rewritten: `--format=value(...)` now reads `lastAttemptTime,state,status.code` (top-level `Job` fields plus `google.rpc.Status.code`, not nested `status.lastAttemptTime`/`status.state`, which print nothing); the `gcloud logging read` filter and output format use `textPayload`, not `jsonPayload.message` (`apps/api/src/main.ts` uses Nest's default logger, and `google-workload-identity.adapter.ts:374-375`'s `this.logger.log(...)` emits a plain string, so Cloud Run stores it as `textPayload`); troubleshooting now explains that `BootstrapAuthGuard.tryGoogleWorkloadIdentityFallback` (`apps/api/src/common/auth/bootstrap-auth.guard.ts:664-698`) catches every adapter rejection and falls through to a generic `JWT_INVALID`, so `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`/`WORKLOAD_PRINCIPAL_NOT_REGISTERED`/`WORKLOAD_AUDIENCE_MISMATCH` never appear in the HTTP response or logs — only `WORKLOAD_ROUTE_SCOPE_DENIED` is log-visible, because the adapter logs it via `this.logger.warn` before throwing. | Old: `--format='value(status.lastAttemptTime,status.state)'` (prints nothing — wrong nesting) and a `jsonPayload.message=~...` log filter (matches nothing — wrong payload type) presented as sufficient proof of success; troubleshooting listed three error codes as if they would appear in the logs. New: correct field names, `textPayload` filter scoped to the specific route per job, and troubleshooting that only promises a distinguishable log line for route-scope denial, with the other three causes diagnosed by re-reading the live secret/deployed revision instead. | `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts` exit 0, including the new "documents the job-describe verification with the real top-level Job fields" (script) and "uses the real top-level Job fields and textPayload, not status.* or jsonPayload" / "documents that BootstrapAuthGuard swallows adapter errors to JWT_INVALID" (runbook) assertions. | Verification is offline/static (string assertions on the script/runbook text and a read of the real adapter/guard source) — no live Cloud Scheduler job was run and no live Cloud Run log query was issued; this task's guardrails forbid both. |
+| F3: delivered registry JSON was not locked by the tests — adapter tests used hand-built constants, and the doc-content tests slice-matched prose instead of parsing the fenced JSON | `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: added `parseJsonFences()`, scoped to ```` ```json ```` fences only (so it cannot match the narrative prose above §8.1, which is where the old 600-char slice from `doc.indexOf(SCHEDULER_SA_EMAIL)` actually landed). The real-adapter `setUp()` now signs its test token against and feeds `process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` from the §8.2 array's parsed entry C, not a local literal — so the existing positive/negative adapter tests are now driven by the delivered content. A new describe block asserts the §8.1 standalone entry and the §8.2 array's entry C parse and deep-equal each other, and that the entry has exactly the two documented routes/scopes, the verified audience, and no `ciTenantActorGrants`/extra key. | Old: `setUp()` built `{ routeScopes: ENTRY_C_ROUTE_SCOPES, scopes: ENTRY_C_SCOPES, ... }` from local constants regardless of doc content; doc-content assertions used `doc.slice(doc.indexOf(SCHEDULER_SA_EMAIL), +600)`, which the reviewer showed lands in prose (`internal-key-exceptions.md:958`), not either JSON entry, so mutating §8.2's `routeScopes` to `["* *"]` left every assertion green. New: adapter tests and content assertions both read the same parsed §8.2 object; the reviewer's exact wildcard mutation was reproduced locally (sandbox-only, reverted before commit) and now fails 4 assertions — the §8.1/§8.2 agreement check, the exact-routeScopes check, and the two real-adapter denial tests that would otherwise wrongly accept `/api/auth/token` and `/api/tenant/passengers` under a `"* *"` grant. | `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts` exit 0, 21/21 passed against the real (unmutated) doc. Reproduction of the reviewer's exact mutation (`routeScopes` → `["* *"]` in the §8.2 array only) run locally and reverted: 4/21 failed as described above, confirming the new tests are not independent of the delivered content; `git status`/`git diff` confirmed clean after revert (the mutation was never committed). | The malformed-JSON case (a syntax error in a fence) is exercised by code path only (the `try`/`catch` in `parseJsonFences` plus the downstream "not found" `toBeDefined()` failure) — not separately reproduced locally, since reproducing it means editing the same file as the real content and the wildcard case already demonstrates the lock works. |
+
+Acceptance evidence on this candidate otherwise unchanged from §8.1–§8.3 (entry
+C's content, the three-entry array, and the schedule rationale were not
+findings in this reopen and were not touched beyond the F1 role-name edit).
+No runtime/cloud changes were made or are authorized by this fix — same
+guardrail as the original candidate.
+
+### 8.5 Reopen fix (2026-10-01, R2): CI typecheck regression in the test's own fence parser (F4)
+
+Reviewer (`Codex`) reopened candidate `fc988cd4f5991a4201e0b31daf1b78c2db71249c`
+(generation `b8922c9dc3a14921b4ca9b3904a4ee3e`, PR #2263) with one P1 finding:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F4: candidate did not typecheck — `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`'s `parseJsonFences()` passed a possibly-`undefined` regex capture group straight into `JSON.parse`, which `noUncheckedIndexedAccess` (this repo's `tsconfig.base.json`) rejects | `tests/unit/sr-mail-scheduler-provision-20261001.test.ts`'s `parseJsonFences()`: added an explicit `if (body === undefined) continue;` guard before `JSON.parse(body)`, narrowing `match[1]` from `string \| undefined` to `string` before use. No other lines changed. | Old: `const body = match[1]; try { parsed.push(JSON.parse(body)); } ...` — `body` typed `string \| undefined`, `JSON.parse` requires `string`, `tsc` reports `TS2345`. New: `undefined` is excluded by the guard before the `try`, so the same call now type-checks. | Reviewer's independent TypeScript compiler API probe (Node v22.23.2, TS 5.9.3, `strict`/`noUncheckedIndexedAccess`/`noEmit` all `true`) on the unchanged function text: old candidate → exactly `TS2345`; new candidate → zero diagnostics, probe exit 0. Hosted CI on the old candidate: `Product smoke` Typecheck job `110457825263` failed with the identical `TS2345` (run https://github.com/ajoe734/drts-fleet-platform/actions/runs/36888440094); integration-trunk Typecheck job `110458553179` failed identically on the same SHA. `pnpm exec vitest run` on the fixed candidate: 6 files, 69/69 passed (unchanged test behavior, only the type-level guard added). | Same-SHA hosted full typecheck for the fixed candidate (`a41645274edfe5225d176ecf52968cebaf4b47fe`) was still in progress when R3 read it (next section) — not claimed green by this fix alone, only the isolated parser-compile regression is claimed resolved. |
+
+No other content changed in this candidate; F1/F3 from §8.4 remain as fixed
+there, and F2 (below) was carried forward unresolved into R3.
+
+### 8.6 Reopen fix (2026-10-01, R3): operator verification proved only that an attempt *started*, not that it *completed* (F2)
+
+Reviewer (`Codex`) reopened candidate `a41645274edfe5225d176ecf52968cebaf4b47fe`
+(generation `876dc662a7c54a74af86b3b642aa95c5`, PR #2263) a third time. F1/F3/F4
+were confirmed fixed (§8.4, §8.5); one P2 finding, carried over unresolved
+from R2, remained:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F2 (unresolved from R1/R2): `jobs run` only dispatches a job and returns before the target responds; `Job.lastAttemptTime` is bumped the instant an attempt *starts*. The runbook and script both treated a fresh `lastAttemptTime` + `state=ENABLED` + `status.code` absent/`0`, read immediately after `jobs run`, as proof the request had *completed* successfully — indistinguishable from "still in flight." The diagnostic branch also told operators the success-only `textPayload` query could find a route-scope-denial log line it was never built to match. | New `infra/gcp/dev/scheduler/confirm-job-attempt.sh` (executable, mode 755): fires the job, records invocation time `T0` (`confirm-job-attempt.sh:50`), then polls (bounded by a timeout, default 90s) for actual completion evidence bound to `timestamp>="${T0}"` — either Cloud Scheduler's own `AttemptFinished` log entry for the exact `job_id` (`confirm-job-attempt.sh:59-76`, matching Google's troubleshooting guidance to pair `AttemptStarted` with a later `AttemptFinished`) or a corroborating Cloud Run HTTP request-log entry for the route (`confirm-job-attempt.sh:84-99`), distinguishing confirmed-success (exit 0) from confirmed-failure (exit 1, prints the actual status/HTTP code) from unconfirmed/timeout (exit 2, explicitly logged as "This does NOT mean the attempt failed"). `docs/03-runbooks/dev-scheduled-tasks-20261001.md` step 4 rewritten to lead with this script instead of the raw `jobs run`/`jobs describe` pair (kept only as a labeled "attempt started, not completion" explanation), and `provision-dev-scheduler.sh`'s handoff text updated to match. The diagnostic `textPayload` query changed from an `AUTH_GOOGLE_WORKLOAD_IDENTITY_USED`-only literal to `AUTH_GOOGLE_WORKLOAD_IDENTITY_(USED\|ROUTE_SCOPE_DENIED)\].*principalId=dev-scheduler.*route=...`, which matches either of the adapter's two actual log templates (`google-workload-identity.adapter.ts:287` denial, `:375` success — line numbers as read by this fix; see note below), so a logged denial is now discoverable by the one documented query instead of silently falling into the "nothing matched" branch. | Old: `gcloud scheduler jobs run ...; gcloud scheduler jobs describe ... --format='value(lastAttemptTime,state,status.code)'` presented as sufficient proof of success; `textPayload=~"AUTH_GOOGLE_WORKLOAD_IDENTITY_USED..."` presented as able to surface a route-scope-denial line it cannot match. New: `infra/gcp/dev/scheduler/confirm-job-attempt.sh <job> <route>` — exit code and printed evidence are the completion proof; combined regex matches both log templates. | Offline, no live Scheduler/Cloud Run calls (forbidden by this task's guardrails): `tests/unit/sr-mail-scheduler-provision-20261001.test.ts` spawns the real `confirm-job-attempt.sh` against a synthetic `gcloud` on `PATH` (`tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs`) that answers only from an in-memory fixture, filtered the same way the real `gcloud logging read` filter text would filter it (job_id/route match, `timestamp>=` the script's own invocation time). New describe block "confirm-job-attempt.sh's completion check is bounded, not just lastAttemptTime/state" (7 cases): no evidence at all → exit 2; a record that predates invocation (stale) → exit 2; a fresh record for a different job (wrong-job) → exit 2; a fresh matching Scheduler success record → exit 0; a fresh matching Scheduler failure record → exit 1 with the status code in the output; a fresh matching Cloud Run 2xx record (no Scheduler record) → exit 0; a fresh matching Cloud Run non-2xx record → exit 1. New describe block "documented diagnostic query finds both success and denial log lines" extracts the actual `textPayload=~"..."` pattern from the runbook text (not a hand-reproduced copy) and confirms it matches literal strings built from the real adapter's two log templates, and does not match an unrelated principal/route. `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: 31/31 passed; full regression set (same 6 files as prior rounds): 79/79 passed. `bash -n` on both scripts: exit 0. `pnpm exec eslint` on the changed test file and the new fixture module: exit 0. `python3 operations/security/verify-internal-key-exceptions.py`: PASSED. `pnpm typecheck:root`: fails only on the same pre-existing, unrelated-package errors already called out in §8.4/prior rounds (missing `@drts/ui-tokens`/`@drts/api-client` build output, a few `noImplicitAny` spots in unrelated apps, and an unrelated `tests/unit/system-remediation/sr-qa-ux-001` file) — zero errors in any file this fix touched. `git diff --check`: exit 0. | No live Cloud Scheduler job was run and no live Cloud Logging query was issued — this task's guardrails forbid both, so `confirm-job-attempt.sh`'s real `gcloud` invocations are verified only via `bash -n` and the fake-`gcloud` harness above, not against the live API's actual `AttemptFinished` log shape. The exact `google.cloud.scheduler.logging.AttemptFinished` JSON shape is taken from Google's published troubleshooting documentation (https://docs.cloud.google.com/scheduler/docs/troubleshooting) and the `Job`/`status` field contract (https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs), not re-derived from a live log export. Cloud Run's `httpRequest.status` request-log field is standard Cloud Run platform logging and was not independently re-verified against a live `drts-dev-api` log export in this fix. |
+
+No source changes were made beyond the files listed above (the new
+`confirm-job-attempt.sh`, the new test fixture, the runbook, the
+provisioning script's handoff text, and the test file). No GCP resources
+were created, no secrets or GitHub variables were touched, no deploy was
+triggered, and no local server or Docker container was started — same
+guardrails as every prior round on this task.
+
+### 8.7 Reopen fix (2026-10-01, R4): the completion check itself could be fooled into reporting false success, and a handoff heredoc executed a stray command (F2 part A, F2 part B, F5)
+
+Reviewer (`Codex`) reopened candidate `975f9de91a5041afaa651c6f7b41e4ba96762c3a`
+(generation `a5f82cf246b14941b9869020c7df4c74`, PR #2263) a fourth time. F1/
+F3/F4 remained fixed (§8.4, §8.5); the §8.6 `confirm-job-attempt.sh` repair
+closed the *started-vs-completed* gap but introduced two new false-success
+paths in the completion check itself, plus a new handoff-text regression:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F2 part A: the real `AttemptFinished` log's `jsonPayload.status` field is a scalar `google.rpc.Code` NAME STRING (e.g. `"OK"`, `"NOT_FOUND"`), not the nested `{code, message}` `google.rpc.Status` object the unrelated `Job.status` REST field uses. Selecting `jsonPayload.status.code` against a scalar field prints an empty second column for *every* outcome — success, every failure code, and a malformed record alike — and the script treated "empty" as success, so a failed or unauthenticated attempt (`NOT_FOUND`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, …) was certified `CONFIRMED COMPLETED (success...)`. | `infra/gcp/dev/scheduler/confirm-job-attempt.sh`: `--format=value(...)` now selects `jsonPayload.status` directly (`confirm-job-attempt.sh:91-98`); a `case` statement (`:102-117`) classifies it — exactly `OK` → success (exit 0); a recognized non-`OK` `google.rpc.Code` name → confirmed failure (exit 1, prints the value); anything else (empty, or an unrecognized string) → logged as a warning and treated as unconfirmed (the loop keeps polling rather than guessing). Header comment rewritten to document the real scalar shape and cite the evidence. `tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs` renamed its synthetic field from `statusCode` to `status` to match the real selector, so the fixture now exercises the actual projection instead of bypassing it. | Old: `--format=value(timestamp,jsonPayload.status.code)`; `status_code=""` or `"0"` → `exit 0` (success). New: `--format=value(timestamp,jsonPayload.status)`; `status="OK"` → `exit 0`; `status` one of the 16 other `google.rpc.Code` names → `exit 1`; empty/unrecognized → unconfirmed, never success. | Independent reproduction using the installed Google Cloud SDK's own `googlecloudsdk.core.resource.resource_printer` (not a hand-written stub) against a literal `{"status": "NOT_FOUND"}` `jsonPayload`: the OLD selector `value(timestamp,jsonPayload.status.code)` produced `'2099-01-01T00:00:00Z\t\n'` (empty second column — the false-success input); the NEW selector `value(timestamp,jsonPayload.status)` produced `'2099-01-01T00:00:00Z\tNOT_FOUND\n'`. `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: new cases cover `status=OK` (exit 0), `status=NOT_FOUND`/`PERMISSION_DENIED`/`UNAUTHENTICATED` (exit 1, each asserting the specific `status=...` string in the output), an absent `status` field (exit 2, not success), and an unrecognized future value `SOME_FUTURE_UNDOCUMENTED_VALUE` (exit 2, not success) — 37/37 passed in this file, 85/85 in the full regression set below. | Google has not published a complete enumeration of every value `AttemptFinished.jsonPayload.status` can take; this fix classifies the 17 standard `google.rpc.Code` names (cited from the general gRPC/Google API status-code set, since the Scheduler-specific troubleshooting page does not itself enumerate them) and treats anything else as unconfirmed by design, so an outcome using a name outside that set will report exit 2 rather than a wrong exit 0/1 — a conservative, not a precise, classification. No live Scheduler job was run; the real selector was verified via the installed SDK's own formatter, not a live log export. |
+| F2 part B: the Cloud Run HTTP-log fallback had no `requestMethod` filter and no way to correlate a given Cloud Run request to this specific Scheduler attempt. `apps/api/src/main.ts` enables CORS, so an unrelated `OPTIONS` preflight to the same route (or any other unrelated caller) could return 2xx and be accepted as proof this attempt succeeded, independent of what the actual scheduler-triggered `POST` did. | `infra/gcp/dev/scheduler/confirm-job-attempt.sh`: the Cloud Run lookup (`:124-137`) now adds `httpRequest.requestMethod="POST"` to the filter and is demoted to a **non-decisive diagnostic** — it is printed (once, to stderr, tagged `DIAGNOSTIC`) if found, but never produces an `exit 0`/`exit 1` on its own; only a matching Scheduler `AttemptFinished` record decides the exit code. The Scheduler query also gained `resource.labels.location="${REGION}"` (`:94`) so a same-`job_id` record from the wrong region can't match either. `docs/03-runbooks/dev-scheduled-tasks-20261001.md` §4 and `provision-dev-scheduler.sh`'s handoff text rewritten to describe the Cloud Run log as diagnostic-only, not corroborating proof. | Old: a matching Cloud Run 2xx record alone → `exit 0` ("CONFIRMED COMPLETED (success, Cloud Run HTTP 200)"), no method filter, no region filter on the Scheduler query. New: a matching Cloud Run 2xx record alone → `exit 2` (unconfirmed, with a `DIAGNOSTIC` line noting it was seen but not decisive); a non-`POST` Cloud Run record (e.g. an `OPTIONS` preflight) is excluded from even the diagnostic path; a same-`job_id` Scheduler record from a different `location` is excluded. | `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts`: new cases — Cloud Run 2xx alone → exit 2, output contains `DIAGNOSTIC` and `Cloud Run`, not `CONFIRMED COMPLETED` (regression test, named after the false-positive it closes); an `OPTIONS`/204 Cloud Run record → exit 2, output does *not* contain `DIAGNOSTIC` (excluded by the method filter before it can even become a diagnostic); a same-job record from `location=europe-west1` → exit 2 (wrong-region evidence); a scenario with both a decisive Scheduler `OK` record and a failing Cloud Run record present → exit 0 (Scheduler evidence is checked first and decides, the loop never reaches the Cloud Run query that pass). `tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs` extended to parse `resource.labels.location=` and `httpRequest.requestMethod=` out of the filter text and apply them, mirroring the real `gcloud logging read` filter the script now sends (not a hand-picked subset). 37/37 passed in this file, 85/85 full regression. | Cloud Logging's structured `httpRequest` fields do not expose a field that would let this script correlate a Cloud Run request to a specific Scheduler attempt even with the tightened filter (method + route + time window is the closest available signal without app-side changes, which are out of this task's scope); this is why the fix demotes Cloud Run to diagnostic rather than trying to fully close the correlation gap. No live Cloud Run/Scheduler logs were queried. |
+| F5 (new, introduced by this candidate's own prior round): `provision-dev-scheduler.sh`'s unquoted `cat <<EOF` handoff heredoc (`:143`) contained literal Markdown backticks around `` `gcloud scheduler jobs run` `` (`:152`). Bash evaluates backtick-delimited text as command substitution inside an unquoted heredoc, so printing the handoff text actually *executed* `gcloud scheduler jobs run` with no job argument and silently dropped the phrase from the rendered output. | `infra/gcp/dev/scheduler/provision-dev-scheduler.sh:152`: the two backticks are now backslash-escaped (`` \`gcloud scheduler jobs run\` ``), which Bash renders as literal backtick characters in heredoc output without triggering command substitution, while the heredoc stays unquoted so `${MAIL_OUTBOX_JOB}`/`${APPROVAL_REMINDER_JOB}`/`${SCHEDULER_SA}` interpolation in the same block (needed for the job-name arguments on the following lines) is preserved. | Old: `` `gcloud scheduler jobs run` `` inside unquoted `<<EOF` → Bash executes it as a command substitution when the heredoc is printed. New: `` \`gcloud scheduler jobs run\` `` → prints the literal backtick-quoted phrase, no command executed. | Independent reproduction: extracted *only* the handoff heredoc text (lines 143-171, unmodified from the file) into a standalone `bash -c` script with `gcloud` replaced by an exported shell function that records every invocation and exits 99 (`UNEXPECTED_GCLOUD_INVOCATION: $*`). Old candidate text: stderr `UNEXPECTED_GCLOUD_INVOCATION: scheduler jobs run`, rendered text missing the phrase, script exit 0 (the substitution's own exit code was swallowed by heredoc evaluation, masking the problem). New (fixed) text: no `gcloud` invocation, rendered output contains the literal `` `gcloud scheduler jobs run` `` phrase verbatim, exit 0. `bash -n infra/gcp/dev/scheduler/provision-dev-scheduler.sh`: exit 0 (syntax check alone does not catch command substitution in prose — this is exactly why the independent heredoc-only reproduction above was necessary). The provisioning script itself was not executed, even under mocks. | This reproduction extracted the heredoc in isolation rather than running the full script end-to-end under a complete `gcloud` mock (the script's guardrails forbid executing it, including under mocks, since earlier steps make real-shaped `gcloud` calls this task is not authorized to simulate as if-real); the isolated extraction is a faithful copy of the unmodified lines, not a paraphrase. |
+
+Acceptance evidence on routeScopes (F3, §8.4), the three-entry registry JSON
+(§8.2), the schedule rationale (§8.3), and the minimum-privilege IAM role
+(F1, §8.4) is unchanged from prior rounds — none were findings in this
+reopen and none were touched by this fix.
+
+All checks started locally for this round were completed and read before
+this candidate was handed off: `pnpm exec vitest run` on the six-file
+regression set (same files as §8.6) — 6 files, 85/85 passed (37/37 in
+`sr-mail-scheduler-provision-20261001.test.ts`, up from 31, reflecting the
+12 new cases above); `bash -n` on both scheduler scripts — exit 0;
+`python3 operations/security/verify-internal-key-exceptions.py` — PASSED;
+`pnpm exec eslint` on the changed test file and the fixture module — exit 0;
+`git diff --check` against the merge-base — exit 0. No source changes were
+made beyond `confirm-job-attempt.sh`, `provision-dev-scheduler.sh`'s handoff
+text, the test fixture, the test file, this document, and the runbook. No
+GCP resources were created, no secrets or GitHub variables were touched, no
+deploy was triggered, the provisioning script was not executed, and no
+local server or Docker container was started — same guardrails as every
+prior round on this task.
+
+### 8.8 Reopen fix (2026-10-01, R5): the completion check's success path still had a format-shape gap (F2 again)
+
+Reviewer (`Codex`) reopened candidate `8bc7ec1667eac94aea7143948867d0003553959f`
+(generation `5995d7635b8448e7a9f886d3e8d93d12`, PR #2263) a fifth time. F1/F3/
+F4/F5 remained fixed (§8.4, §8.5, §8.7); F2 part A/part B from §8.7 (scalar
+failure classification, Cloud Run demoted to diagnostic-only) were confirmed
+still fixed, but the reviewer identified that the scalar-only success check
+left a *different* false-negative gap, distinguished explicitly from the
+false-positive gaps §8.7 closed:
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F2 (success-path gap, new in R5): a successful Cloud Scheduler HTTP-target invocation can produce an `AttemptFinished` log record that omits the scalar `jsonPayload.status` field entirely while carrying `httpRequest.status=200` (or another 2xx) on that *same* record — this is decisive completion evidence from Scheduler itself, not the unrelated, never-decisive `cloud_run_revision` diagnostic §8.7 demoted. The §8.7 selector (`value(timestamp,jsonPayload.status)`) never read this field, so a genuinely successful attempt in this response shape always fell through to the empty/unrecognized branch and reported exit 2 (UNCONFIRMED) no matter how long the operator waited or how many times they re-ran the check. | `infra/gcp/dev/scheduler/confirm-job-attempt.sh`: `--format=value(...)` now also selects `httpRequest.status` (`:91-98`), and the `case` statement's default branch (`:114-122`, reached only when the scalar `status` is empty/unrecognized) checks that third column with `[[ "$http_status_value" =~ ^2[0-9][0-9]$ ]]` — a match prints `CONFIRMED COMPLETED (success, ... httpRequest.status=...)` and exits 0; otherwise the prior "not decisive, continue polling" warning is unchanged. A recognized scalar `status` (`OK` or a failure code) is still checked *first* and always decides the outcome regardless of `httpRequest.status`, so a record that improbably carries both a recognized failure code and a 2xx HTTP status still reports the failure (fail-closed on conflicting evidence — this fix adds one new *success* signal, it does not add a new failure-classification path from `httpRequest.status` alone: a non-2xx or absent `httpRequest.status` paired with an empty/unrecognized scalar still falls through to UNCONFIRMED exactly as in §8.7). Header comment (new "Why R5 changed the success path again" block) and the exit-code summary comment updated to match. `docs/03-runbooks/dev-scheduled-tasks-20261001.md`'s exit-code explanation (the paragraph after the `confirm-job-attempt.sh` invocation example) rewritten to describe this third outcome path and its priority ordering. `tests/unit/fixtures/sr-mail-scheduler-provision-20261001/fake-gcloud.mjs` no longer hard-codes its output columns per record `type`; it now parses the actual `--format=value(...)` field list out of `args` and projects `timestamp`/`jsonPayload.status`/`httpRequest.status` generically from the matched record, so a future selector change in the real script that isn't mirrored in this fixture's field map produces a wrong column instead of being silently absorbed by type-based branching — closing the "Test blind spot" the reviewer identified (the old fixture emitted `timestamp`+`status` for every scheduler record regardless of what `--format` the script actually requested, so it could not have caught this exact gap). | Old: `--format=value(timestamp,jsonPayload.status)`; a record with `status` empty and `httpRequest.status=200` → exit 2 (false negative — this was a real success being reported as unconfirmed). New: same record → exit 0, output contains `httpRequest.status=200`. A record with `status=NOT_FOUND` and (hypothetically) `httpRequest.status=200` → still exit 1 (scalar wins). A record with `status` empty and `httpRequest.status=500` → still exit 2 (no new failure path added). | Source evidence, not a fabricated success assumption: a published first-hand operator log showing exactly this shape (`cloud_scheduler_job`, `AttemptFinished`, `httpRequest.status=200`, no `jsonPayload.status`) at https://stackoverflow.com/questions/70882319/google-cloud-scheduler-getting-returned-message-in-logs ; Cloud Scheduler's `HttpTarget` REST contract documenting 2xx as the acknowledged-success range at https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs#HttpTarget ; the general `LogEntry.HttpRequest.status` field at https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest . Independent offline reproduction using the installed Google Cloud SDK's own `googlecloudsdk.core.resource.resource_printer` against the unchanged §8.7 selector and a literal payload matching the published shape (status omitted, `httpRequest.status=200`) reproduced the old false-negative projection; the same reproduction harness, re-run conceptually against the new three-field selector in this fix, yields the needed third column. `pnpm exec vitest run tests/unit/sr-mail-scheduler-provision-20261001.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key-alerts.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts tests/unit/system-remediation/sr-mail-retry-schedule-20261001/sr-mail-retry-schedule-20261001.test.ts`: exit 0, 6 files, 88/88 passed (40/40 in this task's test file, up from 37 — 3 new cases: HTTP-only success with omitted scalar status now exit 0 and prints `httpRequest.status=200`; a non-2xx `httpRequest.status` alone stays exit 2/UNCONFIRMED, not a new failure; a conflicting record — recognized scalar failure plus a 2xx `httpRequest.status` — still exits 1 with `status=NOT_FOUND`, never claiming success). `bash -n` both scheduler scripts: exit 0. `pnpm exec eslint` on the changed test file and the rewritten fixture module: exit 0. | No live Cloud Scheduler job was run and no live Cloud Logging query was issued — this task's guardrails forbid both. The published Stack Overflow log is a third-party operator observation, not a live `drts-dev` capture, and Google has not published a complete enumeration of every `AttemptFinished` record shape; this fix therefore still does not invent a complete taxonomy — it adds exactly the one additional, narrowly-scoped success signal the reviewer identified and documented, leaving every other branch (including the fail-closed UNCONFIRMED default) unchanged from §8.7. |
+
+Acceptance evidence on routeScopes (F3, §8.4), the three-entry registry JSON
+(§8.2), the schedule rationale (§8.3), the minimum-privilege IAM role (F1,
+§8.4), and the §8.7 F2 part A/part B/F5 fixes is unchanged from prior
+rounds — none were findings in this reopen and none were touched by this
+fix beyond what the table above describes.
+
+All checks started locally for this round were completed and read before
+this candidate was handed off: `pnpm exec vitest run` on the six-file
+regression set (same files as §8.6/§8.7) — 6 files, 88/88 passed (40/40 in
+`sr-mail-scheduler-provision-20261001.test.ts`, up from 37, reflecting the
+3 new cases above); `bash -n` on both scheduler scripts — exit 0;
+`pnpm exec eslint` on the changed test file and the fixture module — exit 0.
+No source changes were made beyond `confirm-job-attempt.sh`, the test
+fixture, the test file, this document, and the runbook. No GCP resources
+were created, no secrets or GitHub variables were touched, no deploy was
+triggered, the provisioning script was not executed/modified, and no local
+server or Docker container was started — same guardrails as every prior
+round on this task.
+
+## 9. Re-dispatch (2026-10-02, `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, seventh session): a narrowed caller #10 gap, two previously-undocumented optional callers, and the staging/production go/no-go finding
 
 Supervisor's 2026-10-02T01:00Z re-dispatch independently verified dev's live
-state against the two-entry plan in §7.6/§7.7: registry secret
-`drts-dev-workload-identity-google-service-principals` version 1 exists with
-entries A (`dev-web-runtime`) and B (`dev-ci-deployer`),
+state: registry secret `drts-dev-workload-identity-google-service-principals`
+version 1 with Entries A/B exactly as §7.9.1 documents,
 `DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`, and deploy-dev run
-`36946449389` at `ddd0d786` is green on revision `drts-dev-api-00037-qx9` with
-logs showing both `POST /api/auth/token` calls (caller #9) verified via
-`AUTH_GOOGLE_WORKLOAD_IDENTITY_USED` and zero `AUTH_LEGACY_INTERNAL_KEY_USED`
-lines for that caller. Supervisor also flagged that dev's
-`DRTS_INTERNAL_KEY_ENFORCED=false` means `InternalKeyMiddleware.use` returns
-before calling `validateInternalKey` at all (`internal-key.middleware.ts:380-383`),
-so callers #1-8 (entry A, the web-app proxies/clients) are never actually
-exercised through the Google adapter on dev today -- there are zero
-`dev-web-runtime` log lines -- and asked for (a) a full re-inventory of any
-*remaining* `POST auth/token` caller still relying on `x-drts-internal-key`,
-explicitly naming `tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts`
-and any `operations/`/`tools/` script, and (b) an explicit statement of how
-staging/production (where enforcement is on) are affected by removing the
-`* *` scope, without claiming the proxy WIF path is proven on dev.
+`36946449389` at `ddd0d786` green on revision `drts-dev-api-00037-qx9`, with
+logs confirming callers #1-9 are genuinely landing on the WIF path (zero
+`AUTH_LEGACY_INTERNAL_KEY_USED` for caller #9; §7.9's replay-protection fix
+means callers #1-8 would not false-positive-409 even once dev enforcement is
+turned on, though Supervisor separately noted dev's
+`DRTS_INTERNAL_KEY_ENFORCED=false` means callers #1-8 are not yet actually
+exercised through `InternalKeyMiddleware` on dev today). Supervisor asked for
+(a) a full re-inventory of any remaining `POST auth/token` caller still
+relying on `x-drts-internal-key`, naming `session-bootstrap.ts` and any
+`operations/`/`tools/` script explicitly, and (b) an explicit statement of
+staging/production impact. This section re-ran that inventory against the
+current merged `dev` HEAD (this branch has just merged `origin/dev`, picking
+up `SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001`'s §7.9 fixes and
+`SR-MAIL-SCHEDULER-PROVISION-20261001`'s §8 work) rather than the pre-merge
+base this branch had been carrying.
 
-#### 7.8.1 Three real callers missed by §6's original inventory
+### 9.1 Caller #10 is now partially migrated, with a narrower remaining gap than §7.9.2 recorded
 
-Re-grepping the **whole tree** (not just `apps/`) for `x-drts-internal-key` /
-`DRTS_INTERNAL_KEY`, beyond test files that only assert header presence/absence
-and the already-covered callers #1-9, found three more call sites that
-actually send the header against a live or livable endpoint:
+§7.9.2 (written before the live-map task's own further commit, picked up by
+this merge) described `session-bootstrap.ts` as sending **no** internal key
+at all for its single `live-map-observer` session, blocked entirely on a
+`ciTenantActorGrants` extension. Re-reading the file at the current merged
+HEAD (`tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts`)
+shows the live-map task's owner has since split this into two sessions, and
+migrated one of them:
 
-| # | Caller | File:line | What it sends | Wired into a live/hosted workflow today? |
+- **Already migrated**: the `ops_observer`/`live-map-observer` session
+  (lines 66-123) now sends `x-drts-google-id-token` (from
+  `gcloud auth print-identity-token`) instead of the internal key — exactly
+  the WIF path §7.9.2 said this caller would need. This confirms §7.9.2's
+  finding was acted on, even though (per §7.9.2's own analysis, still
+  accurate) this specific identity is not one of Entries A/B's
+  `ciTenantActorGrants` tuples, so it must be relying on some other grant
+  path or still failing in dev today until that is reconciled — outside
+  this task's visibility into that task's own current CI state.
+- **Still open**: a second, `platform_admin` session (lines 125-141,
+  `x-actor-id: principal_platform_admin_default`, `x-scopes: driver:provision`)
+  is minted via `POST auth/token` with **`x-drts-internal-key`**
+  (`deps.readInternalKey()`, line 133) and no Google assertion at all. This
+  session exists solely to call `auth/driver/device/invite` (line 144) so the
+  script can provision a temporary driver device registration for the live
+  map acceptance run. `grep -n "platform_admin\|readInternalKey"
+  docs/02-architecture/internal-key-exceptions.md` (run before this section
+  was added) returns no prior mention anywhere in this document — this half
+  of caller #10 was not previously inventoried.
+  - This cannot adopt Entry B's `ciTenantActorGrants` shape either: that
+    tuple-match is keyed on `(tenantId, actorType, actorId)`
+    (`google-workload-identity.adapter.ts:489-496` per §7.9's line
+    numbering) for issuing a **durable fixture tenant-user** session;
+    `platform_admin`/`principal_platform_admin_default` is not a
+    tenant-scoped actor and this call does not go through
+    `TenantPartnerService.findTenantUser` at all (confirmed by reading
+    `auth.controller.ts`'s `issueToken`: the `platform_admin` realm takes a
+    different branch than the tenant-actor CI gate).
+  - Entry A's `* *` `routeScopes` would technically cover `POST auth/token`
+    if `platform_admin`'s Google assertion reached `InternalKeyMiddleware`
+    the normal way, but `POST auth/token` is excluded from
+    `InternalKeyMiddleware`'s route coverage (`app.module.ts`'s
+    `forRoutes(...)` minus health/auth-token, §7.3's reopen fix) precisely
+    because `auth.controller.ts` does its own, stricter check
+    (`validateInternalKey` called directly, or the CI-tenant-actor gate) —
+    so Entry A's broad proxy scope was never the right mechanism for this
+    caller regardless.
+  - **This is the same kind of gap §7.9.2 already flagged for the one-time
+    `live-map-observer` grant**: a new, purpose-built grant kind (or a
+    documented decision that `platform_admin` bootstrap sessions for this
+    one script stay on the internal key indefinitely, which would block
+    `EXCP_002`'s removal forever, not just delay it) coordinated with
+    `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner `Codex`, not a fix this
+    task's `write_scopes` can make unilaterally.
+
+### 9.2 Two optional, currently-unwired callers not previously inventoried
+
+Re-grepping the whole tree (not just `apps/`) for `x-drts-internal-key` /
+`DRTS_INTERNAL_KEY` found two more real call sites, both outside `apps/`,
+both gated behind an optional environment variable that no current hosted
+workflow or CI script ever sets:
+
+| # | Caller | File:line | What it sends | Wired into any CI today? |
 | - | ------ | --------- | -------------- | --- |
-| 10 | `sr-live-map-001` session bootstrap (`SR-LIVE-MAP-C114-COVERAGE-20260930`, owner Codex) | `tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts:88` | `POST /api/auth/token` with `x-drts-internal-key` (read at runtime from the same `drts-dev-jwt-secret` GCP secret dev's `DRTS_INTERNAL_KEY` env var is populated from -- confirmed matching `internal_key_secret="${secret_prefix}-jwt-secret"` at `.github/workflows/deploy-dev.yml:722`) plus `x-actor-type: driver_user` / `ops_user` bootstrap-identity headers, to mint two fixture sessions (`realm: driver`, `realm: ops`) for live map acceptance | Yes -- `.github/workflows/live-entry-map-acceptance.yml:259,274` invokes this script directly (`--preflight` then for real). The task that owns it (`SR-LIVE-MAP-C114-COVERAGE-20260930`) is currently `blocked`/`waiting_for: Gemini` for unrelated reasons (`F-SESSION-CONTRACT`: issued driver/ops sessions fail `verifyAccessToken` for missing `driverBindingId`/`membershipId`, a product-data gap, not a WIF gap), but the workflow wiring itself is live and would run again once that task unblocks. |
-| 11 | smoke test suite, optional staging header | `tests/smoke/lib/helpers.sh:26,101-103` | `SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"`; attached to **every** `http_call` if set (comment at `tools/ci/run-smoke-tests.sh:27`: "Optional `x-drts-internal-key` header for staging/internal envs") | Not today -- `grep -rn "SMOKE_INTERNAL_KEY" .github/workflows/*.yml tools/ci/*.sh` finds no workflow or CI script that ever sets this var, so no automated run currently sends it. It exists for a human to export manually when pointing the smoke suite at staging. |
-| 12 | e2e test suite, bootstrap session minting | `tests/e2e/lib/helpers.sh:26,137-138,157,347-349` | Same optional-var pattern (`E2E_INTERNAL_KEY`); line 157's `mint_e2e_session`-style helper `POST`s `${E2E_API_URL}/auth/token` and, in dev where `DRTS_INTERNAL_KEY` is configured, would get `401 INTERNAL_KEY_REQUIRED` from `auth.controller.ts`'s direct `validateInternalKey` call (line 461, not behind the middleware's `DRTS_INTERNAL_KEY_ENFORCED` bypass) without this header or a verified WIF assertion | Not today -- same grep as above finds no workflow or CI script setting `E2E_INTERNAL_KEY`; manual/staging-only use, same as #11. |
+| 11 | smoke test suite, optional header | `tests/smoke/lib/helpers.sh:26,101-103` | `SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"`, attached to every `http_call` only if set — comment at `tools/ci/run-smoke-tests.sh:27` calls it "Optional `x-drts-internal-key` header for staging/internal envs" | No — `grep -rn "SMOKE_INTERNAL_KEY" .github/workflows/*.yml tools/ci/*.sh` returns no workflow/script that ever sets it; a human export-only path for pointing the suite at staging manually. |
+| 12 | e2e test suite, session minting | `tests/e2e/lib/helpers.sh:26,137-138,157,347-349` | Same optional-var pattern (`E2E_INTERNAL_KEY`); line 157's helper `POST`s `${E2E_API_URL}/auth/token`, and in dev (where `DRTS_INTERNAL_KEY` is configured) would get `401 INTERNAL_KEY_REQUIRED` from `auth.controller.ts`'s direct `validateInternalKey` call without this header or a verified WIF assertion | No — same grep finds no workflow/script setting `E2E_INTERNAL_KEY`; manual/staging-only, same as #11. |
 
-Caller #10 is the only one of these three that is both (a) wired into a live
-hosted workflow and (b) outside this task's `write_scopes`
-(`tests/e2e/system-remediation/sr-live-map-001/` belongs to
-`SR-LIVE-MAP-C114-COVERAGE-20260930`, owned by `Codex`). Per Supervisor's own
-instruction, migrating it is a coordination point with that task's owner, not
-a unilateral edit from this task -- that task is independently blocked right
-now (data-layer `F-SESSION-CONTRACT`, unrelated to credential mechanism), so
-even a migrated WIF path for callers #1-8/#9's `ciTenantActorGrants` shape
-would not help caller #10's `driver_user`/`ops_user` (non-tenant-actor)
-sessions: `auth.controller.ts`'s CI-tenant-actor gate (`resolveCiTenantActorGrant`,
-lines 442-453) matches on `(tenantId, actorType, actorId)`, and caller #10's
-realms (`driver`, `ops`) carry no `tenantId` at all, so it cannot be
-authorized through Entry B's existing grant shape without a new,
-separately-designed grant kind -- another reason this is a decision for
-Supervisor/Codex coordination, not a drop-in fix inside this task's scope.
+No `operations/` script references `x-drts-internal-key` or
+`DRTS_INTERNAL_KEY` at all (`grep -rn "x-drts-internal-key\|DRTS_INTERNAL_KEY"
+operations/` returns no matches), answering that part of Supervisor's
+question directly. The only `tools/` match is `tools/ci/run-smoke-tests.sh`,
+and only in the comment documenting caller #11's env var, not a second call
+site.
 
-Callers #11-12 are not wired into any current automated run (confirmed by
-grep above), so leaving them un-migrated does not block any hosted CI result
-today, but they remain real, documented call sites that would send a
-now-undocumented header the moment a human exports `SMOKE_INTERNAL_KEY` /
-`E2E_INTERNAL_KEY` against staging after `EXCP_002` is removed.
+Because neither #11 nor #12 is wired into any current automated run, leaving
+them un-migrated blocks no hosted CI result today. They remain real,
+documented call sites, though, and the moment a human exports
+`SMOKE_INTERNAL_KEY`/`E2E_INTERNAL_KEY` against staging after `EXCP_002` is
+removed, that request would carry a now-undocumented header and fail closed
+exactly as described in §9.3 below — worth a decision (migrate them to mint
+`x-drts-google-id-token` the same way, or explicitly retire the optional
+var) before or alongside the removal, even though it does not gate it today.
 
-#### 7.8.2 Staging/production impact of removing `INTERNAL_KEY_EXCP_002` -- explicit statement requested by Supervisor
+### 9.3 Staging/production impact of removing `INTERNAL_KEY_EXCP_002` — explicit statement requested by Supervisor
 
 `INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts:35`)
-is a single hardcoded array compiled into `apps/api`'s one build artifact --
+is a single hardcoded array compiled into `apps/api`'s one build artifact —
 there is no per-environment registry. Removing `INTERNAL_KEY_EXCP_002` from
-this file therefore removes it identically in dev, staging, **and**
-production the moment any of them next deploys a build containing the
-change; it is not a dev-scoped edit.
+this file removes it identically in dev, staging, **and** production the
+moment any of them next deploys a build containing the change; it is not a
+dev-scoped edit.
 
-Checked both other deploy workflows directly (`.github/workflows/deploy-staging.yml`,
-`.github/workflows/deploy-prod.yml`) rather than assuming:
+Checked both other deploy workflows directly rather than assuming:
 
-- `deploy-staging.yml:564` sets `DRTS_INTERNAL_KEY_ENFORCED=true` explicitly
-  on the Cloud Run service's env vars, and `AUTH_MODE=strict`/`DRTS_ENV=staging`
-  also makes `isStrictAuthEnvironment()` return `true` there independently
-  (`internal-key.middleware.ts:98-101`) -- so
-  `isInternalKeyEnforcementDisabled()` can never return `true` in staging
-  regardless of that var, and `InternalKeyMiddleware.use` always calls
-  `validateInternalKey` for real.
-- `deploy-prod.yml` never sets `DRTS_INTERNAL_KEY_ENFORCED` at all (not
-  needed: `DRTS_ENV=production` alone makes `isStrictAuthEnvironment()`
-  return `true` unconditionally), so production also always enforces.
+- `.github/workflows/deploy-staging.yml:564` sets
+  `DRTS_INTERNAL_KEY_ENFORCED=true` explicitly on the Cloud Run service's
+  env vars, and `AUTH_MODE=strict`/`DRTS_ENV=staging` independently make
+  `isStrictAuthEnvironment()` return `true` there regardless of that var
+  (`internal-key.middleware.ts:98-101`), so
+  `isInternalKeyEnforcementDisabled()` can never return `true` in staging —
+  `InternalKeyMiddleware.use` always calls `validateInternalKey` for real.
+- `.github/workflows/deploy-prod.yml` never sets
+  `DRTS_INTERNAL_KEY_ENFORCED` at all — not needed, since `DRTS_ENV=production`
+  alone makes `isStrictAuthEnvironment()` return `true` unconditionally — so
+  production also always enforces.
 - Neither `deploy-staging.yml` nor `deploy-prod.yml` contains the string
-  `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` anywhere
-  (`grep -n "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS" .github/workflows/deploy-staging.yml .github/workflows/deploy-prod.yml`
-  returns no matches) -- only `deploy-dev.yml` was ever wired to mount this
-  secret (§7.5). `GoogleWorkloadIdentityAdapter.loadRegistry()` in staging and
-  production therefore always throws `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED`
-  for any `x-drts-google-id-token` it receives, today and for the
-  foreseeable future until a **separate** infra task wires and populates
-  that secret for those two environments -- this task's `write_scopes` only
-  ever covered `deploy-dev.yml`.
+  `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` anywhere (confirmed by
+  `grep`) — only `deploy-dev.yml` was ever wired to mount this secret (§7.5).
+  `GoogleWorkloadIdentityAdapter.loadRegistry()` in staging and production
+  therefore always throws `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` for any
+  `x-drts-google-id-token` it receives, today and for the foreseeable future
+  until a **separate** infra task wires and populates that secret for those
+  two environments — this task's `write_scopes` only ever covered
+  `deploy-dev.yml`.
 
 Today, that `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` result is harmless in
 staging/production: `validateInternalKey` catches exactly that error and
-falls through to the `x-drts-internal-key` check (`internal-key.middleware.ts:141-150`),
-which `EXCP_002` still lets succeed. **If `EXCP_002` is removed while this
-remains true**, that same fallthrough lands on `evaluateInternalKey` finding
-no matching registry entry at all, which is `INTERNAL_KEY_UNDOCUMENTED` --
-fail-closed `401 INTERNAL_KEY_INVALID` -- for every request in staging or
-production that does not carry a `Bearer`/`x-drts-authorization` token and is
-not one of the explicit public routes. This is not a "dev might go red" risk;
-it is every control-plane-proxy request (callers #1-8's dual-sent
-`x-drts-google-id-token` would also fail closed there, since staging/prod
-have no registry to verify it against either) and any staging/production use
-of `POST auth/token` with the internal key (callers #9-12's pattern) breaking
-outright on whatever environment next deploys past the removal commit,
-independent of and in addition to anything this task has verified on dev.
+falls through to the `x-drts-internal-key` check, which `EXCP_002` still
+lets succeed (and, per §7.9's third fix, so does
+`WORKLOAD_PRINCIPAL_NOT_REGISTERED` for a verified-but-unlisted caller).
+**If `EXCP_002` is removed while this remains true**, that same fallthrough
+lands on `evaluateInternalKey` finding no matching registry entry at all —
+`INTERNAL_KEY_UNDOCUMENTED`, fail-closed `401 INTERNAL_KEY_INVALID` — for
+every request in staging or production that does not carry a
+`Bearer`/`x-drts-authorization` token and is not one of the explicit public
+routes. This is not a "dev might go red" risk; it is every control-plane-
+proxy request (callers #1-8's dual-sent `x-drts-google-id-token` would also
+fail closed there, since staging/prod have no registry to verify it against
+either) and any staging/production use of `POST auth/token` with the
+internal key breaking outright on whatever environment next deploys past
+the removal commit, independent of and in addition to anything this task
+has verified on dev.
 
-**Conclusion**: `excp_002_removed_and_deploy_dev_green` is not safe to claim
-by removing the registry entry in this candidate. Doing so safely requires,
-in addition to dev's now-confirmed-live registry:
+### 9.4 Conclusion: not safe to remove `INTERNAL_KEY_EXCP_002` in this candidate
 
-1. A staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` rollout
-   (secret + workflow wiring in `deploy-staging.yml`/`deploy-prod.yml`,
-   analogous to §7.5's dev fix) -- outside this task's `write_scopes`, which
-   names `deploy-dev.yml` only; a Supervisor decision on whether to fold that
-   into this task (with a `write_scopes` expansion to those two files) or
-   track it as its own follow-up task.
-2. Resolution of caller #10 (coordinate with `SR-LIVE-MAP-C114-COVERAGE-20260930`'s
-   owner `Codex`) -- a new CI-tenant-actor-style grant kind for non-tenant
-   (`driver_user`/`ops_user`) actors, or some other design decision, since
-   that caller cannot adopt Entry B's existing `ciTenantActorGrants` shape
-   as-is.
-3. A decision on whether callers #11-12's optional staging-fallback headers
-   in `tests/smoke/lib/helpers.sh` / `tests/e2e/lib/helpers.sh` should be
-   migrated to mint and send `x-drts-google-id-token` the same way the nine
-   already-migrated callers do, or documented as retired/no-longer-supported
-   if nobody still exercises them against staging manually.
+`excp_002_removed_and_deploy_dev_green` remains correctly unmet. Doing this
+safely, beyond dev's now-confirmed-live registry and §7.9's pre-rollout
+fixes, needs:
 
-`callers_migrated_to_wif_assertion` remains satisfied only in the
-dual-send sense already recorded for callers #1-9 (§7.2/§7.6); it does not
-yet cover callers #10-12, and the proxy WIF path (#1-8) remains unproven on
-dev itself per Supervisor's own finding above, let alone in staging/production.
-No code was changed in this session beyond this documentation; `EXCP_002`,
-the dual-send fallback, and all nine previously migrated callers are
-untouched.
+1. A staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`
+   rollout (secret + workflow wiring in `deploy-staging.yml`/`deploy-prod.yml`,
+   analogous to §7.5's dev fix) — outside this task's `write_scopes`, which
+   names `deploy-dev.yml` only; a Supervisor decision on whether to fold
+   that in (with a `write_scopes` expansion) or track it as its own
+   follow-up task.
+2. Resolution of caller #10's remaining `platform_admin` bootstrap session
+   (§9.1) — coordinate with `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner
+   `Codex`, same as the already-resolved `ops_observer` half of this caller.
+3. A decision on callers #11-12 (§9.2): migrate to `x-drts-google-id-token`
+   or document as retired.
+
+`callers_migrated_to_wif_assertion` remains satisfied only in the dual-send
+sense already recorded for callers #1-9 (§7.2/§7.6/§7.9); it does not yet
+cover caller #10's remaining `platform_admin` session or callers #11-12, and
+the proxy WIF path (#1-8) remains unproven under real enforcement on dev
+itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
+in staging/production. No application or workflow code was changed in this
+session beyond this documentation; `EXCP_002`, the dual-send fallback, and
+every previously migrated caller are untouched.

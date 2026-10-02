@@ -34,6 +34,7 @@ export const AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE: Record<
   platform_admin: ["platform"],
   tenant_admin: ["tenant"],
   ops_user: ["ops"],
+  ops_observer: ["ops"],
   driver_user: ["driver"],
   partner_api_key: ["partner"],
   partner_user: ["partner"],
