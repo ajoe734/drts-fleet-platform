@@ -2175,7 +2175,7 @@ re-implemented here.
 
 ## 13. `CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002`: the two operational-acceptance mints collided when they landed in the same wall-clock second
 
-After §12 removed `INTERNAL_KEY_EXCP_002`, `deploy-dev` started failing
+After §12 removed INTERNAL_KEY_EXCP_002, `deploy-dev` started failing
 roughly half the time in `Candidate SHA operational acceptance`, both with
 the same symptom: `Tenant Ops session issuance failed with HTTP 409:
 WORKLOAD_ASSERTION_REPLAYED` (run `36953681080` at `a5bc5065`, 02:01Z; run
