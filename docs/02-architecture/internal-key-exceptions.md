@@ -1389,3 +1389,33 @@ itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
 in staging/production. No application or workflow code was changed in this
 session beyond this documentation; `EXCP_002`, the dual-send fallback, and
 every previously migrated caller are untouched.
+
+## 10. SEC-INTERNAL-KEY-LIVE-MAP-PLATFORM-SESSION-WIF-20261002
+
+Owner Codex; reviewer Claude2. This task owns the live-map bootstrap and
+teardown authorization slice. C114 PR #2235 (`e3c7ed02701c387d82786bcfd8877e2618851f3b`)
+is already merged; its remaining hosted acceptance stays pending. No C114
+coverage geometry, freshness or browser assertions are changed here.
+
+Design: register a dedicated non-human live-map identity. A server-owned
+`driverProvisioningGrant.driverId` authorizes a 15-minute system session with
+exactly `driver:provision`, no workforce role or membership. A signed driver
+restriction and an explicit route ceiling are required: system realm alone
+also reaches routes with no required scopes. Provision/revoke must enforce
+the target driver. Keep the observer identity separate from that session;
+do not add `platform_admin` to any service account. Operator steps and final
+verification follow in this section before candidate handoff.
+
+Read-only dev check 2026-10-02: revision `drts-dev-api-00037-qx9`; live registry
+contains `dev-web-runtime`, `dev-ci-deployer`, `dev-scheduler`, no observer
+role/actor or provisioning grant. Existing observer bootstrap therefore has
+no matching direct role or tenant grant. Latest hosted map run `36686169334`
+skipped session issuance at preflight (missing test driver), not a successful
+observer WIF exchange. No new live session was issued in this task; current
+observer success is **not established**, and the observed registry denies its
+requested actor. Machine evidence: `.local/sec-live-map-wif/registry-summary.json`.
+
+| Finding / acceptance | Source and change | Before → after | Verification | Limits |
+| --- | --- | --- | --- | --- |
+| WIF cannot issue least-privilege provisioning session | `AuthController.issueToken`, Google registry adapter | Base `215d1facf`: production-path regression fails at `WORKLOAD_CI_TENANT_ACTOR_DENIED`; fix pending | `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`, exit 1; `.local/sec-live-map-wif/red.log` | External JWKS mocked with test RSA key; production signature, registry, controller and memory session repository used; no server/PG |
+| Teardown is also an internal-key caller | `session-teardown.ts` reads JWT secret and mints platform admin | Fix pending | Source inventory | Must migrate alongside bootstrap |
