@@ -145,11 +145,12 @@ Machine-specific notes do not belong in this tracked runbook. Put transient
 port mappings, current container names, temporary firewall commands, and other
 per-VM review details in:
 
-- `docs/03-runbooks/local-development.local.md`
+- the generated local-development.local.md overlay (bootstrapped below)
 - `.local/` for broader machine-only scratch files that are not part of the
   canonical runbook
 
-That file is intentionally gitignored. Bootstrap it from:
+That generated overlay file is intentionally gitignored and never appears as
+a tracked path in this repo. Bootstrap it from:
 
 - `docs/03-runbooks/local-development.local.example.md`
 - `./tools/local-development/init-local-workspace.sh`

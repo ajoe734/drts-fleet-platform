@@ -88,8 +88,10 @@ documentation.
 
 - Use `./tools/local-development/init-local-workspace.sh` to create the local-only workspace
   scaffolding.
-- Use `docs/03-runbooks/local-development.local.md` for VM dev endpoint and
-  review access notes.
+- Bootstrap from `docs/03-runbooks/local-development.local.example.md` and
+  fill in the generated gitignored local-development.local.md for VM dev
+  endpoint and review access notes (that generated file is deliberately
+  untracked, so it never appears as a path in this repo).
 - Use `.local/` for personal scratch files, temporary URLs, ad hoc commands,
   and other local-only artifacts.
 - Use `.env` / `.env.local` for environment overrides instead of editing
