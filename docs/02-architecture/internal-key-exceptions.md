@@ -1244,3 +1244,185 @@ the scheduler's subsequent `AttemptFinished` records are the only way to
 confirm the fix against live Cloud Scheduler traffic, per the task's own
 acceptance item 五; that verification is Supervisor's post-merge step, not
 this worker's.
+
+## 9. Re-dispatch (2026-10-02, `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, seventh session): a narrowed caller #10 gap, two previously-undocumented optional callers, and the staging/production go/no-go finding
+
+Supervisor's 2026-10-02T01:00Z re-dispatch independently verified dev's live
+state: registry secret `drts-dev-workload-identity-google-service-principals`
+version 1 with Entries A/B exactly as §7.9.1 documents,
+`DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`, and deploy-dev run
+`36946449389` at `ddd0d786` green on revision `drts-dev-api-00037-qx9`, with
+logs confirming callers #1-9 are genuinely landing on the WIF path (zero
+`AUTH_LEGACY_INTERNAL_KEY_USED` for caller #9; §7.9's replay-protection fix
+means callers #1-8 would not false-positive-409 even once dev enforcement is
+turned on, though Supervisor separately noted dev's
+`DRTS_INTERNAL_KEY_ENFORCED=false` means callers #1-8 are not yet actually
+exercised through `InternalKeyMiddleware` on dev today). Supervisor asked for
+(a) a full re-inventory of any remaining `POST auth/token` caller still
+relying on `x-drts-internal-key`, naming `session-bootstrap.ts` and any
+`operations/`/`tools/` script explicitly, and (b) an explicit statement of
+staging/production impact. This section re-ran that inventory against the
+current merged `dev` HEAD (this branch has just merged `origin/dev`, picking
+up `SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001`'s §7.9 fixes and
+`SR-MAIL-SCHEDULER-PROVISION-20261001`'s §8 work) rather than the pre-merge
+base this branch had been carrying.
+
+### 9.1 Caller #10 is now partially migrated, with a narrower remaining gap than §7.9.2 recorded
+
+§7.9.2 (written before the live-map task's own further commit, picked up by
+this merge) described `session-bootstrap.ts` as sending **no** internal key
+at all for its single `live-map-observer` session, blocked entirely on a
+`ciTenantActorGrants` extension. Re-reading the file at the current merged
+HEAD (`tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts`)
+shows the live-map task's owner has since split this into two sessions, and
+migrated one of them:
+
+- **Already migrated**: the `ops_observer`/`live-map-observer` session
+  (lines 66-123) now sends `x-drts-google-id-token` (from
+  `gcloud auth print-identity-token`) instead of the internal key — exactly
+  the WIF path §7.9.2 said this caller would need. This confirms §7.9.2's
+  finding was acted on, even though (per §7.9.2's own analysis, still
+  accurate) this specific identity is not one of Entries A/B's
+  `ciTenantActorGrants` tuples, so it must be relying on some other grant
+  path or still failing in dev today until that is reconciled — outside
+  this task's visibility into that task's own current CI state.
+- **Still open**: a second, `platform_admin` session (lines 125-141,
+  `x-actor-id: principal_platform_admin_default`, `x-scopes: driver:provision`)
+  is minted via `POST auth/token` with **`x-drts-internal-key`**
+  (`deps.readInternalKey()`, line 133) and no Google assertion at all. This
+  session exists solely to call `auth/driver/device/invite` (line 144) so the
+  script can provision a temporary driver device registration for the live
+  map acceptance run. `grep -n "platform_admin\|readInternalKey"
+  docs/02-architecture/internal-key-exceptions.md` (run before this section
+  was added) returns no prior mention anywhere in this document — this half
+  of caller #10 was not previously inventoried.
+  - This cannot adopt Entry B's `ciTenantActorGrants` shape either: that
+    tuple-match is keyed on `(tenantId, actorType, actorId)`
+    (`google-workload-identity.adapter.ts:489-496` per §7.9's line
+    numbering) for issuing a **durable fixture tenant-user** session;
+    `platform_admin`/`principal_platform_admin_default` is not a
+    tenant-scoped actor and this call does not go through
+    `TenantPartnerService.findTenantUser` at all (confirmed by reading
+    `auth.controller.ts`'s `issueToken`: the `platform_admin` realm takes a
+    different branch than the tenant-actor CI gate).
+  - Entry A's `* *` `routeScopes` would technically cover `POST auth/token`
+    if `platform_admin`'s Google assertion reached `InternalKeyMiddleware`
+    the normal way, but `POST auth/token` is excluded from
+    `InternalKeyMiddleware`'s route coverage (`app.module.ts`'s
+    `forRoutes(...)` minus health/auth-token, §7.3's reopen fix) precisely
+    because `auth.controller.ts` does its own, stricter check
+    (`validateInternalKey` called directly, or the CI-tenant-actor gate) —
+    so Entry A's broad proxy scope was never the right mechanism for this
+    caller regardless.
+  - **This is the same kind of gap §7.9.2 already flagged for the one-time
+    `live-map-observer` grant**: a new, purpose-built grant kind (or a
+    documented decision that `platform_admin` bootstrap sessions for this
+    one script stay on the internal key indefinitely, which would block
+    `EXCP_002`'s removal forever, not just delay it) coordinated with
+    `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner `Codex`, not a fix this
+    task's `write_scopes` can make unilaterally.
+
+### 9.2 Two optional, currently-unwired callers not previously inventoried
+
+Re-grepping the whole tree (not just `apps/`) for `x-drts-internal-key` /
+`DRTS_INTERNAL_KEY` found two more real call sites, both outside `apps/`,
+both gated behind an optional environment variable that no current hosted
+workflow or CI script ever sets:
+
+| # | Caller | File:line | What it sends | Wired into any CI today? |
+| - | ------ | --------- | -------------- | --- |
+| 11 | smoke test suite, optional header | `tests/smoke/lib/helpers.sh:26,101-103` | `SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"`, attached to every `http_call` only if set — comment at `tools/ci/run-smoke-tests.sh:27` calls it "Optional `x-drts-internal-key` header for staging/internal envs" | No — `grep -rn "SMOKE_INTERNAL_KEY" .github/workflows/*.yml tools/ci/*.sh` returns no workflow/script that ever sets it; a human export-only path for pointing the suite at staging manually. |
+| 12 | e2e test suite, session minting | `tests/e2e/lib/helpers.sh:26,137-138,157,347-349` | Same optional-var pattern (`E2E_INTERNAL_KEY`); line 157's helper `POST`s `${E2E_API_URL}/auth/token`, and in dev (where `DRTS_INTERNAL_KEY` is configured) would get `401 INTERNAL_KEY_REQUIRED` from `auth.controller.ts`'s direct `validateInternalKey` call without this header or a verified WIF assertion | No — same grep finds no workflow/script setting `E2E_INTERNAL_KEY`; manual/staging-only, same as #11. |
+
+No `operations/` script references `x-drts-internal-key` or
+`DRTS_INTERNAL_KEY` at all (`grep -rn "x-drts-internal-key\|DRTS_INTERNAL_KEY"
+operations/` returns no matches), answering that part of Supervisor's
+question directly. The only `tools/` match is `tools/ci/run-smoke-tests.sh`,
+and only in the comment documenting caller #11's env var, not a second call
+site.
+
+Because neither #11 nor #12 is wired into any current automated run, leaving
+them un-migrated blocks no hosted CI result today. They remain real,
+documented call sites, though, and the moment a human exports
+`SMOKE_INTERNAL_KEY`/`E2E_INTERNAL_KEY` against staging after `EXCP_002` is
+removed, that request would carry a now-undocumented header and fail closed
+exactly as described in §9.3 below — worth a decision (migrate them to mint
+`x-drts-google-id-token` the same way, or explicitly retire the optional
+var) before or alongside the removal, even though it does not gate it today.
+
+### 9.3 Staging/production impact of removing `INTERNAL_KEY_EXCP_002` — explicit statement requested by Supervisor
+
+`INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts:35`)
+is a single hardcoded array compiled into `apps/api`'s one build artifact —
+there is no per-environment registry. Removing `INTERNAL_KEY_EXCP_002` from
+this file removes it identically in dev, staging, **and** production the
+moment any of them next deploys a build containing the change; it is not a
+dev-scoped edit.
+
+Checked both other deploy workflows directly rather than assuming:
+
+- `.github/workflows/deploy-staging.yml:564` sets
+  `DRTS_INTERNAL_KEY_ENFORCED=true` explicitly on the Cloud Run service's
+  env vars, and `AUTH_MODE=strict`/`DRTS_ENV=staging` independently make
+  `isStrictAuthEnvironment()` return `true` there regardless of that var
+  (`internal-key.middleware.ts:98-101`), so
+  `isInternalKeyEnforcementDisabled()` can never return `true` in staging —
+  `InternalKeyMiddleware.use` always calls `validateInternalKey` for real.
+- `.github/workflows/deploy-prod.yml` never sets
+  `DRTS_INTERNAL_KEY_ENFORCED` at all — not needed, since `DRTS_ENV=production`
+  alone makes `isStrictAuthEnvironment()` return `true` unconditionally — so
+  production also always enforces.
+- Neither `deploy-staging.yml` nor `deploy-prod.yml` contains the string
+  `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` anywhere (confirmed by
+  `grep`) — only `deploy-dev.yml` was ever wired to mount this secret (§7.5).
+  `GoogleWorkloadIdentityAdapter.loadRegistry()` in staging and production
+  therefore always throws `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` for any
+  `x-drts-google-id-token` it receives, today and for the foreseeable future
+  until a **separate** infra task wires and populates that secret for those
+  two environments — this task's `write_scopes` only ever covered
+  `deploy-dev.yml`.
+
+Today, that `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` result is harmless in
+staging/production: `validateInternalKey` catches exactly that error and
+falls through to the `x-drts-internal-key` check, which `EXCP_002` still
+lets succeed (and, per §7.9's third fix, so does
+`WORKLOAD_PRINCIPAL_NOT_REGISTERED` for a verified-but-unlisted caller).
+**If `EXCP_002` is removed while this remains true**, that same fallthrough
+lands on `evaluateInternalKey` finding no matching registry entry at all —
+`INTERNAL_KEY_UNDOCUMENTED`, fail-closed `401 INTERNAL_KEY_INVALID` — for
+every request in staging or production that does not carry a
+`Bearer`/`x-drts-authorization` token and is not one of the explicit public
+routes. This is not a "dev might go red" risk; it is every control-plane-
+proxy request (callers #1-8's dual-sent `x-drts-google-id-token` would also
+fail closed there, since staging/prod have no registry to verify it against
+either) and any staging/production use of `POST auth/token` with the
+internal key breaking outright on whatever environment next deploys past
+the removal commit, independent of and in addition to anything this task
+has verified on dev.
+
+### 9.4 Conclusion: not safe to remove `INTERNAL_KEY_EXCP_002` in this candidate
+
+`excp_002_removed_and_deploy_dev_green` remains correctly unmet. Doing this
+safely, beyond dev's now-confirmed-live registry and §7.9's pre-rollout
+fixes, needs:
+
+1. A staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`
+   rollout (secret + workflow wiring in `deploy-staging.yml`/`deploy-prod.yml`,
+   analogous to §7.5's dev fix) — outside this task's `write_scopes`, which
+   names `deploy-dev.yml` only; a Supervisor decision on whether to fold
+   that in (with a `write_scopes` expansion) or track it as its own
+   follow-up task.
+2. Resolution of caller #10's remaining `platform_admin` bootstrap session
+   (§9.1) — coordinate with `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner
+   `Codex`, same as the already-resolved `ops_observer` half of this caller.
+3. A decision on callers #11-12 (§9.2): migrate to `x-drts-google-id-token`
+   or document as retired.
+
+`callers_migrated_to_wif_assertion` remains satisfied only in the dual-send
+sense already recorded for callers #1-9 (§7.2/§7.6/§7.9); it does not yet
+cover caller #10's remaining `platform_admin` session or callers #11-12, and
+the proxy WIF path (#1-8) remains unproven under real enforcement on dev
+itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
+in staging/production. No application or workflow code was changed in this
+session beyond this documentation; `EXCP_002`, the dual-send fallback, and
+every previously migrated caller are untouched.
