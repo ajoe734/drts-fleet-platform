@@ -149,6 +149,7 @@ describe("SR-MAIL-RETRY-SCHEDULE-20261001 BootstrapAuthGuard Google workload ide
       {
         requestPath: "/api/internal/scheduled-tasks/mail-outbox/drain",
         requestMethod: "POST",
+        enforceReplayProtection: false,
       },
     );
   });
