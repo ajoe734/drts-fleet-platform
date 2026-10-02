@@ -1650,11 +1650,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.build-push.outputs.candidate_sha }}
+      # CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002 (F3 repair): no
+      # `service_account:` here, on purpose. The Tenant Ops mint step below
+      # authenticates its own gcloud call with
+      # `--impersonate-service-account="$SERVICE_ACCOUNT"`, which wraps
+      # *this* job's base credential in a fresh
+      # google.auth.impersonated_credentials.Credentials -- gcloud's own
+      # requirement for minting an identity token (see
+      # googlecloudsdk/command_lib/auth/auth_util.py's
+      # IsImpersonationCredential / ValidIdTokenCredential checks). If this
+      # step set `service_account:` too, the base credential loaded from the
+      # exported CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE would already be
+      # impersonating that same service account (a
+      # google.auth.identity_pool.Credentials with
+      # service_account_impersonation_url set), so the later
+      # `--impersonate-service-account` call would be the service account
+      # trying to impersonate *itself* via the IAM Credentials API -- that
+      # needs roles/iam.serviceAccountTokenCreator granted on the account by
+      # itself, which is not part of this task's granted IAM and must not be
+      # added (guardrail: no GCP/IAM changes). Leaving this step as a plain
+      # Direct Workload Identity Federation exchange keeps the base
+      # credential as the raw GitHub OIDC-federated principal, so the single
+      # impersonation call in the Tenant Ops step below uses the same
+      # workloadIdentityUser-style grant on that principal that every other
+      # `service_account:`-bearing auth@v2 step in this workflow already
+      # relies on.
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -1669,6 +1693,33 @@ jobs:
       # the two fixed tenant/ops actor tuples below, and
       # WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true must be set, or this
       # step fails closed.
+      #
+      # CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002 (F3 follow-up,
+      # independent review REOPEN on candidate 4d3e94813): `create_credentials_
+      # file` and `export_environment_variables` both default to true on
+      # google-github-actions/auth@v2 (action.yml), so leaving them unset here
+      # made this step silently overwrite CLOUDSDK_AUTH_CREDENTIAL_FILE_
+      # OVERRIDE / GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_GHA_CREDS_PATH with
+      # a NEW external_account file whose service_account_impersonation_url
+      # already targets $SERVICE_ACCOUNT, even though only this step's
+      # `outputs.id_token` is consumed (see the "Issue deployment-machine
+      # Tenant acceptance session" step below). The Tenant Ops step after this
+      # one loads its *base* credential from that same env-var override via
+      # `gcloud auth print-identity-token --impersonate-service-account=...`,
+      # so it was picking up this step's already-impersonated credential
+      # instead of the raw Direct-WIF one exported by "Authenticate to GCP"
+      # above -- i.e. the service account trying to impersonate itself via
+      # IAM Credentials API, which needs a self-grant of
+      # roles/iam.serviceAccountTokenCreator that is not part of this task's
+      # granted IAM and must not be added (guardrail: no GCP/IAM changes).
+      # Disabling both file/env export here is safe: the action still returns
+      # `outputs.id_token` for `token_format: id_token` independently of
+      # whether a credentials file is written (google-github-actions/auth
+      # src/main.ts mints the ID token via its own API client before the
+      # optional file/env export step), and nothing downstream reads this
+      # step's exported credential file -- every other job step either reads
+      # `steps.id_token_api_operational.outputs.id_token` directly or mints
+      # its own separate auth@v2 credential.
       - name: Mint identity token — API operational acceptance (Tenant Admin)
         id: id_token_api_operational
         uses: google-github-actions/auth@v2
@@ -1679,23 +1730,82 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ needs.health-check.outputs.api }}
           id_token_include_email: true
-      # SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: a second, independently
-      # minted assertion for the Tenant Ops call below. GoogleWorkloadIdentityAdapter
-      # consumes each assertion exactly once (sha256(token)-keyed replay
-      # guard), so reusing the Tenant Admin token above for this second
-      # POST /api/auth/token call would fail closed with
-      # WORKLOAD_ASSERTION_REPLAYED once the registry is populated and this
-      # header stops being ignored.
+          create_credentials_file: false
+          export_environment_variables: false
+      # CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: Google ID tokens are
+      # RS256 and deterministic for a given (service account, audience, iat)
+      # tuple, so minting the Tenant Ops assertion with a second
+      # google-github-actions/auth@v2 step right after the Tenant Admin mint
+      # above can return a byte-identical token for the same wall-clock
+      # second. GoogleWorkloadIdentityAdapter consumes each assertion exactly
+      # once (sha256(token)-keyed replay guard), so that collision makes the
+      # second POST /api/auth/token call fail closed with
+      # WORKLOAD_ASSERTION_REPLAYED even though these are two independent
+      # mint steps. A wait keyed to this runner's own clock cannot guarantee
+      # that -- the runner and Google's token-issuing service do not share a
+      # clock, so the runner can already read a later second while the
+      # issuer is still minting the prior one. Mint with `gcloud` instead, so
+      # the *actual* resulting token is compared byte-for-byte against the
+      # Tenant Admin token and re-minted on a real collision, bounded so a
+      # persistent failure fails the job instead of looping forever. Never
+      # print either raw token or its decoded payload.
+      #
+      # F3 repair (independent review REJECT on candidate 299fdfd8b): the
+      # "Authenticate to GCP" step above intentionally has no
+      # `service_account:`, so its exported credential is a plain
+      # google.auth.identity_pool.Credentials (Direct WIF, no
+      # service_account_impersonation_url). `gcloud auth print-identity-token`
+      # rejects that credential type outright for both `--audiences` and
+      # `--include-email` (auth_util.ValidIdTokenCredential /
+      # IsImpersonationCredential both require
+      # google.auth.impersonated_credentials.Credentials) -- it fails closed
+      # with WrongAccountTypeError before making any network call, which is
+      # what turned the original intermittent collision into a deterministic
+      # failure. `--impersonate-service-account` makes gcloud wrap that same
+      # base credential in a fresh impersonated_credentials.Credentials
+      # (googlecloudsdk/core/credentials/store.py's `Load()`, then
+      # api_lib/iamcredentials/util.py's GetElevationAccessTokenGoogleAuth /
+      # GetElevationIdTokenGoogleAuth), satisfying both checks. The resulting
+      # IAM Credentials API generateIdToken call is authenticated with the
+      # *source* (raw federated) credential's token, targeting
+      # $SERVICE_ACCOUNT -- the same workloadIdentityUser-style grant already
+      # exercised by every other auth@v2 step in this workflow, not a new
+      # self-impersonation permission.
+      #
+      # F3 follow-up (independent review REOPEN on candidate 4d3e94813): that
+      # "same base credential" claim only holds if the intervening Tenant
+      # Admin mint step above does not itself overwrite the exported
+      # credential file/env vars with an already-impersonated one -- see the
+      # `create_credentials_file: false` / `export_environment_variables:
+      # false` note on that step above.
       - name: Mint identity token — API operational acceptance (Tenant Ops)
         id: id_token_api_operational_ops
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
-          project_id: ${{ needs.prepare.outputs.project_id }}
-          token_format: id_token
-          id_token_audience: ${{ needs.health-check.outputs.api }}
-          id_token_include_email: true
+        env:
+          GOOGLE_ID_TOKEN_TENANT_ADMIN: ${{ steps.id_token_api_operational.outputs.id_token }}
+          OPS_TOKEN_AUDIENCE: ${{ needs.health-check.outputs.api }}
+          SERVICE_ACCOUNT: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+
+          echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_ADMIN"
+
+          ops_token=""
+          for attempt in 1 2 3 4 5; do
+            candidate="$(gcloud auth print-identity-token --impersonate-service-account="$SERVICE_ACCOUNT" --audiences="$OPS_TOKEN_AUDIENCE" --include-email)"
+            echo "::add-mask::$candidate"
+            if [[ "$candidate" != "$GOOGLE_ID_TOKEN_TENANT_ADMIN" ]]; then
+              ops_token="$candidate"
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ -z "$ops_token" ]]; then
+            echo "::error::could not mint a Tenant Ops Google identity token distinct from the Tenant Admin token after 5 attempts" >&2
+            exit 1
+          fi
+
+          echo "id_token=$ops_token" >> "$GITHUB_OUTPUT"
       - name: Issue deployment-machine Tenant acceptance session
         env:
           API_URL: ${{ needs.health-check.outputs.api }}

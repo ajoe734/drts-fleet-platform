@@ -2561,7 +2561,7 @@ two gaps none of the prior eight sessions' review rounds had caught:
 | Callers #11-12 | `tests/smoke/lib/helpers.sh` (`SMOKE_INTERNAL_KEY`) and `tests/e2e/lib/helpers.sh` (`E2E_INTERNAL_KEY`) now `exit 1` with a clear message identifying the retirement and pointing at the WIF alternative, immediately on sourcing, if either var is set -- per Supervisor's integration_notes instruction -- rather than silently sending a header no environment will ever accept again. The now-dead `if [[ -n "$...INTERNAL_KEY" ]]; then curl_args+=(-H "x-drts-internal-key: ...")` blocks were removed from both files' `http_call`-style functions (unreachable once the fail-fast check passes). `tools/ci/run-smoke-tests.sh`'s usage comment updated to match. |
 | `deploy-dev.yml` fail-closed upgrade | The `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret mount (§7.5) changed from a notice-only degrade (safe while INTERNAL_KEY_EXCP_002 provided a fallback) to `::error::` + `exit 1` when the secret is absent -- the fallback it used to degrade to no longer exists, so an absent registry must now fail the deploy before any API secret is set, matching staging/prod's existing fail-closed pattern (§13.4). `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts`'s "dev keeps its own notice-only degrade" test inverted to assert the new fail-closed shape instead. |
 | Registry test coverage | `tests/unit/internal-key-exception-registry.test.ts`, `tests/unit/internal-key-alerts.test.ts`, and `tests/integration/internal-key-rotation-retirement.integration.test.ts` all had tests that implicitly depended on the live registry containing an `x-drts-internal-key`-headed exception (the generic `evaluateInternalKey`/rotation/revocation mechanism tests, not really about INTERNAL_KEY_EXCP_002 specifically) -- updated to pass an explicit retired-fixture `registry:` array, following the exact pattern already established for INTERNAL_KEY_EXCP_003's 2026-09-01 retirement (`RETIRED_STAGING_ONLY` in the first file). `tests/unit/internal-key-wif-configuration.test.ts`'s "does not remove INTERNAL_KEY_EXCP_002" test (whose entire premise this candidate intentionally reverses) rewritten to assert the removal. `apps/api/tests/unit/auth-bootstrap.test.ts` had several tests whose only path to a successful session was the now-retired plain internal-key bootstrap to `/api/auth/token` -- each converted to assert the new `INTERNAL_KEY_INVALID` rejection (the live WIF-equivalent coverage for the tenant-claims case already existed as the next test in the same file). `tests/unit/system-remediation/sr-live-map-001/session-contract.test.ts`'s two `ops_observer` tests rewritten to exercise the real Google workload identity path (mocked `verifyServicePrincipal`, same pattern as that file's own pre-existing "WIF direct login" test) instead of the retired internal key; its `driver_user` test (no live WIF equivalent exists for that actor type) kept on `validateInternalKey`'s dev-lenient bypass by simply no longer configuring `DRTS_INTERNAL_KEY` at all. `tests/integration/iap-subject-adapter.integration.test.ts` had three tests that used a valid internal key only to get past the gate before testing unrelated IAP-specific logic further downstream; stopped configuring `DRTS_INTERNAL_KEY` in those three (none set `APP_ENV` to a strict value, so the dev-lenient bypass already carries them through unchanged). |
-| CI audit script | `operations/security/verify-internal-key-exceptions.py` matches ``INTERNAL_KEY_EXCP_\d+`` wrapped in single backticks anywhere in this document against the registry array; removing the array entry without also touching the doc would fail CI ("documented in Markdown but missing in TypeScript registry"). All 19 remaining backtick-wrapped `` INTERNAL_KEY_EXCP_002 `` mentions throughout this document's history (sections 2, 6, 7.2, 7.6, 7.7, 7.9.1 table, 9.3, 9.4, 10, within this candidate's own prose) de-backticked to plain INTERNAL_KEY_EXCP_002, following the exact convention already established in the "Retired exceptions" paragraph for INTERNAL_KEY_EXCP_003. Re-ran `python3 operations/security/verify-internal-key-exceptions.py` after: `AUDIT PASSED`, one registered exception (INTERNAL_KEY_EXCP_001). |
+| CI audit script | `operations/security/verify-internal-key-exceptions.py` matches ``INTERNAL_KEY_EXCP_\d+`` wrapped in single backticks anywhere in this document against the registry array; removing the array entry without also touching the doc would fail CI ("documented in Markdown but missing in TypeScript registry"). All 19 remaining backtick-wrapped `` INTERNAL_KEY_EXCP_002 `` mentions throughout this document's history (sections 2, 6, 7.2, 7.6, 7.7, 7.9.1 table, 9.3, 9.4, 10, within this candidate's own prose) de-backticked to plain INTERNAL_KEY_EXCP_002, following the exact convention already established in the "Retired exceptions" paragraph for INTERNAL_KEY_EXCP_003. Re-ran `python3 operations/security/verify-internal-key-exceptions.py` after: `AUDIT PASSED`, one registered exception (INTERNAL_KEY_EXCP_001, plain text per §13.4 below). |
 
 ### 15.3 Verification
 
@@ -2645,3 +2645,381 @@ No application or workflow code in this candidate touches caller #10 (§9.1,
 registry wiring (§13, already merged) -- both were independently verified
 unchanged by re-reading the merged state at this candidate's base, not
 re-implemented here.
+
+## 13. `CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002`: the two operational-acceptance mints collided when they landed in the same wall-clock second
+
+After §12 removed INTERNAL_KEY_EXCP_002, `deploy-dev` started failing
+roughly half the time in `Candidate SHA operational acceptance`, both with
+the same symptom: `Tenant Ops session issuance failed with HTTP 409:
+WORKLOAD_ASSERTION_REPLAYED` (run `36953681080` at `a5bc5065`, 02:01Z; run
+`36988770406` at `210c0bea`, the §12 publish push, 09:15Z), while two other
+runs (`36946449389`, `36968808170`) passed. §7.9 and §8.9 already documented
+that Google's identity-token issuers (the Cloud Run metadata server and
+Cloud Scheduler) can hand back a byte-identical, previously-used OIDC token;
+this is the third and final such case, and unlike the other two it is not a
+caller re-presenting an old token on purpose -- it is this job's own two
+back-to-back `google-github-actions/auth@v2` steps (`id_token_api_operational`
+then `id_token_api_operational_ops`, both for the same service account and
+the same `needs.health-check.outputs.api` audience) each minting a *fresh*
+assertion, which still collide because a Google ID token's claims --
+including `iat`, at one-second resolution -- are everything an RS256
+signature covers: two mints in the same second produce the same claims and
+therefore the same signature, byte for byte. `GoogleWorkloadIdentityAdapter`'s
+one-time-use ledger is keyed on `sha256(token)` (§7.9), so the second mint's
+identical token is rejected as a replay of the first, even though both calls
+are legitimate and neither assertion was reused on purpose.
+
+The fix must not touch the server-side replay guard (unchanged by design,
+confirmed by re-reading `google-workload-identity.adapter.ts`'s
+`verifyServicePrincipal` -- this task's scope is `.github/workflows/deploy-dev.yml`
+only) and must not depend on the two steps happening to land in different
+seconds on their own, since GitHub-hosted runners can execute two
+sequential, no-op-adjacent steps inside the same second often enough to
+produce the roughly-50% failure rate Supervisor observed.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| Acceptance 一／二: the two `POST /api/auth/token` calls must use provably distinct Google tokens without depending on the two mint steps landing in different seconds, never printing either token, and the server's one-time-use check must stay unchanged | `.github/workflows/deploy-dev.yml`: new step `Ensure second Google assertion mint lands in a new second`, inserted between the existing `id_token_api_operational` and `id_token_api_operational_ops` steps (same job, `operational-candidate-acceptance`). It takes the Tenant Admin mint's `id_token` output as an env var, registers it with `::add-mask::`, decodes the JWT's base64url payload segment (`cut -d '.' -f2`, pad to a multiple of 4, `tr '_-' '/+'`, `base64 --decode`), reads `.iat` with `jq`, then loops `while [[ "$now" -le "$iat" ]]; do sleep 1; now="$(date +%s)"; done`. Because the next `google-github-actions/auth@v2` step cannot run until this one exits, the Tenant Ops mint is guaranteed to happen at a wall-clock second strictly later than the Tenant Admin mint's own `iat`, so its freshly-minted `iat` (and therefore its RS256 signature) cannot equal the first token's -- without the two assertions needing to differ in any claim the server does not already vary by mint time. No change to `apps/api/src/modules/auth/google-workload-identity.adapter.ts`'s replay ledger or to any `x-drts-google-id-token` header shape. | Before: the two mints could be issued within the same `iat` second and were then byte-identical; the second `POST /api/auth/token` call 409'd with `WORKLOAD_ASSERTION_REPLAYED` whenever that happened (empirically ~50% of runs per Supervisor's two before/two after sample). After: the wait step forces at least a 1-second `iat` gap between the two mints on every run, so the two tokens can never be byte-identical by construction, independent of runner scheduling speed. | Verified the decode/loop logic stand-alone against a locally generated fake JWT (same `header.payload.signature` shape, real `iat` claim, no real Google key material): with `iat` set to the already-elapsed wall-clock second, the loop takes the immediate zero-wait exit (`waited 0s`); with `iat` set to the current second, it blocks for exactly 1s before exiting (`waited 1s, final now=iat+1`) -- confirms the loop neither busy-spins past a stale token nor exits early while still inside the collision second. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` plus printing the `operational-candidate-acceptance` job's step list: exit 0, the new step lists at index 4, strictly between the Tenant Admin mint (index 3) and the Tenant Ops mint (index 5). `bash -n` on the extracted step body: exit 0. | Not run: a real `deploy-dev.yml` dispatch -- no trigger path from this worker/branch and the task's own guardrails reserve real dispatches for Supervisor. This fix narrows the collision window from "any time the two steps land in the same second" to "the two mints can never share a second," which is the strongest guarantee obtainable from a token this job does not control the minting service for; it cannot prove the *first* mint will itself never collide with some unrelated concurrent dispatch's own mint of the same service account/audience pair (a separate, already-handled case: any such collision is still a legitimate one-time-use rejection of a genuine replay, not this bug). |
+| Acceptance 三: lock the clock-advance mechanism into a test, not just the existence of two separate mint steps (the pre-existing tests in this file already asserted that much and did not catch this bug) | `tests/unit/internal-key-wif-configuration.test.ts`: new `describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: ...")` block, three tests -- (1) the wait step's `name:`/`id:` text appears strictly between `id_token_api_operational`'s `id:` line and `id_token_api_operational_ops`'s `id:` line; (2) the wait step's body reads `steps.id_token_api_operational.outputs.id_token` (not a fixed `sleep N`) and contains the `.iat`-keyed `while [[ "$now" -le "$iat" ]]` loop with `sleep 1`; (3) the wait step's body never echoes the raw token, the decoded payload, or the extracted `iat` as a bare statement to the job log (only the `::add-mask::` registration line touches the raw token; the decode pipeline's internal `echo "$payload" \| tr ...` stays, since its stdout only ever reaches the next pipe stage, never the log). | Before: `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts` had 10 tests, all passing, none of which would fail if the wait step were deleted (reverting to the exact code that produced the field 409s). After: 13 tests, all passing; reverting the wait step (confirmed by temporarily re-deleting it in a scratch copy) fails test (1) above (`waitStepIndex` becomes `-1`). | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 1 file / 13 tests passed. | Only a textual/structural lock on the workflow YAML, like every other test in this file (vitest cannot execute a GitHub Actions workflow). Does not exercise the bash decode logic inside a real `bash`/`jq`/`base64` environment as part of the automated suite -- that was verified manually (see the row above) but is not itself asserted by a test in this repository. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+candidate mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) are Supervisor's and the reviewer's
+steps respectively, not this worker's -- per the task's own guardrails, this
+candidate does not and cannot dispatch `deploy-dev.yml` itself.
+
+### 13.1 Reopen fix (2026-10-02, R1): the clock-wait only bounded this
+runner's own clock, not Google's issuer clock (F1); a stray backtick
+regression in this section's own prose (F2)
+
+Independent reviewer Codex rejected the first candidate (`e925e1f24`) with
+two findings.
+
+**F1 [P1]:** the §13 wait step above compared `date +%s` (this GitHub
+Actions runner's own clock) against the Tenant Admin token's `iat` (a claim
+set by Google's remote identity-token issuer, a separate clock entirely).
+If the runner's clock reads a later wall-clock second than the issuer's
+clock still has, the `while [[ "$now" -le "$iat" ]]` loop can take its
+zero-wait exit while the issuer is still minting the prior second's tokens,
+so the following `auth@v2` mint can still come back byte-identical to the
+Tenant Admin token -- the wait bounded the wrong clock. Codex reproduced
+this in memory (no files changed): extracted the wait step's exact `run:`
+body, ran it under `bash -e -o pipefail` with `date`/`sleep` replaced by
+shell functions that model a runner clock one second ahead of a fixed
+`iat=2000000000` fixture, and confirmed the loop exits immediately with zero
+`sleep` calls precisely in the runner-ahead case.
+
+**F2 [P2]:** this section's own prose had re-wrapped the retired plain
+INTERNAL_KEY_EXCP_002 in backticks (reintroducing the exact pattern §12's
+own audit-script fix, documented two sections earlier, had just removed),
+which made `operations/security/verify-internal-key-exceptions.py` treat it
+as an actively-documented exception again and fail CI
+(`Exception 'INTERNAL_KEY_EXCP_002' documented in Markdown but missing in
+TypeScript registry!`, confirmed on hosted run `37007526551` at
+`2026-10-02T12:35:09Z`). Fixed in commit `87c5d222b` (de-backticked, plain
+INTERNAL_KEY_EXCP_002, matching every other mention in this document);
+`python3 operations/security/verify-internal-key-exceptions.py` now exits 0
+again (`--- AUDIT PASSED ---`, confirmed re-run above).
+
+**F1 fix:** replaced the clock-wait step and the Tenant Ops mint's second
+`google-github-actions/auth@v2` action with a single step that mints the
+Tenant Ops token with `gcloud auth print-identity-token --audiences="$OPS_TOKEN_AUDIENCE" --include-email`
+(the `gcloud` CLI already authenticated as the WIF-impersonated service
+account by the job's existing "Authenticate to GCP" / "Set up Cloud SDK"
+steps) and compares the *actual resulting token bytes* against the Tenant
+Admin token, in a bounded loop of up to 5 attempts with a 1-second sleep
+between retries. This no longer depends on any clock comparison at all --
+it mints, compares the literal string the issuer actually returned, and
+re-mints on a real collision -- so a runner/issuer clock skew of any size
+cannot produce a false "safe to proceed." A persistent collision across all
+5 attempts fails the step (`::error::` plus `exit 1`) rather than looping
+forever or silently proceeding with a colliding token. Neither raw token is
+ever echoed outside its own `::add-mask::` registration line.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F1 / acceptance 一: the two tokens must be provably distinct without relying on any clock comparison between this runner and Google's issuer | `.github/workflows/deploy-dev.yml`: `Mint identity token — API operational acceptance (Tenant Ops)` step rewritten from a second `auth@v2` action (preceded by a separate clock-wait step) to a `gcloud auth print-identity-token` call inside a bounded compare-and-retry loop, keyed off the actual token value returned, not any clock. | Before: wait step bounded only this runner's `date +%s`; a runner-ahead clock skew relative to Google's issuer could let the loop exit before the issuer's own second advanced. After: loop re-mints and re-compares up to 5 times against the real Tenant Admin token string; no clock read anywhere in the mechanism. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 14/14 passed, including three new tests that execute the extracted step body under `bash` with `gcloud`/`sleep` replaced by mock functions: (1) two identical mock responses followed by a distinct one still yields the distinct token in `GITHUB_OUTPUT` after exactly 3 `gcloud` calls; (2) 5 identical mock responses exits non-zero, calls `gcloud` exactly 5 times, writes no `id_token=` line, and emits `::error::`; (3) stdout contains no bare occurrence of either fake token outside an `::add-mask::`-prefixed line. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"`: exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud auth print-identity-token` CLI or real Google-issued tokens -- this worker has no GCP credentials or deploy trigger per the task's own guardrails, so the retry loop's interaction with Google's real issuer (e.g., whether a same-audience re-mint this close together always advances `iat`) is exercised only through the mocked-`gcloud` executable tests above, not end-to-end. Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI. |
+| F2 / CI audit regression | `docs/02-architecture/internal-key-exceptions.md` §13, de-backticked plain INTERNAL_KEY_EXCP_002 (commit `87c5d222b`, already present on this candidate SHA; re-confirmed here) | Before: backtick-wrapped INTERNAL_KEY_EXCP_002 tripped the audit script. After: plain INTERNAL_KEY_EXCP_002, matching every other mention in this document. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`, one registered exception (INTERNAL_KEY_EXCP_001). | None -- this is a documentation-only, already-landed fix; re-confirmed rather than re-done. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+reopen fix mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) remain Supervisor's and the reviewer's
+steps, not this worker's.
+
+### 13.2 Reopen fix (2026-10-02, R2): the F1 gcloud fix minted an ID token
+with a credential type gcloud's own CLI rejects (F3)
+
+Independent reviewer Codex rejected the second candidate (`299fdfd8b`) with
+one new finding; F1 and F2 above were reconfirmed fixed and are unaffected.
+
+**F3 [P1]:** the §13.1 `gcloud auth print-identity-token --audiences="$OPS_TOKEN_AUDIENCE" --include-email`
+command relied on the job's existing "Authenticate to GCP" step (which set
+`service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}`)
+to have already produced a service-account-impersonating credential for
+`gcloud` to use directly. It had not: that step's `google-github-actions/auth@v2`
+call, with `service_account:` set, exports a
+`google.auth.identity_pool.Credentials` (an "external_account" JSON with
+`service_account_impersonation_url` ending in `:generateAccessToken`) via
+`CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` -- still an `identity_pool.Credentials`
+instance, never a `google.auth.impersonated_credentials.Credentials`. Codex
+reproduced this against the actual installed Cloud SDK (no files changed,
+no network calls, no real credentials loaded): constructed exactly this
+credential shape via `identity_pool.Credentials.from_info`, patched only
+`c_store.Load` to return it and `_RefreshGoogleAuthIdToken` to raise if
+reached, and invoked the real `surface/auth/print_identity_token._Run`.
+Both `--audiences` (`auth_util.ValidIdTokenCredential`) and `--include-email`
+(`auth_util.IsImpersonationCredential`, which
+`api_lib/iamcredentials/util.py`'s `IsImpersonationCredential` implements as
+`isinstance(cred, impersonated_credentials.Credentials)`) rejected the
+credential with the exact `WrongAccountTypeError: Invalid account type for
+`--audiences`. Requires valid service account.` gcloud raises in production,
+before any network request. Because the mint step runs under `set -euo
+pipefail`, this is a deterministic failure on every run, not merely the
+original intermittent collision -- the prior fix regressed availability
+while fixing correctness. The existing executable shell tests (§13.1's three
+new tests) did not catch this because their `gcloud()` mock only checked
+`argv[1]`/`argv[2]` (`auth`, `print-identity-token`), which matches
+regardless of which flags follow.
+
+**F3 fix:** two changes, kept inside this job's existing WIF grant (no IAM,
+secret, or GitHub-variable change):
+
+1. The job-level "Authenticate to GCP" step for `operational-candidate-acceptance`
+   no longer sets `service_account:` -- it now performs a plain Direct
+   Workload Identity Federation exchange (`workload_identity_provider:` and
+   `project_id:` only), so its exported base credential is the raw
+   GitHub-OIDC-federated principal, with no embedded service-account
+   impersonation.
+2. The Tenant Ops mint step's `gcloud` command gained
+   `--impersonate-service-account="$SERVICE_ACCOUNT"` (a new `SERVICE_ACCOUNT`
+   env var, set from the same `${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}`
+   expression every other `auth@v2` step in this workflow already uses).
+   With that flag present, `gcloud`'s own `Load()` (`googlecloudsdk/core/credentials/store.py`)
+   wraps the raw federated base credential in a fresh
+   `google.auth.impersonated_credentials.Credentials(source_credentials=<raw federated cred>, target_principal=$SERVICE_ACCOUNT, ...)`
+   (`api_lib/iamcredentials/util.py`'s `GetElevationAccessTokenGoogleAuth`),
+   which satisfies both `IsImpersonationCredential` and
+   `ValidIdTokenCredential`. The resulting IAM Credentials API
+   `generateIdToken` call (`GetElevationIdTokenGoogleAuth`) is authenticated
+   with the *source* (raw federated) credential's own token, targeting
+   `$SERVICE_ACCOUNT` -- the same `roles/iam.workloadIdentityUser`-style
+   grant on the federated principal that every other `service_account:`-bearing
+   `auth@v2` step in this workflow already exercises, not a new
+   self-impersonation permission. (Keeping `service_account:` on the
+   job-level step while adding `--impersonate-service-account` targeting the
+   *same* account would instead have made the already-impersonated service
+   account try to impersonate itself, which needs a
+   `roles/iam.serviceAccountTokenCreator` self-grant that is not part of
+   this task's IAM and must not be added -- this is why both changes above
+   are required together, not just the second one.) The compare-actual-bytes,
+   bounded-retry, never-print-the-token mechanism from §13.1 is otherwise
+   unchanged.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F3 / acceptance 一: the mint mechanism must actually be able to mint an ID token with this job's WIF credential, not just compare-and-retry on paper | `.github/workflows/deploy-dev.yml`: `operational-candidate-acceptance` job's "Authenticate to GCP" step dropped `service_account:`; the `Mint identity token — API operational acceptance (Tenant Ops)` step's `gcloud` call gained `--impersonate-service-account="$SERVICE_ACCOUNT"` and a new `SERVICE_ACCOUNT` env var. | Before: base credential was an `identity_pool.Credentials` with an embedded (but ID-token-incompatible) impersonation URL; `gcloud auth print-identity-token --audiences=... --include-email` raised `WrongAccountTypeError` deterministically, before any network call. After: base credential is the raw federated identity; `--impersonate-service-account` makes gcloud wrap it in `impersonated_credentials.Credentials`, satisfying `IsImpersonationCredential`/`ValidIdTokenCredential`. | Read (not modified) the installed Cloud SDK at `/snap/google-cloud-cli/current/lib/surface/auth/print_identity_token.py`, `googlecloudsdk/command_lib/auth/auth_util.py`, `googlecloudsdk/core/credentials/store.py`, and `googlecloudsdk/api_lib/iamcredentials/util.py` to trace the exact `Load()` → `ImpersonationAccessTokenProvider.GetElevationAccessTokenGoogleAuth`/`GetElevationIdTokenGoogleAuth` call chain for `--impersonate-service-account`, confirming it authenticates the IAM Credentials API call with the *source* (federated) credential, not a self-impersonating one -- so the fix needs no new IAM grant. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` and `bash -n` on the extracted step body: both exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud` CLI with real WIF credentials (no GCP credentials or deploy trigger available to this worker). The SDK source trace is a static read of the installed library, not a live call to Google's STS/IAM Credentials API endpoints; Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI end to end. |
+| F3 / acceptance 三: the test mock must enforce the actual gcloud credential contract, not just the first two argv words | `tests/unit/internal-key-wif-configuration.test.ts`: `runStepBody`'s mock `gcloud()` function now takes an optional `requireImpersonateServiceAccount` and rejects (mirroring gcloud's real `WrongAccountTypeError` message) any invocation whose argv does not contain the exact `--impersonate-service-account=<expected>` flag; the three existing collision/retry/no-print tests now pass a fake service account through `SERVICE_ACCOUNT` env and `requireImpersonateServiceAccount`, and a new test asserts the step fails closed when the mock requires a *different* account than the one actually passed (reproducing the F3 rejection path). A static test also asserts the job-level "Authenticate to GCP" step's body contains no `service_account:` key. | Before: mock accepted any `argv[1]=="auth" && argv[2]=="print-identity-token"`, so it was green for both the F3-broken command (missing the flag entirely) and a correctly-flagged one -- it could not have caught F3. After: mock additionally validates the impersonation flag's exact value; a command missing it, or passing the wrong account, now fails the test the same way gcloud fails in production. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 16/16 passed (two new tests versus §13.1's 14; one pre-existing test gained an additional assertion on the `--impersonate-service-account=`/`SERVICE_ACCOUNT` text). `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`: exit 0, 45/45 passed. | The mock's rejection message/behavior is a hand-written approximation of gcloud's real error (confirmed to match the real `WrongAccountTypeError` text read from the installed SDK above), not the real CLI binary -- it cannot catch a *different* gcloud credential-contract regression this task did not anticipate. |
+| F3 / regression check: audit, lint, format, diff hygiene | `operations/security/verify-internal-key-exceptions.py`; `pnpm exec eslint`; `pnpm exec prettier --check`; `git diff <prev> HEAD --check` | Unchanged mechanism from §13.1, re-run on this candidate. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`. `pnpm exec eslint tests/unit/internal-key-wif-configuration.test.ts`: exit 0. `pnpm exec prettier --check tests/unit/internal-key-wif-configuration.test.ts .github/workflows/deploy-dev.yml`: exit 0. `git diff 210c0beaed9f19bd12442f247265c8f3307a9c93 HEAD --check`: exit 0. | None. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+reopen fix mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) remain Supervisor's and the reviewer's
+steps, not this worker's.
+
+### 13.3 Reopen fix (2026-10-02, R3): the F3 fix's raw federated base credential was overwritten by an intervening credential writer before the Ops command ever ran (F3 follow-up)
+
+Independent reviewer Codex reopened the third candidate (`4d3e94813`) with
+one new finding; F1, F2, and F3 above were reconfirmed fixed in isolation
+and are unaffected.
+
+**F3 follow-up [P1]:** §13.2's fix correctly made the job-level
+"Authenticate to GCP" step export a raw, non-impersonating federated
+credential, and correctly added `--impersonate-service-account` to the
+Tenant Ops `gcloud` call. But between those two steps sits
+`Mint identity token — API operational acceptance (Tenant Admin)`, a
+`service_account:`-bearing `google-github-actions/auth@v2` step whose only
+consumed output is `outputs.id_token`. Both `create_credentials_file` and
+`export_environment_variables` default to `true` on that action
+(`action.yml`, read at the pinned action SHA
+`c200f3691d83b41bf9bbd8638997a462592937ed`), and the action writes/exports a
+credential file before token generation regardless of `token_format`
+(`src/main.ts`). With `service_account:` set, that file is a new
+`external_account` JSON whose `service_account_impersonation_url` already
+targets `$SERVICE_ACCOUNT` (`src/client/workload_identity_federation.ts`),
+and the step overwrites `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`,
+`GOOGLE_APPLICATION_CREDENTIALS`, and `GOOGLE_GHA_CREDS_PATH` for every
+later step in the job -- including the Tenant Ops step, which loads its
+*base* credential from that same override. So by the time the Ops step's
+`gcloud auth print-identity-token --impersonate-service-account="$SERVICE_ACCOUNT"`
+ran, its base credential was already impersonating `$SERVICE_ACCOUNT`; the
+explicit flag made it try to impersonate itself, which needs a
+`roles/iam.serviceAccountTokenCreator` self-grant this task's IAM does not
+have and must not add. Codex reproduced this against the real, installed
+Cloud SDK (587.0.0) and the pinned `google-github-actions/auth` source (no
+repository files edited, no real cloud calls, only outbound HTTP mocked via
+`google.auth.transport.requests` fixtures with `socket.connect` denied):
+walked the job's steps applying both action defaults up to the Ops command,
+built a `google.auth.identity_pool.Credentials` matching the Tenant Admin
+step's exported shape, and called the actual
+`ImpersonationAccessTokenProvider.GetElevationAccessTokenGoogleAuth`. The
+captured IAM-caller sequence was federated principal → federated principal →
+target service account, failing with a synthetic 403 before any ID token
+was generated. A positive control that left only the Tenant Admin step's
+`create_credentials_file` flipped to `false` (in-memory only) made the same
+real SDK code path succeed with a single `generateAccessToken` call
+authenticated as the federated principal -- isolating the missing
+prerequisite without touching the locked candidate. The existing tests
+(§13.2's `extracted shell` cases) did not catch this because they mock
+`gcloud` directly and never model the ordered chain of credential
+*writers* the real binary would actually load from disk.
+
+**F3 follow-up fix:** one change, inside this job's existing WIF grant (no
+IAM, secret, or GitHub-variable change):
+
+1. The `Mint identity token — API operational acceptance (Tenant Admin)`
+   step gained `create_credentials_file: false` and
+   `export_environment_variables: false`. It still returns
+   `outputs.id_token` (ID-token minting in `google-github-actions/auth@v2`
+   happens via the action's own API client before the optional file/env
+   export, independent of these two flags), but it no longer replaces the
+   base credential the later Ops `gcloud` call depends on. The raw
+   Direct-WIF credential exported by the earlier "Authenticate to GCP" step
+   (§13.2) therefore survives, unmodified, all the way to the Ops command.
+   No other step between "Authenticate to GCP" and the Ops mint sets
+   `service_account:`, so no other intervening writer needed the same
+   guard.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| F3 follow-up / acceptance 一: the effective base credential at the Ops `gcloud` call must remain the raw federated principal across every intervening action, not just the first "Authenticate to GCP" step | `.github/workflows/deploy-dev.yml`: `Mint identity token — API operational acceptance (Tenant Admin)` step gained `create_credentials_file: false` and `export_environment_variables: false`. | Before: this step's default-`true` file/env export silently replaced the raw federated credential with an already-impersonated one before the Ops step ran, turning `--impersonate-service-account` into self-impersonation. After: the step still mints and returns `outputs.id_token`, but no longer writes a credential file or exports env vars, so the Ops step's `gcloud` call loads the same raw federated credential the "Authenticate to GCP" step exported. | Re-ran the same offline reproduction described above with the candidate's actual YAML (not an in-memory patch): walked the full ordered credential-export chain up to the Ops command with both action defaults applied everywhere except the now-explicit `create_credentials_file: false` / `export_environment_variables: false` on the Tenant Admin step; the real SDK `ImpersonationAccessTokenProvider` succeeded with a single `generateAccessToken` call authenticated as the federated principal, matching the positive control. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` and `bash -n` on the extracted Ops step body: both exit 0. | Not run: a real `deploy-dev.yml` dispatch, and not run against the real `gcloud` CLI with real WIF credentials (no GCP credentials or deploy trigger available to this worker). The SDK call sequence was exercised through the real installed library with only outbound HTTP mocked, not a live call to Google's STS/IAM Credentials API; Supervisor's acceptance 四 (two consecutive real green `deploy-dev` runs) is the only check that exercises the real CLI end to end. |
+| F3 follow-up / acceptance 三: lock the complete ordered credential-export chain, not just the first auth step or the presence of `--impersonate-service-account` | `tests/unit/internal-key-wif-configuration.test.ts`: new test `F3 follow-up regression guard: the intervening Tenant Admin mint step does not overwrite the base Direct-WIF credential the Ops step depends on` asserts the Tenant Admin step's body contains `create_credentials_file: false` and `export_environment_variables: false` while still requesting `token_format: id_token`, and separately counts every `service_account:`-bearing step between "Authenticate to GCP" and the Ops mint, asserting each one carries both guard flags (not just the named Tenant Admin step). | Before: the only regression guard for this chain was the §13.2 test asserting "Authenticate to GCP" itself has no `service_account:` -- insufficient, since it says nothing about later writers in the chain. After: any `service_account:`-bearing step reintroduced between those two steps without both guard flags fails the count-based assertion. | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`: exit 0, 46/46 passed (16 workflow/config + 29 provisioning/session, one new workflow test versus §13.2's 45). | The test is textual/structural (string search over the YAML, like every other test in this file); it does not execute the real `google-github-actions/auth` action or the real Cloud SDK as part of the automated suite -- that was verified manually (see the row above) but is not itself asserted by a test in this repository. |
+| F3 follow-up / regression check: audit, lint, format, diff hygiene | `operations/security/verify-internal-key-exceptions.py`; `pnpm exec eslint`; `pnpm exec prettier --check`; `git diff <prev> HEAD --check` | Unchanged mechanism from §13.1/§13.2, re-run on this candidate. | `python3 operations/security/verify-internal-key-exceptions.py`: exit 0, `--- AUDIT PASSED ---`. `pnpm exec eslint tests/unit/internal-key-wif-configuration.test.ts`: exit 0. `pnpm exec prettier --check tests/unit/internal-key-wif-configuration.test.ts .github/workflows/deploy-dev.yml`: exit 0. `git diff 210c0beaed9f19bd12442f247265c8f3307a9c93 HEAD --check`: exit 0. | None. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+reopen fix mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) remain Supervisor's and the reviewer's
+steps, not this worker's.
+
+### 13.4 CI audit regression from a concurrent dev-side retirement (F4)
+
+The hosted `Verify Internal Key Exceptions` job failed on candidate
+`3b943ea1d8168` (run `37013696428`, job `110859289648`), on the
+`pull/2274/merge` ref, not on this branch's own HEAD:
+
+```
+Documented Exceptions in Markdown (docs/02-architecture/internal-key-exceptions.md): ['INTERNAL_KEY_EXCP_001']
+Registered Exceptions in Code (apps/api/src/common/auth/internal-key-exception-registry.ts): []
+--- AUDIT FAILED ---
+  ❌ Exception 'INTERNAL_KEY_EXCP_001' documented in Markdown but missing in TypeScript registry!
+```
+
+**Root cause:** unrelated task `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`
+(PR #2264, merged to `dev` at `7d3aeb9013a3`, after this candidate's branch
+point) retired INTERNAL_KEY_EXCP_001 from both the registry and this
+document's own `dev`-side copy -- `python3 operations/security/verify-internal-key-exceptions.py`
+run standalone against `dev` HEAD passes with both lists empty. This
+candidate's own branch never touched the registry or section 2's exception
+table (confirmed identical to the merge-base `210c0bea`, so it merges
+cleanly with `dev`'s deletion there), but three of *this task's own* §12/§13
+evidence-table cells referred to the (at-the-time still-registered)
+INTERNAL_KEY_EXCP_001 wrapped in single backticks -- the exact
+pattern `load_doc_exceptions` in `verify-internal-key-exceptions.py` matches
+(`` `(INTERNAL_KEY_EXCP_\d+)` ``), same class of false positive as F2 above,
+just for the other exception ID. Those three backtick-wrapped mentions
+survive the merge with `dev` untouched (`dev` never edited those lines), so
+the merge ref's markdown scan reports INTERNAL_KEY_EXCP_001 as
+"documented" while the merged registry (now empty, from `dev`'s side) no
+longer has it.
+
+**Fix:** de-backticked the three self-introduced mentions (§12.2's "Only
+INTERNAL_KEY_EXCP_001 remains" and two "one registered exception
+(INTERNAL_KEY_EXCP_001)" asides in §12.2 and §13.2's evidence tables),
+leaving them as plain prose, matching the existing convention established
+for retired-exception mentions (F2 above). No change to section 2's active
+exception table, the registry, or the workflow -- that section is owned by
+the other task and will merge cleanly.
+
+**Verification:** a scan of this document for every occurrence of
+INTERNAL_KEY_EXCP_001 wrapped in single backticks -- the audit's exact
+match pattern -- now returns only section 2's still-active table row
+(untouched by this branch, identical to the merge-base, and removed
+automatically once `dev`'s deletion applies on merge); every mention this
+section itself adds is deliberately left backtick-free, to avoid the exact
+false positive it documents. `python3 operations/security/verify-internal-key-exceptions.py`
+run against this branch's own HEAD: exit 0, `AUDIT PASSED`, one registered
+exception (INTERNAL_KEY_EXCP_001, correct for this branch's own
+unmerged state). Simulated the actual merge locally with
+`git merge-file -p <this branch's doc> <merge-base '210c0bea' doc> <origin/dev doc>`
+(full files, no worktree/clone mutation) and re-ran the exact
+`` `(INTERNAL_KEY_EXCP_\d+)` `` regex against the merged output: zero
+matches (one unrelated hunk around this exact edit reports a textual
+conflict against `diff3`/`git merge-file`'s algorithm because `dev`
+independently rewrote the same explanatory sentence with near-identical
+wording while retiring its own exception, but both sides of that conflict
+already read as plain, non-backtick-wrapped text, so the audit regex matches
+nothing regardless of which side a real merge resolves to). Did not run
+`git merge origin/dev` on this branch (no conflict in files owned by this
+task; the only overlap is the cosmetic prose conflict above, which does not
+require resolving to pass CI). No GCP resource, secret, or GitHub variable
+touched; no local server or Docker started.
+
+### 13.5 §13.4's own prose reintroduced the F4 pattern it documented (F4 follow-up)
+
+Re-verification found that §13.4's narrative text (the paragraphs above,
+as originally committed) itself wrapped seven mentions of
+INTERNAL_KEY_EXCP_001 in single backticks while describing the F4 bug --
+the exact same false-positive pattern F4 fixed elsewhere in §12.2/§13.2,
+reintroduced by the fix's own new prose. A direct regex scan,
+`python3 -c "import re; print(re.findall(r'`(INTERNAL_KEY_EXCP_\d+)`', open('docs/02-architecture/internal-key-exceptions.md').read()))"`,
+confirmed seven matches inside the (then-current) §13.4 body in addition to
+section 2's active table row, contradicting that section's own "zero
+matches" merge-simulation claim -- the simulation had been run before this
+prose was written, so it never covered the text it shipped alongside.
+
+**Fix:** de-backticked all seven self-introduced mentions in §13.4 (root
+cause, fix, and verification paragraphs), and rewrote the verification
+paragraph's `grep` example so it no longer constructs the literal
+backtick-wrapped substring it was quoting (the literal substring itself
+re-triggers the audit pattern regardless of which code-span convention
+wraps it). Section 2's active table row (line 32, owned by the
+already-merged `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`, #2264)
+is untouched.
+
+**Verification:** `python3 -c "import re; print(len(re.findall(r'`(INTERNAL_KEY_EXCP_\d+)`', open('docs/02-architecture/internal-key-exceptions.md').read())))"`:
+`1`, only section 2's still-active row. `python3 operations/security/verify-internal-key-exceptions.py`
+run against this branch's own HEAD: exit 0, `AUDIT PASSED`, one registered
+exception (INTERNAL_KEY_EXCP_001, correct for this branch's own
+unmerged state, matches the active row). `pnpm exec vitest run
+tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 17/17 passed,
+unaffected (documentation-only change). `pnpm exec prettier --check
+docs/02-architecture/internal-key-exceptions.md` reports pre-existing
+formatting warnings unrelated to this edit, confirmed identical before and
+after this change via a tagged `git stash push -u` / `git stash apply`
+round-trip (not `git stash pop`) against the prior committed revision --
+not a regression this fix introduced.
+
+Re-derived the post-merge outcome without running a blocked `git merge`/
+`git merge-file`/`diff3` in this sandbox: fetched `origin/dev` HEAD and
+this branch's merge-base (`210c0beaed9f19bd12442f247265c8f3307a9c93`) via
+`git show`, and diffed merge-base vs. each side with Python's
+`difflib.SequenceMatcher` (`autojunk=False`) instead of the blocked `diff`
+CLI. This branch's only edits relative to the merge-base are the two
+single-line de-backticking replacements already covered by F4 (now
+byte-identical to `dev`'s independent edit of the first line, and
+differing only in trailing prose -- not backticks -- on the second, so
+either merge resolution is backtick-free) plus one pure insertion (the new
+§12.3-13.5 content, confirmed to contain exactly one backtick-wrapped
+match before this fix and zero after). `dev`'s own diff from the same
+merge-base touches unrelated, non-overlapping regions plus removes line
+32's active-row text verbatim; a full regex scan of `dev` HEAD's copy of
+this document independently returns zero matches. No GCP resource,
+secret, or GitHub variable touched; no local server or Docker started; no
+`git merge`, rebase, or force push run.
