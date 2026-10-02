@@ -16,7 +16,7 @@ import {
   type LiveEnv,
 } from "./live-map-config";
 import { verifyLiveDeployment } from "./deployment-check";
-import { MAP_OBSERVER_ID } from "./session-bootstrap";
+import { MAP_DRIVER_SCOPES, MAP_OBSERVER_ID } from "./session-bootstrap";
 import { normalizeApiResponse } from "./wire-response";
 import {
   baselineService,
@@ -155,13 +155,18 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
     assert(
       observer.active &&
         observer.identity.realm === "ops" &&
-        observer.identity.actorType === "ops_user",
+        observer.identity.actorType === "ops_observer",
     );
     assert.equal(observer.identity.actorId, MAP_OBSERVER_ID);
     assert.deepEqual(observer.identity.scopes, ["regulatory:read"]);
     const session = await api<{
       active: boolean;
-      identity: { realm: string; actorId: string; actorType: string };
+      identity: {
+        realm: string;
+        actorId: string;
+        actorType: string;
+        scopes: string[];
+      };
     }>("auth/session", config.driverToken);
     assert(
       session.active &&
@@ -174,6 +179,7 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
       config.driverId,
       "Driver session subject mismatch",
     );
+    assert.deepEqual([...session.identity.scopes].sort(), MAP_DRIVER_SCOPES);
     await checkIsolation();
 
     const service = baselineService();

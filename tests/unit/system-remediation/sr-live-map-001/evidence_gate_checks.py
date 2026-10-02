@@ -9,7 +9,7 @@ spec = importlib.util.spec_from_file_location("map_evidence_gate", SCRIPT)
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 SHA = "a" * 40
-OUTCOMES = {"runner": "success", "coverage": "success", "browser": "success"}
+OUTCOMES = {name: "success" for name in ["INSTALL_OUTCOME", "SESSIONS_OUTCOME", "RUNNER_OUTCOME", "COVERAGE_OUTCOME", "BROWSER_OUTCOME", "TEARDOWN_OUTCOME"]}
 
 
 class EvidenceGateTests(unittest.TestCase):
@@ -19,9 +19,10 @@ class EvidenceGateTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.write("evidence-deployment.json", {"candidate_sha": SHA, "deployed_sha": SHA, "effective_backend": "google", "status": "passed"})
         self.write("evidence-sessions.json", {"candidate_sha": SHA, "status": "passed", "sessions": [
-            {"realm": "driver", "actor_type": "driver_user", "actor_id": "drv-demo-002", "scopes": ["driver:read"]},
-            {"realm": "ops", "actor_type": "ops_user", "actor_id": "live-map-observer", "scopes": ["regulatory:read"]},
+            {"realm": "driver", "actor_type": "driver_user", "actor_id": "drv-demo-002", "scopes": ["dispatch:read", "driver:read", "driver:write"]},
+            {"realm": "ops", "actor_type": "ops_observer", "actor_id": "live-map-observer", "scopes": ["regulatory:read"]},
         ]})
+        self.write("evidence-cleanup.json", {"candidate_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True})
         self.write("evidence-map.json", {"candidateSha": SHA, "status": "passed"})
         self.write("evidence-coverage.json", {
             "candidate_sha": SHA, "deployed_sha": SHA, "status": "passed",
@@ -51,6 +52,44 @@ class EvidenceGateTests(unittest.TestCase):
 
     def test_complete_evidence_passes(self):
         gate.verify(self.root, SHA, OUTCOMES, SHA)
+
+    def test_producer_observer_first_order_passes(self):
+        self.change("evidence-sessions.json", lambda value: value["sessions"].reverse())
+        gate.verify(self.root, SHA, OUTCOMES, SHA)
+
+    def test_legacy_identity_is_rejected(self):
+        self.change("evidence-sessions.json", lambda value: value["sessions"][1].update(actor_type="ops_user"))
+        self.reject()
+
+    def test_duplicate_identity_is_rejected(self):
+        self.change("evidence-sessions.json", lambda value: value["sessions"].append(value["sessions"][0]))
+        self.reject()
+
+    def test_missing_driver_scope(self):
+        self.change("evidence-sessions.json", lambda value: value["sessions"][0].update(scopes=["driver:read"]))
+        self.reject()
+
+    def test_cleanup_step_required(self):
+        for outcome in ["skipped", "failure", "cancelled", None]:
+            with self.subTest(outcome=outcome):
+                outcomes = dict(OUTCOMES)
+                if outcome is None:
+                    del outcomes["TEARDOWN_OUTCOME"]
+                else:
+                    outcomes["TEARDOWN_OUTCOME"] = outcome
+                with self.assertRaises(ValueError):
+                    gate.verify(self.root, SHA, outcomes, SHA)
+
+    def test_missing_cleanup_evidence(self):
+        (self.root / "evidence-cleanup.json").unlink()
+        self.reject()
+
+    def test_wrong_cleanup_evidence(self):
+        for change in [{"candidate_sha": "b" * 40}, {"status": "failed"},
+                       {"revoked": False}, {"driver_id": "drv-demo-001"}, {"recovery": "skipped"}]:
+            with self.subTest(change=change):
+                self.write("evidence-cleanup.json", {"candidate_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True, **change})
+                self.reject()
 
     def test_skip_cannot_pass(self):
         with self.assertRaises(ValueError):

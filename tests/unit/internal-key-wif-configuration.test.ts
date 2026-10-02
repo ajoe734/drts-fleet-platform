@@ -47,14 +47,13 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: deploy-dev WIF assertion 
     expect(new Set(headerAssertions).size).toBe(2);
   });
 
-  it("still dual-sends the legacy x-drts-internal-key alongside the WIF assertion for caller #9", () => {
+  it("no longer sends the legacy x-drts-internal-key for caller #9 (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired)", () => {
     const workflow = readFileSync(workflowPath, "utf8");
 
-    const internalKeyHeaders = workflow.match(
-      /x-drts-internal-key: \$\{internal_key\}/g,
+    expect(workflow).not.toMatch(/x-drts-internal-key: \$\{internal_key\}/);
+    expect(workflow).not.toContain(
+      'internal_key="$(gcloud secrets versions access latest',
     );
-    expect(internalKeyHeaders).not.toBeNull();
-    expect(internalKeyHeaders!.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -92,13 +91,12 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: WIF registry operator doc
     expect(doc).toContain("DEV_IAP_CLIENT_ID");
   });
 
-  it("does not remove INTERNAL_KEY_EXCP_002 or the legacy internal-key fallback", () => {
-    const doc = readFileSync(registryDocPath, "utf8");
+  it("SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 removed INTERNAL_KEY_EXCP_002 and its legacy internal-key fallback from the workflow", () => {
     const workflow = readFileSync(workflowPath, "utf8");
 
-    expect(doc).toContain("INTERNAL_KEY_EXCP_002");
-    expect(doc).toContain("INTERNAL_KEY_EXCP_002` and the dual-send legacy-key fallback are untouched");
-    expect(workflow).toContain("x-drts-internal-key");
+    // deploy-dev.yml's operational-acceptance step no longer reads or sends
+    // the legacy internal key; the Google assertion is its only credential.
+    expect(workflow).not.toContain("x-drts-internal-key:");
   });
 });
 

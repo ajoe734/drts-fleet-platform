@@ -1,6 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import { DatabaseModule, DatabaseService } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -9,7 +10,6 @@ import { IdentityModule } from "../identity/identity.module";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
-import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
@@ -54,6 +54,7 @@ export function createTenantInvitationNotificationDeliveryService(
   providers: [
     TenantPartnerService,
     JwtAuthService,
+    GoogleWorkloadIdentityAdapter,
     TenantPartnerRepository,
     GoogleWorkloadIdentityAdapter,
     {

@@ -69,6 +69,8 @@ export interface BootstrapRequestIdentity {
   issuedAt?: string | null;
   expiresAt?: string | null;
   breakGlassGrantId?: string | null;
+  /** Server-issued ceiling for a driver provisioning service session. */
+  driverProvisioningDriverId?: string | undefined;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];

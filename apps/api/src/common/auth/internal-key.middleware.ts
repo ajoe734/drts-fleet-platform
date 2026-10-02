@@ -113,11 +113,7 @@ export async function validateInternalKey(
   options?: { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
 ): Promise<void> {
   const rawPath = request.originalUrl ?? request.url ?? "";
-  const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
-  const strictEnvironment = isStrictAuthEnvironment();
-
-  const configuredKey = expectedKey?.trim();
 
   if (
     isHealthRequest(rawPath) ||
@@ -127,6 +123,44 @@ export async function validateInternalKey(
   ) {
     return;
   }
+
+  return verifyGoogleAssertionOrInternalKey(request, expectedKey, options);
+}
+
+/**
+ * Core WIF-or-internal-key check shared by `validateInternalKey` (the
+ * general InternalKeyMiddleware gate, which additionally bypasses health/
+ * options/explicit-public routes and anything already carrying a Bearer
+ * token verified downstream) and callers like
+ * `TenantPartnerController.issuePartnerIngressHandoff`'s `allowInternalBootstrap`
+ * branch, which have no such downstream Bearer verification and must not
+ * inherit that bypass -- an arbitrary `Authorization: Bearer x` header must
+ * not satisfy this check outside the general middleware's context.
+ */
+export async function verifyGoogleAssertionOrInternalKey(
+  request: RequestLike,
+  expectedKey: string | undefined,
+  options?: {
+    googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter;
+    // The general InternalKeyMiddleware gate treats an unconfigured internal
+    // key as "nobody set up internal-key auth in this (non-strict) local/dev
+    // environment, so don't enforce it" -- appropriate for its broad, every-
+    // route coverage. A narrow, deliberate gate like
+    // TenantPartnerController.issuePartnerIngressHandoff's
+    // allowInternalBootstrap branch guards one sensitive operation and must
+    // fail closed even in dev when no credential at all is configured or
+    // presented, so it sets this to true.
+    requireCredential?: boolean;
+  },
+): Promise<void> {
+  const rawPath = request.originalUrl ?? request.url ?? "";
+  const requestPath = stripQueryString(rawPath);
+  const requestMethod = request.method ?? "GET";
+  const strictEnvironment = Boolean(
+    isStrictAuthEnvironment() || options?.requireCredential,
+  );
+
+  const configuredKey = expectedKey?.trim();
 
   const rawGoogleAssertion = extractGoogleWorkloadIdentityAssertion(
     request.headers,
@@ -152,11 +186,12 @@ export async function validateInternalKey(
     } catch (error) {
       // Registry not populated yet (ops rollout not complete), or this
       // caller's verified identity has no registry entry yet: fall back to
-      // `x-drts-internal-key` below so dev stays green while EXCP_002 is
-      // still active and onboarding is incremental. Any other error (bad
-      // signature, wrong issuer/audience, route scope denial) is a genuine
-      // rejection for an already-registered principal and must not be
-      // masked by falling through.
+      // `x-drts-internal-key` below (INTERNAL_KEY_EXCP_002 is retired, so
+      // that fallback now only succeeds if some *other* exception is ever
+      // registered for that header). Any other error (bad signature, wrong
+      // issuer/audience, route scope denial) is a genuine rejection for an
+      // already-registered principal and must not be masked by falling
+      // through.
       if (
         !isGoogleWorkloadIdentityNotConfigured(error) &&
         !isGoogleWorkloadIdentityPrincipalNotRegistered(error)

@@ -258,19 +258,31 @@ jobs:
         id: targets
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts --preflight
 
-      - name: Authenticate to shared dev using existing WIF
+      - name: Mint observer assertion through existing WIF provider
+        id: observer-wif
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
-          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
-          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          service_account: drts-dev-live-map-observer@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}
+          id_token_include_email: true
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Mint driver provisioning assertion through existing WIF provider
+        id: provisioning-wif
+        uses: google-github-actions/auth@v2
         with:
-          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: drts-dev-live-map@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}/driver-provisioning
+          id_token_include_email: true
 
       - name: Verify runtime health SHA and issue per-run least-scope sessions
         id: sessions
+        env:
+          DRTS_LIVE_MAP_GOOGLE_OBSERVER_ID_TOKEN: ${{ steps.observer-wif.outputs.id_token }}
+          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.provisioning-wif.outputs.id_token }}
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts
 
       - name: Fail closed before billed calls or browser startup
@@ -296,9 +308,22 @@ jobs:
         id: browser
         run: pnpm exec playwright test -c playwright.google-map-live.config.ts
 
-      - name: Revoke sessions
+      - name: Refresh WIF assertion for cleanup if provisioning session expired
+        if: always() && env.DRTS_LIVE_MAP_INVITE_CODE != ''
+        id: cleanup-wif
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: drts-dev-live-map@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}/driver-provisioning
+          id_token_include_email: true
+
+      - name: Revoke per-run invitation and bound driver session
         if: always()
         id: teardown
+        env:
+          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.cleanup-wif.outputs.id_token }}
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-teardown.ts
 
       - name: Record run status
@@ -309,6 +334,7 @@ jobs:
           RUNNER_OUTCOME: ${{ steps.runner.outcome }}
           COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
           BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
         run: |
           python3 tests/e2e/system-remediation/sr-live-map-001/gate-evidence.py
 
@@ -323,6 +349,7 @@ jobs:
             .artifacts/live-map-acceptance/run-status.json
             .artifacts/live-map-acceptance/evidence-deployment.json
             .artifacts/live-map-acceptance/evidence-sessions.json
+            .artifacts/live-map-acceptance/evidence-cleanup.json
             .artifacts/live-map-acceptance/evidence-coverage.json
             .artifacts/live-map-acceptance/evidence-browser.json
             .artifacts/live-map-acceptance/map-*.png

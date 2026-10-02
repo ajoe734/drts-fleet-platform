@@ -20,8 +20,14 @@ import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-pa
 
 function createController(
   jwtAuthService = new JwtAuthService(),
-  options?: { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
+  adapterOrOptions?:
+    | GoogleWorkloadIdentityAdapter
+    | { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
 ) {
+  const googleWorkloadIdentityAdapter =
+    adapterOrOptions && "verifyServicePrincipal" in adapterOrOptions
+      ? adapterOrOptions
+      : adapterOrOptions?.googleWorkloadIdentityAdapter;
   const tenantPartnerService = new TenantPartnerService(
     new AuditNotificationService(),
   );
@@ -40,9 +46,18 @@ function createController(
       undefined,
       undefined,
       undefined,
-      options?.googleWorkloadIdentityAdapter,
+      googleWorkloadIdentityAdapter,
     ),
   };
+}
+
+/** Stub satisfying only the single method verifyGoogleAssertionOrInternalKey calls. */
+function stubGoogleWorkloadIdentityAdapter(
+  verify: () => Promise<void>,
+): GoogleWorkloadIdentityAdapter {
+  return {
+    verifyServicePrincipal: verify,
+  } as unknown as GoogleWorkloadIdentityAdapter;
 }
 
 const REFERRAL_WIF_AUDIENCE = "https://drts-dev-api.example.run.app";
@@ -214,7 +229,7 @@ describe("tenant partner ingress handoff controller", () => {
     ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("allows internal callers to resolve the credential server-side", async () => {
+  it("rejects internal bootstrap via the legacy internal key now that INTERNAL_KEY_EXCP_002 is retired (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -224,6 +239,34 @@ describe("tenant partner ingress handoff controller", () => {
 
     const { controller } = createController();
 
+    await expect(
+      controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-002",
+        },
+        {
+          headers: {
+            "x-drts-internal-key": "internal-dev-key",
+          },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-004",
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+  });
+
+  it("allows internal callers to resolve the credential server-side via a verified Google workload identity assertion", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const adapter = stubGoogleWorkloadIdentityAdapter(async () => {});
+    const { controller } = createController(new JwtAuthService(), adapter);
+
     const response = await controller.issuePartnerIngressHandoff(
       {
         entrySlug: "bank-demo-alpha-airport",
@@ -231,7 +274,7 @@ describe("tenant partner ingress handoff controller", () => {
       },
       {
         headers: {
-          "x-drts-internal-key": "internal-dev-key",
+          "x-drts-google-id-token": "fake-but-verified-assertion",
         },
         method: "POST",
         originalUrl: "/api/partner/ingress/handoff",
@@ -247,6 +290,41 @@ describe("tenant partner ingress handoff controller", () => {
         partnerEntrySlug: "bank-demo-alpha-airport",
       },
     });
+  });
+
+  it("rejects internal bootstrap when the Google workload identity assertion fails verification, even with DRTS_INTERNAL_KEY configured", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-dev-key";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const adapter = stubGoogleWorkloadIdentityAdapter(async () => {
+      const err = new ApiRequestError(
+        403,
+        "WORKLOAD_AUDIENCE_MISMATCH",
+        "wrong audience",
+      );
+      throw err;
+    });
+    const { controller } = createController(new JwtAuthService(), adapter);
+
+    await expect(
+      controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-002b",
+        },
+        {
+          headers: {
+            "x-drts-google-id-token": "forged-assertion",
+            "x-drts-internal-key": "internal-dev-key",
+          },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-004b",
+      ),
+    ).rejects.toThrowError(ApiRequestError);
   });
 
   it("rejects internal bootstrap when the internal key header is missing", async () => {

@@ -1,12 +1,62 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
 import { AuthController } from "../../../../apps/api/src/modules/auth/auth.controller";
+import { GoogleWorkloadIdentityAdapter } from "../../../../apps/api/src/modules/auth/google-workload-identity.adapter";
 import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.useRealTimers();
 });
+
+// Provisions the same membership/role-binding records the real
+// GoogleWorkloadIdentityAdapter would persist for a verified ops_observer
+// principal, without needing a real RSA keypair/JWKS round trip -- same
+// pattern as the "WIF direct login" test further down this file.
+function mockOpsObserverAdapter(
+  repository: IdentityRepository,
+  principalId = "live-map-observer",
+) {
+  const adapter = new GoogleWorkloadIdentityAdapter(repository);
+  vi.spyOn(adapter, "verifyServicePrincipal").mockImplementation(async () => {
+    const authTime = new Date().toISOString();
+    const membershipRecord: any = {
+      membershipId: `mem_${principalId}_ops`,
+      principalId,
+      realm: "ops",
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: authTime,
+      updatedAt: authTime,
+    };
+    await repository.ensureMembershipRecord(membershipRecord);
+    await repository.ensureRoleBindingRecord({
+      roleBindingId: `role_binding_${principalId}_ops_ops_observer`,
+      sourceRef: `google_workload_identity:${principalId}:role_binding:ops_observer`,
+      membershipId: membershipRecord.membershipId,
+      roleCode: "ops_observer",
+      grantedByPrincipalId: null,
+      validFrom: authTime,
+      validTo: null,
+      createdAt: authTime,
+      updatedAt: authTime,
+    } as any);
+    return {
+      principalId,
+      actorId: principalId,
+      email: "test@gserviceaccount.com",
+      subject: principalId,
+      displayName: "Ops Observer WIF",
+      roles: ["ops_observer"],
+      scopes: ["regulatory:read"],
+      audience: "test-aud",
+      authTime,
+      ciTenantActorGrants: [],
+    };
+  });
+  return adapter;
+}
 
 // Reproduce the currently deployed contract before requesting a product scope
 // change. Real issuance, repository (memory adapter), signature and durable
@@ -17,7 +67,12 @@ it("documents why auth/token driver_user sessions cannot yet authenticate live c
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("STRICT_IAP_MODE", "false");
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
-  vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
+  // No DRTS_INTERNAL_KEY configured and no strict env: validateInternalKey's
+  // dev-lenient bypass (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930:
+  // INTERNAL_KEY_EXCP_002 is retired, so the old internal-key credential
+  // this test used to send would no longer validate at all) lets this
+  // request through to the driver_user session-durability behavior under
+  // test -- there is no live WIF path for driver_user bootstrap sessions.
   const repository = new IdentityRepository();
   await repository.onModuleInit();
   const jwt = new JwtAuthService(repository);
@@ -34,7 +89,6 @@ it("documents why auth/token driver_user sessions cannot yet authenticate live c
     method: "POST",
     originalUrl: "/api/auth/token",
     headers: {
-      "x-drts-internal-key": "unit-only-internal-key",
       "x-actor-type": "driver_user",
       "x-actor-id": "drv-demo-002",
       "x-realm": "driver",
@@ -52,17 +106,17 @@ it("documents why auth/token driver_user sessions cannot yet authenticate live c
   expect(await jwt.verifyAccessToken(issued.token)).toBeNull();
 });
 
-it("auth/token ops_observer sessions successfully issue durable sessions with membershipId", async () => {
+it("auth/token ops_observer sessions successfully issue durable sessions with membershipId (via the live Google workload identity path, SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired)", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-30T07:20:00.000Z"));
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("STRICT_IAP_MODE", "false");
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
-  vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
   vi.stubEnv("DRTS_E2E_PROVISIONING", "true");
   const repository = new IdentityRepository();
   await repository.onModuleInit();
   const jwt = new JwtAuthService(repository);
+  const wifAdapter = mockOpsObserverAdapter(repository);
   const controller = new AuthController(
     jwt,
     {} as never,
@@ -71,16 +125,17 @@ it("auth/token ops_observer sessions successfully issue durable sessions with me
     undefined,
     undefined,
     repository,
+    undefined,
+    wifAdapter,
   );
   const issued = await controller.issueToken({
     method: "POST",
     originalUrl: "/api/auth/token",
     headers: {
-      "x-drts-internal-key": "unit-only-internal-key",
+      "x-drts-google-id-token": "valid-token",
       "x-actor-type": "ops_observer",
       "x-actor-id": "live-map-observer",
       "x-realm": "ops",
-      "x-scopes": "regulatory:read",
     },
   });
   expect(issued.expiresIn).toBe("8h");
@@ -93,17 +148,17 @@ it("auth/token ops_observer sessions successfully issue durable sessions with me
   expect(await jwt.verifyAccessToken(issued.token)).not.toBeNull();
 });
 
-it("auth/token rejects elevated scopes for ops_observer", async () => {
+it("auth/token rejects elevated scopes for ops_observer (via the live Google workload identity path, SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired)", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-30T07:20:00.000Z"));
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("STRICT_IAP_MODE", "false");
   vi.stubEnv("JWT_SECRET", "unit-only-session-contract-key");
-  vi.stubEnv("DRTS_INTERNAL_KEY", "unit-only-internal-key");
   vi.stubEnv("DRTS_E2E_PROVISIONING", "true");
   const repository = new IdentityRepository();
   await repository.onModuleInit();
   const jwt = new JwtAuthService(repository);
+  const wifAdapter = mockOpsObserverAdapter(repository);
   const controller = new AuthController(
     jwt,
     {} as never,
@@ -112,12 +167,14 @@ it("auth/token rejects elevated scopes for ops_observer", async () => {
     undefined,
     undefined,
     repository,
+    undefined,
+    wifAdapter,
   );
   const issued = await controller.issueToken({
     method: "POST",
     originalUrl: "/api/auth/token",
     headers: {
-      "x-drts-internal-key": "unit-only-internal-key",
+      "x-drts-google-id-token": "valid-token",
       "x-actor-type": "ops_observer",
       "x-actor-id": "live-map-observer",
       "x-realm": "ops",

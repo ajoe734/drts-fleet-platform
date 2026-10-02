@@ -67,12 +67,6 @@ async function buildIdentityHeaders(
     "x-partner-program-id": id.partnerProgramId || "",
     "x-partner-entry-slug": id.partnerEntrySlug || session.partnerEntrySlug,
     "x-drts-passenger-id": id.drtsPassengerId || session.drtsPassengerId,
-    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up: drop this send once
-    // dev has proven x-drts-google-id-token below end-to-end and
-    // INTERNAL_KEY_EXCP_002 is retired.
-    ...(process.env.DRTS_INTERNAL_KEY
-      ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
-      : {}),
     ...(identityToken ? { "x-drts-google-id-token": identityToken } : {}),
   };
 }

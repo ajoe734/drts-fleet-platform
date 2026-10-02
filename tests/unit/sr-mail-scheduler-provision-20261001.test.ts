@@ -397,10 +397,12 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: runbook sequences deploy, regist
     expect(runbook).not.toMatch(/jsonPayload\.message/);
   });
 
-  it("documents that BootstrapAuthGuard swallows adapter errors to JWT_INVALID, so only route-scope denial is log-visible", () => {
+  it("documents that BootstrapAuthGuard falls through to JWT_INVALID but logs the adapter's rejection reason code first", () => {
     const runbook = readFileSync(runbookPath, "utf8");
     expect(runbook).toContain("JWT_INVALID");
     expect(runbook).toContain("AUTH_GOOGLE_WORKLOAD_IDENTITY_ROUTE_SCOPE_DENIED");
+    expect(runbook).toContain("AUTH_GOOGLE_WORKLOAD_IDENTITY_FALLBACK_DENIED");
+    expect(runbook).toContain("WORKLOAD_ASSERTION_REPLAYED");
   });
 
   it("points at the bounded completion check for actual job-run confirmation", () => {
