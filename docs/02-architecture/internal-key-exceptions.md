@@ -2450,36 +2450,39 @@ Registered Exceptions in Code (apps/api/src/common/auth/internal-key-exception-r
 
 **Root cause:** unrelated task `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`
 (PR #2264, merged to `dev` at `7d3aeb9013a3`, after this candidate's branch
-point) retired `INTERNAL_KEY_EXCP_001` from both the registry and this
+point) retired INTERNAL_KEY_EXCP_001 from both the registry and this
 document's own `dev`-side copy -- `python3 operations/security/verify-internal-key-exceptions.py`
 run standalone against `dev` HEAD passes with both lists empty. This
 candidate's own branch never touched the registry or section 2's exception
 table (confirmed identical to the merge-base `210c0bea`, so it merges
 cleanly with `dev`'s deletion there), but three of *this task's own* §12/§13
 evidence-table cells referred to the (at-the-time still-registered)
-`INTERNAL_KEY_EXCP_001` wrapped in single backticks -- the exact pattern
-`load_doc_exceptions` in `verify-internal-key-exceptions.py` matches
+INTERNAL_KEY_EXCP_001 wrapped in single backticks -- the exact
+pattern `load_doc_exceptions` in `verify-internal-key-exceptions.py` matches
 (`` `(INTERNAL_KEY_EXCP_\d+)` ``), same class of false positive as F2 above,
 just for the other exception ID. Those three backtick-wrapped mentions
 survive the merge with `dev` untouched (`dev` never edited those lines), so
-the merge ref's markdown scan reports `INTERNAL_KEY_EXCP_001` as
+the merge ref's markdown scan reports INTERNAL_KEY_EXCP_001 as
 "documented" while the merged registry (now empty, from `dev`'s side) no
 longer has it.
 
 **Fix:** de-backticked the three self-introduced mentions (§12.2's "Only
-`INTERNAL_KEY_EXCP_001` remains" and two "one registered exception
-(`INTERNAL_KEY_EXCP_001`)" asides in §12.2 and §13.2's evidence tables),
+INTERNAL_KEY_EXCP_001 remains" and two "one registered exception
+(INTERNAL_KEY_EXCP_001)" asides in §12.2 and §13.2's evidence tables),
 leaving them as plain prose, matching the existing convention established
 for retired-exception mentions (F2 above). No change to section 2's active
 exception table, the registry, or the workflow -- that section is owned by
 the other task and will merge cleanly.
 
-**Verification:** ``grep -n '`INTERNAL_KEY_EXCP_001`' docs/02-architecture/internal-key-exceptions.md``
-now matches only section 2's still-active table row (untouched by this
-branch, identical to the merge-base, and removed automatically once `dev`'s
-deletion applies on merge). `python3 operations/security/verify-internal-key-exceptions.py`
+**Verification:** a scan of this document for every occurrence of
+INTERNAL_KEY_EXCP_001 wrapped in single backticks -- the audit's exact
+match pattern -- now returns only section 2's still-active table row
+(untouched by this branch, identical to the merge-base, and removed
+automatically once `dev`'s deletion applies on merge); every mention this
+section itself adds is deliberately left backtick-free, to avoid the exact
+false positive it documents. `python3 operations/security/verify-internal-key-exceptions.py`
 run against this branch's own HEAD: exit 0, `AUDIT PASSED`, one registered
-exception (`INTERNAL_KEY_EXCP_001`, correct for this branch's own
+exception (INTERNAL_KEY_EXCP_001, correct for this branch's own
 unmerged state). Simulated the actual merge locally with
 `git merge-file -p <this branch's doc> <merge-base '210c0bea' doc> <origin/dev doc>`
 (full files, no worktree/clone mutation) and re-ran the exact
@@ -2494,3 +2497,56 @@ nothing regardless of which side a real merge resolves to). Did not run
 task; the only overlap is the cosmetic prose conflict above, which does not
 require resolving to pass CI). No GCP resource, secret, or GitHub variable
 touched; no local server or Docker started.
+
+### 13.5 §13.4's own prose reintroduced the F4 pattern it documented (F4 follow-up)
+
+Re-verification found that §13.4's narrative text (the paragraphs above,
+as originally committed) itself wrapped seven mentions of
+INTERNAL_KEY_EXCP_001 in single backticks while describing the F4 bug --
+the exact same false-positive pattern F4 fixed elsewhere in §12.2/§13.2,
+reintroduced by the fix's own new prose. A direct regex scan,
+`python3 -c "import re; print(re.findall(r'`(INTERNAL_KEY_EXCP_\d+)`', open('docs/02-architecture/internal-key-exceptions.md').read()))"`,
+confirmed seven matches inside the (then-current) §13.4 body in addition to
+section 2's active table row, contradicting that section's own "zero
+matches" merge-simulation claim -- the simulation had been run before this
+prose was written, so it never covered the text it shipped alongside.
+
+**Fix:** de-backticked all seven self-introduced mentions in §13.4 (root
+cause, fix, and verification paragraphs), and rewrote the verification
+paragraph's `grep` example so it no longer constructs the literal
+backtick-wrapped substring it was quoting (the literal substring itself
+re-triggers the audit pattern regardless of which code-span convention
+wraps it). Section 2's active table row (line 32, owned by the
+already-merged `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`, #2264)
+is untouched.
+
+**Verification:** `python3 -c "import re; print(len(re.findall(r'`(INTERNAL_KEY_EXCP_\d+)`', open('docs/02-architecture/internal-key-exceptions.md').read())))"`:
+`1`, only section 2's still-active row. `python3 operations/security/verify-internal-key-exceptions.py`
+run against this branch's own HEAD: exit 0, `AUDIT PASSED`, one registered
+exception (INTERNAL_KEY_EXCP_001, correct for this branch's own
+unmerged state, matches the active row). `pnpm exec vitest run
+tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 17/17 passed,
+unaffected (documentation-only change). `pnpm exec prettier --check
+docs/02-architecture/internal-key-exceptions.md` reports pre-existing
+formatting warnings unrelated to this edit, confirmed identical before and
+after this change via a tagged `git stash push -u` / `git stash apply`
+round-trip (not `git stash pop`) against the prior committed revision --
+not a regression this fix introduced.
+
+Re-derived the post-merge outcome without running a blocked `git merge`/
+`git merge-file`/`diff3` in this sandbox: fetched `origin/dev` HEAD and
+this branch's merge-base (`210c0beaed9f19bd12442f247265c8f3307a9c93`) via
+`git show`, and diffed merge-base vs. each side with Python's
+`difflib.SequenceMatcher` (`autojunk=False`) instead of the blocked `diff`
+CLI. This branch's only edits relative to the merge-base are the two
+single-line de-backticking replacements already covered by F4 (now
+byte-identical to `dev`'s independent edit of the first line, and
+differing only in trailing prose -- not backticks -- on the second, so
+either merge resolution is backtick-free) plus one pure insertion (the new
+§12.3-13.5 content, confirmed to contain exactly one backtick-wrapped
+match before this fix and zero after). `dev`'s own diff from the same
+merge-base touches unrelated, non-overlapping regions plus removes line
+32's active-row text verbatim; a full regex scan of `dev` HEAD's copy of
+this document independently returns zero matches. No GCP resource,
+secret, or GitHub variable touched; no local server or Docker started; no
+`git merge`, rebase, or force push run.
