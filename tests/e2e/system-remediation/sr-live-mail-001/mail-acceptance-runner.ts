@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
+import { observeInvitationMailbox } from "./mailbox-observer";
 import {
   redactObject,
   UatEvidenceRecorder,
@@ -135,6 +136,10 @@ export interface MailRunnerDeps {
   issueInvitation: IssueInvitationFn;
   pollDeliveryReceipt: PollDeliveryReceiptFn;
   recorder: UatEvidenceRecorder;
+  observeMailbox?: (
+    config: MailRunnerConfig,
+    deliveryId: string,
+  ) => Promise<Record<string, unknown>>;
 }
 export interface MailRunnerResult {
   status: "passed" | "failed";
@@ -193,6 +198,14 @@ export async function runMailAcceptance(
     reasons.push("Sent receipt lacks a successful provider attempt.");
   if (reasons.length) return finish();
 
+  if (deps.observeMailbox) {
+    const observation = await deps.observeMailbox(config, issued.deliveryId!);
+    deps.recorder.recordResourceId(
+      "mailbox_observation",
+      issued.deliveryId!,
+      observation,
+    );
+  }
   const negative = await deps.issueInvitation(
     config,
     config.nonAllowlistedRecipient,
@@ -229,7 +242,10 @@ export async function runMailAcceptance(
     );
 
   const outstanding = [
-    "authorized mailbox content for invitation and approval",
+    ...(deps.observeMailbox
+      ? []
+      : ["authorized mailbox content for invitation"]),
+    "authorized mailbox content for approval",
     "approval new_request, approaching_timeout and decision mail",
     "invitation accept, single use, resend, revoke and real 24-hour expiry",
     "automatic retry after scheduler fix deployment",
@@ -399,6 +415,7 @@ async function main(): Promise<void> {
         realIssueInvitation(cfg, recipient, recorder),
       pollDeliveryReceipt: (cfg, id) =>
         realPollDeliveryReceipt(cfg, id, recorder),
+      observeMailbox: observeInvitationMailbox,
       recorder,
     });
     evidence = result.evidence;

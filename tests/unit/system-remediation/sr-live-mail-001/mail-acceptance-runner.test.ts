@@ -156,7 +156,7 @@ describe("validateMailRunnerInputs", () => {
       DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: "person@example.test",
     });
     expect(() => validateMailRunnerInputs(env)).toThrow(
-      /fixture\/demo\/example address/,
+      /fixture\/demo\/example/,
     );
   });
 

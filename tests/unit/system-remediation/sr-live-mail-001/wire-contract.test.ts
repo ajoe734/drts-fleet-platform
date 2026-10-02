@@ -141,13 +141,11 @@ describe("real mail HTTP adapters, using the production response serializer", ()
   });
 
   it("does not send any mail when the checkout SHA is wrong", async () => {
-    const issueInvitation = vi
-      .fn()
-      .mockResolvedValue({
-        statusCode: 500,
-        deliveryId: null,
-        deployedCandidateSha: sha,
-      });
+    const issueInvitation = vi.fn().mockResolvedValue({
+      statusCode: 500,
+      deliveryId: null,
+      deployedCandidateSha: sha,
+    });
     await runMailAcceptance(
       { ...validateMailRunnerInputs(env), workflowSha: "b".repeat(40) },
       {

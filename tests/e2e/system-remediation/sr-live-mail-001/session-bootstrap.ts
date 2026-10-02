@@ -256,6 +256,8 @@ export function deriveAliasRecipient(baseEmail: string, tag: string): string {
 
 async function main(): Promise<void> {
   const config = validateMailSessionInputs(process.env);
+  if (process.env.GITHUB_ACTIONS !== "true")
+    throw new Error("Hosted runner required");
   await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
   const envPath = process.env.GITHUB_ENV;
   if (!envPath) {
@@ -327,10 +329,8 @@ const invokedDirectly =
   resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (invokedDirectly) {
-  main().catch((error: unknown) => {
-    console.error(
-      error instanceof Error ? error.message : "Mail session bootstrap failed",
-    );
+  main().catch(() => {
+    console.error("Mail session bootstrap failed; credential details omitted.");
     process.exitCode = 1;
   });
 }
