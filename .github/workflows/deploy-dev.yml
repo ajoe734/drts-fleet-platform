@@ -1579,13 +1579,46 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ needs.health-check.outputs.api }}
           id_token_include_email: true
+      # CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: Google ID tokens are
+      # RS256 and deterministic for a given (service account, audience, iat)
+      # tuple -- iat has one-second resolution, so minting the Tenant Ops
+      # assertion below in the same wall-clock second as the Tenant Admin
+      # assertion above would produce a byte-identical token.
+      # GoogleWorkloadIdentityAdapter consumes each assertion exactly once
+      # (sha256(token)-keyed replay guard), so that collision makes the
+      # second POST /api/auth/token call fail closed with
+      # WORKLOAD_ASSERTION_REPLAYED even though these are two independent
+      # mint steps. Block here until the wall clock has moved past the first
+      # token's iat, so the next mint is guaranteed a later iat and therefore
+      # a distinct signature. Never print the token or its decoded payload.
+      - name: Ensure second Google assertion mint lands in a new second
+        env:
+          GOOGLE_ID_TOKEN_TENANT_ADMIN: ${{ steps.id_token_api_operational.outputs.id_token }}
+        run: |
+          set -euo pipefail
+
+          echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_ADMIN"
+
+          payload="$(echo "$GOOGLE_ID_TOKEN_TENANT_ADMIN" | cut -d '.' -f2)"
+          case $(( ${#payload} % 4 )) in
+            2) payload="${payload}==" ;;
+            3) payload="${payload}=" ;;
+          esac
+          iat="$(echo "$payload" | tr '_-' '/+' | base64 --decode | jq --exit-status --raw-output '.iat')"
+
+          now="$(date +%s)"
+          while [[ "$now" -le "$iat" ]]; do
+            sleep 1
+            now="$(date +%s)"
+          done
       # SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: a second, independently
       # minted assertion for the Tenant Ops call below. GoogleWorkloadIdentityAdapter
       # consumes each assertion exactly once (sha256(token)-keyed replay
       # guard), so reusing the Tenant Admin token above for this second
       # POST /api/auth/token call would fail closed with
-      # WORKLOAD_ASSERTION_REPLAYED once the registry is populated and this
-      # header stops being ignored.
+      # WORKLOAD_ASSERTION_REPLAYED. The wait step above guarantees this
+      # mint's iat is later than the Tenant Admin mint's iat, so the two
+      # tokens are provably distinct regardless of how fast these steps run.
       - name: Mint identity token — API operational acceptance (Tenant Ops)
         id: id_token_api_operational_ops
         uses: google-github-actions/auth@v2

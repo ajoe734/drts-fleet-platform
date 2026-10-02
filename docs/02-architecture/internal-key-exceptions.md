@@ -2172,3 +2172,47 @@ No application or workflow code in this candidate touches caller #10 (§9.1,
 registry wiring (§10, already merged) -- both were independently verified
 unchanged by re-reading the merged state at this candidate's base, not
 re-implemented here.
+
+## 13. `CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002`: the two operational-acceptance mints collided when they landed in the same wall-clock second
+
+After §12 removed `INTERNAL_KEY_EXCP_002`, `deploy-dev` started failing
+roughly half the time in `Candidate SHA operational acceptance`, both with
+the same symptom: `Tenant Ops session issuance failed with HTTP 409:
+WORKLOAD_ASSERTION_REPLAYED` (run `36953681080` at `a5bc5065`, 02:01Z; run
+`36988770406` at `210c0bea`, the §12 publish push, 09:15Z), while two other
+runs (`36946449389`, `36968808170`) passed. §7.9 and §8.9 already documented
+that Google's identity-token issuers (the Cloud Run metadata server and
+Cloud Scheduler) can hand back a byte-identical, previously-used OIDC token;
+this is the third and final such case, and unlike the other two it is not a
+caller re-presenting an old token on purpose -- it is this job's own two
+back-to-back `google-github-actions/auth@v2` steps (`id_token_api_operational`
+then `id_token_api_operational_ops`, both for the same service account and
+the same `needs.health-check.outputs.api` audience) each minting a *fresh*
+assertion, which still collide because a Google ID token's claims --
+including `iat`, at one-second resolution -- are everything an RS256
+signature covers: two mints in the same second produce the same claims and
+therefore the same signature, byte for byte. `GoogleWorkloadIdentityAdapter`'s
+one-time-use ledger is keyed on `sha256(token)` (§7.9), so the second mint's
+identical token is rejected as a replay of the first, even though both calls
+are legitimate and neither assertion was reused on purpose.
+
+The fix must not touch the server-side replay guard (unchanged by design,
+confirmed by re-reading `google-workload-identity.adapter.ts`'s
+`verifyServicePrincipal` -- this task's scope is `.github/workflows/deploy-dev.yml`
+only) and must not depend on the two steps happening to land in different
+seconds on their own, since GitHub-hosted runners can execute two
+sequential, no-op-adjacent steps inside the same second often enough to
+produce the roughly-50% failure rate Supervisor observed.
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| Acceptance 一／二: the two `POST /api/auth/token` calls must use provably distinct Google tokens without depending on the two mint steps landing in different seconds, never printing either token, and the server's one-time-use check must stay unchanged | `.github/workflows/deploy-dev.yml`: new step `Ensure second Google assertion mint lands in a new second`, inserted between the existing `id_token_api_operational` and `id_token_api_operational_ops` steps (same job, `operational-candidate-acceptance`). It takes the Tenant Admin mint's `id_token` output as an env var, registers it with `::add-mask::`, decodes the JWT's base64url payload segment (`cut -d '.' -f2`, pad to a multiple of 4, `tr '_-' '/+'`, `base64 --decode`), reads `.iat` with `jq`, then loops `while [[ "$now" -le "$iat" ]]; do sleep 1; now="$(date +%s)"; done`. Because the next `google-github-actions/auth@v2` step cannot run until this one exits, the Tenant Ops mint is guaranteed to happen at a wall-clock second strictly later than the Tenant Admin mint's own `iat`, so its freshly-minted `iat` (and therefore its RS256 signature) cannot equal the first token's -- without the two assertions needing to differ in any claim the server does not already vary by mint time. No change to `apps/api/src/modules/auth/google-workload-identity.adapter.ts`'s replay ledger or to any `x-drts-google-id-token` header shape. | Before: the two mints could be issued within the same `iat` second and were then byte-identical; the second `POST /api/auth/token` call 409'd with `WORKLOAD_ASSERTION_REPLAYED` whenever that happened (empirically ~50% of runs per Supervisor's two before/two after sample). After: the wait step forces at least a 1-second `iat` gap between the two mints on every run, so the two tokens can never be byte-identical by construction, independent of runner scheduling speed. | Verified the decode/loop logic stand-alone against a locally generated fake JWT (same `header.payload.signature` shape, real `iat` claim, no real Google key material): with `iat` set to the already-elapsed wall-clock second, the loop takes the immediate zero-wait exit (`waited 0s`); with `iat` set to the current second, it blocks for exactly 1s before exiting (`waited 1s, final now=iat+1`) -- confirms the loop neither busy-spins past a stale token nor exits early while still inside the collision second. `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` plus printing the `operational-candidate-acceptance` job's step list: exit 0, the new step lists at index 4, strictly between the Tenant Admin mint (index 3) and the Tenant Ops mint (index 5). `bash -n` on the extracted step body: exit 0. | Not run: a real `deploy-dev.yml` dispatch -- no trigger path from this worker/branch and the task's own guardrails reserve real dispatches for Supervisor. This fix narrows the collision window from "any time the two steps land in the same second" to "the two mints can never share a second," which is the strongest guarantee obtainable from a token this job does not control the minting service for; it cannot prove the *first* mint will itself never collide with some unrelated concurrent dispatch's own mint of the same service account/audience pair (a separate, already-handled case: any such collision is still a legitimate one-time-use rejection of a genuine replay, not this bug). |
+| Acceptance 三: lock the clock-advance mechanism into a test, not just the existence of two separate mint steps (the pre-existing tests in this file already asserted that much and did not catch this bug) | `tests/unit/internal-key-wif-configuration.test.ts`: new `describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: ...")` block, three tests -- (1) the wait step's `name:`/`id:` text appears strictly between `id_token_api_operational`'s `id:` line and `id_token_api_operational_ops`'s `id:` line; (2) the wait step's body reads `steps.id_token_api_operational.outputs.id_token` (not a fixed `sleep N`) and contains the `.iat`-keyed `while [[ "$now" -le "$iat" ]]` loop with `sleep 1`; (3) the wait step's body never echoes the raw token, the decoded payload, or the extracted `iat` as a bare statement to the job log (only the `::add-mask::` registration line touches the raw token; the decode pipeline's internal `echo "$payload" \| tr ...` stays, since its stdout only ever reaches the next pipe stage, never the log). | Before: `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts` had 10 tests, all passing, none of which would fail if the wait step were deleted (reverting to the exact code that produced the field 409s). After: 13 tests, all passing; reverting the wait step (confirmed by temporarily re-deleting it in a scratch copy) fails test (1) above (`waitStepIndex` becomes `-1`). | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts`: exit 0, 1 file / 13 tests passed. | Only a textual/structural lock on the workflow YAML, like every other test in this file (vitest cannot execute a GitHub Actions workflow). Does not exercise the bash decode logic inside a real `bash`/`jq`/`base64` environment as part of the automated suite -- that was verified manually (see the row above) but is not itself asserted by a test in this repository. |
+
+No GCP resources, secrets, or GitHub variables were touched; nothing in this
+candidate mounts, reads, or prints any secret or token value; no local
+server or Docker container was started. Acceptance 四 (two consecutive real
+`deploy-dev` green runs) and acceptance 五 (CI green on this candidate SHA
+plus independent reviewer approval) are Supervisor's and the reviewer's
+steps respectively, not this worker's -- per the task's own guardrails, this
+candidate does not and cannot dispatch `deploy-dev.yml` itself.

@@ -57,6 +57,77 @@ describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: deploy-dev WIF assertion 
   });
 });
 
+describe("CI-DEPLOY-DEV-WIF-ASSERTION-COLLISION-20261002: the two operational-acceptance mints are provably distinct, not just two separate steps", () => {
+  it("inserts a clock-advance wait step between the Tenant Admin and Tenant Ops mints", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    const adminMintIndex = workflow.indexOf("id: id_token_api_operational\n");
+    const waitStepIndex = workflow.indexOf(
+      "name: Ensure second Google assertion mint lands in a new second",
+    );
+    const opsMintIndex = workflow.indexOf("id: id_token_api_operational_ops");
+
+    expect(adminMintIndex).toBeGreaterThan(-1);
+    expect(waitStepIndex).toBeGreaterThan(-1);
+    expect(opsMintIndex).toBeGreaterThan(-1);
+    // Same-second mints of the same (service account, audience) tuple are
+    // byte-identical RS256 tokens, which the server's sha256(token)-keyed
+    // one-time-use guard then rejects as a replay on the second call -- so
+    // the wait step must run strictly between the two mints, not before or
+    // after both.
+    expect(adminMintIndex).toBeLessThan(waitStepIndex);
+    expect(waitStepIndex).toBeLessThan(opsMintIndex);
+  });
+
+  it("the wait step blocks on the Tenant Admin token's own iat, not a fixed sleep, so it degrades to a no-op once real clock time has already moved on", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+    const waitStepStart = workflow.indexOf(
+      "name: Ensure second Google assertion mint lands in a new second",
+    );
+    const opsMintStart = workflow.indexOf(
+      "name: Mint identity token — API operational acceptance (Tenant Ops)",
+    );
+    const waitStepBody = workflow.slice(waitStepStart, opsMintStart);
+
+    // Reads the first mint's own output -- not a fixed `sleep 1`, which
+    // would be a flaky guess about scheduler speed rather than a guarantee.
+    expect(waitStepBody).toContain(
+      "GOOGLE_ID_TOKEN_TENANT_ADMIN: ${{ steps.id_token_api_operational.outputs.id_token }}",
+    );
+    // Decodes the JWT payload to read `iat` and loops until the wall clock
+    // has moved past it, so the loop body only runs when the two mints
+    // actually land in the same second.
+    expect(waitStepBody).toMatch(/\.iat/);
+    expect(waitStepBody).toMatch(/while \[\[\s*"\$now"\s*-le\s*"\$iat"\s*\]\]/);
+    expect(waitStepBody).toContain("sleep 1");
+  });
+
+  it("never echoes the raw token or its decoded JWT payload to the job log", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+    const waitStepStart = workflow.indexOf(
+      "name: Ensure second Google assertion mint lands in a new second",
+    );
+    const opsMintStart = workflow.indexOf(
+      "name: Mint identity token — API operational acceptance (Tenant Ops)",
+    );
+    const waitStepBody = workflow.slice(waitStepStart, opsMintStart);
+
+    // The only line allowed to touch the raw token is the add-mask
+    // registration. `echo "$payload" | ...` as the first leg of the base64
+    // decode pipe is fine -- its stdout only ever reaches the next pipe
+    // stage or a command-substitution assignment, never the job log -- but
+    // no line may stand alone echoing the token, the decoded payload, or
+    // the extracted iat straight to the log.
+    expect(waitStepBody).toContain(
+      'echo "::add-mask::$GOOGLE_ID_TOKEN_TENANT_ADMIN"',
+    );
+    const bareVariablePrints = waitStepBody.match(
+      /^\s*echo\s+"\$(GOOGLE_ID_TOKEN_TENANT_ADMIN|payload|iat)"\s*$/gm,
+    );
+    expect(bareVariablePrints).toBeNull();
+  });
+});
+
 describe("SEC-INTERNAL-KEY-WIF-OPS-READINESS-20261001: WIF registry operator doc audience accuracy", () => {
   it("no longer tells ops to register the token-exchange audience for the Google-assertion callers", () => {
     const doc = readFileSync(registryDocPath, "utf8");
