@@ -1656,3 +1656,40 @@ and `@drts/ui-tokens` to this worktree's respective `packages/*/src` entrypoints
 configuration. That full check passed; this does not replace clean-install
 hosted CI. Logs distinguish initial failures from final passes. No test server,
 browser, Docker, cloud resource change or actual scheduler invocation occurred.
+
+### 10.3 Composed candidate evidence (2026-10-02)
+
+This section supersedes §10.2's **pre-composition checkpoint** counts. The
+published C114 draft `5d23550587b1bbb6ce33be0d8948cc50a6dbd07f` and WIF anchor
+`83e6904b98de5637e3acce5c9b1a20a12f3e8d46` were merged normally at `8405c7040`;
+operator identity separation is anchored at `88b5bc275`. Neither history was
+rewritten, and C114 PR #2247 remains a blocked-parent draft. The final immutable
+candidate is the full SHA recorded by this task's handoff and PR head.
+
+| Finding / required acceptance | Production source and change | Before → after / validation | Remaining limits |
+| --- | --- | --- | --- |
+| `live map runner不再使用x-drts-internal-key` | `bootstrapMapSessions`, `issueMapProvisioningSession`, `teardownMapSessions`; three Google auth steps | No legacy-key/Secret Manager/platform-admin references in session scripts. Bootstrap and expired-session cleanup tests use only Google proof and the limited JWT. All 122 map tests pass within the 197-test root regression | Actual Google exchange/hosted map acceptance not run; operator D/E rollout pending |
+| `取代方案只授予driver:provision所需最小權限` | Controller fixed grant; signed target; guard route ceiling; invitation target/revoke checks; entry D has no roles | 29 production-path tests cover positive issuance and revocation, unregistered identity, deployer/no-grant denial, tenant/partner/role/scope/realm escalation, other routes/drivers, signature/audience/replay, idempotency isolation, and literal operator JSON | External JWKS replaced with test RSA issuer; real production auth/guard/services and memory repository, no PG/server |
+| F-OBSERVER-PROVISIONER-VERSION | Google adapter upserts principal timestamps; operator entries D/E and observer workflow account | Same new production-path test on `8405c7040` fails: valid observer → provisioning exchange 1s later → observer null. Independent principal configuration at `88b5bc275` passes. `observer-separation-red.log` exit 1; `observer-separation-green.log` exit 0 | Unit clock pins observer issuance to isolate this finding; the separate C114 crossed-tick workforce defect remains open |
+| C114 F-CONSUMER-DRIFT / F-CLEANUP-GATE | Merged coverage/bootstrap formal scopes; `revokeMapInvitation`; workflow teardown evidence gate | All existing driver register/refresh/revoke/response-loss/retry cases retained. Bootstrap verifies offline isolation; masked recovery is saved before registration; immediate and always teardown require positive revocation. Seven transport/body/redirect/SHA negatives retained; Python gate has 23 passing cases | HTTP boundaries simulated. Observer/provisioner auth in the real-device recovery probes is explicitly stubbed; separate production-path WIF cases test auth. No C114 live acceptance claimed |
+| `註冊表變更寫成可貼上內容交由操作者` | §10.1 additive entries D/E, existing provider trust, per-account WIF binding | Bash syntax passes. Execute only the jq expression on local fixture A/B/C: preserves all three and produces exactly the literal D/E JSON. YAML parsed; observer/provisioner accounts differ; cleanup matches provisioner; all three assert verified email; cleanup outcome/artifact wiring retained | Operator commands were **not executed**. No service account, secret, WIF binding, GitHub variable or deployment changed |
+| `同候選SHA CI通過且獨立reviewer審查` | Exact PR head and machine-truth handoff to Claude2 | Local regression 197/197 (16 files); API auth/WIF 115/115 (2 files); API typecheck after building contracts/control-plane-auth passes; full-root typecheck with local workspace resolution passes; scoped ESLint and changed runner/workflow Prettier pass. Hosted CI and independent review recorded against final head through lifecycle | Pending at commit time. Owner does not call done or merge; C114 F-WORKFORCE-VERSION and live rollout remain separately gated |
+
+Execution is Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4. Commands are §10.2's
+root/API commands with `--maxWorkers=2`; the root command now includes the merged
+`supported-session-contract.test.ts` automatically. Two passing cases reproduce
+F-WORKFORCE-VERSION and are **not** usable observer/live evidence. New logs in
+this worktree: `.local/sec-live-map-wif/{regression-final,api-unit-final,api-typecheck-final,root-typecheck-final,lint}.log`.
+The initial combined run passed 120 map tests before the two identity-separation
+cases were added. All checks started by the worker are read to completion before
+handoff. Same-SHA hosted results belong to the PR/status record, not to older
+checkpoint counts.
+
+Full-root typecheck uses the local configuration described in §10.2, with
+`@drts/ui-web` exports mapped to the actual local `.tsx` entrypoints. It changes
+no strictness/includes and passes at this checkpoint. API prerequisites were
+built locally; no product process was started. An overly broad Prettier check
+also included unchanged `map-acceptance-runner.test.ts` and reported its existing
+formatting; the final check restricted to changed runner/test/workflow files
+passes. No unrelated formatting was changed. Internal-key exception audit and
+commit trailer checks pass.
