@@ -1446,8 +1446,17 @@ jobs:
       # documented, operator-actionable, pending condition. The consume call
       # goes through referral-embed-web's own BFF, which already
       # authenticates as `drts-dev-runtime` (routeScopes `["* *"]`, no
-      # registry change needed) -- that half of the lifecycle always runs as
-      # a hard gate, before and after the registry rollout.
+      # registry change needed) and needs no registry rollout of its own --
+      # but it still cannot be exercised pre-rollout, because there is no
+      # issued artifact to consume until the issuance route itself is
+      # reachable. Pre-rollout, only the fail-closed issuance rejection runs
+      # as a hard gate; the full issue/consume/replay/cross-host lifecycle
+      # only becomes a hard gate once the registry rollout has landed. This
+      # is the one documented, operator-actionable external prerequisite
+      # this task cannot close by itself (see §10.3/§10.6) -- it is not a
+      # repaired condition, and the smoke test is not being skipped: the
+      # real rejection is asserted every run, before rollout, and the real
+      # positive lifecycle is asserted every run, after rollout.
       - name: Check referral embed handoff WIF registry rollout state
         id: referral_handoff_rollout
         env:
@@ -1528,7 +1537,7 @@ jobs:
             local partner_user_ref="$1"
             local status
             status="$(issue_artifact_status "$partner_user_ref")"
-            if [[ "$status" != "200" ]]; then
+            if [[ "$status" != "201" ]]; then
               echo "::error::Referral embed handoff issuance returned HTTP ${status}: $(cat "$body_file")" >&2
               exit 1
             fi

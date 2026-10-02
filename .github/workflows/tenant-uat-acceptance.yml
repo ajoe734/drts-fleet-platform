@@ -197,6 +197,7 @@ jobs:
               principalId: "tenant-uat-ci-deployer",
               allowedTokenAudiences: [$aud],
               routeScopes: [
+                "GET partner/entries/*",
                 "POST partner/ingress/referral-embed-handoff",
                 "POST partner/ingress/referral-embed-handoff/consume",
                 "POST partner/ingress/referral-embed-handoff/consent"
@@ -388,6 +389,12 @@ jobs:
         id: restart_api
         env:
           DRTS_ALLOW_LOCAL_WEBHOOKS: "true"
+          # SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002 R2: this fresh
+          # process generation must see the same registry start_api mapped,
+          # or every post-restart caller (partner_notify_e2e, the direct
+          # replay probe) loses its Google workload identity and falls back
+          # to 503 WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED -- see §10.6.
+          WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS: ${{ env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON }}
         run: |
           set -euo pipefail
           old_pid="$(cat .artifacts/tenant-uat-acceptance/api-server.pid)"
