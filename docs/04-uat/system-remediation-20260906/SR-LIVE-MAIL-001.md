@@ -7,7 +7,7 @@
 ## 0.2 CI 退回定位與 scope 待辦（2026-10-02）
 
 - 本輪 `git fetch origin` 後 base `origin/dev` 仍為 `210c0beaed9f19bd12442f247265c8f3307a9c93`；local／remote／[PR #2275](https://github.com/ajoe734/drts-fleet-platform/pull/2275) head 均為 `a03b4b34e8da1a430b3d3167ea816955352af96b`。未因 trunk 移動而 merge/rebase，沒有重寫 published history。
-- canonical task 是 `in_progress`、`ci_status=failure`；GitHub reviews 為空。這是新定位的 **F12 CI wiring 缺口**，不是兩次獨立 reviewer 對同一 finding 的退修；§0／§0.1 的 F01–F11 與未驗事項全部保留。
+- dispatch 開始時 canonical task 是 `in_progress`、`ci_status=failure`。續查時已讀到 **13:16:39Z 的 canonical `Reopen` 完整退修**（`ai-status.sh show SR-LIVE-MAIL-001` 的 `next`），確認同一缺口並要求先接入 CI、必要時請 Supervisor 擴 scope；候選與 CI 欄位已由 reopen 清空。GitHub reviews 陣列仍空，不代表沒有 canonical reviewer 退修。這是 **F12 CI wiring 缺口的首次退修**，不是兩次相鄰候選的同 finding 退修；§0／§0.1 的 F01–F11 與未驗事項全部保留。
 - [CI run 37011504250](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37011504250/job/110852087854) 的 `Change scope` 與 [integration run 37011504184](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37011504184/job/110852120326) 的 `changes` 均執行 `python3 tools/ci/check_test_coverage.py` 後 exit **1**：`test_hosted_gate.py`、`test_mailbox_observer.py` 都不在 discovery roots。後續 lint／typecheck／unit 等 job 是 **skipped**；Smoke／E2E aggregate 因上游 gate 失敗而紅燈，不能解讀為產品測試已跑完失敗或通過。
 
 ### F12 最小重現、修正邊界與驗證
