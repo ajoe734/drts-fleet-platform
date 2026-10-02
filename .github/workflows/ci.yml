@@ -113,6 +113,18 @@ jobs:
         if: steps.ctx.outputs.skip == 'true'
         run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered dev.)"
 
+  repo-classification:
+    name: Repo classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify repository file classification
+        run: node tools/ci/check-repo-classification.mjs
+
   spec-source-archive:
     name: Spec source archive
     runs-on: ubuntu-latest

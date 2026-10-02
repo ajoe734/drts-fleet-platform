@@ -32,5 +32,8 @@
     "@types/node": "^20.11.24",
     "tsup": "^8.0.1",
     "typescript": "^5.4.2"
+  },
+  "dependencies": {
+    "openclaw": "2026.9.2"
   }
 }

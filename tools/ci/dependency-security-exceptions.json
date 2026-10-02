@@ -1,0 +1,52 @@
+[
+  {
+    "module_name": "multer",
+    "reason": "Wait for @nestjs/platform-express to update multer dependency or upstream patch",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "brace-expansion",
+    "reason": "Transitive dependency of exceljs, waiting for archiver/exceljs patch",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "fast-uri",
+    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for openclaw patch",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "hono",
+    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for openclaw patch",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "ip-address",
+    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for openclaw patch",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "body-parser",
+    "reason": "Transitive dependency of @nestjs/platform-express > express, wait for upstream",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "@hono/node-server",
+    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for upstream",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "protobufjs",
+    "reason": "Transitive dependency of openclaw > @google/genai, wait for upstream",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "qs",
+    "reason": "Transitive dependency of @nestjs/platform-express > express, wait for upstream",
+    "expires_at": "2027-01-01T00:00:00Z"
+  },
+  {
+    "module_name": "uuid",
+    "reason": "Transitive dependency of exceljs, wait for upstream",
+    "expires_at": "2027-01-01T00:00:00Z"
+  }
+]

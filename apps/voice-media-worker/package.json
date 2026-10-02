@@ -20,6 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@drts/contracts": "workspace:*"
+    "@drts/contracts": "workspace:*",
+    "openclaw": "2026.9.2"
   }
 }

@@ -2,5 +2,8 @@
   "name": "@drts/eslint-config",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "openclaw": "2026.9.2"
+  }
 }
