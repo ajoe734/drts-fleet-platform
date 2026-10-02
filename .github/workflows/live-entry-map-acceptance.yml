@@ -262,7 +262,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
-          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          service_account: drts-dev-live-map@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
           project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
 
       - uses: google-github-actions/setup-gcloud@v2
