@@ -508,7 +508,7 @@ jobs:
             fi
           done
           if ! gcloud secrets describe "$workload_google_registry_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
-            echo "::error::Required secret ${workload_google_registry_secret} not found in project ${PROJECT_ID}. Populate it with the Google workload identity service principal registry before deploying production (see docs/02-architecture/internal-key-exceptions.md section 9.3); deploying without it risks every proxied request being rejected once INTERNAL_KEY_EXCP_002 is retired."
+            echo "::error::Required secret ${workload_google_registry_secret} not found in project ${PROJECT_ID}. Populate it with the Google workload identity service principal registry before deploying production (see docs/02-architecture/internal-key-exceptions.md section 10.3); deploying without it risks every proxied request being rejected once INTERNAL_KEY_EXCP_002 is retired."
             exit 1
           fi
           secret_args="${secret_args},WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY=${workload_key_secret}:latest,WORKLOAD_IDENTITY_SERVICE_PRINCIPALS=${workload_registry_secret}:latest,WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest"

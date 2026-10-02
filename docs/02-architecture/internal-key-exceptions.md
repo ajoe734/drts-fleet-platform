@@ -1208,7 +1208,199 @@ triggered, the provisioning script was not executed/modified, and no local
 server or Docker container was started — same guardrails as every prior
 round on this task.
 
-## 9. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`: staging/production deploy-wiring and operator templates
+## 9. Re-dispatch (2026-10-02, `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, seventh session): a narrowed caller #10 gap, two previously-undocumented optional callers, and the staging/production go/no-go finding
+
+Supervisor's 2026-10-02T01:00Z re-dispatch independently verified dev's live
+state: registry secret `drts-dev-workload-identity-google-service-principals`
+version 1 with Entries A/B exactly as §7.9.1 documents,
+`DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`, and deploy-dev run
+`36946449389` at `ddd0d786` green on revision `drts-dev-api-00037-qx9`, with
+logs confirming callers #1-9 are genuinely landing on the WIF path (zero
+`AUTH_LEGACY_INTERNAL_KEY_USED` for caller #9; §7.9's replay-protection fix
+means callers #1-8 would not false-positive-409 even once dev enforcement is
+turned on, though Supervisor separately noted dev's
+`DRTS_INTERNAL_KEY_ENFORCED=false` means callers #1-8 are not yet actually
+exercised through `InternalKeyMiddleware` on dev today). Supervisor asked for
+(a) a full re-inventory of any remaining `POST auth/token` caller still
+relying on `x-drts-internal-key`, naming `session-bootstrap.ts` and any
+`operations/`/`tools/` script explicitly, and (b) an explicit statement of
+staging/production impact. This section re-ran that inventory against the
+current merged `dev` HEAD (this branch has just merged `origin/dev`, picking
+up `SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001`'s §7.9 fixes and
+`SR-MAIL-SCHEDULER-PROVISION-20261001`'s §8 work) rather than the pre-merge
+base this branch had been carrying.
+
+### 9.1 Caller #10 is now partially migrated, with a narrower remaining gap than §7.9.2 recorded
+
+§7.9.2 (written before the live-map task's own further commit, picked up by
+this merge) described `session-bootstrap.ts` as sending **no** internal key
+at all for its single `live-map-observer` session, blocked entirely on a
+`ciTenantActorGrants` extension. Re-reading the file at the current merged
+HEAD (`tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts`)
+shows the live-map task's owner has since split this into two sessions, and
+migrated one of them:
+
+- **Already migrated**: the `ops_observer`/`live-map-observer` session
+  (lines 66-123) now sends `x-drts-google-id-token` (from
+  `gcloud auth print-identity-token`) instead of the internal key — exactly
+  the WIF path §7.9.2 said this caller would need. This confirms §7.9.2's
+  finding was acted on, even though (per §7.9.2's own analysis, still
+  accurate) this specific identity is not one of Entries A/B's
+  `ciTenantActorGrants` tuples, so it must be relying on some other grant
+  path or still failing in dev today until that is reconciled — outside
+  this task's visibility into that task's own current CI state.
+- **Still open**: a second, `platform_admin` session (lines 125-141,
+  `x-actor-id: principal_platform_admin_default`, `x-scopes: driver:provision`)
+  is minted via `POST auth/token` with **`x-drts-internal-key`**
+  (`deps.readInternalKey()`, line 133) and no Google assertion at all. This
+  session exists solely to call `auth/driver/device/invite` (line 144) so the
+  script can provision a temporary driver device registration for the live
+  map acceptance run. `grep -n "platform_admin\|readInternalKey"
+  docs/02-architecture/internal-key-exceptions.md` (run before this section
+  was added) returns no prior mention anywhere in this document — this half
+  of caller #10 was not previously inventoried.
+  - This cannot adopt Entry B's `ciTenantActorGrants` shape either: that
+    tuple-match is keyed on `(tenantId, actorType, actorId)`
+    (`google-workload-identity.adapter.ts:489-496` per §7.9's line
+    numbering) for issuing a **durable fixture tenant-user** session;
+    `platform_admin`/`principal_platform_admin_default` is not a
+    tenant-scoped actor and this call does not go through
+    `TenantPartnerService.findTenantUser` at all (confirmed by reading
+    `auth.controller.ts`'s `issueToken`: the `platform_admin` realm takes a
+    different branch than the tenant-actor CI gate).
+  - Entry A's `* *` `routeScopes` would technically cover `POST auth/token`
+    if `platform_admin`'s Google assertion reached `InternalKeyMiddleware`
+    the normal way, but `POST auth/token` is excluded from
+    `InternalKeyMiddleware`'s route coverage (`app.module.ts`'s
+    `forRoutes(...)` minus health/auth-token, §7.3's reopen fix) precisely
+    because `auth.controller.ts` does its own, stricter check
+    (`validateInternalKey` called directly, or the CI-tenant-actor gate) —
+    so Entry A's broad proxy scope was never the right mechanism for this
+    caller regardless.
+  - **This is the same kind of gap §7.9.2 already flagged for the one-time
+    `live-map-observer` grant**: a new, purpose-built grant kind (or a
+    documented decision that `platform_admin` bootstrap sessions for this
+    one script stay on the internal key indefinitely, which would block
+    `EXCP_002`'s removal forever, not just delay it) coordinated with
+    `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner `Codex`, not a fix this
+    task's `write_scopes` can make unilaterally.
+
+### 9.2 Two optional, currently-unwired callers not previously inventoried
+
+Re-grepping the whole tree (not just `apps/`) for `x-drts-internal-key` /
+`DRTS_INTERNAL_KEY` found two more real call sites, both outside `apps/`,
+both gated behind an optional environment variable that no current hosted
+workflow or CI script ever sets:
+
+| # | Caller | File:line | What it sends | Wired into any CI today? |
+| - | ------ | --------- | -------------- | --- |
+| 11 | smoke test suite, optional header | `tests/smoke/lib/helpers.sh:26,101-103` | `SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"`, attached to every `http_call` only if set — comment at `tools/ci/run-smoke-tests.sh:27` calls it "Optional `x-drts-internal-key` header for staging/internal envs" | No — `grep -rn "SMOKE_INTERNAL_KEY" .github/workflows/*.yml tools/ci/*.sh` returns no workflow/script that ever sets it; a human export-only path for pointing the suite at staging manually. |
+| 12 | e2e test suite, session minting | `tests/e2e/lib/helpers.sh:26,137-138,157,347-349` | Same optional-var pattern (`E2E_INTERNAL_KEY`); line 157's helper `POST`s `${E2E_API_URL}/auth/token`, and in dev (where `DRTS_INTERNAL_KEY` is configured) would get `401 INTERNAL_KEY_REQUIRED` from `auth.controller.ts`'s direct `validateInternalKey` call without this header or a verified WIF assertion | No — same grep finds no workflow/script setting `E2E_INTERNAL_KEY`; manual/staging-only, same as #11. |
+
+No `operations/` script references `x-drts-internal-key` or
+`DRTS_INTERNAL_KEY` at all (`grep -rn "x-drts-internal-key\|DRTS_INTERNAL_KEY"
+operations/` returns no matches), answering that part of Supervisor's
+question directly. The only `tools/` match is `tools/ci/run-smoke-tests.sh`,
+and only in the comment documenting caller #11's env var, not a second call
+site.
+
+Because neither #11 nor #12 is wired into any current automated run, leaving
+them un-migrated blocks no hosted CI result today. They remain real,
+documented call sites, though, and the moment a human exports
+`SMOKE_INTERNAL_KEY`/`E2E_INTERNAL_KEY` against staging after `EXCP_002` is
+removed, that request would carry a now-undocumented header and fail closed
+exactly as described in §9.3 below — worth a decision (migrate them to mint
+`x-drts-google-id-token` the same way, or explicitly retire the optional
+var) before or alongside the removal, even though it does not gate it today.
+
+### 9.3 Staging/production impact of removing `INTERNAL_KEY_EXCP_002` — explicit statement requested by Supervisor
+
+`INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts:35`)
+is a single hardcoded array compiled into `apps/api`'s one build artifact —
+there is no per-environment registry. Removing `INTERNAL_KEY_EXCP_002` from
+this file removes it identically in dev, staging, **and** production the
+moment any of them next deploys a build containing the change; it is not a
+dev-scoped edit.
+
+Checked both other deploy workflows directly rather than assuming:
+
+- `.github/workflows/deploy-staging.yml:564` sets
+  `DRTS_INTERNAL_KEY_ENFORCED=true` explicitly on the Cloud Run service's
+  env vars, and `AUTH_MODE=strict`/`DRTS_ENV=staging` independently make
+  `isStrictAuthEnvironment()` return `true` there regardless of that var
+  (`internal-key.middleware.ts:98-101`), so
+  `isInternalKeyEnforcementDisabled()` can never return `true` in staging —
+  `InternalKeyMiddleware.use` always calls `validateInternalKey` for real.
+- `.github/workflows/deploy-prod.yml` never sets
+  `DRTS_INTERNAL_KEY_ENFORCED` at all — not needed, since `DRTS_ENV=production`
+  alone makes `isStrictAuthEnvironment()` return `true` unconditionally — so
+  production also always enforces.
+- Neither `deploy-staging.yml` nor `deploy-prod.yml` contains the string
+  `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` anywhere (confirmed by
+  `grep`) — only `deploy-dev.yml` was ever wired to mount this secret (§7.5).
+  `GoogleWorkloadIdentityAdapter.loadRegistry()` in staging and production
+  therefore always throws `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` for any
+  `x-drts-google-id-token` it receives, today and for the foreseeable future
+  until a **separate** infra task wires and populates that secret for those
+  two environments — this task's `write_scopes` only ever covered
+  `deploy-dev.yml`.
+
+Today, that `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` result is harmless in
+staging/production: `validateInternalKey` catches exactly that error and
+falls through to the `x-drts-internal-key` check, which `EXCP_002` still
+lets succeed (and, per §7.9's third fix, so does
+`WORKLOAD_PRINCIPAL_NOT_REGISTERED` for a verified-but-unlisted caller).
+**If `EXCP_002` is removed while this remains true**, that same fallthrough
+lands on `evaluateInternalKey` finding no matching registry entry at all —
+`INTERNAL_KEY_UNDOCUMENTED`, fail-closed `401 INTERNAL_KEY_INVALID` — for
+every request in staging or production that does not carry a
+`Bearer`/`x-drts-authorization` token and is not one of the explicit public
+routes. This is not a "dev might go red" risk; it is every control-plane-
+proxy request (callers #1-8's dual-sent `x-drts-google-id-token` would also
+fail closed there, since staging/prod have no registry to verify it against
+either) and any staging/production use of `POST auth/token` with the
+internal key breaking outright on whatever environment next deploys past
+the removal commit, independent of and in addition to anything this task
+has verified on dev.
+
+### 9.4 Conclusion: not safe to remove `INTERNAL_KEY_EXCP_002` in this candidate
+
+`excp_002_removed_and_deploy_dev_green` remains correctly unmet. Doing this
+safely, beyond dev's now-confirmed-live registry and §7.9's pre-rollout
+fixes, needs:
+
+1. A staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`
+   rollout (secret + workflow wiring in `deploy-staging.yml`/`deploy-prod.yml`,
+   analogous to §7.5's dev fix) — outside this task's `write_scopes`, which
+   names `deploy-dev.yml` only; a Supervisor decision on whether to fold
+   that in (with a `write_scopes` expansion) or track it as its own
+   follow-up task.
+2. Resolution of caller #10's remaining `platform_admin` bootstrap session
+   (§9.1) — coordinate with `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner
+   `Codex`, same as the already-resolved `ops_observer` half of this caller.
+3. A decision on callers #11-12 (§9.2): migrate to `x-drts-google-id-token`
+   or document as retired.
+
+`callers_migrated_to_wif_assertion` remains satisfied only in the dual-send
+sense already recorded for callers #1-9 (§7.2/§7.6/§7.9); it does not yet
+cover caller #10's remaining `platform_admin` session or callers #11-12, and
+the proxy WIF path (#1-8) remains unproven under real enforcement on dev
+itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
+in staging/production. No application or workflow code was changed in this
+session beyond this documentation; `EXCP_002`, the dual-send fallback, and
+every previously migrated caller are untouched.
+
+## 10. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`: staging/production deploy-wiring and operator templates
+
+This section is the follow-up §9.4 item 1 below asked for ("A
+staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` rollout ...
+outside this task's `write_scopes` ... a Supervisor decision on whether to
+fold that in ... or track it as its own follow-up task"): Supervisor
+dispatched it as the latter, a separate task
+(`SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`), rather than folding it
+into that session's `write_scopes`. §9.3's analysis of what breaks once
+`INTERNAL_KEY_EXCP_002` is removed is the authoritative statement of why this
+work matters and is not repeated in full here.
 
 Everything in §§7-8 above wired and populated
 `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` for **dev only**.
@@ -1232,15 +1424,15 @@ proxied request that cannot present a valid assertion — exactly the
 own checks" design intent `deploy-dev.yml`'s own `api_secrets` step comment
 already states (§7.5, `.github/workflows/deploy-dev.yml:690-695`).
 
-### 9.1 What shipped
+### 10.1 What shipped
 
 | Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
 | --- | --- | --- | --- | --- |
-| `deploy-staging.yml` and `deploy-prod.yml` never mounted `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`, unlike `deploy-dev.yml` since §7.5 (`staging與prod部署流程掛載註冊表密鑰`) | `.github/workflows/deploy-staging.yml`'s `Resolve API secret mounts` step: added `workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"` alongside the two pre-existing required workload secrets, and added `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest` to `secret_args`. `.github/workflows/deploy-prod.yml`'s `Resolve API secret mounts` step: added the same `workload_google_registry_secret` variable and a dedicated `gcloud secrets describe` guard immediately after the pre-existing `for required_secret in "$workload_key_secret" "$workload_registry_secret"; do ... done` loop (kept as its original two-element loop, unchanged), plus the same mount onto `secret_args`. Both follow the exact `${SECRET_PREFIX}-workload-identity-google-service-principals` naming `deploy-dev.yml` uses for its own (optional) mount of the same env var. | Before: ops populating a secret named `drts-staging-workload-identity-google-service-principals` or `drts-prod-workload-identity-google-service-principals` in the respective GCP project would have had no effect on either deployed service — no env var wiring existed. After: the mount exists in both workflows, resolved from the same `SECRET_PREFIX` pattern every other staging/prod secret in these two files already uses (`vars.STAGING_SECRET_PREFIX \|\| 'drts-staging'`, `vars.PROD_SECRET_PREFIX \|\| 'drts-prod'`). | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-staging.yml')); yaml.safe_load(open('.github/workflows/deploy-prod.yml'))"` (exit 0, both valid YAML). `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, 1 file / 11 tests passed). `gh run list --workflow=deploy-staging.yml --limit=5` (most recent run `31930534031`, `2026-08-16T06:04:37Z`, conclusion `failure`) and `gh run list --workflow=deploy-prod.yml --limit=5` (only run on record `25988293601`, `2026-05-17T10:26:43Z`, conclusion `failure`) confirm the "neither environment has run recently" premise this section's preamble states. | Not run: an actual `deploy-staging.yml` or `deploy-prod.yml` execution (no trigger path from this branch; this task's guardrails forbid dispatching either deploy). No GCP secret was created or read in either project — this sandbox cannot read the staging/production projects (see §9.2/§9.3). |
+| `deploy-staging.yml` and `deploy-prod.yml` never mounted `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`, unlike `deploy-dev.yml` since §7.5 (`staging與prod部署流程掛載註冊表密鑰`) | `.github/workflows/deploy-staging.yml`'s `Resolve API secret mounts` step: added `workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"` alongside the two pre-existing required workload secrets, and added `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest` to `secret_args`. `.github/workflows/deploy-prod.yml`'s `Resolve API secret mounts` step: added the same `workload_google_registry_secret` variable and a dedicated `gcloud secrets describe` guard immediately after the pre-existing `for required_secret in "$workload_key_secret" "$workload_registry_secret"; do ... done` loop (kept as its original two-element loop, unchanged), plus the same mount onto `secret_args`. Both follow the exact `${SECRET_PREFIX}-workload-identity-google-service-principals` naming `deploy-dev.yml` uses for its own (optional) mount of the same env var. | Before: ops populating a secret named `drts-staging-workload-identity-google-service-principals` or `drts-prod-workload-identity-google-service-principals` in the respective GCP project would have had no effect on either deployed service — no env var wiring existed. After: the mount exists in both workflows, resolved from the same `SECRET_PREFIX` pattern every other staging/prod secret in these two files already uses (`vars.STAGING_SECRET_PREFIX \|\| 'drts-staging'`, `vars.PROD_SECRET_PREFIX \|\| 'drts-prod'`). | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-staging.yml')); yaml.safe_load(open('.github/workflows/deploy-prod.yml'))"` (exit 0, both valid YAML). `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, 1 file / 11 tests passed). `gh run list --workflow=deploy-staging.yml --limit=5` (most recent run `31930534031`, `2026-08-16T06:04:37Z`, conclusion `failure`) and `gh run list --workflow=deploy-prod.yml --limit=5` (only run on record `25988293601`, `2026-05-17T10:26:43Z`, conclusion `failure`) confirm the "neither environment has run recently" premise this section's preamble states. | Not run: an actual `deploy-staging.yml` or `deploy-prod.yml` execution (no trigger path from this branch; this task's guardrails forbid dispatching either deploy). No GCP secret was created or read in either project — this sandbox cannot read the staging/production projects (see §10.2/§10.3). |
 | 缺少註冊表密鑰時部署在部署 API 前明確失敗並說明原因，不得部署出會拒絕所有代理請求的 API (`註冊表密鑰不存在時部署明確失敗而非靜默放行`) | Both workflows' `Resolve API secret mounts` step runs and fails (`exit 1` with an `::error::` annotation naming the missing secret and pointing at this section) strictly before the later `Deploy — api` step that actually runs `gcloud run deploy` for `drts-api` — the resolve step's `secret_args` output is the only input the deploy step consumes (`--set-secrets "${{ steps.api_secrets.outputs.api }}"`), so a failed resolve step means the job stops before any `gcloud run deploy` call is reached, for either environment. This mirrors the pre-existing fail-closed pattern both files already use for `workload_key_secret`/`workload_registry_secret` (staging) and the `workload_key_secret`/`workload_registry_secret` loop (prod) — this task extends the same established pattern to the third, previously-unguarded registry rather than inventing a new one. | Before: no explicit guard existed for this secret in either file; absence was indistinguishable from presence until a request actually needed Google-assertion verification at runtime (and today, EXCP_002's fallback would mask even that). After: a missing registry secret stops the GitHub Actions job at the resolve step, before any Cloud Run deploy call, with a message naming the exact secret and this document section. | `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` "runs the registry guard inside the Resolve API secret mounts step, strictly before the Deploy — api step" (both describe blocks) asserts the guard and the `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` mount both appear, in order, between the `Resolve API secret mounts` step name and the `Deploy — api` step name in the raw workflow text. `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/internal-key-alerts.test.ts tests/unit/sr-mail-scheduler-provision-20261001.test.ts` (exit 0, 7 files / 93 tests passed — regression check confirming the pre-existing dev/staging/prod workflow and internal-key-middleware test suites are unaffected). `pnpm exec eslint tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, clean). | Static/text-level assertion only (parses the committed YAML as text, as every other test in this file does) — does not execute the `run:` block's bash in a real `gcloud`-equipped runner. No live GitHub Actions run exercised this guard (same reservation as the row above). |
 | 不得建立密鑰、GitHub 變數或觸發任何部署；本機不得啟動任何服務或Docker (guardrail, not an acceptance key) | N/A — process constraint, not a code change | N/A | This task created no GCP secret, no GitHub repository variable, and did not run `gh workflow run` / `workflow_dispatch` against either workflow. No local server, dev/preview server, or Docker container was started in this sandbox. | N/A |
 
-### 9.2 Operator template: staging registry content (values 待填 by ops — not verified by this task)
+### 10.2 Operator template: staging registry content (values 待填 by ops — not verified by this task)
 
 Supervisor's and this task's own credentials cannot read the staging GCP
 project (confirmed unreadable from this sandbox, same restriction noted in
@@ -1293,9 +1485,9 @@ drts-staging-workload-identity-google-service-principals = [
 ]
 ```
 
-### 9.3 Operator template: production registry content (values 待填 by ops — not verified by this task)
+### 10.3 Operator template: production registry content (values 待填 by ops — not verified by this task)
 
-Same reservation as §9.2: this sandbox cannot read the production GCP
+Same reservation as §10.2: this sandbox cannot read the production GCP
 project. Production additionally enforces
 `isProductionAllowedBoundary` (§1, `internal-key-exception-registry.ts`) on
 any `DRTS_INTERNAL_KEY` exception's `networkBoundary` — this is unrelated to
@@ -1309,7 +1501,7 @@ missing value.
   if that repository variable is set to something other than `drts-prod`).
 - **GCP project**: `vars.PROD_GCP_PROJECT_ID` — 待填, read the actual
   repository variable value before provisioning.
-- **Steps for ops to populate it**: identical method to §9.2 steps 1-5,
+- **Steps for ops to populate it**: identical method to §10.2 steps 1-5,
   substituting `vars.PROD_GCP_PROJECT_ID` / `vars.PROD_GCP_REGION` and
   `secrets.PROD_WIF_PROVIDER` / `secrets.PROD_WIF_SERVICE_ACCOUNT`
   (`.github/workflows/deploy-prod.yml`'s own `env:` block) for the project,
@@ -1331,7 +1523,7 @@ drts-prod-workload-identity-google-service-principals = [
 ]
 ```
 
-### 9.4 Why fail-closed here, unlike dev's notice-only degrade
+### 10.4 Why fail-closed here, unlike dev's notice-only degrade
 
 `deploy-dev.yml`'s own comment (§7.5, lines 690-695) already states the
 design intent this task implements for staging/production: inventing
@@ -1342,10 +1534,10 @@ fallback keeps it green either way, and a wrong invented entry there would
 look like configured security while authorizing a subject that does not
 exist. Staging and production differ in exactly the respect that comment
 flags as out of scope for dev: this task does not invent any value for
-either environment (§9.2/§9.3 mark every concrete identity 待填), but it does
+either environment (§10.2/§10.3 mark every concrete identity 待填), but it does
 add the fail-closed deploy guard dev's comment says belongs to "staging and
 prod['s] own checks" — so that whenever a human operator populates the real
-secret (via §9.2/§9.3's steps, not this task), the deploy pipeline already
+secret (via §10.2/§10.3's steps, not this task), the deploy pipeline already
 requires it, instead of silently degrading the same way dev does right up
 until the day `INTERNAL_KEY_EXCP_002`'s fallback is removed and every
 proxied request starts failing with no advance warning.
