@@ -42,7 +42,7 @@ The three routes it covered (`POST partner/ingress/referral-embed-handoff`,
 assertion (`x-drts-google-id-token`) against the same
 `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry and
 `GoogleWorkloadIdentityAdapter` every other proxied route already uses (see
-§8.2/§9 below); `x-drts-referral-handoff-key` is no longer read anywhere in
+§8.2/§10 below); `x-drts-referral-handoff-key` is no longer read anywhere in
 `apps/api`. `referral-embed-web`'s BFF (`apps/referral-embed-web/lib/embed-api.ts`)
 already dual-sent this assertion on every authority call before this task, so
 no caller-side change was needed there.
@@ -1221,9 +1221,191 @@ triggered, the provisioning script was not executed/modified, and no local
 server or Docker container was started — same guardrails as every prior
 round on this task.
 
-## 9. `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`: EXCP_001 retired, referral embed handoff moved to WIF
+## 9. Re-dispatch (2026-10-02, `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, seventh session): a narrowed caller #10 gap, two previously-undocumented optional callers, and the staging/production go/no-go finding
 
-### 9.1 Caller inventory (EXCP_001, before removal)
+Supervisor's 2026-10-02T01:00Z re-dispatch independently verified dev's live
+state: registry secret `drts-dev-workload-identity-google-service-principals`
+version 1 with Entries A/B exactly as §7.9.1 documents,
+`DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`, and deploy-dev run
+`36946449389` at `ddd0d786` green on revision `drts-dev-api-00037-qx9`, with
+logs confirming callers #1-9 are genuinely landing on the WIF path (zero
+`AUTH_LEGACY_INTERNAL_KEY_USED` for caller #9; §7.9's replay-protection fix
+means callers #1-8 would not false-positive-409 even once dev enforcement is
+turned on, though Supervisor separately noted dev's
+`DRTS_INTERNAL_KEY_ENFORCED=false` means callers #1-8 are not yet actually
+exercised through `InternalKeyMiddleware` on dev today). Supervisor asked for
+(a) a full re-inventory of any remaining `POST auth/token` caller still
+relying on `x-drts-internal-key`, naming `session-bootstrap.ts` and any
+`operations/`/`tools/` script explicitly, and (b) an explicit statement of
+staging/production impact. This section re-ran that inventory against the
+current merged `dev` HEAD (this branch has just merged `origin/dev`, picking
+up `SEC-INTERNAL-KEY-WIF-PROXY-REPLAY-20261001`'s §7.9 fixes and
+`SR-MAIL-SCHEDULER-PROVISION-20261001`'s §8 work) rather than the pre-merge
+base this branch had been carrying.
+
+### 9.1 Caller #10 is now partially migrated, with a narrower remaining gap than §7.9.2 recorded
+
+§7.9.2 (written before the live-map task's own further commit, picked up by
+this merge) described `session-bootstrap.ts` as sending **no** internal key
+at all for its single `live-map-observer` session, blocked entirely on a
+`ciTenantActorGrants` extension. Re-reading the file at the current merged
+HEAD (`tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts`)
+shows the live-map task's owner has since split this into two sessions, and
+migrated one of them:
+
+- **Already migrated**: the `ops_observer`/`live-map-observer` session
+  (lines 66-123) now sends `x-drts-google-id-token` (from
+  `gcloud auth print-identity-token`) instead of the internal key — exactly
+  the WIF path §7.9.2 said this caller would need. This confirms §7.9.2's
+  finding was acted on, even though (per §7.9.2's own analysis, still
+  accurate) this specific identity is not one of Entries A/B's
+  `ciTenantActorGrants` tuples, so it must be relying on some other grant
+  path or still failing in dev today until that is reconciled — outside
+  this task's visibility into that task's own current CI state.
+- **Still open**: a second, `platform_admin` session (lines 125-141,
+  `x-actor-id: principal_platform_admin_default`, `x-scopes: driver:provision`)
+  is minted via `POST auth/token` with **`x-drts-internal-key`**
+  (`deps.readInternalKey()`, line 133) and no Google assertion at all. This
+  session exists solely to call `auth/driver/device/invite` (line 144) so the
+  script can provision a temporary driver device registration for the live
+  map acceptance run. `grep -n "platform_admin\|readInternalKey"
+  docs/02-architecture/internal-key-exceptions.md` (run before this section
+  was added) returns no prior mention anywhere in this document — this half
+  of caller #10 was not previously inventoried.
+  - This cannot adopt Entry B's `ciTenantActorGrants` shape either: that
+    tuple-match is keyed on `(tenantId, actorType, actorId)`
+    (`google-workload-identity.adapter.ts:489-496` per §7.9's line
+    numbering) for issuing a **durable fixture tenant-user** session;
+    `platform_admin`/`principal_platform_admin_default` is not a
+    tenant-scoped actor and this call does not go through
+    `TenantPartnerService.findTenantUser` at all (confirmed by reading
+    `auth.controller.ts`'s `issueToken`: the `platform_admin` realm takes a
+    different branch than the tenant-actor CI gate).
+  - Entry A's `* *` `routeScopes` would technically cover `POST auth/token`
+    if `platform_admin`'s Google assertion reached `InternalKeyMiddleware`
+    the normal way, but `POST auth/token` is excluded from
+    `InternalKeyMiddleware`'s route coverage (`app.module.ts`'s
+    `forRoutes(...)` minus health/auth-token, §7.3's reopen fix) precisely
+    because `auth.controller.ts` does its own, stricter check
+    (`validateInternalKey` called directly, or the CI-tenant-actor gate) —
+    so Entry A's broad proxy scope was never the right mechanism for this
+    caller regardless.
+  - **This is the same kind of gap §7.9.2 already flagged for the one-time
+    `live-map-observer` grant**: a new, purpose-built grant kind (or a
+    documented decision that `platform_admin` bootstrap sessions for this
+    one script stay on the internal key indefinitely, which would block
+    `EXCP_002`'s removal forever, not just delay it) coordinated with
+    `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner `Codex`, not a fix this
+    task's `write_scopes` can make unilaterally.
+
+### 9.2 Two optional, currently-unwired callers not previously inventoried
+
+Re-grepping the whole tree (not just `apps/`) for `x-drts-internal-key` /
+`DRTS_INTERNAL_KEY` found two more real call sites, both outside `apps/`,
+both gated behind an optional environment variable that no current hosted
+workflow or CI script ever sets:
+
+| # | Caller | File:line | What it sends | Wired into any CI today? |
+| - | ------ | --------- | -------------- | --- |
+| 11 | smoke test suite, optional header | `tests/smoke/lib/helpers.sh:26,101-103` | `SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"`, attached to every `http_call` only if set — comment at `tools/ci/run-smoke-tests.sh:27` calls it "Optional `x-drts-internal-key` header for staging/internal envs" | No — `grep -rn "SMOKE_INTERNAL_KEY" .github/workflows/*.yml tools/ci/*.sh` returns no workflow/script that ever sets it; a human export-only path for pointing the suite at staging manually. |
+| 12 | e2e test suite, session minting | `tests/e2e/lib/helpers.sh:26,137-138,157,347-349` | Same optional-var pattern (`E2E_INTERNAL_KEY`); line 157's helper `POST`s `${E2E_API_URL}/auth/token`, and in dev (where `DRTS_INTERNAL_KEY` is configured) would get `401 INTERNAL_KEY_REQUIRED` from `auth.controller.ts`'s direct `validateInternalKey` call without this header or a verified WIF assertion | No — same grep finds no workflow/script setting `E2E_INTERNAL_KEY`; manual/staging-only, same as #11. |
+
+No `operations/` script references `x-drts-internal-key` or
+`DRTS_INTERNAL_KEY` at all (`grep -rn "x-drts-internal-key\|DRTS_INTERNAL_KEY"
+operations/` returns no matches), answering that part of Supervisor's
+question directly. The only `tools/` match is `tools/ci/run-smoke-tests.sh`,
+and only in the comment documenting caller #11's env var, not a second call
+site.
+
+Because neither #11 nor #12 is wired into any current automated run, leaving
+them un-migrated blocks no hosted CI result today. They remain real,
+documented call sites, though, and the moment a human exports
+`SMOKE_INTERNAL_KEY`/`E2E_INTERNAL_KEY` against staging after `EXCP_002` is
+removed, that request would carry a now-undocumented header and fail closed
+exactly as described in §9.3 below — worth a decision (migrate them to mint
+`x-drts-google-id-token` the same way, or explicitly retire the optional
+var) before or alongside the removal, even though it does not gate it today.
+
+### 9.3 Staging/production impact of removing `INTERNAL_KEY_EXCP_002` — explicit statement requested by Supervisor
+
+`INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts:35`)
+is a single hardcoded array compiled into `apps/api`'s one build artifact —
+there is no per-environment registry. Removing `INTERNAL_KEY_EXCP_002` from
+this file removes it identically in dev, staging, **and** production the
+moment any of them next deploys a build containing the change; it is not a
+dev-scoped edit.
+
+Checked both other deploy workflows directly rather than assuming:
+
+- `.github/workflows/deploy-staging.yml:564` sets
+  `DRTS_INTERNAL_KEY_ENFORCED=true` explicitly on the Cloud Run service's
+  env vars, and `AUTH_MODE=strict`/`DRTS_ENV=staging` independently make
+  `isStrictAuthEnvironment()` return `true` there regardless of that var
+  (`internal-key.middleware.ts:98-101`), so
+  `isInternalKeyEnforcementDisabled()` can never return `true` in staging —
+  `InternalKeyMiddleware.use` always calls `validateInternalKey` for real.
+- `.github/workflows/deploy-prod.yml` never sets
+  `DRTS_INTERNAL_KEY_ENFORCED` at all — not needed, since `DRTS_ENV=production`
+  alone makes `isStrictAuthEnvironment()` return `true` unconditionally — so
+  production also always enforces.
+- Neither `deploy-staging.yml` nor `deploy-prod.yml` contains the string
+  `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` anywhere (confirmed by
+  `grep`) — only `deploy-dev.yml` was ever wired to mount this secret (§7.5).
+  `GoogleWorkloadIdentityAdapter.loadRegistry()` in staging and production
+  therefore always throws `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` for any
+  `x-drts-google-id-token` it receives, today and for the foreseeable future
+  until a **separate** infra task wires and populates that secret for those
+  two environments — this task's `write_scopes` only ever covered
+  `deploy-dev.yml`.
+
+Today, that `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` result is harmless in
+staging/production: `validateInternalKey` catches exactly that error and
+falls through to the `x-drts-internal-key` check, which `EXCP_002` still
+lets succeed (and, per §7.9's third fix, so does
+`WORKLOAD_PRINCIPAL_NOT_REGISTERED` for a verified-but-unlisted caller).
+**If `EXCP_002` is removed while this remains true**, that same fallthrough
+lands on `evaluateInternalKey` finding no matching registry entry at all —
+`INTERNAL_KEY_UNDOCUMENTED`, fail-closed `401 INTERNAL_KEY_INVALID` — for
+every request in staging or production that does not carry a
+`Bearer`/`x-drts-authorization` token and is not one of the explicit public
+routes. This is not a "dev might go red" risk; it is every control-plane-
+proxy request (callers #1-8's dual-sent `x-drts-google-id-token` would also
+fail closed there, since staging/prod have no registry to verify it against
+either) and any staging/production use of `POST auth/token` with the
+internal key breaking outright on whatever environment next deploys past
+the removal commit, independent of and in addition to anything this task
+has verified on dev.
+
+### 9.4 Conclusion: not safe to remove `INTERNAL_KEY_EXCP_002` in this candidate
+
+`excp_002_removed_and_deploy_dev_green` remains correctly unmet. Doing this
+safely, beyond dev's now-confirmed-live registry and §7.9's pre-rollout
+fixes, needs:
+
+1. A staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`
+   rollout (secret + workflow wiring in `deploy-staging.yml`/`deploy-prod.yml`,
+   analogous to §7.5's dev fix) — outside this task's `write_scopes`, which
+   names `deploy-dev.yml` only; a Supervisor decision on whether to fold
+   that in (with a `write_scopes` expansion) or track it as its own
+   follow-up task.
+2. Resolution of caller #10's remaining `platform_admin` bootstrap session
+   (§9.1) — coordinate with `SR-LIVE-MAP-C114-COVERAGE-20260930`'s owner
+   `Codex`, same as the already-resolved `ops_observer` half of this caller.
+3. A decision on callers #11-12 (§9.2): migrate to `x-drts-google-id-token`
+   or document as retired.
+
+`callers_migrated_to_wif_assertion` remains satisfied only in the dual-send
+sense already recorded for callers #1-9 (§7.2/§7.6/§7.9); it does not yet
+cover caller #10's remaining `platform_admin` session or callers #11-12, and
+the proxy WIF path (#1-8) remains unproven under real enforcement on dev
+itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
+in staging/production. No application or workflow code was changed in this
+session beyond this documentation; `EXCP_002`, the dual-send fallback, and
+every previously migrated caller are untouched.
+
+## 10. `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`: EXCP_001 retired, referral embed handoff moved to WIF
+
+### 10.1 Caller inventory (EXCP_001, before removal)
 
 INTERNAL_KEY_EXCP_001 gated the header `x-drts-referral-handoff-key`
 (env `DRTS_REFERRAL_EMBED_HANDOFF_KEY` / `..._PREVIOUS` / `..._REVOKED_KEYS`)
@@ -1235,15 +1417,15 @@ on three API routes. Every caller, with file/line evidence as found on
 | 1 | `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts` `issueReferralEmbedHandoffArtifact` (`POST partner/ingress/referral-embed-handoff`) | then `:501-508` | `requireScopedInternalKey(request, process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY, {header: REFERRAL_EMBED_HANDOFF_KEY_HEADER, requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY"})` |
 | 2 | same file, `consumeReferralEmbedHandoffArtifact` (`POST .../consume`) | then `:539-546` | same shape |
 | 3 | same file, `recordReferralEmbedConsent` (`POST .../consent`) | then `:568-575` | same shape |
-| 4 | same file, `resolvePartnerNotificationNavigation` (`POST partner/entries/:entrySlug/notification-navigation/resolve`) | then `:2459-2466`, R1 reopen fix now `:2478-2486` | same header/env pair, reused for an unrelated route **not** in EXCP_001's registered `scope`. Already dead before this task: `evaluateInternalKey`'s `findMatchingExceptions` only matches by header *and* scope pattern, and no EXCP_001 scope pattern matches this route, so the `allowInternalBootstrap` branch here always returned `INTERNAL_KEY_UNDOCUMENTED` → 401, with or without EXCP_001 registered. Confirmed by reading `findMatchingExceptions`/`matchesScope` in `internal-key-exception-registry.ts` against this route's path. R1 reopen fix (§9.5, F3) replaced the `requireScopedInternalKey(..., process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY, ...)` call itself with an explicit `throw new ApiRequestError(401, "INTERNAL_KEY_UNDOCUMENTED", ...)`, so this branch no longer reads the retired env var at all (same always-401 outcome, now source-level explicit instead of an incidental side effect of registry removal) and is now covered by a dedicated test. |
-| 5 | `apps/referral-embed-web/lib/embed-api.ts` `requestAuthority` | then `:126-131`, R1 reopen fix removed | sender, not the API's check: dual-sent `x-drts-referral-handoff-key` (from `process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY`) alongside `x-drts-internal-key` and a Google workload identity assertion (`getGoogleWorkloadIdentityHeader()`) on every authority call. R1 reopen fix (§9.5, F3) deleted this send and the `DRTS_REFERRAL_EMBED_HANDOFF_KEY` read entirely -- the Google workload identity assertion is the only credential `requestAuthority` sends for these routes now. |
-| 6 | `.github/workflows/deploy-dev.yml`, "Verify referral handoff session lifecycle" step | then `:1422-1460`, R1 reopen fix now preceded by a "Check referral embed handoff WIF registry rollout state" step | reads GCP secret `${secret_prefix}-referral-embed-handoff-key` and sends it as `x-drts-referral-handoff-key` on a direct `POST /api/partner/ingress/referral-embed-handoff` smoke-test call (route #1) as part of the post-deploy acceptance check. R1 reopen fix (§9.5, F1) replaced this with the Google workload identity flow and a rollout-state gate -- see §9.5. |
+| 4 | same file, `resolvePartnerNotificationNavigation` (`POST partner/entries/:entrySlug/notification-navigation/resolve`) | then `:2459-2466`, R1 reopen fix now `:2478-2486` | same header/env pair, reused for an unrelated route **not** in EXCP_001's registered `scope`. Already dead before this task: `evaluateInternalKey`'s `findMatchingExceptions` only matches by header *and* scope pattern, and no EXCP_001 scope pattern matches this route, so the `allowInternalBootstrap` branch here always returned `INTERNAL_KEY_UNDOCUMENTED` → 401, with or without EXCP_001 registered. Confirmed by reading `findMatchingExceptions`/`matchesScope` in `internal-key-exception-registry.ts` against this route's path. R1 reopen fix (§10.5, F3) replaced the `requireScopedInternalKey(..., process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY, ...)` call itself with an explicit `throw new ApiRequestError(401, "INTERNAL_KEY_UNDOCUMENTED", ...)`, so this branch no longer reads the retired env var at all (same always-401 outcome, now source-level explicit instead of an incidental side effect of registry removal) and is now covered by a dedicated test. |
+| 5 | `apps/referral-embed-web/lib/embed-api.ts` `requestAuthority` | then `:126-131`, R1 reopen fix removed | sender, not the API's check: dual-sent `x-drts-referral-handoff-key` (from `process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY`) alongside `x-drts-internal-key` and a Google workload identity assertion (`getGoogleWorkloadIdentityHeader()`) on every authority call. R1 reopen fix (§10.5, F3) deleted this send and the `DRTS_REFERRAL_EMBED_HANDOFF_KEY` read entirely -- the Google workload identity assertion is the only credential `requestAuthority` sends for these routes now. |
+| 6 | `.github/workflows/deploy-dev.yml`, "Verify referral handoff session lifecycle" step | then `:1422-1460`, R1 reopen fix now preceded by a "Check referral embed handoff WIF registry rollout state" step | reads GCP secret `${secret_prefix}-referral-embed-handoff-key` and sends it as `x-drts-referral-handoff-key` on a direct `POST /api/partner/ingress/referral-embed-handoff` smoke-test call (route #1) as part of the post-deploy acceptance check. R1 reopen fix (§10.5, F1) replaced this with the Google workload identity flow and a rollout-state gate -- see §10.5. |
 | 7 | `docs/02-architecture/internal-key-exceptions.md` §2 inventory table / CI check (`operations/security/verify-internal-key-exceptions.py`) | this file | documentation + the automated registry/doc alignment check this task must keep passing. |
-| 8 | `.github/workflows/tenant-uat-acceptance.yml` (job env + `start_api`/`start_ui` steps) and `tests/e2e/system-remediation/sr-partner-notify-qa-20260917/navigation-uat.spec.ts`'s "C224 NAV" direct-fetch | then job env `DRTS_REFERRAL_EMBED_HANDOFF_KEY: hosted-uat-handoff-not-a-real-secret` plus the spec's direct `fetch(...consume, {headers: {"x-drts-referral-handoff-key": ...}})` | **Missed by the original candidate's §9.1 (R0) inventory** -- found by Codex's R1 review (F2). This hosted Playwright harness starts the real API/BFF processes itself (not Cloud Run) and the spec calls the consume route directly to prove the replay ledger is shared across callers. R1 reopen fix (§9.5, F2) migrated both to the Google workload identity flow -- see §9.5. |
+| 8 | `.github/workflows/tenant-uat-acceptance.yml` (job env + `start_api`/`start_ui` steps) and `tests/e2e/system-remediation/sr-partner-notify-qa-20260917/navigation-uat.spec.ts`'s "C224 NAV" direct-fetch | then job env `DRTS_REFERRAL_EMBED_HANDOFF_KEY: hosted-uat-handoff-not-a-real-secret` plus the spec's direct `fetch(...consume, {headers: {"x-drts-referral-handoff-key": ...}})` | **Missed by the original candidate's §10.1 (R0) inventory** -- found by Codex's R1 review (F2). This hosted Playwright harness starts the real API/BFF processes itself (not Cloud Run) and the spec calls the consume route directly to prove the replay ledger is shared across callers. R1 reopen fix (§10.5, F2) migrated both to the Google workload identity flow -- see §10.5. |
 
 No other caller was found: `grep -rn "REFERRAL_EMBED_HANDOFF_KEY\|x-drts-referral-handoff-key"` across the repo (excluding `node_modules`/build output) returns only the files above plus this task's own tests.
 
-### 9.2 What changed
+### 10.2 What changed
 
 - `apps/api/src/common/auth/internal-key-exception-registry.ts`: the
   INTERNAL_KEY_EXCP_001 entry is deleted from
@@ -1260,7 +1442,7 @@ No other caller was found: `grep -rn "REFERRAL_EMBED_HANDOFF_KEY\|x-drts-referra
   `apps/api/src/common/auth/internal-key.middleware.ts`). No fallback to the
   legacy key: EXCP_001 is being retired outright, not extended like EXCP_002,
   so there is nothing left for a fallback to read. Caller #4
-  (`resolvePartnerNotificationNavigation`) is unchanged -- see §9.1 row 4.
+  (`resolvePartnerNotificationNavigation`) is unchanged -- see §10.1 row 4.
   `apps/api/src/modules/tenant-partner/tenant-partner.module.ts` adds
   `GoogleWorkloadIdentityAdapter` to `TenantPartnerModule`'s `providers`
   (it already has `IdentityModule` imported, which exports the
@@ -1280,10 +1462,10 @@ No other caller was found: `grep -rn "REFERRAL_EMBED_HANDOFF_KEY\|x-drts-referra
   `drts-dev-runtime` (routeScopes `["* *"]`) -- no registry change needed
   for that leg.
 - This document: §2's EXCP_001 row removed, retirement note added to
-  "Retired exceptions" (§2), this §9 added.
-- Tests: see §9.4.
+  "Retired exceptions" (§2), this §10 added.
+- Tests: see §10.4.
 
-### 9.3 Registry change required before this candidate's dev deploy (operator action, not performed by this task)
+### 10.3 Registry change required before this candidate's dev deploy (operator action, not performed by this task)
 
 The CI smoke-test step now authenticates as `github-actions-deployer`
 (registry entry B, `principalId: "dev-ci-deployer"`), which today is scoped
@@ -1340,11 +1522,11 @@ unchanged):
 ]
 ```
 
-**Superseded by the R1 reopen fix (§9.5, F1):** the paragraph below described
+**Superseded by the R1 reopen fix (§10.5, F1):** the paragraph below described
 the R0 candidate, which required this registry update to land *before* any
 deploy of this code, with no code-level fallback -- Codex's review (F1)
 found that violated the "deployment must not go red before or after the
-change" acceptance item. §9.5 replaces the direct hard requirement with a
+change" acceptance item. §10.5 replaces the direct hard requirement with a
 read-only rollout-state check: `deploy-dev.yml`'s smoke test now detects
 whether this registry update has landed yet and runs the full
 issue/consume/replay/cross-host lifecycle only once it has; before that, it
@@ -1362,14 +1544,14 @@ green. Nothing in this candidate reads the old
 `${secret_prefix}-referral-embed-handoff-key` GCP secret anymore, but this
 task did not remove its Cloud Run `secret_args` mount (§6 of
 `deploy-dev.yml`'s `prepare` job) or delete the secret itself, to avoid any
-chance of affecting caller #4 (§9.1) or any other latent consumer beyond
-this task's verified scope. **Also superseded by §9.5 (F3):** the R1 reopen
+chance of affecting caller #4 (§10.1) or any other latent consumer beyond
+this task's verified scope. **Also superseded by §10.5 (F3):** the R1 reopen
 fix removed that `secret_args`/`referral_embed_secret_args` mount entirely
 (deploy-dev.yml no longer requires the secret to exist at all), since F3
-confirmed caller #4 never read it successfully either way (§9.1 row 4) and
+confirmed caller #4 never read it successfully either way (§10.1 row 4) and
 no other caller does post-fix.
 
-### 9.4 Tests
+### 10.4 Tests
 
 - `apps/api/tests/unit/tenant-partner.controller.test.ts`: the old
   shared-secret-based `requires a dedicated key for referral embed handoff
@@ -1405,7 +1587,7 @@ no other caller does post-fix.
   section's backtick-quoting were fixed to match the `` `INTERNAL_KEY_EXCP_\d+` ``
   pattern the script scans for).
 
-### 9.5 Reopen fix (2026-10-02, R1): deploy-dev rollout ordering, an omitted hosted UAT caller, and leftover retired-credential reads (F1, F2, F3)
+### 10.5 Reopen fix (2026-10-02, R1): deploy-dev rollout ordering, an omitted hosted UAT caller, and leftover retired-credential reads (F1, F2, F3)
 
 Reviewer (`Codex`) reopened candidate `79debde59564dbfd45ff7242cb9251132fbca8b6`
 (generation `603e1c5551cc4f058d2194d03911bc06`, PR #2264) with three
@@ -1414,8 +1596,8 @@ round on this task (no same-defect-two-rounds condition applies yet).
 
 | Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
 | --- | --- | --- | --- | --- |
-| F1 [P1, acceptance 3/5]: `.github/workflows/deploy-dev.yml`'s "Verify referral handoff session lifecycle" step unconditionally called the issuance route as `github-actions-deployer`, whose only grant today (§8.2's current registry) is `routeScopes: ["POST auth/token"]` -- not the issuance route -- so deploying this candidate before ops applies §9.3's registry change would turn the step red (403 `WORKLOAD_ROUTE_SCOPE_DENIED`), violating "deployment must not go red before or after the change." Investigated whether a code-only fix could avoid depending on that registry change at all (e.g. minting as `drts-dev-runtime`, which already has `routeScopes: ["* *"]`): ruled out by reading `infra/gcp/dev/provision-dev-project.sh`'s actual IAM bindings (`:122-124`) -- the deployer service account's only grant on the runtime service account is `roles/iam.serviceAccountUser` (act-as, for `gcloud run deploy --service-account`), not `roles/iam.serviceAccountTokenCreator`, so GitHub Actions cannot mint an ID token as `drts-dev-runtime` from this workflow; the registry rollout is a genuine external prerequisite, not a code gap. | New step "Check referral embed handoff WIF registry rollout state" (`deploy-dev.yml`, before the existing mint/verify steps) reads the live `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret (read-only `gcloud secrets versions access`) and checks via `jq` whether the `dev-ci-deployer`/`github-actions-deployer@` entry's `routeScopes` already include `"POST partner/ingress/referral-embed-handoff"`, exporting `applied=true\|false`. "Verify referral handoff session lifecycle" branches on that output: if `true`, runs the unchanged full issue/consume/replay/cross-host lifecycle as a hard gate (identical to the R0 behavior); if `false`, it still makes the real issuance call with the real token and asserts the call fails with exactly `403` + `.error.code == "WORKLOAD_ROUTE_SCOPE_DENIED"` (hard-failing on any other status/code), prints a `::warning::` pointing at this section, and stops without claiming the positive lifecycle passed. The consume-side check (through referral-embed-web's own BFF, authenticated as `drts-dev-runtime`) was already registry-change-independent and is unchanged -- it always runs as a hard gate. | Old: issuance call always made with `curl --fail`; any non-2xx (including the expected pre-rollout 403) aborted the step via `set -euo pipefail`, red. New: pre-rollout, the same call is made without `--fail`, its status/body are asserted to be exactly the documented rejection shape, and the step exits 0; post-rollout, byte-identical to the old behavior. | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"`: exit 0. Every `run:` block in the file (including both touched steps) extracted via the same `yaml.safe_load` and checked with `bash -n`: exit 0 for all. The new `jq` rollout-detection filter was run standalone against two literal registry JSON fixtures -- one matching the current §8.2 shape (no issuance route scope) and one matching the documented §9.3 shape (issuance route scope present) -- producing `false`/exit 1 and `true`/exit 0 respectively, confirming the filter discriminates the two real documented registry shapes before it runs inside the workflow. The base64url JWT-payload decode added to `tenant-uat-acceptance.yml` (F2, same pattern) was independently verified against a real RS256 token signed with `jsonwebtoken` carrying the exact `github-actions-deployer@...` email shape `google-github-actions/auth@v2` would include, confirming the extracted `email` matches exactly. | No live GCP secret read or live GitHub Actions run was performed (this task's guardrails forbid dispatching workflows/reading live dev secrets); the rollout-detection `jq` filter and the bash syntax are verified, not a live `deploy-dev.yml` execution in either registry state. Ops must still, at some point, apply §9.3's registry change for the smoke test to ever exercise the positive issuance lifecycle live; this fix changes *when* that's safe to do (no longer gates "can this candidate deploy at all"), not whether it's eventually required. New checked-in behavioral coverage of both registry versions (the reviewer's own ad hoc reproduction, now locked into the test suite): see `apps/api/tests/unit/google-workload-identity.adapter.test.ts`, `describe("deploy-dev referral embed handoff rollout (docs §8.2/§9.3 registry content)")`, added in this round -- two cases, each loading the real fenced JSON straight out of this doc (§8.2 for "current", §9.3 for "rolled out") via a shared `findDevCiDeployerRegistry` helper, and calling the real adapter with the exact `enforceReplayProtection:false`/method/path shape `requireReferralEmbedWorkloadIdentity` uses. |
-| F2 [P1, acceptance 1/2 and regression]: `.github/workflows/tenant-uat-acceptance.yml` only configured `DRTS_REFERRAL_EMBED_HANDOFF_KEY` for its self-started API/BFF processes, with no Google identity/registry/mint setup, and `navigation-uat.spec.ts`'s "C224 NAV" test POSTed `consume` directly with only that legacy header, expecting `409`. After the R0 fix, the legacy header has no effect, so the direct call returned `401 WORKLOAD_ASSERTION_MISSING` before the business-level replay check -- this hosted caller was missing from §9.1's R0 inventory entirely (now added as row 8). This runner has no GCE/Cloud Run metadata server, so `embed-api.ts`'s existing metadata-server-based token minting cannot work here either. | New steps "Mint Google workload identity token for hosted UAT referral handoff" and "Derive Google workload identity registry for hosted UAT" (`tenant-uat-acceptance.yml`, after "Prepare evidence directory") mint a real Google ID token via the same WIF identity (`google-github-actions/auth@v2`, `secrets.DEV_WIF_PROVIDER`/`DEV_WIF_SERVICE_ACCOUNT`) `deploy-dev.yml` uses (requires the new `id-token: write` permission, added to this workflow), decode its `email` claim (base64url + padding fix, `jq`), and self-provision a `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry entry scoped to exactly the three referral embed handoff routes, entirely inside this job's own disposable env (not the shared dev GCP secret -- no GCP/GitHub state was created or modified). `embed-api.ts`'s `getGoogleWorkloadIdentityHeader()` gained a `DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN` static-token override, checked before the metadata-server path, used only by this hosted harness (production never sets it and is unaffected). `navigation-uat.spec.ts`'s direct fetch now sends `x-drts-google-id-token: process.env.DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN` instead of the retired header; the expected `409` is unchanged (auth now passes, so the call reaches the same already-consumed business check as before). | Old: BFF/API processes started with no Google identity wiring; direct consume with the legacy header → `401 WORKLOAD_ASSERTION_MISSING`, never reaching the replay ledger; the whole navigation UAT suite's authenticated paths were broken. New: BFF/API processes start with a self-provisioned registry scoped to the real minted identity; the BFF's own calls (issue/consume/consent through its existing `getGoogleWorkloadIdentityHeader()` path) and the spec's direct call both authenticate successfully; the direct call reaches the same `409` already-consumed check as before the migration. | Decode logic verified independently (see F1's evidence cell: a real RS256 token's `email` claim extracted correctly by the exact bash/jq one-liners added to the workflow). `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/tenant-uat-acceptance.yml'))"`: exit 0. Every `run:` block in the file extracted via the same loader and checked with `bash -n`: exit 0 for all, including the two new steps. `pnpm exec eslint apps/referral-embed-web/lib/embed-api.ts tests/e2e/system-remediation/sr-partner-notify-qa-20260917/navigation-uat.spec.ts`: exit 0. | No live GitHub Actions run of `tenant-uat-acceptance.yml` was performed (same guardrail as F1 -- this task may not dispatch workflows); the YAML/bash syntax and the token-decode logic are verified in isolation, not a live hosted Playwright run against a real WIF-minted token end-to-end. |
-| F3 [P2, acceptance 4]: deleting the EXCP_001 registry entry alone did not remove its credential dependency: `embed-api.ts:126-131` still read and sent `DRTS_REFERRAL_EMBED_HANDOFF_KEY`; `deploy-dev.yml:730-736` still required the old Secret Manager secret and exited 1 without it; `tenant-partner.controller.ts:2481-2487` still read it in `resolvePartnerNotificationNavigation`'s internal-bootstrap branch; the header export was retained at `internal-key.middleware.ts:34`; `infra/gcp/dev/provision-dev-project.sh:295` still provisioned the secret for new projects. | `embed-api.ts`: deleted the `DRTS_REFERRAL_EMBED_HANDOFF_KEY` read/send and the local `REFERRAL_EMBED_HANDOFF_KEY_HEADER` constant. `deploy-dev.yml`: removed the `referral_handoff_secret` required-secret block and both its `secret_args`/`referral_embed_secret_args` mounts (§9.3's note above updated to match). `tenant-partner.controller.ts`: the internal-bootstrap branch of `resolvePartnerNotificationNavigation` now throws `ApiRequestError(401, "INTERNAL_KEY_UNDOCUMENTED", ...)` directly instead of calling `requireScopedInternalKey` against the retired env var (same always-401 outcome per §9.1 row 4 -- this branch never had a legitimate caller); the now-unused `REFERRAL_EMBED_HANDOFF_KEY_HEADER`/`requireScopedInternalKey` imports were removed. `internal-key.middleware.ts`: deleted the now-fully-unused `REFERRAL_EMBED_HANDOFF_KEY_HEADER` export. `infra/gcp/dev/provision-dev-project.sh`: removed `"${SECRET_PREFIX}-referral-embed-handoff-key"` from the provisioning loop (no live secret was deleted -- this only stops a *future* project provisioning run from creating a fresh one). `tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts`: removed the now-pointless `beforeEach`/`afterEach` env setup (the suite never exercised the bootstrap branch -- all its cases send `x-api-key`) and added a dedicated case asserting the bootstrap branch rejects with 403 even when a leftover `DRTS_REFERRAL_EMBED_HANDOFF_KEY` env var is set. | `grep -rn "DRTS_REFERRAL_EMBED_HANDOFF_KEY\|REFERRAL_EMBED_HANDOFF_KEY_HEADER"` across the repo (excluding `node_modules`) now returns only: this doc, `deploy-dev.yml`'s explanatory comment (no longer a mount), `tenant-partner.controller.test.ts`'s unconditional cleanup `delete`, and the new dedicated regression test above -- no remaining production-path read or send. | `pnpm --filter @drts/api exec tsc --noEmit -p tsconfig.json`: exit 0 (after rebuilding the stale `@drts/contracts`/`@drts/control-plane-auth` dist that was pre-existing drift, unrelated to this change). `pnpm --filter @drts/api exec vitest run tests/unit` (full suite): exit 0, 120 files / 1182 tests (up from the prior round's 1180 -- the 2 new F1 adapter cases). `pnpm exec vitest run tests/unit/internal-key-exception-registry.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key-alerts.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts tests/unit/system-remediation/sr-referral-001/referral-embed-handoff-lifecycle.test.ts tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts`: exit 0, 7 files / 63 tests. `pnpm exec eslint` on every file this round touched: exit 0 (one pre-existing `no-unused-vars` hit in the navigation test file, introduced by this round's own edit, was found and fixed before this evidence table was written, not left for the next round). `python3 operations/security/verify-internal-key-exceptions.py`: `AUDIT PASSED`, only `INTERNAL_KEY_EXCP_002` remains. `git diff --check` against the merge-base (`ddd0d786a`) and against the working tree: exit 0 for both. | `bash -n infra/gcp/dev/provision-dev-project.sh`: exit 0; this script was not executed (same guardrail as every prior round -- it mutates live GCP project state). |
+| F1 [P1, acceptance 3/5]: `.github/workflows/deploy-dev.yml`'s "Verify referral handoff session lifecycle" step unconditionally called the issuance route as `github-actions-deployer`, whose only grant today (§8.2's current registry) is `routeScopes: ["POST auth/token"]` -- not the issuance route -- so deploying this candidate before ops applies §10.3's registry change would turn the step red (403 `WORKLOAD_ROUTE_SCOPE_DENIED`), violating "deployment must not go red before or after the change." Investigated whether a code-only fix could avoid depending on that registry change at all (e.g. minting as `drts-dev-runtime`, which already has `routeScopes: ["* *"]`): ruled out by reading `infra/gcp/dev/provision-dev-project.sh`'s actual IAM bindings (`:122-124`) -- the deployer service account's only grant on the runtime service account is `roles/iam.serviceAccountUser` (act-as, for `gcloud run deploy --service-account`), not `roles/iam.serviceAccountTokenCreator`, so GitHub Actions cannot mint an ID token as `drts-dev-runtime` from this workflow; the registry rollout is a genuine external prerequisite, not a code gap. | New step "Check referral embed handoff WIF registry rollout state" (`deploy-dev.yml`, before the existing mint/verify steps) reads the live `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret (read-only `gcloud secrets versions access`) and checks via `jq` whether the `dev-ci-deployer`/`github-actions-deployer@` entry's `routeScopes` already include `"POST partner/ingress/referral-embed-handoff"`, exporting `applied=true\|false`. "Verify referral handoff session lifecycle" branches on that output: if `true`, runs the unchanged full issue/consume/replay/cross-host lifecycle as a hard gate (identical to the R0 behavior); if `false`, it still makes the real issuance call with the real token and asserts the call fails with exactly `403` + `.error.code == "WORKLOAD_ROUTE_SCOPE_DENIED"` (hard-failing on any other status/code), prints a `::warning::` pointing at this section, and stops without claiming the positive lifecycle passed. The consume-side check (through referral-embed-web's own BFF, authenticated as `drts-dev-runtime`) was already registry-change-independent and is unchanged -- it always runs as a hard gate. | Old: issuance call always made with `curl --fail`; any non-2xx (including the expected pre-rollout 403) aborted the step via `set -euo pipefail`, red. New: pre-rollout, the same call is made without `--fail`, its status/body are asserted to be exactly the documented rejection shape, and the step exits 0; post-rollout, byte-identical to the old behavior. | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"`: exit 0. Every `run:` block in the file (including both touched steps) extracted via the same `yaml.safe_load` and checked with `bash -n`: exit 0 for all. The new `jq` rollout-detection filter was run standalone against two literal registry JSON fixtures -- one matching the current §8.2 shape (no issuance route scope) and one matching the documented §10.3 shape (issuance route scope present) -- producing `false`/exit 1 and `true`/exit 0 respectively, confirming the filter discriminates the two real documented registry shapes before it runs inside the workflow. The base64url JWT-payload decode added to `tenant-uat-acceptance.yml` (F2, same pattern) was independently verified against a real RS256 token signed with `jsonwebtoken` carrying the exact `github-actions-deployer@...` email shape `google-github-actions/auth@v2` would include, confirming the extracted `email` matches exactly. | No live GCP secret read or live GitHub Actions run was performed (this task's guardrails forbid dispatching workflows/reading live dev secrets); the rollout-detection `jq` filter and the bash syntax are verified, not a live `deploy-dev.yml` execution in either registry state. Ops must still, at some point, apply §10.3's registry change for the smoke test to ever exercise the positive issuance lifecycle live; this fix changes *when* that's safe to do (no longer gates "can this candidate deploy at all"), not whether it's eventually required. New checked-in behavioral coverage of both registry versions (the reviewer's own ad hoc reproduction, now locked into the test suite): see `apps/api/tests/unit/google-workload-identity.adapter.test.ts`, `describe("deploy-dev referral embed handoff rollout (docs §8.2/§10.3 registry content)")`, added in this round -- two cases, each loading the real fenced JSON straight out of this doc (§8.2 for "current", §10.3 for "rolled out") via a shared `findDevCiDeployerRegistry` helper, and calling the real adapter with the exact `enforceReplayProtection:false`/method/path shape `requireReferralEmbedWorkloadIdentity` uses. |
+| F2 [P1, acceptance 1/2 and regression]: `.github/workflows/tenant-uat-acceptance.yml` only configured `DRTS_REFERRAL_EMBED_HANDOFF_KEY` for its self-started API/BFF processes, with no Google identity/registry/mint setup, and `navigation-uat.spec.ts`'s "C224 NAV" test POSTed `consume` directly with only that legacy header, expecting `409`. After the R0 fix, the legacy header has no effect, so the direct call returned `401 WORKLOAD_ASSERTION_MISSING` before the business-level replay check -- this hosted caller was missing from §10.1's R0 inventory entirely (now added as row 8). This runner has no GCE/Cloud Run metadata server, so `embed-api.ts`'s existing metadata-server-based token minting cannot work here either. | New steps "Mint Google workload identity token for hosted UAT referral handoff" and "Derive Google workload identity registry for hosted UAT" (`tenant-uat-acceptance.yml`, after "Prepare evidence directory") mint a real Google ID token via the same WIF identity (`google-github-actions/auth@v2`, `secrets.DEV_WIF_PROVIDER`/`DEV_WIF_SERVICE_ACCOUNT`) `deploy-dev.yml` uses (requires the new `id-token: write` permission, added to this workflow), decode its `email` claim (base64url + padding fix, `jq`), and self-provision a `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry entry scoped to exactly the three referral embed handoff routes, entirely inside this job's own disposable env (not the shared dev GCP secret -- no GCP/GitHub state was created or modified). `embed-api.ts`'s `getGoogleWorkloadIdentityHeader()` gained a `DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN` static-token override, checked before the metadata-server path, used only by this hosted harness (production never sets it and is unaffected). `navigation-uat.spec.ts`'s direct fetch now sends `x-drts-google-id-token: process.env.DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN` instead of the retired header; the expected `409` is unchanged (auth now passes, so the call reaches the same already-consumed business check as before). | Old: BFF/API processes started with no Google identity wiring; direct consume with the legacy header → `401 WORKLOAD_ASSERTION_MISSING`, never reaching the replay ledger; the whole navigation UAT suite's authenticated paths were broken. New: BFF/API processes start with a self-provisioned registry scoped to the real minted identity; the BFF's own calls (issue/consume/consent through its existing `getGoogleWorkloadIdentityHeader()` path) and the spec's direct call both authenticate successfully; the direct call reaches the same `409` already-consumed check as before the migration. | Decode logic verified independently (see F1's evidence cell: a real RS256 token's `email` claim extracted correctly by the exact bash/jq one-liners added to the workflow). `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/tenant-uat-acceptance.yml'))"`: exit 0. Every `run:` block in the file extracted via the same loader and checked with `bash -n`: exit 0 for all, including the two new steps. `pnpm exec eslint apps/referral-embed-web/lib/embed-api.ts tests/e2e/system-remediation/sr-partner-notify-qa-20260917/navigation-uat.spec.ts`: exit 0. | No live GitHub Actions run of `tenant-uat-acceptance.yml` was performed (same guardrail as F1 -- this task may not dispatch workflows); the YAML/bash syntax and the token-decode logic are verified in isolation, not a live hosted Playwright run against a real WIF-minted token end-to-end. |
+| F3 [P2, acceptance 4]: deleting the EXCP_001 registry entry alone did not remove its credential dependency: `embed-api.ts:126-131` still read and sent `DRTS_REFERRAL_EMBED_HANDOFF_KEY`; `deploy-dev.yml:730-736` still required the old Secret Manager secret and exited 1 without it; `tenant-partner.controller.ts:2481-2487` still read it in `resolvePartnerNotificationNavigation`'s internal-bootstrap branch; the header export was retained at `internal-key.middleware.ts:34`; `infra/gcp/dev/provision-dev-project.sh:295` still provisioned the secret for new projects. | `embed-api.ts`: deleted the `DRTS_REFERRAL_EMBED_HANDOFF_KEY` read/send and the local `REFERRAL_EMBED_HANDOFF_KEY_HEADER` constant. `deploy-dev.yml`: removed the `referral_handoff_secret` required-secret block and both its `secret_args`/`referral_embed_secret_args` mounts (§10.3's note above updated to match). `tenant-partner.controller.ts`: the internal-bootstrap branch of `resolvePartnerNotificationNavigation` now throws `ApiRequestError(401, "INTERNAL_KEY_UNDOCUMENTED", ...)` directly instead of calling `requireScopedInternalKey` against the retired env var (same always-401 outcome per §10.1 row 4 -- this branch never had a legitimate caller); the now-unused `REFERRAL_EMBED_HANDOFF_KEY_HEADER`/`requireScopedInternalKey` imports were removed. `internal-key.middleware.ts`: deleted the now-fully-unused `REFERRAL_EMBED_HANDOFF_KEY_HEADER` export. `infra/gcp/dev/provision-dev-project.sh`: removed `"${SECRET_PREFIX}-referral-embed-handoff-key"` from the provisioning loop (no live secret was deleted -- this only stops a *future* project provisioning run from creating a fresh one). `tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts`: removed the now-pointless `beforeEach`/`afterEach` env setup (the suite never exercised the bootstrap branch -- all its cases send `x-api-key`) and added a dedicated case asserting the bootstrap branch rejects with 403 even when a leftover `DRTS_REFERRAL_EMBED_HANDOFF_KEY` env var is set. | `grep -rn "DRTS_REFERRAL_EMBED_HANDOFF_KEY\|REFERRAL_EMBED_HANDOFF_KEY_HEADER"` across the repo (excluding `node_modules`) now returns only: this doc, `deploy-dev.yml`'s explanatory comment (no longer a mount), `tenant-partner.controller.test.ts`'s unconditional cleanup `delete`, and the new dedicated regression test above -- no remaining production-path read or send. | `pnpm --filter @drts/api exec tsc --noEmit -p tsconfig.json`: exit 0 (after rebuilding the stale `@drts/contracts`/`@drts/control-plane-auth` dist that was pre-existing drift, unrelated to this change). `pnpm --filter @drts/api exec vitest run tests/unit` (full suite): exit 0, 120 files / 1182 tests (up from the prior round's 1180 -- the 2 new F1 adapter cases). `pnpm exec vitest run tests/unit/internal-key-exception-registry.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key-alerts.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts tests/unit/system-remediation/sr-referral-001/referral-embed-handoff-lifecycle.test.ts tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts`: exit 0, 7 files / 63 tests. `pnpm exec eslint` on every file this round touched: exit 0 (one pre-existing `no-unused-vars` hit in the navigation test file, introduced by this round's own edit, was found and fixed before this evidence table was written, not left for the next round). `python3 operations/security/verify-internal-key-exceptions.py`: `AUDIT PASSED`, only `INTERNAL_KEY_EXCP_002` remains. `git diff --check` against the merge-base (`ddd0d786a`) and against the working tree: exit 0 for both. | `bash -n infra/gcp/dev/provision-dev-project.sh`: exit 0; this script was not executed (same guardrail as every prior round -- it mutates live GCP project state). |
 
 No files were edited beyond the ones named above (plus this document). No GCP secrets, GCP IAM bindings, or GitHub variables were created or modified; no deploy, workflow dispatch, or live GCP/GitHub Actions run was triggered by this reviewer-fix round; no local server, browser, or Docker container was started.

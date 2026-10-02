@@ -2476,7 +2476,7 @@ export class TenantPartnerController {
       if (allowInternalBootstrap) {
         // INTERNAL_KEY_EXCP_001 retired (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002):
         // this bootstrap branch never matched EXCP_001's registered scope
-        // (see docs/02-architecture/internal-key-exceptions.md §9.1 row 4),
+        // (see docs/02-architecture/internal-key-exceptions.md §10.1 row 4),
         // so it always rejected before the retired key existed and must keep
         // rejecting explicitly now that the key is gone -- no caller may
         // reach this route without a valid partner `x-api-key`/`x-tenant-api-key`.

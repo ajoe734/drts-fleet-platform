@@ -42,7 +42,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
     // retired. This internal-bootstrap branch (no x-api-key/x-tenant-api-key)
     // never had a legitimate caller -- EXCP_001's registered scope never
     // matched this route (docs/02-architecture/internal-key-exceptions.md
-    // §9.1 row 4) -- so it must keep rejecting explicitly now that the
+    // §10.1 row 4) -- so it must keep rejecting explicitly now that the
     // retired credential is gone, without reading any leftover env var.
     it("returns 403 for the internal-bootstrap branch with no api key, even if a legacy handoff key env var is set", async () => {
       process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "leftover-env-value";

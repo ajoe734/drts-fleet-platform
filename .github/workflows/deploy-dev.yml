@@ -1436,7 +1436,7 @@ jobs:
       # `"POST partner/ingress/referral-embed-handoff"` to the
       # github-actions-deployer principal's `routeScopes` in the deployed
       # `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry secret -- see
-      # docs/02-architecture/internal-key-exceptions.md §9.3/§9.5 for the
+      # docs/02-architecture/internal-key-exceptions.md §10.3/§10.5 for the
       # exact value and why this one-time registry rollout cannot be
       # replaced by a code-only change. The read-only check below detects
       # whether that rollout has already landed and only then runs the full
@@ -1554,7 +1554,7 @@ jobs:
           }
 
           if [[ "$ROLLOUT_APPLIED" != "true" ]]; then
-            # Registry rollout (docs §9.3) has not landed yet: the deployer
+            # Registry rollout (docs §10.3) has not landed yet: the deployer
             # principal is not yet scoped for this route. Prove the rejection
             # is the exact, expected, fail-closed one -- not a different bug
             # -- then stop without claiming the positive lifecycle passed.
@@ -1563,7 +1563,7 @@ jobs:
               echo "::error::Expected the documented pending-rollout rejection (403 WORKLOAD_ROUTE_SCOPE_DENIED) but got HTTP ${status}: $(cat "$body_file")" >&2
               exit 1
             fi
-            echo "::warning::referral embed handoff WIF registry rollout (docs/02-architecture/internal-key-exceptions.md §9.3) has not landed yet; fail-closed rejection confirmed, issue/consume/replay/cross-host lifecycle deferred until ops applies it."
+            echo "::warning::referral embed handoff WIF registry rollout (docs/02-architecture/internal-key-exceptions.md §10.3) has not landed yet; fail-closed rejection confirmed, issue/consume/replay/cross-host lifecycle deferred until ops applies it."
           else
             artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
             [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]

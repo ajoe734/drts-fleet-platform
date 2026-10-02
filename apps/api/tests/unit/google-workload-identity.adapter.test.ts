@@ -336,7 +336,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
   // review reproduced, with an ad hoc probe, that the live dev registry's
   // current `dev-ci-deployer` routeScopes (docs §8.2, unchanged by this
   // task) reject the referral embed handoff issuance route, and that the
-  // documented §9.3 rollout (adding that one route) accepts it. Lock both
+  // documented §10.3 rollout (adding that one route) accepts it. Lock both
   // halves of that reproduction into checked-in, doc-content-driven
   // coverage: each case loads the real fenced JSON straight out of
   // docs/02-architecture/internal-key-exceptions.md (not a hand-typed
@@ -345,7 +345,7 @@ describe("GoogleWorkloadIdentityAdapter", () => {
   // `requireReferralEmbedWorkloadIdentity` makes
   // (apps/api/src/modules/tenant-partner/tenant-partner.controller.ts):
   // `enforceReplayProtection: false`, method/path of the issuance route.
-  describe("deploy-dev referral embed handoff rollout (docs §8.2/§9.3 registry content)", () => {
+  describe("deploy-dev referral embed handoff rollout (docs §8.2/§10.3 registry content)", () => {
     const ISSUANCE_ROUTE = {
       requestMethod: "POST",
       requestPath: "/api/partner/ingress/referral-embed-handoff",
@@ -372,11 +372,11 @@ describe("GoogleWorkloadIdentityAdapter", () => {
       ).rejects.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
     });
 
-    it("completes the issuance-route authorization lifecycle for dev-ci-deployer under the documented §9.3 rollout", async () => {
+    it("completes the issuance-route authorization lifecycle for dev-ci-deployer under the documented §10.3 rollout", async () => {
       const { registry, entry } = findDevCiDeployerRegistry(
         (routeScopes) =>
           routeScopes.includes("POST partner/ingress/referral-embed-handoff"),
-        "rolled-out registry (§9.3, includes the referral-embed-handoff route scope)",
+        "rolled-out registry (§10.3, includes the referral-embed-handoff route scope)",
       );
       process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS =
         JSON.stringify(registry);
