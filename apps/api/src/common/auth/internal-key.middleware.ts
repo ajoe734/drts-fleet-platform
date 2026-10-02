@@ -31,7 +31,6 @@ type RequestLike = {
 };
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
-export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);

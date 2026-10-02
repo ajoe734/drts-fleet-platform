@@ -60,7 +60,10 @@ describe('IAM-UAT-002 Staging Journeys & Sign-Off Verification (Plan §19.5 Comp
     });
 
     it('J8: Service Account WIF & Key Exception Governance', () => {
-      expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBeGreaterThan(0);
+      // EXCP_001 and EXCP_002 were both migrated to WIF and retired
+      // (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002 / SEC-INTERNAL-KEY-WIF-MIGRATION-20260930),
+      // so an empty registry is the correct governed end state; the invariant
+      // below must still hold for any exception that is registered in the future.
       for (const excp of INTERNAL_KEY_EXCEPTION_REGISTRY) {
         expect(() => validateExceptionMetadata(excp)).not.toThrow();
         expect(excp.exceptionId).toBeDefined();

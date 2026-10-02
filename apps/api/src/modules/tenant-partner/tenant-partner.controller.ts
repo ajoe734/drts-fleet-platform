@@ -109,18 +109,14 @@ import { IdempotencyService } from "../../common/idempotency";
 import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import { IdentityRepository } from "../identity/identity.repository";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
-import {
-  REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-  requireScopedInternalKey,
-  verifyGoogleAssertionOrInternalKey,
-} from "../../common/auth/internal-key.middleware";
-import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
+import { verifyGoogleAssertionOrInternalKey } from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -228,6 +224,45 @@ export class TenantPartnerController {
     @Inject(GoogleWorkloadIdentityAdapter)
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
   ) {}
+
+  /**
+   * INTERNAL_KEY_EXCP_001 retired (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002):
+   * the three referral embed handoff routes no longer accept
+   * `x-drts-referral-handoff-key`. `requestAuthority` in
+   * `apps/referral-embed-web/lib/embed-api.ts` already dual-sends a Google
+   * workload identity assertion (`x-drts-google-id-token`) on every
+   * authority call, verified here against the same
+   * `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry and
+   * `GoogleWorkloadIdentityAdapter` every other proxied route uses.
+   * `enforceReplayProtection: false` matches `validateInternalKey`'s general
+   * proxy path: a Cloud Run metadata server returns the same cached token for
+   * every concurrent request within its validity window, so these are not
+   * one-time-use session issuance like `POST /api/auth/token`.
+   */
+  private async requireReferralEmbedWorkloadIdentity(request?: {
+    headers?: Record<string, string | string[] | undefined>;
+    method?: string;
+    originalUrl?: string;
+    url?: string;
+  }): Promise<void> {
+    if (!this.googleWorkloadIdentityAdapter) {
+      throw new ApiRequestError(
+        503,
+        "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+        "Google workload identity verification is not available for referral embed handoff routes.",
+        { requiredEnv: ["WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS"] },
+      );
+    }
+    const req = request ?? {};
+    await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
+      req.headers ?? {},
+      {
+        requestPath: req.originalUrl ?? req.url,
+        requestMethod: req.method,
+        enforceReplayProtection: false,
+      },
+    );
+  }
 
   /**
    * SR-MAIL-RETRY-SCHEDULE-20261001: scale-to-zero-safe trigger for the
@@ -522,14 +557,7 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    await this.requireReferralEmbedWorkloadIdentity(request);
     const artifact: ReferralEmbedHandoffArtifact =
       await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
         command,
@@ -560,14 +588,7 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    await this.requireReferralEmbedWorkloadIdentity(request);
     const session: ReferralEmbedSession =
       await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
         command,
@@ -589,14 +610,7 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    await this.requireReferralEmbedWorkloadIdentity(request);
     const session =
       await this.tenantPartnerService.recordReferralEmbedConsent(command);
     return toApiSuccessEnvelope(session, requestId);
@@ -2480,13 +2494,16 @@ export class TenantPartnerController {
 
     try {
       if (allowInternalBootstrap) {
-        requireScopedInternalKey(
-          request ?? {},
-          process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-          {
-            header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-            requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-          },
+        // INTERNAL_KEY_EXCP_001 retired (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002):
+        // this bootstrap branch never matched EXCP_001's registered scope
+        // (see docs/02-architecture/internal-key-exceptions.md §10.1 row 4),
+        // so it always rejected before the retired key existed and must keep
+        // rejecting explicitly now that the key is gone -- no caller may
+        // reach this route without a valid partner `x-api-key`/`x-tenant-api-key`.
+        throw new ApiRequestError(
+          401,
+          "INTERNAL_KEY_UNDOCUMENTED",
+          "No documented exception metadata found for this route.",
         );
       } else {
         const partnerEntry =

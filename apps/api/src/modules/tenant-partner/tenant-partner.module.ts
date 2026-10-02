@@ -56,6 +56,7 @@ export function createTenantInvitationNotificationDeliveryService(
     JwtAuthService,
     GoogleWorkloadIdentityAdapter,
     TenantPartnerRepository,
+    GoogleWorkloadIdentityAdapter,
     {
       provide: NotificationDeliveryService,
       useFactory: createTenantInvitationNotificationDeliveryService,
