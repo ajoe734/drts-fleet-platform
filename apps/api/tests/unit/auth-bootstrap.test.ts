@@ -1,9 +1,10 @@
 import { generateKeyPairSync } from "node:crypto";
 
+import { Logger } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import jwt from "jsonwebtoken";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
@@ -1833,6 +1834,259 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+  });
+});
+
+describe("bootstrap auth guard: Cloud Scheduler OIDC token reuse on idempotent system routes", () => {
+  const SCHEDULER_AUDIENCE = "https://api.dev.drts.internal";
+  const SCHEDULER_SERVICE_ACCOUNT_EMAIL =
+    "drts-dev-scheduler@dev-project.iam.gserviceaccount.com";
+  const SCHEDULER_PRINCIPAL_ID = "svc-drts-dev-scheduler";
+
+  function configureSchedulerRegistry(routeScopes: string[], scopes: string[]) {
+    process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        serviceAccountEmail: SCHEDULER_SERVICE_ACCOUNT_EMAIL,
+        principalId: SCHEDULER_PRINCIPAL_ID,
+        actorId: "drts-dev-scheduler",
+        roles: [],
+        scopes,
+        allowedTokenAudiences: [SCHEDULER_AUDIENCE],
+        routeScopes,
+      },
+    ]);
+  }
+
+  let schedulerKidCounter = 0;
+
+  function signSchedulerToken(): string {
+    const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    const jwk = publicKey.export({ format: "jwk" }) as {
+      kty: string;
+      n: string;
+      e: string;
+    };
+    // A fresh kid per signing call (rather than a fixed constant) avoids
+    // colliding with this adapter module's own cross-test JWKS cache
+    // (`fetchGoogleJwks`'s 10-minute TTL is a module-level singleton, not
+    // reset between tests) -- a repeated kid here would make a later test's
+    // freshly generated keypair get "verified" against an earlier test's
+    // still-cached public key for that same kid and fail closed for the
+    // wrong reason.
+    const kid = `scheduler-test-key-${schedulerKidCounter++}`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }] }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const now = Math.floor(Date.now() / 1000);
+    return jwt.sign(
+      {
+        iss: "https://accounts.google.com",
+        sub: "scheduler-subject-001",
+        email: SCHEDULER_SERVICE_ACCOUNT_EMAIL,
+        email_verified: true,
+        aud: SCHEDULER_AUDIENCE,
+        iat: now,
+        exp: now + 300,
+      },
+      privateKey,
+      { algorithm: "RS256", keyid: kid },
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
+  });
+
+  it("reproduces the root cause: the adapter's default one-time-use ledger rejects Cloud Scheduler's second presentation of its own cached, still-valid OIDC token", async () => {
+    // Cloud Scheduler mints one OIDC token per HTTP target and reuses the
+    // identical cached assertion across the job's successive firings for
+    // most of that token's validity window -- it does not mint a fresh one
+    // per invocation. `verifyServicePrincipal` defaults to one-time-use
+    // (`enforceReplayProtection` default `true`), so the *second* firing with
+    // the still-valid, unexpired, never-before-rejected token is the one that
+    // 401s -- an intermittent failure driven purely by call order, not by
+    // anything wrong with the token itself.
+    configureSchedulerRegistry(
+      ["POST internal/scheduled-tasks/mail-outbox/drain"],
+      ["notification-delivery:drain"],
+    );
+    const adapter = new GoogleWorkloadIdentityAdapter(new IdentityRepository());
+    const token = signSchedulerToken();
+    const context = {
+      requestMethod: "POST",
+      requestPath: "/api/internal/scheduled-tasks/mail-outbox/drain",
+    };
+
+    const first = await adapter.verifyServicePrincipal(
+      { "x-drts-google-id-token": token },
+      context,
+    );
+    expect(first.principalId).toBe(SCHEDULER_PRINCIPAL_ID);
+
+    await expect(
+      adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, context),
+    ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
+  });
+
+  it.each([
+    [
+      "mail-outbox drain",
+      "POST",
+      "internal/scheduled-tasks/mail-outbox/drain",
+      "notification-delivery:drain",
+    ],
+    [
+      "approval-timeout-reminders run",
+      "POST",
+      "internal/scheduled-tasks/approval-timeout-reminders/run",
+      "tenant-partner:approval-timeout-reminders:run",
+    ],
+  ])(
+    "lets the guard accept the same reused, still-valid scheduler token every time on the idempotent %s route",
+    async (_label, method, routePath, scope) => {
+      configureSchedulerRegistry([`${method} ${routePath}`], [scope]);
+      const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
+        new IdentityRepository(),
+      );
+      const guard = new BootstrapAuthGuard(
+        new Reflector(),
+        new JwtAuthService(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        googleWorkloadIdentityAdapter,
+      );
+      const token = signSchedulerToken();
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const request: AuthenticatedRequestLike = {
+          headers: { authorization: `Bearer ${token}` },
+          method,
+          originalUrl: `/api/${routePath}`,
+        };
+        const context = createExecutionContext(request);
+        expect(await guard.canActivate(context)).toBe(true);
+        expect(request.identity).toMatchObject({
+          authMode: "jwt_bearer",
+          actorType: "system",
+          realm: "system",
+          principalId: SCHEDULER_PRINCIPAL_ID,
+        });
+      }
+    },
+  );
+
+  it("still enforces one-time-use (and still denies an out-of-scope route) for a system-only route that is not on the idempotent allowlist", async () => {
+    configureSchedulerRegistry(
+      ["POST identity/privileged-role-grants/process-expiries"],
+      ["identity:write"],
+    );
+    const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
+      new IdentityRepository(),
+    );
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      googleWorkloadIdentityAdapter,
+    );
+    const token = signSchedulerToken();
+    const makeRequest = (): AuthenticatedRequestLike => ({
+      headers: { authorization: `Bearer ${token}` },
+      method: "POST",
+      originalUrl: "/api/identity/privileged-role-grants/process-expiries",
+    });
+
+    expect(await guard.canActivate(createExecutionContext(makeRequest()))).toBe(
+      true,
+    );
+
+    const warnSpy = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
+
+    await expectApiRequestError(
+      () => guard.canActivate(createExecutionContext(makeRequest())),
+      (error) => {
+        expect(error.code).toBe("JWT_INVALID");
+      },
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("WORKLOAD_ASSERTION_REPLAYED"),
+    );
+    const anyLoggedCallIncludesToken = warnSpy.mock.calls.some(([message]) =>
+      typeof message === "string" ? message.includes(token) : false,
+    );
+    expect(anyLoggedCallIncludesToken).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
+  it("logs the denial reason code (never the token) when a reused scheduler token fails a check other than replay, e.g. an out-of-scope route", async () => {
+    configureSchedulerRegistry(
+      ["POST internal/scheduled-tasks/mail-outbox/drain"],
+      ["notification-delivery:drain"],
+    );
+    const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
+      new IdentityRepository(),
+    );
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      googleWorkloadIdentityAdapter,
+    );
+    const token = signSchedulerToken();
+    const warnSpy = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
+
+    // This principal's routeScopes only cover the mail-outbox drain route, so
+    // a request to the other scheduled-task route must still be denied.
+    await expectApiRequestError(
+      () =>
+        guard.canActivate(
+          createExecutionContext({
+            headers: { authorization: `Bearer ${token}` },
+            method: "POST",
+            originalUrl:
+              "/api/internal/scheduled-tasks/approval-timeout-reminders/run",
+          }),
+        ),
+      (error) => {
+        expect(error.code).toBe("JWT_INVALID");
+      },
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("WORKLOAD_ROUTE_SCOPE_DENIED"),
+    );
+    const anyLoggedCallIncludesToken = warnSpy.mock.calls.some(([message]) =>
+      typeof message === "string" ? message.includes(token) : false,
+    );
+    expect(anyLoggedCallIncludesToken).toBe(false);
+
+    warnSpy.mockRestore();
   });
 });
 
