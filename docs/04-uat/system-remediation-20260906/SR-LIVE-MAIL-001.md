@@ -1,8 +1,39 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：**候選 a03b4b34 的 CI 因 Python 測試未接入 CI discovery 失敗；修正需 Supervisor 擴充 ci-integ.yml scope。** hosted harness 的既有 scoped checks 保留；live acceptance 尚未執行。Supervisor 12:50Z 指定 promotion 後 dispatch。本輪沒有寄真郵件、部署、呼叫 `done` 或 `record-acceptance`。
-- **§0.2 是最新結果**；§0.1 是前輪交審，§0 為早先 checkpoint，§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 歷史觀察。歷史 scope blocker、IMAP 套件缺口、部署狀態與 acceptance 判定不能代替本輪證據。
+- 現況：**F12 已依 Supervisor 核可接入 ci-integ.yml；正式 coverage gate 舊版 exit 1 → 修正版 exit 0，15 個 Python 測試實際通過。** hosted harness 的既有 scoped checks 亦重跑通過；新候選仍須獨立 review／同 SHA CI／merge，live acceptance 尚未執行。Supervisor 12:50Z 指定 promotion 後 dispatch。本輪沒有寄真郵件、部署、呼叫 `done` 或 `record-acceptance`。
+- **§0.3 是最新修正與檢查結果**；§0.2 保留首次 CI 退修定位，§0.1 是前輪交審，§0 為早先 checkpoint，§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 歷史觀察。歷史 scope blocker、IMAP 套件缺口、部署狀態與 acceptance 判定不能代替本輪證據。
+
+## 0.3 F12：接入正式 PR CI（2026-10-02）
+
+- 依完整 Claude2 `2026-10-02T13:16:39Z` reopen（候選 `a03b4b34e8da1a430b3d3167ea816955352af96b`，失敗 runs 見 §0.2）續修；Supervisor `16:05Z` integration note 明確授權 **僅在 ci-integ.yml changes job 的 coverage checker 前新增所提 unittest discover step**，且已核對沒有其它 open task 寫同檔。無須再等待 scope。
+- 本輪 fetch 的 base `origin/dev` 為 `15ebab491e15bc5219d487168e33050c526e63b6`；開始時 local／remote／PR #2275 head 同為 `27d3d1a3e87c9c5a3f8400fcad34eb97fc783f23`，舊 CI 已 completed/failure、沒有鎖定 candidate。`git diff origin/dev -- .github/workflows/ci-integ.yml` 為空，故不為 trunk 前進另做 merge／rebase。
+- 唯一 workflow 修改是 `.github/workflows/ci-integ.yml: jobs.changes.steps` 的 `Verify live mail Python unit tests`，執行既有 `test_hosted_gate.py`／`test_mailbox_observer.py`。沿用正式 `covered_targets`／`collected_files`；没有改 checker、測試、豁免、failure handling 或其它 workflow step。修改 anchor `7dee04dfe1116bd85fc58c9536d9d67e24a09063` 已普通 push；下列程式檢查均在此 SHA，後續只更新本 evidence 文件。
+- 最終 candidate 是本節文件提交後的 branch HEAD，完整 SHA 由 canonical handoff 與 PR #2275 head 鎖定；不把 anchor 當 candidate。文件寫入時新 hosted CI 尚未結束，**本節不宣稱 CI pass**；本輪必要 checks 結果須讀完，最終 run／job 與結論寫入 canonical handoff/progress，可從 PR 同 SHA 取回。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、版本與證據 | 未驗與具體限制 |
+| --- | --- | --- | --- | --- |
+| F12 Python tests 未進 CI discovery | `check_test_coverage.py: WORKFLOWS, covered_targets, collected_files`；`ci-integ.yml: jobs.changes` | `27d3d1a3e` 正式 gate exit **1**，精確報兩個 Python 檔未覆蓋；`7dee04dfe` 正式 gate exit **0**，全部 **79** tracked test files 可收集 | Python **3.12.3**；下表 coverage 命令及 `.local/sr-live-mail-001/f12-20261002/coverage-{before,after}.log` | 這是正式全庫 discovery gate；不等於全部測試或 live 通過。需同 candidate hosted CI |
+| F01–F11 先前修正回歸 | §0／§0.1 的正式 API／runner／receipt／observer 呼叫路徑維持 | 本輪 **82 TS + 15 Python** tests pass，既有正向／拒絕情境保留 | 下表完整 scoped regression 指令／log | 外部 HTTP、IMAP、IAM 邊界仍為 mock；§0.1 所列 live 限制全部保留 |
+| `authorized_test_mailbox` | §0.1、Supervisor 授權 dedicated sender 的 +invite／+approve aliases | 本輪未連 IMAP，沒有新 live arrival | 未執行 `record-acceptance`；資源授權入口沿用 §0.1 | Supervisor promotion 後 dispatch；operator 須提供真 approval 資源 |
+| `configured_mail_provider` | §0.1 provider metadata runner | 本輪未讀 secrets／cloud metadata；無新 candidate provider 證據 | 既有部署設定不能替代同 SHA `evidence-provider.json` | 待 Supervisor shared-dev hosted 執行 |
+| `provider_message_receipts` | 正式 delivery readback／approval audit／retry observer | 真 SMTP 回執與 inbox 仍未收集；unit pass 不計入 | §0.1 `evidence-mail.json`／IMAP UID／內容 hash 證據入口 | operator 提供 approval request、真 24h expiry 樣本、尚 queued retryable delivery；未授權改共用 SMTP 製造故障 |
+| `live_candidate_sha` | §0.1 workflow checkout／health SHA gate | 本輪是 CI wiring 修正，未 merge／部署／live | 最終 code candidate 由 handoff 鎖定；live SHA 待正常 promotion／部署後記錄 | 不把 anchor、候選或 merge SHA 當已部署 SHA；四項 acceptance 均未完成 |
+
+所有本機 checks 均已結束並讀取；各命令的 stdout/stderr 留在 `.local/sr-live-mail-001/f12-20261002/`，未啟 VM 產品 server、browser、Docker、PG 或真郵件連線。
+
+| 命令（`7dee04dfe`，baseline 另註） | Exit／實際結果 | Log |
+| --- | --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py`（baseline `27d3d1a3e`） | **1**，兩個檔案未在 CI path；不是 setup failure | `coverage-before.log` |
+| `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py` | **0**，79 files covered | `coverage-after.log` |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v` | **0**，15 tests passed | `python-tests.log` |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/ci/test_check_test_coverage.py tools/ci/test_workflow_timeouts.py -v` | **0**，11 tests passed | `workflow-tests.log` |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/` | **0**，6 files／82 tests passed，Vitest 4.1.4 | `vitest.log` |
+| `pnpm exec tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json` | **0** | `scoped-static.log` |
+| `pnpm exec eslint --max-warnings=0 tests/e2e/system-remediation/sr-live-mail-001/ tests/unit/system-remediation/sr-live-mail-001/` | **0** | `scoped-static.log` |
+| `pnpm exec prettier --check .github/workflows/ci-integ.yml .github/workflows/live-mail-acceptance.yml 'tests/e2e/system-remediation/sr-live-mail-001/*.ts' 'tests/unit/system-remediation/sr-live-mail-001/*.ts'` | **0** | `scoped-static.log` |
+| `git diff --check` | **0** | `scoped-static.log` |
+| Playwright／SMTP／IMAP／PG／Cloud Run live | **未執行**；依 VM 限制及 Supervisor 先 promotion 指示 | 無 live pass 聲明 |
 
 ## 0.2 CI 退回定位與 scope 待辦（2026-10-02）
 
