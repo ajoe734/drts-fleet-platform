@@ -1890,6 +1890,25 @@ branch switch, product servers/browser/Docker, GCP secret/IAM or GitHub
 variable changes, real secret reads, deploys, or workflow dispatch occurred
 in producing this fix.
 
+### 10.10 CI fix (2026-10-02, post R6 approve): unrelated governance test assumed a non-empty registry
+
+Codex's R6 review approved candidate `a7a02893c1db59b426eaf5572d5f1095b3358f0c`
+(generation `642cceb2a7044b4d89b315e81b6ecbb6`, PR #2264). Hosted CI runs
+[37010368231](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37010368231)
+and `37010368...152` on that exact SHA both completed `failure`: the `unit`
+job and the downstream `ci-integ` aggregate job. `gh run view --job --log-failed`
+on the `unit` job's failing step showed exactly one failing test across
+408 files / 4434 tests: `tests/security/iam-uat-002-staging-verification.test.ts`
+→ `J8: Service Account WIF & Key Exception Governance` →
+`AssertionError: expected 0 to be greater than 0`.
+
+| Finding / acceptance key | Fix location | Before → after | Evidence | Known gaps |
+| --- | --- | --- | --- | --- |
+| `tests/security/iam-uat-002-staging-verification.test.ts:63` (unrelated to this task's `write_scopes`, committed 2025 in #1391) asserted `INTERNAL_KEY_EXCEPTION_REGISTRY.length` is `> 0`. This candidate's §10.8 dev-sync merged `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`'s EXCP_002 retirement together with this task's own EXCP_001 removal, so for the first time both exceptions are gone and the registry is legitimately empty — the exact end state both tasks' `required_acceptance` ask for (`EXCP_001自登錄表移除`, and EXCP_002's own task). The assertion's premise (governance verification needs at least one exception on file) stopped holding once retirement, not just rotation, became the goal. | `tests/security/iam-uat-002-staging-verification.test.ts`'s J8 test: removed the `toBeGreaterThan(0)` assertion and its surrounding comment explaining why; kept the `for` loop (now iterating zero times) so the governance invariant — every *future* registered exception must pass `validateExceptionMetadata` and carry `exceptionId`/`owner` — still holds unconditionally, including once the registry is empty. | Before: `expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBeGreaterThan(0)` fails as soon as the registry is empty, regardless of why. After: the test only checks the shape of whatever is registered (currently nothing), which is exactly the production state. | `pnpm exec vitest run tests/security/iam-uat-002-staging-verification.test.ts`: exit 0, 12 tests. Combined with the same 9-file scoped suite R5/R6 ran plus this file: `pnpm exec vitest run tests/unit/internal-key-exception-registry.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key-alerts.test.ts tests/integration/internal-key-rotation-retirement.integration.test.ts tests/unit/system-remediation/sr-referral-001/referral-embed-handoff-lifecycle.test.ts tests/unit/system-remediation/sr-partner-notify-nav-20260917/partner-notification-navigation.test.ts tests/unit/system-remediation/sr-referral-001/deploy-dev-referral-handoff-workflow.test.ts tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts tests/security/iam-uat-002-staging-verification.test.ts`: exit 0, 10 files / 99 tests. `python3 -B operations/security/verify-internal-key-exceptions.py`: exit 0, AUDIT PASSED, zero exceptions in both code and markdown. `pnpm exec eslint tests/security/iam-uat-002-staging-verification.test.ts`: exit 0. `git diff --check`: exit 0. Only this test file and this doc section changed; no production source touched. | The full root `pnpm run test:unit` (the exact command the hosted `unit`/`ci-integ` jobs run, 408 files/4434 tests, requires `pnpm db:migrate` first) was not re-run locally in this sandbox — out of proportion to a single-assertion fix in one unrelated file, and this task's VM guardrails forbid starting local service/DB infrastructure. The fix is scoped to the one failing assertion identified by the exact hosted failure log; this new candidate's hosted CI on this exact SHA is the authoritative re-check and must be read before claiming `同候選SHA CI通過`. |
+
+No GCP secret/IAM mutation, GitHub variable mutation, workflow dispatch,
+deploy, or local server/Docker occurred in producing this fix.
+
 ## 13. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`: staging/production deploy-wiring and operator templates
 
 This section is the follow-up §9.4 item 1 below asked for ("A
