@@ -23,7 +23,17 @@ SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-system}"
 SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-system-001}"
 SMOKE_REALM="${SMOKE_REALM:-}"   # leave blank to derive from SMOKE_ACTOR_TYPE
 SMOKE_AUTH_BEARER_TOKEN="${SMOKE_AUTH_BEARER_TOKEN:-}"
+# SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 (the
+# x-drts-internal-key header this suite used to attach when set) is retired.
+# No registry entry accepts that header anymore, so sending it now gets a
+# generic 401 rather than the staging/internal-env access it once granted.
+# Fail fast with a clear reason instead of silently sending a header the API
+# will reject.
 SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"
+if [[ -n "${SMOKE_INTERNAL_KEY:-}" ]]; then
+  echo "SMOKE_INTERNAL_KEY/DRTS_INTERNAL_KEY is set, but INTERNAL_KEY_EXCP_002 was retired on 2026-10-02 (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930): the x-drts-internal-key header is no longer accepted by any environment. Unset this variable; if you need staging/internal access, use a Google workload identity assertion (x-drts-google-id-token) instead." >&2
+  exit 1
+fi
 
 # Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql.
 # TEN_ACME tenant; 張司機 / ABC-1234 driver+vehicle pair.
@@ -96,10 +106,6 @@ http_call() {
     if [[ -n "${SMOKE_TENANT_ID:-}" ]]; then
       curl_args+=(-H "x-tenant-id: ${SMOKE_TENANT_ID}")
     fi
-  fi
-
-  if [[ -n "${SMOKE_INTERNAL_KEY:-}" ]]; then
-    curl_args+=(-H "x-drts-internal-key: ${SMOKE_INTERNAL_KEY}")
   fi
 
   if [[ -n "$body_file" ]]; then

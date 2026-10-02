@@ -15,8 +15,6 @@ export async function verifyEnterpriseTenantSession(
   try {
     const target = new URL("/api/auth/session", apiBaseUrl);
     const headers = new Headers({ Authorization: `Bearer ${accessToken}` });
-    const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
-    if (internalKey) headers.set("x-drts-internal-key", internalKey);
     const audience =
       process.env.DRTS_API_AUTH_AUDIENCE?.trim() ||
       (target.hostname.endsWith(".a.run.app") ? target.origin : null);
@@ -34,9 +32,8 @@ export async function verifyEnterpriseTenantSession(
       const identityToken = await tokenResponse.text();
       // Cloud Run's own IAM invoker check (network hop).
       headers.set("x-serverless-authorization", `Bearer ${identityToken}`);
-      // apps/api's app-level caller identity (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930
-      // follow-up: drop the x-drts-internal-key send above once this is
-      // proven end-to-end and INTERNAL_KEY_EXCP_002 is retired).
+      // apps/api's app-level caller identity, verified against Google's
+      // public JWKS (INTERNAL_KEY_EXCP_002 retired, SEC-INTERNAL-KEY-WIF-MIGRATION-20260930).
       headers.set("x-drts-google-id-token", identityToken);
     }
     const response = await fetch(target, {

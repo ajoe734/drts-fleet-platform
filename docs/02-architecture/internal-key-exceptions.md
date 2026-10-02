@@ -30,20 +30,29 @@ To prevent undocumented credential proliferation and unmonitored backdoor access
 | Exception ID            | Owner               | Purpose                                                                                      | Scope / Header                                                                                                                                                                                   | Network Boundary              | TTL / ExpiresAt        | Rotation Cadence | Usage Signal                    | Target Removal Date | Removal Plan                                                                                                                                 |
 | ----------------------- | ------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- | ---------------------- | ---------------- | ------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `INTERNAL_KEY_EXCP_001` | `referral-team`     | Scoped server-to-server referral embed handoff artifact issuance and consumption             | `x-drts-referral-handoff-key`<br>`POST partner/ingress/referral-embed-handoff`<br>`POST partner/ingress/referral-embed-handoff/consume`<br>`POST partner/ingress/referral-embed-handoff/consent` | `internal-vpc-to-api-ingress` | `2026-10-31T23:59:59Z` | `30d`            | `AUTH_SCOPED_INTERNAL_KEY_USED` | `2026-10-31`        | Migrate `referral-embed-web` BFF caller to IAM-SVC-001 WIF token exchange once WIF proxy is enabled on referral web app.                     |
-| `INTERNAL_KEY_EXCP_002` | `control-plane-ops` | Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent | `x-drts-internal-key`<br>`* *`<br>`POST partner/ingress/handoff`<br>`POST auth/token`                                                                                                            | `control-plane-proxy-to-api`  | `2026-10-31T23:59:59Z` | `14d`            | `AUTH_LEGACY_INTERNAL_KEY_USED` | `2026-10-31`        | Full deprecation of `DRTS_INTERNAL_KEY` fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. Temporarily extended per user decision on 2026-09-30 to keep dev deployments green pending WIF migration `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, accepting the delay of scheduled security retirement. |
 
 ### Retired exceptions
 
 INTERNAL_KEY_EXCP_003 (sre-ops, staging emergency break-glass) reached its
-`removalDate` of 2026-08-31 and was retired from the registry on 2026-09-01,
+removalDate of 2026-08-31 and was retired from the registry on 2026-09-01,
 per its own removal plan: replaced by IAM-BG-001 two-person break-glass
 approval with short session tokens, which shipped before that date.
 
 Retiring it changed no request outcome. It stopped matching when it expired,
-and `INTERNAL_KEY_EXCP_002` carries scope `* *` on the same header, so the
-routes it had covered -- `GET health` and `POST ops/*` -- already resolved
-through EXCP_002 in both staging and production. Verified against the
-evaluator with and without the entry before removal.
+and INTERNAL_KEY_EXCP_002 carried scope `* *` on the same header at the time,
+so the routes it had covered -- `GET health` and `POST ops/*` -- already
+resolved through EXCP_002 in both staging and production. Verified against
+the evaluator with and without the entry before removal.
+
+INTERNAL_KEY_EXCP_002 (control-plane-ops, x-drts-internal-key) reached its
+removalDate of 2026-10-31 early and was retired from the registry on
+2026-10-02 by SEC-INTERNAL-KEY-WIF-MIGRATION-20260930, per its own removal
+plan: all control-plane proxy, auth/token, and partner/ingress/handoff
+bootstrap callers migrated to the Google workload identity assertion
+(`x-drts-google-id-token`, verified by `GoogleWorkloadIdentityAdapter`
+against Google's own public JWKS -- no new long-term key was invented). Full
+inventory, migration evidence, and the removal candidate's own verification
+are in section 12 below.
 
 ---
 
@@ -109,9 +118,9 @@ gantt
     section INTERNAL_KEY_EXCP_003 (retired)
     SRE Break-Glass Key Expiry         :done, excp3, 2026-08-05, 2026-08-31
     Retired to IAM-BG-001              :done, 2026-08-31, 2026-08-31
-    section INTERNAL_KEY_EXCP_002
-    Control-Plane Fallback Key Expiry  :active, excp2, 2026-08-05, 2026-09-30
-    Retire EXCP_002 to WIF Assertions  :crit, 2026-09-30, 2026-09-30
+    section INTERNAL_KEY_EXCP_002 (retired)
+    Control-Plane Fallback Key Expiry  :done, excp2, 2026-08-05, 2026-09-30
+    Retired to WIF Assertions          :done, 2026-10-02, 2026-10-02
     section INTERNAL_KEY_EXCP_001
     Referral Handoff Key Expiry        :active, excp1, 2026-08-05, 2026-10-31
     Retire EXCP_001 to WIF Tokens      :crit, 2026-10-31, 2026-10-31
@@ -119,7 +128,7 @@ gantt
 
 ---
 
-## 6. `INTERNAL_KEY_EXCP_002` Caller Inventory (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)
+## 6. INTERNAL_KEY_EXCP_002 Caller Inventory (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)
 
 Full inventory of every call site that presents `x-drts-internal-key` /
 `DRTS_INTERNAL_KEY` under EXCP_002's `* *` and `POST auth/token` scopes,
@@ -378,7 +387,7 @@ confirmation.
 
 ### 7.2 What is NOT done in this candidate, and why
 
-`INTERNAL_KEY_EXCP_002` is **not** removed here. Doing so requires, in this
+INTERNAL_KEY_EXCP_002 is **not** removed here. Doing so requires, in this
 order:
 
 1. Ops populates `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` in dev for
@@ -396,13 +405,13 @@ order:
    tenant-user fixture lookup, not from this header or this grant) -- and
    sets `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true`.
 2. A real dev deploy of this candidate (or later) confirms
-   `AUTH_LEGACY_INTERNAL_KEY_USED` for `INTERNAL_KEY_EXCP_002` stops
+   `AUTH_LEGACY_INTERNAL_KEY_USED` for INTERNAL_KEY_EXCP_002 stops
    appearing in `apps/api` logs / `internalKeyMetrics` for all nine
    callers, i.e. every caller is genuinely landing on the WIF path, not
    silently still falling back.
 3. Only then does a follow-up change drop the `x-drts-internal-key` sends
    from the nine caller files/steps above and remove the
-   `INTERNAL_KEY_EXCP_002` entry from
+   INTERNAL_KEY_EXCP_002 entry from
    `apps/api/src/common/auth/internal-key-exception-registry.ts` and this
    document.
 
@@ -524,7 +533,7 @@ environment.
 
 | Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
 | --- | --- | --- | --- | --- |
-| §7.2 item 1 unsatisfiable: no env-var wiring existed for `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` or `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` (`excp_002_removed_and_deploy_dev_green`) | `.github/workflows/deploy-dev.yml`: added a third workload secret check (`workload_google_registry_secret="${secret_prefix}-workload-identity-google-service-principals"`) mounted as `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` in the `api_secrets` step, following the exact same absent-is-safe `gcloud secrets describe` pattern as the two existing workload mounts; added `DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED: ${{ vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED }}` to the workflow's top-level `env:` block (same pattern as `DEV_WORKLOAD_IDENTITY_ISSUER`) and threaded it into the `api_env` step's `env_vars` as `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}`, so it defaults to `false` (gate stays off, `isCiTenantActorGateEnabled()` short-circuits) until ops deliberately sets the repo variable to `"true"`. Kept as a separate explicit opt-in rather than tying it to the registry secret's mere existence: `auth.controller.ts`'s CI-tenant-actor branch calls `verifyServicePrincipal` with no surrounding `try/catch`, so if the gate were ever on while the registry is absent/incomplete, `loadRegistry()`'s `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` throw would surface as a request-time 503 there instead of degrading to the internal key (unlike `InternalKeyMiddleware`, which does catch it) -- ops must confirm the registry is complete before flipping this variable. | Before: secret mount for this env var did not exist in the workflow at any point in this task's history; ops populating a secret named `${secret_prefix}-workload-identity-google-service-principals` in GCP would have had no effect on the deployed service. After: the mount exists, gated on the secret's presence exactly like the pre-existing two; the CI-tenant-actor gate is wired but defaults to off. | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` (exit 0, valid YAML); `pnpm exec vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/dev-active-surface-contract.test.ts tests/unit/cloud-run-deploy-retry.test.ts` (exit 0, 3 files / 19 tests passed -- none of these pre-existing guards asserted anything about `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` before this change, so this is a regression check, not new coverage of the fix itself); read-through confirmation that `isCiTenantActorGateEnabled()` compares the env var case-insensitively against the literal string `"true"`, so the default `false` correctly disables the gate. | Not run: an actual `deploy-dev.yml` execution (no trigger path from this branch; GitHub `gh run list --workflow=deploy-dev.yml` at the time of this fix showed the most recent run, 36744111603, dispatched at 16:25:41Z against `headSha=cb479ddfc` -- the pre-merge commit -- so no dev deploy has yet exercised this candidate's code, merge commit `739e7e9e44c5`, or this wiring fix). Full §7.2 completion still requires, in order: (1) ops creates GCP secret `${secret_prefix}-workload-identity-google-service-principals` in `drts-dev-devcc-20260825` with real per-caller service-account entries per §7.3.1's `routeScopes` recommendations (this worker cannot invent that data -- see §7.2's original reasoning), (2) a fresh `workflow_dispatch` run of `deploy-dev.yml` against a ref including this fix and confirming `AUTH_LEGACY_INTERNAL_KEY_USED` stops appearing for all nine callers, (3) ops sets `vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true` and re-verifies caller #9 (`deploy-dev` operational acceptance) still passes, (4) only then a follow-up candidate removes `INTERNAL_KEY_EXCP_002` and the dual-send headers. None of steps (1)-(3) can be performed from this sandbox: (1) requires inventing no data that doesn't exist, and (2)-(3) deploy to and mutate the shared dev environment, which this task's guardrails reserve for an authorized deploy action outside a code-only worker's reach. |
+| §7.2 item 1 unsatisfiable: no env-var wiring existed for `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` or `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED` (`excp_002_removed_and_deploy_dev_green`) | `.github/workflows/deploy-dev.yml`: added a third workload secret check (`workload_google_registry_secret="${secret_prefix}-workload-identity-google-service-principals"`) mounted as `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` in the `api_secrets` step, following the exact same absent-is-safe `gcloud secrets describe` pattern as the two existing workload mounts; added `DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED: ${{ vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED }}` to the workflow's top-level `env:` block (same pattern as `DEV_WORKLOAD_IDENTITY_ISSUER`) and threaded it into the `api_env` step's `env_vars` as `WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}`, so it defaults to `false` (gate stays off, `isCiTenantActorGateEnabled()` short-circuits) until ops deliberately sets the repo variable to `"true"`. Kept as a separate explicit opt-in rather than tying it to the registry secret's mere existence: `auth.controller.ts`'s CI-tenant-actor branch calls `verifyServicePrincipal` with no surrounding `try/catch`, so if the gate were ever on while the registry is absent/incomplete, `loadRegistry()`'s `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` throw would surface as a request-time 503 there instead of degrading to the internal key (unlike `InternalKeyMiddleware`, which does catch it) -- ops must confirm the registry is complete before flipping this variable. | Before: secret mount for this env var did not exist in the workflow at any point in this task's history; ops populating a secret named `${secret_prefix}-workload-identity-google-service-principals` in GCP would have had no effect on the deployed service. After: the mount exists, gated on the secret's presence exactly like the pre-existing two; the CI-tenant-actor gate is wired but defaults to off. | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` (exit 0, valid YAML); `pnpm exec vitest run tests/unit/deployment-architecture-guards.test.ts tests/unit/dev-active-surface-contract.test.ts tests/unit/cloud-run-deploy-retry.test.ts` (exit 0, 3 files / 19 tests passed -- none of these pre-existing guards asserted anything about `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` before this change, so this is a regression check, not new coverage of the fix itself); read-through confirmation that `isCiTenantActorGateEnabled()` compares the env var case-insensitively against the literal string `"true"`, so the default `false` correctly disables the gate. | Not run: an actual `deploy-dev.yml` execution (no trigger path from this branch; GitHub `gh run list --workflow=deploy-dev.yml` at the time of this fix showed the most recent run, 36744111603, dispatched at 16:25:41Z against `headSha=cb479ddfc` -- the pre-merge commit -- so no dev deploy has yet exercised this candidate's code, merge commit `739e7e9e44c5`, or this wiring fix). Full §7.2 completion still requires, in order: (1) ops creates GCP secret `${secret_prefix}-workload-identity-google-service-principals` in `drts-dev-devcc-20260825` with real per-caller service-account entries per §7.3.1's `routeScopes` recommendations (this worker cannot invent that data -- see §7.2's original reasoning), (2) a fresh `workflow_dispatch` run of `deploy-dev.yml` against a ref including this fix and confirming `AUTH_LEGACY_INTERNAL_KEY_USED` stops appearing for all nine callers, (3) ops sets `vars.DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=true` and re-verifies caller #9 (`deploy-dev` operational acceptance) still passes, (4) only then a follow-up candidate removes INTERNAL_KEY_EXCP_002 and the dual-send headers. None of steps (1)-(3) can be performed from this sandbox: (1) requires inventing no data that doesn't exist, and (2)-(3) deploy to and mutate the shared dev environment, which this task's guardrails reserve for an authorized deploy action outside a code-only worker's reach. |
 
 ### 7.6 Re-dispatch (2026-10-01, fifth session): dev's shared runtime service account collapses §7.3.1's per-caller entry plan
 
@@ -637,7 +646,7 @@ radius. Achieving real narrowing for those four would require a follow-up,
 separate task to give each web app (or at least the narrow-purpose ones) its
 own dedicated Cloud Run runtime service account, which is an IAM/infra
 change this task was not scoped or authorized to make and does not block
-`INTERNAL_KEY_EXCP_002`'s removal, since the legacy exception offered no
+INTERNAL_KEY_EXCP_002's removal, since the legacy exception offered no
 per-caller scoping at all -- entry A is still a strict improvement (bounded,
 auditable, Google-signed identity instead of a shared static key), not a
 regression against the exception it replaces.
@@ -660,9 +669,9 @@ and §7.6's ops guidance before a real dev deploy exercises either.
 | --- | --- | --- | --- | --- |
 | Caller #9's two `POST /api/auth/token` calls reused one Google assertion, which `GoogleWorkloadIdentityAdapter`'s hash-keyed replay guard only accepts once (`每個POST auth/token使用一次性且不同的Google assertion`) | `.github/workflows/deploy-dev.yml`: split the single `Mint identity token — API operational acceptance` step into two (`id_token_api_operational` / `id_token_api_operational_ops`), each its own `google-github-actions/auth@v2` call with the same `id_token_audience: needs.health-check.outputs.api`; `Issue deployment-machine Tenant acceptance session`'s `env:` now carries `GOOGLE_ID_TOKEN_TENANT_ADMIN` and `GOOGLE_ID_TOKEN_TENANT_OPS` instead of one shared `GOOGLE_ID_TOKEN`, and the Tenant Admin (`x-actor-id: ...901`) vs Tenant Ops (`x-actor-id: ...902`) `curl` calls each send only their own variable. | Before: both `curl --header "x-drts-google-id-token: ${GOOGLE_ID_TOKEN}"` calls carried byte-identical assertions from the single mint step, so once the registry is populated the second call (`...902`, Tenant Ops) would fail closed with `WORKLOAD_ASSERTION_REPLAYED` (409) every run. After: two independently minted assertions, one per call, each consumed exactly once by `IdentityRepository.consumeWorkloadIdentityAssertion`'s `sha256(token)` key -- no cross-call reuse. | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"` (exit 0, valid YAML); `grep -n 'GOOGLE_ID_TOKEN\b' .github/workflows/deploy-dev.yml` (exit 1 / no bare-name matches left, confirming no leftover shared-token reference); `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts` (see row below). | Not run: an actual `deploy-dev.yml` execution (no trigger path from this branch/worker; this is a static workflow-authoring fix). Per this task's guardrails, this worker performs no shared-dev writes or dispatches. |
 | §7.6's ops guidance told ops to set both registry entries' `allowedTokenAudiences` to `DEV_WORKLOAD_IDENTITY_AUDIENCE`'s token-exchange URL, which no caller actually mints against (`registry文件明確對應實際呼叫端ID token audience`) | `docs/02-architecture/internal-key-exceptions.md` §7.6: replaced the single wrong `allowedTokenAudiences` line with a corrected explanation citing each caller's real mint call site (`apps/partner-booking-web/lib/api-client.ts:100-104`, `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts:197-214`, and `deploy-dev.yml`'s two mint steps), concluding both entries need the live `drts-dev-api` Cloud Run origin URL (not the token-exchange URL) while `DEV_IAP_CLIENT_ID` is unset in dev. | Before: following §7.6 literally would have ops populate `allowedTokenAudiences: ["https://auth.dev.drts.internal/token-exchange"]` for both entries, which does not match either caller's `aud` claim, so every `x-drts-google-id-token` verification would fail closed with `WORKLOAD_AUDIENCE_MISMATCH` (403) the moment the registry env var is set, regardless of signature/issuer/replay correctness. After: the doc now tells ops to use the API's own Cloud Run origin URL for both entries (today), with an explicit note on how `DEV_IAP_CLIENT_ID` would change entry A's (but not entry B's) audience if ops sets it later. | Read-through of `apps/api/src/modules/auth/google-workload-identity.adapter.ts:203-241` (audience check is against the token's own `aud`, not an env var) and `apps/api/src/modules/auth/service-workload-identity.adapter.ts:382` (confirms `WORKLOAD_IDENTITY_AUDIENCE`/`DEV_WORKLOAD_IDENTITY_AUDIENCE` feeds a different adapter entirely); `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts` asserts the corrected doc text and the absence of the old wrong guidance (see row below). | Cannot verify against a populated registry in a real dev environment from this sandbox (no GCP secret-write access, same restriction as §7.2/§7.5/§7.6). This section only corrects what ops should write; it does not and cannot write it. |
-| New focused regression coverage for both fixes above, required before this candidate's CI/review (`新增聚焦回歸測試並同候選CI通過且由獨立reviewer核准`) | `tests/unit/internal-key-wif-configuration.test.ts` (new): asserts (a) the workflow mints two distinct `google-github-actions/auth@v2` id-token steps for caller #9 and that the two `POST /api/auth/token` calls reference two different `GOOGLE_ID_TOKEN_*` env vars (not the same name twice); (b) the registry doc no longer contains the `https://auth.dev.drts.internal/token-exchange` audience recommendation, and does state the corrected API-origin-based audience guidance for both entries; (c) `INTERNAL_KEY_EXCP_002` and the legacy internal-key fallback/dual-send are still present/documented, so this candidate did not regress them. | N/A (new test, no prior behavior to diff). | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts` -- see this candidate's `handoff` evidence for the exact exit code and pass count observed in this sandbox. | Static/text-level assertions only (no live Cloud Run call, no real Google-signed token, no Postgres-backed replay check) -- consistent with this being a workflow-authoring and documentation fix, not new `apps/api` runtime behavior; `apps/api`'s own `google-workload-identity.adapter.test.ts` already covers the replay/audience *verification* logic itself and is unchanged by this task. |
+| New focused regression coverage for both fixes above, required before this candidate's CI/review (`新增聚焦回歸測試並同候選CI通過且由獨立reviewer核准`) | `tests/unit/internal-key-wif-configuration.test.ts` (new): asserts (a) the workflow mints two distinct `google-github-actions/auth@v2` id-token steps for caller #9 and that the two `POST /api/auth/token` calls reference two different `GOOGLE_ID_TOKEN_*` env vars (not the same name twice); (b) the registry doc no longer contains the `https://auth.dev.drts.internal/token-exchange` audience recommendation, and does state the corrected API-origin-based audience guidance for both entries; (c) INTERNAL_KEY_EXCP_002 and the legacy internal-key fallback/dual-send are still present/documented, so this candidate did not regress them. | N/A (new test, no prior behavior to diff). | `pnpm exec vitest run tests/unit/internal-key-wif-configuration.test.ts` -- see this candidate's `handoff` evidence for the exact exit code and pass count observed in this sandbox. | Static/text-level assertions only (no live Cloud Run call, no real Google-signed token, no Postgres-backed replay check) -- consistent with this being a workflow-authoring and documentation fix, not new `apps/api` runtime behavior; `apps/api`'s own `google-workload-identity.adapter.test.ts` already covers the replay/audience *verification* logic itself and is unchanged by this task. |
 
-`INTERNAL_KEY_EXCP_002` and the dual-send legacy-key fallback are untouched
+INTERNAL_KEY_EXCP_002 and the dual-send legacy-key fallback are untouched
 by both fixes above -- neither the workflow edit nor the doc edit removes or
 weakens them, and this worker made no shared-dev writes or deployments while
 making them.
@@ -692,7 +701,7 @@ worktree at `origin/dev` HEAD `5b0ec5283`, which contains merge_sha
   **not** met: `grep -n "INTERNAL_KEY_EXCP_002"
   apps/api/src/common/auth/internal-key-exception-registry.ts` still returns a
   match at this HEAD, and the inventory table in §2 above still lists
-  `INTERNAL_KEY_EXCP_002` as active. The dual-send code path (send both
+  INTERNAL_KEY_EXCP_002 as active. The dual-send code path (send both
   `x-drts-google-id-token` and the legacy `x-drts-internal-key`) is what
   shipped; removing the legacy fallback is causally downstream of a real
   `deploy-dev.yml` run that proves every caller lands on WIF, which itself
@@ -770,7 +779,7 @@ three defects in the shipped WIF verification path would each have broken
 dev the moment ops turned the registry on, none of them visible from static
 review of the registry JSON alone. All three are fixed in this candidate;
 none required changing the exception registry's active/expired state in
-`internal-key-exception-registry.ts`, and `INTERNAL_KEY_EXCP_002` remains
+`internal-key-exception-registry.ts`, and INTERNAL_KEY_EXCP_002 remains
 active and unremoved, same as every prior round in this section.
 
 | Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
@@ -1350,11 +1359,11 @@ exactly as described in §9.3 below — worth a decision (migrate them to mint
 `x-drts-google-id-token` the same way, or explicitly retire the optional
 var) before or alongside the removal, even though it does not gate it today.
 
-### 9.3 Staging/production impact of removing `INTERNAL_KEY_EXCP_002` — explicit statement requested by Supervisor
+### 9.3 Staging/production impact of removing INTERNAL_KEY_EXCP_002 — explicit statement requested by Supervisor
 
 `INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts:35`)
 is a single hardcoded array compiled into `apps/api`'s one build artifact —
-there is no per-environment registry. Removing `INTERNAL_KEY_EXCP_002` from
+there is no per-environment registry. Removing INTERNAL_KEY_EXCP_002 from
 this file removes it identically in dev, staging, **and** production the
 moment any of them next deploys a build containing the change; it is not a
 dev-scoped edit.
@@ -1400,7 +1409,7 @@ internal key breaking outright on whatever environment next deploys past
 the removal commit, independent of and in addition to anything this task
 has verified on dev.
 
-### 9.4 Conclusion: not safe to remove `INTERNAL_KEY_EXCP_002` in this candidate
+### 9.4 Conclusion: not safe to remove INTERNAL_KEY_EXCP_002 in this candidate
 
 `excp_002_removed_and_deploy_dev_green` remains correctly unmet. Doing this
 safely, beyond dev's now-confirmed-live registry and §7.9's pre-rollout
@@ -1426,3 +1435,740 @@ itself (Supervisor's own finding, §7.9.2/this section's opening), let alone
 in staging/production. No application or workflow code was changed in this
 session beyond this documentation; `EXCP_002`, the dual-send fallback, and
 every previously migrated caller are untouched.
+
+## 10. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`: staging/production deploy-wiring and operator templates
+
+This section is the follow-up §9.4 item 1 below asked for ("A
+staging/production `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` rollout ...
+outside this task's `write_scopes` ... a Supervisor decision on whether to
+fold that in ... or track it as its own follow-up task"): Supervisor
+dispatched it as the latter, a separate task
+(`SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`), rather than folding it
+into that session's `write_scopes`. §9.3's analysis of what breaks once
+INTERNAL_KEY_EXCP_002 is removed is the authoritative statement of why this
+work matters and is not repeated in full here.
+
+Everything in §§7-8 above wired and populated
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` for **dev only**.
+INTERNAL_KEY_EXCP_002 (§2, §6) is still active (expires
+`2026-10-31T23:59:59Z`) and unremoved in this candidate; removing it is a
+separate, not-yet-dispatched follow-up. While it remains active,
+`InternalKeyMiddleware`'s `catch` (`apps/api/src/common/auth/internal-key.middleware.ts:153-167`)
+falls back to the legacy `x-drts-internal-key` whenever the Google registry
+is absent or unpopulated, for every environment including staging/production
+— so this candidate does not change current runtime behavior for either
+environment. Neither has run recently enough for that to matter today: the
+most recent `deploy-staging.yml` dispatch (2026-08-16) and `deploy-prod.yml`
+dispatch (2026-05-17) both failed, confirmed by `gh run list --workflow=deploy-staging.yml --limit=5`
+and `gh run list --workflow=deploy-prod.yml --limit=5` from this sandbox's
+read-only `gh` access. The risk this task closes is forward-looking: once a
+follow-up task removes INTERNAL_KEY_EXCP_002's fallback, the *next* deploy
+of either environment without a populated registry would make
+`GoogleWorkloadIdentityAdapter` the only verification path and reject every
+proxied request that cannot present a valid assertion — exactly the
+"invented values are worse than absent ones ... staging and prod keep their
+own checks" design intent `deploy-dev.yml`'s own `api_secrets` step comment
+already states (§7.5, `.github/workflows/deploy-dev.yml:690-695`).
+
+### 10.1 What shipped
+
+| Finding / acceptance key | Source & fix location | Before → after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| `deploy-staging.yml` and `deploy-prod.yml` never mounted `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`, unlike `deploy-dev.yml` since §7.5 (`staging與prod部署流程掛載註冊表密鑰`) | `.github/workflows/deploy-staging.yml`'s `Resolve API secret mounts` step: added `workload_google_registry_secret="${SECRET_PREFIX}-workload-identity-google-service-principals"` alongside the two pre-existing required workload secrets, and added `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS=${workload_google_registry_secret}:latest` to `secret_args`. `.github/workflows/deploy-prod.yml`'s `Resolve API secret mounts` step: added the same `workload_google_registry_secret` variable and a dedicated `gcloud secrets describe` guard immediately after the pre-existing `for required_secret in "$workload_key_secret" "$workload_registry_secret"; do ... done` loop (kept as its original two-element loop, unchanged), plus the same mount onto `secret_args`. Both follow the exact `${SECRET_PREFIX}-workload-identity-google-service-principals` naming `deploy-dev.yml` uses for its own (optional) mount of the same env var. | Before: ops populating a secret named `drts-staging-workload-identity-google-service-principals` or `drts-prod-workload-identity-google-service-principals` in the respective GCP project would have had no effect on either deployed service — no env var wiring existed. After: the mount exists in both workflows, resolved from the same `SECRET_PREFIX` pattern every other staging/prod secret in these two files already uses (`vars.STAGING_SECRET_PREFIX \|\| 'drts-staging'`, `vars.PROD_SECRET_PREFIX \|\| 'drts-prod'`). | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-staging.yml')); yaml.safe_load(open('.github/workflows/deploy-prod.yml'))"` (exit 0, both valid YAML). `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, 1 file / 11 tests passed). `gh run list --workflow=deploy-staging.yml --limit=5` (most recent run `31930534031`, `2026-08-16T06:04:37Z`, conclusion `failure`) and `gh run list --workflow=deploy-prod.yml --limit=5` (only run on record `25988293601`, `2026-05-17T10:26:43Z`, conclusion `failure`) confirm the "neither environment has run recently" premise this section's preamble states. | Not run: an actual `deploy-staging.yml` or `deploy-prod.yml` execution (no trigger path from this branch; this task's guardrails forbid dispatching either deploy). No GCP secret was created or read in either project — this sandbox cannot read the staging/production projects (see §10.2/§10.3). |
+| 缺少註冊表密鑰時部署在部署 API 前明確失敗並說明原因，不得部署出會拒絕所有代理請求的 API (`註冊表密鑰不存在時部署明確失敗而非靜默放行`) | Both workflows' `Resolve API secret mounts` step runs and fails (`exit 1` with an `::error::` annotation naming the missing secret and pointing at this section) strictly before the later `Deploy — api` step that actually runs `gcloud run deploy` for `drts-api` — the resolve step's `secret_args` output is the only input the deploy step consumes (`--set-secrets "${{ steps.api_secrets.outputs.api }}"`), so a failed resolve step means the job stops before any `gcloud run deploy` call is reached, for either environment. This mirrors the pre-existing fail-closed pattern both files already use for `workload_key_secret`/`workload_registry_secret` (staging) and the `workload_key_secret`/`workload_registry_secret` loop (prod) — this task extends the same established pattern to the third, previously-unguarded registry rather than inventing a new one. | Before: no explicit guard existed for this secret in either file; absence was indistinguishable from presence until a request actually needed Google-assertion verification at runtime (and today, EXCP_002's fallback would mask even that). After: a missing registry secret stops the GitHub Actions job at the resolve step, before any Cloud Run deploy call, with a message naming the exact secret and this document section. | `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` "runs the registry guard inside the Resolve API secret mounts step, strictly before the Deploy — api step" (both describe blocks) asserts the guard and the `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` mount both appear, in order, between the `Resolve API secret mounts` step name and the `Deploy — api` step name in the raw workflow text. `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts tests/unit/internal-key-wif-configuration.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/deployment-architecture-guards.test.ts tests/unit/cloud-run-deploy-retry.test.ts tests/unit/internal-key-alerts.test.ts tests/unit/sr-mail-scheduler-provision-20261001.test.ts` (exit 0, 7 files / 93 tests passed — regression check confirming the pre-existing dev/staging/prod workflow and internal-key-middleware test suites are unaffected). `pnpm exec eslint tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (exit 0, clean). | Static/text-level assertion only (parses the committed YAML as text, as every other test in this file does) — does not execute the `run:` block's bash in a real `gcloud`-equipped runner. No live GitHub Actions run exercised this guard (same reservation as the row above). |
+| 不得建立密鑰、GitHub 變數或觸發任何部署；本機不得啟動任何服務或Docker (guardrail, not an acceptance key) | N/A — process constraint, not a code change | N/A | This task created no GCP secret, no GitHub repository variable, and did not run `gh workflow run` / `workflow_dispatch` against either workflow. No local server, dev/preview server, or Docker container was started in this sandbox. | N/A |
+| **R1 reopen fix (2026-10-02)**: §10.2/§10.3's original operator templates told ops to resolve `drts-api`'s Cloud Run `status.url` as `allowedTokenAudiences` for the registry entry — wrong for every caller this task's own §10.2/§10.3 cover. | §10.2 steps 1-3 and §10.3's corresponding step rewritten below to resolve `vars.STAGING_IAP_CLIENT_ID` (falling back to the literal already committed at `deploy-staging.yml:56,447,672,770`) / `vars.PROD_IAP_CLIENT_ID` (required, no fallback — `deploy-prod.yml:57,113`) instead. | Before: the template, if followed literally, would have produced `allowedTokenAudiences=[<drts-api Cloud Run URL>]`. Every staging web-app deploy (`platform-admin-web`, `ops-console-web`, `tenant-console-web`) unconditionally sets `DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }}` (`deploy-staging.yml:603,620,636`; prod deploys only `platform-admin-web`/`ops-console-web`, same pattern at `deploy-prod.yml:605,622` — prod does not deploy `tenant-console-web`). Each app's own control-plane-proxy route mints its outbound Google ID token with `aud` set to that env var whenever it is present — `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts:197-204` (`x-drts-google-id-token`), `apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:148-156`, `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts:147-155` (both via `resolveTargetAudience(targetUrl)`, `route.ts:35`, which also returns `DRTS_API_AUTH_AUDIENCE` first) — the origin-fallback branch in any of these three never fires for a deployed staging/prod caller, since `DRTS_API_AUTH_AUDIENCE` is always populated there. The old template's audience would therefore match no token any live caller actually presents, so `GoogleWorkloadIdentityAdapter.verifyServicePrincipal` (`apps/api/src/modules/auth/google-workload-identity.adapter.ts:203-241`) would reject every one of those requests with `WORKLOAD_AUDIENCE_MISMATCH` the moment ops populated the registry per the old template and the secret got mounted — exactly the "deploy an API that rejects all proxied requests" outcome this task's acceptance key 2 forbids, not a hypothetical post-`EXCP_002`-removal risk. After: §10.2/§10.3 resolve the audience each environment's deployed proxies actually mint. | Independent reviewer reproduction (R1, same candidate generation, recorded in this task's review history): an in-memory `pnpm exec tsx --eval` probe invoked the real `validateInternalKey`/`GoogleWorkloadIdentityAdapter` with a correctly RS256-signed test assertion whose `aud` was a review IAP client ID; registering `allowedTokenAudiences=[<drts-api Cloud Run URL>]` produced `WORKLOAD_AUDIENCE_MISMATCH` for both environment modes, while `allowedTokenAudiences=[<the token's own aud>]` accepted it (4/4 assertions, exit 0). This session re-confirmed the cited call sites and line numbers by direct file inspection (`grep`/`Read`, listed above) rather than re-running that probe. New regression assertions added to `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` (§10.2/§10.3 audience guidance, below); `pnpm exec vitest run tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` — see updated evidence in that file's own test run. | Only `tenant-console-web` sends the Google-workload-identity header (`x-drts-google-id-token`) `apps/api`'s `GoogleWorkloadIdentityAdapter` actually reads; `platform-admin-web`/`ops-console-web` mint a Google ID token too but send it as a plain `authorization: Bearer` header consumed by a separate, non-registry `issueControlPlaneRequestAuth` IAP-JWT control-plane auth path (`apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:112-146`) that this task does not change or assess — including that path's own correctness is out of this task's scope. Since `deploy-prod.yml` does not deploy `tenant-console-web` at all, production currently has no live caller of the Google-workload-identity registry path regardless of this fix; the corrected template is still required so the registry is ready the day that changes (or `EXCP_002` is removed, whichever comes first). |
+
+### 10.2 Operator template: staging registry content (values 待填 by ops — not verified by this task)
+
+Supervisor's and this task's own credentials cannot read the staging GCP
+project (confirmed unreadable from this sandbox, same restriction noted in
+§7.2/§7.9.1 for dev's own project before ops populated it there). Every
+concrete identity value below is therefore marked 待填 (to-be-filled) rather
+than guessed. Do not copy §7.9.1's dev service-account emails or audience
+into staging — they name dev-project identities and would authorize the
+wrong principals here.
+
+- **Secret name**: `drts-staging-workload-identity-google-service-principals`
+  (or `${vars.STAGING_SECRET_PREFIX}-workload-identity-google-service-principals`
+  if that repository variable is set to something other than `drts-staging`
+  — check `vars.STAGING_SECRET_PREFIX` first).
+- **GCP project**: `vars.STAGING_GCP_PROJECT_ID` (or `vars.GCP_PROJECT_ID` if
+  that staging-specific variable is unset) — 待填, read the actual
+  repository variable value before provisioning.
+- **Steps for ops to populate it** (mirrors §7.6's corrected dev method — one
+  shared-identity entry, not one per caller — but with the audience resolved
+  the opposite way §7.6 explains, since staging's `IAP_CLIENT_ID` is always
+  populated, unlike dev's):
+  1. `gcloud run services list --project=<staging project id> --region=<vars.STAGING_GCP_REGION> --format='table(metadata.name,spec.template.spec.serviceAccountName)'`
+     to confirm every staging Cloud Run service (`drts-api`,
+     `drts-platform-admin-web`, `drts-ops-console-web`,
+     `drts-tenant-console-web`) runs as the single shared identity
+     `deploy-staging.yml` resolves via `RUNTIME_SERVICE_ACCOUNT`
+     (`vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT`, falling back to
+     `vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT` / `vars.GCP_RUNTIME_SERVICE_ACCOUNT`,
+     `deploy-staging.yml:43-44`) — this is the only `serviceAccountEmail`
+     the registry needs (Entry A) — 待填 the actual email. Do **not** add a
+     second entry for the deployer identity
+     (`secrets.STAGING_WIF_SERVICE_ACCOUNT`): `deploy-staging.yml`'s own
+     "Mint IAP verification token" / "Verify IAP-protected control-plane
+     API" steps (`:678-727`) use that identity's token only as the
+     `Authorization: Bearer` header against the IAP-protected
+     `platform-admin`/`ops-console` origins directly — it is never
+     forwarded to `apps/api` as `x-drts-google-id-token`, so
+     `GoogleWorkloadIdentityAdapter` never verifies it and it has no
+     registry entry to populate (unlike dev caller #9 / §7.6 Entry B, whose
+     token *is* checked by that adapter).
+  2. **Audience — corrected per R1 (2026-10-02), do not use `status.url`**:
+     every staging web-app Cloud Run deploy unconditionally sets
+     `DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }}`
+     (`deploy-staging.yml:603,620,636`), and `iap_client_id` itself resolves
+     from `${IAP_CLIENT_ID_ENV:-<literal fallback>}` with a nonempty literal
+     fallback already committed in this repo
+     (`deploy-staging.yml:56,447,672,770`:
+     `1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`)
+     — so `DRTS_API_AUTH_AUDIENCE` is always populated for every staging
+     proxy, and each app's control-plane-proxy route always mints its
+     outbound Google ID token with `aud = DRTS_API_AUTH_AUDIENCE`, never the
+     API's own Cloud Run origin (confirmed in
+     `apps/tenant-console-web/app/control-plane-proxy/[...path]/route.ts:197-204`,
+     `apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:148-156`,
+     `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts:147-155`
+     — the origin-fallback branch each of these three also has is dead code
+     for every deployed staging caller). `allowedTokenAudiences` must
+     therefore be a single-element array containing
+     `vars.STAGING_IAP_CLIENT_ID` if that repository variable is set,
+     otherwise the literal fallback quoted above — this is a committed repo
+     value, not a guess, so it is not marked 待填, but ops must still check
+     whether `vars.STAGING_IAP_CLIENT_ID` is actually set before trusting
+     the fallback applies.
+  3. Build the JSON array with **one** object (not one per caller — see
+     step 1): `serviceAccountEmail` (step 1), `principalId`
+     (operator-chosen, e.g. `staging-web-runtime`), `allowedTokenAudiences`
+     (step 2), `routeScopes: ["* *"]` (the shared identity services every
+     proxy, so no caller-specific narrowing is possible here either — same
+     reasoning as §7.6 Entry A for dev). Store the compacted single-line
+     JSON as the secret's value.
+  4. Re-run `deploy-staging.yml` only after confirming the registry secret
+     exists — this task's guardrails do not permit triggering that run from
+     here.
+
+```
+drts-staging-workload-identity-google-service-principals = [
+  {
+    "serviceAccountEmail": "<待填: resolve vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT (or its fallback chain, deploy-staging.yml:43-44) via gcloud run services list — step 1>",
+    "principalId": "<待填: an operator-chosen stable label, e.g. staging-web-runtime>",
+    "allowedTokenAudiences": ["<vars.STAGING_IAP_CLIENT_ID if set, otherwise the literal fallback \"1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com\" already committed at deploy-staging.yml:56 — step 2, not status.url>"],
+    "routeScopes": ["* *"]
+  }
+]
+```
+
+### 10.3 Operator template: production registry content (values 待填 by ops — not verified by this task)
+
+Same reservation as §10.2: this sandbox cannot read the production GCP
+project. Production additionally enforces
+`isProductionAllowedBoundary` (§1, `internal-key-exception-registry.ts`) on
+any `DRTS_INTERNAL_KEY` exception's `networkBoundary` — this is unrelated to
+the Google registry itself, but is a reminder that production's checks are
+at least as strict as staging's, never looser; do not relax any
+`routeScopes` entry below "least privilege for that caller" to work around a
+missing value.
+
+- **Secret name**: `drts-prod-workload-identity-google-service-principals`
+  (or `${vars.PROD_SECRET_PREFIX}-workload-identity-google-service-principals`
+  if that repository variable is set to something other than `drts-prod`).
+- **GCP project**: `vars.PROD_GCP_PROJECT_ID` — 待填, read the actual
+  repository variable value before provisioning.
+- **Steps for ops to populate it**: same method as §10.2 steps 1-4,
+  substituting `vars.PROD_GCP_PROJECT_ID` / `vars.PROD_GCP_REGION` and
+  `vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT` (`deploy-prod.yml:46`, no fallback
+  chain — required, the workflow fails closed at its own config-validation
+  step if unset, `deploy-prod.yml:107`) for the project, region, and runtime
+  identity to inspect. Production currently deploys only `drts-api`,
+  `drts-platform-admin-web`, and `drts-ops-console-web`
+  (`deploy-prod.yml` has no `Deploy — tenant-console-web` step, unlike
+  staging) — all three still share the one `RUNTIME_SERVICE_ACCOUNT`, so
+  step 1's "one shared entry, not one per service" conclusion holds
+  unchanged. Production's `Deploy — api` step additionally sets
+  `DRTS_ENV=production` (not `staging`)/`AUTH_MODE=strict`, which is why
+  `auth-startup-config.ts`'s `isStrictEnvironment` treats it the same as
+  staging for every other strict-environment control in this document — this
+  template records only the registry-specific values that differ from
+  staging.
+
+  **Audience — corrected per R1 (2026-10-02), do not use `status.url`**:
+  unlike staging, `vars.PROD_IAP_CLIENT_ID` has **no** literal fallback —
+  `deploy-prod.yml:57` reads it verbatim and `:113` fails the whole deploy
+  closed (`missing+=("vars.PROD_IAP_CLIENT_ID")`) before anything else runs
+  if it is unset. Both deployed proxies
+  (`apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts:148-156`,
+  `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts:147-155`)
+  set `DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }}`
+  unconditionally (`deploy-prod.yml:605,622`), so by the time either service
+  is live, `DRTS_API_AUTH_AUDIENCE` is guaranteed populated and every minted
+  token's `aud` is `vars.PROD_IAP_CLIENT_ID`'s actual value — never
+  `drts-api`'s Cloud Run origin. `allowedTokenAudiences` must be a
+  single-element array containing the exact value of
+  `vars.PROD_IAP_CLIENT_ID` — 待填, read the real repository variable value
+  before provisioning; there is no safe literal to fall back to here, unlike
+  staging's §10.2 step 2.
+
+```
+drts-prod-workload-identity-google-service-principals = [
+  {
+    "serviceAccountEmail": "<待填: resolve vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT via gcloud run services list, same method as §10.2 step 1>",
+    "principalId": "<待填: an operator-chosen stable label, e.g. prod-web-runtime>",
+    "allowedTokenAudiences": ["<待填: the exact value of vars.PROD_IAP_CLIENT_ID (deploy-prod.yml's IAP_CLIENT_ID_ENV, no fallback) — not status.url, not the drts-api Cloud Run URL>"],
+    "routeScopes": ["* *"]
+  }
+]
+```
+
+### 10.4 Why fail-closed here, unlike dev's notice-only degrade
+
+`deploy-dev.yml`'s own comment (§7.5, lines 690-695) already states the
+design intent this task implements for staging/production: inventing
+registry values for an environment this task cannot verify "is worse than
+absent ones", so dev mounts the secret only when it already exists and
+otherwise logs a notice and continues — dev's INTERNAL_KEY_EXCP_002
+fallback keeps it green either way, and a wrong invented entry there would
+look like configured security while authorizing a subject that does not
+exist. Staging and production differ in exactly the respect that comment
+flags as out of scope for dev: this task does not invent any value for
+either environment (§10.2/§10.3 mark every concrete identity 待填), but it does
+add the fail-closed deploy guard dev's comment says belongs to "staging and
+prod['s] own checks" — so that whenever a human operator populates the real
+secret (via §10.2/§10.3's steps, not this task), the deploy pipeline already
+requires it, instead of silently degrading the same way dev does right up
+until the day INTERNAL_KEY_EXCP_002's fallback is removed and every
+proxied request starts failing with no advance warning.
+
+No GCP secret or GitHub repository variable was created, read, or modified
+for this task. No deploy was dispatched. No local server, dev/preview
+server, or Docker container was started.
+
+## 11. SEC-INTERNAL-KEY-LIVE-MAP-PLATFORM-SESSION-WIF-20261002
+
+Owner Codex; reviewer Claude2. This task owns the live-map bootstrap and
+teardown authorization slice. C114 PR #2235 (`e3c7ed02701c387d82786bcfd8877e2618851f3b`)
+is already merged; draft PR #2247 at `5d23550587b1bbb6ce33be0d8948cc50a6dbd07f`
+contains additional consumer/cleanup repairs. Merge anchor `8405c7040` composes
+that published draft without rewriting either history. Its exact driver scopes,
+isolation check, recovery paths and mandatory cleanup evidence gate are retained.
+C114 remaining hosted acceptance stays pending.
+
+Design: register a dedicated non-human live-map identity. A server-owned
+`driverProvisioningGrant.driverId` authorizes a 15-minute system session with
+exactly `driver:provision`, no workforce role or membership. A signed driver
+restriction and an explicit route ceiling are required: system realm alone
+also reaches routes with no required scopes. Provision/revoke must enforce
+the target driver. Keep the observer identity separate from that session;
+do not add `platform_admin` to any service account. Operator steps and verification are recorded below.
+
+Read-only dev check 2026-10-02: revision `drts-dev-api-00037-qx9`; live registry
+contains `dev-web-runtime`, `dev-ci-deployer`, `dev-scheduler`, no observer
+role/actor or provisioning grant. Existing observer bootstrap therefore has
+no matching direct role or tenant grant. Latest hosted map run `36686169334`
+skipped session issuance at preflight (missing test driver), not a successful
+observer WIF exchange. No new live session was issued in this task; current
+observer success is **not established**, and the observed registry denies its
+requested actor. Machine evidence: `.local/sec-live-map-wif/registry-summary.json`.
+
+| Finding / acceptance                                  | Source and change                                               | Before → after                                                                                                         | Verification                                                                                                                                 | Limits                                                                                                                              |
+| ----------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| WIF cannot issue least-privilege provisioning session | `AuthController.issueToken`, Google registry adapter            | Base `215d1facf`: production-path regression fails at `WORKLOAD_CI_TENANT_ACTOR_DENIED`; new grant/session path passes | `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/provisioning-session.test.ts`, exit 1; `.local/sec-live-map-wif/red.log` | External JWKS mocked with test RSA key; production signature, registry, controller and memory session repository used; no server/PG |
+| Teardown is also an internal-key caller               | `session-teardown.ts` reads JWT secret and mints platform admin | Migrated; see §11.2                                                                                                            | Source inventory                                                                                                                             | Must migrate alongside bootstrap                                                                                                    |
+
+### 11.1 Authorization and operator handoff
+
+Implemented boundary:
+
+- The workflow uses the existing provider with a **new dedicated**
+  `drts-dev-live-map` service account. Entry B / the deployer is unchanged.
+  Entry D below has no tenant impersonation grants, workforce roles, wildcard
+  scope, or generic system role. A second account/principal, entry E, serves
+  only the read-only observer. Separating sessions on one principal was not
+  sufficient: Google verification upserts principal timestamps, invalidating
+  a previously issued workforce token. Independent principals avoid that
+  cross-session mutation and keep provisioning authority exclusively narrow.
+- `AuthController.issueToken` accepts the explicit provisioning grant only
+  with the CI gate enabled outside staging/production. It constructs the
+  session claims from verified registry data, ignores no requested authority
+  silently, and rejects foreign actors/realms/tenant/partner selectors and
+  extra scopes/roles. Unregistered system requests cannot fall back to an
+  internal key. Google direct workforce issuance is restricted to ops actors
+  in the ops realm; CI tenant grants stay tenant-admin/tenant-realm only.
+  In particular, an observer cannot request `x-realm: system` and `x-scopes: *`.
+- The signed `driverProvisioningDriverId` claim survives JWT validation and
+  request-identity conversion. `BootstrapAuthGuard` caps **both** ordinary
+  and open routes to `GET auth/session`, `POST auth/driver/device/invite`,
+  and `POST auth/driver/device/invite/revoke`. Existing realm/scope checks
+  still run. This matters because some system-accessible routes have no
+  scope requirement. There is no generic platform-admin or system escape.
+- Invitation creation must match the granted driver and cannot choose a
+  registration code or lifetime. Revocation checks the stored invitation's
+  driver before mutation, including consumed invitations and refresh families.
+  Idempotency scopes include the restricted principal and driver, preventing
+  reuse of a privileged caller's cached response. A grant can revoke any
+  known invitation code for its one isolated driver; it cannot revoke another
+  driver's invitation. The existing C114 isolation check still applies.
+- Both JWT and registry-based checks are server-side. A registry grant
+  withdrawal prevents new exchanges; already-issued provisioning sessions
+  expire after 15 minutes (or can be revoked in the existing session store).
+  No new database schema is needed.
+- Bootstrap exports the masked invite code and provisioning JWT immediately
+  after invite creation, so the `always()` cleanup can retry partial failures.
+  Cleanup reuses the restricted session, or obtains a new one using a freshly
+  minted WIF assertion if it expired. Revoking a consumed invitation also
+  revokes the device session. All cleanup API calls enforce allowed targets,
+  candidate SHA, redirect rejection and timeouts; unsuccessful cleanup exits
+  nonzero without logging credentials or response bodies.
+
+The following is **operator-only, not executed by the worker**. Do not grant
+project roles, Secret Manager access, `serviceAccountTokenCreator`, or
+impersonation rights to the deployer. `roles/iam.workloadIdentityUser` is bound
+only on each dedicated account, to this repository's existing provider/pool trust.
+It permits the auth action to mint ID tokens; the account itself has no GCP
+resource permissions. See Google's [WIF service-account setup](https://github.com/google-github-actions/auth/tree/v2#workload-identity-federation-through-a-service-account)
+and [deployment-pipeline federation guide](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines).
+
+Run after this candidate has been reviewed/merged and the authorization code
+is available on the shared dev API. Independently coordinate the authorized
+immutable-SHA deployment/revision rollout to load the new registry secret
+version; these instructions do not trigger it. The API workflow already
+mounts `drts-dev-workload-identity-google-service-principals:latest`.
+
+```bash
+set -euo pipefail
+LIVE_MAP_PROJECT=$(gh variable get DEV_GCP_PROJECT_ID --repo ajoe734/drts-fleet-platform)
+LIVE_MAP_REGION=$(gh variable get DEV_GCP_REGION --repo ajoe734/drts-fleet-platform)
+LIVE_MAP_API=$(gh variable get DEV_CONTROL_PLANE_API_ORIGIN --repo ajoe734/drts-fleet-platform)
+test "$LIVE_MAP_PROJECT" = drts-dev-devcc-20260825
+test "$LIVE_MAP_REGION" = us-central1
+test "$LIVE_MAP_API" = https://drts-dev-api-r6ykdme3wa-uc.a.run.app
+LIVE_MAP_PROJECT_NUMBER=$(gcloud projects describe "$LIVE_MAP_PROJECT" --format='value(projectNumber)')
+LIVE_MAP_SA="drts-dev-live-map@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
+LIVE_MAP_OBSERVER_SA="drts-dev-live-map-observer@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
+mkdir -p .local/sec-live-map-wif/operator
+
+# Read back trust before using it; do not change the existing provider.
+gcloud iam workload-identity-pools providers describe github \
+  --project="$LIVE_MAP_PROJECT" --location=global --workload-identity-pool=github-actions \
+  --format=json > .local/sec-live-map-wif/operator/provider.json
+jq -e '.attributeMapping["attribute.repository"] == "assertion.repository" and
+  .attributeCondition == "assertion.repository==\u0027ajoe734/drts-fleet-platform\u0027"' \
+  .local/sec-live-map-wif/operator/provider.json
+
+for LIVE_MAP_ACCOUNT in drts-dev-live-map drts-dev-live-map-observer; do
+  LIVE_MAP_ACCOUNT_EMAIL="${LIVE_MAP_ACCOUNT}@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
+  gcloud iam service-accounts describe "$LIVE_MAP_ACCOUNT_EMAIL" --project="$LIVE_MAP_PROJECT" >/dev/null 2>&1 || \
+    gcloud iam service-accounts create "$LIVE_MAP_ACCOUNT" --project="$LIVE_MAP_PROJECT" \
+      --display-name='Dev live map acceptance only'
+  gcloud iam service-accounts add-iam-policy-binding "$LIVE_MAP_ACCOUNT_EMAIL" \
+    --project="$LIVE_MAP_PROJECT" --role=roles/iam.workloadIdentityUser \
+    --member="principalSet://iam.googleapis.com/projects/${LIVE_MAP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/attribute.repository/ajoe734/drts-fleet-platform"
+done
+
+# Preserve A/B/C. Refuse duplicates instead of silently replacing an entry.
+gcloud secrets versions access latest --project="$LIVE_MAP_PROJECT" \
+  --secret=drts-dev-workload-identity-google-service-principals \
+  > .local/sec-live-map-wif/operator/registry-before.json
+jq -e --arg sa "$LIVE_MAP_SA" --arg observer "$LIVE_MAP_OBSERVER_SA" \
+  'type == "array" and all(.[]; .principalId != "dev-live-map" and
+    .principalId != "dev-live-map-observer" and .serviceAccountEmail != $sa and .serviceAccountEmail != $observer)' \
+  .local/sec-live-map-wif/operator/registry-before.json
+jq --arg sa "$LIVE_MAP_SA" --arg observer "$LIVE_MAP_OBSERVER_SA" --arg api "$LIVE_MAP_API" '. + [{
+  serviceAccountEmail: $sa,
+  principalId: "dev-live-map",
+  displayName: "Dev live map driver provisioning",
+  roles: [],
+  scopes: [],
+  allowedTokenAudiences: [($api + "/driver-provisioning")],
+  routeScopes: ["POST auth/token"],
+  ciTenantActorGrants: [],
+  driverProvisioningGrant: {driverId: "drv-demo-002"}
+}, {
+  serviceAccountEmail: $observer,
+  principalId: "dev-live-map-observer",
+  actorId: "live-map-observer",
+  displayName: "Dev live map read-only observer",
+  roles: ["ops_observer"],
+  scopes: ["regulatory:read"],
+  allowedTokenAudiences: [$api],
+  routeScopes: ["POST auth/token"],
+  ciTenantActorGrants: []
+}]' .local/sec-live-map-wif/operator/registry-before.json \
+  > .local/sec-live-map-wif/operator/registry-after.json
+
+# Operator reviews the additive diff before publishing the new version.
+diff -u .local/sec-live-map-wif/operator/registry-before.json \
+  .local/sec-live-map-wif/operator/registry-after.json || test "$?" -eq 1
+# Avoid overwriting an intervening registry edit between read and publish.
+gcloud secrets versions access latest --project="$LIVE_MAP_PROJECT" \
+  --secret=drts-dev-workload-identity-google-service-principals \
+  > .local/sec-live-map-wif/operator/registry-current.json
+cmp .local/sec-live-map-wif/operator/registry-before.json .local/sec-live-map-wif/operator/registry-current.json
+gcloud secrets versions add drts-dev-workload-identity-google-service-principals \
+  --project="$LIVE_MAP_PROJECT" --data-file=.local/sec-live-map-wif/operator/registry-after.json
+```
+
+Exact additive entries D and E for operators maintaining JSON elsewhere:
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-live-map@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-live-map",
+  "displayName": "Dev live map driver provisioning",
+  "roles": [],
+  "scopes": [],
+  "allowedTokenAudiences": [
+    "https://drts-dev-api-r6ykdme3wa-uc.a.run.app/driver-provisioning"
+  ],
+  "routeScopes": ["POST auth/token"],
+  "ciTenantActorGrants": [],
+  "driverProvisioningGrant": { "driverId": "drv-demo-002" }
+}
+```
+
+```json
+{
+  "serviceAccountEmail": "drts-dev-live-map-observer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-live-map-observer",
+  "actorId": "live-map-observer",
+  "displayName": "Dev live map read-only observer",
+  "roles": ["ops_observer"],
+  "scopes": ["regulatory:read"],
+  "allowedTokenAudiences": [
+    "https://drts-dev-api-r6ykdme3wa-uc.a.run.app"
+  ],
+  "routeScopes": ["POST auth/token"],
+  "ciTenantActorGrants": []
+}
+```
+
+No new GitHub variable or secret is required. Existing `DEV_WIF_PROVIDER` and
+`DEV_GCP_PROJECT_ID` select the provider and deterministic account names;
+`DEV_WIF_SERVICE_ACCOUNT` stays unchanged for deployment callers. The workflow
+creates its own observer/provisioning/cleanup Google ID tokens with
+`id_token_include_email: true`. Separate observer/provisioning audiences prevent
+assertion reuse between the two purposes; distinct principals also prevent
+provisioning exchanges from invalidating the observer session.
+The `DRTS_LIVE_MAP_GOOGLE_*_ID_TOKEN` values are masked, per-step action outputs,
+not repository secrets or saved artifacts. A fresh cleanup assertion handles
+runs lasting longer than the provisioning session's 15-minute lifetime.
+
+The existing provider trusts this repository, not only this workflow. Any
+repository workflow allowed by that trust can request these accounts' narrow
+capabilities. This does not confer deployment, secret-reading, tenant admin,
+or platform admin privileges. Further workflow-specific federation isolation
+would require a separate trust-policy task; no existing provider is widened.
+
+INTERNAL_KEY_EXCP_002 remains unchanged: §9.2–9.4's other callers and
+staging/production rollout still gate global removal. No exception extension
+or removal is part of this candidate. C114's remaining real map/observer/device
+acceptance (including its separately tracked workforce-version concern) is not
+claimed by the mocked external-boundary unit tests here.
+
+### 11.2 Candidate verification ledger
+
+Execution: Node 22.23.2, pnpm 10.33.0, 2026-10-02. Code baseline is
+`215d1facf`; implementation anchors `9755ae4cb`, `06266a1ab`. The final candidate
+is the immutable PR head / full SHA in the machine-truth handoff, not either
+anchor. Local evidence is under `.local/sec-live-map-wif/` in the assigned task
+worktree. The logs' paths are machine-specific; the commands and outcomes below
+are durable review evidence. All started local checks have finished.
+
+| Finding / required acceptance                | Source / change                                                                                                     | Before → after                                                                                                                              | Checks and result                                                                                                                                                                                                                                                                                                                            | Remaining limits                                                                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live map runner不再使用x-drts-internal-key` | `session-bootstrap.ts`, `session-teardown.ts`, live-entry-map workflow                                              | Both read JWT secret and issued platform-admin sessions → WIF-only, purpose-limited system session, separate observer assertion             | Source search finds zero `x-drts-internal-key`, `readInternalKey`, `platform_admin` in session scripts. Runner tests assert no legacy header; expired cleanup remints WIF. 98/98 map tests pass                                                                                                                                              | Real Google token/hosted run not executed; operator entry D and account pending                                                                       |
+| `取代方案只授予driver:provision所需最小權限` | `AuthController.issueToken`, adapter, signed claim in `JwtAuthService`, `BootstrapAuthGuard`, invite/revoke service | Original could expand to durable platform role scopes → 15m, exactly `driver:provision`, no session roles, fixed driver and 3-route ceiling | 27 production-path tests: valid issuance, exact operator JSON, real signature/audience/replay, unregistered+legacy-key rejection, selector/scope/role escalation, staging/production, scope-less/open route denial, cross-driver create/revoke and idempotency isolation. 173/173 root regression tests; 115/115 existing API auth/WIF tests | Google JWKS mocked; memory repositories, no PG/server. Observer read grant is separate, never in provisioning session                                 |
+| `註冊表變更寫成可貼上內容交由操作者`         | §11.1 entry D, additive jq/gcloud sequence                                                                          | No usable observer or provisioning entry → exact operator-only account/WIF/registry steps                                                   | Bash syntax, JSON parse, workflow YAML and 3 verified-email action steps pass. Production adapter consumes the literal documented JSON in a passing test                                                                                                                                                                                     | Nothing applied; independent operator rollout required. No GitHub variables/secrets changed; no deployment dispatched                                 |
+| `同候選SHA CI通過且獨立reviewer審查`         | Final PR and `ai-status.sh handoff` identify exact head                                                             | Local checks complete; hosted CI/reviewer pending at commit time                                                                            | API typecheck pass after building local contracts/control-plane-auth. Scoped runner/tests typecheck pass. Full root typecheck with local workspace source mappings pass. Changed-code ESLint, changed runner/workflow Prettier and internal-key exception verification pass                                                                  | Same-SHA CI result and Claude2 review must be recorded by lifecycle; owner does not mark done                                                         |
+| C114 composition and observer status         | Merged PR #2235; §11 opening read-only registry/run evidence                                                        | Merged candidate plus draft PR #2247 → compose the draft repairs before locking this candidate                                    | Current live registry lacks observer grant; latest hosted map run skipped session issuance. No successful dev observer claim                                                                                                                                                                                                                 | C114 service-area/freshness/browser evidence and its separately scoped workforce-version investigation remain pending; no coverage assertions changed |
+
+Commands (all exit 0 unless noted):
+
+```bash
+pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001   tests/unit/auth-bootstrap.test.ts tests/unit/driver-device-session.test.ts   tests/unit/bootstrap-auth-guard-strict-env.test.ts   tests/unit/jwt-auth-controller-error-mapping.test.ts   tests/unit/internal-key.middleware.test.ts tests/unit/internal-key-wif-configuration.test.ts   tests/unit/sr-mail-scheduler-provision-20261001.test.ts
+# 15 files, 173 tests; regression.log. Scheduler tests use fake gcloud only.
+pnpm --dir apps/api exec vitest run tests/unit/auth-bootstrap.test.ts tests/unit/google-workload-identity.adapter.test.ts
+# 2 files, 115 tests; api-unit.log.
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/api typecheck
+pnpm exec tsc -p .local/sec-live-map-wif/tsconfig.scoped.json --noEmit
+pnpm exec tsc -p .local/sec-live-map-wif/tsconfig.root-local.json --noEmit
+python3 operations/security/verify-internal-key-exceptions.py
+```
+
+The first unmodified `pnpm typecheck:root` exited 2 because this supervisor
+worktree's shared `node_modules` links resolve other workspace packages to
+missing canonical-root outputs; the first API typecheck also lacked local
+built contracts. After building the API prerequisites and correcting this
+change's optional-property type, API/scoped checks passed. For the full root
+check, the local-only config extends `tsconfig.json` and maps `@drts/contracts`,
+`@drts/control-plane-auth`, `@drts/api-client`, `@drts/ui-web`, `@drts/ui-web/*`,
+and `@drts/ui-tokens` to this worktree's respective `packages/*/src` entrypoints
+(the wildcard maps to `src/*`). It changes no includes, strictness or product
+configuration. That full check passed; this does not replace clean-install
+hosted CI. Logs distinguish initial failures from final passes. No test server,
+browser, Docker, cloud resource change or actual scheduler invocation occurred.
+
+### 11.3 Composed candidate evidence (2026-10-02)
+
+This section supersedes §11.2's **pre-composition checkpoint** counts. The
+published C114 draft `5d23550587b1bbb6ce33be0d8948cc50a6dbd07f` and WIF anchor
+`83e6904b98de5637e3acce5c9b1a20a12f3e8d46` were merged normally at `8405c7040`;
+operator identity separation is anchored at `88b5bc275`. Neither history was
+rewritten, and C114 PR #2247 remains a blocked-parent draft. The final immutable
+candidate is the full SHA recorded by this task's handoff and PR head.
+
+| Finding / required acceptance | Production source and change | Before → after / validation | Remaining limits |
+| --- | --- | --- | --- |
+| `live map runner不再使用x-drts-internal-key` | `bootstrapMapSessions`, `issueMapProvisioningSession`, `teardownMapSessions`; three Google auth steps | No legacy-key/Secret Manager/platform-admin references in session scripts. Bootstrap and expired-session cleanup tests use only Google proof and the limited JWT. All 122 map tests pass within the 197-test root regression | Actual Google exchange/hosted map acceptance not run; operator D/E rollout pending |
+| `取代方案只授予driver:provision所需最小權限` | Controller fixed grant; signed target; guard route ceiling; invitation target/revoke checks; entry D has no roles | 29 production-path tests cover positive issuance and revocation, unregistered identity, deployer/no-grant denial, tenant/partner/role/scope/realm escalation, other routes/drivers, signature/audience/replay, idempotency isolation, and literal operator JSON | External JWKS replaced with test RSA issuer; real production auth/guard/services and memory repository, no PG/server |
+| F-OBSERVER-PROVISIONER-VERSION | Google adapter upserts principal timestamps; operator entries D/E and observer workflow account | Same new production-path test on `8405c7040` fails: valid observer → provisioning exchange 1s later → observer null. Independent principal configuration at `88b5bc275` passes. `observer-separation-red.log` exit 1; `observer-separation-green.log` exit 0 | Unit clock pins observer issuance to isolate this finding; the separate C114 crossed-tick workforce defect remains open |
+| C114 F-CONSUMER-DRIFT / F-CLEANUP-GATE | Merged coverage/bootstrap formal scopes; `revokeMapInvitation`; workflow teardown evidence gate | All existing driver register/refresh/revoke/response-loss/retry cases retained. Bootstrap verifies offline isolation; masked recovery is saved before registration; immediate and always teardown require positive revocation. Seven transport/body/redirect/SHA negatives retained; Python gate has 23 passing cases | HTTP boundaries simulated. Observer/provisioner auth in the real-device recovery probes is explicitly stubbed; separate production-path WIF cases test auth. No C114 live acceptance claimed |
+| `註冊表變更寫成可貼上內容交由操作者` | §11.1 additive entries D/E, existing provider trust, per-account WIF binding | Bash syntax passes. Execute only the jq expression on local fixture A/B/C: preserves all three and produces exactly the literal D/E JSON. YAML parsed; observer/provisioner accounts differ; cleanup matches provisioner; all three assert verified email; cleanup outcome/artifact wiring retained | Operator commands were **not executed**. No service account, secret, WIF binding, GitHub variable or deployment changed |
+| `同候選SHA CI通過且獨立reviewer審查` | Exact PR head and machine-truth handoff to Claude2 | Local regression 197/197 (16 files); API auth/WIF 115/115 (2 files); API typecheck after building contracts/control-plane-auth passes; full-root typecheck with local workspace resolution passes; scoped ESLint and changed runner/workflow Prettier pass. Hosted CI and independent review recorded against final head through lifecycle | Pending at commit time. Owner does not call done or merge; C114 F-WORKFORCE-VERSION and live rollout remain separately gated |
+
+Execution is Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4. Commands are §11.2's
+root/API commands with `--maxWorkers=2`; the root command now includes the merged
+`supported-session-contract.test.ts` automatically. Two passing cases reproduce
+F-WORKFORCE-VERSION and are **not** usable observer/live evidence. New logs in
+this worktree: `.local/sec-live-map-wif/{regression-final,api-unit-final,api-typecheck-final,root-typecheck-final,lint}.log`.
+The initial combined run passed 120 map tests before the two identity-separation
+cases were added. All checks started by the worker are read to completion before
+handoff. Same-SHA hosted results belong to the PR/status record, not to older
+checkpoint counts.
+
+Full-root typecheck uses the local configuration described in §11.2, with
+`@drts/ui-web` exports mapped to the actual local `.tsx` entrypoints. It changes
+no strictness/includes and passes at this checkpoint. API prerequisites were
+built locally; no product process was started. An overly broad Prettier check
+also included unchanged `map-acceptance-runner.test.ts` and reported its existing
+formatting; the final check restricted to changed runner/test/workflow files
+passes. No unrelated formatting was changed. Internal-key exception audit and
+commit trailer checks pass.
+
+### 11.4 Merge-conflict recovery (2026-10-02)
+
+Previous candidate `b984861fd6e3a08313301b78699294d8b105137a` completed
+[integration CI](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36954735930)
+and [CI](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36954735928)
+successfully; the owner read both completed results and all 25 check conclusions.
+The machine record contains Claude2's same-SHA approval, but its summary is only
+`test`, with no review-artifact reference. That entry is not a substitute for
+the new candidate's independent, finding-level review.
+
+GitHub then reported PR #2269 `CONFLICTING` against `dev`. A read-only
+`git merge-tree --write-tree HEAD origin/dev` reproduced the single content
+conflict in this document: both tasks appended section 10. Merge anchor
+`f8d532bec` preserves both published parents, the previous candidate and
+`22d6547c2` (`SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`, PR #2267).
+The incoming document is preserved byte-for-byte; this task's section moves
+to 11 with its internal references and C114 link updated. The operator JSON,
+commands, authorization design and C114 consumer/cleanup changes are unchanged.
+No published commit was rebased, amended or force-pushed.
+
+The upstream scheduler change also composes in `BootstrapAuthGuard`: only its
+two scheduled sweep routes tolerate reused Google tokens. Session issuance
+remains replay-protected, and provisioning JWTs still pass the fixed-driver
+and three-route ceiling on ordinary and open routes.
+
+| Finding / required acceptance | Source / resolution | Before → after / evidence | Remaining limits |
+| --- | --- | --- | --- |
+| F-MERGE-DOC-SECTION | This document and `C114-COVERAGE.md` current-operator link | Old candidate conflicts; merge anchor resolves it. Content comparison verifies the entire incoming document and the former live-map section, allowing only section/reference renumbering. `git diff --check` passes | Final PR head requires fresh CI/review; prior green checks do not transfer |
+| `live map runner不再使用x-drts-internal-key` | Unchanged bootstrap/teardown and workflow from §11.3 | Source inventory still finds no legacy-key/platform-admin references in the two scripts. All 122 map tests pass in the 227-test root regression | Operator D/E rollout and hosted map acceptance still pending |
+| `取代方案只授予driver:provision所需最小權限` | Unchanged controller/adapter/grant/JWT checks; composed `BootstrapAuthGuard` | 29 provisioning cases pass, including positive issuance/revoke, unregistered identity and out-of-scope denials. API auth/WIF regression now passes 120 cases, including upstream scheduled-token reuse and strict session-issuance replay checks | External JWKS mocked; production auth/guard/services with memory repositories, no PG or server |
+| `註冊表變更寫成可貼上內容交由操作者` | §11.1 and corrected C114 link | Literal operator JSON is still exercised through the real adapter by passing tests; byte comparison confirms the operator instructions are unchanged | No operator command, resource/secret/variable mutation or deployment executed |
+| `同候選SHA CI通過且獨立reviewer審查` | New full PR head is recorded by the handoff following this recovery | Completed local checks and logs below; previous CI links above are historical evidence only | New same-SHA hosted results and substantive independent Claude2 review must be recorded through candidate lifecycle; owner does not call `done` or merge the PR |
+
+Execution: Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4. The §11.2 root command
+with `--maxWorkers=2` plus
+`tests/unit/system-remediation/sr-mail-retry-schedule-20261001` and
+`tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` passes
+227/227 tests in 18 files (exit 0). The §11.2 API command with
+`--maxWorkers=2` passes 120/120 tests in two files (exit 0). Logs are
+`.local/sec-live-map-wif/merge-regression.log` and `merge-api-unit.log` in the
+assigned worktree. These checks include fake-cloud scheduler probes only.
+The independent C114 workforce-version defect/live acceptance remains open;
+its two defect-reproduction cases still must not be read as live success.
+
+API typecheck passes after building the local contracts and control-plane-auth
+packages (exit 0, `merge-api-typecheck.log`). Full-root typecheck uses §11.3's
+local workspace source mapping with unchanged includes/strictness and passes
+(exit 0, `merge-root-typecheck.log`). Changed TypeScript ESLint, changed
+runner/test/workflow Prettier, and the internal-key exception audit pass
+(exit 0, `merge-lint.log` and `merge-prettier.log` for the first two).
+All started local checks completed and were read before this evidence commit.
+No local service, browser or Docker was started. All new candidate results must
+match the full SHA in PR #2269 and the machine-truth handoff; merge anchors are
+not substitute candidates.
+
+## 12. Removal candidate (2026-10-02, `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, eighth session): INTERNAL_KEY_EXCP_002 removed, dual-sends dropped, two new findings fixed in the same candidate
+
+Both of §9.4's remaining blockers resolved since the last dispatch: section 10
+(`SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`) shipped the staging/prod
+registry mount + fail-closed guard, and section 11
+(`SEC-INTERNAL-KEY-LIVE-MAP-PLATFORM-SESSION-WIF-20261002`) migrated caller
+#10's remaining `platform_admin` bootstrap session to a dedicated WIF grant
+(confirmed by re-reading `tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts`
+at this candidate's base: zero remaining `x-drts-internal-key` references).
+Supervisor's own 2026-10-02T01:50Z decision (recorded in this task's
+`integration_notes`) authorized retiring INTERNAL_KEY_EXCP_002 once both
+merged, deciding callers #11-12 (§9.2) should be documented as retired and
+made to fail with a clear message rather than silently, in the same
+candidate. This section is that candidate.
+
+### 12.1 Two new findings this session, before any removal was safe
+
+Re-reading every real call site that reaches `/api/partner/ingress/handoff`
+or `/api/auth/token` (not just the 9 inventoried dual-send callers) surfaced
+two gaps none of the prior eight sessions' review rounds had caught:
+
+1. **`TenantPartnerController.issuePartnerIngressHandoff`'s `allowInternalBootstrap`
+   branch never accepted a Google assertion at all.** This `@OpenRoute()`
+   endpoint (`apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`)
+   is the real handler behind caller #5's (`partner-booking-web/lib/api-client.ts`)
+   and callers #7-8's (`referral-embed-web`) `POST /api/partner/ingress/handoff`
+   calls. When the caller omits a partner `apiKey` -- the actual call shape
+   `apps/partner-booking-web/lib/embed-airport-booking.ts:196` and
+   `referral-embed-web`'s `issuePartnerIngressHandoff` both use, confirmed by
+   reading the real call sites, not assumed -- the controller called
+   `requireInternalKey(request, process.env.DRTS_INTERNAL_KEY)` directly.
+   That function (`apps/api/src/common/auth/internal-key.middleware.ts`)
+   checks only `x-drts-internal-key` via the registry-backed
+   `evaluateInternalKey`; it never looked at `x-drts-google-id-token` at all,
+   unlike the general `InternalKeyMiddleware` gate this same route also
+   passes through first. Every one of these callers already dual-sends both
+   headers (§7.1-§7.9), but this second, narrower gate inside the controller
+   would have rejected all of them the moment INTERNAL_KEY_EXCP_002 was
+   removed, regardless of a valid Google assertion being present -- a real
+   `partner/ingress/handoff` outage this task's own required acceptance
+   (`不得讓 dev 部署變紅`) forbids. `apps/api/tests/unit/tenant-partner.controller.test.ts`'s
+   existing coverage for this branch (`allows internal callers...`) only ever
+   exercised the internal-key path, so it never caught this.
+2. **`apps/api/src/config/auth-startup-config.ts`'s own strict-environment
+   validation (`validateAuthStartupConfig`) throws `MISSING_CONTROL` --
+   `DRTS_INTERNAL_KEY is configured but lacks a documented exception entry in
+   INTERNAL_KEY_EXCEPTION_REGISTRY` -- for any strict environment
+   (`isStrictAuthEnvironment()`: staging or production) that still has
+   `DRTS_INTERNAL_KEY` mounted once no registry entry matches that env var's
+   header.** This is a *process boot failure*, not the already-documented
+   §9.3 per-request 401 degrade: a Cloud Run revision that fails this
+   startup check never serves traffic at all. `deploy-staging.yml:519` and
+   `deploy-prod.yml:517` both mount `DRTS_INTERNAL_KEY` from an *optional*
+   secret (`${SECRET_PREFIX}-internal-key`) whenever it exists in the
+   project -- this task cannot read either project (§10.2/§10.3's own
+   reservation) to confirm whether that secret is currently present. If it
+   is, the *next* `drts-api` deploy to either environment crashes at boot,
+   not just at request time. Neither environment has deployed successfully
+   recently (§10's own `gh run list` evidence: staging last `2026-08-16`,
+   prod last `2026-05-17`, both `failure`), so this is forward-looking risk,
+   identical in shape to §9.3/§10's "next deploy" framing -- not a regression
+   this candidate causes today, but a sharper, previously-undocumented
+   version of the same risk that must be in the record before the next
+   staging/prod deploy attempt. **Operator action required before that next
+   deploy**: confirm whether `${SECRET_PREFIX}-internal-key` exists in the
+   staging/prod GCP projects, and if so, remove it (or stop mounting it in
+   the respective `deploy-*.yml`) — now that INTERNAL_KEY_EXCP_002 is gone,
+   there is no longer any registry entry it could validate against, in any
+   environment.
+
+### 12.2 Fixes shipped in this candidate
+
+| Area | Change |
+| --- | --- |
+| Registry | INTERNAL_KEY_EXCP_002 entry deleted from `INTERNAL_KEY_EXCEPTION_REGISTRY` (`apps/api/src/common/auth/internal-key-exception-registry.ts`). Only `INTERNAL_KEY_EXCP_001` remains. |
+| Finding 1 fix | `tenant-partner.controller.ts`'s `issuePartnerIngressHandoff` now calls a new exported `verifyGoogleAssertionOrInternalKey` (refactored out of `validateInternalKey`'s shared core, `internal-key.middleware.ts`) with `{ googleWorkloadIdentityAdapter, requireCredential: true }`. `GoogleWorkloadIdentityAdapter` is now a provider in `TenantPartnerModule` (write-scope expansion: `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts` and `tenant-partner.module.ts`, outside the task's original `write_scopes`; `IdentityModule` was already imported there so no circular dependency with `AuthModule` was introduced). `verifyGoogleAssertionOrInternalKey` deliberately does **not** inherit `validateInternalKey`'s `hasBearerAuthorization` bypass (this route has no downstream Bearer-verifying guard -- an arbitrary forged `Authorization: Bearer x` header must not satisfy this gate the way it safely can for the general proxy middleware) nor its dev-lenient "no key configured in non-strict env → allow" skip (`requireCredential: true` forces the original `requireInternalKey` behavior of always demanding *some* credential). Regression tests: `apps/api/tests/unit/tenant-partner.controller.test.ts` (WIF success, WIF-verification-failure non-masking, legacy-key-now-rejected) and a new `verifyGoogleAssertionOrInternalKey` describe block in `tests/unit/internal-key.middleware.test.ts` (bearer-bypass-does-not-apply, `requireCredential` fails closed even non-strict, accepts a real signed Google assertion). |
+| Finding 2 | Documented here (§12.1 item 2) and in a new regression test (`tests/unit/auth-startup-config.test.ts`'s "fails when DRTS_INTERNAL_KEY is configured without a documented exception"). Not a code fix -- `deploy-staging.yml`/`deploy-prod.yml` are outside this task's `write_scopes`, and this task cannot read either project's secrets to know whether to touch the mount. Both test files' own "fully configured production env" base fixture (`buildValidProductionEnv()` / `getValidProdEnv()`) was updated to the post-retirement valid shape: no `DRTS_INTERNAL_KEY`, full `WORKLOAD_IDENTITY_*` set instead -- this is what a real production deploy must configure now. |
+| Dual-send removal (callers #1-9) | Removed the `x-drts-internal-key` send from all 9 previously-inventoried callers: `apps/passenger-web`, `apps/enterprise-dispatch-web` (both the control-plane-proxy route and `enterprise-session.server.ts`), `apps/partner-booking-web` (both the proxy route and `api-client.ts`), `apps/tenant-console-web`'s proxy route, `apps/referral-embed-web` (`embed-api.ts` and `embed-booking-api.ts`), and `deploy-dev.yml`'s operational-acceptance step (removed the `internal_key=$(gcloud secrets versions access ...)` fetch and both `x-drts-internal-key` curl headers). Only `x-drts-google-id-token` remains on each. |
+| Callers #11-12 | `tests/smoke/lib/helpers.sh` (`SMOKE_INTERNAL_KEY`) and `tests/e2e/lib/helpers.sh` (`E2E_INTERNAL_KEY`) now `exit 1` with a clear message identifying the retirement and pointing at the WIF alternative, immediately on sourcing, if either var is set -- per Supervisor's integration_notes instruction -- rather than silently sending a header no environment will ever accept again. The now-dead `if [[ -n "$...INTERNAL_KEY" ]]; then curl_args+=(-H "x-drts-internal-key: ...")` blocks were removed from both files' `http_call`-style functions (unreachable once the fail-fast check passes). `tools/ci/run-smoke-tests.sh`'s usage comment updated to match. |
+| `deploy-dev.yml` fail-closed upgrade | The `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` secret mount (§7.5) changed from a notice-only degrade (safe while INTERNAL_KEY_EXCP_002 provided a fallback) to `::error::` + `exit 1` when the secret is absent -- the fallback it used to degrade to no longer exists, so an absent registry must now fail the deploy before any API secret is set, matching staging/prod's existing fail-closed pattern (§10.4). `tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts`'s "dev keeps its own notice-only degrade" test inverted to assert the new fail-closed shape instead. |
+| Registry test coverage | `tests/unit/internal-key-exception-registry.test.ts`, `tests/unit/internal-key-alerts.test.ts`, and `tests/integration/internal-key-rotation-retirement.integration.test.ts` all had tests that implicitly depended on the live registry containing an `x-drts-internal-key`-headed exception (the generic `evaluateInternalKey`/rotation/revocation mechanism tests, not really about INTERNAL_KEY_EXCP_002 specifically) -- updated to pass an explicit retired-fixture `registry:` array, following the exact pattern already established for INTERNAL_KEY_EXCP_003's 2026-09-01 retirement (`RETIRED_STAGING_ONLY` in the first file). `tests/unit/internal-key-wif-configuration.test.ts`'s "does not remove INTERNAL_KEY_EXCP_002" test (whose entire premise this candidate intentionally reverses) rewritten to assert the removal. `apps/api/tests/unit/auth-bootstrap.test.ts` had several tests whose only path to a successful session was the now-retired plain internal-key bootstrap to `/api/auth/token` -- each converted to assert the new `INTERNAL_KEY_INVALID` rejection (the live WIF-equivalent coverage for the tenant-claims case already existed as the next test in the same file). `tests/unit/system-remediation/sr-live-map-001/session-contract.test.ts`'s two `ops_observer` tests rewritten to exercise the real Google workload identity path (mocked `verifyServicePrincipal`, same pattern as that file's own pre-existing "WIF direct login" test) instead of the retired internal key; its `driver_user` test (no live WIF equivalent exists for that actor type) kept on `validateInternalKey`'s dev-lenient bypass by simply no longer configuring `DRTS_INTERNAL_KEY` at all. `tests/integration/iap-subject-adapter.integration.test.ts` had three tests that used a valid internal key only to get past the gate before testing unrelated IAP-specific logic further downstream; stopped configuring `DRTS_INTERNAL_KEY` in those three (none set `APP_ENV` to a strict value, so the dev-lenient bypass already carries them through unchanged). |
+| CI audit script | `operations/security/verify-internal-key-exceptions.py` matches ``INTERNAL_KEY_EXCP_\d+`` wrapped in single backticks anywhere in this document against the registry array; removing the array entry without also touching the doc would fail CI ("documented in Markdown but missing in TypeScript registry"). All 19 remaining backtick-wrapped `` INTERNAL_KEY_EXCP_002 `` mentions throughout this document's history (sections 2, 6, 7.2, 7.6, 7.7, 7.9.1 table, 9.3, 9.4, 10, within this candidate's own prose) de-backticked to plain INTERNAL_KEY_EXCP_002, following the exact convention already established in the "Retired exceptions" paragraph for INTERNAL_KEY_EXCP_003. Re-ran `python3 operations/security/verify-internal-key-exceptions.py` after: `AUDIT PASSED`, one registered exception (`INTERNAL_KEY_EXCP_001`). |
+
+### 12.3 Verification
+
+- `python3 operations/security/verify-internal-key-exceptions.py`: exit 0,
+  `AUDIT PASSED`, `Registered Exceptions in Code: ['INTERNAL_KEY_EXCP_001']`.
+- `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/deploy-dev.yml'))"`:
+  exit 0.
+- `pnpm --filter @drts/contracts build` and
+  `pnpm --filter @drts/control-plane-auth build`: exit 0 (stale dist was
+  producing bogus `@drts/contracts` resolution errors before rebuilding, same
+  as every prior session's note on this).
+- `apps/api`: `pnpm exec tsc --noEmit -p tsconfig.json` exit 0, clean.
+- `apps/api`: `pnpm exec vitest run tests/unit` -- 120 files / 1183 tests
+  passed, exit 0 (this run regenerates 8 `support/sidecars/**/*.json`
+  closeout-proof fixtures as a side effect of running
+  `apps/api/tests/unit/map-*-closeout-proof.test.ts` and
+  `owned-mobility-ops-map-*-closeout-proof.test.ts` -- the same test-hygiene
+  defect §9's reviewer round identified; restored all 8 to
+  `git show origin/dev:<path>` byte-identical immediately after, confirmed
+  via `git diff --stat origin/dev -- support/sidecars/` returning empty, and
+  did not re-run that full command again afterward).
+- Repo-root `pnpm exec vitest run tests/unit`: 362 files, 3719 tests passed,
+  43 skipped; the 16 "failed" files are all pre-existing and unrelated to
+  this change -- 3 `SR-QA-*`/`db-apply` suites that explicitly require a
+  real configured Postgres database (`CONCURRENCY_TEST_DATABASE_URL` etc.,
+  unavailable in this sandbox, same restriction every prior session recorded)
+  and `db-apply.test.ts`'s own 3 cases timing out for the same reason; the
+  remaining apparent "failed files" had zero actual failing tests (import-
+  time `@drts/ui-tokens` resolution noise in unrelated web-app packages).
+  All internal-key/WIF-related tests across both suites are 100% green.
+- Targeted re-runs read individually before this candidate: all 6
+  internal-key/WIF test files (70 tests), `tenant-partner.controller.test.ts`
+  (19 tests), `auth-bootstrap.test.ts` (101 tests),
+  `iap-subject-adapter.integration.test.ts` (14 tests),
+  `auth-startup-config.test.ts` (36 tests),
+  `auth-startup-config.integration.test.ts` +
+  `service-workload-identity.integration.test.ts` (22 tests), the full
+  `sr-live-map-001` directory (122 tests across 9 files), and
+  `deployment-architecture-guards.test.ts` +
+  `dev-active-surface-contract.test.ts` + `cloud-run-deploy-retry.test.ts`
+  (19 tests) -- all exit 0.
+- `pnpm exec eslint` on every touched `apps/api` source/test file and every
+  touched web-app file: clean. One pre-existing `no-unused-vars` hit on
+  `apps/api/tests/unit/auth-bootstrap.test.ts`'s unrelated
+  `"issues the same durable tenant claims for a granted Google workload
+  identity CI probe"` test (an unused `controller` destructure) confirmed
+  present in `origin/dev`'s unmodified copy of this file before this
+  candidate's edits -- not introduced here, not touched (out of this task's
+  scope; the test itself passes).
+- `bash -n tests/smoke/lib/helpers.sh` and `bash -n tests/e2e/lib/helpers.sh`:
+  exit 0.
+- Not run (same restriction as every prior round): a real `deploy-dev.yml`
+  execution confirming `excp_002_removed_and_deploy_dev_green` end-to-end --
+  this branch has no trigger path to dispatch it, and the guardrails reserve
+  a real dispatch for Supervisor/an authorized operator. Also not verified:
+  whether `${SECRET_PREFIX}-internal-key` currently exists in the staging or
+  production GCP projects (§12.1 item 2's operator action).
+
+### 12.4 Remaining before `excp_002_removed_and_deploy_dev_green` can be recorded
+
+1. A real `deploy-dev.yml` run against a ref including this candidate,
+   confirming the job stays green end-to-end -- including the
+   operational-acceptance step's two `POST /api/auth/token` calls now
+   succeeding on the Google assertion alone -- and that
+   `AUTH_LEGACY_INTERNAL_KEY_USED` no longer appears anywhere in the
+   resulting logs (it cannot: the registry entry that ever emitted it is
+   gone). Supervisor dispatches this, per the task's own guardrails.
+2. Operator confirmation of §12.1 item 2: whether
+   `${SECRET_PREFIX}-internal-key` exists in the staging/production GCP
+   projects, and if so, its removal (or the corresponding `deploy-*.yml`
+   mount's removal) before either environment's next deploy attempt.
+3. A decision, outside this candidate, on whether callers #11-12's
+   `SMOKE_INTERNAL_KEY`/`E2E_INTERNAL_KEY` optional paths should eventually
+   be migrated to mint a Google assertion instead of just failing fast --
+   not required for `excp_002_removed_and_deploy_dev_green` since neither is
+   wired into any current CI workflow (§9.2), now explicitly fail-closed
+   rather than silently inert.
+
+No application or workflow code in this candidate touches caller #10 (§9.1,
+§11, already fully migrated in the merged base) or the staging/production
+registry wiring (§10, already merged) -- both were independently verified
+unchanged by re-reading the merged state at this candidate's base, not
+re-implemented here.

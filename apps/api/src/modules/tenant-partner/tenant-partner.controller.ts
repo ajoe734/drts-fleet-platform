@@ -117,9 +117,10 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import {
   REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-  requireInternalKey,
   requireScopedInternalKey,
+  verifyGoogleAssertionOrInternalKey,
 } from "../../common/auth/internal-key.middleware";
+import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -223,6 +224,9 @@ export class TenantPartnerController {
     @Optional()
     @Inject(NotificationDeliveryService)
     private readonly notificationDeliveryService?: NotificationDeliveryService,
+    @Optional()
+    @Inject(GoogleWorkloadIdentityAdapter)
+    private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
   ) {}
 
   /**
@@ -421,7 +425,27 @@ export class TenantPartnerController {
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
     if (allowInternalBootstrap) {
-      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+      // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: this bootstrap gate used to
+      // require only `x-drts-internal-key` (INTERNAL_KEY_EXCP_002, retired
+      // -- see docs/02-architecture/internal-key-exceptions.md section 12).
+      // It now also accepts a verified `x-drts-google-id-token` assertion,
+      // which is what partner-booking-web and referral-embed-web already
+      // send for every call to this route. This route is `@OpenRoute()`
+      // with no downstream Bearer-token guard, so it uses
+      // verifyGoogleAssertionOrInternalKey directly rather than
+      // validateInternalKey -- an arbitrary Authorization: Bearer header
+      // must not bypass this check the way it safely can for the general
+      // proxy middleware.
+      await verifyGoogleAssertionOrInternalKey(
+        request ?? {},
+        process.env.DRTS_INTERNAL_KEY,
+        {
+          ...(this.googleWorkloadIdentityAdapter
+            ? { googleWorkloadIdentityAdapter: this.googleWorkloadIdentityAdapter }
+            : {}),
+          requireCredential: true,
+        },
+      );
     }
     const resolved = await this.tenantPartnerService.issuePartnerIngressHandoff(
       command,

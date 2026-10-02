@@ -7,6 +7,7 @@ import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import {
   InternalKeyMiddleware,
   validateInternalKey,
+  verifyGoogleAssertionOrInternalKey,
 } from "../../apps/api/src/common/auth/internal-key.middleware";
 import { GoogleWorkloadIdentityAdapter } from "../../apps/api/src/modules/auth/google-workload-identity.adapter";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
@@ -102,16 +103,20 @@ describe("validateInternalKey general proxy requests over Google workload identi
     ).resolves.toBeDefined();
   });
 
-  it("does not let an unregistered caller's Google assertion take the whole route down when a valid internal key is also present", async () => {
+  it("fails closed for an unregistered caller's Google assertion now that INTERNAL_KEY_EXCP_002 is retired, even with x-drts-internal-key also present (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
     process.env.APP_ENV = "development";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
     // Registry exists (ops has onboarded some callers) but not this one yet.
+    // Before EXCP_002's retirement this fell through to a valid internal-key
+    // fallback; that fallback no longer exists, so an unregistered Google
+    // principal must now fail closed instead of silently degrading.
     const { adapter, token } = setUpGoogleWorkloadIdentity({
       tokenEmail: "not-yet-onboarded@dev-project.iam.gserviceaccount.com",
     });
 
-    await expect(
-      validateInternalKey(
+    let error: ApiRequestError | null = null;
+    try {
+      await validateInternalKey(
         {
           method: "GET",
           originalUrl: "/api/tenant/passengers",
@@ -122,8 +127,13 @@ describe("validateInternalKey general proxy requests over Google workload identi
         },
         process.env.DRTS_INTERNAL_KEY,
         { googleWorkloadIdentityAdapter: adapter },
-      ),
-    ).resolves.not.toThrow();
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+
+    expect(error?.getStatus()).toBe(401);
+    expect(error?.code).toBe("INTERNAL_KEY_INVALID");
   });
 
   it("still fails closed for a registered principal's genuinely invalid assertion (wrong audience) even with a valid internal key present", async () => {
@@ -382,5 +392,77 @@ describe("validateInternalKey strict environment behavior", () => {
         process.env.DRTS_INTERNAL_KEY,
       ),
     ).rejects.toThrowError(ApiRequestError);
+  });
+});
+
+describe("verifyGoogleAssertionOrInternalKey (TenantPartnerController.issuePartnerIngressHandoff's allowInternalBootstrap gate, SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", () => {
+  it("does NOT bypass on an arbitrary Authorization: Bearer header, unlike validateInternalKey's general-middleware bypass", async () => {
+    // This function has no downstream guard verifying the Bearer token for
+    // its one caller (an @OpenRoute() controller method), so it must not
+    // inherit validateInternalKey's bearer-bypass shortcut -- an arbitrary
+    // forged Bearer header must still be rejected.
+    process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
+
+    let error: ApiRequestError | null = null;
+    try {
+      await verifyGoogleAssertionOrInternalKey(
+        {
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+          headers: {
+            authorization: "Bearer forged-browser-token",
+          },
+        },
+        process.env.DRTS_INTERNAL_KEY,
+        { requireCredential: true },
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.getStatus()).toBe(401);
+    expect(error?.code).toBe("INTERNAL_KEY_REQUIRED");
+  });
+
+  it("fails closed with requireCredential even in a non-strict environment with no key configured (unlike validateInternalKey's dev-lenient default)", async () => {
+    delete process.env.APP_ENV;
+    delete process.env.DRTS_ENV;
+    delete process.env.NODE_ENV;
+    delete process.env.DRTS_INTERNAL_KEY;
+
+    let error: ApiRequestError | null = null;
+    try {
+      await verifyGoogleAssertionOrInternalKey(
+        {
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+          headers: {},
+        },
+        process.env.DRTS_INTERNAL_KEY,
+        { requireCredential: true },
+      );
+    } catch (caught) {
+      error = caught as ApiRequestError;
+    }
+
+    expect(error?.getStatus()).toBe(503);
+    expect(error?.code).toBe("INTERNAL_KEY_NOT_CONFIGURED");
+  });
+
+  it("accepts a verified Google workload identity assertion", async () => {
+    const { adapter, token } = setUpGoogleWorkloadIdentity();
+
+    await expect(
+      verifyGoogleAssertionOrInternalKey(
+        {
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+          headers: { "x-drts-google-id-token": token },
+        },
+        undefined,
+        { googleWorkloadIdentityAdapter: adapter, requireCredential: true },
+      ),
+    ).resolves.not.toThrow();
   });
 });
