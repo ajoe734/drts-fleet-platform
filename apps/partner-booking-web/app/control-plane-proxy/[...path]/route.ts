@@ -184,16 +184,6 @@ async function mintMetadataIdentityToken(
 }
 
 async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
-  // TODO(SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up): drop this send
-  // once dev has proven the `x-drts-google-id-token` path below end-to-end
-  // and INTERNAL_KEY_EXCP_002 is retired. Kept for now so requests still
-  // succeed if the API's WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS
-  // registry has not been populated for this environment yet.
-  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
-  if (internalKey) {
-    headers.set("x-drts-internal-key", internalKey);
-  }
-
   const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   if (protectedAudience) {
     const metadataToken = await mintMetadataIdentityToken(protectedAudience);
