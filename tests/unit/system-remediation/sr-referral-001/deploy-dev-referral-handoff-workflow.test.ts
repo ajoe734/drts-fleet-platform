@@ -35,11 +35,19 @@ curl() {
   local args=("$@")
   local n=\${#args[@]}
   local url="\${args[$((n-1))]}"
-  local output_file="" dump_header_file=""
+  local output_file="" dump_header_file="" has_stdin_data=""
   for ((i=0; i<n; i++)); do
     if [[ "\${args[$i]}" == "--output" ]]; then output_file="\${args[$((i+1))]}"; fi
     if [[ "\${args[$i]}" == "--dump-header" ]]; then dump_header_file="\${args[$((i+1))]}"; fi
+    if [[ "\${args[$i]}" == "--data" && "\${args[$((i+1))]:-}" == "@-" ]]; then has_stdin_data="true"; fi
   done
+  # The real curl reads --data @- from stdin; the production workflow pipes
+  # it from a preceding \`jq -nc | curl ...\` under set -euo pipefail. If this
+  # fake curl never reads stdin, it can return before jq finishes writing,
+  # giving jq SIGPIPE (141) and failing the pipeline (F5).
+  if [[ "$has_stdin_data" == "true" ]]; then
+    cat >/dev/null
+  fi
   echo "$url" >> "$CALL_LOG"
   case "$url" in
     */api/partner/entries/*)
@@ -90,7 +98,23 @@ curl() {
 }
 `;
 
-function runBlock(rolloutApplied: "true" | "false") {
+// F5 regression: delays jq's JSON-building invocation (`jq -nc`) so that, if
+// the fake curl() below it does not drain --data @- from stdin before
+// returning, jq is still writing when the pipe's read end is gone and gets
+// SIGPIPE (141) under set -euo pipefail. The pass-through to the real jq
+// keeps the workflow's own filters (`.data.artifact`, etc.) exercised
+// unmodified.
+const SLOW_JQ_PRODUCER = `
+jq() {
+  if [[ "$1" == "-nc" ]]; then sleep 0.05; fi
+  command jq "$@"
+}
+`;
+
+function runBlock(
+  rolloutApplied: "true" | "false",
+  options: { slowJq?: boolean } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "deploy-dev-referral-"));
   try {
     const result = spawnSync(
@@ -107,6 +131,7 @@ function runBlock(rolloutApplied: "true" | "false") {
         EXCH_COUNTER="$DIRECTORY/exch-count"
         FIXTURE_ROLLOUT_APPLIED="$ROLLOUT_APPLIED"
         ${CURL_FIXTURE}
+        ${options.slowJq ? SLOW_JQ_PRODUCER : ""}
         ${block}
       `,
       ],
@@ -155,6 +180,27 @@ describe("deploy-dev referral handoff session lifecycle smoke test", () => {
     expect(calls.some((u) => u.endsWith("/api/referral/session"))).toBe(false);
   });
 
+  // F5 regression (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002 R5):
+  // the real workflow pipes `jq -nc ... | curl ... --data @-` under
+  // set -euo pipefail. With SLOW_JQ_PRODUCER delaying jq, these runs
+  // deterministically reproduce the SIGPIPE race if curl() does not drain
+  // stdin before returning; they must stay green across repeats.
+  it("does not race a slow jq producer into SIGPIPE on the post-rollout lifecycle", () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { result } = runBlock("true", { slowJq: true });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+    }
+  });
+
+  it("does not race a slow jq producer into SIGPIPE on the pre-rollout fail-closed check", () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { result } = runBlock("false", { slowJq: true });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+    }
+  });
+
   it("fails closed if issuance ever returns something other than the real 201 success status", () => {
     const directory = mkdtempSync(join(tmpdir(), "deploy-dev-referral-regression-"));
     try {
@@ -174,10 +220,14 @@ describe("deploy-dev referral handoff session lifecycle smoke test", () => {
             local args=("$@")
             local n=\${#args[@]}
             local url="\${args[$((n-1))]}"
-            local output_file=""
+            local output_file="" has_stdin_data=""
             for ((i=0; i<n; i++)); do
               if [[ "\${args[$i]}" == "--output" ]]; then output_file="\${args[$((i+1))]}"; fi
+              if [[ "\${args[$i]}" == "--data" && "\${args[$((i+1))]:-}" == "@-" ]]; then has_stdin_data="true"; fi
             done
+            if [[ "$has_stdin_data" == "true" ]]; then
+              cat >/dev/null
+            fi
             case "$url" in
               */api/partner/entries/*) echo '{"data":{"entryHost":"entry.example.test"}}' ;;
               */api/partner/ingress/referral-embed-handoff)
