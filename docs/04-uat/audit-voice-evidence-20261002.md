@@ -1,23 +1,36 @@
 # AUDIT-VOICE-EVIDENCE-20261002
 
+## 0.7 Acceptance and Evidence Table
+
+| Acceptance Criteria | Reproducible Check (Command) | Old Result | New Result | Limitations |
+| :--- | :--- | :--- | :--- | :--- |
+| `live_never_reports_fixture_success` | `node operations/verification/unattended-voice-eval.mjs --mode LIVE` (and other invalid modes) | Exit 0, printed "LIVE TELEPHONY EVALUATION COMPLETED" with fixture metrics | Exit 1, printed "[FAIL_CLOSED] INVALID MODE REJECTED" or "LIVE MODE ABORTED" with no metrics | Exclusively tests script boundary, not internal provider internals (which are absent) |
+| `fixture_provenance_and_unchanged_existing_evidence` | Run `pnpm exec vitest run tests/unit/audit-voice-evidence-20261002.test.ts` (the "existing evidence unchanged" case) | N/A (Test didn't exist) | Exit 0, existing evidence file hash/sentinel verified intact, fixture notice printed | Relies on unit test fs.mkdtemp wrapper to simulate evidence file |
+| `production_adapter_blockers_precisely_recorded` | See Section 3 (Missing Production Wiring Requirements) | Vague broad absence claims | Concrete source seams, file paths, and deployment placeholders mapped | Still requires actual provider implementation in future PRs |
+| `same_sha_review_ci` | Candidate CI and reviewer SHA mapping | Reopened with findings | Awaiting Review CI | To be verified in CI |
+
 ## 1. Problem Statement
-The unattended voice live evaluation (`operations/verification/unattended-voice-eval.mjs`) in `--mode live` was previously computing fixture latencies and outcomes despite a lack of real telephony provider wiring, potentially overwriting prior evidence files with synthetic data disguised as live success.
+The unattended voice live evaluation (`operations/verification/unattended-voice-eval.mjs`) in `--mode live` (and invalid modes) was previously computing fixture latencies and outcomes despite a lack of real telephony provider wiring, potentially overwriting prior evidence files with synthetic data disguised as live success.
 
 ## 2. Remediation
-- **Separation of Fixture from Live**: Modified `operations/verification/unattended-voice-eval.mjs` to strictly enforce a fail-closed boundary. When `--mode live` is executed, the script now aborts after the authorization gate with an explicit error indicating that the production adapter is missing. It halts before any fixture metrics are calculated or output is generated.
-- **Fixture Provenance**: The script output prominently displays `[NOTICE] FIXTURE MODE EVALUATION COMPLETED` in fixture mode, clarifying that it does not claim production PSTN quality or SLA.
-- **Behavior Regressions Added**: Authored `tests/unit/audit-voice-evidence-20261002.test.ts` to assert that live mode properly fails closed (both when credentials are omitted and when valid-looking credentials are provided but the production adapter is un-wired) and that fixture mode completes successfully without network side effects.
+- **Separation of Fixture from Live**: Modified `operations/verification/unattended-voice-eval.mjs` to strictly enforce a fail-closed boundary. Unknown modes are rejected immediately. Live mode properly fails closed either on missing credentials or on missing production adapter, before metrics or output generation.
+- **TypeScript and Unit Tests Fixes**: Fixed `unknown` type errors in `tests/unit/audit-voice-evidence-20261002.test.ts`. Added comprehensive behavioral regressions enforcing invalid modes, authorization gates, credential requirements, preservation of existing evidence files, and verification of fixture provenance outputs.
 
-## 3. Missing Production Wiring Requirements (F06 Preparation)
-As recorded during this audit, the following concrete production telephony components are completely missing from the current architecture. A real provider adapter must be wired before live mode can truly be executed:
+## 3. Missing Production Wiring Requirements (Concrete Seams)
+As required, the concrete production telephony components missing from the current architecture are documented precisely at the following seams:
 
-- **Missing CTI/ASR/TTS Providers**: No production carrier or provider adapters exist for PSTN telephony integration, Automatic Speech Recognition, or Text-to-Speech generation.
-- **Missing Audio Recorder & Worker Wiring**: There is no live architecture for streaming, persisting, or analyzing real bidirectional audio recordings from live carrier sessions.
-- **Missing Safe Transport/Auth**: Production telephony requires proper TLS transport and secure exchange of provider API keys that are missing. The current environment gate checks `UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT` and `UNATTENDED_VOICE_LIVE_AUTH_KEY`, but there is no underlying codebase (e.g., SIP/WSS transports) to use them.
+- `apps/api/src/modules/callcenter/voice-cti.adapter.ts:394` (`SandboxVoiceCtiProviderAdapter`) / `:519` (`createUnconfiguredVoiceCtiProvider`) / `:700-739`: Production gate exists but lacks actual provider implementations.
+- `apps/voice-media-worker/src/providers/twm/twm-adapter.ts:68`: Fixture adapters only.
+- `providers/native-voice/native-voice-adapter.ts:97-107`: Production connect rejection is hardcoded.
+- `recording/sealed-recorder.ts:37`: `RecorderObjectStore` interface lacks a production backend.
+- `server.ts:4`: New `MediaWorkerServer()` instantiated without recording/pipeline composition.
+- `server/media-worker-server.ts:343-376` (`/drain` and `/sessions`) and `:424-471` (upgrade): Lack caller/session authorization, transport/session binding, and body/frame limits.
+- `.github/workflows/deploy-dev.yml:249-257`: Active inventory does not include a voice worker.
+- `infra/gcp/staging/voice-media-worker-service.yaml`: Contains placeholders; `ingress=all` alone does not prove unauthenticated IAM without actual deployment definitions.
 
 ## 4. Preservation of True Gates
-- The existing manual external gates for actual live PSTN deployment (`test_telephony_authorization`, `sandbox_dispatch_isolation_evidence`, `live_bidirectional_recording_evidence`, `live_barge_in_dtmf_transfer_evidence`) remain fully intact and unmet, requiring true physical telephony enablement.
-- Previously synthetic acceptance criteria have NOT been set to pass.
+- The existing manual external gates for actual live PSTN deployment remain fully intact.
+- The evaluation script now strictly requires `AUTH-UV-LIVE-*` and PSTN credentials to even reach the missing adapter rejection.
 
 ## 5. Conclusion
 Live evaluation has been successfully prevented from fabricating fixture results. The execution boundary fails closed, preserving historical evidence and enforcing the dependency on real provider contracts.

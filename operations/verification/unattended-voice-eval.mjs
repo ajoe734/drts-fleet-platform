@@ -96,6 +96,12 @@ async function runEvaluation() {
   console.log(`Authorization Ref: ${options.authorizationRef || '(none)'}`);
   console.log('----------------------------------------------------------------------');
 
+  if (options.mode !== 'fixture' && options.mode !== 'live') {
+    console.error(`\n[FAIL_CLOSED] INVALID MODE REJECTED: '${options.mode}'`);
+    console.error('Supported modes are strictly: fixture, live (lowercase).');
+    process.exit(1);
+  }
+
   // SAFETY GATE: Fail closed for live mode without authorization or credentials
   if (options.mode === 'live') {
     const authPattern = /^AUTH-UV-LIVE-[A-Z0-9_-]+$/;
