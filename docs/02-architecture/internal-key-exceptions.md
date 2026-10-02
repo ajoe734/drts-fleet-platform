@@ -1942,3 +1942,58 @@ also included unchanged `map-acceptance-runner.test.ts` and reported its existin
 formatting; the final check restricted to changed runner/test/workflow files
 passes. No unrelated formatting was changed. Internal-key exception audit and
 commit trailer checks pass.
+
+### 11.4 Merge-conflict recovery (2026-10-02)
+
+Previous candidate `b984861fd6e3a08313301b78699294d8b105137a` completed
+[integration CI](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36954735930)
+and [CI](https://github.com/ajoe734/drts-fleet-platform/actions/runs/36954735928)
+successfully; the owner read both completed results and all 25 check conclusions.
+The machine record contains Claude2's same-SHA approval, but its summary is only
+`test`, with no review-artifact reference. That entry is not a substitute for
+the new candidate's independent, finding-level review.
+
+GitHub then reported PR #2269 `CONFLICTING` against `dev`. A read-only
+`git merge-tree --write-tree HEAD origin/dev` reproduced the single content
+conflict in this document: both tasks appended section 10. Merge anchor
+`f8d532bec` preserves both published parents, the previous candidate and
+`22d6547c2` (`SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002`, PR #2267).
+The incoming document is preserved byte-for-byte; this task's section moves
+to 11 with its internal references and C114 link updated. The operator JSON,
+commands, authorization design and C114 consumer/cleanup changes are unchanged.
+No published commit was rebased, amended or force-pushed.
+
+The upstream scheduler change also composes in `BootstrapAuthGuard`: only its
+two scheduled sweep routes tolerate reused Google tokens. Session issuance
+remains replay-protected, and provisioning JWTs still pass the fixed-driver
+and three-route ceiling on ordinary and open routes.
+
+| Finding / required acceptance | Source / resolution | Before → after / evidence | Remaining limits |
+| --- | --- | --- | --- |
+| F-MERGE-DOC-SECTION | This document and `C114-COVERAGE.md` current-operator link | Old candidate conflicts; merge anchor resolves it. Content comparison verifies the entire incoming document and the former live-map section, allowing only section/reference renumbering. `git diff --check` passes | Final PR head requires fresh CI/review; prior green checks do not transfer |
+| `live map runner不再使用x-drts-internal-key` | Unchanged bootstrap/teardown and workflow from §11.3 | Source inventory still finds no legacy-key/platform-admin references in the two scripts. All 122 map tests pass in the 227-test root regression | Operator D/E rollout and hosted map acceptance still pending |
+| `取代方案只授予driver:provision所需最小權限` | Unchanged controller/adapter/grant/JWT checks; composed `BootstrapAuthGuard` | 29 provisioning cases pass, including positive issuance/revoke, unregistered identity and out-of-scope denials. API auth/WIF regression now passes 120 cases, including upstream scheduled-token reuse and strict session-issuance replay checks | External JWKS mocked; production auth/guard/services with memory repositories, no PG or server |
+| `註冊表變更寫成可貼上內容交由操作者` | §11.1 and corrected C114 link | Literal operator JSON is still exercised through the real adapter by passing tests; byte comparison confirms the operator instructions are unchanged | No operator command, resource/secret/variable mutation or deployment executed |
+| `同候選SHA CI通過且獨立reviewer審查` | New full PR head is recorded by the handoff following this recovery | Completed local checks and logs below; previous CI links above are historical evidence only | New same-SHA hosted results and substantive independent Claude2 review must be recorded through candidate lifecycle; owner does not call `done` or merge the PR |
+
+Execution: Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4. The §11.2 root command
+with `--maxWorkers=2` plus
+`tests/unit/system-remediation/sr-mail-retry-schedule-20261001` and
+`tests/unit/sec-wif-registry-staging-prod-wiring-20261002.test.ts` passes
+227/227 tests in 18 files (exit 0). The §11.2 API command with
+`--maxWorkers=2` passes 120/120 tests in two files (exit 0). Logs are
+`.local/sec-live-map-wif/merge-regression.log` and `merge-api-unit.log` in the
+assigned worktree. These checks include fake-cloud scheduler probes only.
+The independent C114 workforce-version defect/live acceptance remains open;
+its two defect-reproduction cases still must not be read as live success.
+
+API typecheck passes after building the local contracts and control-plane-auth
+packages (exit 0, `merge-api-typecheck.log`). Full-root typecheck uses §11.3's
+local workspace source mapping with unchanged includes/strictness and passes
+(exit 0, `merge-root-typecheck.log`). Changed TypeScript ESLint, changed
+runner/test/workflow Prettier, and the internal-key exception audit pass
+(exit 0, `merge-lint.log` and `merge-prettier.log` for the first two).
+All started local checks completed and were read before this evidence commit.
+No local service, browser or Docker was started. All new candidate results must
+match the full SHA in PR #2269 and the machine-truth handoff; merge anchors are
+not substitute candidates.
