@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
 import { observeInvitationMailbox } from "./mailbox-observer";
+import { prepareTaskInvitation, exerciseInvitationLifecycle, verifyExpiredInvitation, observeApproval } from "./live-profiles";
 import {
   redactObject,
   UatEvidenceRecorder,
@@ -115,6 +116,7 @@ export interface IssueInvitationResult {
   invitationId: string;
   statusCode: number;
   deployedCandidateSha: string | null;
+  userId?: string;
 }
 export interface DeliveryReceipt {
   status: "queued" | "sent" | "failed";
@@ -140,6 +142,9 @@ export interface MailRunnerDeps {
     config: MailRunnerConfig,
     deliveryId: string,
   ) => Promise<Record<string, unknown>>;
+  lifecycle?: (issued: IssueInvitationResult) => Promise<void>;
+  approval?: () => Promise<void>;
+  expiryVerified?: boolean;
 }
 export interface MailRunnerResult {
   status: "passed" | "failed";
@@ -206,6 +211,8 @@ export async function runMailAcceptance(
       observation,
     );
   }
+  if (deps.lifecycle) await deps.lifecycle(issued);
+  if (deps.approval) await deps.approval();
   const negative = await deps.issueInvitation(
     config,
     config.nonAllowlistedRecipient,
@@ -245,10 +252,10 @@ export async function runMailAcceptance(
     ...(deps.observeMailbox
       ? []
       : ["authorized mailbox content for invitation"]),
-    "authorized mailbox content for approval",
-    "approval new_request, approaching_timeout and decision mail",
-    "invitation accept, single use, resend, revoke and real 24-hour expiry",
-    "automatic retry after scheduler fix deployment",
+    ...(deps.approval ? [] : ["authorized mailbox content for approval", "approval new_request, approaching_timeout and decision mail"]),
+    ...(deps.lifecycle ? [] : ["invitation accept, single use, resend and revoke"]),
+    ...(deps.expiryVerified ? [] : ["real 24-hour invitation expiry"]),
+    "automatic retry after a real retryable failure (no authorized fault injection)",
   ];
   for (const surface of outstanding)
     deps.recorder.recordLiveLimitation(
@@ -260,7 +267,7 @@ export async function runMailAcceptance(
 }
 
 /** Real HTTP status/timing is recorded here, never fabricated by orchestration. */
-async function mailRequest(
+export async function mailRequest(
   config: MailRunnerConfig,
   path: string,
   init: RequestInit,
@@ -334,6 +341,7 @@ export async function realIssueInvitation(
     invitationId: invitation?.invitation_id ?? "",
     statusCode: res.status,
     deployedCandidateSha: res.headers.get("x-drts-candidate-sha"),
+    ...(body.data?.user_id ? { userId: body.data.user_id } : {}),
   };
 }
 export async function realPollDeliveryReceipt(
@@ -410,12 +418,19 @@ async function main(): Promise<void> {
     if (config.workflowSha !== config.candidateSha)
       throw new Error("Checkout SHA does not match requested candidate");
     await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
+    recorder.setCandidateSha(config.candidateSha);
+    const expiryVerified = await verifyExpiredInvitation(config, process.env, recorder);
     const result = await runMailAcceptance(config, {
       issueInvitation: (cfg, recipient) =>
-        realIssueInvitation(cfg, recipient, recorder),
+        prepareTaskInvitation(cfg, recipient, recorder),
       pollDeliveryReceipt: (cfg, id) =>
         realPollDeliveryReceipt(cfg, id, recorder),
       observeMailbox: observeInvitationMailbox,
+      lifecycle: (issued) => exerciseInvitationLifecycle(config, issued, recorder),
+      ...(process.env.DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID?.trim() ? {
+        approval: () => observeApproval(config, process.env.DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID!.trim(), recorder),
+      } : {}),
+      expiryVerified,
       recorder,
     });
     evidence = result.evidence;

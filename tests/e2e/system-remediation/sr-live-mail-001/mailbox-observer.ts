@@ -7,6 +7,25 @@ export function observeInvitationMailbox(
   config: MailRunnerConfig,
   deliveryId: string,
 ): Promise<Record<string, unknown>> {
+  return observeMailbox(config, deliveryId, {
+    flow: "invite", subject: "You're invited to join your DRTS tenant workspace",
+    required_text: ["You have been invited to join a DRTS tenant workspace.", "This invitation expires at"],
+  });
+}
+
+export interface MailboxProbe {
+  flow: "invite" | "approve";
+  subject: string;
+  required_text: string[];
+  acceptance?: "accepted" | "denied" | "expired";
+  user_id?: string;
+}
+
+export function observeMailbox(
+  config: MailRunnerConfig,
+  deliveryId: string,
+  probe: MailboxProbe,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "python3",
@@ -51,12 +70,7 @@ export function observeInvitationMailbox(
         candidate_sha: config.candidateSha,
         api_origin: config.apiOrigin,
         delivery_id: deliveryId,
-        flow: "invite",
-        subject: "You're invited to join your DRTS tenant workspace",
-        required_text: [
-          "You have been invited to join a DRTS tenant workspace.",
-          "This invitation expires at",
-        ],
+        ...probe,
       }),
     );
   });

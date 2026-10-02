@@ -10,6 +10,14 @@ on:
         description: "Optional real approval request to observe (authorized +approve recipient only)"
         required: false
         default: ""
+      expiry_user_id:
+        description: "User ID from prior invitation_expiry_checkpoint (both expiry inputs or neither)"
+        required: false
+        default: ""
+      expiry_delivery_id:
+        description: "Delivery ID from that checkpoint, after its real 24-hour expiry"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -38,6 +46,8 @@ jobs:
       DRTS_LIVE_MAIL_TENANT_ACTOR_ID: ${{ vars.DRTS_LIVE_MAIL_TENANT_ACTOR_ID }}
       DRTS_LIVE_MAIL_INVITATION_ROLE_CODE: ${{ vars.DRTS_LIVE_MAIL_INVITATION_ROLE_CODE }}
       DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID: ${{ inputs.approval_request_id }}
+      DRTS_LIVE_MAIL_EXPIRY_USER_ID: ${{ inputs.expiry_user_id }}
+      DRTS_LIVE_MAIL_EXPIRY_DELIVERY_ID: ${{ inputs.expiry_delivery_id }}
       DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
       DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
       DRTS_LIVE_MAIL_EVIDENCE_PATH: .artifacts/live-mail-acceptance/evidence-mail.json
