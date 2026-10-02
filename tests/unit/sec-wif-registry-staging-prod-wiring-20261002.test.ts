@@ -142,3 +142,74 @@ describe("SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: operator documentation"
     expect(doc).toMatch(/待填|TBD|TODO\(ops\)/);
   });
 });
+
+describe("SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002: operator documentation resolves the correct per-environment audience (R1 reopen fix)", () => {
+  const registryDocPath = path.join(
+    repoRoot,
+    "docs/02-architecture/internal-key-exceptions.md",
+  );
+  const section10Marker = "## 10. `SEC-WIF-REGISTRY-STAGING-PROD-WIRING-20261002";
+
+  function readSection10(): string {
+    const doc = readFileSync(registryDocPath, "utf8");
+    const start = doc.indexOf(section10Marker);
+    expect(start).toBeGreaterThan(-1);
+    return doc.slice(start);
+  }
+
+  it("does not instruct ops to resolve drts-api's own Cloud Run status.url as the registry audience", () => {
+    const section10 = readSection10();
+
+    // R1: every staging/prod web-app proxy always mints its outbound Google
+    // ID token with aud = DRTS_API_AUTH_AUDIENCE (the environment's IAP
+    // client id), never drts-api's own Cloud Run origin. A template step
+    // that resolves `drts-api`'s `status.url` as the audience would register
+    // a value no live caller ever presents, so GoogleWorkloadIdentityAdapter
+    // would reject every proxied request the moment the registry is mounted.
+    expect(section10).not.toMatch(/describe drts-api[\s\S]{0,120}status\.url/);
+    expect(section10).not.toMatch(/live API origin audience value/);
+  });
+
+  it("resolves the staging audience from STAGING_IAP_CLIENT_ID, falling back only to the literal already committed in deploy-staging.yml", () => {
+    const section10 = readSection10();
+    const workflow = readFileSync(stagingWorkflowPath, "utf8");
+
+    expect(section10).toContain("vars.STAGING_IAP_CLIENT_ID");
+
+    const fallbackMatch = workflow.match(
+      /IAP_CLIENT_ID_ENV:\s*\$\{\{\s*vars\.STAGING_IAP_CLIENT_ID \|\| '([^']+)'\s*\}\}/,
+    );
+    expect(fallbackMatch).not.toBeNull();
+    const literalFallback = fallbackMatch![1];
+
+    // The doc's quoted literal fallback must match the one actually
+    // committed in the workflow -- if deploy-staging.yml's default IAP
+    // client id is ever rotated, this fails instead of the template
+    // silently pointing ops at a stale audience.
+    expect(section10).toContain(literalFallback);
+  });
+
+  it("resolves the production audience from PROD_IAP_CLIENT_ID and documents it has no literal fallback", () => {
+    const section10 = readSection10();
+    const workflow = readFileSync(prodWorkflowPath, "utf8");
+
+    expect(section10).toContain("vars.PROD_IAP_CLIENT_ID");
+    expect(section10).toMatch(/no literal fallback|no safe literal to fall back/);
+
+    // Confirm the premise still holds: unlike staging, deploy-prod.yml must
+    // not grow a "|| '<literal>'" fallback for IAP_CLIENT_ID_ENV, or the
+    // doc's "no safe literal" claim and required-variable guard go stale
+    // together.
+    expect(workflow).toMatch(
+      /IAP_CLIENT_ID_ENV:\s*\$\{\{\s*vars\.PROD_IAP_CLIENT_ID\s*\}\}/,
+    );
+  });
+
+  it("documents one shared-identity registry entry per environment, not one entry per deployed caller", () => {
+    const section10 = readSection10();
+
+    expect(section10).toMatch(
+      /one object \(not one per caller|single shared identity|one shared identity/,
+    );
+  });
+});
