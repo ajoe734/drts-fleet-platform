@@ -102,6 +102,37 @@ correct next actor is already identified in the parent's own record.
    `6d39dac2e387359aba1caa02b5177d5f20407fea` / PR #2264 remains the base for
    the next round in both cases.
 
+### Merge-time requirement for whoever lands this helper's PR
+
+This task's own record has `task_class: unblock` and
+`helper_parent: SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`. Per
+`tools/development-orchestrator/bin/ai_status.py`'s
+`apply_unblock_parent_resolution` (invoked from `transition_after_merge` when
+this helper task itself reaches `done`), the parent's `status`/`next`/
+`waiting_for` get overwritten automatically from this helper's
+`resolved_parent_status`/`resolved_parent_next`/`resolved_parent_waiting_for`
+fields, falling back to the `PARENT_STATUS`/`PARENT_NEXT`/`PARENT_WAITING_FOR`
+environment variables read at that moment, and **defaulting to `status:
+"todo"` with no `waiting_for` if neither is set**. This helper never had
+`PARENT_STATUS` et al. set (a dispatched worker cannot mutate a different
+task's fields directly — confirmed by `task_board_commands.py`'s
+`_guard_worker_command`, which raised `"Dispatched worker cannot mutate a
+different task"` when this helper attempted a direct `note` on the parent).
+Left to the default, merging this helper would silently flip the parent from
+`blocked` to `todo`, erasing the still-unresolved Supervisor disposition and
+very likely causing Codex/Claude2 to be redispatched into the identical
+guardrail wall again. Whoever drives this helper's merge-to-done transition
+(Supervisor) must set, at that moment:
+
+```bash
+PARENT_STATUS=blocked \
+PARENT_WAITING_FOR=Codex \
+PARENT_NEXT="No git/branch/worktree repair needed (see support/unblock/SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002/SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002-UNBLOCK-HISTORY-REPAIR.md). Sole blocker remains docs/02-architecture/internal-key-exceptions.md section 10.7: F1 persisted 3 rounds, owner guardrail-forbidden from GCP IAM mutation. Needs Supervisor disposition between section 10.3's registry routeScopes change (option a) or an explicit accepted-disposition for pre-rollout warn-only behavior (option b)."
+```
+
+so the parent stays correctly `blocked` on the real, already-documented
+cause instead of being reset to an inaccurate `todo`.
+
 ## Checks performed in this helper
 
 - `git fetch origin`, branch/remote SHA comparison, `git rev-list
