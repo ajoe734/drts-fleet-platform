@@ -1419,9 +1419,43 @@ jobs:
           service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
 
+      # SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: INTERNAL_KEY_EXCP_001
+      # (x-drts-referral-handoff-key) is retired and removed from
+      # INTERNAL_KEY_EXCEPTION_REGISTRY. The three referral embed handoff
+      # routes now verify a Google-signed workload identity assertion via
+      # GoogleWorkloadIdentityAdapter instead, same as the operational
+      # acceptance job's POST /api/auth/token calls above. This step's direct
+      # call to the issuance route authenticates as this workflow's own WIF
+      # service account (`github-actions-deployer`), which requires ops to
+      # add `"POST partner/ingress/referral-embed-handoff"` to that
+      # principal's `routeScopes` in the deployed
+      # `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry secret -- see
+      # docs/02-architecture/internal-key-exceptions.md §9 for the exact
+      # value. The consume call below goes through referral-embed-web's own
+      # BFF, which already authenticates as `drts-dev-runtime` (routeScopes
+      # `["* *"]`, no registry change needed).
+      - name: Mint identity token — referral embed handoff (API)
+        id: id_token_referral_handoff
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.api }}
+          id_token_include_email: true
+
       - name: Verify referral handoff session lifecycle
+        env:
+          REFERRAL_HANDOFF_ID_TOKEN: ${{ steps.id_token_referral_handoff.outputs.id_token }}
         run: |
           set -euo pipefail
+
+          echo "::add-mask::${REFERRAL_HANDOFF_ID_TOKEN}"
+          if [[ -z "${REFERRAL_HANDOFF_ID_TOKEN:-}" ]]; then
+            echo "::error::REFERRAL_HANDOFF_ID_TOKEN is empty; identity token minting failed upstream." >&2
+            exit 1
+          fi
 
           api_url="${{ steps.urls.outputs.api }}"
           referral_embed_url="${{ steps.urls.outputs.referral_embed }}"
@@ -1429,11 +1463,6 @@ jobs:
           entry_host="$(curl --fail --silent --show-error \
             "${api_url}/api/partner/entries/${entry_slug}" \
             | jq -er '.data.entry_host // .data.entryHost')"
-          handoff_secret="${{ needs.prepare.outputs.secret_prefix }}-referral-embed-handoff-key"
-          handoff_key="$(gcloud secrets versions access latest \
-            --secret="$handoff_secret" \
-            --project="${{ needs.prepare.outputs.project_id }}")"
-          echo "::add-mask::${handoff_key}"
 
           body_file="$(mktemp)"
           headers_file="$(mktemp)"
@@ -1450,7 +1479,7 @@ jobs:
               | curl --fail --silent --show-error \
                 --request POST \
                 --header "Content-Type: application/json" \
-                --header "x-drts-referral-handoff-key: ${handoff_key}" \
+                --header "x-drts-google-id-token: ${REFERRAL_HANDOFF_ID_TOKEN}" \
                 --data @- \
                 "${api_url}/api/partner/ingress/referral-embed-handoff")"
             artifact="$(jq -er '.data.artifact' <<<"$response")"

@@ -34,30 +34,6 @@ export interface InternalKeyExceptionMetadata {
 
 export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
   {
-    exceptionId: "INTERNAL_KEY_EXCP_001",
-    owner: "referral-team",
-    purpose:
-      "Scoped server-to-server referral embed handoff artifact issuance and consumption",
-    scope: [
-      "POST partner/ingress/referral-embed-handoff",
-      "POST partner/ingress/referral-embed-handoff/consume",
-      "POST partner/ingress/referral-embed-handoff/consent",
-    ],
-    ttl: "2026-10-31T23:59:59Z",
-    expiresAt: "2026-10-31T23:59:59Z",
-    networkBoundary: "internal-vpc-to-api-ingress",
-    rotationCadence: "30d",
-    usageSignal: "AUTH_SCOPED_INTERNAL_KEY_USED",
-    removalDate: "2026-10-31",
-    removalPlan:
-      "Migrate referral-embed-web BFF caller to IAM-SVC-001 WIF token exchange",
-    header: "x-drts-referral-handoff-key",
-    envVar: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-    rotationEnvVar: "DRTS_REFERRAL_EMBED_HANDOFF_KEY_PREVIOUS",
-    revokedKeysEnvVar: "DRTS_REFERRAL_EMBED_HANDOFF_KEY_REVOKED_KEYS",
-    status: "active",
-  },
-  {
     exceptionId: "INTERNAL_KEY_EXCP_002",
     owner: "control-plane-ops",
     purpose:

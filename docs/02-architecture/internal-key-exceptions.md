@@ -29,10 +29,23 @@ To prevent undocumented credential proliferation and unmonitored backdoor access
 
 | Exception ID            | Owner               | Purpose                                                                                      | Scope / Header                                                                                                                                                                                   | Network Boundary              | TTL / ExpiresAt        | Rotation Cadence | Usage Signal                    | Target Removal Date | Removal Plan                                                                                                                                 |
 | ----------------------- | ------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- | ---------------------- | ---------------- | ------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `INTERNAL_KEY_EXCP_001` | `referral-team`     | Scoped server-to-server referral embed handoff artifact issuance and consumption             | `x-drts-referral-handoff-key`<br>`POST partner/ingress/referral-embed-handoff`<br>`POST partner/ingress/referral-embed-handoff/consume`<br>`POST partner/ingress/referral-embed-handoff/consent` | `internal-vpc-to-api-ingress` | `2026-10-31T23:59:59Z` | `30d`            | `AUTH_SCOPED_INTERNAL_KEY_USED` | `2026-10-31`        | Migrate `referral-embed-web` BFF caller to IAM-SVC-001 WIF token exchange once WIF proxy is enabled on referral web app.                     |
 | `INTERNAL_KEY_EXCP_002` | `control-plane-ops` | Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent | `x-drts-internal-key`<br>`* *`<br>`POST partner/ingress/handoff`<br>`POST auth/token`                                                                                                            | `control-plane-proxy-to-api`  | `2026-10-31T23:59:59Z` | `14d`            | `AUTH_LEGACY_INTERNAL_KEY_USED` | `2026-10-31`        | Full deprecation of `DRTS_INTERNAL_KEY` fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. Temporarily extended per user decision on 2026-09-30 to keep dev deployments green pending WIF migration `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930`, accepting the delay of scheduled security retirement. |
 
 ### Retired exceptions
+
+INTERNAL_KEY_EXCP_001 (referral-team, referral embed handoff issuance /
+consume / consent) reached its `removalDate` of 2026-10-31 ahead of schedule:
+retired from the registry on 2026-10-02 by
+SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002, per its own removal plan.
+The three routes it covered (`POST partner/ingress/referral-embed-handoff`,
+`.../consume`, `.../consent`) now verify a Google-signed workload identity
+assertion (`x-drts-google-id-token`) against the same
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry and
+`GoogleWorkloadIdentityAdapter` every other proxied route already uses (see
+§8.2/§9 below); `x-drts-referral-handoff-key` is no longer read anywhere in
+`apps/api`. `referral-embed-web`'s BFF (`apps/referral-embed-web/lib/embed-api.ts`)
+already dual-sent this assertion on every authority call before this task, so
+no caller-side change was needed there.
 
 INTERNAL_KEY_EXCP_003 (sre-ops, staging emergency break-glass) reached its
 `removalDate` of 2026-08-31 and was retired from the registry on 2026-09-01,
@@ -1207,3 +1220,168 @@ were created, no secrets or GitHub variables were touched, no deploy was
 triggered, the provisioning script was not executed/modified, and no local
 server or Docker container was started — same guardrails as every prior
 round on this task.
+
+## 9. `SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002`: EXCP_001 retired, referral embed handoff moved to WIF
+
+### 9.1 Caller inventory (EXCP_001, before removal)
+
+INTERNAL_KEY_EXCP_001 gated the header `x-drts-referral-handoff-key`
+(env `DRTS_REFERRAL_EMBED_HANDOFF_KEY` / `..._PREVIOUS` / `..._REVOKED_KEYS`)
+on three API routes. Every caller, with file/line evidence as found on
+`origin/dev` before this task's edits:
+
+| # | Caller | Location | Evidence |
+| --- | --- | --- | --- |
+| 1 | `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts` `issueReferralEmbedHandoffArtifact` (`POST partner/ingress/referral-embed-handoff`) | then `:501-508` | `requireScopedInternalKey(request, process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY, {header: REFERRAL_EMBED_HANDOFF_KEY_HEADER, requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY"})` |
+| 2 | same file, `consumeReferralEmbedHandoffArtifact` (`POST .../consume`) | then `:539-546` | same shape |
+| 3 | same file, `recordReferralEmbedConsent` (`POST .../consent`) | then `:568-575` | same shape |
+| 4 | same file, `resolvePartnerNotificationNavigation` (`POST partner/entries/:entrySlug/notification-navigation/resolve`) | then `:2459-2466` | same header/env pair, reused for an unrelated route **not** in EXCP_001's registered `scope`. Already dead before this task: `evaluateInternalKey`'s `findMatchingExceptions` only matches by header *and* scope pattern, and no EXCP_001 scope pattern matches this route, so the `allowInternalBootstrap` branch here always returned `INTERNAL_KEY_UNDOCUMENTED` → 401, with or without EXCP_001 registered. Confirmed by reading `findMatchingExceptions`/`matchesScope` in `internal-key-exception-registry.ts` against this route's path; not exercised by any test. Left untouched: out of this task's three-route scope, and removing the registry entry does not change its (already-failing) outcome, only `INTERNAL_KEY_NOT_CONFIGURED` (503) vs `INTERNAL_KEY_INVALID`/`UNDOCUMENTED` (401) depending on whether ops still mounts the now-unused `DRTS_REFERRAL_EMBED_HANDOFF_KEY` secret in dev — either way this branch never succeeds. |
+| 5 | `apps/referral-embed-web/lib/embed-api.ts` `requestAuthority` | `:126-131` | sender, not the API's check: dual-sends `x-drts-referral-handoff-key` (from `process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY`) alongside `x-drts-internal-key` and, already before this task, a Google workload identity assertion (`getGoogleWorkloadIdentityHeader()`, `:89-105`) on every authority call `requestAuthority` makes — including all three routes (`:198-232`). This is the real caller for routes #1-3 in production/dev; no caller-side change was needed. |
+| 6 | `.github/workflows/deploy-dev.yml`, "Verify referral handoff session lifecycle" step | then `:1422-1460` | reads GCP secret `${secret_prefix}-referral-embed-handoff-key` and sends it as `x-drts-referral-handoff-key` on a direct `POST /api/partner/ingress/referral-embed-handoff` smoke-test call (route #1) as part of the post-deploy acceptance check. |
+| 7 | `docs/02-architecture/internal-key-exceptions.md` §2 inventory table / CI check (`operations/security/verify-internal-key-exceptions.py`) | this file | documentation + the automated registry/doc alignment check this task must keep passing. |
+
+No other caller was found: `grep -rn "REFERRAL_EMBED_HANDOFF_KEY\|x-drts-referral-handoff-key"` across the repo (excluding `node_modules`/build output) returns only the files above plus this task's own tests.
+
+### 9.2 What changed
+
+- `apps/api/src/common/auth/internal-key-exception-registry.ts`: the
+  INTERNAL_KEY_EXCP_001 entry is deleted from
+  `INTERNAL_KEY_EXCEPTION_REGISTRY` (array now holds only EXCP_002).
+- `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`: callers
+  #1-3 above now call a new private `requireReferralEmbedWorkloadIdentity`
+  helper instead of `requireScopedInternalKey`. The helper calls the existing
+  `GoogleWorkloadIdentityAdapter.verifyServicePrincipal` (the same adapter
+  and `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry every other
+  proxied route already verifies against — §7-§8 above), with
+  `enforceReplayProtection: false` (these are general proxied requests, not
+  one-time session issuance, matching `validateInternalKey`'s existing
+  general-proxy path and comment at
+  `apps/api/src/common/auth/internal-key.middleware.ts`). No fallback to the
+  legacy key: EXCP_001 is being retired outright, not extended like EXCP_002,
+  so there is nothing left for a fallback to read. Caller #4
+  (`resolvePartnerNotificationNavigation`) is unchanged -- see §9.1 row 4.
+  `apps/api/src/modules/tenant-partner/tenant-partner.module.ts` adds
+  `GoogleWorkloadIdentityAdapter` to `TenantPartnerModule`'s `providers`
+  (it already has `IdentityModule` imported, which exports the
+  `IdentityRepository` the adapter's constructor needs, so no new module
+  import or `forwardRef` was required).
+- `.github/workflows/deploy-dev.yml`: the "Verify referral handoff session
+  lifecycle" step no longer calls `gcloud secrets versions access` for the
+  handoff key secret or sends `x-drts-referral-handoff-key`. A new "Mint
+  identity token — referral embed handoff (API)" step mints a Google ID
+  token for this workflow's own WIF service account
+  (`DEV_WIF_SERVICE_ACCOUNT` / `github-actions-deployer`, audience =
+  the deployed API URL — the same pattern as the `operational-candidate-acceptance`
+  job's `POST /api/auth/token` calls at §7.9), and the verify step sends it
+  as `x-drts-google-id-token` on its direct issuance call. The `/consume`
+  leg of the smoke test goes through `referral-embed-web`'s own BFF
+  (`/api/referral/session`), which already authenticates as
+  `drts-dev-runtime` (routeScopes `["* *"]`) -- no registry change needed
+  for that leg.
+- This document: §2's EXCP_001 row removed, retirement note added to
+  "Retired exceptions" (§2), this §9 added.
+- Tests: see §9.4.
+
+### 9.3 Registry change required before this candidate's dev deploy (operator action, not performed by this task)
+
+The CI smoke-test step now authenticates as `github-actions-deployer`
+(registry entry B, `principalId: "dev-ci-deployer"`), which today is scoped
+only to `routeScopes: ["POST auth/token"]` (§7.9.1/§8.2). Calling the
+referral-embed-handoff issuance route with that identity will fail
+`WORKLOAD_ROUTE_SCOPE_DENIED` (403) until entry B's `routeScopes` also
+includes the issuance route. This task cannot write to the live
+`WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` GCP secret (guardrail), so the
+exact change ops/Supervisor must apply before deploying this candidate is:
+entry B's `routeScopes` becomes
+`["POST auth/token", "POST partner/ingress/referral-embed-handoff"]`,
+i.e. the full registry (replacing §8.2's three-entry JSON, entries A and C
+unchanged):
+
+```json
+[
+  {
+    "serviceAccountEmail": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-web-runtime",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["* *"]
+  },
+  {
+    "serviceAccountEmail": "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-ci-deployer",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": ["POST auth/token", "POST partner/ingress/referral-embed-handoff"],
+    "ciTenantActorGrants": [
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000901"
+      },
+      {
+        "tenantId": "10000000-0000-0000-0000-000000000201",
+        "actorType": "tenant_admin",
+        "actorId": "10000000-0000-0000-0000-000000000902"
+      }
+    ]
+  },
+  {
+    "serviceAccountEmail": "drts-dev-scheduler@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "principalId": "dev-scheduler",
+    "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
+    "routeScopes": [
+      "POST internal/scheduled-tasks/mail-outbox/drain",
+      "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+    ],
+    "scopes": [
+      "notification-delivery:drain",
+      "tenant-partner:approval-timeout-reminders:run"
+    ]
+  }
+]
+```
+
+Before this registry update lands, deploying this candidate would turn the
+"Verify referral handoff session lifecycle" step red (403 on the issuance
+call); the registry update must be applied before (or as part of)
+triggering the dev deploy of this candidate's merged SHA so that the first
+deploy of this code is already green. Nothing in this candidate reads the
+old `${secret_prefix}-referral-embed-handoff-key` GCP secret anymore, but
+this task did not remove its Cloud Run `secret_args` mount (§6 of
+`deploy-dev.yml`'s `prepare` job) or delete the secret itself, to avoid any
+chance of affecting caller #4 (§9.1) or any other latent consumer beyond
+this task's verified scope.
+
+### 9.4 Tests
+
+- `apps/api/tests/unit/tenant-partner.controller.test.ts`: the old
+  shared-secret-based `requires a dedicated key for referral embed handoff
+  issuance and consume` test is replaced with a
+  `describe("referral embed handoff: Google workload identity ...")` block
+  covering: a registered identity completing issue → consume (and rejecting
+  replay on a second consume, unchanged business logic); an unregistered
+  Google identity rejected `WORKLOAD_PRINCIPAL_NOT_REGISTERED`; a registered
+  identity outside its `routeScopes` rejected `WORKLOAD_ROUTE_SCOPE_DENIED`;
+  issuance and consent rejected `WORKLOAD_ASSERTION_MISSING` with no
+  assertion at all, including a case that presents the retired
+  `x-drts-referral-handoff-key` header alone (no effect); and a fail-closed
+  `WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED` case when the adapter is not
+  wired into the controller at all. Signs real RS256-signed test JWTs and
+  stubs `fetch` for the Google JWKS endpoint, same technique as
+  `apps/api/tests/unit/google-workload-identity.adapter.test.ts`.
+- `tests/unit/internal-key-exception-registry.test.ts`: the expiry-table
+  assertion that read EXCP_001 through the default registry now expects
+  `INTERNAL_KEY_UNDOCUMENTED` (no exception found) instead of
+  `INTERNAL_KEY_EXPIRED`, since the entry no longer exists.
+- `tests/integration/internal-key-rotation-retirement.integration.test.ts`:
+  the registry-completeness test drops the `EXCP_001` membership assertion
+  and now asserts `INTERNAL_KEY_EXCEPTION_REGISTRY.length === 1`. The
+  rotation/revocation test that exercised `requireScopedInternalKey`'s
+  generic primary/previous/revoked-key handling via the (now-retired)
+  referral-handoff header is repointed at EXCP_002's still-active
+  `x-drts-internal-key` header instead -- it was testing the generic
+  rotation mechanism, not anything specific to EXCP_001.
+- `operations/security/verify-internal-key-exceptions.py` run locally:
+  `AUDIT PASSED`, registry and markdown both show only `INTERNAL_KEY_EXCP_002`
+  (previously failed with "INTERNAL_KEY_EXCP_001 documented in Markdown
+  but missing in TypeScript registry" until the §2 table row and this
+  section's backtick-quoting were fixed to match the `` `INTERNAL_KEY_EXCP_\d+` ``
+  pattern the script scans for).

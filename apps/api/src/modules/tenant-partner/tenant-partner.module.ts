@@ -9,6 +9,7 @@ import { IdentityModule } from "../identity/identity.module";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
+import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
@@ -54,6 +55,7 @@ export function createTenantInvitationNotificationDeliveryService(
     TenantPartnerService,
     JwtAuthService,
     TenantPartnerRepository,
+    GoogleWorkloadIdentityAdapter,
     {
       provide: NotificationDeliveryService,
       useFactory: createTenantInvitationNotificationDeliveryService,

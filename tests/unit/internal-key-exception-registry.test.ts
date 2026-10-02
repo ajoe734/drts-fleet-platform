@@ -184,7 +184,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "key-value-1234567890123456789012345",
       "key-value-1234567890123456789012345",
       {
-        headerName: "x-drts-referral-handoff-key",
+        headerName: expiredRegistry[0]!.header,
         now: new Date("2026-08-01T00:00:00Z"),
         registry: expiredRegistry,
       },
@@ -358,7 +358,13 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "INTERNAL_KEY_EXCP_002",
     );
 
-    const resultReferralExpired = evaluateInternalKey(
+    // INTERNAL_KEY_EXCP_001 (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002)
+    // was removed from INTERNAL_KEY_EXCEPTION_REGISTRY ahead of its 2026-10-31
+    // deadline, so x-drts-referral-handoff-key is undocumented for every
+    // route now, not merely expired. The three referral embed handoff routes
+    // verify a Google workload identity assertion instead (see
+    // apps/api/tests/unit/tenant-partner.controller.test.ts).
+    const resultReferralUndocumented = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
@@ -369,11 +375,9 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         environment: "staging",
       },
     );
-    expect(resultReferralExpired.valid).toBe(false);
-    expect(resultReferralExpired.code).toBe("INTERNAL_KEY_EXPIRED");
-    expect(resultReferralExpired.exception?.exceptionId).toBe(
-      "INTERNAL_KEY_EXCP_001",
-    );
+    expect(resultReferralUndocumented.valid).toBe(false);
+    expect(resultReferralUndocumented.code).toBe("INTERNAL_KEY_UNDOCUMENTED");
+    expect(resultReferralUndocumented.exception).toBeUndefined();
   });
 
   it("enforces expiration on rotation overlap key when previousKeyExpiresAt is passed", () => {
