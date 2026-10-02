@@ -27,8 +27,10 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
+import { googleAssertionSource } from "./fresh-assertion";
 
 export class MailSessionInputError extends Error {}
+export class AssertionReplayError extends Error {}
 
 export interface MailSessionConfig {
   apiOrigin: string;
@@ -85,6 +87,7 @@ export interface MailSessionFetchDeps {
   fetch: typeof fetch;
   readGoogleIdToken: () => string;
   mask: (value: string) => void;
+  onSessionIssued?: (token: string) => void;
 }
 
 export interface MintedMailSession {
@@ -109,6 +112,11 @@ async function request(
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
+    if (path === "auth/token" && response.status === 409) {
+      const body = await response.json() as { error?: { code?: string } };
+      if (body.error?.code === "WORKLOAD_ASSERTION_REPLAYED")
+        throw new AssertionReplayError("Google assertion already consumed");
+    }
     throw new Error(
       `${path} returned HTTP ${response.status} (no credential details retained).`,
     );
@@ -167,6 +175,8 @@ export async function mintTenantAdminSession(
     throw new Error("auth/token did not return a usable session token.");
   }
   deps.mask(sessionToken);
+  // Retain the cleanup handle even if identity/proof verification later fails.
+  deps.onSessionIssued?.(sessionToken);
 
   const session = await request(
     config,
@@ -259,30 +269,38 @@ async function main(): Promise<void> {
   if (process.env.GITHUB_ACTIONS !== "true")
     throw new Error("Hosted runner required");
   await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
+  if (process.argv.includes("--preflight")) return;
   const envPath = process.env.GITHUB_ENV;
   if (!envPath) {
     throw new Error(
       "GITHUB_ENV is required to export the minted session to later workflow steps.",
     );
   }
-  const minted = await mintTenantAdminSession(config, {
-    fetch,
-    // Issued by google-github-actions/auth with token_format=id_token,
-    // id_token_audience=API origin. Never reuse an assertion from another call.
-    readGoogleIdToken: () =>
-      requireString(
-        process.env.DRTS_LIVE_MAIL_GOOGLE_ID_TOKEN,
-        "DRTS_LIVE_MAIL_GOOGLE_ID_TOKEN",
-      ),
-    mask: (value) =>
-      console.log(
-        `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
-      ),
-  });
-  appendFileSync(
-    envPath,
-    `DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=${minted.sessionToken}\n`,
+  const mask = (value: string) => console.log(
+    `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
   );
+  const assertions = googleAssertionSource(
+    config.apiOrigin,
+    requireString(process.env.DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT, "WIF service account"),
+    requireString(process.env.DRTS_LIVE_MAIL_WIF_ACCESS_TOKEN, "WIF access token"),
+    mask,
+  );
+  let minted: MintedMailSession | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const assertion = await assertions.next();
+    try {
+      minted = await mintTenantAdminSession(config, {
+        fetch, mask, readGoogleIdToken: () => assertion,
+        onSessionIssued: (token) => appendFileSync(envPath, `DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=${token}\n`),
+      });
+      break;
+    } catch (error) {
+      // A concurrent dev workflow can consume the first same-second token.
+      // Only this explicit replay rejection permits minting a new assertion.
+      if (!(error instanceof AssertionReplayError)) throw error;
+    }
+  }
+  if (!minted) throw new Error("Assertion collisions exhausted bounded retries");
   appendFileSync(
     envPath,
     `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`,
