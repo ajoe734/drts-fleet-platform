@@ -22,8 +22,7 @@ const driverId = "drv-demo-002";
 const registryEntry = {
   serviceAccountEmail: email,
   principalId,
-  actorId: "live-map-observer",
-  roles: ["ops_observer"],
+  roles: [],
   allowedTokenAudiences: [audience],
   routeScopes: ["POST auth/token"],
   driverProvisioningGrant: { driverId },
@@ -55,6 +54,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 function token(overrides: Record<string, unknown> = {}) {
@@ -167,6 +167,11 @@ it("issues a durable 15m service session with only driver:provision, without wor
 it.each([
   { "x-scopes": "*" },
   { "x-roles": "platform_admin" },
+  {
+    "x-actor-type": "ops_observer",
+    "x-actor-id": "dev-live-map",
+    "x-realm": "ops",
+  },
   { "x-role-families": "platform" },
   { "x-realm": "platform" },
   { "x-actor-id": "someone-else" },
@@ -210,7 +215,11 @@ it("rejects an unregistered Google identity even with a valid legacy key", async
 });
 
 it("does not grant provisioning to the deployer or to an observer without an explicit grant", async () => {
-  const entry = { ...registryEntry, driverProvisioningGrant: undefined };
+  const entry = {
+    ...registryEntry,
+    roles: ["ops_observer"],
+    driverProvisioningGrant: undefined,
+  };
   vi.stubEnv(
     "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS",
     JSON.stringify([entry]),
@@ -352,7 +361,7 @@ it("accepts the exact operator JSON with the real adapter and session service", 
     {},
     token({
       email: entry.serviceAccountEmail,
-      aud: entry.allowedTokenAudiences[1],
+      aud: entry.allowedTokenAudiences.at(-1),
     }),
   );
   expect((await f.auth.verifyAccessToken(issued.token))?.scopes).toEqual([
@@ -379,4 +388,59 @@ it("cannot reuse an unrestricted caller's idempotency result for another driver'
       identity,
     ),
   ).rejects.toMatchObject({ code: "WORKLOAD_DRIVER_TARGET_DENIED" });
+});
+
+it("the documented provisioning exchange leaves the observer session valid", async () => {
+  // Hold observer issuance within one tick to isolate this from C114's already
+  // tracked workforce-version race. All signing/persistence/verification is real.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-02T02:00:00Z"));
+  const doc = readFileSync(
+    "docs/02-architecture/internal-key-exceptions.md",
+    "utf8",
+  );
+  const entries = [...doc.matchAll(/```json\n([\s\S]*?)```/g)]
+    .map((match) => {
+      try {
+        return JSON.parse(match[1]!);
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry) => entry?.principalId?.startsWith("dev-live-map"));
+  const observer = entries.find((entry) =>
+    entry.roles.includes("ops_observer"),
+  );
+  const provisioner = entries.find((entry) => entry.driverProvisioningGrant);
+  expect(observer).toBeDefined();
+  expect(provisioner).toBeDefined();
+  vi.stubEnv(
+    "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS",
+    JSON.stringify(entries),
+  );
+  const f = fixture();
+  const observed = await f.issue(
+    {
+      "x-actor-type": "ops_observer",
+      "x-actor-id": "live-map-observer",
+      "x-realm": "ops",
+    },
+    token({
+      email: observer.serviceAccountEmail,
+      sub: "google-observer-subject",
+      aud: observer.allowedTokenAudiences[0],
+    }),
+  );
+  expect(await f.auth.verifyAccessToken(observed.token)).not.toBeNull();
+  vi.setSystemTime(Date.now() + 1000);
+  const issued = await f.issue(
+    {},
+    token({
+      email: provisioner.serviceAccountEmail,
+      sub: "google-provisioner-subject",
+      aud: provisioner.allowedTokenAudiences.at(-1),
+    }),
+  );
+  expect(await f.auth.verifyAccessToken(issued.token)).not.toBeNull();
+  expect(await f.auth.verifyAccessToken(observed.token)).not.toBeNull();
 });

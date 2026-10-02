@@ -1395,9 +1395,10 @@ every previously migrated caller are untouched.
 Owner Codex; reviewer Claude2. This task owns the live-map bootstrap and
 teardown authorization slice. C114 PR #2235 (`e3c7ed02701c387d82786bcfd8877e2618851f3b`)
 is already merged; draft PR #2247 at `5d23550587b1bbb6ce33be0d8948cc50a6dbd07f`
-contains additional consumer/cleanup repairs. That draft was discovered during
-final GitHub cross-check and must be composed before candidate handoff. C114
-remaining hosted acceptance stays pending.
+contains additional consumer/cleanup repairs. Merge anchor `8405c7040` composes
+that published draft without rewriting either history. Its exact driver scopes,
+isolation check, recovery paths and mandatory cleanup evidence gate are retained.
+C114 remaining hosted acceptance stays pending.
 
 Design: register a dedicated non-human live-map identity. A server-owned
 `driverProvisioningGrant.driverId` authorizes a 15-minute system session with
@@ -1427,10 +1428,12 @@ Implemented boundary:
 
 - The workflow uses the existing provider with a **new dedicated**
   `drts-dev-live-map` service account. Entry B / the deployer is unchanged.
-  Entry D below has no tenant impersonation grants, platform role, wildcard
-  scope, or generic system role. Its observer role serves the existing,
-  separate read-only map observer session; the provisioning session never
-  inherits that role or `regulatory:read`.
+  Entry D below has no tenant impersonation grants, workforce roles, wildcard
+  scope, or generic system role. A second account/principal, entry E, serves
+  only the read-only observer. Separating sessions on one principal was not
+  sufficient: Google verification upserts principal timestamps, invalidating
+  a previously issued workforce token. Independent principals avoid that
+  cross-session mutation and keep provisioning authority exclusively narrow.
 - `AuthController.issueToken` accepts the explicit provisioning grant only
   with the CI gate enabled outside staging/production. It constructs the
   session claims from verified registry data, ignores no requested authority
@@ -1467,7 +1470,7 @@ Implemented boundary:
 The following is **operator-only, not executed by the worker**. Do not grant
 project roles, Secret Manager access, `serviceAccountTokenCreator`, or
 impersonation rights to the deployer. `roles/iam.workloadIdentityUser` is bound
-only on the new account, to this repository's existing provider/pool trust.
+only on each dedicated account, to this repository's existing provider/pool trust.
 It permits the auth action to mint ID tokens; the account itself has no GCP
 resource permissions. See Google's [WIF service-account setup](https://github.com/google-github-actions/auth/tree/v2#workload-identity-federation-through-a-service-account)
 and [deployment-pipeline federation guide](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines).
@@ -1488,6 +1491,7 @@ test "$LIVE_MAP_REGION" = us-central1
 test "$LIVE_MAP_API" = https://drts-dev-api-r6ykdme3wa-uc.a.run.app
 LIVE_MAP_PROJECT_NUMBER=$(gcloud projects describe "$LIVE_MAP_PROJECT" --format='value(projectNumber)')
 LIVE_MAP_SA="drts-dev-live-map@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
+LIVE_MAP_OBSERVER_SA="drts-dev-live-map-observer@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
 mkdir -p .local/sec-live-map-wif/operator
 
 # Read back trust before using it; do not change the existing provider.
@@ -1498,31 +1502,44 @@ jq -e '.attributeMapping["attribute.repository"] == "assertion.repository" and
   .attributeCondition == "assertion.repository==\u0027ajoe734/drts-fleet-platform\u0027"' \
   .local/sec-live-map-wif/operator/provider.json
 
-gcloud iam service-accounts describe "$LIVE_MAP_SA" --project="$LIVE_MAP_PROJECT" >/dev/null 2>&1 || \
-  gcloud iam service-accounts create drts-dev-live-map --project="$LIVE_MAP_PROJECT" \
-    --display-name='Dev live map acceptance only'
-gcloud iam service-accounts add-iam-policy-binding "$LIVE_MAP_SA" \
-  --project="$LIVE_MAP_PROJECT" --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${LIVE_MAP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/attribute.repository/ajoe734/drts-fleet-platform"
+for LIVE_MAP_ACCOUNT in drts-dev-live-map drts-dev-live-map-observer; do
+  LIVE_MAP_ACCOUNT_EMAIL="${LIVE_MAP_ACCOUNT}@${LIVE_MAP_PROJECT}.iam.gserviceaccount.com"
+  gcloud iam service-accounts describe "$LIVE_MAP_ACCOUNT_EMAIL" --project="$LIVE_MAP_PROJECT" >/dev/null 2>&1 || \
+    gcloud iam service-accounts create "$LIVE_MAP_ACCOUNT" --project="$LIVE_MAP_PROJECT" \
+      --display-name='Dev live map acceptance only'
+  gcloud iam service-accounts add-iam-policy-binding "$LIVE_MAP_ACCOUNT_EMAIL" \
+    --project="$LIVE_MAP_PROJECT" --role=roles/iam.workloadIdentityUser \
+    --member="principalSet://iam.googleapis.com/projects/${LIVE_MAP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions/attribute.repository/ajoe734/drts-fleet-platform"
+done
 
 # Preserve A/B/C. Refuse duplicates instead of silently replacing an entry.
 gcloud secrets versions access latest --project="$LIVE_MAP_PROJECT" \
   --secret=drts-dev-workload-identity-google-service-principals \
   > .local/sec-live-map-wif/operator/registry-before.json
-jq -e --arg sa "$LIVE_MAP_SA" \
-  'type == "array" and all(.[]; .principalId != "dev-live-map" and .serviceAccountEmail != $sa)' \
+jq -e --arg sa "$LIVE_MAP_SA" --arg observer "$LIVE_MAP_OBSERVER_SA" \
+  'type == "array" and all(.[]; .principalId != "dev-live-map" and
+    .principalId != "dev-live-map-observer" and .serviceAccountEmail != $sa and .serviceAccountEmail != $observer)' \
   .local/sec-live-map-wif/operator/registry-before.json
-jq --arg sa "$LIVE_MAP_SA" --arg api "$LIVE_MAP_API" '. + [{
+jq --arg sa "$LIVE_MAP_SA" --arg observer "$LIVE_MAP_OBSERVER_SA" --arg api "$LIVE_MAP_API" '. + [{
   serviceAccountEmail: $sa,
   principalId: "dev-live-map",
-  actorId: "live-map-observer",
-  displayName: "Dev live map acceptance",
-  roles: ["ops_observer"],
+  displayName: "Dev live map driver provisioning",
+  roles: [],
   scopes: [],
-  allowedTokenAudiences: [$api, ($api + "/driver-provisioning")],
+  allowedTokenAudiences: [($api + "/driver-provisioning")],
   routeScopes: ["POST auth/token"],
   ciTenantActorGrants: [],
   driverProvisioningGrant: {driverId: "drv-demo-002"}
+}, {
+  serviceAccountEmail: $observer,
+  principalId: "dev-live-map-observer",
+  actorId: "live-map-observer",
+  displayName: "Dev live map read-only observer",
+  roles: ["ops_observer"],
+  scopes: ["regulatory:read"],
+  allowedTokenAudiences: [$api],
+  routeScopes: ["POST auth/token"],
+  ciTenantActorGrants: []
 }]' .local/sec-live-map-wif/operator/registry-before.json \
   > .local/sec-live-map-wif/operator/registry-after.json
 
@@ -1538,18 +1555,16 @@ gcloud secrets versions add drts-dev-workload-identity-google-service-principals
   --project="$LIVE_MAP_PROJECT" --data-file=.local/sec-live-map-wif/operator/registry-after.json
 ```
 
-Exact additive entry D for operators maintaining JSON elsewhere:
+Exact additive entries D and E for operators maintaining JSON elsewhere:
 
 ```json
 {
   "serviceAccountEmail": "drts-dev-live-map@drts-dev-devcc-20260825.iam.gserviceaccount.com",
   "principalId": "dev-live-map",
-  "actorId": "live-map-observer",
-  "displayName": "Dev live map acceptance",
-  "roles": ["ops_observer"],
+  "displayName": "Dev live map driver provisioning",
+  "roles": [],
   "scopes": [],
   "allowedTokenAudiences": [
-    "https://drts-dev-api-r6ykdme3wa-uc.a.run.app",
     "https://drts-dev-api-r6ykdme3wa-uc.a.run.app/driver-provisioning"
   ],
   "routeScopes": ["POST auth/token"],
@@ -1558,18 +1573,35 @@ Exact additive entry D for operators maintaining JSON elsewhere:
 }
 ```
 
+```json
+{
+  "serviceAccountEmail": "drts-dev-live-map-observer@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+  "principalId": "dev-live-map-observer",
+  "actorId": "live-map-observer",
+  "displayName": "Dev live map read-only observer",
+  "roles": ["ops_observer"],
+  "scopes": ["regulatory:read"],
+  "allowedTokenAudiences": [
+    "https://drts-dev-api-r6ykdme3wa-uc.a.run.app"
+  ],
+  "routeScopes": ["POST auth/token"],
+  "ciTenantActorGrants": []
+}
+```
+
 No new GitHub variable or secret is required. Existing `DEV_WIF_PROVIDER` and
-`DEV_GCP_PROJECT_ID` select the provider and deterministic account name;
+`DEV_GCP_PROJECT_ID` select the provider and deterministic account names;
 `DEV_WIF_SERVICE_ACCOUNT` stays unchanged for deployment callers. The workflow
 creates its own observer/provisioning/cleanup Google ID tokens with
 `id_token_include_email: true`. Separate observer/provisioning audiences prevent
-the replay ledger from rejecting the second exchange as the same assertion.
+assertion reuse between the two purposes; distinct principals also prevent
+provisioning exchanges from invalidating the observer session.
 The `DRTS_LIVE_MAP_GOOGLE_*_ID_TOKEN` values are masked, per-step action outputs,
 not repository secrets or saved artifacts. A fresh cleanup assertion handles
 runs lasting longer than the provisioning session's 15-minute lifetime.
 
 The existing provider trusts this repository, not only this workflow. Any
-repository workflow allowed by that trust can request this account's narrow
+repository workflow allowed by that trust can request these accounts' narrow
 capabilities. This does not confer deployment, secret-reading, tenant admin,
 or platform admin privileges. Further workflow-specific federation isolation
 would require a separate trust-policy task; no existing provider is widened.
