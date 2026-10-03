@@ -66,6 +66,15 @@ describe("validateMailSessionInputs", () => {
 });
 
 describe("deriveAliasRecipient", () => {
+  it.each(["invite", "approve"])(
+    "accepts the authorized sender's Workspace domain for %s",
+    (tag) => {
+      expect(deriveAliasRecipient("mail.acceptance@example.com", tag)).toBe(
+        `mail.acceptance+${tag}@example.com`,
+      );
+    },
+  );
+
   it("inserts a plus-addressing tag before the domain", () => {
     expect(deriveAliasRecipient("person@gmail.com", "invite")).toBe(
       "person+invite@gmail.com",

@@ -5,7 +5,7 @@ import io
 import json
 from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock, patch
 
 path = Path(__file__).resolve().parents[3] / 'e2e/system-remediation/sr-live-mail-001/mailbox_observer.py'
 spec = importlib.util.spec_from_file_location('mailbox_observer', path)
@@ -25,6 +25,42 @@ def mime(recipient='unit+invite@gmail.com', body='Invitation code: ti_SUPER_SECR
 
 
 class MailboxObservationTest(unittest.TestCase):
+    def test_workspace_sender_reaches_readonly_imap_and_real_mime_inspection(self):
+        request = {'candidate_sha': 'a' * 40, 'api_origin': 'https://drts-dev-api-r6ykdme3wa-uc.a.run.app',
+                   'delivery_id': '11111111-1111-1111-1111-111111111111', 'flow': 'invite',
+                   'subject': 'Invitation', 'required_text': ['Business content']}
+        health = MagicMock()
+        health.__enter__.return_value = health
+        health.status = 200
+        health.headers = {'x-drts-candidate-sha': 'a' * 40}
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.select.return_value = ('OK', [])
+        client.response.return_value = ('UIDVALIDITY', [b'900'])
+        message = EmailMessage()
+        message['From'] = 'mail.acceptance@example.com'
+        message['To'] = 'mail.acceptance+invite@example.com'
+        message['Message-ID'] = MESSAGE_ID
+        message['Subject'] = 'Invitation'
+        message.set_content('Business content')
+        client.uid.side_effect = [('OK', [b'45']), ('OK', [(b'data', message.as_bytes())])]
+        secrets = {'drts-dev-smtp-username': 'mail.acceptance@example.com',
+                   'drts-dev-smtp-password': 'private-password', 'drts-dev-smtp-from-email': 'mail.acceptance@example.com'}
+        output = io.StringIO()
+        with patch.dict(observer.os.environ, {'GITHUB_ACTIONS': 'true', 'DEV_GCP_PROJECT_ID': observer.PROJECT}), \
+             patch.object(observer.sys, 'stdin', io.StringIO(json.dumps(request))), \
+             patch.object(observer.sys, 'stdout', output), patch.object(observer.sys, 'stderr', io.StringIO()), \
+             patch.object(observer, 'secret', side_effect=secrets.__getitem__), \
+             patch.object(observer.urllib.request, 'build_opener') as opener, \
+             patch.object(observer.imaplib, 'IMAP4_SSL', return_value=client):
+            opener.return_value.open.return_value = health
+            observer.main()
+        client.login.assert_called_once_with('mail.acceptance@example.com', 'private-password')
+        client.select.assert_called_once_with('"[Gmail]/All Mail"', readonly=True)
+        self.assertTrue(json.loads(output.getvalue())['matched_content'])
+        self.assertNotIn('private-password', output.getvalue())
+        self.assertNotIn('mail.acceptance', output.getvalue())
+
     def inspect(self, raw):
         return observer.inspect_message(raw, MESSAGE_ID, 'unit+invite@gmail.com', 'unit@gmail.com', '邀請測試', ['Business id 123'])
 
