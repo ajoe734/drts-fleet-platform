@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   VoiceCallAuthorityError,
   type VoiceCallAuthorityClaims,
+  type VoiceCallAuthorityOperation,
   type VoiceCallAuthorityVerifier,
 } from "../../../apps/voice-media-worker/src/server/call-authority";
 import type { RecordingScope } from "../../../apps/voice-media-worker/src/recording/sealed-recorder";
@@ -14,17 +15,29 @@ import type { RecordingScope } from "../../../apps/voice-media-worker/src/record
  * `MediaWorkerServer`'s own verification/binding/fencing logic for real
  * against whatever claims this returns.
  */
+const BOTH_OPERATIONS: readonly VoiceCallAuthorityOperation[] = [
+  "admit",
+  "finalize",
+];
+
 export class FakeCallAuthority implements VoiceCallAuthorityVerifier {
   private readonly tokens = new Map<
     string,
-    { claims: VoiceCallAuthorityClaims; expiresAt: number | undefined }
+    {
+      claims: VoiceCallAuthorityClaims;
+      expiresAt: number | undefined;
+      allowedOperations: readonly VoiceCallAuthorityOperation[];
+    }
   >();
   private readonly revoked = new Set<string>();
   private epochCounter = 0;
 
   /** Issues a fresh token resolving to the given session id. Defaults to a
    * freshly auto-incremented epoch, an undefined (non-recording-eligible)
-   * scope, and no expiry unless overridden. */
+   * scope, no expiry, and a token capable of both `admit` and `finalize`
+   * unless overridden -- `allowedOperations` lets a test mint an
+   * admission-only (or finalize-only) token to exercise the operation
+   * separation `MediaWorkerServer` is required to enforce. */
   issue(
     sessionId: string,
     options: {
@@ -32,6 +45,7 @@ export class FakeCallAuthority implements VoiceCallAuthorityVerifier {
       scope?: RecordingScope | undefined;
       epoch?: number;
       expiresAt?: number;
+      allowedOperations?: readonly VoiceCallAuthorityOperation[];
     } = {},
   ): { token: string; claims: VoiceCallAuthorityClaims } {
     const token = `fake-call-authority-token-${randomUUID()}`;
@@ -42,7 +56,11 @@ export class FakeCallAuthority implements VoiceCallAuthorityVerifier {
       scope: options.scope,
       epoch,
     };
-    this.tokens.set(token, { claims, expiresAt: options.expiresAt });
+    this.tokens.set(token, {
+      claims,
+      expiresAt: options.expiresAt,
+      allowedOperations: options.allowedOperations ?? BOTH_OPERATIONS,
+    });
     return { token, claims };
   }
 
@@ -54,6 +72,7 @@ export class FakeCallAuthority implements VoiceCallAuthorityVerifier {
 
   async verifySessionAuthority(
     token: string,
+    operation: VoiceCallAuthorityOperation,
   ): Promise<VoiceCallAuthorityClaims> {
     if (this.revoked.has(token)) {
       throw new VoiceCallAuthorityError(
@@ -72,6 +91,12 @@ export class FakeCallAuthority implements VoiceCallAuthorityVerifier {
       throw new VoiceCallAuthorityError(
         "VOICE_MEDIA_CALL_AUTHORITY_EXPIRED",
         "This call-authority token has expired.",
+      );
+    }
+    if (!record.allowedOperations.includes(operation)) {
+      throw new VoiceCallAuthorityError(
+        "VOICE_MEDIA_CALL_AUTHORITY_OPERATION_NOT_PERMITTED",
+        `This call-authority token does not permit the '${operation}' operation.`,
       );
     }
     return record.claims;

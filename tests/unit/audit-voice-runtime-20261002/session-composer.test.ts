@@ -366,4 +366,67 @@ describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS 
     expect(asrAdapter.endAudioCalls).toBe(1);
     expect(asrAdapter.closeCalls).toBe(1);
   });
+
+  /**
+   * Codex review round 5 (reopen, AUDIT-VOICE-RUNTIME-20261002) R11
+   * scenario (b): a real provider boundary enforcing native WebSocket send
+   * semantics throws when `endAudio()` tries to send EOS on a socket still
+   * CONNECTING. That exception must never escape `VoiceMediaWorkerSession.
+   * closeAsr()` into the composer's close handler -- doing so skipped
+   * `close()` entirely and left the composer's own session-map entry
+   * leaked, since the `delete` after `closeAsr()` never ran. A plain
+   * call-counting double (`TrackingAsrAdapter` above) cannot demonstrate
+   * this: it has to actually throw.
+   */
+  it("still removes the session and still calls close() when the ASR adapter's endAudio throws", () => {
+    class ThrowingOnEndAudioAdapter implements VoiceSpeechToTextAdapter {
+      readonly providerName = "throwing";
+      readonly isProductionCapable = false as const;
+      closeCalls = 0;
+
+      async transcribe(): Promise<VoiceAsrSegmentResult> {
+        return {
+          segmentId: "seg",
+          revision: 1,
+          text: "",
+          final: true,
+          language: "cmn-TW",
+        };
+      }
+
+      endAudio(): void {
+        throw new Error(
+          "InvalidStateError: still in CONNECTING, cannot send EOS.",
+        );
+      }
+
+      close(): void {
+        this.closeCalls += 1;
+      }
+    }
+
+    const asrAdapter = new ThrowingOnEndAudioAdapter();
+    const ttsAdapter = new DeterministicTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({ asrAdapter, ttsAdapter }),
+    });
+    const channel = new (class extends EventEmitter {
+      destroyed = false;
+      sendText(): void {}
+      sendBinary(): void {}
+    })() as unknown as import("../../../apps/voice-media-worker/src/server/websocket-channel").WebSocketServerChannel;
+
+    composer.attach("sess-throwing-endaudio", channel);
+
+    expect(() =>
+      (channel as unknown as EventEmitter).emit(
+        "close",
+        1000,
+        "Normal closure",
+      ),
+    ).not.toThrow();
+
+    expect(composer.get("sess-throwing-endaudio")).toBeUndefined();
+    expect(asrAdapter.closeCalls).toBe(1);
+  });
 });

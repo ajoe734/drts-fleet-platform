@@ -716,3 +716,140 @@ durable recording storage, deployment). This round's fixes are internal
 authorization/lifecycle/concurrency corrections to code already in this
 worker's write scope -- they neither close nor newly depend on any of
 those external gaps.
+
+## 11. Round-5 review (reopen on `030aa63a0430`, Codex, generation `14cd83c0d32444f7a699f746be62462b`, PR #2282)
+
+Preserved here (this record is itself the round-5 reopen; the original
+read-only dispatch that produced it could not edit this document, so owner
+Claude2 appends it now, per Guide §0.7). Codex's round-5 review confirmed
+R1/R3/R4(structural)/R6/R8/R9/R10 as repaired per §10, and the R2 RESOURCE
+check (session/epoch/principal/scope matching) as repaired, but found two
+findings still open:
+
+- **R11 (P1 for the early-close exception/resource leak; P2 for the
+  unfinished drain/pending-result lifecycle, persistent, reusing round-4's
+  label for the _same_ underlying defect, not a new one)**:
+  `VoiceMediaWorkerSession.closeAsr()` called `endAudio()` then `close()`
+  synchronously with no terminal/cancelled state for an in-flight
+  `connect()`, no failure-safe cleanup, no EOS drain window, and no
+  rejection/settlement of pending `receiveResult()` waiters. The round-4
+  fix made the already-open-socket close _count_ correct but did not
+  implement the lifecycle itself: (a) closing while `connect()`'s login
+  HTTP call was still pending let the response, once it arrived, go on to
+  acquire access-info and a new provider socket for a session nobody was
+  attached to; (b) closing while the socket was still CONNECTING made
+  `endAudio()` call `socket.send("EOS")`, which a real WebSocket boundary
+  throws `InvalidStateError` for outside the OPEN state -- that exception
+  escaped `closeAsr()` and the composer's close handler before
+  `this.sessions.delete(sessionId)` ran, leaking both the socket and the
+  composer's map entry; (c) a pending `transcribe()` result was never
+  settled by `close()`, leaving its promise hanging indefinitely with no
+  bounded wait for an in-flight final.
+- **R12 (P2, new)**: `TwmAsrNetworkAdapter.connect()` resolved on the
+  socket's `open` event, not on the documented `180` send-ready status,
+  which can (and did, in the reviewer's reproduction) land in a later
+  event-loop turn. `transcribe()` immediately threw `TWM_ASR_NOT_READY`
+  for audio sent in that gap, with no queue/retry -- permanently
+  discarding the caller's first one or two audio chunks on every call.
+  `connect()` also returned immediately whenever `this.socket` was
+  assigned, even mid-handshake (checked before the single-flight
+  `connectPromise` guard), which was semantically wrong even though
+  `transcribe()`'s separate readiness check happened to still fail closed.
+- **R2 operation separation (P1, `caller_session_authorization`, remaining
+  part identified in round 4)**: both `/sessions` and `/recording/finalize`
+  called the exact same `verifySessionAuthority(token)` with no
+  operation/audience argument. A token resolving to the right
+  session/epoch/principal/resource was accepted for _either_ route --
+  admission and finalize were never distinguished as separate
+  capabilities.
+
+Required acceptance was assessed: `caller_session_authorization` NOT met
+(R2 operation separation); `approved_runtime_provider_paths` NOT met
+(R11/R12); `remaining_external_blockers_precise` not fully met (§9's
+omission of the drain/settlement requirement, corrected below);
+`same_sha_review_ci` not met (review rejected despite green same-SHA
+hosted CI). §12 repairs all three.
+
+## 12. Round-5 repair: terminal ASR lifecycle fencing, TWM readiness queuing, and call-authority operation separation
+
+| Finding / required_acceptance                                | Source and fix location                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Round-4 candidate -> this round                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Command / evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R11 (P1/P2, persistent)                                      | `media-session.ts` `closeAsr()`: each of `endAudio()`/`close()` now wrapped in its own `try`/`catch` so either throwing can never block the other or escape to the composer. `twm-network-client.ts` `TwmAsrNetworkAdapter`: new `terminated`/`socketOpen` fields; `connect()` rejects immediately once `terminated`, and no longer short-circuits on a merely-assigned (not yet open) `this.socket`; `performConnect()` now calls `assertNotTerminated()` after every awaited login/access-info/socket-construction/handshake step, and refuses to adopt a socket constructed after termination (closing it immediately instead); the socket's `open`-wait `Promise` also listens for `close` (not just `open`/`error`) so a `close()` issued mid-handshake can never leave that await hanging; new private `terminate(code, reason)` (invoked by `close()`) sends EOS only if `socketOpen` (never on CONNECTING/CLOSED), awaits a new `awaitDrain(eosDrainMs)` (bounded by the route profile's configured `timeouts.eosDrainMs`, ending early via a `drainSignal` the instant every outstanding waiter settles) before calling `failPendingWork()` to reject any still-pending `receiveResult()` waiters and discard unsent queued audio, then releases the socket | On `030aa63a0430`: (a) a stale login response still acquired access-info/a new socket after close; (b) `endAudio()`'s `send("EOS")` on a CONNECTING socket threw, skipping `close()` and leaving the composer's session-map entry leaked; (c) a pending `transcribe()` result was abandoned instantly, with no drain window for an in-flight final. This round: (a) the stale continuation is fenced before access-info/socket construction; (b) EOS is only attempted once `socketOpen`, and `close()`/cleanup always run regardless, never throwing; (c) `close()` waits up to the configured `eosDrainMs` for a final already in flight, and rejects (does not hang) whatever is still pending once that window elapses | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- 19/19 passed, including the four new "(R11 scenario a/b/c/c-timeout)" regressions using a new `StatefulSocket` double that enforces native WebSocket send/readyState semantics (throws on `send()` outside OPEN), not the existing call-counting `FakeSocket`; `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/session-composer.test.ts` -- 6/6 passed, including the new "still removes the session and still calls close() when the ASR adapter's endAudio throws" regression proving the composer's session-map cleanup now survives a throwing adapter          |
+| R12 (P2, new)                                                | `twm-network-client.ts` `TwmAsrNetworkAdapter`: `connect()`'s single-flight guard now checks `connectPromise` before any `this.socket` state (removing the premature "assigned but not open" short-circuit); new `audioQueue` (bounded at `MAX_QUEUED_AUDIO_CHUNKS = 64`, failing closed with `TWM_ASR_QUEUE_OVERFLOW` past that) and private `tryFlushQueue()`; `transcribe()` now always pushes the chunk to `audioQueue` and calls `tryFlushQueue()` (a no-op unless `this.ready`) instead of throwing `TWM_ASR_NOT_READY` for audio sent after `open` but before `180`; the `180` status handler in `handleMessage` also calls `tryFlushQueue()` once `this.ready` becomes true, flushing any chunks queued during that gap in arrival order; the provider `close`/`error` path now calls `failPendingWork()`, which also discards `audioQueue`, so queued-but-unsent audio cannot outlive a dropped connection                                                                                                                                                                                                                                                                                                                                                  | On `030aa63a0430`: two chunks sent between `open` and `180` produced two `TWM_ASR_NOT_READY` errors and zero provider audio delivered, silently truncating the caller's first utterance on every call. This round: both chunks are queued, then flushed to the provider in original order the instant `180` arrives -- zero errors, zero loss                                                                                                                                                                                                                                                                                                                                                                              | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- includes "(R12) queues audio sent between open and 180, then flushes it in order with no errors and no loss" and "(R12) rejects without hanging if the provider connection closes while audio is still queued and not yet ready"                                                                                                                                                                                                                                                                                                                                                  |
+| R2 operation separation (P1, `caller_session_authorization`) | `call-authority.ts`: new exported `VoiceCallAuthorityOperation` (`"admit" \| "finalize"`); `VoiceCallAuthorityVerifier.verifySessionAuthority` now takes a required second `operation` argument. `media-worker-server.ts`: `/sessions` now calls `verifySessionAuthority(callAuthorityToken, "admit")`; `/recording/finalize` now calls `verifySessionAuthority(callAuthorityToken, "finalize")`. `fake-call-authority.ts` (the test double standing in for the external issuer, per Guide §0.7 -- the worker's own verification/binding logic is still exercised for real): `issue()` gained an `allowedOperations` option (defaulting to both, so every pre-existing test is unaffected); `verifySessionAuthority` now throws `VOICE_MEDIA_CALL_AUTHORITY_OPERATION_NOT_PERMITTED` when the resolved token's `allowedOperations` does not include the requested operation                                                                                                                                                                                                                                                                                                                                                                                          | On `030aa63a0430`: a token resolving to the exact bound session/epoch/principal/resource was accepted at either `/sessions` or `/recording/finalize` regardless of which operation it was actually issued for -- admission and finalize were not distinguished as separate capabilities. This round denies an admission-only token presented to `/recording/finalize`, and a finalize-only token presented to `/sessions`, before either route's resource-level checks ever run, while still sealing/admitting normally for a token that legitimately carries the attempted operation                                                                                                                                      | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/call-authority-session-binding.test.ts` -- 5/5 passed, including "rejects admission with a token that resolves to the right session id but was only ever granted the 'finalize' operation"; `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts` -- 14/14 passed, including "rejects finalization when the presented token resolves to the right session/epoch/resource but was only ever granted the 'admit' operation" and "seals a valid finalization using a token granted only the 'finalize' operation (operation separation does not over-deny)" |
+
+Full regression for this round (Node v22.23.2, pnpm 10.33.0, TypeScript
+5.9.3, Vitest 4.1.4, this task's worktree):
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- clean (exit 0).
+- `pnpm --filter @drts/voice-media-worker lint` (`eslint src --max-warnings=0`) -- clean (exit 0).
+- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- **91
+  passed, 0 failed (11 files)**, run twice consecutively to confirm no
+  flakiness (up from round-4's 81; new cases added to
+  `twm-network-client.test.ts` (R11 scenarios a/b/c/timeout, R12 ordering
+  and provider-close-while-queued), `session-composer.test.ts` (R11
+  throwing-adapter composer-level regression), `call-authority-session-
+binding.test.ts` and `media-recording-finalize-authorization.test.ts`
+  (R2 operation-separation denial and non-over-denial cases), plus the
+  `fake-call-authority.ts` double's new `allowedOperations` support).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-recording-recovery-20260913
+tests/integration/uv-exec-023.integration.test.ts
+tests/integration/system-remediation/sr-recording-recovery-20260913` -- 23
+  passed, 0 failed (3 files): confirms this round's `call-authority.ts`/
+  `media-worker-server.ts`/`media-session.ts`/`twm-network-client.ts`
+  changes stay compatible with these pre-existing, out-of-write-scope
+  callers.
+- `pnpm run typecheck:root` -- clean (exit 0, zero errors anywhere in the repo).
+- `pnpm run lint:root` -- clean (exit 0).
+- `git diff --check 030aa63a04308ad0f1d5bca180810148d3dc9b22 HEAD -- apps/voice-media-worker tests/unit/audit-voice-runtime-20261002 docs/04-uat/audit-voice-runtime-20261002.md` -- exit 0.
+
+**Environment note (not attributable to this task's code):** this
+worktree's shared `node_modules` was again stale at the start of this
+round -- identical condition to prior rounds, and identical root cause:
+several top-level symlinks (`typescript`, `husky`, `next`, `globals`,
+`lint-staged`, +24 more) resolved through dangling absolute paths into the
+removed sibling worktree `gemini-audit-dependency-gates-20261002`. Round-4
+repaired this once already (§10's environment note) but the repair is
+worktree-local and does not survive a later `.pnpm` store GC/reindex in
+the shared workspace; repeated the same repair via
+`tools/development-orchestrator/bin/ensure-local-node-modules.py repair
+--root .`, which re-materializes this worktree's own local `node_modules`
+(backed by its own `.pnpm` virtual store, `CI=true pnpm install
+--frozen-lockfile --prefer-offline`) in place of the stale symlinks --
+scoped to this worktree, not the canonical root's shared one, and not a
+lockfile change (`Lockfile is up to date, resolution step is skipped`).
+After the repair, all commands above passed normally. No product/browser/
+DB/Compose server was started; no live network call was made.
+
+`same_sha_review_ci`: candidate SHA and branch are recorded via the task
+lifecycle at handoff; hosted CI and review run against that SHA per the
+normal candidate lifecycle, not asserted here. The locked round-4
+candidate `030aa63a04308ad0f1d5bca180810148d3dc9b22` is superseded by this
+round.
+
+**Still open, not addressed this round:** round 4's and round 5's reviews
+both noted that `media-recording-finalize-authorization.test.ts`'s
+`MemoryRecorderObjectStore.readVersion` (lines ~95-128) still fabricates
+readback metadata for segments that were never actually persisted via
+`putRecordingImmutable`, instead of exercising `verifyRecordedObject`
+against genuinely stored objects for every success-path case. This
+round's three required findings (R11, R12, R2 operation separation) did
+not touch that test boundary and it remains exactly as round 4 left it --
+recorded here precisely so it is not mistaken for closed.
+
+### Remaining blockers, restated precisely for this round
+
+Unchanged from §8's "Remaining blockers, restated precisely for this
+round" (6a: no call-authority issuer exists; 6b: dialogue/booking business
+logic is still not invoked) and §3 items 1/3/5 (vendor procurement,
+durable recording storage, deployment). This round's fixes -- terminal ASR
+session lifecycle fencing, bounded readiness queuing, and call-authority
+operation separation -- are internal authorization/lifecycle/concurrency
+corrections to code already in this worker's write scope. They do not
+require, and do not newly depend on, a real call-authority issuer, a
+provisioned TWM account, or any other external gap: the operation
+separation is enforced entirely by this worker's own verifier contract
+(§0.7 notes the missing production issuer/audience itself remains a
+legitimate external gate; only the _distinction_ between admit and
+finalize capabilities was in scope here, and is now enforced at this
+worker-owned port for whichever issuer is eventually wired in).

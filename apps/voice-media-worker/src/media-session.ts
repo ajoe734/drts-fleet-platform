@@ -200,10 +200,22 @@ export class VoiceMediaWorkerSession {
    * connection, if the adapter supports it. Idempotent and safe to call on
    * every session-close path (normal close, drain, idle timeout, provider
    * failure, attach failure) -- a provider stream, its waiters, and any
-   * billing/session resource it holds must not outlive this session. */
+   * billing/session resource it holds must not outlive this session. Each
+   * call is isolated: an adapter whose `endAudio`/`close` throws (e.g. a
+   * native WebSocket boundary rejecting a send attempted outside the OPEN
+   * state) must never prevent the other from running, nor escape to the
+   * composer's own close handler and block its session-map cleanup. */
   closeAsr(): void {
-    this.asrAdapter.endAudio?.();
-    this.asrAdapter.close?.();
+    try {
+      this.asrAdapter.endAudio?.();
+    } catch {
+      // Best effort -- teardown continues regardless (SD §11.4).
+    }
+    try {
+      this.asrAdapter.close?.();
+    } catch {
+      // Best effort -- teardown continues regardless (SD §11.4).
+    }
   }
 
   handleDtmf(digit: string, occurredAt: string): void {

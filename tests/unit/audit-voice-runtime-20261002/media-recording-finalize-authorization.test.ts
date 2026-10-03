@@ -541,6 +541,102 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     expect(ledger.calls).toBe(0);
   });
 
+  /**
+   * Codex review round 5 R2 (remaining operation requirement, carried from
+   * round 4): a token that resolves to the exact bound session/epoch/
+   * principal/resource is not, by itself, evidence of permission to
+   * *finalize* -- admission and finalize are separate capabilities, and
+   * `verifySessionAuthority` must be told, and must itself enforce, which
+   * operation the caller is attempting.
+   */
+  it("rejects finalization when the presented token resolves to the right session/epoch/resource but was only ever granted the 'admit' operation", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-op",
+      callId: "call-op-admit-only",
+      recordingId: "rec-op-admit-only",
+      legId: "leg-1",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-op-admit-only",
+      scope,
+      started.callAuthority,
+    );
+    // Same session/epoch/resource as the admission above, but this
+    // finalize-time token was only ever granted 'admit'.
+    const { token: admitOnlyToken } = started.callAuthority.issue(
+      "sess-op-admit-only",
+      { epoch, scope, allowedOperations: ["admit"] },
+    );
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-op-admit-only",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: admitOnlyToken,
+    });
+
+    expect(result.status).toBe(403);
+    expect(result.body.code).toBe(
+      "VOICE_MEDIA_CALL_AUTHORITY_OPERATION_NOT_PERMITTED",
+    );
+    expect(ledger.calls).toBe(0);
+  });
+
+  it("seals a valid finalization using a token granted only the 'finalize' operation (operation separation does not over-deny)", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-op",
+      callId: "call-op-finalize-only",
+      recordingId: "rec-op-finalize-only",
+      legId: "leg-1",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-op-finalize-only",
+      scope,
+      started.callAuthority,
+    );
+    const { token: finalizeOnlyToken } = started.callAuthority.issue(
+      "sess-op-finalize-only",
+      { epoch, scope, allowedOperations: ["finalize"] },
+    );
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-op-finalize-only",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeOnlyToken,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ status: "sealed" });
+    expect(ledger.calls).toBeGreaterThan(0);
+  });
+
   it("rejects finalization once the presented call-authority token has been revoked", async () => {
     const scope: RecordingScope = {
       brandId: "brand-y",

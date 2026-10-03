@@ -115,6 +115,31 @@ describe("AUDIT-VOICE-RUNTIME-20261002: call-authority token lifecycle at admiss
     }
   });
 
+  /**
+   * Codex review round 5 R2 (remaining operation requirement, carried from
+   * round 4): a genuine, unexpired, unrevoked token for the right session id
+   * must still be denied admission if it was only ever granted the
+   * 'finalize' operation -- admission and finalize are separate
+   * capabilities enforced by the verifier call itself, not by resource
+   * equality alone.
+   */
+  it("rejects admission with a token that resolves to the right session id but was only ever granted the 'finalize' operation", async () => {
+    const { server, port, callAuthority } = await startServer();
+    try {
+      const { token } = callAuthority.issue("sess-finalize-only-token", {
+        allowedOperations: ["finalize"],
+      });
+      const result = await postSessions(port, token);
+      expect(result.status).toBe(403);
+      expect(result.body.code).toBe(
+        "VOICE_MEDIA_CALL_AUTHORITY_OPERATION_NOT_PERMITTED",
+      );
+      expect(server.sessionCount).toBe(0);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("rejects reissuing an equal-or-lower epoch for a session id once a higher epoch has already been admitted", async () => {
     const { server, port, callAuthority } = await startServer();
     try {

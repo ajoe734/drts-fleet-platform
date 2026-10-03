@@ -227,6 +227,65 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     }
   }
 
+  /** A real WebSocket enforces native send semantics: `send()` throws
+   * `InvalidStateError` outside the OPEN state, and `close()` on a
+   * CONNECTING socket transitions it to CLOSING/CLOSED and fires `close`
+   * (never `open`/`error`). `FakeSocket` above deliberately does not model
+   * this ("merely appends bytes in all states") -- these R11/R12
+   * regressions need a double that actually enforces it, the way Codex
+   * review round 5 required. */
+  class StatefulSocket implements TwmWebSocketLike {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSED = 3;
+
+    readyState: number = StatefulSocket.CONNECTING;
+    readonly sent: Array<Uint8Array | string> = [];
+    private readonly listeners: Record<string, Array<(event: any) => void>> =
+      {};
+    private readonly buffered: Record<string, unknown[]> = {};
+
+    send(data: Uint8Array | string): void {
+      if (this.readyState !== StatefulSocket.OPEN) {
+        const err = new Error(
+          `Cannot send: WebSocket is not OPEN (readyState=${this.readyState}).`,
+        );
+        err.name = "InvalidStateError";
+        throw err;
+      }
+      this.sent.push(data);
+    }
+
+    open(): void {
+      this.readyState = StatefulSocket.OPEN;
+      this.fire("open", {});
+    }
+
+    close(): void {
+      if (this.readyState === StatefulSocket.CLOSED) return;
+      this.readyState = StatefulSocket.CLOSED;
+      this.fire("close", {});
+    }
+
+    addEventListener(type: string, listener: (event: any) => void): void {
+      (this.listeners[type] ??= []).push(listener);
+      const queued = this.buffered[type];
+      if (queued?.length) {
+        this.buffered[type] = [];
+        for (const event of queued) listener(event);
+      }
+    }
+
+    fire(type: string, event: unknown): void {
+      const list = this.listeners[type];
+      if (list?.length) {
+        for (const listener of list) listener(event);
+      } else {
+        (this.buffered[type] ??= []).push(event);
+      }
+    }
+  }
+
   function transportFor(
     accessTicket: string,
     expiresAt = "2099-01-01T00:00:00.000Z",
@@ -603,5 +662,288 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
 
     adapter.endAudio();
     expect(socket.sent[socket.sent.length - 1]).toBe("EOS");
+  });
+
+  /**
+   * Codex review round 5 (reopen, AUDIT-VOICE-RUNTIME-20261002) R11
+   * scenario (a): `closeAsr()`/`close()` arriving while `connect()`'s login
+   * HTTP call is still pending must fence the continuation -- the login
+   * response finally arriving afterward must never go on to acquire
+   * access-info or a provider socket for a session nobody is attached to
+   * anymore.
+   */
+  it("(R11 scenario a) never acquires access-info or a provider socket once closed while login is still pending", async () => {
+    let resolveLogin: (() => void) | undefined;
+    const loginGate = new Promise<void>((resolve) => {
+      resolveLogin = resolve;
+    });
+    let accessCalls = 0;
+    const wsFactory = vi.fn(() => new StatefulSocket());
+    const transport: TwmHttpTransport = async (_method, path) => {
+      if (path === "/api/v1/login") {
+        await loginGate;
+        return jsonResponse(200, { token: "asr-tok" });
+      }
+      if (path === "/api/v1/streaming/transcript/access-info") {
+        accessCalls += 1;
+        return jsonResponse(200, {
+          websocketUrl: "wss://twm.example/stream",
+          ticket: "ticket-scenario-a",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    };
+    const adapter = new TwmAsrNetworkAdapter(
+      transport,
+      wsFactory,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    const transcribePromise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    // Let `transcribe()` actually enter `connect()` -> `login()` and start
+    // awaiting the still-pending HTTP call.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Simulates `VoiceMediaWorkerSession.closeAsr()` firing on a channel
+    // "close" (hangup) while that login call is still in flight.
+    adapter.close();
+
+    resolveLogin!();
+    await expect(transcribePromise).rejects.toThrow(TwmNetworkError);
+
+    expect(accessCalls).toBe(0);
+    expect(wsFactory).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Codex review round 5 R11 scenario (b): closing while the provider
+   * socket exists but is still CONNECTING (login/access-info already
+   * resolved, `open` not yet fired) must not throw -- a real WebSocket
+   * boundary throws `InvalidStateError` on `send()` outside OPEN, and that
+   * exception used to escape before `close()` ever ran, leaking the
+   * CONNECTING socket and (at the composer layer) the session-map entry.
+   */
+  it("(R11 scenario b) closes cleanly without throwing while the socket is still CONNECTING, never sending on a non-open socket", async () => {
+    const socket = new StatefulSocket();
+    let created = false;
+    const wsFactory = (): StatefulSocket => {
+      created = true;
+      return socket;
+    };
+    const adapter = new TwmAsrNetworkAdapter(
+      transportFor("ticket-scenario-b"),
+      wsFactory,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    const connectPromise = adapter.connect();
+    for (let i = 0; i < 20 && !created; i++) {
+      await Promise.resolve();
+    }
+    expect(created).toBe(true);
+    expect(socket.readyState).toBe(StatefulSocket.CONNECTING);
+
+    // Must not throw even though the socket cannot accept a send yet.
+    expect(() => adapter.close()).not.toThrow();
+
+    expect(socket.sent).toEqual([]);
+    expect(socket.readyState).toBe(StatefulSocket.CLOSED);
+    await expect(connectPromise).rejects.toThrow(TwmNetworkError);
+  });
+
+  /**
+   * Codex review round 5 R11 scenario (c): a ready stream with a pending
+   * `transcribe()` result must not be abandoned the instant `close()` is
+   * called -- the adapter must honor the profile's configured
+   * `eosDrainMs` and let an in-flight final still be delivered.
+   */
+  it("(R11 scenario c) delivers a final result that arrives within the configured EOS-drain window after close()", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new StatefulSocket();
+      const shortDrainProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, eosDrainMs: 30 },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transportFor("ticket-scenario-c1"),
+        () => socket,
+        { accountId: "a", accountSecret: "s" },
+        shortDrainProfile,
+      );
+
+      const promise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      socket.open();
+      socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(socket.sent).toEqual([new Uint8Array([1])]);
+
+      adapter.close();
+      // A final scheduled 5ms after EOS, well within the 30ms drain window.
+      setTimeout(() => {
+        socket.fire("message", {
+          data: JSON.stringify({
+            providerSessionId: "p1",
+            segmentId: "seg-1",
+            revision: 1,
+            text: "final text",
+            final: 1,
+            language: "cmn-TW",
+          }),
+        });
+      }, 5);
+      await vi.advanceTimersByTimeAsync(5);
+
+      const result = await promise;
+      expect(result).toMatchObject({ text: "final text", final: true });
+      expect(socket.sent).toContain("EOS");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("(R11 scenario c, timeout) rejects a pending transcribe result once the configured EOS-drain window elapses with no final", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new StatefulSocket();
+      const shortDrainProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, eosDrainMs: 30 },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transportFor("ticket-scenario-c2"),
+        () => socket,
+        { accountId: "a", accountSecret: "s" },
+        shortDrainProfile,
+      );
+
+      const promise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      socket.open();
+      socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+
+      adapter.close();
+      // Attach the rejection assertion before advancing the fake drain
+      // timer, so Node never observes `promise` as unhandled in the gap
+      // between the timer firing and this test resuming.
+      const rejection = expect(promise).rejects.toThrow(TwmNetworkError);
+      await vi.advanceTimersByTimeAsync(30);
+
+      await rejection;
+      expect(socket.readyState).toBe(StatefulSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Codex review round 5 R12: `connect()` resolves on the socket's `open`
+   * event, which documentedly lands in an earlier turn than the provider's
+   * `180` send-ready status. Audio sent in that gap must be queued and
+   * flushed in order the instant `180` arrives, never thrown away as
+   * "not ready" and never dropped.
+   */
+  it("(R12) queues audio sent between open and 180, then flushes it in order with no errors and no loss", async () => {
+    const socket = new StatefulSocket();
+    const adapter = new TwmAsrNetworkAdapter(
+      transportFor("ticket-r12"),
+      () => socket,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    const first = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    const second = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([2]),
+      sequence: 2,
+    });
+
+    socket.open();
+    // Let `connect()` resolve for both callers before 180 ever arrives --
+    // the exact gap the finding describes.
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(socket.sent).toEqual([]);
+
+    socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+    await Promise.resolve();
+    expect(socket.sent).toEqual([new Uint8Array([1]), new Uint8Array([2])]);
+
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-1",
+        revision: 1,
+        text: "one",
+        final: 1,
+        language: "cmn-TW",
+      }),
+    });
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-2",
+        revision: 1,
+        text: "two",
+        final: 1,
+        language: "cmn-TW",
+      }),
+    });
+
+    await expect(first).resolves.toMatchObject({ text: "one" });
+    await expect(second).resolves.toMatchObject({ text: "two" });
+  });
+
+  it("(R12) rejects without hanging if the provider connection closes while audio is still queued and not yet ready", async () => {
+    const socket = new StatefulSocket();
+    const adapter = new TwmAsrNetworkAdapter(
+      transportFor("ticket-r12-close"),
+      () => socket,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    const promise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    socket.open();
+    // Let `connect()`/`transcribe()` resolve and the chunk land in the
+    // not-yet-ready queue; 180 never arrives before the connection drops.
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(socket.sent).toEqual([]);
+    socket.close();
+
+    await expect(promise).rejects.toThrow(TwmNetworkError);
+    expect(socket.sent).toEqual([]);
   });
 });

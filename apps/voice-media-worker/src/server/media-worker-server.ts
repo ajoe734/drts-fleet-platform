@@ -605,10 +605,10 @@ export class MediaWorkerServer extends EventEmitter {
             }
             let claims: VoiceCallAuthorityClaims;
             try {
-              claims =
-                await this.callAuthorityVerifier.verifySessionAuthority(
-                  callAuthorityToken,
-                );
+              claims = await this.callAuthorityVerifier.verifySessionAuthority(
+                callAuthorityToken,
+                "admit",
+              );
             } catch (err) {
               res.statusCode = 403;
               res.end(
@@ -752,10 +752,10 @@ export class MediaWorkerServer extends EventEmitter {
             }
             let claims: VoiceCallAuthorityClaims;
             try {
-              claims =
-                await this.callAuthorityVerifier.verifySessionAuthority(
-                  callAuthorityToken,
-                );
+              claims = await this.callAuthorityVerifier.verifySessionAuthority(
+                callAuthorityToken,
+                "finalize",
+              );
             } catch (err) {
               res.statusCode = 403;
               res.end(

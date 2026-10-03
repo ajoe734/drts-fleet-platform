@@ -1,6 +1,16 @@
 import type { RecordingScope } from "../recording/sealed-recorder";
 
 /**
+ * The two distinct capabilities a call-authority token may carry (Codex
+ * review round 5, R2 "remaining" operation requirement). A token that
+ * resolves to the right session/epoch/principal/resource is necessary but
+ * not sufficient: admission and recording-finalize are different
+ * capabilities, and a token issued only for one must be refused for the
+ * other even though every resource coordinate matches.
+ */
+export type VoiceCallAuthorityOperation = "admit" | "finalize";
+
+/**
  * The authenticated, server-owned facts a trusted call/line authority
  * attests for one admitted session. These must be *resolved* from a
  * caller-presented, independently verifiable token -- never accepted as
@@ -49,8 +59,16 @@ export class VoiceCallAuthorityError extends Error {
  * verification/binding logic.
  */
 export interface VoiceCallAuthorityVerifier {
-  /** Resolves and validates a caller-presented call-authority token.
-   * Must reject (throw `VoiceCallAuthorityError`) a missing, expired,
-   * replayed, revoked, or otherwise unrecognized token. */
-  verifySessionAuthority(token: string): Promise<VoiceCallAuthorityClaims>;
+  /** Resolves and validates a caller-presented call-authority token for the
+   * exact operation the caller is attempting. Must reject (throw
+   * `VoiceCallAuthorityError`) a missing, expired, replayed, revoked, or
+   * otherwise unrecognized token, AND must reject a token that is genuine,
+   * unexpired and resolves to the right session/resource but was never
+   * granted `operation` (e.g. an admission-only token presented to
+   * `/recording/finalize`) -- resource/epoch/principal equality alone is not
+   * evidence of permission to perform a specific operation. */
+  verifySessionAuthority(
+    token: string,
+    operation: VoiceCallAuthorityOperation,
+  ): Promise<VoiceCallAuthorityClaims>;
 }
