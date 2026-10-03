@@ -303,7 +303,7 @@ describe("platform admin service", () => {
 
     await platformAdminService.onModuleInit();
 
-    const placard = platformAdminService.generatePlacardVersion(
+    const placard = await platformAdminService.generatePlacardVersion(
       {
         versionCode: "placard-2026-q3",
         publicInfoVersionId: "public-info-persisted-001",
@@ -383,7 +383,7 @@ describe("platform admin service", () => {
 
     await platformAdminService.onModuleInit();
 
-    const placard = platformAdminService.listPlacardVersions()[0];
+    const placard = (await platformAdminService.listPlacardVersions())[0];
 
     expect(placard).toEqual(
       expect.objectContaining({

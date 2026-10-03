@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Inject, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import {
   AdapterType,
@@ -56,8 +62,10 @@ import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
 import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
+  type DocumentArtifactRebuildRegistry,
   type DocumentArtifactRecord,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
@@ -76,6 +84,14 @@ import {
  */
 const CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS = 14;
 
+/**
+ * Attempts `restorePlacardArtifactWithRetry` makes before giving up on a
+ * transient store failure (R10-F, Codex REOPEN generation
+ * fdc2511b33d844c8b89d74ad71a982c9) -- see that method's own doc for why a
+ * retry here is always safe.
+ */
+const PLACARD_PUBLICATION_RESTORE_ATTEMPTS = 3;
+
 // ── Placard PDF rendering (SR-PLACARD-001) ──────────────────────────────────
 // Dependency-free, minimal PDF-1.4 writer for vehicle placards.
 // Matches the minimal PDF-1.4 writer used by billing settlement (SR-INVOICE-001).
@@ -87,7 +103,10 @@ function toPdfAsciiText(value: string): string {
 }
 
 function escapePdfLiteralText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
 }
 
 function chunkPdfLines(lines: string[], size: number): string[][] {
@@ -162,7 +181,11 @@ function buildMinimalPdf(lines: string[]): Buffer {
 function buildPlacardPdfRows(
   placard: Pick<
     PlacardVersionRecord,
-    "placardVersionId" | "versionCode" | "templateName" | "publishedAt" | "createdAt"
+    | "placardVersionId"
+    | "versionCode"
+    | "templateName"
+    | "publishedAt"
+    | "createdAt"
   >,
   source: PublicInfoVersionRecord,
 ): string[] {
@@ -458,6 +481,35 @@ type PlatformAdminUserSnapshot = {
   status: PlatformAdminUserStatus;
 };
 
+/**
+ * `__publishClaimToken` (R7-followthrough/R8/R9) marks a placard record as
+ * a durable publish claim that has not been finalized yet -- see
+ * `PlatformAdminRepository.claimPlacardPublish`/`finalizePlacardPublish`.
+ * It is never part of the public `PlacardVersionRecord` contract; every
+ * path that returns a placard to a caller outside this module goes through
+ * `stripClaimToken`/`clonePlacardVersion` first.
+ */
+type PlacardWithClaimToken = PlacardVersionRecord & {
+  __publishClaimToken?: string | null;
+};
+
+function withClaimToken(
+  record: PlacardVersionRecord,
+  token: string,
+): PlacardWithClaimToken {
+  return { ...record, __publishClaimToken: token };
+}
+
+function stripClaimToken(record: PlacardVersionRecord): PlacardVersionRecord {
+  const clean: PlacardWithClaimToken = { ...record };
+  delete clean.__publishClaimToken;
+  return clean;
+}
+
+function hasPendingPublishClaim(record: PlacardVersionRecord): boolean {
+  return Boolean((record as PlacardWithClaimToken).__publishClaimToken);
+}
+
 @Injectable()
 export class PlatformAdminService implements OnModuleInit {
   private publicInfoVersions = PUBLIC_INFO_SEED.map((version) =>
@@ -465,6 +517,18 @@ export class PlatformAdminService implements OnModuleInit {
   );
 
   private placardVersions: PlacardVersionRecord[] = [];
+
+  /**
+   * Serializes `publishPlacardVersion` calls per `placardVersionId` within
+   * this process. Without it, two concurrent publish requests for the same
+   * placard can both pass the `publishedAt` guard before either awaits
+   * anything, race the durable-store write, and leave the live placard's
+   * metadata pointing at a hash a *different* completion's bytes actually
+   * occupy (R7). A later publish for the same id chains onto whatever
+   * promise is already queued, so it only runs -- and only re-checks the
+   * guard -- after every earlier one has fully settled, success or failure.
+   */
+  private readonly placardPublishQueue = new Map<string, Promise<unknown>>();
 
   private adapters: PlatformAdapter[] = PLATFORM_ADAPTERS_SEED.map((adapter) =>
     this.clonePlatformAdapter(adapter),
@@ -507,9 +571,32 @@ export class PlatformAdminService implements OnModuleInit {
     @Optional()
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {
-    this.placardVersions = PLACARD_SEED.map((placard) =>
-      this.clonePlacardVersion(placard),
+    // Materialising real PDF bytes requires awaiting `documentArtifactStore`,
+    // which a constructor cannot do; seed placards start as plain clones here
+    // and are actually rendered (via `clonePlacardVersion`) in `onModuleInit`,
+    // which already runs -- and is already awaited -- before the app accepts
+    // any request.
+    this.placardVersions = PLACARD_SEED.map((placard) => ({ ...placard }));
+
+    // Registered unconditionally, same convention as
+    // `BillingSettlementService`'s "tenant-invoice"/"report" rebuilders: a
+    // placard whose `artifactManifestHash` was recorded under a process-local
+    // store that predates this durable one (or under a sibling instance, or
+    // before this instance restarted) has metadata that proves nothing about
+    // what the shared store currently holds. `resolveDocumentArtifact`
+    // reports that as "not_found" the same way it would a never-materialised
+    // placard, and this rebuilder answers it by deterministically
+    // re-deriving the file from this instance's own durably persisted
+    // placard + public-info records -- returning null, not throwing, when
+    // this instance's own list genuinely has no such id.
+    documentArtifactRebuildRegistry?.register(
+      "placard",
+      (subjectId, expectedSha256) =>
+        this.rebuildPlacardArtifact(subjectId, expectedSha256),
     );
   }
 
@@ -523,14 +610,22 @@ export class PlatformAdminService implements OnModuleInit {
           persistedState.placardVersions.length > 0;
 
         if (!hasPersistedState) {
+          this.placardVersions = await Promise.all(
+            this.placardVersions.map((placard) =>
+              this.resolvePlacardVersion(placard),
+            ),
+          );
           this.persistChanges(
             {
               publicInfoVersions: this.publicInfoVersions.map((version) =>
                 this.clonePublicInfoVersion(version),
               ),
-              placardVersions: this.placardVersions.map((placard) =>
-                this.clonePlacardVersion(placard),
-              ),
+              placardVersions: this.placardVersions.map((placard) => ({
+                ...placard,
+                downloadMetadata: placard.downloadMetadata
+                  ? { ...placard.downloadMetadata }
+                  : null,
+              })),
             },
             "module init bootstrap",
           );
@@ -538,8 +633,14 @@ export class PlatformAdminService implements OnModuleInit {
           this.publicInfoVersions = persistedState.publicInfoVersions.map(
             (version) => this.clonePublicInfoVersion(version),
           );
-          this.placardVersions = persistedState.placardVersions.map((placard) =>
-            this.clonePlacardVersion(placard),
+          // Keeps a still-pending `__publishClaimToken`, if a sibling
+          // instance's claim for one of these placards has not finalized
+          // yet (R9) -- `resolvePlacardVersion`, not the external-facing
+          // `clonePlacardVersion`, is what populates this cache.
+          this.placardVersions = await Promise.all(
+            persistedState.placardVersions.map((placard) =>
+              this.resolvePlacardVersion(placard),
+            ),
           );
         }
 
@@ -564,8 +665,10 @@ export class PlatformAdminService implements OnModuleInit {
         );
       }
     } else {
-      this.placardVersions = this.placardVersions.map((placard) =>
-        this.clonePlacardVersion(placard),
+      this.placardVersions = await Promise.all(
+        this.placardVersions.map((placard) =>
+          this.clonePlacardVersion(placard),
+        ),
       );
     }
 
@@ -673,8 +776,7 @@ export class PlatformAdminService implements OnModuleInit {
       this.normalizeNullableText(command.effectiveFrom) ??
       version.effectiveFrom;
     version.effectiveTo =
-      this.normalizeNullableText(command.effectiveTo) ??
-      version.effectiveTo;
+      this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
     version.updatedAt = publishedAt;
 
     const changedVersions = previousPublished
@@ -768,13 +870,15 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePublicInfoVersion(version);
   }
 
-  listPlacardVersions() {
-    return this.placardVersions.map((placard) =>
-      this.clonePlacardVersion(placard),
+  async listPlacardVersions() {
+    return Promise.all(
+      this.placardVersions.map((placard) => this.clonePlacardVersion(placard)),
     );
   }
 
-  getPlacardVersion(placardVersionId: string): PlacardVersionRecord {
+  async getPlacardVersion(
+    placardVersionId: string,
+  ): Promise<PlacardVersionRecord> {
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );
@@ -789,13 +893,47 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePlacardVersion(placard);
   }
 
-  publishPlacardVersion(
+  async publishPlacardVersion(
     placardVersionId: string,
     command: PublishPlacardVersionCommand = {},
     requestId?: string,
     publishActorId?: string | null,
   ) {
     void command;
+    return this.runExclusivePlacardPublish(placardVersionId, () =>
+      this.publishPlacardVersionExclusive(
+        placardVersionId,
+        requestId,
+        publishActorId,
+      ),
+    );
+  }
+
+  /**
+   * Chains `fn` onto whatever publish for this `placardVersionId` is already
+   * queued, so concurrent calls run one at a time, in call order, and a
+   * later one always observes an earlier one's fully-settled result (success
+   * or failure) before it re-checks `placard.publishedAt` -- see
+   * `placardPublishQueue`'s own comment for why this matters (R7). `fn` runs
+   * via `.then(fn, fn)` so a rejected predecessor still unblocks the next
+   * queued call instead of wedging it forever.
+   */
+  private runExclusivePlacardPublish<T>(
+    placardVersionId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.placardPublishQueue.get(placardVersionId) ?? Promise.resolve();
+    const next = previous.then(fn, fn);
+    this.placardPublishQueue.set(placardVersionId, next);
+    return next;
+  }
+
+  private async publishPlacardVersionExclusive(
+    placardVersionId: string,
+    requestId?: string,
+    publishActorId?: string | null,
+  ) {
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );
@@ -807,7 +945,24 @@ export class PlatformAdminService implements OnModuleInit {
         { placardVersionId },
       );
     }
-    if (placard.publishedAt) {
+    // (R8-followthrough, Codex REOPEN generation 2b738adf3c2d4a508800cb3a8df0f553)
+    // This cached `placard` can be a restarted/freshly-booted instance's
+    // bootstrap snapshot of ANOTHER instance's claim that has since been
+    // abandoned (crashed/lost network before finalize/release). Such a
+    // snapshot still carries `publishedAt` (set when the claim was taken)
+    // AND the pending `__publishClaimToken` -- it is not proof of a
+    // finalized publish (see `hasPendingPublishClaim`). Rejecting here
+    // purely on cached `publishedAt`, without ever reaching
+    // `claimPlacardPublish`'s own stale-claim reclaim guard below, would
+    // make every instance booted after an abandoned claim permanently
+    // unable to publish this placard even once the abandonment window has
+    // elapsed. Only a cached record that is ALREADY known-finalized (no
+    // repository to double-check against, or no pending claim token) is
+    // trustworthy enough to reject without a round trip.
+    if (
+      placard.publishedAt &&
+      (!this.platformAdminRepository || !hasPendingPublishClaim(placard))
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "PLACARD_VERSION_ALREADY_PUBLISHED",
@@ -817,16 +972,221 @@ export class PlatformAdminService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    placard.publishedAt = now;
-    placard.updatedAt = now;
-
-    // Force re-render so PDF reflects the actual publishedAt timestamp
-    this.ensurePlacardArtifact(placard, true);
-
-    this.persistChanges(
-      { placardVersions: [this.clonePlacardVersion(placard)] },
-      "publish_placard_version",
+    // Render against a staged copy, not the live placard: `ensurePlacardArtifact`
+    // performs a real durable-store write (`put`), which can fail after this
+    // instance has already decided to publish (network blip, throttled
+    // storage, etc). Mutating `placard.publishedAt` before that write is
+    // confirmed would leave a transient failure indistinguishable from a
+    // genuine publish -- `placard.publishedAt` truthy blocks every retry with
+    // ALREADY_PUBLISHED even though no durable bytes exist. Staging first
+    // means a failed write leaves the original record untouched and
+    // retryable; only a successful write's results are copied back.
+    // `__publishClaimToken` (R8/R9) is this attempt's own unique marker --
+    // never part of the public contract, always stripped before this
+    // placard is returned to any caller -- see `claimPlacardPublish`.
+    const claimToken = randomUUID();
+    const staged: PlacardVersionRecord = withClaimToken(
+      { ...placard, publishedAt: now, updatedAt: now },
+      claimToken,
     );
+
+    // `runExclusivePlacardPublish` only rules out another publish call IN
+    // THIS PROCESS reaching here concurrently -- it cannot see a different
+    // Cloud Run instance racing to publish the same never-before-published
+    // placard. Claim the publish in the durable record BEFORE either
+    // instance touches the document-artifact store: the claim is an atomic
+    // `WHERE publishedAt IS NULL` conditional write, so exactly one
+    // concurrent caller wins it. A losing caller must never render or store
+    // bytes -- it adopts whatever the winner actually persisted instead.
+    const claim = this.platformAdminRepository
+      ? await this.platformAdminRepository.claimPlacardPublish(staged)
+      : { claimed: true, currentRecord: null };
+
+    if (!claim.claimed) {
+      if (claim.currentRecord) {
+        const winnerIndex = this.placardVersions.findIndex(
+          (candidate) => candidate.placardVersionId === placardVersionId,
+        );
+        if (winnerIndex >= 0) {
+          // The winner's own claim snapshot, cached verbatim -- including
+          // its `__publishClaimToken` if it has not finalized yet (R9).
+          // `clonePlacardVersion`/`ensurePlacardArtifact` must not treat a
+          // record carrying that token as proof of a completed publish;
+          // they re-resolve it against the repository instead of trusting
+          // this snapshot's `artifactManifestHash`.
+          this.placardVersions[winnerIndex] = { ...claim.currentRecord };
+        }
+      }
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLACARD_VERSION_ALREADY_PUBLISHED",
+        "This placard version has already been published.",
+        {
+          placardVersionId,
+          publishedAt: claim.currentRecord?.publishedAt ?? null,
+        },
+      );
+    }
+
+    // The repository may have reconciled an earlier, ambiguously-acked
+    // attempt by THIS caller (R8) and returned that earlier attempt's own
+    // committed claim instead of rejecting outright. Keep working against
+    // whatever claim actually landed, not necessarily `staged` itself.
+    const wonClaim = claim.currentRecord ?? staged;
+
+    try {
+      // (R7/R8 byte-ownership fix, Codex REOPEN generation
+      // f556818456f9441c80a29478e7910bea) The claim above only fences the
+      // durable *record* -- it does not stop this attempt's own object
+      // write from landing late. A previous version of this method relied
+      // solely on the read-back below, which only catches a stale write
+      // that lands BEFORE it runs; a write delayed past finalize (a slow
+      // network, not a slow claimant) still silently clobbered the actual
+      // winner's bytes. Capturing this attempt's baseline generation here,
+      // before render, and fencing the write itself against it (see
+      // `renderPlacardArtifact`'s `fenceGeneration`) closes that gap: ANY
+      // write that lands after another writer has changed the object is
+      // rejected by the store, no matter how late it arrives.
+      const baselineArtifact = await this.documentArtifactStore.get(
+        "placard",
+        placard.placardVersionId,
+      );
+      // Force re-render so PDF reflects the actual publishedAt timestamp.
+      // (R10-G fix) `requireDurableBackup: true` -- this is the actual
+      // destructive publish; see `preservePlacardPublicationBytes`.
+      await this.ensurePlacardArtifact(
+        wonClaim,
+        true,
+        baselineArtifact?.record.generation ?? null,
+        true,
+      );
+
+      // The claim above only fences the durable *record*; the fenced write
+      // just above only fences against THIS call's own stale baseline. Both
+      // leave a gap this re-read closes: a generic writer outside this
+      // method's own claim/fence protocol (or a store-level anomaly) that
+      // mutates the same object immediately after this call's write landed,
+      // with no repository involved at all to detect it via `finalize`
+      // below (that path requires a real, configured repository). Trust
+      // what the store actually has now, not only what this call's own
+      // render produced, before committing metadata to it.
+      //
+      // (R10-A, Codex REOPEN generation 9f5f14e9954f4ee9bbb2cb629880b777)
+      // A transport failure on THIS read -- or this check's own mismatch
+      // throw -- used to fall straight through to the generic `catch`
+      // below, which only released the DB claim and never restored the
+      // object. The `catch` now also calls
+      // `repairPlacardArtifactAfterLostClaim`, so either outcome from this
+      // read is covered, not just a clean `finalize` rejection.
+      const storedEntry = await this.documentArtifactStore.get(
+        "placard",
+        placard.placardVersionId,
+      );
+      if (
+        !storedEntry ||
+        storedEntry.record.sha256 !== wonClaim.artifactManifestHash
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PLACARD_PUBLISH_CONFLICT",
+          "This placard's durable artifact changed during publish. Retry the publish.",
+          {
+            placardVersionId,
+            expectedSha256: wonClaim.artifactManifestHash,
+            actualSha256: storedEntry?.record.sha256 ?? null,
+          },
+        );
+      }
+
+      // Fenced, awaited commit of the claim this call already won: the
+      // caller never observes success before the durable record actually
+      // reflects it, unlike the fire-and-forget `persistChanges` used
+      // elsewhere in this service. Dropping the token here is what tells a
+      // later reader this row is actually finalized, not merely claimed
+      // (R9); a `false` result means something unexpected already moved
+      // the row out from under this claim, so treat it as a conflict
+      // rather than reporting success for a record that does not actually
+      // reflect it.
+      if (this.platformAdminRepository) {
+        const finalized = await this.platformAdminRepository.finalizePlacardPublish(
+          stripClaimToken(wonClaim),
+          claimToken,
+        );
+        if (!finalized) {
+          // (R10 byte-ownership compensation) The DB CAS above is the
+          // actual source of truth on ownership and has just said this
+          // attempt lost it, which can happen even though this attempt's
+          // own object write above legitimately passed its own fence (its
+          // baseline read stalled long enough to alias a reclaiming
+          // instance's already-finalized bytes as "unchanged" -- R10). The
+          // object must not keep reflecting this attempt's bytes; see
+          // `repairPlacardArtifactAfterLostClaim` for how it is put back.
+          await this.repairPlacardArtifactAfterLostClaim(
+            placard.placardVersionId,
+          );
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "PLACARD_PUBLISH_CONFLICT",
+            "This placard's publish claim was superseded before it could be finalized. Retry the publish.",
+            { placardVersionId },
+          );
+        }
+
+        // (R10-C byte-ownership compensation, Codex REOPEN generation
+        // ac45f6a18eb347a397a7f5faf84f00d7) This call just won the DB race,
+        // but that does not prove the object still holds the bytes this
+        // call verified above: a losing sibling can read the object AFTER
+        // this call's own write (passing ITS fence legitimately, since it
+        // is reading current state, not a stale baseline), overwrite it,
+        // then lose the DB race and call `repairPlacardArtifactAfterLostClaim`
+        // itself -- but at that moment this row still carries THIS call's
+        // now-dropped claim token as "pending" from the loser's point of
+        // view, so the loser's own repair correctly no-ops and defers to
+        // "whichever attempt eventually finalizes", i.e. here. Calling it
+        // unconditionally closes that loop; it is a cheap no-op on the
+        // overwhelmingly common case where the store already matches
+        // `wonClaim.artifactManifestHash`.
+        await this.repairPlacardArtifactAfterLostClaim(
+          placard.placardVersionId,
+        );
+      }
+    } catch (error) {
+      if (this.platformAdminRepository) {
+        const reverted: PlacardVersionRecord = {
+          ...placard,
+          publishedAt: null,
+          updatedAt: now,
+        };
+        await this.platformAdminRepository.releasePlacardPublishClaim(
+          placardVersionId,
+          wonClaim.publishedAt!,
+          reverted,
+          claimToken,
+        );
+        // (R10-A byte-ownership compensation on a failed/ambiguous
+        // attempt, Codex REOPEN generation
+        // 9f5f14e9954f4ee9bbb2cb629880b777) An error here is not only "the
+        // DB CAS reported loss" (handled above, before this attempt even
+        // reaches `catch`) -- it can be any failure AFTER this attempt's
+        // own object write already landed, e.g. a transport error on
+        // whatever this attempt did next. Whether or not this attempt's
+        // own write actually clobbered the real winner, repairing is
+        // idempotent and safe (see `repairPlacardArtifactAfterLostClaim`),
+        // so it always runs here too rather than only on the clean
+        // `!finalized` path above.
+        await this.repairPlacardArtifactAfterLostClaim(placardVersionId);
+      }
+      throw error;
+    }
+
+    placard.publishedAt = wonClaim.publishedAt;
+    placard.updatedAt = wonClaim.updatedAt;
+    placard.artifactFileId = wonClaim.artifactFileId;
+    placard.artifactManifestHash = wonClaim.artifactManifestHash;
+    placard.artifactDownloadUrl = wonClaim.artifactDownloadUrl;
+    placard.artifactExpiresAt = wonClaim.artifactExpiresAt;
+    placard.downloadMetadata = wonClaim.downloadMetadata ?? null;
+
     this.recordAudit(
       {
         actorId: this.normalizeNullableText(publishActorId),
@@ -848,7 +1208,7 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePlacardVersion(placard);
   }
 
-  generatePlacardVersion(
+  async generatePlacardVersion(
     command: GeneratePlacardVersionCommand,
     requestId?: string,
   ) {
@@ -913,15 +1273,20 @@ export class PlatformAdminService implements OnModuleInit {
     };
 
     // Materialise real PDF bytes and sign the URL
-    this.ensurePlacardArtifact(placard);
+    await this.ensurePlacardArtifact(placard);
 
     this.placardVersions = [
-      this.clonePlacardVersion(placard),
+      await this.clonePlacardVersion(placard),
       ...this.placardVersions,
     ];
-    this.persistChanges(
+    // Awaited, not fire-and-forget (R7-followthrough): this id is about to
+    // be returned to the caller, who can immediately try to publish it on
+    // this instance or a sibling one. If this draft write were still in
+    // flight when that publish's claim/finalize committed, it could land
+    // after them and regress the row back to pre-publish content.
+    await this.persistChanges(
       {
-        placardVersions: [this.clonePlacardVersion(placard)],
+        placardVersions: [await this.clonePlacardVersion(placard)],
       },
       "generate_placard_version",
     );
@@ -935,7 +1300,7 @@ export class PlatformAdminService implements OnModuleInit {
         resourceType: "placard_version",
         resourceId: placard.placardVersionId,
         newValuesSummary: {
-          ...this.clonePlacardVersion(placard),
+          ...(await this.clonePlacardVersion(placard)),
           sourcePublicInfoStatus: publicInfoVersion.status,
         },
       },
@@ -2356,19 +2721,23 @@ export class PlatformAdminService implements OnModuleInit {
     }
   }
 
-  private ensurePlacardArtifact(
+  /**
+   * `DOCUMENT_ARTIFACT_STORE` is now a durable, shared backend (see
+   * `document-artifact-runtime.config.ts`): the exact bytes `put` there at
+   * render time survive a restart and are visible from every instance, so
+   * once `placard.artifactManifestHash` is set it is permanent proof the
+   * bytes exist -- there is no need to re-check the store on every read.
+   * Only an explicit `forceRerender` (the placard's own mutable fields, e.g.
+   * `publishedAt`, are deliberately baked into its PDF) or a
+   * never-before-materialised placard actually renders and calls `put`.
+   */
+  private async ensurePlacardArtifact(
     placard: PlacardVersionRecord,
     forceRerender = false,
-  ): PlacardVersionRecord {
-    const stored = this.documentArtifactStore.get(
-      "placard",
-      placard.placardVersionId,
-    );
-    const materialised =
-      !forceRerender &&
-      stored != null &&
-      placard.artifactManifestHash != null &&
-      stored.record.sha256 === placard.artifactManifestHash;
+    fenceGeneration?: string | null,
+    requireDurableBackup = false,
+  ): Promise<PlacardVersionRecord> {
+    const materialised = !forceRerender && placard.artifactManifestHash != null;
     const expired = this.isPlacardArtifactExpired(
       placard.artifactDownloadUrl,
       placard.artifactExpiresAt,
@@ -2378,37 +2747,24 @@ export class PlatformAdminService implements OnModuleInit {
       return placard;
     }
 
-    const publicInfoVersion = this.publicInfoVersions.find(
-      (v) => v.versionId === placard.publicInfoVersionId,
-    );
-
-    let record: DocumentArtifactRecord;
     if (materialised) {
-      record = stored!.record;
-    } else if (publicInfoVersion) {
-      const pdfBytes = buildMinimalPdf(
-        buildPlacardPdfRows(placard, publicInfoVersion),
+      // Only the signed link's window has lapsed; the durable store already
+      // holds the exact bytes behind `artifactManifestHash` -- reissue the
+      // signature over that same unchanged hash, never re-render.
+      const downloadMetadata = this.createPlacardDownloadMetadata(
+        placard.placardVersionId,
+        placard.artifactManifestHash!,
       );
-      record = this.documentArtifactStore.put({
-        kind: "placard",
-        subjectId: placard.placardVersionId,
-        mimeType: "application/pdf",
-        bytes: pdfBytes,
-      });
-    } else {
-      const fallbackBytes = buildMinimalPdf([
-        `Vehicle Service Placard ${placard.versionCode}`,
-        `Placard ID: ${placard.placardVersionId}`,
-        `Source Version: ${placard.publicInfoVersionId}`,
-        `Generated At: ${placard.createdAt}`,
-      ]);
-      record = this.documentArtifactStore.put({
-        kind: "placard",
-        subjectId: placard.placardVersionId,
-        mimeType: "application/pdf",
-        bytes: fallbackBytes,
-      });
+      placard.artifactDownloadUrl = downloadMetadata.downloadUrl;
+      placard.artifactExpiresAt = downloadMetadata.expiresAt;
+      placard.downloadMetadata = downloadMetadata;
+      return placard;
     }
+
+    const record = await this.renderPlacardArtifact(placard, {
+      fenceGeneration,
+      requireDurableBackup,
+    });
 
     const downloadMetadata = this.createPlacardDownloadMetadata(
       placard.placardVersionId,
@@ -2426,15 +2782,557 @@ export class PlatformAdminService implements OnModuleInit {
     return placard;
   }
 
-  private clonePlacardVersion(
+  /**
+   * Renders this placard's PDF bytes from its own fields and the source
+   * `PublicInfoVersionRecord` it was generated from. The one rendering logic
+   * both `ensurePlacardArtifact`'s first materialisation/republish and
+   * `rebuildPlacardArtifact` go through, so a sibling instance or a
+   * post-restart instance recovering a verified link gets byte-identical
+   * content to what was originally issued (as long as the source public-info
+   * record has not itself changed since -- see `rebuildPlacardArtifact` for
+   * what happens when it has).
+   *
+   * `recover: true` (used only by `rebuildPlacardArtifact`) writes with
+   * `putIfAbsent` instead of `put`: that recovery path can race a sibling
+   * instance's own concurrent recovery of the exact same (kind, subjectId),
+   * and an unconditional overwrite could clobber bytes the sibling already
+   * correctly restored. A producer's own explicit issuance/republish
+   * (`recover` left `false` and `fenceGeneration` left `undefined`) is never
+   * racing a *recovery* in this sense -- writing its own newly rendered
+   * bytes is the legitimate, intended overwrite -- so it keeps using `put`.
+   *
+   * `fenceGeneration` (R7/R8 byte-ownership fix, Codex REOPEN generation
+   * f556818456f9441c80a29478e7910bea), used only by the publish path via
+   * `ensurePlacardArtifact`, conditions the write on the object's state not
+   * having moved since the caller's own baseline read: `null` means the
+   * caller believed nothing was stored yet, a string means the caller
+   * observed exactly that generation. This is what actually stops a
+   * publish attempt whose claim was reclaimed and finalized by another
+   * instance while this attempt's own write was still in flight (a slow
+   * network, not a slow claimant) from clobbering the real winner's bytes
+   * on arrival -- the DB claim token alone fences the *record*, never the
+   * object. A fenced-out write throws `PLACARD_PUBLISH_CONFLICT` instead of
+   * returning a record for bytes that were never actually stored.
+   */
+  /**
+   * The pure rendering step `renderPlacardArtifact` builds on: a placard's
+   * PDF bytes are solely a function of its own fields and the source
+   * `PublicInfoVersionRecord` currently held in memory -- no store access,
+   * no side effects.
+   *
+   * (R10-E, Codex REOPEN generation fdc2511b33d844c8b89d74ad71a982c9) A
+   * repair/restore no longer re-renders through this at all -- it copies
+   * `preservePlacardPublicationBytes`'s own durable, content-addressed copy
+   * of whatever a winner's render originally produced instead, which stays
+   * correct even after `this.publicInfoVersions` (or the durable source row
+   * itself) has legitimately moved on since. This stays the one rendering
+   * path `renderPlacardArtifact` uses for an actual new issuance.
+   */
+  private renderPlacardBytes(placard: PlacardVersionRecord): Buffer {
+    const publicInfoVersion =
+      this.publicInfoVersions.find(
+        (v) => v.versionId === placard.publicInfoVersionId,
+      ) ?? null;
+    return publicInfoVersion
+      ? buildMinimalPdf(buildPlacardPdfRows(placard, publicInfoVersion))
+      : buildMinimalPdf([
+          `Vehicle Service Placard ${placard.versionCode}`,
+          `Placard ID: ${placard.placardVersionId}`,
+          `Source Version: ${placard.publicInfoVersionId}`,
+          `Generated At: ${placard.createdAt}`,
+        ]);
+  }
+
+  private async renderPlacardArtifact(
     placard: PlacardVersionRecord,
-  ): PlacardVersionRecord {
-    const ensured = this.ensurePlacardArtifact(placard);
+    options: {
+      recover?: boolean;
+      fenceGeneration?: string | null | undefined;
+      requireDurableBackup?: boolean;
+    } = {},
+  ): Promise<DocumentArtifactRecord> {
+    const bytes = this.renderPlacardBytes(placard);
+    const mimeType = "application/pdf";
+    // (R10-E/R10-F byte-ownership fix, Codex REOPEN generation
+    // fdc2511b33d844c8b89d74ad71a982c9) Preserve this exact render BEFORE
+    // issuing any of the writes below, regardless of which one actually
+    // runs -- see `preservePlacardPublicationBytes` for why a durable,
+    // content-addressed copy is what lets a later repair restore these
+    // precise bytes even after the source they came from has legitimately
+    // moved on.
+    //
+    // (R10-G fix, Codex REOPEN generation 86c0d8a2b0a94499b721fdb97ab1fbaf)
+    // `requireDurableBackup` (set only by the actual publish path) makes a
+    // failure here abort BEFORE the destructive write below runs at all --
+    // see `preservePlacardPublicationBytes`'s own doc.
+    await this.preservePlacardPublicationBytes(
+      placard.placardVersionId,
+      bytes,
+      mimeType,
+      options.requireDurableBackup ?? false,
+    );
+    const command = {
+      kind: "placard" as const,
+      subjectId: placard.placardVersionId,
+      mimeType,
+      bytes,
+    };
+
+    if (options.recover) {
+      const { record } = await this.documentArtifactStore.putIfAbsent(
+        command,
+      );
+      return record;
+    }
+    if (options.fenceGeneration !== undefined) {
+      const result = await this.documentArtifactStore.putIfUnchanged(
+        command,
+        options.fenceGeneration,
+      );
+      if (!result.applied) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PLACARD_PUBLISH_CONFLICT",
+          "This placard's durable artifact changed during publish. Retry the publish.",
+          {
+            placardVersionId: placard.placardVersionId,
+            expectedSha256: createHash("sha256").update(bytes).digest("hex"),
+            actualSha256: result.record?.sha256 ?? null,
+          },
+        );
+      }
+      return result.record;
+    }
+    return this.documentArtifactStore.put(command);
+  }
+
+  /**
+   * (R10 byte-ownership compensation, Codex REOPEN generation
+   * 9f5f14e9954f4ee9bbb2cb629880b777) Called after a publish attempt has
+   * lost (or cannot prove it won) ownership of `placardVersionId`'s DB row,
+   * from both `publishPlacardVersionExclusive`'s `!finalized` branch and
+   * its generic `catch`. Never trusts "whatever I personally observed
+   * before I wrote" as the thing to restore -- a prior design did exactly
+   * that (restore this attempt's own pre-write baseline), which is only
+   * correct for a single loser overwriting the actual winner. With two or
+   * more overlapping losers, a later loser's baseline can itself already
+   * be an earlier loser's corruption, so "restore my baseline" durably
+   * reinstates THAT corruption instead of the real winner's bytes (R10-B).
+   *
+   * - If the repository has no row yet, or the row is unpublished, or it
+   *   still carries a pending `__publishClaimToken` (someone else's claim
+   *   has not finalized yet), there is no authoritative winner to restore
+   *   TO yet -- do nothing. Whichever attempt eventually finalizes that
+   *   row calls this same method on every one of its own losing siblings'
+   *   behalf once IT is the authoritative winner, so the gap closes on the
+   *   next actual finalize, not on a guess made before one exists.
+   *   (R10-C, Codex REOPEN generation ac45f6a18eb347a397a7f5faf84f00d7)
+   *   That last sentence was only a design intent until this generation:
+   *   `publishPlacardVersionExclusive`'s success path did not actually call
+   *   this method, so a loser whose repair deferred to "the eventual
+   *   winner's own finalize" was deferring to a call that never happened,
+   *   permanently stranding its own corrupting write. The winner's success
+   *   path now calls this unconditionally after its own finalize commits.
+   * - Otherwise, restore from `restorePlacardArtifactWithRetry` -- see its
+   *   own doc for what changed and why (R10-E/R10-F, Codex REOPEN
+   *   generation fdc2511b33d844c8b89d74ad71a982c9): this used to re-render
+   *   deterministically from the authoritative row and a FRESH read of the
+   *   source `PublicInfoVersionRecord`, which was correct only as long as
+   *   that source had not itself legitimately moved on since the real
+   *   winner's own original render (R10-D fenced the loser's STALE cache,
+   *   but not a legitimate mutation landing between render and repair).
+   *   Copying the winner's own durably preserved bytes instead of
+   *   re-deriving them makes that question moot -- and makes retrying a
+   *   transient store failure here always safe, never a risk of landing on
+   *   different (wrong) content between attempts.
+   */
+  private async repairPlacardArtifactAfterLostClaim(
+    placardVersionId: string,
+  ): Promise<void> {
+    if (!this.platformAdminRepository) {
+      return;
+    }
+
+    let authoritative: PlacardVersionRecord | null;
+    try {
+      authoritative = await this.platformAdminRepository.getPlacardVersionRecord(
+        placardVersionId,
+      );
+    } catch {
+      return;
+    }
+    if (!authoritative) {
+      return;
+    }
+
+    await this.restorePlacardArtifactWithRetry(authoritative);
+  }
+
+  private placardPublicationBackupSubjectId(
+    placardVersionId: string,
+    sha256: string,
+  ): string {
+    return `${placardVersionId}::publication-backup::${sha256}`;
+  }
+
+  /**
+   * (R10-E/R10-F byte-ownership fix, Codex REOPEN generation
+   * fdc2511b33d844c8b89d74ad71a982c9) A durable, content-addressed copy of
+   * this exact render -- `renderPlacardArtifact` calls this before issuing
+   * ANY of its own writes, regardless of which one actually runs -- stored
+   * under a key only this hash can ever name, independent of whatever the
+   * shared (kind, subjectId) public slot holds afterward, and independent
+   * of whatever the source `PublicInfoVersionRecord` looks like later.
+   * `restorePlacardPublicationBackup` reads this back instead of
+   * re-deriving bytes from current state, which is what let a legitimate
+   * source mutation between a render and a later repair make an
+   * already-issued publication's own bytes permanently unrecoverable
+   * (R10-E): the source can move on; this copy never does.
+   *
+   * `putIfAbsent` is the right primitive here, not `put`: two renders that
+   * happen to produce identical bytes (same placard, same source) safely
+   * agree on the same backup key and never re-write it; renders that differ
+   * land at different keys and can never collide or clobber each other.
+   *
+   * (R10-G fix, Codex REOPEN generation 86c0d8a2b0a94499b721fdb97ab1fbaf)
+   * Best-effort was the wrong posture for `required` callers: a publish that
+   * destructively overwrites the shared public slot and finalizes
+   * authoritative metadata MUST NOT be allowed to report success while this,
+   * the only durable recovery copy of what it just published, silently does
+   * not exist -- a later legitimate clobber (a stale sibling's write landing
+   * after this attempt, followed by that sibling itself losing the DB race)
+   * would then have nothing to repair FROM. `required` callers (the actual
+   * publish path, via `renderPlacardArtifact`'s `requireDurableBackup`)
+   * therefore rethrow after logging, which -- because this call always runs
+   * BEFORE the destructive write in `renderPlacardArtifact` -- aborts the
+   * publish attempt before that write, or any metadata finalize, ever runs.
+   * Non-publish callers (initial generation, recovery re-renders) keep the
+   * original abstain-on-uncertainty posture: a missing backup there just
+   * means a later repair/restore attempt safely declines instead of
+   * corrupting anything.
+   */
+  private async preservePlacardPublicationBytes(
+    placardVersionId: string,
+    bytes: Buffer,
+    mimeType: string,
+    required = false,
+  ): Promise<void> {
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    try {
+      await this.documentArtifactStore.putIfAbsent({
+        kind: "placard",
+        subjectId: this.placardPublicationBackupSubjectId(
+          placardVersionId,
+          sha256,
+        ),
+        mimeType,
+        bytes,
+      });
+    } catch (error) {
+      this.platformAdminRepository?.reportPersistenceFailure(
+        error,
+        "placard publication backup",
+      );
+      if (required) {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Restores `authoritative`'s own durably preserved bytes (see
+   * `preservePlacardPublicationBytes`) into the shared public slot, if the
+   * slot does not already hold them. Never re-derives from current state --
+   * only ever copies bytes a winner already successfully rendered under
+   * this EXACT hash, so a legitimate source mutation since that render can
+   * never make them unrecoverable (R10-E). Deliberately lets a store
+   * failure propagate (rather than swallowing it) so
+   * `restorePlacardArtifactWithRetry` can retry; returns null only for a
+   * genuine "nothing to restore" (already correct, row not actually
+   * published/finalized yet, or no backup exists for this hash) -- never
+   * for a transient failure.
+   */
+  private async restorePlacardPublicationBackup(
+    authoritative: PlacardVersionRecord,
+  ): Promise<DocumentArtifactRecord | null> {
+    if (
+      !authoritative.publishedAt ||
+      !authoritative.artifactManifestHash ||
+      hasPendingPublishClaim(authoritative)
+    ) {
+      return null;
+    }
+    const { placardVersionId, artifactManifestHash } = authoritative;
+
+    const current = await this.documentArtifactStore.get(
+      "placard",
+      placardVersionId,
+    );
+    if (current && current.record.sha256 === artifactManifestHash) {
+      return current.record;
+    }
+
+    const backup = await this.documentArtifactStore.get(
+      "placard",
+      this.placardPublicationBackupSubjectId(
+        placardVersionId,
+        artifactManifestHash,
+      ),
+    );
+    if (!backup || backup.record.sha256 !== artifactManifestHash) {
+      return null;
+    }
+
+    const result = await this.documentArtifactStore.putIfUnchanged(
+      {
+        kind: "placard",
+        subjectId: placardVersionId,
+        mimeType: backup.record.mimeType,
+        bytes: backup.bytes,
+      },
+      current?.record.generation ?? null,
+    );
+    return result.applied ? result.record : null;
+  }
+
+  /**
+   * (R10-F fix, Codex REOPEN generation fdc2511b33d844c8b89d74ad71a982c9) A
+   * single transient store failure anywhere inside
+   * `restorePlacardPublicationBackup` used to permanently abandon the
+   * fix-up with no retry -- the exact gap this round's reopen reproduced
+   * (one modeled `GetObjectCommand` failure inside the success-path repair
+   * left a winner's finalized row pointing at a stale writer's bytes
+   * forever). Restoring is now a pure copy of immutable, content-addressed
+   * bytes, so unlike the old re-render-from-current-source approach a
+   * retry can never land on different (wrong) content; only a failure that
+   * persists across every attempt is treated as "could not repair this
+   * time", not swallowed on the first blip.
+   */
+  private async restorePlacardArtifactWithRetry(
+    authoritative: PlacardVersionRecord,
+    attempts = PLACARD_PUBLICATION_RESTORE_ATTEMPTS,
+  ): Promise<DocumentArtifactRecord | null> {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await this.restorePlacardPublicationBackup(authoritative);
+      } catch (error) {
+        if (attempt >= attempts) {
+          this.platformAdminRepository?.reportPersistenceFailure(
+            error,
+            "placard publication backup restore",
+          );
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind "placard":
+   * lets `ControlledDownloadController` recover a verified, unexpired link
+   * whose bytes are genuinely missing from the durable store -- including a
+   * placard whose `artifactManifestHash` was only ever recorded against an
+   * older process-local store, never this durable one -- by re-deriving the
+   * file from this placard's own durably persisted record. Returns null, not
+   * a thrown error, when this instance's own placard list has no such id,
+   * which the registry contract treats as "nothing to rebuild", not a
+   * rebuild failure.
+   *
+   * The re-derived bytes depend on the CURRENT `PublicInfoVersionRecord` --
+   * `buildPlacardPdfRows` bakes in its `status`/`effectiveTo`, which
+   * `publishPublicInfoVersion` mutates for any version a later one retires.
+   * A placard generated before that mutation has an `artifactManifestHash`
+   * recovery can no longer reproduce: exact-byte recovery is not possible
+   * without a durable snapshot of those inputs at issuance time, which this
+   * store does not keep. Rather than silently write mismatching bytes under
+   * a hash that still claims to be the original -- or leave this placard's
+   * own get/reissue path advertising a hash the store can now never produce
+   * again -- `migratePlacardArtifactAfterSourceDrift` adopts the
+   * deterministic current-state render as this placard's new canonical
+   * artifact, explicitly and audited, once that drift is detected.
+   *
+   * `expectedSha256` (R10-E/R10-F fix, Codex REOPEN generation
+   * fdc2511b33d844c8b89d74ad71a982c9), when supplied, is
+   * `ControlledDownloadController`'s own "content_mismatch" recovery
+   * attempt -- an object already exists at this (kind, subjectId), just
+   * not matching this one verified link's own manifest hash. That case
+   * must NEVER fall through to the current-state re-render below: doing so
+   * could legitimately disagree with a real object other still-valid links
+   * depend on and overwrite it (see `ControlledDownloadController`'s own
+   * comment). Instead this only ever asks the durable repository whether
+   * `expectedSha256` is STILL the row's own current, finalized hash --
+   * never trusting the caller's claim on its own -- and if so restores that
+   * exact publication's own durably preserved bytes (`preservePlacardPublicationBytes`)
+   * via the same path `repairPlacardArtifactAfterLostClaim` uses. A hash
+   * that is not (or no longer) the row's own returns null here, same as
+   * having nothing registered: it is a genuinely stale or forged link, and
+   * restoring it would resurrect bytes a later, legitimate republish has
+   * already superseded.
+   */
+  private async rebuildPlacardArtifact(
+    placardVersionId: string,
+    expectedSha256?: string,
+  ): Promise<DocumentArtifactRecord | null> {
+    if (expectedSha256 !== undefined) {
+      if (!this.platformAdminRepository) {
+        return null;
+      }
+      let authoritative: PlacardVersionRecord | null;
+      try {
+        authoritative =
+          await this.platformAdminRepository.getPlacardVersionRecord(
+            placardVersionId,
+          );
+      } catch {
+        return null;
+      }
+      if (
+        !authoritative ||
+        authoritative.artifactManifestHash !== expectedSha256
+      ) {
+        return null;
+      }
+      return this.restorePlacardArtifactWithRetry(authoritative);
+    }
+
+    const placard = this.placardVersions.find(
+      (candidate) => candidate.placardVersionId === placardVersionId,
+    );
+    if (!placard) {
+      return null;
+    }
+    try {
+      const record = await this.renderPlacardArtifact(placard, {
+        recover: true,
+      });
+      if (
+        placard.artifactManifestHash &&
+        record.sha256 !== placard.artifactManifestHash
+      ) {
+        await this.migratePlacardArtifactAfterSourceDrift(placard, record);
+      }
+      return record;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Called only when a recovery render's hash disagrees with this placard's
+   * own recorded `artifactManifestHash` -- the source has drifted since
+   * issuance (see `rebuildPlacardArtifact`). Adopts `record` as this
+   * placard's new canonical artifact: an explicit, audited migration to the
+   * best currently-derivable render, not a claim that these are the
+   * originally issued bytes.
+   */
+  private async migratePlacardArtifactAfterSourceDrift(
+    placard: PlacardVersionRecord,
+    record: DocumentArtifactRecord,
+  ): Promise<void> {
+    const previousManifestHash = placard.artifactManifestHash;
+    const downloadMetadata = this.createPlacardDownloadMetadata(
+      placard.placardVersionId,
+      record.sha256,
+    );
+    placard.artifactManifestHash = record.sha256;
+    placard.artifactFileId = `placard-${record.sha256.slice(0, 16)}`;
+    placard.artifactDownloadUrl = downloadMetadata.downloadUrl;
+    placard.artifactExpiresAt = downloadMetadata.expiresAt;
+    placard.downloadMetadata = downloadMetadata;
+    placard.updatedAt = new Date().toISOString();
+
+    this.persistChanges(
+      { placardVersions: [await this.clonePlacardVersion(placard)] },
+      "migrate_placard_artifact_after_source_drift",
+    );
+    this.recordAudit({
+      actorId: null,
+      actorType: "platform_admin",
+      tenantId: null,
+      moduleName: "platform-admin",
+      actionName: "migrate_placard_artifact_after_source_drift",
+      resourceType: "placard_version",
+      resourceId: placard.placardVersionId,
+      oldValuesSummary: { artifactManifestHash: previousManifestHash },
+      newValuesSummary: { artifactManifestHash: record.sha256 },
+    });
+  }
+
+  /**
+   * (R9) `placard` can be a losing/booting instance's cached snapshot of
+   * another instance's still-pending publish claim -- carrying
+   * `publishedAt` already set, but an `artifactManifestHash` that is only
+   * the pre-publish value (see `claimPlacardPublish`'s own comment). Taking
+   * that at face value would sign download links for bytes the claim owner
+   * has not actually produced yet. Resolve the authoritative row from the
+   * repository first whenever the cached copy still carries a pending
+   * claim token; once the claim has actually finalized (token gone), adopt
+   * that authoritative copy into this instance's own cache so later reads
+   * of the same id do not need to repeat the round trip. If the claim is
+   * still genuinely in flight elsewhere, there is nothing more authoritative
+   * to serve yet -- fall through on the last-known snapshot, same as
+   * before this fix.
+   *
+   * (R9 additional reader gap, Codex REOPEN generation
+   * 2b738adf3c2d4a508800cb3a8df0f553) An instance that never itself
+   * attempted a claim -- e.g. booted before any publish and only ever
+   * holding the plain, never-published draft -- carries NO claim token at
+   * all, so the original `hasPendingPublishClaim` gate above never fires
+   * for it even after a sibling instance finishes publishing elsewhere.
+   * Any cached snapshot that is not yet a known-finalized row (`publishedAt`
+   * unset, OR set but still carrying a pending token) must re-resolve
+   * against the repository on every read; only a snapshot this instance
+   * already knows is finalized (no token) is safe to trust without a round
+   * trip, because a finalized `publishedAt` never regresses.
+   *
+   * Returns the RAW resolved record -- including a still-pending
+   * `__publishClaimToken`, if that is genuinely the best known state -- so
+   * a caller populating `this.placardVersions` (bootstrap) keeps that
+   * marker instead of laundering it away before anything actually
+   * finalized. `clonePlacardVersion` is the external-facing wrapper that
+   * strips it.
+   */
+  private async resolvePlacardVersion(
+    placard: PlacardVersionRecord,
+  ): Promise<PlacardVersionRecord> {
+    let resolved = placard;
+    if (
+      this.platformAdminRepository &&
+      (!resolved.publishedAt || hasPendingPublishClaim(resolved))
+    ) {
+      const authoritative =
+        await this.platformAdminRepository.getPlacardVersionRecord(
+          resolved.placardVersionId,
+        );
+      if (authoritative) {
+        resolved = authoritative;
+      }
+    }
+
+    const ensured = await this.ensurePlacardArtifact(resolved);
+    if (!hasPendingPublishClaim(ensured)) {
+      const idx = this.placardVersions.findIndex(
+        (candidate) => candidate.placardVersionId === ensured.placardVersionId,
+      );
+      if (idx >= 0) {
+        this.placardVersions[idx] = { ...ensured };
+      }
+    }
+
+    return ensured;
+  }
+
+  private async clonePlacardVersion(
+    placard: PlacardVersionRecord,
+  ): Promise<PlacardVersionRecord> {
+    const ensured = await this.resolvePlacardVersion(placard);
+    const clean = stripClaimToken(ensured);
 
     return {
-      ...ensured,
-      downloadMetadata: ensured.downloadMetadata
-        ? { ...ensured.downloadMetadata }
+      ...clean,
+      downloadMetadata: clean.downloadMetadata
+        ? { ...clean.downloadMetadata }
         : null,
     };
   }
@@ -2520,15 +3418,23 @@ export class PlatformAdminService implements OnModuleInit {
     return JSON.stringify(value);
   }
 
+  /**
+   * Fire-and-forget by default -- most callers persist in the background and
+   * do not await the returned promise. `generatePlacardVersion` is the one
+   * exception (R7-followthrough): it awaits this so a placard's draft
+   * creation is durably committed before its id is ever handed back to a
+   * caller, closing the window where that same write could otherwise land
+   * late, after a competing publish claim/finalize for the same id.
+   */
   private persistChanges(
     changes: PersistPlatformAdminChanges,
     context: string,
-  ) {
+  ): Promise<void> {
     if (!this.platformAdminRepository) {
-      return;
+      return Promise.resolve();
     }
 
-    void this.platformAdminRepository
+    return this.platformAdminRepository
       .persistChanges(changes)
       .catch((error: unknown) => {
         this.platformAdminRepository!.reportPersistenceFailure(error, context);
