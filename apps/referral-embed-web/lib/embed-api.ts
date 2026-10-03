@@ -15,7 +15,6 @@ import type {
 import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
-const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 
 // The authority API serialises responses in snake_case, but the embed reads the
 // records as the camelCase contract types (entry.displayName / entryHost /
@@ -86,12 +85,21 @@ async function mintMetadataIdentityToken(
   }
 }
 
-// SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up: drop the
-// x-drts-internal-key send in requestAuthority below once dev has proven
-// this header end-to-end and INTERNAL_KEY_EXCP_002 is retired.
 async function getGoogleWorkloadIdentityHeader(): Promise<
   Record<string, string>
 > {
+  // SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: hosted CI harnesses
+  // (e.g. tenant-uat-acceptance.yml) run this BFF on a plain GitHub-hosted
+  // runner, not Cloud Run/GCE, so there is no metadata server to mint a
+  // token from. Those harnesses instead mint a real Google-signed ID token
+  // out of band (via google-github-actions/auth, the same WIF identity
+  // deploy-dev.yml uses) and inject it here directly. Production never sets
+  // this var and keeps using the metadata server below.
+  const staticToken = process.env.DRTS_GOOGLE_WORKLOAD_IDENTITY_TOKEN?.trim();
+  if (staticToken) {
+    return { "x-drts-google-id-token": staticToken };
+  }
+
   const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   const targetUrl = new URL(API_URL);
   const audience =
@@ -116,19 +124,7 @@ async function requestAuthority<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        // Server-to-server authority calls (/api/partner/*) require the shared
-        // internal key in environments that enforce it. requestAuthority only
-        // ever runs server-side, so reading the secret here is safe.
-        ...(process.env.DRTS_INTERNAL_KEY
-          ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
-          : {}),
         ...(await getGoogleWorkloadIdentityHeader()),
-        ...(process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY
-          ? {
-              [REFERRAL_EMBED_HANDOFF_KEY_HEADER]:
-                process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-            }
-          : {}),
         ...(init?.headers ?? {}),
       },
     });

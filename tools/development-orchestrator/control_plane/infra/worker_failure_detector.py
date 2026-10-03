@@ -55,7 +55,8 @@ WORKER_FAILURE_PATTERNS = (
     re.compile(r"^Error:\s*Individual quota reached\b", re.IGNORECASE),
     re.compile(r"^Error:\s*Eligibility check failed\b", re.IGNORECASE),
     re.compile(r"\bnot eligible for Antigravity\b", re.IGNORECASE),
-    re.compile(r"\bhit your usage limit\b", re.IGNORECASE),
+    # pi words the ChatGPT subscription wall "You have hit your ChatGPT usage limit".
+    re.compile(r"\bhit your (?:chatgpt )?usage limit\b", re.IGNORECASE),
     re.compile(r"\bexceeded your monthly quota\b", re.IGNORECASE),
     re.compile(r"\b(?:selected )?model is at capacity\b", re.IGNORECASE),
     re.compile(r"^An unexpected critical error occurred", re.IGNORECASE),
@@ -245,6 +246,65 @@ def _detect_antigravity_result_signal(payload: dict[str, Any]) -> WorkerFailureS
     return WorkerFailureSignal(reason, "antigravity_stream_result_error", authorized)
 
 
+# `pi --mode json` event types (pi docs/json.md). Their string values carry the
+# prompt, tool output and assistant text, so no pi event is a provider failure
+# by content. Only the structured error fields read below are, and pi exits 0
+# even when its run ended in one.
+_PI_EVENT_TYPES = frozenset({
+    "session", "agent_start", "agent_end", "agent_settled", "turn_start", "turn_end",
+    "message_start", "message_update", "message_end",
+    "tool_execution_start", "tool_execution_update", "tool_execution_end",
+    "queue_update", "entry_appended", "session_info_changed", "thinking_level_changed",
+    "compaction_start", "compaction_end", "auto_retry_start", "auto_retry_end",
+    "summarization_retry_scheduled", "summarization_retry_attempt_start",
+    "summarization_retry_finished", "extension_error",
+})
+
+
+def _is_pi_event(payload: dict[str, Any]) -> bool:
+    return str(payload.get("type") or "") in _PI_EVENT_TYPES
+
+
+def _pi_failure_signal(reason: str, source: str) -> WorkerFailureSignal:
+    authorized = _is_result_level_provider_blocker(reason.lower()) or _extract_failure_candidate(reason) is not None
+    return WorkerFailureSignal(reason, source, authorized)
+
+
+def _detect_pi_event_signal(payload: dict[str, Any]) -> tuple[bool, WorkerFailureSignal | None]:
+    """Read one pi event during a newest-first scan: (decides the scan, signal).
+
+    The newest assistant `message_end` decides: a turn that ended normally is
+    not overturned by an earlier failed attempt, and one that ended in "error"
+    is the failure. `agent_end` with willRetry and `auto_retry_start` mean pi is
+    still retrying, which must not stop a live worker; `auto_retry_end` with
+    success false is the final failure after pi's retries ran out.
+    """
+    event_type = payload.get("type")
+    if event_type == "auto_retry_start" or (event_type == "agent_end" and payload.get("willRetry")):
+        return True, None
+    if event_type == "auto_retry_end":
+        if payload.get("success") is False:
+            reason = str(payload.get("finalError") or "").strip() or "pi gave up after automatic retries."
+            return True, _pi_failure_signal(reason, "pi_retry_exhausted")
+        return False, None
+    if event_type == "compaction_end":
+        reason = str(payload.get("errorMessage") or "").strip()
+        return False, (_pi_failure_signal(reason, "pi_compaction_error") if reason else None)
+    if event_type != "message_end":
+        return False, None
+    message = payload.get("message")
+    if not isinstance(message, dict) or message.get("role") != "assistant":
+        return False, None
+    stop_reason = str(message.get("stopReason") or "")
+    if stop_reason == "error":
+        reason = str(message.get("errorMessage") or "").strip() or "pi assistant turn ended with an error."
+        return True, _pi_failure_signal(reason, "pi_assistant_error")
+    if stop_reason == "aborted":
+        reason = str(message.get("errorMessage") or "").strip() or "pi assistant turn was aborted."
+        return True, WorkerFailureSignal(reason, "pi_assistant_aborted", False)
+    return True, None
+
+
 def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     try:
         payload = json.loads(line)
@@ -312,6 +372,12 @@ def detect_failure_signal_in_lines(lines: list[str]) -> WorkerFailureSignal | No
                 payload = json.loads(stripped)
             except json.JSONDecodeError:
                 payload = None
+            if isinstance(payload, dict) and _is_pi_event(payload):
+                decides, detected = _detect_pi_event_signal(payload)
+                if decides:
+                    return detected
+                fallback = fallback or detected
+                continue
             if isinstance(payload, dict) and payload.get("type") == "result" and not payload.get("is_error"):
                 detected = _detect_json_worker_failure_signal(stripped)
                 if detected and _is_result_level_provider_blocker(detected.reason):

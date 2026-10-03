@@ -24,7 +24,9 @@
 #   SMOKE_ACTOR_ID           Bootstrap auth actor ID (x-actor-id header)
 #   SMOKE_REALM              Override realm derived from actor type (leave blank to auto-derive)
 #   SMOKE_TENANT_ID          Tenant UUID (x-tenant-id header; must match S0002 seed)
-#   SMOKE_INTERNAL_KEY       Optional x-drts-internal-key header for staging/internal envs
+#   SMOKE_INTERNAL_KEY       Retired 2026-10-02 (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930):
+#                            setting this now makes helpers.sh fail fast, it no longer
+#                            attaches x-drts-internal-key (INTERNAL_KEY_EXCP_002 is gone)
 #   SMOKE_DRIVER_ID          Driver UUID (must match S0002 seed)
 #   SMOKE_VEHICLE_ID         Vehicle UUID (must match S0002 seed)
 #   SMOKE_TIMEOUT            Curl timeout per request in seconds (default: 30)

@@ -202,7 +202,9 @@ describe("forwarder service", () => {
     expect(forwarderService.listAdapterHealth()).toEqual([
       expect.objectContaining({
         platformCode: PLATFORM_CODE_LINE_TAXI,
-        status: "healthy",
+        status: "degraded",
+        reason: "credential",
+        credentialStatus: "not_configured",
         lastError: null,
       }),
     ]);
@@ -285,7 +287,8 @@ describe("forwarder service", () => {
         adapterHealth: [
           expect.objectContaining({
             platformCode: PLATFORM_CODE_UBER,
-            status: "healthy",
+            status: "degraded",
+            reason: "credential",
           }),
         ],
       }),

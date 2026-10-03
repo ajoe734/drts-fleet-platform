@@ -734,11 +734,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       realm: "ops",
       roleFamilies: ["ops"],
       defaultRoles: ["ops_observer"],
-      scopes: [
-        "regulatory:read",
-        "sandbox.compliance.read",
-        "sandbox.investigation.read",
-      ],
+      scopes: ["regulatory:read"],
     },
     {
       actorType: "driver_user",

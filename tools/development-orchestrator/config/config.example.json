@@ -85,20 +85,22 @@
     "reassign_on_terminal_failure": true,
     "eligible_statuses": ["todo", "in_progress", "review"],
     "owner_fallbacks": {
-      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
-      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
-      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
-      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
+      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2", "Pi"],
+      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2", "Pi"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot", "Pi"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot", "Pi"],
+      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2", "Pi"],
+      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2", "Pi"],
+      "Pi": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
     },
     "reviewer_fallbacks": {
-      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
-      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
-      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
-      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
+      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2", "Pi"],
+      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2", "Pi"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot", "Pi"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot", "Pi"],
+      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2", "Pi"],
+      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2", "Pi"],
+      "Pi": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
     }
   },
   "chair_review": {
@@ -223,6 +225,13 @@
       "adapter": "copilot_local",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/copilot.md"
+    },
+    "pi": {
+      "display_name": "Pi",
+      "provider": "pi",
+      "adapter": "pi",
+      "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
+      "file_inbox_path": ".llm-inbox/pi.md"
     }
   },
   "providers": {
@@ -368,6 +377,21 @@
         "dangerously_bypass": true
       }
     },
+    "pi": {
+      "delivery_mode": "pi",
+      "file_inbox": {
+        "path": ".llm-inbox/pi.md",
+        "open_in_vscode": false
+      },
+      "pi": {
+        "cli": "pi",
+        "provider": "openai-codex",
+        "model": "gpt-6-astra",
+        "thinking": "high",
+        "agent_dir": null,
+        "extra_args": []
+      }
+    },
     "codex2": {
       "delivery_mode": "codex",
       "file_inbox": {
@@ -443,7 +467,8 @@
       "codex2": 4,
       "gemini": 2,
       "gemini2": 2,
-      "copilot": 2
+      "copilot": 2,
+      "pi": 2
     },
     "max_dispatches_per_tick": 4
   }

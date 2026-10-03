@@ -18,6 +18,7 @@ import {
   extractGoogleWorkloadIdentityAssertion,
   GoogleWorkloadIdentityAdapter,
   isGoogleWorkloadIdentityNotConfigured,
+  isGoogleWorkloadIdentityPrincipalNotRegistered,
 } from "../../modules/auth/google-workload-identity.adapter";
 
 type HeaderValue = string | string[] | undefined;
@@ -30,7 +31,6 @@ type RequestLike = {
 };
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
-export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
@@ -87,6 +87,16 @@ function isExplicitPublicRequest(
   );
 }
 
+function isRemittanceProofGrantRequest(method: string, path: string): boolean {
+  // This one GET endpoint authenticates its bearer grant in the controller
+  // (signature, expiry, proof identity and clean scan) before serving bytes.
+  // Durable V0098 rows use raw UUIDs; only the test-memory fallback adds
+  // `remit-proof-`. Both still require the downstream signed-grant checks.
+  // Do not admit uploads, grant issuance, other artifact kinds or child paths.
+  return method.toUpperCase() === "GET" &&
+    /^\/(?:api\/)?reimbursements\/proof-downloads\/remittance-proof\/(?:remit-proof-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(stripQueryString(path));
+}
+
 function hasBearerAuthorization(request: RequestLike): boolean {
   const headerValues = [
     normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]),
@@ -113,20 +123,55 @@ export async function validateInternalKey(
   options?: { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
 ): Promise<void> {
   const rawPath = request.originalUrl ?? request.url ?? "";
-  const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
-  const strictEnvironment = isStrictAuthEnvironment();
-
-  const configuredKey = expectedKey?.trim();
 
   if (
     isHealthRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, rawPath) ||
+    isRemittanceProofGrantRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
   ) {
     return;
   }
+
+  return verifyGoogleAssertionOrInternalKey(request, expectedKey, options);
+}
+
+/**
+ * Core WIF-or-internal-key check shared by `validateInternalKey` (the
+ * general InternalKeyMiddleware gate, which additionally bypasses health/
+ * options/explicit-public routes and anything already carrying a Bearer
+ * token verified downstream) and callers like
+ * `TenantPartnerController.issuePartnerIngressHandoff`'s `allowInternalBootstrap`
+ * branch, which have no such downstream Bearer verification and must not
+ * inherit that bypass -- an arbitrary `Authorization: Bearer x` header must
+ * not satisfy this check outside the general middleware's context.
+ */
+export async function verifyGoogleAssertionOrInternalKey(
+  request: RequestLike,
+  expectedKey: string | undefined,
+  options?: {
+    googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter;
+    // The general InternalKeyMiddleware gate treats an unconfigured internal
+    // key as "nobody set up internal-key auth in this (non-strict) local/dev
+    // environment, so don't enforce it" -- appropriate for its broad, every-
+    // route coverage. A narrow, deliberate gate like
+    // TenantPartnerController.issuePartnerIngressHandoff's
+    // allowInternalBootstrap branch guards one sensitive operation and must
+    // fail closed even in dev when no credential at all is configured or
+    // presented, so it sets this to true.
+    requireCredential?: boolean;
+  },
+): Promise<void> {
+  const rawPath = request.originalUrl ?? request.url ?? "";
+  const requestPath = stripQueryString(rawPath);
+  const requestMethod = request.method ?? "GET";
+  const strictEnvironment = Boolean(
+    isStrictAuthEnvironment() || options?.requireCredential,
+  );
+
+  const configuredKey = expectedKey?.trim();
 
   const rawGoogleAssertion = extractGoogleWorkloadIdentityAssertion(
     request.headers,
@@ -135,16 +180,33 @@ export async function validateInternalKey(
     try {
       await options.googleWorkloadIdentityAdapter.verifyServicePrincipal(
         request.headers ?? {},
-        { requestPath, requestMethod },
+        {
+          requestPath,
+          requestMethod,
+          // General proxied requests reuse one Google-minted identity token
+          // for every concurrent call a page makes (the Cloud Run metadata
+          // server caches and returns the same token for its whole validity
+          // window), so this path must not treat repeat presentation of the
+          // identical assertion as a replay. One-time consumption stays
+          // enforced for session issuance (`POST /api/auth/token`), which
+          // calls this adapter separately in `auth.controller.ts`.
+          enforceReplayProtection: false,
+        },
       );
       return;
     } catch (error) {
-      // Registry not populated yet (ops rollout not complete): fall back to
-      // `x-drts-internal-key` below so dev stays green while EXCP_002 is
-      // still active. Any other error (bad signature, wrong audience,
-      // unregistered principal, replay) is a genuine rejection and must not
-      // be masked by falling through.
-      if (!isGoogleWorkloadIdentityNotConfigured(error)) {
+      // Registry not populated yet (ops rollout not complete), or this
+      // caller's verified identity has no registry entry yet: fall back to
+      // `x-drts-internal-key` below (INTERNAL_KEY_EXCP_002 is retired, so
+      // that fallback now only succeeds if some *other* exception is ever
+      // registered for that header). Any other error (bad signature, wrong
+      // issuer/audience, route scope denial) is a genuine rejection for an
+      // already-registered principal and must not be masked by falling
+      // through.
+      if (
+        !isGoogleWorkloadIdentityNotConfigured(error) &&
+        !isGoogleWorkloadIdentityPrincipalNotRegistered(error)
+      ) {
         throw error;
       }
     }

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,13 +10,19 @@ import {
   writeEvidence,
   type LiveEnv,
 } from "./live-map-config";
+import { revokeMapInvitation } from "./session-cleanup";
 import { normalizeApiResponse } from "./wire-response";
 
+export const MAP_DRIVER_SCOPES = [
+  "dispatch:read",
+  "driver:read",
+  "driver:write",
+];
+export const MAP_PROVISIONER_ID = "dev-live-map";
 export const MAP_OBSERVER_ID = "live-map-observer";
-type BootstrapDeps = {
+export type BootstrapDeps = {
   fetch: typeof fetch;
-  readGoogleIdToken: () => string;
-  readInternalKey: () => string;
+  readGoogleIdToken: (purpose: "observer" | "provisioning") => string;
   mask: (value: string) => void;
   exportSession: (name: string, value: string) => void;
   save: (name: string, evidence: unknown) => void;
@@ -32,8 +37,10 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
   );
   const evidence = {
     candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
     status: "failed",
-    stage: "internal-key",
+    stage: "google-workload-identity",
+    cleanup: "not-required",
     sessions: [] as Array<{
       realm: string;
       actor_type: string;
@@ -43,24 +50,10 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     }>,
   };
   try {
-    const idToken = deps.readGoogleIdToken().trim();
+    const idToken = deps.readGoogleIdToken("observer").trim();
     assert(idToken && !/[\r\n]/.test(idToken));
     deps.mask(idToken);
-    const request = async <T>(path: string, init: RequestInit): Promise<T> => {
-      const url = `${config.apiOrigin}/api/${path}`;
-      assertAllowedUrl(url, config.allowedTargets);
-      const response = await deps.fetch(url, {
-        ...init,
-        redirect: "error",
-        signal: AbortSignal.timeout(15_000),
-      });
-      assert(response.ok);
-      assert.equal(
-        response.headers.get("x-drts-candidate-sha"),
-        config.candidateSha,
-      );
-      return normalizeApiResponse(await response.json()) as T;
-    };
+    const request = createMapSessionRequest(config, deps.fetch);
     const verified: Array<{ name: string; token: string }> = [];
 
     // 1. Get an observer session for ops
@@ -86,12 +79,17 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     );
     deps.mask(observerIssued.token);
     assert(/^(?:[1-9]\d*[sm]|[1-8]h)$/.test(observerIssued.expiresIn));
-    
+
     evidence.stage = `ops:verify-session`;
     let session = await request<{
       data: {
         active: boolean;
-        identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+        identity: {
+          realm: string;
+          actorType: string;
+          actorId: string;
+          scopes: string[];
+        };
       };
     }>("auth/session", {
       headers: { authorization: `Bearer ${observerIssued.token}` },
@@ -100,9 +98,15 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     assert.equal(session.data.identity.realm, "ops");
     assert.equal(session.data.identity.actorType, "ops_observer");
     assert.equal(session.data.identity.actorId, MAP_OBSERVER_ID);
-    assert.deepEqual([...session.data.identity.scopes].sort(), ["regulatory:read"]);
-    
-    verified.push({ name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", token: observerIssued.token });
+    assert.deepEqual(
+      [...session.data.identity.scopes].sort(),
+      ["regulatory:read"].sort(),
+    );
+
+    verified.push({
+      name: "DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN",
+      token: observerIssued.token,
+    });
     evidence.sessions.push({
       realm: "ops",
       actor_type: "ops_observer",
@@ -111,24 +115,41 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       expires_in: observerIssued.expiresIn,
     });
 
-    // 2. Get a temp platform session with driver:provision to issue driver invite
-    evidence.stage = `driver:invite-setup`;
-    const tempOpsIssued = await request<{ token: string; expiresIn: string }>(
-      "auth/token",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-drts-internal-key": deps.readInternalKey().trim(),
-          "x-actor-type": "platform_admin",
-          "x-actor-id": "principal_platform_admin_default",
-          "x-realm": "platform",
-          "x-scopes": "driver:provision",
-        },
-        body: "{}",
-      },
+    // Check the reserved driver's live isolation before creating any invitation
+    // or replacing its device binding, not only before telemetry writes.
+    evidence.stage = "driver:isolation";
+    const registry = await request<{
+      data: {
+        items: Array<{
+          driverId: string;
+          workState: string;
+          dispatchEligible: boolean;
+        }>;
+      };
+    }>("regulatory-registry/drivers", {
+      headers: { authorization: `Bearer ${observerIssued.token}` },
+    });
+    const driver = registry.data.items.find(
+      (item) => item.driverId === config.driverId,
     );
-    
+    assert(
+      driver &&
+        driver.workState === "offline" &&
+        driver.dispatchEligible === false,
+    );
+
+    // Exchange a separate assertion for the fixed-driver service grant.
+    evidence.stage = "driver:invite-setup";
+    const provisioner = await issueMapProvisioningSession(
+      config.driverId,
+      request,
+      deps,
+    );
+    // Retain the masked service session before the first invitation mutation.
+    deps.exportSession(
+      "DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN",
+      provisioner.token,
+    );
     evidence.stage = `driver:issue-invite`;
     const invite = await request<{ data: { registrationCode: string } }>(
       "auth/driver/device/invite",
@@ -136,35 +157,52 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${tempOpsIssued.token}`,
+          authorization: `Bearer ${provisioner.token}`,
         },
         body: JSON.stringify({ driverId: config.driverId }),
       },
     );
     const registrationCode = invite.data.registrationCode;
+    assert(
+      typeof registrationCode === "string" &&
+        registrationCode &&
+        !/\s/.test(registrationCode),
+    );
     deps.mask(registrationCode);
-    
+
     try {
+      deps.exportSession("DRTS_LIVE_MAP_INVITE_CODE", registrationCode);
+      evidence.cleanup = "required";
       evidence.stage = `driver:register-device`;
       const deviceId = `live-map-run-${Date.now()}`;
-      const driverSession = await request<{ data: { accessToken: { token: string; expiresIn: string } } }>(
-        "auth/driver/device/register",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ registrationCode, deviceId }),
+      const driverSession = await request<{
+        data: { accessToken: string; expiresIn: string };
+      }>("auth/driver/device/register", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
         },
+        body: JSON.stringify({ registrationCode, deviceId }),
+      });
+      const driverToken = driverSession.data.accessToken;
+      assert(
+        typeof driverToken === "string" &&
+          driverToken &&
+          !/\s/.test(driverToken),
       );
-      const driverToken = driverSession.data.accessToken.token;
       deps.mask(driverToken);
-      
+      assert.equal(driverSession.data.expiresIn, "15m");
+
       evidence.stage = `driver:verify-session`;
       session = await request<{
         data: {
           active: boolean;
-          identity: { realm: string; actorType: string; actorId: string; scopes: string[] };
+          identity: {
+            realm: string;
+            actorType: string;
+            actorId: string;
+            scopes: string[];
+          };
         };
       }>("auth/session", {
         headers: { authorization: `Bearer ${driverToken}` },
@@ -173,37 +211,42 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       assert.equal(session.data.identity.realm, "driver");
       assert.equal(session.data.identity.actorType, "driver_user");
       assert.equal(session.data.identity.actorId, config.driverId);
-      assert.deepEqual([...session.data.identity.scopes].sort(), ["driver:read"]);
-      
-      verified.push({ name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", token: driverToken });
+      assert.deepEqual(
+        [...session.data.identity.scopes].sort(),
+        MAP_DRIVER_SCOPES,
+      );
+
+      verified.push({
+        name: "DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN",
+        token: driverToken,
+      });
       evidence.sessions.push({
         realm: "driver",
         actor_type: "driver_user",
         actor_id: config.driverId,
-        scopes: ["driver:read"],
-        expires_in: driverSession.data.accessToken.expiresIn,
+        scopes: [...MAP_DRIVER_SCOPES],
+        expires_in: driverSession.data.expiresIn,
       });
-      
+
       // Neither token reaches subsequent steps unless both session checks pass.
       for (const { name, token } of verified) deps.exportSession(name, token);
       deps.exportSession("DRTS_LIVE_MAP_DRIVER_DEVICE_ID", deviceId);
-      deps.exportSession("DRTS_LIVE_MAP_INVITE_CODE", registrationCode);
     } catch (error) {
       try {
-        await request("auth/driver/device/invite/revoke", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${tempOpsIssued.token}`,
-          },
-          body: JSON.stringify({ registrationCode }),
-        });
+        await revokeMapInvitation(
+          env,
+          deps.fetch,
+          provisioner.token,
+          registrationCode,
+        );
+        evidence.cleanup = "passed";
       } catch {
-        // Best effort cleanup, do not mask original error
+        evidence.cleanup = "failed";
+        // Retain recovery values for the workflow's always() teardown retry.
       }
       throw error;
     }
-    
+
     evidence.status = "passed";
     evidence.stage = "complete";
   } catch {
@@ -215,36 +258,111 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
   }
 }
 
+export type MapSessionRequest = <T>(
+  path: string,
+  init: RequestInit,
+) => Promise<T>;
+type SessionIdentity = {
+  realm: string;
+  actorType: string;
+  actorId: string;
+  scopes: string[];
+  driverProvisioningDriverId?: string;
+};
+
+export function createMapSessionRequest(
+  config: ReturnType<typeof validateCoverageTargets>,
+  fetchImpl: typeof fetch,
+): MapSessionRequest {
+  return async <T>(path: string, init: RequestInit): Promise<T> => {
+    const url = `${config.apiOrigin}/api/${path}`;
+    assertAllowedUrl(url, config.allowedTargets);
+    const response = await fetchImpl(url, {
+      ...init,
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    assert(response.ok);
+    assert.equal(
+      response.headers.get("x-drts-candidate-sha"),
+      config.deployedSha,
+    );
+    return normalizeApiResponse(await response.json()) as T;
+  };
+}
+
+export async function verifyMapProvisioningSession(
+  driverId: string,
+  request: MapSessionRequest,
+  token: string,
+) {
+  const session = await request<{
+    data: { active: boolean; identity: SessionIdentity };
+  }>("auth/session", {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert(session.data.active);
+  assert.equal(session.data.identity.realm, "system");
+  assert.equal(session.data.identity.actorType, "system");
+  assert.equal(session.data.identity.actorId, MAP_PROVISIONER_ID);
+  assert.equal(session.data.identity.driverProvisioningDriverId, driverId);
+  assert.deepEqual(session.data.identity.scopes, ["driver:provision"]);
+}
+
+export async function issueMapProvisioningSession(
+  driverId: string,
+  request: MapSessionRequest,
+  deps: Pick<BootstrapDeps, "readGoogleIdToken" | "mask">,
+) {
+  const idToken = deps.readGoogleIdToken("provisioning").trim();
+  assert(idToken && !/\s/.test(idToken));
+  deps.mask(idToken);
+  const issued = await request<{ token: string; expiresIn: string }>(
+    "auth/token",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-drts-google-id-token": idToken,
+        "x-actor-type": "system",
+        "x-actor-id": MAP_PROVISIONER_ID,
+        "x-realm": "system",
+      },
+      body: "{}",
+    },
+  );
+  assert(
+    typeof issued.token === "string" &&
+      issued.token &&
+      !/\s/.test(issued.token),
+  );
+  deps.mask(issued.token);
+  assert.equal(issued.expiresIn, "15m");
+  await verifyMapProvisioningSession(driverId, request, issued.token);
+  return issued;
+}
+
+export function readMapGoogleIdToken(
+  env: LiveEnv,
+  purpose: "observer" | "provisioning",
+) {
+  // The auth action mints Google ID tokens with verified email. The two
+  // audiences keep the observer and provisioning one-time exchanges separate.
+  return required(
+    env,
+    purpose === "observer"
+      ? "DRTS_LIVE_MAP_GOOGLE_OBSERVER_ID_TOKEN"
+      : "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN",
+  );
+}
+
 async function main() {
   validateCoverageTargets(process.env);
   if (process.argv.includes("--preflight")) return;
-  const project = required(process.env, "DEV_GCP_PROJECT_ID");
   const envPath = required(process.env, "GITHUB_ENV");
   await bootstrapMapSessions(process.env, {
     fetch,
-    readGoogleIdToken: () =>
-      execFileSync(
-        "gcloud",
-        [
-          "auth",
-          "print-identity-token",
-          `--audiences=${process.env.DRTS_LIVE_MAP_API_ORIGIN}`,
-        ],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-      ),
-    readInternalKey: () =>
-      execFileSync(
-        "gcloud",
-        [
-          "secrets",
-          "versions",
-          "access",
-          "latest",
-          "--secret=drts-dev-jwt-secret",
-          `--project=${project}`,
-        ],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-      ),
+    readGoogleIdToken: (purpose) => readMapGoogleIdToken(process.env, purpose),
     mask: (value) =>
       console.log(
         `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,

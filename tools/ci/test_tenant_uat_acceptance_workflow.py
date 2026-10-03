@@ -330,6 +330,67 @@ class HostedBoundaryTests(unittest.TestCase):
         self.assertIn("referral-web.log", text.split("upload-artifact@v4", 1)[1])
 
 
+class ReferralEmbedWorkloadIdentityRegistryTests(unittest.TestCase):
+    """SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002 R2 (F2a, F2b).
+
+    Codex's R2/R3 review found two ways the hosted UAT caller's self-
+    provisioned Google workload identity registry stopped covering the real
+    referral embed handoff flow: (F2a) `restart_api` launches a fresh API
+    process that never received the registry env `start_api` mapped, so
+    every caller after the mandatory C113-C115 restart lost its identity
+    (503 WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED); (F2b) the BFF sends its
+    Google token on every authority call including the plain entry-page GET,
+    but the registry only ever granted the three POST handoff routes, so
+    even the first page load was denied (403 WORKLOAD_ROUTE_SCOPE_DENIED).
+    Both are structural workflow/content defects a syntax check cannot
+    catch; these tests parse the real workflow text and assert the fix.
+    """
+
+    def setUp(self) -> None:
+        self.text = WORKFLOW.read_text(encoding="utf-8")
+
+    def test_restart_api_inherits_the_same_workload_identity_registry_as_start_api(self):
+        start_block = self.text.split("id: start_api\n", 1)[1].split(
+            "      - name:", 1
+        )[0]
+        restart_block = self.text.split("id: restart_api\n", 1)[1].split(
+            "      - name:", 1
+        )[0]
+        self.assertIn(
+            "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS: ${{ env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON }}",
+            start_block,
+        )
+        self.assertIn(
+            "WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS: ${{ env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS_JSON }}",
+            restart_block,
+            "restart_api must map the same canonical registry env start_api "
+            "does, or every caller after the mandatory C113-C115 restart "
+            "loses its Google workload identity (F2a).",
+        )
+
+    def test_self_provisioned_registry_grants_the_partner_entry_read_route(self):
+        derive_block = self.text.split(
+            "id: id_token_referral_handoff_uat\n", 1
+        )[1]
+        route_scopes_text = derive_block.split("routeScopes: [", 1)[1].split(
+            "]", 1
+        )[0]
+        self.assertIn(
+            "GET partner/entries/*",
+            route_scopes_text,
+            "the BFF sends its Google workload identity token on every "
+            "requestAuthority call, including getPartnerEntry's GET; "
+            "without this scope the first hosted embed page load is denied "
+            "WORKLOAD_ROUTE_SCOPE_DENIED before any handoff route runs (F2b).",
+        )
+        for route in (
+            "POST partner/ingress/referral-embed-handoff",
+            "POST partner/ingress/referral-embed-handoff/consume",
+            "POST partner/ingress/referral-embed-handoff/consent",
+        ):
+            self.assertIn(route, route_scopes_text)
+
+
 class ReportProvenanceBehaviorTests(unittest.TestCase):
     def run_report(self, *, write=True, command_exit=0, candidate=None, metadata=None):
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()

@@ -39,6 +39,9 @@ describe("live map authorization boundary", () => {
     ["RUNNER_ENVIRONMENT", "self-hosted"],
     ["WORKFLOW_SHA", "b".repeat(40)],
     ["DRTS_CANDIDATE_SHA", "a"],
+    ["DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA", ""],
+    ["DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA", "dev"],
+    ["DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA", "A".repeat(40)],
     ["DRTS_LIVE_MAP_API_ORIGIN", "https://elsewhere.test"],
     ["DRTS_LIVE_MAP_TEST_ORIGIN", "https://elsewhere.test"],
     ["DRTS_LIVE_MAP_TEST_ORIGIN", "https://user:secret@ops.example.test"],
@@ -80,6 +83,8 @@ function harness(
   options: {
     wire?: "snake_case" | "camelCase";
     realm?: string;
+    observerType?: string;
+    driverScopes?: string[];
     actor?: string;
     workState?: string;
     wrongDecision?: boolean;
@@ -156,7 +161,7 @@ function harness(
         active: true,
         identity: {
           realm: "ops",
-          actorType: "ops_user",
+          actorType: options.observerType ?? "ops_observer",
           actorId: "live-map-observer",
           scopes: ["regulatory:read"],
         },
@@ -168,6 +173,11 @@ function harness(
           realm: options.realm ?? "driver",
           actorType: "driver_user",
           actorId: options.actor ?? env.DRTS_LIVE_MAP_TEST_DRIVER_ID,
+          scopes: options.driverScopes ?? [
+            "driver:read",
+            "driver:write",
+            "dispatch:read",
+          ],
         },
       });
     if (url.pathname.endsWith("regulatory-registry/drivers"))
@@ -283,8 +293,37 @@ describe("C114 coverage orchestration", () => {
         expect(serialized).not.toContain(secret);
     },
   );
+  it("runs a candidate against the separately pinned deployment and retains both SHAs", async () => {
+    const deployedSha = "b".repeat(40);
+    const { deps } = harness({ deployedSha, wire: "snake_case" });
+    const result = await runCoverage(
+      { ...env, DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: deployedSha },
+      deps,
+    );
+    expect(result).toMatchObject({
+      status: "passed",
+      candidate_sha: env.DRTS_CANDIDATE_SHA,
+      deployed_sha: deployedSha,
+    });
+    expect(result.service_area).toHaveLength(5);
+    expect(result.location).toHaveLength(4);
+  });
+  it("rejects the candidate runtime when a different deployment was requested", async () => {
+    const { deps, writes } = harness();
+    await expect(
+      runCoverage(
+        { ...env, DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: "b".repeat(40) },
+        deps,
+      ),
+    ).rejects.toThrow();
+    expect(deps.fetch).toHaveBeenCalledTimes(1);
+    expect(writes).toEqual([]);
+  });
   it.each([
     { realm: "system" },
+    { observerType: "ops_user" },
+    { driverScopes: ["driver:read"] },
+    { driverScopes: ["*"] },
     { actor: "live-map-other" },
     { workState: "available" },
     { deployedSha: "c".repeat(40) },

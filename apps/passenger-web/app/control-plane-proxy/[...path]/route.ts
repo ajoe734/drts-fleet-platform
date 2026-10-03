@@ -115,15 +115,6 @@ async function mintMetadataIdentityToken(audience: string) {
 }
 
 async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
-  // TODO(SEC-INTERNAL-KEY-WIF-MIGRATION-20260930 follow-up): drop this send
-  // once dev has proven the `x-drts-google-id-token` path below end-to-end
-  // and INTERNAL_KEY_EXCP_002 is retired. Kept for now so requests still
-  // succeed if the API's WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS
-  // registry has not been populated for this environment yet.
-  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
-  if (internalKey) {
-    headers.set("x-drts-internal-key", internalKey);
-  }
   const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   const audience =
     configuredAudience ||
@@ -137,9 +128,9 @@ async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
   if (identityToken) {
     // Cloud Run's own IAM invoker check (network hop).
     headers.set("x-serverless-authorization", `Bearer ${identityToken}`);
-    // apps/api's app-level caller identity: the same Google-signed identity
-    // token, verified against Google's public JWKS instead of the shared
-    // x-drts-internal-key secret.
+    // apps/api's app-level caller identity: a Google-signed identity token,
+    // verified against Google's public JWKS (INTERNAL_KEY_EXCP_002 retired,
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930).
     headers.set("x-drts-google-id-token", identityToken);
   }
 }

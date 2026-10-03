@@ -5,6 +5,17 @@
 **Region：** `us-central1`
 **目標：** 記錄 dev active inventory 與 `smarttransport.tw` 目前可觀測的 custom-domain 狀態，僅供控管與後續清理；本 task 不部署、不改 billing。
 
+> ⚠️ **歷史範圍（2026-10-02 補註）：** 本 runbook 全文的 GCP project 是
+> `nodal-alloy-503700-s3`，依 `AGENTS.md` 記錄，該 project 已於 2026-09-07
+> 因 content/ToS 問題停權；現行 live 共用 dev target 是 GitHub repo
+> variables `DEV_GCP_PROJECT_ID`／`DEV_GCP_REGION` 當時的值（2026-09-08 起為
+> `drts-dev-devcc-20260825` / `us-central1`），且必須在使用前重新查詢，不可
+> 從任何已提交文件推斷。以下章節的 project ID、domain mapping 指令與
+> 2026-07-31／2026-08-01 實測記錄，保留為該舊 project 當時狀態的歷史記錄；
+> 若要對現行 live project 執行或驗證 domain mapping，先讀
+> `.github/workflows/deploy-dev.yml` 與現行 repo variables，以其為準，不要
+> 直接套用本文件的 project ID。
+
 > ⚠️ **執行前提（只有具權限者能做）**
 >
 > 1. `gcloud auth login`。

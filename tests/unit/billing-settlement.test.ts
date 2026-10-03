@@ -337,13 +337,47 @@ describe("billing settlement service", () => {
         },
         "reimbursement-approve-request",
       );
-    const paidBatch = billingSettlementService.markReimbursementPaid(
+    // A bare invented ID is no longer accepted through the compatibility route.
+    await expect(
+      billingSettlementService.markReimbursementPaid(
+        batchId,
+        {
+          remittanceProofId: "remit-proof-001",
+        },
+        undefined,
+        "missing-proof-intent",
+      ),
+    ).rejects.toMatchObject({ code: "REMITTANCE_PROOF_NOT_FOUND" });
+    const staged = await billingSettlementService.stageRemittanceProofContent(
+      Buffer.from("unit-test receipt"),
+      "application/pdf",
+    );
+    const proof = await billingSettlementService.uploadRemittanceProof(
+      {
+        batchId,
+        originalFilename: "receipt.pdf",
+        contentType: "application/pdf",
+        sizeBytes: 17,
+        stagedContentRef: staged.stagedContentRef,
+      },
+      null,
+    );
+    await billingSettlementService.remittanceProofServiceForTest.recordScanResult(
+      proof.proofId,
+      {
+        scanState: "clean",
+        rejectionReason: null,
+        scanCompletedAt: new Date().toISOString(),
+      },
+    );
+    const paidBatch = await billingSettlementService.markReimbursementPaid(
       batchId,
       {
-        remittanceProofId: "remit-proof-001",
+        remittanceProofId: proof.proofId,
         paidAt: "2026-04-01T10:30:00Z",
       },
       "reimbursement-paid-request",
+      "reimbursement-paid-intent",
     );
     const statement = billingSettlementService.getDriverStatement(
       pendingBatch.statementId,
@@ -351,7 +385,7 @@ describe("billing settlement service", () => {
 
     expect(approvedBatch.approvedAt).toBeTruthy();
     expect(paidBatch.status).toBe("paid");
-    expect(paidBatch.remittanceProofId).toBe("remit-proof-001");
+    expect(paidBatch.remittanceProofId).toBe(proof.proofId);
     expect(paidBatch.paidAt).toBe("2026-04-01T10:30:00Z");
     expect(statement.payoutStatus).toBe("paid");
     expect(
@@ -364,7 +398,7 @@ describe("billing settlement service", () => {
     ).toEqual(
       expect.arrayContaining([
         "approve_reimbursement_batch",
-        "mark_reimbursement_paid",
+        "mark_reimbursement_paid_with_proof",
       ]),
     );
   });

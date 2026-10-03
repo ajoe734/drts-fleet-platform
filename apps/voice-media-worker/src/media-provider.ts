@@ -50,6 +50,29 @@ export interface VoiceSpeechToTextAdapter {
   transcribe(
     request: VoiceAsrTranscribeRequest,
   ): Promise<VoiceAsrSegmentResult>;
+  /** Optional streaming hook. A provider whose transport may deliver an
+   * accepted revision asynchronously, independent of the chunk cadence that
+   * triggered `transcribe()` (e.g. a buffered final revision that arrives
+   * after the request/response pair it logically belongs to already
+   * resolved), registers a listener here to receive every accepted result
+   * as soon as it is decoded. Callers that implement this must not also
+   * require another `transcribe()` call to "poll" for it. Adapters with a
+   * strict one-call/one-result shape (sandbox, fixtures) do not implement
+   * this. */
+  onResult?(listener: (result: VoiceAsrSegmentResult) => void): void;
+  /** Signals that no further audio will be sent for this session (the
+   * documented end-of-stream signal on the wire, where applicable). Safe to
+   * call multiple times. */
+  endAudio?(): void;
+  /** Releases any underlying connection/socket/billing resource this
+   * adapter holds. Safe to call multiple times and must not throw. An
+   * adapter whose teardown is itself asynchronous (e.g. a bounded EOS
+   * drain before the socket is released) returns a `Promise` that settles
+   * once that teardown has actually finished -- callers that need shutdown
+   * to be observable (`VoiceMediaWorkerSession.closeAsr`, and ultimately
+   * `MediaWorkerServer.stop`/`drain`) await it instead of firing-and-
+   * forgetting it. */
+  close?(): void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

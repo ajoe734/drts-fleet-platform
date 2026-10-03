@@ -98,7 +98,9 @@ describe("enterprise-dispatch control-plane proxy", () => {
       "Bearer enterprise-session-token",
     );
     expect(headers.get("content-type")).toBe("application/json");
-    expect(headers.get("x-drts-internal-key")).toBe("dev-internal-key");
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 retired,
+    // the proxy no longer sends the legacy internal key at all.
+    expect(headers.has("x-drts-internal-key")).toBe(false);
     expect(headers.get("x-realm")).toBe("tenant");
     expect(headers.get("x-actor-type")).toBe("tenant_admin");
     expect(headers.get("x-actor-id")).toBe("enterprise-dispatch-web");
