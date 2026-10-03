@@ -99,11 +99,29 @@ async function waitUntilBlockedOn(
 // identity.repository.ts actually executed against real Postgres, instead
 // of only inferring it from a converged final result (which a lucky,
 // error-free ON CONFLICT resolution could also produce).
-function traceClientQueries(db: DatabaseService): { queries: string[] } {
-  const trace: { queries: string[] } = { queries: [] };
+//
+// IdentityRepository's constructor fires two best-effort, unawaited seed
+// calls (ensureDefaultPlatformAccount / ensureLiveMapObserverAccount) that
+// also run inside a transaction and also take "upsert_principal_sp" --
+// they execute on this same DatabaseService's connection pool, racing with
+// whatever the test itself does. A flat `queries: string[]` mixes their
+// SAVEPOINT/ROLLBACK traffic in with the call under test and makes exact
+// counts like `toHaveLength(1)` flaky. Queries are tracked per logical
+// connection (one entry per `connect()` call, each carrying its bound
+// params) so a test can first identify *which* connection ran the specific
+// row it cares about (by matching a bound parameter such as principalId)
+// and only inspect that connection's queries.
+function traceClientQueries(db: DatabaseService): {
+  connections: { sql: string; params: unknown[] }[][];
+} {
+  const trace: { connections: { sql: string; params: unknown[] }[][] } = {
+    connections: [],
+  };
   const originalConnect = db.connect.bind(db);
   (db as unknown as { connect: typeof db.connect }).connect = async () => {
     const client = await originalConnect();
+    const connectionQueries: { sql: string; params: unknown[] }[] = [];
+    trace.connections.push(connectionQueries);
     const originalQuery = client.query.bind(client);
     (client as unknown as { query: (...args: unknown[]) => unknown }).query =
       (...args: unknown[]) => {
@@ -112,12 +130,34 @@ function traceClientQueries(db: DatabaseService): { queries: string[] } {
           typeof first === "string"
             ? first
             : ((first as { text?: string } | undefined)?.text ?? "");
-        trace.queries.push(sql);
+        const params = Array.isArray(args[1])
+          ? (args[1] as unknown[])
+          : ((first as { values?: unknown[] } | undefined)?.values ?? []);
+        connectionQueries.push({ sql, params });
         return (originalQuery as (...a: unknown[]) => unknown)(...args);
       };
     return client;
   };
   return trace;
+}
+
+// Finds the one connection (out of possibly several concurrent ones on the
+// same traced DatabaseService) that actually issued a statement binding
+// `value` as one of its parameters -- used to isolate the call under test
+// from IdentityRepository's unrelated constructor-seeding connections.
+function findConnectionByBoundParam(
+  trace: { connections: { sql: string; params: unknown[] }[][] },
+  value: string,
+): { sql: string; params: unknown[] }[] {
+  const match = trace.connections.find((queries) =>
+    queries.some((q) => q.params.includes(value)),
+  );
+  if (!match) {
+    throw new Error(
+      `No traced connection issued a statement bound to ${value}`,
+    );
+  }
+  return match;
 }
 
 describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/concurrency against real Postgres", () => {
@@ -1370,16 +1410,26 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
       // the attempt, a genuine unique-violation, ROLLBACK TO SAVEPOINT,
       // then a successful retry, and the whole bundle still reached
       // COMMIT rather than being lost to an aborted transaction.
-      const savepointHits = trace.queries.filter((sql) =>
+      //
+      // repoA's constructor also fires an unawaited, best-effort
+      // ensureDefaultPlatformAccount() seed call that runs on a separate
+      // connection from this same traced DatabaseService; isolate A's own
+      // connection (the one that actually inserted this test's
+      // `principalId`) before counting SAVEPOINT/ROLLBACK traffic, so that
+      // unrelated background seeding never pollutes this assertion.
+      const aQueries = findConnectionByBoundParam(trace, principalId).map(
+        (q) => q.sql,
+      );
+      const savepointHits = aQueries.filter((sql) =>
         sql.startsWith("SAVEPOINT upsert_principal_sp"),
       );
-      const rollbackToHits = trace.queries.filter((sql) =>
+      const rollbackToHits = aQueries.filter((sql) =>
         sql.startsWith("ROLLBACK TO SAVEPOINT upsert_principal_sp"),
       );
       expect(savepointHits).toHaveLength(1);
       expect(rollbackToHits).toHaveLength(1);
-      expect(trace.queries).toContain("COMMIT");
-      expect(trace.queries).not.toContain("ROLLBACK");
+      expect(aQueries).toContain("COMMIT");
+      expect(aQueries).not.toContain("ROLLBACK");
     } finally {
       if (!gateCommitted) {
         await gateClient.query("ROLLBACK").catch(() => undefined);
