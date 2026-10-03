@@ -1088,6 +1088,38 @@ export class PlatformAdminService implements OnModuleInit {
           claimToken,
         );
         if (!finalized) {
+          // (R10 byte-ownership compensating restore, Codex REOPEN
+          // generation 8b3a794454664b3d858cd10a63e00948) `storedEntry`
+          // just confirmed THIS call's own write landed in the store --
+          // which only happens when `baselineArtifact`'s generation was
+          // captured late enough (its own GET stalled in transit, not the
+          // write) to alias a reclaiming instance's already-finalized
+          // bytes as "unchanged", so `fenceGeneration` legitimately let a
+          // superseded attempt overwrite the real winner's bytes. The DB
+          // CAS above is the actual source of truth on ownership and has
+          // just said this attempt lost it; the object must not keep
+          // reflecting this attempt's bytes. Put `baselineArtifact`'s own
+          // observed bytes straight back, fenced on the generation this
+          // call's write just produced (`storedEntry.record.generation`):
+          // if nothing else has written since, this restores the true
+          // winner's bytes; if yet another writer landed in between, the
+          // fence refuses to clobber that newer, equally legitimate state
+          // instead of blindly reasserting a stale one. `baselineArtifact`
+          // is never null here -- a null baseline means this call's write
+          // used `IfNoneMatch: "*"`, which `renderPlacardArtifact` already
+          // turns into a thrown conflict before this point whenever any
+          // other writer created the object first.
+          if (baselineArtifact) {
+            await this.documentArtifactStore.putIfUnchanged(
+              {
+                kind: "placard",
+                subjectId: placard.placardVersionId,
+                mimeType: baselineArtifact.record.mimeType,
+                bytes: baselineArtifact.bytes,
+              },
+              storedEntry.record.generation,
+            );
+          }
           throw new ApiRequestError(
             HttpStatus.CONFLICT,
             "PLACARD_PUBLISH_CONFLICT",

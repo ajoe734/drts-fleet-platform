@@ -2791,6 +2791,198 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       );
     });
   });
+
+  describe("R10 byte-ownership compensating restore (Codex REOPEN, generation 8b3a794454664b3d858cd10a63e00948): a stale owner's delayed BASELINE READ must not let its later write replace a reclaimed-and-finalized winner's bytes", () => {
+    const PUBLIC_INFO_R10_BASELINE_GET = {
+      versionId: "public-info-r10-baseline-get",
+      title: "R10 Baseline Get Disclosure",
+      callPhone: "0800-040-040",
+      complaintPhone: "0800-040-050",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /**
+     * Holds a `get` call's entire execution -- not merely delivery of an
+     * already-decided response -- until released, for exactly one matching
+     * subjectId. This is what models a real `GetObjectCommand` that has not
+     * yet reached the transport: the R7/R8 byte-ownership fix's own
+     * `baselineArtifact` read (`publishPlacardVersionExclusive`, captured
+     * before `ensurePlacardArtifact`'s fenced write) only observes whatever
+     * the store actually holds at RELEASE time, which can be a sibling
+     * instance's reclaim-and-finalize that happened entirely while this read
+     * sat held -- the exact gap the prior fix's own `fenceGeneration` write
+     * cannot see, because by the time the write runs, its baseline already
+     * (legitimately, from the write's own point of view) matches the
+     * winner's current generation.
+     */
+    class HeldGetDocumentArtifactStore implements DocumentArtifactStore {
+      readonly inner = new InMemoryDocumentArtifactStore();
+      private holdSubjectId: string | null = null;
+      private gate: Promise<void> | undefined;
+
+      holdNextGetFor(subjectId: string): () => void {
+        this.holdSubjectId = subjectId;
+        let release!: () => void;
+        this.gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.inner.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.inner.putIfUnchanged(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        const [, subjectId] = args;
+        if (this.holdSubjectId === subjectId && this.gate) {
+          const held = this.gate;
+          this.holdSubjectId = null;
+          this.gate = undefined;
+          await held;
+        }
+        return this.inner.get(...args);
+      }
+    }
+
+    it("fences out a stale owner's write whose baseline read resumes after a reclaimed claim finalizes -- the winner's bytes, DB row, original link and a freshly issued link all stay correct", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R10_BASELINE_GET,
+      ]);
+      const store = new HeldGetDocumentArtifactStore();
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r10-baseline-get",
+        publicInfoVersionId: PUBLIC_INFO_R10_BASELINE_GET.versionId,
+        templateName: "seatback-r10-baseline-get",
+      });
+
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      // A claims publication and starts its own baseline read -- the first
+      // `get` this test allows to run for this subjectId is held BEFORE it
+      // reaches the transport, i.e. before A has any idea what the store
+      // actually holds.
+      const release = store.holdNextGetFor(draft.placardVersionId);
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const claimedRow = rows.get(draft.placardVersionId);
+      expect(claimedRow?.record.publishedAt).toBeTruthy();
+      expect(claimedRow?.record.__publishClaimToken).toBeTruthy();
+
+      // Age A's claim past the repository's 2-minute abandonment window --
+      // A is modelled as stalled in flight, not crashed, but the guard only
+      // looks at elapsed time, exactly like a real abandoned claim.
+      claimedRow!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // C reclaims the now-stale claim, renders, writes and finalizes for
+      // real -- entirely while A's baseline read sits held, never having
+      // observed any of it yet.
+      const published = await podC.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+      expect(
+        rows.get(draft.placardVersionId)?.record.__publishClaimToken,
+      ).toBeUndefined();
+
+      // Only now does A's baseline read actually reach the store -- AFTER C
+      // has already finalized. A observes C's own finalized generation as
+      // "the current state", so its own fenced write legitimately succeeds
+      // against that baseline and clobbers C's bytes -- UNLESS the
+      // compensating restore below closes that gap.
+      release();
+      await expect(publishA).rejects.toMatchObject({
+        code: "PLACARD_PUBLISH_CONFLICT",
+      });
+
+      // The durable row still reflects C's finalize, untouched by A's
+      // rejected, superseded write.
+      const persisted = rows.get(draft.placardVersionId);
+      expect(persisted?.record.publishedAt).toBe(published.publishedAt);
+      expect(persisted?.record.artifactManifestHash).toBe(
+        published.artifactManifestHash,
+      );
+
+      // The actual stored bytes are C's, not A's -- even though A's own
+      // write legitimately passed its own (stale) fence check, the
+      // compensating restore put C's observed bytes straight back once the
+      // DB-level finalize told A it had actually lost.
+      const stored = await store.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      // C's own successful link still resolves to the exact bytes it names.
+      const controller = new ControlledDownloadController(store, registry);
+      const winnerFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(winnerFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      // A freshly booted, independent reader -- never itself a claimant --
+      // resolves the same winning bytes via its own freshly issued link.
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
 });
 
 describe("createDocumentArtifactStore provider resolution", () => {

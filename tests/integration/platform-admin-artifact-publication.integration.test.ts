@@ -340,6 +340,94 @@ describe.skipIf(!DATABASE_URL)(
       );
     });
 
+    it("releasePlacardPublishClaim: matching publishedAt AND matching token actually reverts the claim back to an unpublished, retryable draft", async () => {
+      const placardVersionId = `pg-matrix-release-success-${randomUUID()}`;
+      placardIds.add(placardVersionId);
+
+      const repo = newRepository();
+      const claimToken = `token-release-success-${randomUUID()}`;
+      const claim = await repo.claimPlacardPublish(
+        stagedClaim(basePlacard(placardVersionId), claimToken),
+      );
+      expect(claim.claimed).toBe(true);
+      const wonClaim = claim.currentRecord!;
+
+      const revertedRecord: PlacardVersionRecord = {
+        ...wonClaim,
+        publishedAt: null,
+        updatedAt: new Date().toISOString(),
+      };
+      delete (revertedRecord as { __publishClaimToken?: string })
+        .__publishClaimToken;
+
+      // Both predicates (`record->>'publishedAt' = $4` AND
+      // `record->>'__publishClaimToken' = $5`) genuinely match this exact
+      // still-pending claim -- this is the real revert path a failed
+      // render/store write takes, distinct from the two no-op branches the
+      // test above already covers (wrong token; already finalized).
+      const released = await repo.releasePlacardPublishClaim(
+        placardVersionId,
+        wonClaim.publishedAt!,
+        revertedRecord,
+        claimToken,
+      );
+      expect(released).toBe(true);
+
+      const row = await readRow(placardVersionId);
+      expect(row?.publishedAt).toBeNull();
+      expect(row?.__publishClaimToken).toBeUndefined();
+
+      // The now-unpublished row is retryable: a fresh claim attempt is
+      // admitted again through the guard's first disjunct.
+      const retry = await repo.claimPlacardPublish(
+        stagedClaim(basePlacard(placardVersionId), `token-retry-${randomUUID()}`),
+      );
+      expect(retry.claimed).toBe(true);
+    });
+
+    it("releasePlacardPublishClaim: the exact token but a stale claimedPublishedAt is a no-op, distinguishing the two SQL predicates", async () => {
+      const placardVersionId = `pg-matrix-release-wrong-publishedat-${randomUUID()}`;
+      placardIds.add(placardVersionId);
+
+      const repo = newRepository();
+      const claimToken = `token-release-wrong-publishedat-${randomUUID()}`;
+      const claim = await repo.claimPlacardPublish(
+        stagedClaim(basePlacard(placardVersionId), claimToken),
+      );
+      expect(claim.claimed).toBe(true);
+      const wonClaim = claim.currentRecord!;
+
+      const revertedRecord: PlacardVersionRecord = {
+        ...wonClaim,
+        publishedAt: null,
+        updatedAt: new Date().toISOString(),
+      };
+      delete (revertedRecord as { __publishClaimToken?: string })
+        .__publishClaimToken;
+
+      // The token matches exactly, but `claimedPublishedAt` names a
+      // different instant than the row's actual `publishedAt` -- e.g. a
+      // caller that staged its own claim a second time and is releasing
+      // against a stale cached value. Neither predicate alone is this
+      // call's guard; both the previous test (right publishedAt, wrong
+      // token) and this one (right token, wrong publishedAt) must fail
+      // for the guard to actually be AND, not OR.
+      const staleDifferentPublishedAt = new Date(
+        Date.parse(wonClaim.publishedAt!) - 1000,
+      ).toISOString();
+      const wrongPublishedAtRelease = await repo.releasePlacardPublishClaim(
+        placardVersionId,
+        staleDifferentPublishedAt,
+        revertedRecord,
+        claimToken,
+      );
+      expect(wrongPublishedAtRelease).toBe(false);
+
+      const row = await readRow(placardVersionId);
+      expect(row?.publishedAt).toBe(wonClaim.publishedAt);
+      expect(row?.__publishClaimToken).toBe(claimToken);
+    });
+
     it("persistChanges generic-writer guard: real Postgres JSONB text comparison rejects a stale publishedAt:null writer against an already-finalized row, regardless of updated_at ordering", async () => {
       const placardVersionId = `pg-matrix-generic-writer-${randomUUID()}`;
       placardIds.add(placardVersionId);
