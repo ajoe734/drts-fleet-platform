@@ -2554,6 +2554,28 @@ export class IdentityRepository implements OnModuleInit {
     );
   }
 
+  // identity_principals/identity_memberships each carry more than one
+  // UNIQUE constraint (the primary key plus source_ref, plus a composite
+  // context key for memberships) on top of the ON CONFLICT arbiter
+  // (source_ref). Postgres's speculative-insertion retry only covers the
+  // named arbiter: two genuinely concurrent first-time inserts for the
+  // SAME not-yet-existing row (identical principal_id/source_ref -- two
+  // parallel automation runs authenticating for the first time) can both
+  // pass the arbiter's conflict check and then have the LOSING insert
+  // raise a hard, unhandled 23505 on the non-arbiter constraint instead of
+  // being absorbed by DO UPDATE. The caller already falls back to a plain
+  // SELECT by source_ref when the INSERT returns no row; reaching that
+  // same fallback on this specific error code is correct here too, since
+  // source_ref is identical between the racing rows and the loser just
+  // needs to read back whichever one actually committed.
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === "23505"
+    );
+  }
+
   // The three upserts below decide "did a tracked field actually change"
   // via the ON CONFLICT ... WHERE clause instead of a separate SELECT +
   // JS comparison. A no-op "ensure" (session re-issuance) must leave
@@ -2577,8 +2599,10 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityPrincipalRecord,
   ) {
-    const result = await client.query<JsonRecordRow>(
-      `
+    let result: { rows: JsonRecordRow[] };
+    try {
+      result = await client.query<JsonRecordRow>(
+        `
         INSERT INTO iam.identity_principals (
           principal_id,
           source_ref,
@@ -2633,21 +2657,33 @@ export class IdentityRepository implements OnModuleInit {
           AND EXCLUDED.updated_at >= iam.identity_principals.updated_at
         RETURNING record
       `,
-      [
-        record.principalId,
-        record.sourceRef,
-        record.issuer,
-        record.subject,
-        record.principalType,
-        record.email,
-        record.emailVerified,
-        record.displayName,
-        record.status,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
-      ],
-    );
+        [
+          record.principalId,
+          record.sourceRef,
+          record.issuer,
+          record.subject,
+          record.principalType,
+          record.email,
+          record.emailVerified,
+          record.displayName,
+          record.status,
+          record.createdAt,
+          record.updatedAt,
+          JSON.stringify(record),
+        ],
+      );
+    } catch (error) {
+      // A genuinely concurrent first-time insert for this exact
+      // (previously-unseen) principal_id/source_ref can lose the race on
+      // the primary key rather than the source_ref arbiter above; Postgres
+      // raises that as a hard, unhandled unique_violation instead of
+      // routing it through ON CONFLICT DO UPDATE. Fall through to the same
+      // read-back-the-winner path used when DO UPDATE is a no-op.
+      if (!this.isUniqueViolation(error)) {
+        throw error;
+      }
+      result = { rows: [] };
+    }
     if (result.rows[0]?.record) {
       return this.parseRecord<CanonicalIdentityPrincipalRecord>(
         result.rows[0].record,
@@ -2668,8 +2704,10 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityMembershipRecord,
   ) {
-    const result = await client.query<JsonRecordRow>(
-      `
+    let result: { rows: JsonRecordRow[] };
+    try {
+      result = await client.query<JsonRecordRow>(
+        `
         INSERT INTO iam.identity_memberships (
           membership_id,
           source_ref,
@@ -2723,22 +2761,34 @@ export class IdentityRepository implements OnModuleInit {
           AND EXCLUDED.updated_at >= iam.identity_memberships.updated_at
         RETURNING record
       `,
-      [
-        record.membershipId,
-        record.sourceRef,
-        record.principalId,
-        record.realm,
-        record.scopeRef,
-        record.tenantId,
-        record.partnerId,
-        record.status,
-        record.invitedByPrincipalId,
-        record.invitationId,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
-      ],
-    );
+        [
+          record.membershipId,
+          record.sourceRef,
+          record.principalId,
+          record.realm,
+          record.scopeRef,
+          record.tenantId,
+          record.partnerId,
+          record.status,
+          record.invitedByPrincipalId,
+          record.invitationId,
+          record.createdAt,
+          record.updatedAt,
+          JSON.stringify(record),
+        ],
+      );
+    } catch (error) {
+      // See upsertPrincipal: identity_memberships also carries a
+      // non-arbiter unique constraint (principal_id, realm, scope_ref)
+      // beyond the source_ref arbiter above, so a genuinely concurrent
+      // first-time insert for the same not-yet-existing membership can
+      // raise a hard unique_violation instead of routing through DO
+      // UPDATE. Fall through to the same read-back-the-winner path.
+      if (!this.isUniqueViolation(error)) {
+        throw error;
+      }
+      result = { rows: [] };
+    }
     if (result.rows[0]?.record) {
       return this.parseRecord<CanonicalIdentityMembershipRecord>(
         result.rows[0].record,
@@ -2771,8 +2821,10 @@ export class IdentityRepository implements OnModuleInit {
                 '{validFrom}',
                 to_jsonb(iam.identity_role_bindings.valid_from)
               )`;
-    const result = await client.query<JsonRecordRow>(
-      `
+    let result: { rows: JsonRecordRow[] };
+    try {
+      result = await client.query<JsonRecordRow>(
+        `
         INSERT INTO iam.identity_role_bindings (
           role_binding_id,
           source_ref,
@@ -2820,20 +2872,31 @@ export class IdentityRepository implements OnModuleInit {
           AND EXCLUDED.updated_at >= iam.identity_role_bindings.updated_at
         RETURNING record
       `,
-      [
-        record.roleBindingId,
-        record.sourceRef,
-        record.membershipId,
-        record.roleCode,
-        record.grantedByPrincipalId,
-        record.approvalId,
-        record.validFrom,
-        record.validTo,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
-      ],
-    );
+        [
+          record.roleBindingId,
+          record.sourceRef,
+          record.membershipId,
+          record.roleCode,
+          record.grantedByPrincipalId,
+          record.approvalId,
+          record.validFrom,
+          record.validTo,
+          record.createdAt,
+          record.updatedAt,
+          JSON.stringify(record),
+        ],
+      );
+    } catch (error) {
+      // See upsertPrincipal: a genuinely concurrent first-time insert for
+      // the same not-yet-existing role binding can lose the race on the
+      // primary key rather than the source_ref arbiter above, raising a
+      // hard unique_violation instead of routing through DO UPDATE. Fall
+      // through to the same read-back-the-winner path.
+      if (!this.isUniqueViolation(error)) {
+        throw error;
+      }
+      result = { rows: [] };
+    }
     if (result.rows[0]?.record) {
       return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
         result.rows[0].record,
