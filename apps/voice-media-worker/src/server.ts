@@ -80,16 +80,16 @@ async function main() {
   );
   console.warn(
     "[voice-media-worker] Dialogue turns run against the real VoiceDialogueEngine/VoiceDialogueState " +
-      "machinery but every tool proposal other than request_handoff forces an honest 'unavailable' " +
-      "handoff, and persist() is an in-process-only no-op: apps/api's VoiceToolGatewayService/" +
-      "VoiceSessionService, and the VoiceCapabilityService/VoiceCapabilityGuard token exchange SD " +
-      "§4.2 specifies, already exist and are DB-backed/wired on the verification side. The precise " +
-      "gaps are narrower: VoiceCapabilityService.issue is never called from any route or job (no " +
-      "issuance call site/trust context for a specific live call), voice-booking.controller.ts " +
-      "exposes no HTTP route guarded by VoiceCapabilityGuard at all, and this worker has no HTTP " +
-      "client to call apps/api with -- not a missing 'apps/api/src/modules/cti-ivr' folder and not " +
-      "an undesigned verification contract. See " +
-      "docs/04-uat/audit-voice-application-wiring-20261003.md.",
+      "machinery; every tool proposal other than request_handoff still forces an honest 'unavailable' " +
+      "handoff (no reachable domain-execution channel for any other tool exists). Codex reopen round " +
+      "5/6 (R4) built the issuance route, the VoiceCapabilityGuard-guarded sessions/:id/input-resolutions " +
+      "and sessions/:id/handoffs routes, and this worker's own VoiceApiClient to call them -- an earlier " +
+      "version of this message claiming none of that existed is now obsolete and explicitly superseded. " +
+      "persist() uses that client for any attachment a real VoiceSessionBinding is supplied to (none is, " +
+      "today -- no call-admission flow exists yet) and otherwise remains the original in-process-only " +
+      "no-op. A further route/client (sessions/:id/events, backing VoiceSessionService.recordControlEvent's " +
+      "durable speech-start watermark) exists but this coordinator does not yet call it during a live " +
+      "turn. See docs/04-uat/audit-voice-application-wiring-20261003.md.",
   );
 
   let draining = false;

@@ -121,21 +121,29 @@ const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"]
  * for-session-capability flow end to end on the verification side
  * (corrected this round -- an earlier version of this comment said this
  * contract "has never been designed on either side," which `Codex`'s
- * second reopen correctly called too broad). What is genuinely missing is
- * narrower: (1) `VoiceCapabilityService.issue` is never called from
- * anywhere in production code -- no route or job mints a capability token
- * for a specific live call, so there is no *issuance call site or trust
- * context* yet, even though verification is ready to consume one; (2)
- * `voice-booking.controller.ts` exposes no HTTP route guarded by
- * `VoiceCapabilityGuard` at all (only `metrics/cohort`, `usage/*`, and
- * `work-items/:workId/repair`), so there is nothing for a minted token to
- * call even once issued; (3) this worker has no HTTP client to call
- * apps/api with. Designing who triggers issuance and when, adding the
- * guarded route, and adding the worker-side client together are the
- * precisely-scoped cross-service contract that needs coordinated design on
- * both sides, not a speculative endpoint this task invents unilaterally.
- * `voice-media-worker` also carries no database dependency at all (see its
- * package.json) and must not acquire one here just to reach that state.
+ * second reopen correctly called too broad). An earlier version of *this*
+ * paragraph then went on to list three remaining gaps -- no issuance call
+ * site, no guarded HTTP route, and no worker-side HTTP client -- which
+ * Codex reopen round 5/6 (R4) correctly flagged as now obsolete and
+ * explicitly superseded: all three are built. `voice-booking.controller.ts`
+ * exposes `POST capabilities`/`sessions/:id/input-resolutions`/
+ * `sessions/:id/handoffs`/`sessions/:id/events`, all guarded by
+ * `VoiceCapabilityGuard`; `VoiceCapabilityService.issue` is called from the
+ * first of those; and `../server/voice-api-client.ts` is this worker's own
+ * HTTP client calling all four. `voice-media-worker` still carries no
+ * database dependency at all (see its package.json) and still must not
+ * acquire one here. What remains genuinely unavailable is the call-
+ * admission flow that would supply any attachment a real
+ * `VoiceSessionBinding` in the first place (see `attach()`'s own doc and
+ * `../server/voice-session-binding.ts`), the ordered control-event/turn
+ * persistence this worker does not yet call `recordControlEvent`/an
+ * ASR-final-recording route for during a live turn (R4 residual -- the
+ * route/client exist, see `voice-api-client.ts#recordControlEvent`, but
+ * nothing in this coordinator's `handle()` calls it yet, and this
+ * attachment's own process-local turn-sequencing counter is not yet
+ * reconciled against the authoritative, speech-start-only remote
+ * watermark that call would advance), and session restoration on
+ * worker restart/reconnect.
  *
  * This coordinator therefore runs the real `VoiceDialogueEngine` /
  * `VoiceDialogueState` machinery against every admitted final transcript --
