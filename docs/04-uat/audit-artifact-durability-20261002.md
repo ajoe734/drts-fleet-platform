@@ -930,10 +930,27 @@ changes reach: `tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public
 `platform-admin-assistant-action.test.ts` (27/27). None of these pre-existing
 suites' assertions were weakened or removed to make this repair pass.
 
+### Hosted CI exact-SHA evidence for this repair (`same_sha_review_ci`)
+
+PR #2295 head `1ff6dacff660b4bb4b6ff73057a40e07dffd6b77` (this repair's
+candidate, verified via `gh pr view 2295 --json headRefOid` immediately
+before and after polling): `gh pr checks 2295` at this exact SHA shows every
+check `pass` except the explicitly-skipped `orchestrator-tests`. Required
+checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`,
+`ci-integ`. Full set, including the four jobs that were still running when
+first observed and were polled to completion rather than assumed:
+`unit` (10m55s), `build` (7m10s), `ui-route-e2e` (7m20s), `Product smoke
+acceptance` (8m0s), plus previously-confirmed `typecheck`, `lint`,
+`integration`, `iam-negative-matrix`, `cross-surface-e2e`, `candidate`,
+`changes`, `e2e`, `i18n guard`/`i18n-guard`, `dependency-security`,
+`Canonical consistency`, `BFF-only imports`, `Change scope`, `Repo
+classification` (x2), `Dependency security`, `No real financial-institution
+identifiers`, `Spec source archive`, `Verify Internal Key Exceptions`. Runs:
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/37127370610 and
+https://github.com/ajoe734/drts-fleet-platform/actions/runs/37127370622.
+
 ### Remaining limitations (this repair)
 
-- `same_sha_review_ci`: not yet run for the new candidate SHA this repair
-  produces; hosted CI must be re-verified at that exact SHA.
 - Real storage/Cloud Run/IAM acceptance remains `SR-LIVE-DOC-001`; this
   repair's cross-instance-race coverage is same-process test doubles over
   the shared-boundary store, not deployed multi-replica Cloud Run.
