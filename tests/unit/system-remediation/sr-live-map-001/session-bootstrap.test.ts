@@ -197,6 +197,30 @@ it.each([true, false])(
   },
 );
 
+it("binds every bootstrap response to the explicitly requested runtime, retaining the test candidate", async () => {
+  const deployedSha = "b".repeat(40);
+  const deps = harness({
+    healthSha: deployedSha,
+    headerSha: deployedSha,
+    snake: true,
+  });
+  await bootstrapMapSessions(
+    { ...env, DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: deployedSha },
+    deps,
+  );
+  expect(deps.fetch).toHaveBeenCalledTimes(9);
+  expect(deps.evidence.sessions).toMatchObject({
+    status: "passed",
+    candidate_sha: sha,
+    deployed_sha: deployedSha,
+  });
+  expect(deps.evidence.deployment).toMatchObject({
+    status: "passed",
+    candidate_sha: sha,
+    deployed_sha: deployedSha,
+  });
+});
+
 it.each([
   { DRTS_LIVE_MAP_TEST_AUTHORIZED: "false" },
   { RUNNER_ENVIRONMENT: "self-hosted" },

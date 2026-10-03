@@ -32,7 +32,7 @@ export async function revokeMapInvitation(
     });
     assert.equal(
       response.headers.get("x-drts-candidate-sha"),
-      config.candidateSha,
+      config.deployedSha,
     );
     assert(response.ok);
     const result = normalizeApiResponse(await response.json()) as {
