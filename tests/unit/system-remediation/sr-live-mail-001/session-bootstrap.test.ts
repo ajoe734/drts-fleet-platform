@@ -71,7 +71,16 @@ describe("validateMailSessionInputs", () => {
 });
 
 describe("deriveAliasRecipient", () => {
-  it.each(["example.com", "EXAMPLE.NET", "sub.example.org", "fixture-mail.org", "demo.mail.org", "mail.invalid", "mail.test", "mail.localhost"])("rejects placeholder mailbox domain %s for both flows", (domain) => {
+  it.each([
+    "example.com",
+    "EXAMPLE.NET",
+    "sub.example.org",
+    "fixture-mail.org",
+    "demo.mail.org",
+    "mail.invalid",
+    "mail.test",
+    "mail.localhost",
+  ])("rejects placeholder mailbox domain %s for both flows", (domain) => {
     for (const tag of ["invite", "approve"]) {
       expect(() => deriveAliasRecipient(`unit@${domain}`, tag)).toThrow();
     }

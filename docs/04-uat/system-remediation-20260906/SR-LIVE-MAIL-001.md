@@ -1,8 +1,52 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：首次 hosted run 在 bootstrap 失敗，郵件 runner **skipped**。本輪修正 TS／Python 兩處 Gmail-only mailbox 限制，補安全的 bootstrap stage／error-class 診斷；**127 TS＋18 Python tests 通過**。舊 live log 無 stage，尚不能斷言當次故障一定由 mailbox domain 引起；待 Supervisor 合併／部署後重跑確認。
-- **§0.4 是最新修正與檢查結果**；§0–§0.3 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+- 現況：第二次 hosted run 的 bootstrap 已成功，但 runner 殘留 Gmail-only gate 失敗。本輪移除最後一處網域限制並共用 TS alias validator，補 bootstrap→runner→Python observer 串接回歸及 deploy-dev 重疊拒絕檢查；**152 TS＋25 Python tests 通過**。真郵件回執／內容仍待 Supervisor 合併、部署並避開 deploy-dev 後重跑。
+- **§0.5 是最新修正與檢查結果**；§0–§0.4 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+
+## 0.5 F13 續修／F15：完整網域 gate 與部署重疊（2026-10-03）
+
+依 Supervisor `2026-10-03T13:45Z` integration note 續作。F13 是前輪漏修的同一非 Gmail sender 觸發情境，沒有改名消除歷史；前輪獨立 review 是 approve，這是第二次 hosted failure，不冒稱兩輪獨立 reviewer reopen。沿用 C006／N06、C026／N07 的正式邀請與簽核流程；C079 依原授權不涵蓋。
+
+### 原候選、定位與版本
+
+- 原候選 `c6019428aff9ecdf5684edfe1840d6c438d1be61`／[PR #2299](https://github.com/ajoe734/drts-fleet-platform/pull/2299) 已合併且同 SHA CI 結束。本輪 fetch 的 base 是 `origin/dev=4b9531acaa5f45c077fea65bb71c35182f35f117`；以普通 merge `eea9fd1340417f72f924eba266752dfc14c540ed` 同步，無衝突、無 rebase/reset/force push。merge 後 task 原始碼与該 base 相同，後續 authored diff 僅在授權 scope；`ci-integ.yml` 沒有本輪修改。
+- [hosted run 37126280484](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37126280484)，attempt **1**，checkout／deployed candidate `98352db89e6ac7b2d734f03d74b3bee234158274`，workflow source `bc85c54cf080a5906721912e4c009f4bf5c11239`。已實際下載 artifact **11274747911**（`live-mail-acceptance-98352db89e6ac7b2d734f03d74b3bee234158274-37126280484-1`）。install／preflight／resources／sessions／teardown success，runner failure；`evidence-mail.json.errors[0]` 明確指出 dedicated Gmail sender invite alias gate。沒有郵件送達證據。
+- 同 artifact provider metadata：revision **drts-dev-api-00046-8ll**，candidate `98352db8…`、alias freshness true。只能證明當次配置與版本，不是 receipt／IMAP arrival，也不是新候選 acceptance。
+- 精確呼叫路徑：workflow `session-bootstrap.ts` → `bootstrapMailSession`／`deriveAliasRecipient` export → runner `validateMailRunnerInputs`（原 line 77 的 `+invite@gmail.com` regex）→ `runMailAcceptance` → `observeInvitationMailbox`／`observeMailbox` → Python `main`／`derive_alias_recipient`／`observe`／`inspect_message`。前輪測試分別驗 bootstrap／observer，沒有讓其 exports 經過 runner gate，因此漏修。
+- 全 harness 與 workflow 搜尋 `gmail|domain|alias|fixture|demo|example`：收件網域限制只餘上述 runner regex；`imap.gmail.com:993`、`[Gmail]/All Mail` 是使用者指定 Gmail／Workspace provider 的 TLS endpoint／folder，保留。`live-profiles.ts: observeApproval` 的 `+invite@` → `+approve@` 轉換與同租戶 approver 比對沒有 Gmail domain 假設。
+
+### 逐項修復與驗證
+
+| Finding／驗收項 | 正式依據與修改位置 | 舊版重現 → 修正版結果 | 命令、版本與證據 | 未驗與限制／責任 |
+| --- | --- | --- | --- | --- |
+| F13 續：bootstrap 接受 Workspace，runner 隨後拒絕 | runner `validateMailRunnerInputs` 改用 bootstrap 的 `deriveAliasRecipient`，要求最後 tag 為 `+invite`；兩流程仍只准 invite／approve | 同串接測試舊程式 **2 failed／1 passed**：兩種 Workspace 地址卡在 runner，Gmail 控制組通過；修後 **3 passed**，兩 aliases 均進真 Python main 與 MIME parser | 重現 anchor `9018858fa3ff8f9cd0133ab5bafe54df38188311`；修正 anchor `399b9157fb187e2530616d705b9023b90571642b`；`pipeline-before.log`／`pipeline-after.log` | HTTP／IAM／secrets／IMAP 邊界 mock；没有對 unit 地址發信，不能當 live receipt |
+| F13 邊界：放寬 domain 不得允許 placeholder／額外 tag | TS `deriveAliasRecipient` 與 Python `derive_alias_recipient` 一致拒絕 fixture/demo/example domain words、`.invalid/.test/.localhost`；沿用 DNS label、local-part、長度／注入拒絕 | Workspace 大小寫 domain、子網域、apostrophe／既有 plus local-part 正向；runner wrong tag／無 tag／placeholder／malformed 拒絕，TS＋Python 均測兩流程 reserved domain | `mail-acceptance-runner.test.ts`、`session-bootstrap.test.ts`、`test_mailbox_observer.py`；全套 **152 TS＋25 Python pass** | SMTP allowlist 仍是正式送信權威；domain 支援不增加收件授權。unit 正向地址改為非 reserved synthetic domain，只用 mock |
+| F14 與 F01–F12 回歸 | 原 stage／safe error class、identity／tenant／proof／SHA、receipt、allowlist failure、lifecycle／expiry／retry gates | 既有回歸全部通過；串接測試仍要求 partial profile 回 failed，沒有將缺少的 live profiles 設 true | 同下表完整 scoped suite；production proof policy／API serializer 仍直接引用 | 原未驗項全部保留，不把單元成功當成 acceptance |
+| F15：與 deploy-dev 同 actor 登入使既有 session 失效 | Supervisor note：mail token `13:29:12` 覆蓋 deploy token `13:28:46`，後者 `13:30:47/58` 回 401。產品責任另由 `SR-AUTH-SESSION-SUPERSEDE-20261003` 追蹤；本任務只改 workflow／guard | 新 `deployment-guard.py` 查所有 active／scheduled 狀態及所有 pages；cloud auth 前與 mint session 前各查一次，缺權限／壞回應 fail closed；gate-evidence 要求兩步成功 | **6 guard tests pass**；真 GitHub read-only probe 對 [deploy run 37126736140](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37126736140)（source `4b9531ac…`，in_progress）實際 exit **1（預期拒絕）**；未 mint session | 是 point-in-time guard，**不是跨 workflow 原子鎖**；Supervisor/operator 必須等部署整個 run 結束，再 dispatch mail，直到 mail teardown 完成不得啟動新的 deploy-dev。沒有越 scope 改 deploy-dev／產品 session |
+| `authorized_test_mailbox` | 既有 user option A 的 dedicated sender +invite／+approve，bootstrap 從授權 secret 衍生 | 授權沿用；修正 domain gate，不改 recipient allowlist | 上述第二次 run bootstrap success，單元 alias／注入拒絕回歸 | 新候選真 IMAP UID／內容 hash 仍待 Supervisor hosted run；沒有重問授權 |
+| `configured_mail_provider` | artifact 11274747911 的 evidence-provider.json | 舊 live source 的 resources success；本輪未讀 secrets | source／revision 如上 | 新候選部署後需重新取回 provider metadata；未 record-acceptance |
+| `provider_message_receipts` | 第二次 run 在 runner input validation 失敗，無 provider receipt | **仍無真 receipt／inbox arrival**；mock 不計 | evidence-mail.json 與 run-status.json | 仍需兩流程 mail、真24h expiry、operator approval request 與真 queued retryable delivery；Supervisor/operator＋Codex |
+| `live_candidate_sha` | 舊 run health／checkout 為 `98352db8…` | 只證明舊 deployed SHA；本輪最終候選依 canonical handoff／新 PR head | base、重現／修正 anchors 已普通 push；最終 candidate 另由 handoff 鎖定 | 同候選 review／CI／merge 後 Supervisor 部署、正常 promotion/dispatch；本輪不部署、不 done |
+
+### 已結束的檢查
+
+本機 log 根目錄為 `.local/sr-live-mail-001/domain-gates-20261003/`。完整檢查版本 **f4122c233df5e8f4b1c6b83fd9dda568bc15463e**，後續只有 test formatting 與本 evidence 更新；不把 checkpoint 當正式候選。最終 SHA、PR 與 hosted CI 結論由本輪 canonical handoff 記錄。第一次 prettier check exit 1（新增的 TS test formatting），已修正並以相同命令重跑 exit 0。
+
+| 命令 | Exit／結果 | 證據 |
+| --- | --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/mailbox-pipeline.test.ts`（原 gate／修後） | **1 → 0**；2 failed＋1 passed → 3 passed | pipeline-before.log／pipeline-after.log；Gmail 控制組也呼叫真正 Python observer |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/` | **0**；7 files／**152 tests passed**，Vitest 4.1.4 | vitest.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v` | **0**；**25 tests passed** | python.log |
+| `pnpm exec tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json` | **0** | typecheck.log |
+| `pnpm exec eslint --max-warnings=0 tests/e2e/system-remediation/sr-live-mail-001/ tests/unit/system-remediation/sr-live-mail-001/` | **0** | lint.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py` | **0**；83 tracked test files 可被 CI 收集 | terminal；新增 guard tests 沿用現有 CI discover step，无 ci-integ.yml 改動 |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/ci/test_check_test_coverage.py tools/ci/test_workflow_timeouts.py -v` | **0**；11 tests passed | terminal |
+| `pnpm exec prettier --check .github/workflows/live-mail-acceptance.yml 'tests/e2e/system-remediation/sr-live-mail-001/*.ts' 'tests/unit/system-remediation/sr-live-mail-001/*.ts'`；`git diff --check` | **0** | prettier.log／terminal |
+| `GITHUB_REPOSITORY=ajoe734/drts-fleet-platform PYTHONDONTWRITEBYTECODE=1 python3 tests/e2e/system-remediation/sr-live-mail-001/deployment-guard.py` | **1（預期拒絕）**；真 active deployment，不是 API／credentials failure | deployment-guard-live.log；run37126736140 如上 |
+| Playwright／SMTP／IMAP live／Cloud Run 部署 | **未執行** | VM 限制與 Supervisor redeploy/redispatch 分工；本輪只執行 unit 子程序與唯讀 GitHub probe |
+
+四項 required_acceptance 尚未完備，§0.1 的 approval／真24h expiry／automatic retry 條件全部保留。Operator 必須從已包含 guard 的 workflow ref dispatch，使用部署的 immutable candidate SHA；舊 main workflow 不會執行新增 step。按原正常 promotion 路徑發布後，先確認 deploy-dev 全 run 已結束，再執行 mail acceptance；保留至 session teardown 結束的部署空窗。
 
 ## 0.4 F13／F14：首次 hosted bootstrap 退修（2026-10-03）
 
