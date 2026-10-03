@@ -246,7 +246,7 @@
     },
     {
       "id": "repository-policy",
-      "pattern": "^(?:repo-classification\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$|^\\.[a-z0-9][a-z0-9.-]*$",
+      "pattern": "^(?:AGENTS\\.md|repo-classification\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$|^\\.[a-z0-9][a-z0-9.-]*$",
       "classification": "repository_governance",
       "status": "active"
     }

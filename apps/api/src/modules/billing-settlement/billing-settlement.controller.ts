@@ -631,11 +631,15 @@ export class BillingSettlementController {
   }
 
   @Post("reimbursements/:batchId/pay")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
   async markReimbursementPaid(
     @Param("batchId") batchId: string,
     @Body() command: MarkReimbursementPaidCommand,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     const scope = `billing:reimbursement_batch:${batchId}:pay`;
     const result = await this.idempotencyService.execute({
@@ -652,6 +656,8 @@ export class BillingSettlementController {
           batchId,
           command,
           requestId,
+          idempotencyKey,
+          identity ?? null,
         );
         return {
           data,
@@ -758,18 +764,37 @@ export class BillingSettlementController {
         stagedContentRef: command.stagedContentRef,
       },
       execute: async () => {
-        const data = await this.billingSettlementService.uploadRemittanceProof(
-          command,
+        const uploaded =
+          await this.billingSettlementService.uploadRemittanceProof(
+            command,
+            identity ?? null,
+            requestId,
+          );
+        // Scan actual persisted bytes. Failure keeps the committed upload and
+        // pending state, rather than losing its ID or fabricating a clean result.
+        const data = await this.billingSettlementService.scanRemittanceProof(
+          uploaded.proofId,
           identity ?? null,
           requestId,
+          true,
         );
-        return {
-          data,
-          statusCode: 200,
-        };
+        return { data, statusCode: 200 };
       },
     });
     return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Get("reimbursements/:batchId/proof")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:read")
+  async getReimbursementProof(
+    @Param("batchId") batchId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.getReimbursementProof(batchId),
+      requestId,
+    );
   }
 
   @Get("reimbursements/proofs/:proofId")
@@ -801,6 +826,26 @@ export class BillingSettlementController {
         requestId,
       );
     return toApiSuccessEnvelope(data, requestId);
+  }
+
+  /** Explicit, retryable real-scanner execution; a caller cannot submit a verdict. */
+  @Post("reimbursements/proofs/:proofId/scan")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async scanRemittanceProof(
+    @Param("proofId") proofId: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.scanRemittanceProof(
+        proofId,
+        identity ?? null,
+        requestId,
+      ),
+      requestId,
+    );
   }
 
   @Post("reimbursements/:batchId/pay-with-proof")

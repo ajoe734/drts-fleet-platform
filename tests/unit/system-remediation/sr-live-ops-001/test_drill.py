@@ -1,0 +1,357 @@
+"""Execute real runner against fake external CLIs. No live service is started."""
+import importlib.util
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+REPO = Path(__file__).resolve().parents[4]
+INFRA = REPO / "infra/gcp/dev/ops-drill"
+sys.path.insert(0, str(INFRA))
+spec = importlib.util.spec_from_file_location("restore_drill", INFRA / "restore_drill.py")
+drill = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(drill)
+sys.modules["restore_drill"] = drill
+import provision_drill_sa as provision  # noqa: E402
+import sweep_drill as sweep  # noqa: E402
+import check_readiness as readiness  # noqa: E402
+import validate_live_evidence as live_evidence  # noqa: E402
+
+
+class Clock:
+    def __init__(self):
+        self.value = 0
+
+    def monotonic(self):
+        self.value += 0.01
+        return self.value
+
+    def sleep(self, seconds):
+        self.value += seconds
+
+
+class RestoreDrillTest(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix="ops-drill-unit-")
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name)
+        fixture = Path(__file__).with_name("fake_cli.py")
+        for binary, kind in (("gcloud", "gcloud"), ("psql", "psql"), ("cloud-sql-proxy", "proxy"), ("gh", "gh")):
+            wrapper = self.root / binary
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fixture}" "{kind}" "$@"\n')
+            wrapper.chmod(0o755)
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+        self.env = {"PATH": str(self.root) + ":" + os.environ["PATH"], "DRILL_FAKE_DIR": str(self.root),
+                    "GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_REPOSITORY": "ajoe734/drts-fleet-platform",
+                    "GITHUB_REF": "refs/heads/main", "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+                    "DEV_GCP_PROJECT_ID": drill.PROJECT, "DEV_GCP_REGION": drill.REGION,
+                    "DEV_GCP_CLOUDSQL_INSTANCE": f"{drill.PROJECT}:{drill.REGION}:{drill.SOURCE}",
+                    "CANDIDATE_SHA": sha, "BASE_SHA": sha}
+        self.target = "drts-dev-db-drill-123-1"
+        self.output = self.root / "evidence.json"
+        self.clock = Clock()
+        for mock in (patch.dict(os.environ, self.env), patch.object(drill.time, "monotonic", self.clock.monotonic), patch.object(drill.time, "sleep", self.clock.sleep)):
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def calls(self):
+        path = self.root / "commands.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def execute(self, scenario="success", success=False):
+        with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}):
+            if success:
+                drill.run(self.target, self.output)
+            else:
+                with self.assertRaises(drill.DrillError):
+                    drill.run(self.target, self.output)
+        raw = self.output.read_text()
+        self.assertNotIn("TOP-SECRET", raw + json.dumps(self.calls()))
+        return json.loads(raw)
+
+    def deleted(self):
+        return any(call[1:4] == ["sql", "instances", "delete"] for call in self.calls())
+
+    def test_success_reads_both_source_and_clone_then_confirms_deletion(self):
+        result = self.execute(success=True)
+        self.assertEqual(result["status"], "restore_readback_passed")
+        self.assertEqual(result["cleanup"]["status"], "deleted")
+        self.assertEqual(len(result["clone_readback"]["tables"]), 4)
+        self.assertGreater(result["rto_readable_seconds"], result["rto_runnable_seconds"])
+        self.assertIn("not a proven data-loss bound", result["rpo_observation"]["meaning"])
+        self.assertEqual(result["capacity_acceptance"], "pending_representative_workload_and_SLO")
+        self.assertTrue(self.deleted())
+        self.assertFalse((self.root / "created").exists())
+        self.assertEqual(sum(call[0] == "psql" for call in self.calls()), 3)
+
+    def test_name_guards_before_any_cli_or_cleanup(self):
+        for target in ("drts-dev-db", "drts-dev-primary-db", "drts-dev-db-drill-../../x", "other-db", "drts-dev-db-drill-123-2"):
+            with self.subTest(target=target), self.assertRaises(drill.DrillError):
+                drill.run(target, self.output)
+        self.assertEqual(self.calls(), [])
+
+    def test_vm_guard(self):
+        with patch.dict(os.environ, {"RUNNER_ENVIRONMENT": "self-hosted"}), self.assertRaises(drill.DrillError):
+            drill.run(self.target, self.output)
+        self.assertEqual(self.calls(), [])
+
+    def test_candidate_checkout_mismatch(self):
+        with patch.dict(os.environ, {"CANDIDATE_SHA": "0" * 40}), self.assertRaises(drill.DrillError):
+            drill.run(self.target, self.output)
+        self.assertEqual(self.calls(), [])
+
+    def test_preexisting_target_is_never_deleted(self):
+        result = self.execute("preexisting")
+        self.assertEqual(result["failure_code"], "target_already_exists_do_not_delete")
+        self.assertFalse(self.deleted())
+
+    def test_permission_error_is_not_treated_as_absence(self):
+        self.execute("describe_denied")
+        self.assertFalse(self.deleted())
+        self.assertFalse(any(call[1:4] == ["sql", "instances", "clone"] for call in self.calls()))
+
+    def test_disabled_pitr_blocks_before_clone(self):
+        self.execute("no_pitr")
+        self.assertFalse(self.deleted())
+
+    def test_stale_recovery_window_blocks_before_secret_or_clone(self):
+        self.execute("stale_point")
+        self.assertFalse(any(call[1:3] == ["secrets", "versions"] for call in self.calls()))
+
+    def test_secret_errors_are_not_printed_and_do_not_create_resources(self):
+        result = self.execute("secret_failure")
+        self.assertEqual(result["failure_code"], "child_command_failed")
+        self.assertFalse(self.deleted())
+
+    def test_clone_api_failure_still_deletes_possible_resource(self):
+        result = self.execute("clone_failure")
+        self.assertTrue(self.deleted())
+        self.assertEqual(result["cleanup"]["status"], "deleted")
+
+    def test_sigterm_after_clone_still_cleans_up(self):
+        original = drill.gc
+        def interrupted(*args, **kwargs):
+            response = original(*args, **kwargs)
+            if args[:3] == ("sql", "instances", "clone"):
+                signal.raise_signal(signal.SIGTERM)
+            return response
+        with patch.object(drill, "gc", interrupted):
+            result = self.execute()
+        self.assertEqual(result["failure_code"], "interrupted")
+        self.assertEqual(result["cleanup"]["status"], "deleted")
+
+    def test_shell_entrypoint_nonzero_and_no_secret_in_stdout_stderr(self):
+        with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "clone_failure"}):
+            result = subprocess.run(["bash", str(INFRA / "run-restore-drill.sh"),
+                                     "--target", self.target, "--evidence", str(self.output)],
+                                    capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("TOP-SECRET-PASSWORD", result.stdout + result.stderr)
+        self.assertNotIn("postgresql://", result.stdout + result.stderr)
+        self.assertEqual(json.loads(self.output.read_text())["cleanup"]["status"], "deleted")
+
+    def test_missing_operation_is_failure_with_cleanup(self):
+        result = self.execute("missing_operation")
+        self.assertEqual(result["failure_code"], "clone_operation_missing")
+        self.assertTrue(self.deleted())
+
+    def test_operation_error_is_failure_with_cleanup(self):
+        result = self.execute("operation_error")
+        self.assertEqual(result["failure_code"], "clone_operation_failed")
+        self.assertTrue(self.deleted())
+
+    def test_readback_failure_cleans_clone(self):
+        self.execute("readback_failure")
+        self.assertTrue(self.deleted())
+
+    def test_missing_table_is_nonzero(self):
+        self.execute("missing_table")
+        self.assertFalse(self.deleted())  # Source preflight fails before clone.
+
+    def test_counts_mismatch_never_claims_success_and_still_deletes(self):
+        result = self.execute("mismatch")
+        self.assertEqual(result["failure_code"], "readback_mismatch_or_concurrent_source_change")
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(self.deleted())
+
+    def test_future_write_is_rejected(self):
+        self.execute("post_point")
+        self.assertTrue(self.deleted())
+
+    def test_cleanup_failure_overrides_success(self):
+        result = self.execute("cleanup_failure")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["cleanup"]["status"], "unconfirmed")
+
+    def test_plan_checks_actual_provider_trust(self):
+        result = provision.plan()
+        self.assertEqual(result["status"], "plan_only")
+        self.assertIn("NOT IAM-enforceable", result["residual_risk"])
+        with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "bad_trust"}), self.assertRaises(drill.DrillError):
+            provision.plan()
+
+    def test_noninteractive_apply_fails_before_any_iam_write(self):
+        result = subprocess.run(["bash", str(INFRA / "provision-drill-sa.sh"), "--apply"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.iam_writes())
+
+    def iam_writes(self):
+        return [c for c in self.calls() if "create" in c or "add-iam-policy-binding" in c or c[1:3] == ["variable", "set"]]
+
+    def test_apply_real_orchestrator_is_additive_idempotent_and_readiness_is_separate(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        state = provision.inventory(design, complete=True)
+        writes = self.iam_writes()
+        self.assertEqual(len(writes), 11)  # SA, four roles/bindings, secret, WIF
+        provision.apply(design, state)
+        self.assertEqual(self.iam_writes(), writes)
+        self.assertFalse((self.root / "ready.json").exists())
+        iam = json.loads((self.root / "iam.json").read_text())
+        for item in iam["project"]["bindings"]:
+            permissions = iam["roles"][item["role"].split("/")[-1]]["includedPermissions"]
+            if "cloudsql.instances.delete" in permissions:
+                self.assertIn("resource.name.startsWith('projects/drts-dev-devcc-20260825/instances/drts-dev-db-drill-')", item["condition"]["expression"])
+            if "cloudsql.instances.clone" in permissions:
+                self.assertEqual(permissions, ["cloudsql.instances.clone"])
+                self.assertIn("resource.name == 'projects/drts-dev-devcc-20260825/instances/drts-dev-db'", item["condition"]["expression"])
+        self.assertFalse(any(p in json.dumps(iam["roles"]) for p in ("restoreBackup", "instances.update", "users.update", "instances.create")))
+
+    def test_inherited_owner_or_failed_ancestor_read_blocks_before_writes(self):
+        design = provision.plan()
+        for scenario in ("inherited_owner", "ancestor_denied", "other_secret_access", "other_sa_access"):
+            with self.subTest(scenario=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaises(drill.DrillError):
+                provision.inventory(design)
+        self.assertFalse(self.iam_writes())
+
+    def test_role_drift_and_extra_sa_grant_are_not_silently_repaired(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        statefile = self.root / "iam.json"
+        original = statefile.read_text()
+        for change in ("role", "grant", "impersonation", "unconditioned_delete"):
+            iam = json.loads(original)
+            if change == "role":
+                iam["roles"]["drtsOpsDrillTemporary"]["includedPermissions"].append("cloudsql.instances.update")
+            elif change == "grant":
+                iam["project"]["bindings"].append({"role": "roles/owner", "members": [provision.MEMBER]})
+            elif change == "impersonation":
+                iam["sa"]["bindings"][0]["members"].append("allAuthenticatedUsers")
+            else:
+                iam["project"]["bindings"][1].pop("condition")
+            statefile.write_text(json.dumps(iam))
+            with self.subTest(change=change), self.assertRaises(drill.DrillError):
+                provision.inventory(design, complete=True)
+
+    def test_partial_apply_failure_can_be_retried_without_widening_or_readiness(self):
+        design = provision.plan()
+        original = provision.gc
+        def denied(*args, **kwargs):
+            if args[:2] == ("secrets", "add-iam-policy-binding"):
+                raise drill.DrillError("simulated_iam_failure")
+            return original(*args, **kwargs)
+        with patch.object(provision, "gc", denied), self.assertRaises(drill.DrillError):
+            provision.apply(design, provision.inventory(design))
+        with self.assertRaises(drill.DrillError):
+            provision.inventory(design, complete=True)
+        provision.apply(design, provision.inventory(design))
+        provision.inventory(design, complete=True)
+        self.assertEqual(len(self.iam_writes()), 11)
+        self.assertFalse((self.root / "ready.json").exists())
+
+    def test_public_or_group_grant_is_not_assumed_to_exclude_drill_sa(self):
+        for member in ("allAuthenticatedUsers", "group:operators@example.test"):
+            with self.subTest(member=member), self.assertRaises(drill.DrillError):
+                provision.audit_policy({"bindings": [{"role": "roles/owner", "members": [member]}]}, [])
+
+    def test_confirmation_requires_exact_candidate_and_interactive_operator(self):
+        sha = self.env["CANDIDATE_SHA"]
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": ""}), patch.object(sys.stdin, "isatty", return_value=True):
+            with patch("builtins.input", return_value="yes"), self.assertRaises(drill.DrillError):
+                provision.confirm("APPLY", sha)
+            with patch("builtins.input", return_value=f"APPLY {provision.SA} {sha}"):
+                provision.confirm("APPLY", sha)
+        with patch.object(sys.stdin, "isatty", return_value=True), self.assertRaises(drill.DrillError):
+            provision.confirm("APPLY", sha)  # GITHUB_ACTIONS blocks even a TTY
+
+    def test_readiness_rejects_absent_wrong_candidate_provider_and_stale_receipts(self):
+        receipt = {"candidate_sha": self.env["CANDIDATE_SHA"], "service_account": provision.SA,
+                   "provider": "reviewed-provider", "checked_at": drill.iso(drill.utcnow()), "audit_sha256": "a" * 64}
+        readiness.check(json.dumps(receipt), self.env["CANDIDATE_SHA"], "reviewed-provider")
+        for key, value in (("candidate_sha", "0" * 40), ("provider", "other"), ("checked_at", "2020-01-01T00:00:00Z"), ("audit_sha256", "")):
+            with self.subTest(key=key), self.assertRaises(drill.DrillError):
+                readiness.check(json.dumps(dict(receipt, **{key: value})), self.env["CANDIDATE_SHA"], "reviewed-provider")
+        with self.assertRaises(drill.DrillError):
+            readiness.check("", self.env["CANDIDATE_SHA"], "reviewed-provider")
+
+    def test_ready_publication_requires_complete_audit_and_confirmation(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        original = provision.command
+        def boundary(args, **kwargs):
+            # Only the local git dirty check is isolated from in-progress edits.
+            if args[:2] == ["git", "status"]:
+                return ""
+            return original(args, **kwargs)
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": ""}), patch.object(sys.stdin, "isatty", return_value=True), patch.object(provision, "command", boundary), patch.object(sys, "argv", ["provision", "--check-ready", "--output", str(self.root / "plan.json")]):
+            with patch("builtins.input", return_value="yes"):
+                self.assertEqual(provision.main(), 2)
+                self.assertFalse((self.root / "ready.json").exists())
+            with patch("builtins.input", return_value=f"READY {provision.SA} {self.env['CANDIDATE_SHA']}"):
+                self.assertEqual(provision.main(), 0)
+        receipt = json.loads((self.root / "ready.json").read_text())
+        readiness.check(json.dumps(receipt), self.env["CANDIDATE_SHA"], design["provider"])
+
+    def test_sweep_clean_inventory_and_audit_pass_without_any_delete(self):
+        prior = drill.context(self.target)
+        prior["clone_operation_id"] = "op1"
+        drill.write(self.output, prior)
+        output = self.root / "sweep.json"
+        with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "audit_lro"}):
+            sweep.sweep(self.target, self.output, output)
+        self.assertEqual(json.loads(output.read_text())["status"], "sweep_passed")
+        self.assertFalse(self.deleted())
+
+    def test_sweep_rejects_leftovers_foreign_creates_missing_and_truncated_audit(self):
+        prior = drill.context(self.target)
+        prior["clone_operation_id"] = "op1"
+        drill.write(self.output, prior)
+        output = self.root / "sweep.json"
+        for scenario in ("leftover", "audit_foreign", "audit_unknown", "audit_empty", "audit_denied", "audit_truncated", "audit_lro_unknown"):
+            with self.subTest(scenario=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaises(drill.DrillError):
+                sweep.sweep(self.target, self.output, output)
+            result = json.loads(output.read_text())
+            self.assertEqual(result["status"], "sweep_failed")
+            if scenario == "leftover":
+                self.assertEqual(result["remaining_drill_instances"], ["drts-dev-db-drill-999-1"])
+            if scenario == "audit_foreign":
+                self.assertEqual(result["unexpected_destinations"], ["unexpected-extra-clone"])
+            self.assertNotIn("TOP-SECRET", output.read_text())
+        self.assertFalse(self.deleted())
+
+    def test_live_artifact_validator_recomputes_readback_and_never_claims_capacity(self):
+        self.output = self.root / "restore.json"
+        ready = {"candidate_sha": self.env["CANDIDATE_SHA"], "service_account": provision.SA,
+                 "checked_at": drill.iso(drill.utcnow()), "audit_sha256": "a" * 64}
+        drill.write(self.root / "readiness.json", ready)
+        restore = self.execute(success=True)
+        sweep.sweep(self.target, self.output, self.root / "sweep.json")
+        result = live_evidence.validate(self.root, self.env["CANDIDATE_SHA"], "123", "1")
+        self.assertEqual(result["capacity"], "not_evaluated")
+        self.assertEqual(result["scheduled_restart"], "not_evaluated")
+        restore["clone_readback"]["tables"][0]["row_count"] += 1
+        drill.write(self.output, restore)
+        with self.assertRaises(drill.DrillError):
+            live_evidence.validate(self.root, self.env["CANDIDATE_SHA"], "123", "1")
+        self.output.unlink()
+        with self.assertRaises(OSError):
+            live_evidence.validate(self.root, self.env["CANDIDATE_SHA"], "123", "1")
+
+
+if __name__ == "__main__":
+    unittest.main()

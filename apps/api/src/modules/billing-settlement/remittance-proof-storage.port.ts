@@ -1,12 +1,9 @@
 /**
  * Remittance Proof storage seam (SR-PROOF-001).
  *
- * Deliberately narrower than the shared `DocumentArtifactStore`
- * (`../../common/document-artifacts`): that store's accepted kinds are a
- * fixed enum (`document-artifact-kinds.ts`), which SR-PROOF-001's
- * write_scopes does not include -- widening it to add a "remittance-proof"
- * kind is out of scope. This module owns its own read/write seam instead,
- * following the same two-method (`put`-like / `get`) shape.
+ * Proofs use content-addressed, two-phase storage independently of generated
+ * document artifacts. RemittanceProofDownloadController reads this same
+ * provider after signature, expiry, identity and clean-scan authorization.
  */
 export const REMITTANCE_PROOF_STORAGE = Symbol("REMITTANCE_PROOF_STORAGE");
 
