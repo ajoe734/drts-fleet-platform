@@ -45,12 +45,23 @@ def run_audit():
         print("Malformed audit report: metadata.vulnerabilities missing or not an object")
         sys.exit(1)
         
+    vuln_counts = data['metadata']['vulnerabilities']
+    required_counters = {'info', 'low', 'moderate', 'high', 'critical'}
+    if set(vuln_counts.keys()) != required_counters:
+        print(f"Malformed audit report: metadata.vulnerabilities must contain exactly {required_counters}")
+        sys.exit(1)
+        
+    for key, val in vuln_counts.items():
+        if not isinstance(val, int) or isinstance(val, bool) or val < 0:
+            print(f"Malformed audit report: metadata.vulnerabilities.{key} must be a non-negative integer")
+            sys.exit(1)
+            
     if 'advisories' in data and not isinstance(data['advisories'], dict):
         print("Malformed audit report: advisories is not an object")
         sys.exit(1)
         
     advisories = data.get('advisories', {})
-    vuln_totals = sum(data['metadata']['vulnerabilities'].values())
+    vuln_totals = sum(vuln_counts.values())
     
     if result.returncode == 0 and vuln_totals > 0:
         print("pnpm audit exited 0 but metadata indicates vulnerabilities are present")

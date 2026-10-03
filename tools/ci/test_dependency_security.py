@@ -13,7 +13,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_no_vulnerabilities(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"advisories": {}, "metadata": {"vulnerabilities": {"high": 0}}})
+        mock_result.stdout = json.dumps({"advisories": {}, "metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0}}})
         mock_result.returncode = 0
         mock_run.return_value = mock_result
         
@@ -33,7 +33,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_ignored_mobile_vulnerabilities(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, 
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 1, "critical": 0}}, 
             "advisories": {
                 "123": {
                     "module_name": "expo",
@@ -74,7 +74,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_unexcepted_vulnerability(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, 
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 1, "critical": 0}}, 
             "advisories": {
                 "456": {
                     "module_name": "some-server-lib",
@@ -152,7 +152,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_changed_version_reject(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, 
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 1, "critical": 0}}, 
             "advisories": {
                 "123": {
                     "module_name": "expo",
@@ -194,7 +194,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_expired_exception(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, "advisories": {
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 1, "critical": 0}}, "advisories": {
             "123": {
                 "module_name": "expo",
                 "severity": "high",
@@ -247,7 +247,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.subprocess.run')
     def test_rc0_metadata_vulnerabilities(self, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"metadata":{"vulnerabilities":{"high":1}}})
+        mock_result.stdout = json.dumps({"metadata":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":1,"critical":0}}})
         mock_result.returncode = 0
         mock_run.return_value = mock_result
         
@@ -261,7 +261,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.subprocess.run')
     def test_rc0_advisories_empty_vulnerabilities(self, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"advisories":{},"metadata":{"vulnerabilities":{"high":1}}})
+        mock_result.stdout = json.dumps({"advisories":{},"metadata":{"vulnerabilities":{"info":0,"low":0,"moderate":0,"high":1,"critical":0}}})
         mock_result.returncode = 0
         mock_run.return_value = mock_result
         
@@ -285,7 +285,7 @@ class TestDependencySecurity(unittest.TestCase):
                     "findings": []
                 }
             },
-            "metadata": {"vulnerabilities": {"critical": 1}}
+            "metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 1}}
         })
         mock_result.returncode = 1
         mock_run.return_value = mock_result
@@ -323,7 +323,7 @@ class TestDependencySecurity(unittest.TestCase):
                     "findings": [{"version": "8.3.2", "paths": []}]
                 }
             },
-            "metadata": {"vulnerabilities": {"critical": 1}}
+            "metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 1}}
         })
         mock_result.returncode = 1
         mock_run.return_value = mock_result
@@ -361,7 +361,7 @@ class TestDependencySecurity(unittest.TestCase):
                     "findings": [{"version": "8.3.2", "paths": ""}]
                 }
             },
-            "metadata": {"vulnerabilities": {"critical": 1}}
+            "metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 1}}
         })
         mock_result.returncode = 1
         mock_run.return_value = mock_result
@@ -386,6 +386,56 @@ class TestDependencySecurity(unittest.TestCase):
                     pass
                 mock_exit.assert_called_with(1)
 
+
+    @patch('dependency_security.subprocess.run')
+    def test_rc0_metadata_vulnerabilities_empty(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {}}})
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_rc0_metadata_vulnerabilities_missing_counter(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 0}}})
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_rc0_metadata_vulnerabilities_invalid_numeric(self, mock_run):
+        invalid_counts = [
+            {"info": 0, "low": 0, "moderate": 0, "high": -1, "critical": 0},
+            {"info": 0, "low": 0, "moderate": 0, "high": 1.5, "critical": 0},
+            {"info": 0, "low": 0, "moderate": 0, "high": True, "critical": 0},
+            {"info": 0, "low": 0, "moderate": 0, "high": "0", "critical": 0}
+        ]
+        
+        for counts in invalid_counts:
+            mock_result = MagicMock()
+            mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": counts}})
+            mock_result.returncode = 0
+            mock_run.return_value = mock_result
+            
+            with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(1)
 
 if __name__ == '__main__':
     unittest.main()
