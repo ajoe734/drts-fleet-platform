@@ -84,7 +84,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function fixture(stall?: "login" | "access") {
+function fixture(stall?: "login" | "access", route = profile) {
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
@@ -112,7 +112,7 @@ function fixture(stall?: "login" | "access") {
       return socket;
     },
     { accountId: "unit", accountSecret: "unit" },
-    profile,
+    route,
   );
   const outcomes: Array<{ done: boolean; error?: unknown }> = [];
   const work: Promise<void>[] = [];
@@ -169,6 +169,135 @@ function fixture(stall?: "login" | "access") {
 }
 
 describe("ASR lifecycle acceptance with non-replaying external boundaries", () => {
+  it("bounds ready-state input idle and releases every pending request", async () => {
+    const f = fixture();
+    const outcome = f.chunk();
+    const socket = await f.open();
+    await vi.advanceTimersByTimeAsync(29);
+    expect(socket.state).toBe("open");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toMatchObject({
+      done: true,
+      error: { code: "TWM_ASR_IDLE_TIMEOUT" },
+    });
+    expect(socket.closes).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(f.adapter.connect()).rejects.toMatchObject({
+      code: "TWM_ASR_TERMINATED",
+    });
+  });
+
+  it("refreshes idle on successfully sent audio, not elapsed connection age", async () => {
+    const f = fixture();
+    f.chunk();
+    const socket = await f.open();
+    await vi.advanceTimersByTimeAsync(20);
+    const latest = f.chunk(2);
+    await vi.advanceTimersByTimeAsync(29);
+    expect(socket.state).toBe("open");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(latest.error).toMatchObject({ code: "TWM_ASR_IDLE_TIMEOUT" });
+    expect(f.outcomes.every((outcome) => outcome.done)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not refresh idle on provider status or transcript chatter", async () => {
+    const f = fixture();
+    f.chunk();
+    const socket = await f.open();
+    await vi.advanceTimersByTimeAsync(20);
+    socket.message({ status: 180 });
+    f.result(socket, 1, 0);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(socket.closes).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("enforces absolute duration despite continuous audio and repeated readiness", async () => {
+    const f = fixture();
+    f.chunk();
+    const socket = await f.open();
+    for (let sequence = 2; sequence <= 5; sequence++) {
+      await vi.advanceTimersByTimeAsync(20);
+      f.chunk(sequence);
+      socket.message({ status: 180 });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    await vi.advanceTimersByTimeAsync(19);
+    expect(socket.state).toBe("open");
+    await vi.advanceTimersByTimeAsync(1);
+    for (const outcome of f.outcomes)
+      expect(outcome).toMatchObject({
+        done: true,
+        error: { code: "TWM_ASR_MAX_DURATION" },
+      });
+    expect(socket.closes).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts the absolute cap at socket open, even before readiness", async () => {
+    const f = fixture(undefined, {
+      ...profile,
+      timeouts: { ...profile.timeouts, maxDurationMs: 10 },
+    });
+    const outcome = f.chunk();
+    const socket = await f.open(false);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(outcome.error).toMatchObject({ code: "TWM_ASR_MAX_DURATION" });
+    expect(socket.closes).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("EOS cancels input idle but cannot keep the provider socket forever", async () => {
+    const f = fixture();
+    const outcome = f.chunk();
+    const socket = await f.open();
+    f.adapter.endAudio();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(socket.state).toBe("open");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome.error).toMatchObject({ code: "TWM_ASR_MAX_DURATION" });
+    expect(socket.closes).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("explicit close replaces runtime timers with the bounded FINAL drain", async () => {
+    const f = fixture();
+    f.chunk();
+    const socket = await f.open();
+    f.result(socket, 1, 0);
+    await vi.advanceTimersByTimeAsync(20);
+    const closing = f.adapter.close();
+    await vi.advanceTimersByTimeAsync(15);
+    expect(socket.state).toBe("open");
+    f.result(socket, 2, 1);
+    await closing;
+    expect(socket.closes).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears the abandoned connection's runtime timer on recoverable setup timeout", async () => {
+    const f = fixture();
+    const outcome = f.chunk();
+    await f.open(false);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(outcome.error).toMatchObject({ code: "TWM_ASR_SETUP_TIMEOUT" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([0, -1, NaN, Infinity, 2_147_483_648])(
+    "rejects invalid runtime timer value %s before network work",
+    (value) => {
+      for (const name of ["idleTimeoutMs", "maxDurationMs"] as const) {
+        expect(() =>
+          fixture(undefined, {
+            ...profile,
+            timeouts: { ...profile.timeouts, [name]: value },
+          }),
+        ).toThrow("positive timer-safe duration");
+      }
+    },
+  );
   it.each(["before-close", "during-drain"] as const)(
     "waits for FINAL, not partial (%s)",
     async (order) => {

@@ -1431,6 +1431,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     );
 
     let overflowRejections = 0;
+    let totalRejections = 0;
     const outcomes = Array.from({ length: 128 }, (_, i) =>
       adapter
         .transcribe({
@@ -1441,6 +1442,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         .then(
           () => "resolved" as const,
           (err: unknown) => {
+            totalRejections++;
             if (
               err instanceof TwmNetworkError &&
               err.code === "TWM_ASR_QUEUE_OVERFLOW"
@@ -1457,11 +1459,14 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     // cap must already be rejected now, well before setup ever times out.
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(overflowRejections).toBe(128 - 64);
+    // The combined implementation aborts the entire attempt on overflow:
+    // the 64 admitted chunks plus the triggering chunk report overflow;
+    // subsequent ingress reports terminated. None remains pending.
+    expect(overflowRejections).toBe(65);
+    expect(totalRejections).toBe(128);
     expect(wsFactory).not.toHaveBeenCalled();
 
-    // Settle the 64 admitted calls (still awaiting the stuck login) instead
-    // of leaving them pending forever.
+    // Closing after fail-closed overflow is still safe and idempotent.
     await adapter.close();
     const results = await Promise.all(outcomes);
     expect(results.every((outcome) => outcome === "rejected")).toBe(true);

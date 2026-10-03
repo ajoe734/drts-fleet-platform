@@ -1197,3 +1197,37 @@ round's four fixes are internal lifecycle/concurrency/test-fidelity
 corrections to code and tests already in this task's write scope; none
 of them depend on, or newly require, a real call-authority issuer, a
 provisioned TWM account, or any other external gap.
+
+## 17. Consolidated lifecycle follow-up (AUDIT-VOICE-LIFECYCLE-20261003)
+
+The owner candidate `e91db0db5780aaa52a1d2d5fbc55c68eb558e8a5` was independently approved and merged as PR #2282 (`5bf63636a`). Companion PR #2290 preserves that history through a normal merge (`bbc94d736`), retaining abortable setup, generation/socket fencing, shared close promise, drain-before-channel-close, peer-independent `session.event`, and promise-identity teardown tracking. Recording tests retain real `SealedRecorder.seal` persistence with strict missing-object/scope/version rejection, not fabricated readback. Owner R12/R13/R14 regression cases remain present.
+
+The overflow policies differed: the owner rejected only excess ingress while admitted calls awaited setup timeout; the companion fails the entire setup attempt closed. The owner regression initially failed after consolidation (65 overflow rejections versus its expected 64). The successor assertion is stronger for the selected policy: all 128 calls settle before setup timeout, exactly 65 report overflow (64 admitted plus the triggering call), subsequent calls report termination, and no socket opens. No cases/assertions were skipped.
+
+### Newly implemented local runtime bounds
+
+- `maxDurationMs` starts on the current socket's `open`, including the open-to-readiness interval; repeated readiness, transcripts and audio cannot extend it. Expiry fails the session with `TWM_ASR_MAX_DURATION` and closes its socket.
+- `idleTimeoutMs` starts at first `180` readiness. Only successfully sent **nonempty audio** resets it; status/revision chatter cannot keep abandoned input alive. Expiry rejects pending work with `TWM_ASR_IDLE_TIMEOUT` and closes the socket. These are local resource bounds, **not verified provider billing/no-speech semantics**.
+- EOS disables the input-idle bound but retains the absolute cap. Explicit `close()` clears runtime timers and instead owns the already bounded EOS/final-result drain. Failure, abandoned setup and successful close release timers. Recoverable setup timeout still permits a fresh generation; idle/max-duration failure is terminal.
+- Invalid/nonfinite/nonpositive/Node-overflowing idle/max timer configuration is rejected before network setup. No new provider protocol, credential or paid operation is introduced.
+
+### Verification-scope correction and retained failed evidence
+
+The prior blanket description of all nine selected suites as socket-free was incorrect: the then-current `session-composer.test.ts` had three HTTP-listening cases. A consolidation run at 2026-10-03 05:22Z inadvertently selected them; it completed, their `finally` blocks stopped the servers, and a subsequent process inspection found no remaining voice test/server process. This was a VM-restriction violation, not authorized local runtime acceptance. Local evidence is preserved in `.local/voice-runtime-evidence/consolidated-tests.log`; older owner descriptions of loopback execution above are historical, not permission to repeat them.
+
+The composer helper now invokes the real request/upgrade listeners over an in-memory duplex pair. It still exercises signed session admission, actual WebSocket frame parsing, composer, ASR/TTS session and outbound frames; it never calls `start()`/`listen()`. A `net.Server.prototype.listen` guard throws if a regression tries to listen. All eight composer cases pass, including all three former listener cases. The nine-file selection was inspected again for active start/listen/network calls before rerunning.
+
+Completed offline checks on the consolidated source: **9 files / 113 tests passed, zero skips**; root TypeScript, voice-worker TypeScript, worker lint and changed-test lint all passed. Commands:
+
+```sh
+NODE_ENV=test env -u DATABASE_URL -u API_DATABASE_URL pnpm exec vitest run \
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,websocket-channel-frame-limits,session-authority-grant-expiry-race,provider-composition,twm-lifecycle-boundaries,twm-network-client,session-composer,media-worker-server-shutdown-drain,media-recording-finalize-authorization}.test.ts --maxWorkers=1
+pnpm run typecheck:root
+pnpm --filter @drts/voice-media-worker typecheck
+pnpm --filter @drts/voice-media-worker lint
+pnpm exec eslint tests/unit/audit-voice-runtime-20261002/{twm-lifecycle-boundaries,twm-network-client,session-composer,media-recording-finalize-authorization}.test.ts
+```
+
+Local logs: `.local/voice-runtime-evidence/runtime-deadlines-*.log`. Predecessor companion `5b4d76a13cd981b217c3e4d96f7901a7e9aa7535` passed hosted runs `37098046560` and `37098046701`; they do **not** certify this successor. Independent review and CI must bind the newly pushed full SHA before merging #2290.
+
+`productionCapable` remains false. Real CTI/account/model/voice verification, call-authority issuer/audience, durable recording storage, dialogue/booking orchestration, cloud deployment and real-service acceptance remain open. This section supersedes only the earlier idle/max-duration *implementation* remainder, not any external readiness gate. The emitted `session.event` seam is not a durable dialogue consumer. No deployment was performed.

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import * as http from "node:http";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import { Duplex, Readable } from "node:stream";
+import { Server as NetServer } from "node:net";
 import { MediaWorkerServer } from "../../../apps/voice-media-worker/src/server/media-worker-server";
 import { VOICE_MEDIA_INTERNAL_KEY_HEADER } from "../../../apps/voice-media-worker/src/server/internal-auth";
 import { VoiceSessionComposer } from "../../../apps/voice-media-worker/src/server/session-composer";
@@ -20,8 +20,9 @@ import { FakeCallAuthority } from "./fake-call-authority";
  * in this worker ever consumed `session.message` -- a composed ASR/TTS
  * session never existed for an attached WebSocket. These tests exercise
  * the real `MediaWorkerServer` + `VoiceSessionComposer` + the real
- * `VoiceMediaWorkerSession` harness end to end over an actual HTTP/
- * WebSocket upgrade; only the ASR/TTS *speech engine* itself (the external
+ * `VoiceMediaWorkerSession` harness through actual HTTP request/upgrade
+ * listeners over an in-memory duplex pair, never a listening socket.
+ * The transport and ASR/TTS *speech engine* (the external
  * boundary this worker has no real vendor account for -- see
  * docs/04-uat/audit-voice-runtime-20261002.md) is a deterministic test
  * double, exactly like `SandboxSpeechToTextAdapter`/
@@ -29,6 +30,12 @@ import { FakeCallAuthority } from "./fake-call-authority";
  */
 
 const INTERNAL_KEY = "test-internal-key-composer";
+beforeEach(() => {
+  vi.spyOn(NetServer.prototype, "listen").mockImplementation(() => {
+    throw new Error("VM restriction: composer tests must not listen");
+  });
+});
+afterEach(() => vi.restoreAllMocks());
 
 class DeterministicAsrAdapter implements VoiceSpeechToTextAdapter {
   readonly providerName = "test-double";
@@ -77,10 +84,9 @@ async function startServer() {
     callAuthorityVerifier: callAuthority,
     sessionComposer,
   });
-  const port = await server.start();
+  expect(server.httpServer.address()).toBeNull();
   return {
     server,
-    port,
     callAuthority,
     asrAdapter,
     ttsAdapter,
@@ -100,43 +106,78 @@ function binaryFrame(payload: Buffer): Buffer {
 }
 
 async function attach(
-  port: number,
+  server: MediaWorkerServer,
   callAuthority: FakeCallAuthority,
   sessionId: string,
-): Promise<Socket> {
+): Promise<Duplex> {
   const { token } = callAuthority.issue(sessionId);
-  const sessionsRes = await fetch(`http://127.0.0.1:${port}/sessions`, {
-    method: "POST",
-    headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
-    body: JSON.stringify({ callAuthorityToken: token }),
+  const request = Object.assign(
+    Readable.from([Buffer.from(JSON.stringify({ callAuthorityToken: token }))]),
+    {
+      method: "POST",
+      url: "/sessions",
+      headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+    },
+  );
+  const admitted = await new Promise<{ grant: { token: string } }>(
+    (resolve) => {
+      const response = {
+        statusCode: 200,
+        setHeader() {},
+        end(body: string) {
+          expect(this.statusCode).toBe(201);
+          resolve(JSON.parse(body) as { grant: { token: string } });
+        },
+      };
+      server.httpServer.emit("request", request, response);
+    },
+  );
+  let handshake = true;
+  const client = new Duplex({
+    read() {},
+    write(chunk, _encoding, done) {
+      peer.push(Buffer.from(chunk));
+      done();
+    },
+    destroy(error, done) {
+      peer.destroy();
+      done(error);
+    },
   });
-  const { grant } = (await sessionsRes.json()) as {
-    grant: { token: string };
-  };
-  return new Promise<Socket>((resolve, reject) => {
-    const req = http.request({
-      host: "127.0.0.1",
-      port,
-      path: `/ws?sessionId=${sessionId}&grant=${grant.token}`,
+  const peer = new Duplex({
+    read() {},
+    write(chunk, _encoding, done) {
+      if (handshake) {
+        expect(Buffer.from(chunk).toString()).toContain(
+          "101 Switching Protocols",
+        );
+        handshake = false;
+      } else client.push(Buffer.from(chunk));
+      done();
+    },
+    destroy(error, done) {
+      client.destroy();
+      done(error);
+    },
+  });
+  server.httpServer.emit(
+    "upgrade",
+    {
       method: "GET",
+      url: `/ws?sessionId=${sessionId}&grant=${admitted.grant.token}`,
       headers: {
-        Connection: "Upgrade",
-        Upgrade: "websocket",
-        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-        "Sec-WebSocket-Version": "13",
+        upgrade: "websocket",
+        connection: "Upgrade",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
         [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY,
       },
-    });
-    req.on("upgrade", (res, socket) => {
-      if (res.statusCode !== 101) {
-        reject(new Error(`attach failed: ${res.statusCode}`));
-        return;
-      }
-      resolve(socket);
-    });
-    req.on("error", reject);
-    req.end();
-  });
+    },
+    peer,
+    Buffer.alloc(0),
+  );
+  expect(handshake).toBe(false);
+  return client;
 }
 
 /** Decodes the small, unmasked server->client WS messages this test
@@ -144,7 +185,7 @@ async function attach(
  * coalesced in a single TCP `data` event (buffers the remainder for the
  * next `next()` call instead of discarding it). Not a general-purpose WS
  * client. */
-function createFrameReader(socket: Socket): {
+function createFrameReader(socket: Duplex): {
   next(): Promise<{ opcode: number; payload: Buffer }>;
 } {
   let buffer = Buffer.alloc(0);
@@ -231,9 +272,9 @@ class TrackingAsrAdapter implements VoiceSpeechToTextAdapter {
 
 describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS composition onto an attached session", () => {
   it("transcribes an inbound binary audio frame through the real session harness and emits the real ASR event back", async () => {
-    const { server, port, callAuthority, asrAdapter } = await startServer();
+    const { server, callAuthority, asrAdapter } = await startServer();
     try {
-      const socket = await attach(port, callAuthority, "sess-asr-1");
+      const socket = await attach(server, callAuthority, "sess-asr-1");
       const reader = createFrameReader(socket);
       socket.write(binaryFrame(Buffer.from("hello-audio")));
 
@@ -255,9 +296,9 @@ describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS 
   });
 
   it("synthesizes TTS from a control frame and writes the real adapter's audio back as a binary frame", async () => {
-    const { server, port, callAuthority } = await startServer();
+    const { server, callAuthority } = await startServer();
     try {
-      const socket = await attach(port, callAuthority, "sess-tts-1");
+      const socket = await attach(server, callAuthority, "sess-tts-1");
       const reader = createFrameReader(socket);
       socket.write(
         textFrame(
@@ -289,9 +330,9 @@ describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS 
   });
 
   it("emits a real speech.started event for a speech.started control frame", async () => {
-    const { server, port, callAuthority } = await startServer();
+    const { server, callAuthority } = await startServer();
     try {
-      const socket = await attach(port, callAuthority, "sess-speech-1");
+      const socket = await attach(server, callAuthority, "sess-speech-1");
       const reader = createFrameReader(socket);
       socket.write(textFrame(JSON.stringify({ type: "speech.started" })));
 
