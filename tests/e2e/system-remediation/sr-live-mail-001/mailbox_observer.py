@@ -139,6 +139,23 @@ def secret(name):
     return result
 
 
+def derive_alias_recipient(username, flow):
+    """Dedicated Gmail/Workspace address; the domain is not a provider gate."""
+    require(flow in ("invite", "approve"), "Unauthorized alias")
+    parts = username.split("@")
+    require(len(parts) == 2, "Invalid dedicated mailbox")
+    local, domain = parts
+    labels = domain.split(".")
+    recipient = local + "+" + flow + "@" + domain
+    require(re.fullmatch(r"[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+", local)
+            and not local.startswith(".") and not local.endswith(".") and ".." not in local
+            and len(local) + len(flow) + 1 <= 64 and len(recipient) <= 254
+            and len(labels) >= 2
+            and all(re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label) for label in labels),
+            "Invalid dedicated mailbox")
+    return recipient
+
+
 def main():
     require(os.environ.get("GITHUB_ACTIONS") == "true", "Hosted runner required")
     request = json.load(sys.stdin)
@@ -155,11 +172,9 @@ def main():
     require(flow in ("invite", "approve"), "Unauthorized alias")
     require(not request.get("acceptance") or flow == "invite", "Only invitation mail can be consumed")
     username = secret("drts-dev-smtp-username")
-    require(re.fullmatch(r"[a-zA-Z0-9._-]+@gmail\.com", username), "Invalid dedicated mailbox")
+    recipient = derive_alias_recipient(username, flow)
     password = secret("drts-dev-smtp-password")
     sender = secret("drts-dev-smtp-from-email")
-    local, domain = username.split("@")
-    recipient = local + "+" + flow + "@" + domain
     print("::add-mask::" + recipient.replace("%", "%25"), file=sys.stderr, flush=True)
     expected_id = "<" + delivery_id + "@notification.drts.invalid>"
     with imaplib.IMAP4_SSL("imap.gmail.com", 993, ssl_context=ssl.create_default_context(), timeout=20) as client:
