@@ -26,9 +26,10 @@
 | R1 Candidate SHA | `6ce5abe3ddee55950c2a2a26f13c256f77c6b381` (Rejected, failed compilation) |
 | R2 Candidate SHA | `5e3837caeccaa6e54f15865422fb957b5c2bcf4e` (Rejected, failed lint) |
 | R3 Candidate SHA | `641fd949823ea1d0b686251ac7065cd062c5f16e` (Rejected at 2026-10-03T01:01:31Z) |
-| R4 Candidate SHA | `ca37a9fe377509e8f39e4024c2725f12122e3da5` (Rejected, F4-A/F8 test regression) |
-| Tested Source Anchor SHA | `da2e69215e67f1803ff783bc36cd5bc34cf0e90d` |
-| Tested Implementation SHA | `7bb73f9dde9e1dc8dd8ab18361531df03cc64628` (plus local F8 fixes) |
+| R4 Candidate SHA | `ca37a9fe377509e8f39e4024c2725f12122e3da5` (Rejected, F4-A and malformed-fixture static finding; scoped root suite passed 15/15) |
+| R5 Candidate SHA | `7bb73f9dde9e1dc8dd8ab18361531df03cc64628` (Rejected, F8 test failure; scoped root suite was 14 pass / 1 fail. Hosted CI run 37085822041 completed/cancelled, unit failure) |
+| R6 Candidate SHA | `b333dffdebfb4b645af204a2b5eef057b496fa2d` (Rejected, F4-A evidence attribution defect) |
+| Tested Source Anchor SHA | `b333dffdebfb4b645af204a2b5eef057b496fa2d` |
 | CWD | `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-audit-forwarder-runtime-20261002` |
 | Validation Command (API) | `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` |
 | Validation Exit Code (API) | `0` (Passed) |
@@ -36,20 +37,20 @@
 | Validation Exit Code (UAT root) | `0` (Passed - after F8 local fix) |
 | Validation Command (Lint) | `pnpm exec eslint apps/api/src/modules/forwarder/ tests/unit/audit-forwarder-runtime-20261002.test.ts tests/unit/forwarder.test.ts apps/api/tests/unit/forwarder.service.test.ts --max-warnings=0` |
 | Validation Exit Code (Lint) | `0` (Passed) |
-| Local Typecheck (tsc) | `pnpm exec tsc -p apps/api/tsconfig.json --noEmit --incremental false` -> `exit 2` (missing @drts/control-plane-auth declarations, local dependency limit only; exact-SHA hosted check passes) |
+| Local Typecheck (tsc) | `pnpm exec tsc -p apps/api/tsconfig.json --noEmit --incremental false` -> `exit 2` (missing @drts/control-plane-auth declarations, local dependency limit only) |
 | Evidence Locator | `docs/04-uat/audit-forwarder-runtime-20261002.md` |
-| Same-SHA Hosted Results | Hosted run https://github.com/ajoe734/drts-fleet-platform/actions/runs/37085822041 pending |
+| Same-SHA Hosted Results | Final candidate identity is recorded by handoff; matching hosted CI and merge are recorded by the GitHub bus. No final-candidate hosted pass is claimed in this pre-handoff document. |
 | External Live Gates | EXT-002-BLK-001 through 007 / SR-LIVE-FORWARD-001 blocking live signed provider verification and real callback lifecycle. Do not run hosted integration endpoints. |
-| **F1** | Fixed. Scoped ESLint passes; exact-SHA hosted typecheck/lint pass. |
+| **F1** | Fixed. Scoped ESLint passes. |
 | **F2** | Fixed. Scoped ESLint passes. |
 | **F3** | Fixed. Committed real-adapter tests preserve degraded/not_configured. |
 | **F4** | Fixed. Rejection code 401 unconditional on ingest. Action correlation assertions on real-adapter tests. |
-| **F4-A** | Fixed. Corrected prior/current anchors in this document, removed self-referential SHAs, added R4 results, and corrected hosted run link. |
+| **F4-A** | Fixed. Corrected prior/current anchors in this document, removed self-referential SHAs, added R4/R5/R6 results, and removed unsupported exact-current-SHA pass claims. |
 | **F5** | Fixed. Scoped ESLint passes. |
 | **F6** | Fixed. API tests pass 38/38 with valid unknown expectations. |
 | **F7** | Fixed. Runtime capability matches production probe. |
-| **F8** | Fixed. Test asserts correct `api` mode, proper `notes`, specific `supportedWebhookEvents`, and validates historical timestamp survival alongside refreshed `lastCheckedAt`. |
+| **F8** | Fixed. Test asserts correct `api` mode, proper `notes`, specific `supportedWebhookEvents`, and validates historical timestamp survival alongside refreshed `lastCheckedAt`. (Archived R5 failure -> current R6 pass). |
 | **no_fake_provider_ack** | Confirmed by `GrabTaiwanAdapter` regressions verifying `accept`, `reject`, `complete`, `heartbeat` return `acknowledged: false` with specific `platformCode` and `externalOrderId` correlations, and `verifyWebhook` returns `accepted: false`. Confirmed driver sync outcomes evaluate to `sync_failed`. |
 | **confirmed_transport_or_explicit_blocker** | Confirmed by the blockers and missing prerequisites listed above and explicit `MISSING_PROVIDER_CONTRACT` return messages. Health readiness correctly defaults to `degraded/credential/not_configured` from the unavailable capabilities. Capability summary is authoritative from registered adapter over persisted history. |
 | **callback_auth_and_idempotency** | Verified in `tests/unit/audit-forwarder-runtime-20261002.test.ts`, showing repeated rejected callbacks unconditionally assert `401` `FORWARDER_WEBHOOK_VERIFICATION_FAILED` and create zero orders. The direct ingest test verifies that repeated calls with same external order ID produce the exact same mirror order ID. |
-| **same_sha_review_ci** | Local unit tests pass on API and root tests. Hosted checks are pending on CI integration bus. |
+| **same_sha_review_ci** | Local unit tests pass on API and root tests. Hosted checks are deferred to CI integration bus. |
