@@ -755,7 +755,12 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
     const seeded = await repo.ensureDefaultPlatformAccount();
     const principalId = seeded.principal.principalId;
     const membershipId = seeded.membership.membershipId;
-    const [binding] = await repo.findRoleBindingsByMembershipId(membershipId);
+    const binding = (
+      await repo.findRoleBindingsByMembershipId(membershipId)
+    )[0];
+    if (!binding) {
+      throw new Error("expected a seeded role binding");
+    }
 
     // A real caller (e.g. GoogleWorkloadIdentityAdapter) derives updatedAt
     // from a signed assertion's `iat`, which is not guaranteed to be
@@ -798,7 +803,12 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
     const { identityRepository: repo } = createTestHarness();
     const seeded = await repo.ensureDefaultPlatformAccount();
     const membershipId = seeded.membership.membershipId;
-    const [binding] = await repo.findRoleBindingsByMembershipId(membershipId);
+    const binding = (
+      await repo.findRoleBindingsByMembershipId(membershipId)
+    )[0];
+    if (!binding) {
+      throw new Error("expected a seeded role binding");
+    }
     const grantedUpdatedAt = binding.updatedAt;
 
     const removedAt = new Date(
@@ -835,6 +845,9 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
     const reloaded = (
       await repo.findRoleBindingsByMembershipId(membershipId)
     )[0];
+    if (!reloaded) {
+      throw new Error("expected a persisted role binding");
+    }
     expect(reloaded.updatedAt).toBe(regrantedAt);
   });
 });
