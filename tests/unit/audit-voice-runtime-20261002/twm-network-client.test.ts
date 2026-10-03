@@ -1141,7 +1141,9 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         shortSetupProfile,
       );
 
-      const settled = Array.from({ length: 65 }, (_, i) =>
+      // Stay within the queue cap to exercise the readiness deadline, not
+      // the now-earlier setup-overflow failure covered by lifecycle-boundaries.
+      const settled = Array.from({ length: 64 }, (_, i) =>
         adapter
           .transcribe({
             sessionId: "sess",
