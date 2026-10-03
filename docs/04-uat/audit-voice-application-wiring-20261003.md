@@ -2706,3 +2706,23 @@ because536 scoped tests pass is not independent review. All original code
 acceptance keys, exact-successor review/hosted CI and merge remain required.
 No DB migration was applied, no product/browser/server was started and no
 shared-dev or live-provider acceptance is claimed.
+
+### Hosted follow-through: exact schema inventory must include V0106
+
+Run37133425283 on exact64ae42343b4b259a03d4ed1cb1212a9b250a9177 advanced
+past the repaired allocation guards, then failed the later API tests step:
+1482 passed / 1 failed. The formal-schema UV-EXEC-002 inventory assertion
+expected26 tables but PostgreSQL actually returned27, with the only added
+entry `dialogue_snapshot` from the authorized V0106 migration. Job111233040268
+log is retained as voice-smoke-64ae4234.log in local audit-followthrough.
+
+Coordinator added the exact apps/api integration-test path to original
+scope. The follow-up inserts `dialogue_snapshot` into the existing sorted
+EXACT-equality inventory; it does not remove the assertion, filter unknown
+tables, substitute a fake schema or change any DB constraints. All other
+expected table names and SQL remain unchanged. Scoped lint/static checks
+are local; rerunning this PostgreSQL test is HOSTED ONLY, not even collected
+on this VM. A later same-SHA hosted result is required before claiming pass.
+Draft CI's skipped product jobs are not complete product regression evidence.
+This delivery repair does not close the remaining actual runtime composition
+or independent review/acceptance obligations.
