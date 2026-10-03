@@ -399,6 +399,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run i18n:guard
 
+  repo-classification:
+    name: Repo classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify repository file classification
+        run: node tools/ci/check-repo-classification.mjs
+
   dependency-security:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true'
@@ -590,6 +602,7 @@ jobs:
         iam-negative-matrix,
         build,
         i18n-guard,
+        repo-classification,
         dependency-security,
         orchestrator-tests,
         e2e,
@@ -610,6 +623,7 @@ jobs:
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "Change scope gate failed"; exit 1; }
 
+          [ '${{ needs.repo-classification.result }}' = 'success' ] || { echo "Repo classification check failed"; exit 1; }
           [ '${{ needs.dependency-security.result }}' = 'success' ] || { echo "Dependency security check failed"; exit 1; }
 
           if [ '${{ needs.changes.outputs.product }}' = 'true' ]; then

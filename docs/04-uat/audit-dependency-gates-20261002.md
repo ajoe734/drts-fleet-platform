@@ -29,7 +29,7 @@ These exceptions are recorded in `tools/ci/dependency-security-exceptions.json`.
 The initial wave of updates successfully patched the majority of vulnerabilities by updating `openclaw`, `next`, `multer`, and other packages to their latest supported versions. `multer` is now at 2.4.0 and `@nestjs/platform-express` resolves 11.2.7.
 The remaining vulnerabilities have been individually documented and categorized as unreachable tooling paths or un-patchable package exceptions in our exception manifest.
 
-We documented 8 path suppressions for mobile/build paths (e.g., PostCSS 1117015/1124252/1130709/1139510 via Expo Metro, decode-uri-component 1147955 via expo-router, image-size 1239765/1239766 via Metro, node-forge 1240912 via Expo CLI) and 1 package exception (uuid 1119441 via API exceljs and driver xcode). We do not relabel these suppressions as remediations or proven exploits, but we recognize them as unreachable or currently un-patchable and track them via expiry bounds.
+We documented 52 path suppressions for mobile/build paths (e.g., PostCSS 1117015/1124252/1130709/1139510 via Expo Metro, decode-uri-component 1147955 via expo-router, image-size 1239765/1239766 via Metro, node-forge 1240912 via Expo CLI) and 1 package exception (uuid 1119441 via API exceljs and driver xcode). We do not relabel these suppressions as remediations or proven exploits, but we recognize them as unreachable or currently un-patchable and track them via expiry bounds.
 
 ## Codex Review Remediation
 
