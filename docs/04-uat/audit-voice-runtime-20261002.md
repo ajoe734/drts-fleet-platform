@@ -14,20 +14,24 @@ not a substitute.
 
 ## 1. Provider path inventory (approved vs undecided)
 
-| Surface | Status | Evidence |
-|---|---|---|
-| CTI (telephony vendor) | **Undecided.** No vendor has been selected (SD §3.3 "未決標"). Only a fixed-fixture `sandbox` adapter and a fail-closed "unconfigured" slot exist; the adapter file is an intentional standalone scaffold not wired into any controller/route. | `apps/api/src/modules/callcenter/voice-cti.adapter.ts:7-21` (scaffold/ownership note), `:394-443` (`SandboxVoiceCtiProviderAdapter`, `isProductionCapable` hard-coded `false`), `:519-540` (`createUnconfiguredVoiceCtiProvider`, fails closed with `VOICE_CTI_PROVIDER_NOT_CONFIGURED`). Wiring this adapter into a real route is explicitly owned by UV-EXEC-010, not this task. |
-| ASR/TTS (TWM) | **Accepted vendor, protocol documented, no real client exists.** TWM is the decided ASR/TTS vendor: staging already reserves live secrets for it (`infra/gcp/staging/voice-media-worker-service.yaml:48-57`, `TWM_ASR_API_KEY` / `TWM_TTS_API_KEY`), and the exact wire protocol (login, access-info, synthesize paths) is documented in source per SD §11. Only a fixture implementation exists -- no network I/O, no credential handling, no WebSocket client. | `apps/voice-media-worker/src/providers/twm/twm-adapter.ts:47-55` (`TWM_PROTOCOL_FIXTURE`: documented REST/WS paths), `:70-186` (`TwmAsrFixtureAdapter`, `isProductionCapable = false as const`, all methods operate on an in-memory fixture list, zero network calls), `:207-261` (`TwmTtsFixtureAdapter`, same). |
-| Native speech-to-speech (OpenAI Realtime) | **Candidate, not accepted.** Explicitly documented as a candidate pending UV-EXEC-027/028 account/PSTN gating; `connect()` throws `voice_fixture_forbidden` if ever asked to run in production mode. | `apps/voice-media-worker/src/providers/native-voice/native-voice-adapter.ts:56-67` (class doc), `:99-114` (`connect()` fail-closed). |
-| Recording durable storage (`RecorderObjectStore`) | **No production implementation anywhere in the repo.** Only the interface and its invariant checks (`validateSegment`, `verifyRecordedObject`) exist; `MediaRecordingAdapter` requires a concrete `RecorderObjectStore` and none is ever constructed. | `apps/voice-media-worker/src/recording/sealed-recorder.ts:37-63` (interface), `apps/voice-media-worker/src/recording/media-recording-adapter.ts:48-54` (constructor requires it). Repo-wide search for a GCS/S3-backed implementation of this interface returns none. |
-| Worker-to-API wiring | **Not connected at all.** `apps/api` never calls any `voice-media-worker` HTTP route; the only repo references to `VOICE_MEDIA_*` in `apps/api` are an unrelated DI token name (`VOICE_MEDIA_RECORDING_ADAPTER`) in `voice-booking`, not a network client. | `apps/api/src/modules/voice-booking/voice-evidence.service.ts:31-32`, `voice-command-runner.service.ts:22,95` (DI token only). No `fetch`/`http` client to the worker exists anywhere under `apps/api`. |
-| Deploy inventory | **Worker is not deployed anywhere.** No `.github/workflows/*.yml` references `voice-media-worker`; `infra/gcp/staging/voice-media-worker-service.yaml` is a template with `SERVICE_ACCOUNT_PLACEHOLDER` / `IMAGE_PLACEHOLDER` / `CONTROL_PLANE_API_ORIGIN_PLACEHOLDER` still unfilled. | `infra/gcp/staging/voice-media-worker-service.yaml:24,26,47`. `grep -rl voice-media-worker .github/workflows/*.yml` returns no matches. |
+| Surface                                           | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CTI (telephony vendor)                            | **Undecided.** No vendor has been selected (SD §3.3 "未決標"). Only a fixed-fixture `sandbox` adapter and a fail-closed "unconfigured" slot exist; the adapter file is an intentional standalone scaffold not wired into any controller/route.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `apps/api/src/modules/callcenter/voice-cti.adapter.ts:7-21` (scaffold/ownership note), `:394-443` (`SandboxVoiceCtiProviderAdapter`, `isProductionCapable` hard-coded `false`), `:519-540` (`createUnconfiguredVoiceCtiProvider`, fails closed with `VOICE_CTI_PROVIDER_NOT_CONFIGURED`). Wiring this adapter into a real route is explicitly owned by UV-EXEC-010, not this task.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ASR/TTS (TWM)                                     | **Reference route, not an awarded vendor; wire protocol documented; a real network client now exists.** SD §92 lists "TWM＋文字 LLM" as "本版參考路線；未決標" (this version's reference route; not yet awarded) and SD §48 states procurement is still decided by the full unattended-taxi evaluation; SA §312 states the candidate architectures table "沒有採購或效果優勝結論" (no procurement or performance-winner conclusion). The original version of this evidence document incorrectly called TWM an "accepted vendor" based only on staging reserving secret _names_ for it (`infra/gcp/staging/voice-media-worker-service.yaml:48-57`) -- reserved names are not a procurement decision and are corrected here. The exact wire protocol (login, access-info, synthesize paths) is documented in source per SD §11 regardless of procurement status, and a real HTTP/WebSocket client implementing those documented paths (`TwmAsrNetworkAdapter`, `TwmTtsNetworkAdapter`) is now implemented in this task, with its request/response composition and the protocol's single-use-ticket/180-ready-gate/monotonic-revision invariants unit-verified against a mocked transport (never a live network call). `isProductionCapable` defaults to `false` on both and must stay `false` until a verified TWM account exists (UV-EXEC-027/028) -- a working client class is necessary but not sufficient for that attestation. The original `TwmAsrFixtureAdapter`/`TwmTtsFixtureAdapter` (zero I/O, in-memory fixtures) are unchanged and remain available for non-production composition. | SD `docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md:48,92`; SA `docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md:312`. `apps/voice-media-worker/src/providers/twm/twm-adapter.ts:47-55` (`TWM_PROTOCOL_FIXTURE`), `:70-186`/`:207-261` (unchanged fixtures). `apps/voice-media-worker/src/providers/twm/twm-network-client.ts` (`TwmAsrNetworkAdapter`, `TwmTtsNetworkAdapter`, real login/access-info/synthesize HTTP calls and a real WebSocket streaming session, injectable transport). `tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` (9 tests: request composition, header/auth, 401 re-login-and-retry, ticket single-use, 180 gate, frame-size cap, monotonic-revision dedupe -- all against a mocked transport). |
+| Native speech-to-speech (OpenAI Realtime)         | **Candidate, not accepted.** Explicitly documented as a candidate pending UV-EXEC-027/028 account/PSTN gating; `connect()` throws `voice_fixture_forbidden` if ever asked to run in production mode.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `apps/voice-media-worker/src/providers/native-voice/native-voice-adapter.ts:56-67` (class doc), `:99-114` (`connect()` fail-closed).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Recording durable storage (`RecorderObjectStore`) | **No production implementation anywhere in the repo.** Only the interface and its invariant checks (`validateSegment`, `verifyRecordedObject`) exist; `MediaRecordingAdapter` requires a concrete `RecorderObjectStore` and none is ever constructed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `apps/voice-media-worker/src/recording/sealed-recorder.ts:37-63` (interface), `apps/voice-media-worker/src/recording/media-recording-adapter.ts:48-54` (constructor requires it). Repo-wide search for a GCS/S3-backed implementation of this interface returns none.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Worker-to-API wiring                              | **Not connected at all.** `apps/api` never calls any `voice-media-worker` HTTP route; the only repo references to `VOICE_MEDIA_*` in `apps/api` are an unrelated DI token name (`VOICE_MEDIA_RECORDING_ADAPTER`) in `voice-booking`, not a network client.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `apps/api/src/modules/voice-booking/voice-evidence.service.ts:31-32`, `voice-command-runner.service.ts:22,95` (DI token only). No `fetch`/`http` client to the worker exists anywhere under `apps/api`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Deploy inventory                                  | **Worker is not deployed anywhere.** No `.github/workflows/*.yml` references `voice-media-worker`; `infra/gcp/staging/voice-media-worker-service.yaml` is a template with `SERVICE_ACCOUNT_PLACEHOLDER` / `IMAGE_PLACEHOLDER` / `CONTROL_PLANE_API_ORIGIN_PLACEHOLDER` still unfilled.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `infra/gcp/staging/voice-media-worker-service.yaml:24,26,47`. `grep -rl voice-media-worker .github/workflows/*.yml` returns no matches.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-Conclusion: there is no case in this worker where a real, accepted protocol
-implementation exists but is simply left unwired from configuration -- every
-fixture is fixture because the real client code does not exist yet (TWM) or
-the vendor itself is undecided (CTI) or explicitly gated (native candidate).
-Flipping an env var cannot make any of these production-capable; see §3.
+Conclusion: no vendor in this worker's domain is actually awarded (CTI is
+explicitly undecided; TWM is the documented reference route but not awarded;
+native speech-to-speech is an explicit non-accepted candidate). That is a
+procurement/business-decision gap, not an engineering one: where the wire
+protocol for the reference route is documented in source (TWM), this task
+implemented a real network client against it, unit-verified with a mocked
+transport boundary -- see §2.5. Flipping an env var still cannot make any
+of these production-capable, because none has a verified real account; see
+§3.
 
 ## 2. Code fix delivered in this task: honest composition and worker authorization
 
@@ -75,9 +79,89 @@ already-active `sessionId` (via either `/sessions` or the WS upgrade),
 orphaning the first caller's channel (no longer reachable from
 `closeSession`/`drain`) with no error. It now rejects with
 `MEDIA_WORKER_SESSION_ID_CONFLICT` (surfaced as HTTP 409, or WS close code
-1013 with an explicit reason) when the id is already active.
+1013 with an explicit reason) when the id is already active. Codex round-1
+review (R2, see §2.2b) found this guard alone is not session _authorization_
+-- it only prevents two admissions from colliding, it does not prove the
+caller attaching to a given session id was ever granted it.
 
-### 2.3 Body and frame size limits
+### 2.2b Session-authoritative admission, WS attachment, and recording
+
+finalization (Codex round-1 reopen R1 + R2 repair)
+
+Codex round-1 review of the first candidate (generation `b7347821bf7741b882dc2a2a08f85fb3`,
+`ae016843c`) found two P1 gaps in `caller_session_authorization` that the
+shared-key auth in §2.1 did not close:
+
+- **R1**: `POST /recording/finalize` trusted the caller's own `scope`,
+  `credential`, and `closureLedger`/`closure` body fields.
+  `MediaRecordingAdapter.sealFinalRecording` used that request-supplied
+  ledger (`new FinalRecordingManifests(this.manifests, closureLedger)`)
+  instead of the trusted one injected at construction. A caller holding only
+  the shared operations key could post a forged `closure` and get a `200
+sealed` response with zero calls to the real trusted ledger.
+- **R2**: the WS upgrade and `/sessions`/`/recording/finalize` only checked
+  one global worker key. No per-session grant, scope, or epoch was issued or
+  checked, so any caller holding that one key could attach to an arbitrary,
+  never-admitted `sessionId` and start receiving `session.message` events --
+  the collision guard in §2.2 only stops two _admissions_ from colliding, it
+  is not evidence a given attacher was ever granted that session.
+
+Fix, in `apps/voice-media-worker/src/server/session-authority.ts`
+(`VoiceMediaSessionAuthority`, new) and
+`apps/voice-media-worker/src/recording/media-recording-adapter.ts`:
+
+- `MediaRecordingAdapter` no longer accepts a caller-supplied `closureLedger`
+  or `credential` for trust decisions (`MediaRecordingFinalizationRequest`
+  keeps both fields only as optional/ignored, for structural compatibility
+  with existing non-HTTP callers such as
+  `tests/unit/system-remediation/sr-recording-recovery-20260913/recording-recovery.test.ts`,
+  which pass the _same_ ledger the adapter was already constructed with).
+  `sealFinalRecording` always resolves closure via `this.ledger` (bound once
+  at construction) and a fixed internal credential constant -- a forged
+  request body cannot substitute a different ledger or identity.
+- `POST /sessions` is now the only place a session's recording `scope`
+  (`brandId`/`callId`/`recordingId`/`legId`) is declared, and it issues a
+  single-use, HMAC-signed, time-boxed (`VOICE_MEDIA_SESSION_GRANT_TTL_MS`,
+  default 30s) grant tied to that exact `sessionId`. A partially-specified
+  scope is rejected (400) before admission, rather than silently becoming
+  "no scope."
+- The WS upgrade no longer self-admits. It requires `?sessionId=&grant=`
+  matching a session that was actually created via `POST /sessions`; it
+  looks up the existing `MediaSessionRecord`, consumes the grant (fails
+  closed on missing/expired/replayed/cross-session token), and only then
+  completes the handshake. Only on successful consumption does the
+  session's scope become "authoritative" via
+  `VoiceMediaSessionAuthority.getAuthoritativeScope`.
+- `POST /recording/finalize` now takes only `sessionId` and `segments` from
+  the caller. It resolves `scope` exclusively from
+  `getAuthoritativeScope(sessionId)` (403 if the session was never attached
+  or has no bound scope) and passes it straight to the trusted-ledger-backed
+  adapter -- any `scope`/`closure`/`credential` the caller supplies in the
+  body is parsed but never used for the trust decision.
+
+Regression coverage (all against the real HTTP/WS listener and the real
+`MediaRecordingAdapter`/`SealedRecorder`/`FinalRecordingManifests` chain, an
+in-memory `RecorderObjectStore` as the only mocked boundary):
+
+- `tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts`:
+  finalize on a never-attached session (403, zero ledger calls); finalize on
+  a session admitted with no scope (403, zero ledger calls); a forged
+  `closure`/`credential`/`closureLedger` body against an attached session
+  whose _trusted_ ledger says "not yet closed" (rejected, ledger consulted
+  exactly once, using the session's scope); a valid authorized finalization
+  that seals for real and ignores a conflicting `scope` claim in the body;
+  cross-session segments/scope against a different session id (rejected,
+  the legitimate session's own finalize is unaffected).
+- `tests/unit/audit-voice-runtime-20261002/media-worker-server-caller-session-authorization.test.ts`:
+  WS attach to an unissued session (403, no self-admission); attach with no
+  grant token (403); cross-session grant (403); expired grant (403); valid
+  same-session grant succeeds, and replaying that same grant on a second
+  attach is rejected (403/409 depending on whether the first channel's close
+  event has already freed the session record).
+
+### 2.3 Body and frame size limits, and exactly-once WS close/cleanup
+
+(Codex round-1 reopen R3 repair)
 
 `/sessions` and `/recording/finalize` previously accumulated an unbounded
 request body before parsing. `readBoundedBody()` now rejects with HTTP 413
@@ -92,6 +176,27 @@ multi-gigabyte frame length and force unbounded buffering. It now rejects any
 frame whose declared length exceeds `maxPayloadBytes`
 (`VOICE_MEDIA_WS_MAX_FRAME_BYTES`, default 1 MiB) as soon as the length is
 known, before waiting for the rest of the frame, closing with code 1009.
+
+Codex round-1 review found that this frame-limit path leaked worker
+capacity: `close()` set `isClosed = true` before the underlying socket's own
+`"close"` event fired, so `handleClose()` (which only emits `"close"` when
+`!isClosed`) never emitted it for a server-initiated closure (size limit,
+idle timeout, or local shutdown). `MediaWorkerServer`'s
+`channel.on("close", ...)` handler -- the only place that deletes the
+session from `activeSessions` -- therefore never ran, so a single oversized
+frame permanently occupied a session slot even though the socket was torn
+down. Fix: `close()` is now the single authoritative close/cleanup path and
+always emits `"close"` itself exactly once (the redundant explicit emit in
+the peer-initiated 0x08 close-frame handler was removed to avoid a double
+emission); `handleData` and its frame loop stop processing once `isClosed`
+is set, so a later frame in the same buffered chunk can no longer be
+processed after closure. Regression:
+`tests/unit/audit-voice-runtime-20261002/media-worker-server-frame-limit-capacity-recovery.test.ts`
+drives the real worker upgrade listener with `maxConcurrentSessions=1,
+maxWsFrameBytes=8`, sends a 2-byte frame header announcing a 9-byte payload
+that never arrives, and asserts `server.sessionCount` returns to `0` and a
+replacement session can then be admitted (not just that the channel reports
+`destroyed`).
 
 ### 2.4 Honest `/ready`: a strict-environment worker can no longer claim readiness it cannot back up
 
@@ -120,106 +225,185 @@ exists so that whoever eventually wires a real, verified production adapter
 `RecorderObjectStore`) has a concrete, fail-closed switch to flip with actual
 evidence -- rather than readiness being silently blind to the question.
 
-### 2.5 What this task deliberately did not build
+### 2.5 Real TWM network client (Codex round-1 reopen R4 repair)
 
-Building a real TWM ASR/TTS network client (WebSocket streaming + REST
-login/synthesize against `TWM_PROTOCOL_FIXTURE`'s documented paths), a real
-`RecorderObjectStore` backend, or wiring the existing dialogue/language-router
-pipeline (`apps/voice-media-worker/src/dialogue/dialogue-engine.ts`,
-`language/language-router.ts`) into `media-worker-server.ts`'s WS session
-handling are each substantial, independently testable features that this
-task's guardrails and VM restrictions (no live network/PSTN calls, no new
-credentials) make impossible to implement *and verify* safely in one pass:
+Codex round-1 review found two problems in how the first version of this
+document (and §2.5 in that version, since replaced) framed the ASR/TTS
+surface:
 
-- A real TWM client cannot be exercised against the actual service from this
-  VM, so it could not be validated beyond "compiles," which is not a
-  responsible bar for a component that would handle live caller audio.
-- A durable `RecorderObjectStore` needs an explicit storage/bucket decision;
-  `AUDIT-ARTIFACT-DURABILITY-20261002` (this same owner's parallel task) is
-  independently establishing the repo's shared durable-object-store pattern
-  for a related surface (billing/document artifacts) -- duplicating a second,
-  divergent storage adapter here ahead of that decision would create the
-  inconsistency the audit is trying to remove, not fix it.
-- Wiring the dialogue/ASR/TTS loop into the WS handler is a full per-call
-  state-machine integration (frame parsing, barge-in, confirmation gating)
-  that cannot be meaningfully tested without either the real vendor or a
-  large new test harness; attempting it without live verification risks
-  shipping an integration that looks wired but has never processed a real
-  frame, which is a more subtle version of the same "looks done, isn't"
-  problem the audit raised.
+- It called TWM an "accepted vendor" based only on staging reserving secret
+  _names_ for it. SD §92/§48 and SA §312 (quoted in §1 above) are explicit
+  that TWM is the documented _reference route_, with procurement undecided.
+  That classification is corrected in §1.
+- It treated "this VM cannot make a live call to the real TWM service" as
+  equivalent to "this client's request/response composition cannot be
+  implemented or unit-verified," and separately invented a dependency on
+  `AUDIT-ARTIFACT-DURABILITY-20261002` for the unrelated `RecorderObjectStore`
+  gap that this task's board entry does not actually declare
+  (`depends_on: []`). Both were used to justify not writing code that could,
+  in fact, be written and tested.
 
-These remain open, precisely-scoped follow-on work (see §3), not silently
-dropped.
+Those are two different gaps and are now separated:
+
+- **Documented protocol**: `TWM_PROTOCOL_FIXTURE` (`twm-adapter.ts:47-55`)
+  and SD §11 already fully specify the login/access-info/synthesize paths,
+  ticket semantics, the 180 ready gate, and revision/EOS framing.
+- **Implementation remaining (now done)**: `TwmAsrNetworkAdapter` and
+  `TwmTtsNetworkAdapter`
+  (`apps/voice-media-worker/src/providers/twm/twm-network-client.ts`) are
+  real clients against that documented protocol -- actual HTTP login calls,
+  a real WebSocket streaming session for ASR, actual bearer-token handling
+  including a 401 re-login-and-retry for TTS, and the same single-use-ticket
+  /180-gate/monotonic-revision invariants the fixture enforced, now applied
+  to real transport traffic instead of an in-memory fixture list. The HTTP
+  transport and WebSocket factory are injected, so
+  `tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` (9
+  tests) unit-verifies real request composition, auth headers, retry
+  behavior, and all four protocol invariants against a mocked boundary --
+  zero network calls leave the process, and none were made to prepare this
+  evidence. `isProductionCapable` still defaults to `false` on both classes
+  and is not flipped anywhere in this change.
+- **Missing exact contract/decision**: which vendor is actually procured
+  (SD §92/SA §312) and, independently, a verified TWM account/credentials to
+  attest against (`accountCapabilityVerified`/`capabilityVerified` flags
+  already model this and remain `false` in all composition in this repo).
+- **Live acceptance**: connecting this client to the real TWM service,
+  exercising a live call, and setting `isProductionCapable: true` with
+  verified evidence all remain blocked on that account and on this VM's no
+  live-network-call restriction -- see §3 item 2.
+
+This task still did not wire a durable `RecorderObjectStore` backend or
+invoke the dialogue/ASR/TTS/recording pipeline from
+`media-worker-server.ts`'s WS session handling. Those remain real,
+separately-scoped remaining implementation work (§3 items 3-4), not
+redefined as "impossible to unit-verify" -- the honest reason they are not
+done here is that a durable object-store backend needs its own storage/
+bucket decision (not a declared dependency on another task), and wiring the
+per-call dialogue state machine into the WS handler is substantial,
+independently-scoped work this task's `write_scopes` were never asked to
+cover in EXECUTION.md's phrasing ("replace fixture-only runtime composition
+where a protocol is already accepted").
 
 ## 3. Remaining blockers (precise)
 
-1. **CTI vendor selection** -- SD §3.3 "未決標". No code change can close
-   this; it requires a business/procurement decision external to this repo.
-   Once decided, wiring happens in UV-EXEC-010's scope
-   (`voice-cti.adapter.ts:7-21`), not this task's.
-2. **TWM production account + real client implementation.** Staging secret
-   names are reserved (`infra/gcp/staging/voice-media-worker-service.yaml:48-57`)
-   but no verified account/credentials exist in this environment, and no HTTP/
-   WebSocket client implementing `TWM_PROTOCOL_FIXTURE`'s documented paths
-   exists. Needs: a provisioned TWM account, a real client class marking
-   `isProductionCapable: true` only once connected against that account, and
-   live verification this VM cannot perform (no live network calls allowed
-   here).
+1. **Vendor procurement, both CTI and ASR/TTS.** CTI: SD §3.3 "未決標", no
+   vendor selected. ASR/TTS: SD §92/§48 list TWM as the reference route only,
+   SA §312 states the candidate table has no procurement/winner conclusion.
+   No code change can close either; both require a business/procurement
+   decision external to this repo. Once CTI is decided, wiring happens in
+   UV-EXEC-010's scope (`voice-cti.adapter.ts:7-21`), not this task's.
+2. **TWM production account and live verification.** A real client class
+   implementing the documented protocol now exists (§2.5,
+   `twm-network-client.ts`) and is unit-verified against a mocked transport.
+   What remains blocked is a provisioned, verified TWM account/credentials
+   (none exist in this environment) and the live verification itself
+   (connecting this client to the real service, confirming a real call path,
+   and only then setting `isProductionCapable: true` with that evidence) --
+   this VM does not permit live network calls to perform that verification.
 3. **Durable `RecorderObjectStore` backend.** No GCS/S3-backed implementation
-   exists. Blocked on the storage pattern `AUDIT-ARTIFACT-DURABILITY-20261002`
-   is establishing; building a second, divergent one here would itself be a
-   defect.
+   exists anywhere in the repo. This needs its own storage/bucket decision;
+   this task's board entry declares no dependency on another task
+   (`depends_on: []`), and none is claimed here.
 4. **Dialogue/ASR/TTS/recording pipeline wiring into the running worker.**
    `dialogue-engine.ts`, `language-router.ts`, the TWM/native adapters, and
    `SealedRecorder` all exist as tested library code but are never invoked
    from `media-worker-server.ts`'s WS session handling
-   (`apps/voice-media-worker/src/index.ts` only re-exports them). This is real
-   remaining implementation work, blocked on (2) and (3) above existing
-   first -- there is no honest "production-capable" composition to wire
-   without a real ASR/TTS client and durable recorder.
+   (`apps/voice-media-worker/src/index.ts` only re-exports them). This is
+   real, substantial remaining implementation work -- a full per-call
+   state-machine integration (frame parsing, barge-in, confirmation gating)
+   -- independent of whether a vendor is procured, but wiring it against
+   adapters that are not yet production-capable (item 2) or backed by a
+   durable recorder (item 3) would not make the worker production-capable
+   either; it is sequenced after those, not blocked by a missing decision of
+   its own.
 5. **Deployment.** The worker is not in any GitHub Actions deploy inventory
    and the staging Cloud Run template has three unfilled placeholders
    (`SERVICE_ACCOUNT_PLACEHOLDER`, `IMAGE_PLACEHOLDER`,
    `CONTROL_PLANE_API_ORIGIN_PLACEHOLDER`,
    `infra/gcp/staging/voice-media-worker-service.yaml:24,26,47`). It also
-   needs `VOICE_MEDIA_INTERNAL_KEY` (and `apps/api`'s matching client config,
-   which does not exist yet either -- see §1 "Worker-to-API wiring") added
-   before go-live now that §2.1 enforces it in strict environments.
+   needs `VOICE_MEDIA_INTERNAL_KEY` and `VOICE_MEDIA_SESSION_GRANT_TTL_MS`
+   (and `apps/api`'s matching client config, which does not exist yet either
+   -- see §1 "Worker-to-API wiring") added before go-live now that §2.1/§2.2b
+   enforce them in strict environments.
 6. **`apps/api` has no client for this worker at all.** Something must
-   eventually call `/sessions` and the WS endpoint with the configured
-   internal key once a real pipeline exists; today nothing in `apps/api`
-   does.
+   eventually call `/sessions` (to obtain a session grant) and the WS
+   endpoint (presenting that grant) with the configured internal key once a
+   real pipeline exists; today nothing in `apps/api` does.
 
-None of (1)-(6) can be closed by writing more fixture code in this worker; they
-require either an external decision/account, a dependency on another task's
-in-progress deliverable, or deployment/ops work outside this task's write
+None of (1)-(6) can be closed by writing more fixture code in this worker;
+they require either an external procurement/account decision, a storage
+decision this task's board does not depend on, substantial independently-
+scoped implementation work, or deployment/ops work outside this task's write
 scope.
 
-## 4. Executed validation (same SHA as handoff)
+## 4. Executed validation (this round, same SHA as handoff)
 
-- `pnpm --filter @drts/voice-media-worker typecheck` -- clean.
-- `pnpm --filter @drts/voice-media-worker lint` -- clean (`eslint src --max-warnings=0`).
-- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- 23 passed
-  (3 files): internal-key auth (strict/non-strict, rotation, malformed
-  headers), caller/session authorization and body-size limits on the live
-  HTTP server (including a real WS upgrade handshake over a socket), WS frame
-  size limits.
-- `pnpm exec vitest run tests/integration/uv-exec-023.integration.test.ts` --
-  4 passed, confirming the pre-existing drain/capacity/readiness integration
-  test is unaffected by the new auth/readiness gates (it runs in a non-strict
-  test environment and never exercises the now-authenticated routes directly).
-- Root `tsc -p tsconfig.json --noEmit` (`pnpm run typecheck:root`): no errors
-  attributable to this task's files. The run surfaces pre-existing,
-  unrelated `ApiClient` duplicate-declaration errors in
-  `tests/unit/fleet-partner-list-envelope.test.ts` and
-  `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
-  that reference a *different* concurrent worktree's `packages/api-client`
-  path (`.../gemini-audit-dependency-gates-20261002/...`) -- a pre-existing
-  cross-worktree TypeScript module-identity artifact on this shared VM,
-  unrelated to and not touched by this task's changes (confirmed via
-  `git status --porcelain`, which shows only `apps/voice-media-worker/**` and
-  `tests/unit/audit-voice-runtime-20261002/**` as modified/added).
+Node v22.23.2, pnpm 10.33.0, TypeScript 5.9.3, Vitest 4.1.4, all run from
+this task's worktree.
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- clean (exit 0).
+- `pnpm --filter @drts/voice-media-worker lint` (`eslint src --max-warnings=0`)
+  -- clean (exit 0).
+- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- **43
+  passed, 0 failed (6 files)**: `internal-auth.test.ts` (unchanged from round
+  1), `media-worker-server-caller-session-authorization.test.ts` (updated:
+  session-grant issuance and consumption, missing/expired/replayed/
+  cross-session grant denial, same-session success), `media-recording-
+finalize-authorization.test.ts` (new, R1: forged-closure/forged-scope/
+  cross-session denial and valid authorized sealing against the real sealing
+  chain), `media-worker-server-frame-limit-capacity-recovery.test.ts` (new,
+  R3: capacity recovers after a frame-limit closure), `twm-network-client.test.ts`
+  (new, R4: real TWM client request composition/auth/retry/protocol
+  invariants against a mocked transport), `websocket-channel-frame-limits.test.ts`
+  (unchanged from round 1).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-recording-recovery-20260913
+tests/integration/uv-exec-023.integration.test.ts
+tests/integration/system-remediation/sr-recording-recovery-20260913` -- 23
+  passed, 0 failed (3 files): confirms `MediaRecordingAdapter`'s narrowed
+  `MediaRecordingFinalizationRequest` (credential/closureLedger now optional
+  and ignored for trust, §2.2b) stays structurally and behaviorally
+  compatible with this pre-existing, out-of-write-scope caller, and that the
+  drain/capacity/readiness integration test remains unaffected.
+- `pnpm run lint:root` (`eslint eslint.config.mjs playwright*.config.ts
+vitest.config.ts tests --max-warnings=0`) -- clean (exit 0), covering all
+  new/changed test files under `tests/`.
+- `pnpm run typecheck:root` (root `tsc -p tsconfig.json --noEmit`): no errors
+  attributable to this task's files (`git status --porcelain` shows only
+  `apps/voice-media-worker/**`, `tests/unit/audit-voice-runtime-20261002/**`,
+  and this document as modified/added). The run surfaces pre-existing,
+  unrelated TypeScript errors from a dual Next.js version + a cross-worktree
+  `ApiClient` identity mismatch (`tests/security/iam-tenant-session-revocation-e2e.test.ts`,
+  `tests/unit/fleet-partner-list-envelope.test.ts`,
+  `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`),
+  same category as recorded in the round-1 evidence.
+- `tests/integration/uv-exec-023.integration.test.ts` and the HTTP-server
+  test file were run directly above, not skipped, correcting round 1's note
+  that they were not run under VM restriction.
+
+**Environment note (not attributable to this task's code):** mid-session,
+this worktree's and the canonical root's shared `node_modules` symlinks
+(`typescript`, `@types/node`, and others) broke because they pointed into
+`.artifacts/worktrees/auto/gemini-audit-dependency-gates-20261002`, a
+sibling worktree that was removed from this VM while this task was in
+progress. This is exactly the condition
+`tools/development-orchestrator/bin/ensure-local-node-modules.py` exists to
+detect and repair (`test_node_modules_health.py`); it was run as `repair`
+against this worktree only (`CI=true pnpm install --frozen-lockfile
+--prefer-offline`, scoped to this worktree's own root, not the canonical
+root's shared symlink), after which all commands above passed normally. No
+product/browser/DB/Compose server was started.
 
 `same_sha_review_ci`: candidate SHA and branch are recorded via the task
 lifecycle at handoff; hosted CI and review run against that SHA per the
 normal candidate lifecycle, not asserted here.
+
+## 5. Finding-to-evidence mapping (Codex round-1 reopen)
+
+| Finding / required_acceptance                                                                                                                                                                                                                     | Source and fix location                                                                                                                                                                                                                                                             | Round-1 candidate -> this round                                                                                                                                                                                                                        | Command / evidence                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| R1 (P1, `caller_session_authorization`): forged `closure`/`credential`/`closureLedger` body sealed a recording with zero trusted-ledger calls                                                                                                     | `media-recording-adapter.ts` (`sealFinalRecording` now only uses the constructor-injected ledger/credential); `media-worker-server.ts` `/recording/finalize` (scope resolved from `VoiceMediaSessionAuthority`, not the body)                                                       | Repro on `ae016843c` returned `200 sealed`, `trustedLedgerCalls=0` -> this round's `media-recording-finalize-authorization.test.ts` reproduces the same forged-body shape and asserts non-200 with the trusted ledger consulted exactly once           | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts` -- 5/5 passed             |
+| R2 (P1, `caller_session_authorization`): one global key admitted an arbitrary, unissued `sessionId` onto the WS                                                                                                                                   | `session-authority.ts` (new `VoiceMediaSessionAuthority`); `media-worker-server.ts` `/sessions` issues a single-use grant, WS upgrade consumes it, no self-admission                                                                                                                | Repro on `ae016843c` admitted `sessionId=unissued-session` with only the internal key -> this round's WS tests require a prior `POST /sessions` grant for every attach                                                                                 | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-worker-server-caller-session-authorization.test.ts` -- 16/16 passed |
+| R3 (P2): frame-limit closure leaked a session slot (`sessionCount` never returned to 0)                                                                                                                                                           | `websocket-channel.ts` (`close()` is the single authoritative close/cleanup path and always emits `"close"`; frame loop stops once closed)                                                                                                                                          | Repro: `maxConcurrentSessions=1, maxWsFrameBytes=8`, oversized frame header, `sessionCount` stayed 1 and a replacement admission threw `MEDIA_WORKER_CAPACITY_EXCEEDED` -> this round asserts `sessionCount` returns to 0 and the replacement succeeds | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-worker-server-frame-limit-capacity-recovery.test.ts` -- 1/1 passed  |
+| R4 (P2, `approved_runtime_provider_paths` / `remaining_external_blockers_precise`): doc called TWM "accepted" against SD §92/SA §312, and conflated "can't call live" with "can't implement/verify"; invented an undeclared cross-task dependency | §1 ASR/TTS row and conclusion corrected to "reference route, not awarded"; §2.5 separates documented protocol / missing decision / implementation (now done: `twm-network-client.ts`) / live acceptance; §3 item 3 no longer claims a dependency this task's board does not declare | N/A (documentation + new implementation, not a behavioral regression)                                                                                                                                                                                  | This document §1/§2.5/§3; `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- 9/9 passed       |
+| `remaining_external_blockers_precise`                                                                                                                                                                                                             | §3 (1)-(6), each naming the exact external decision/account/storage/ops gap, with no implementation obligation substituted by blocker prose                                                                                                                                         | --                                                                                                                                                                                                                                                     | §3 above                                                                                                                                |
+| `same_sha_review_ci`                                                                                                                                                                                                                              | Candidate lifecycle (`handoff`/`approve`/GitHub bus)                                                                                                                                                                                                                                | Round-1 candidate `ae016843c` was reopened before a same-SHA review+CI pass completed                                                                                                                                                                  | New candidate SHA from this round's commit, pending review/CI per the normal lifecycle                                                  |

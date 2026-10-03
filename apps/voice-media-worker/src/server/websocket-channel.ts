@@ -82,6 +82,13 @@ export class WebSocketServerChannel extends EventEmitter {
     this.socket.write(frame);
   }
 
+  /** The single authoritative close/cleanup path for this channel --
+   * size-limit rejection, idle timeout, local shutdown, and the 0x08 close
+   * frame handler all route through here exactly once. `isClosed` is the
+   * guard against double-entry (including against `handleClose`, which
+   * fires on the underlying socket's own "close" event for an abnormal
+   * closure the peer never framed), so this is also the only place that
+   * emits the "close" event callers rely on for session bookkeeping. */
   close(code = 1000, reason = ""): void {
     if (this.isClosed) return;
     this.isClosed = true;
@@ -103,6 +110,8 @@ export class WebSocketServerChannel extends EventEmitter {
     } catch {
       this.socket.destroy();
     }
+
+    this.emit("close", code, reason);
   }
 
   private encodeFrame(opcode: number, payload: Buffer): Buffer {
@@ -131,10 +140,11 @@ export class WebSocketServerChannel extends EventEmitter {
   }
 
   private handleData(chunk: Buffer): void {
+    if (this.isClosed) return;
     this.resetTimeout();
     this.buffer = Buffer.concat([this.buffer, chunk]);
 
-    while (this.buffer.length >= 2) {
+    while (!this.isClosed && this.buffer.length >= 2) {
       const b0 = this.buffer[0];
       const b1 = this.buffer[1];
       if (b0 === undefined || b1 === undefined) return;
@@ -200,12 +210,11 @@ export class WebSocketServerChannel extends EventEmitter {
         this.emit("message", payload, true);
         break;
       case 0x08: {
-        // Close
+        // Close -- `close()` itself emits "close" exactly once.
         const code = payload.length >= 2 ? payload.readUInt16BE(0) : 1000;
         const reason =
           payload.length > 2 ? payload.subarray(2).toString("utf8") : "";
         this.close(code, reason);
-        this.emit("close", code, reason);
         break;
       }
       case 0x09: // Ping

@@ -14,6 +14,11 @@ import {
 import type { MediaRecordingAdapter } from "../recording/media-recording-adapter";
 import { isStrictVoiceMediaEnvironment } from "./environment";
 import { VoiceMediaAuthError, verifyVoiceMediaCaller } from "./internal-auth";
+import {
+  VoiceMediaSessionAuthority,
+  VoiceMediaSessionAuthorityError,
+  parseRecordingScope,
+} from "./session-authority";
 
 /** Default cap on a single HTTP control-plane request body (`/sessions`,
  * `/recording/finalize`). These carry JSON metadata, never raw audio, so this
@@ -46,6 +51,11 @@ export interface MediaWorkerServerConfig {
    * vendor, so `/ready` must not claim otherwise in a strict environment. */
   voiceRuntimeProductionCapable?: boolean | undefined;
   voiceRuntimeNotCapableReason?: string | undefined;
+  /** How long a `POST /sessions` grant remains attachable before it must be
+   * consumed by the WebSocket upgrade. Defaults to `VOICE_MEDIA_SESSION_GRANT_TTL_MS`
+   * or 30s; kept short since the grant is meant to be redeemed immediately
+   * by the same orchestrator call that just admitted the session. */
+  sessionGrantTtlMs?: number | undefined;
 }
 
 export interface MediaSessionRecord {
@@ -72,6 +82,7 @@ export class MediaWorkerServer extends EventEmitter {
   };
   private readonly server: Server;
   private readonly activeSessions = new Map<string, MediaSessionRecord>();
+  private readonly sessionAuthority: VoiceMediaSessionAuthority;
   private isDraining = false;
   private totalAdmitted = 0;
   private isRunning = false;
@@ -80,6 +91,10 @@ export class MediaWorkerServer extends EventEmitter {
   constructor(config?: MediaWorkerServerConfig) {
     super();
     this.recordingAdapter = config?.recordingAdapter;
+    this.sessionAuthority = new VoiceMediaSessionAuthority(
+      config?.sessionGrantTtlMs ??
+        Number(process.env.VOICE_MEDIA_SESSION_GRANT_TTL_MS ?? 30_000),
+    );
     this.config = {
       port:
         config?.port ??
@@ -518,17 +533,33 @@ export class MediaWorkerServer extends EventEmitter {
             const sessionId =
               parsed.sessionId ??
               `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            // Validated before admission: a half-specified scope must never
+            // silently become "no recording scope for this session" later.
+            const scope = parseRecordingScope(parsed.scope);
             const session = this.admitSession(sessionId, parsed.metadata);
+            const grant = this.sessionAuthority.issueGrant(sessionId, scope);
             res.statusCode = 201;
-            res.end(JSON.stringify({ status: "admitted", session }));
+            res.end(
+              JSON.stringify({
+                status: "admitted",
+                session,
+                grant: {
+                  token: grant.token,
+                  epoch: grant.epoch,
+                  expiresAt: grant.expiresAt,
+                },
+              }),
+            );
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             res.statusCode =
-              errorMsg.includes("DRAINING") || errorMsg.includes("CAPACITY")
-                ? 503
-                : errorMsg.includes("CONFLICT")
-                  ? 409
-                  : 400;
+              err instanceof VoiceMediaSessionAuthorityError
+                ? 400
+                : errorMsg.includes("DRAINING") || errorMsg.includes("CAPACITY")
+                  ? 503
+                  : errorMsg.includes("CONFLICT")
+                    ? 409
+                    : 400;
             res.end(JSON.stringify({ error: errorMsg }));
           }
         })
@@ -574,13 +605,36 @@ export class MediaWorkerServer extends EventEmitter {
               return;
             }
             const parsed = body ? JSON.parse(body) : {};
+            const sessionId =
+              typeof parsed.sessionId === "string" ? parsed.sessionId : "";
+            if (!sessionId) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: "sessionId is required" }));
+              return;
+            }
+            // The authoritative scope bound at POST /sessions time -- never
+            // the caller's own `scope`/`closure`/`credential` claims in this
+            // request body. A caller cannot finalize a recording for a
+            // session it never legitimately admitted, nor substitute a
+            // forged closure for the trusted ledger's answer.
+            const scope =
+              this.sessionAuthority.getAuthoritativeScope(sessionId);
+            if (!scope) {
+              res.statusCode = 403;
+              res.end(
+                JSON.stringify({
+                  error: "No authorized recording scope for this session id",
+                  code: "VOICE_MEDIA_SESSION_SCOPE_UNKNOWN",
+                }),
+              );
+              return;
+            }
+            const segments = Array.isArray(parsed.segments)
+              ? parsed.segments
+              : [];
             const result = await this.recordingAdapter.sealFinalRecording({
-              credential: parsed.credential ?? "media-internal",
-              scope: parsed.scope,
-              segments: parsed.segments ?? [],
-              closureLedger: parsed.closureLedger ?? {
-                resolve: async () => parsed.closure ?? null,
-              },
+              scope,
+              segments,
             });
             res.statusCode = 200;
             res.end(JSON.stringify({ status: "sealed", ...result }));
@@ -638,21 +692,53 @@ export class MediaWorkerServer extends EventEmitter {
       return;
     }
 
-    if (this.activeSessions.size >= this.config.maxConcurrentSessions) {
+    const url = new URL(
+      req.url ?? "/",
+      `http://${req.headers.host ?? "localhost"}`,
+    );
+    const sessionId = url.searchParams.get("sessionId");
+    const grantToken = url.searchParams.get("grant") ?? undefined;
+
+    // Attachment is deliberately NOT self-admitting. Possession of the
+    // shared operations key proves the caller operates this worker; it does
+    // not prove the specific `sessionId` it is asking to attach was ever
+    // legitimately admitted. The session and its single-use grant must have
+    // been issued by a prior `POST /sessions` call -- otherwise any holder
+    // of the key could attach to an arbitrary, unissued session id.
+    if (!sessionId) {
       socket.write(
-        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\n\r\nCapacity exceeded\r\n",
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nsessionId query parameter is required\r\n",
       );
       socket.destroy();
       return;
     }
 
-    const url = new URL(
-      req.url ?? "/",
-      `http://${req.headers.host ?? "localhost"}`,
-    );
-    const sessionId =
-      url.searchParams.get("sessionId") ??
-      `ws-session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const session = this.activeSessions.get(sessionId);
+    if (!session) {
+      socket.write(
+        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nNo admitted session for this id; call POST /sessions first\r\n",
+      );
+      socket.destroy();
+      return;
+    }
+    if (session.channel) {
+      socket.write(
+        "HTTP/1.1 409 Conflict\r\nContent-Type: text/plain\r\n\r\nSession already attached\r\n",
+      );
+      socket.destroy();
+      return;
+    }
+
+    try {
+      this.sessionAuthority.consumeGrant(sessionId, grantToken);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      socket.write(
+        `HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\n${message}\r\n`,
+      );
+      socket.destroy();
+      return;
+    }
 
     const secKey = req.headers["sec-websocket-key"] as string | undefined;
     const channel = completeWebSocketHandshake(secKey, socket, {
@@ -661,20 +747,6 @@ export class MediaWorkerServer extends EventEmitter {
     });
 
     if (!channel) return;
-
-    let session: MediaSessionRecord;
-    try {
-      session = this.admitSession(sessionId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      channel.close(
-        1013,
-        message.includes("CONFLICT")
-          ? "Session id already active"
-          : "Capacity exceeded or draining",
-      );
-      return;
-    }
 
     session.channel = channel;
 
