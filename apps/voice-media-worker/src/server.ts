@@ -4,6 +4,7 @@ import { composeVoiceMediaProviders } from "./server/provider-composition";
 import { VoiceSessionComposer } from "./server/session-composer";
 import { VoiceCallTurnCoordinator } from "./dialogue/call-turn-coordinator";
 import { OpenAiRealtimeFixtureAdapter } from "./providers/native-voice/native-voice-adapter";
+import { createVoiceRecordingAdapter } from "./recording/recording-adapter-factory";
 
 async function main() {
   const composition = composeVoiceMediaProviders();
@@ -25,20 +26,24 @@ async function main() {
     sessionComposer,
     voiceRuntimeProductionCapable: composition.productionCapable,
     voiceRuntimeNotCapableReason: composition.notCapableReason,
-    // `recordingAdapter` stays unset so `/recording/finalize` correctly
-    // fails closed (503). Two independent, precisely-scoped gaps block it
-    // (see docs/04-uat/audit-voice-application-wiring-20261003.md):
-    // (1) `RecorderObjectStore` has a real, unit-tested implementation
-    // against the provider-neutral `ObjectStoreClient` seam
-    // (./recording/object-store-recorder.ts) but no concrete backend
-    // client -- that needs `@aws-sdk/client-s3` added to this package's
-    // own dependencies, a manifest/lockfile change outside this task's
-    // write_scopes requiring the dependency-gates owner's coordination;
-    // (2) `RecordingClosureLedger` needs a trusted call-close event from
-    // the real call/line authority, which is the same missing
-    // `apps/api/src/modules/cti-ivr` channel `callAuthorityVerifier` below
-    // is blocked on -- resolving (1) alone would still not unblock
-    // `MediaRecordingAdapter`.
+    // `recordingAdapter` is now constructed whenever this worker's own
+    // `VOICE_RECORDING_OBJECT_STORE_PROVIDER` is configured (see
+    // ./recording/recording-adapter-factory.ts): the dependency-manifest/
+    // lockfile gap that previously blocked a concrete `ObjectStoreClient`
+    // backend is resolved -- `@aws-sdk/client-s3` is now this package's own
+    // dependency (AUDIT-DEPENDENCY-GATES-20261002 #2287 delegated that
+    // addition to this task; see
+    // docs/04-uat/audit-voice-application-wiring-20261003.md). `undefined`
+    // when unconfigured (e.g. this VM, with no `VOICE_RECORDING_S3_*`
+    // variables set), which still correctly fails `/recording/finalize`
+    // closed at 503 exactly as before. Even when configured, sealing a
+    // recording still correctly fails closed: the adapter's
+    // `RecordingClosureLedger` has no trusted call-close event source yet
+    // (that is the separate, still-missing `apps/api/src/modules/cti-ivr`
+    // `callAuthorityVerifier` channel below is also blocked on), so
+    // `/recording/finalize` now fails at that specific, real remaining
+    // gate instead of a generic "adapter not configured" one.
+    recordingAdapter: createVoiceRecordingAdapter(),
   });
 
   if (
