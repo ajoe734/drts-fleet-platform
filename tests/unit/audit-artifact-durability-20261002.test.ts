@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
+import type { PlacardVersionRecord } from "@drts/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
@@ -19,7 +20,8 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import type { BillingSettlementRepository } from "../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { ControlledDownloadController } from "../../apps/api/src/modules/controlled-download/controlled-download.controller";
-import type { PlatformAdminRepository } from "../../apps/api/src/modules/platform-admin/platform-admin.repository";
+import type { DatabaseService } from "../../apps/api/src/common/db";
+import { PlatformAdminRepository } from "../../apps/api/src/modules/platform-admin/platform-admin.repository";
 import { PlatformAdminService } from "../../apps/api/src/modules/platform-admin/platform-admin.service";
 
 // Structural stand-in for `@nestjs/common`'s `StreamableFile`; see the same
@@ -588,8 +590,9 @@ function emptyPlatformAdminRepository(
       claimed: true,
       currentRecord: null,
     })),
-    finalizePlacardPublish: vi.fn(async () => undefined),
-    releasePlacardPublishClaim: vi.fn(async () => undefined),
+    finalizePlacardPublish: vi.fn(async () => true),
+    releasePlacardPublishClaim: vi.fn(async () => true),
+    getPlacardVersionRecord: vi.fn(async () => null),
   } as unknown as PlatformAdminRepository;
 }
 
@@ -1479,6 +1482,7 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
       }),
       finalizePlacardPublish: vi.fn(async (record: any) => {
         rows.set(record.placardVersionId, { ...record });
+        return true;
       }),
       releasePlacardPublishClaim: vi.fn(
         async (
@@ -1489,9 +1493,15 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
           const current = rows.get(placardVersionId);
           if (current?.publishedAt === claimedPublishedAt) {
             rows.set(placardVersionId, { ...reverted });
+            return true;
           }
+          return false;
         },
       ),
+      getPlacardVersionRecord: vi.fn(async (placardVersionId: string) => {
+        const current = rows.get(placardVersionId);
+        return current ? { ...current } : null;
+      }),
     };
     return {
       repository: repository as unknown as PlatformAdminRepository,
@@ -1693,6 +1703,443 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
 
     const stored = await sharedStore.get("placard", draft.placardVersionId);
     expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+  });
+});
+
+describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810ca5c0d435beb): production repository-path regressions for the durable publish claim", () => {
+  const STALE_CLAIM_MS = 2 * 60 * 1000;
+
+  type PlacardClaimFixture = PlacardVersionRecord & {
+    __publishClaimToken?: string | null;
+  };
+
+  function placardFixture(
+    overrides: Partial<PlacardClaimFixture> & { placardVersionId: string },
+  ): PlacardClaimFixture {
+    return {
+      versionCode: overrides.placardVersionId,
+      publicInfoVersionId: "public-info-fixture",
+      templateName: "seatback",
+      artifactFileId: `placard-artifact-${overrides.placardVersionId}`,
+      artifactManifestHash: "draft-hash",
+      artifactDownloadUrl: "https://controlled-download.invalid/draft",
+      artifactExpiresAt: null,
+      publishedAt: null,
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      downloadMetadata: null,
+      ...overrides,
+    };
+  }
+
+  /**
+   * Exercises the REAL `PlatformAdminRepository` (not an interface-level
+   * stand-in) against a fake query transport that implements the actual
+   * SQL guards this review requires: the `persistChanges` placard upsert's
+   * `updated_at <= EXCLUDED.updated_at` fence (R7-followthrough), and
+   * `claimPlacardPublish`'s `publishedAt IS NULL OR (stale
+   * __publishClaimToken)` claim guard (R8/R9). Only the external query
+   * transport is modelled; the repository's own SQL text and parameter
+   * binding are exercised for real, same evidentiary shape as this
+   * lineage's prior rounds.
+   */
+  function createRealPlacardRepository(publicInfoVersions: unknown[] = []) {
+    const rows = new Map<string, { updatedAt: string; record: any }>();
+    let armedInsertFailure: { error: Error; commits: boolean } | null = null;
+
+    async function query(text: string, values: readonly unknown[] = []) {
+      const q = text.replace(/\s+/g, " ").trim();
+
+      if (
+        q.startsWith("SELECT record") &&
+        q.includes("phase1_public_info_versions")
+      ) {
+        return {
+          rows: publicInfoVersions.map((record) => ({
+            record: structuredClone(record),
+          })),
+        };
+      }
+      if (
+        q.startsWith("SELECT record") &&
+        q.includes("phase1_placard_versions")
+      ) {
+        if (q.includes("WHERE placard_version_id")) {
+          const row = rows.get(values[0] as string);
+          return { rows: row ? [{ record: structuredClone(row.record) }] : [] };
+        }
+        return {
+          rows: [...rows.values()].map((row) => ({
+            record: structuredClone(row.record),
+          })),
+        };
+      }
+      if (
+        q.startsWith("SELECT record") &&
+        (q.includes("phase1_platform_tenants") ||
+          q.includes("phase1_platform_adapters"))
+      ) {
+        return { rows: [] };
+      }
+
+      if (q.startsWith("INSERT INTO admin.phase1_placard_versions")) {
+        const id = values[0] as string;
+        const proposed = JSON.parse(values[5] as string);
+        const current = rows.get(id);
+
+        if (q.includes("RETURNING record")) {
+          if (armedInsertFailure) {
+            const { error, commits } = armedInsertFailure;
+            armedInsertFailure = null;
+            if (commits) {
+              rows.set(id, { updatedAt: values[4] as string, record: proposed });
+            }
+            throw error;
+          }
+          const guardOk =
+            !current ||
+            current.record.publishedAt == null ||
+            (current.record.__publishClaimToken != null &&
+              Date.now() - Date.parse(current.updatedAt) > STALE_CLAIM_MS);
+          if (!guardOk) {
+            return { rows: [] };
+          }
+          rows.set(id, { updatedAt: values[4] as string, record: proposed });
+          return { rows: [{ record: structuredClone(proposed) }] };
+        }
+
+        // Generic `persistChanges` upsert: only applies when it is not older
+        // than whatever is already persisted (R7-followthrough).
+        const guardOk =
+          !current || Date.parse(current.updatedAt) <= Date.parse(values[4] as string);
+        if (guardOk) {
+          rows.set(id, { updatedAt: values[4] as string, record: proposed });
+        }
+        return { rows: [], rowCount: guardOk ? 1 : 0 };
+      }
+
+      if (q.startsWith("INSERT INTO admin.phase1_platform_adapters")) {
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (q.startsWith("UPDATE admin.phase1_placard_versions")) {
+        const id = values[0] as string;
+        const current = rows.get(id);
+        const proposed = JSON.parse(values[2] as string);
+        if (values.length === 4) {
+          // finalizePlacardPublish: WHERE placard_version_id = $1 AND
+          // record->>'__publishClaimToken' = $4
+          const ok = current?.record.__publishClaimToken === values[3];
+          if (ok) {
+            rows.set(id, { updatedAt: values[1] as string, record: proposed });
+          }
+          return { rows: [], rowCount: ok ? 1 : 0 };
+        }
+        // releasePlacardPublishClaim: WHERE ... AND publishedAt = $4 AND
+        // __publishClaimToken = $5
+        const ok =
+          current?.record.publishedAt === values[3] &&
+          current?.record.__publishClaimToken === values[4];
+        if (ok) {
+          rows.set(id, { updatedAt: values[1] as string, record: proposed });
+        }
+        return { rows: [], rowCount: ok ? 1 : 0 };
+      }
+
+      throw new Error(`Unexpected SQL in test double: ${q}`);
+    }
+
+    const databaseService = {
+      isEnabled: () => true,
+      query,
+    } as unknown as DatabaseService;
+
+    return {
+      repository: new PlatformAdminRepository(databaseService),
+      rows,
+      armNextClaimInsertFailure(error: Error, options: { commits: boolean } = { commits: true }) {
+        armedInsertFailure = { error, commits: options.commits };
+      },
+    };
+  }
+
+  describe("R7-followthrough: a late, unconditioned placard write must not regress a newer claim/finalize", () => {
+    it("rejects a stale write (older updated_at) against an already-finalized row, and still accepts a genuinely newer one", async () => {
+      const { repository } = createRealPlacardRepository();
+      const id = "placard_late_draft_guard";
+      const finalized = placardFixture({
+        placardVersionId: id,
+        artifactManifestHash: "final-hash",
+        artifactDownloadUrl: "https://controlled-download.invalid/final",
+        publishedAt: "2026-04-02T00:00:00.000Z",
+        updatedAt: "2026-04-02T00:00:00.000Z",
+      });
+      await repository.persistChanges({ placardVersions: [finalized] });
+
+      // The draft's own fire-and-forget write, modelled landing AFTER the
+      // claim/finalize above with its own older `updatedAt` -- exactly the
+      // ordering this review's probe B demonstrated.
+      const lateDraft = placardFixture({
+        placardVersionId: id,
+        artifactManifestHash: "draft-hash",
+        artifactDownloadUrl: "https://controlled-download.invalid/draft",
+        publishedAt: null,
+        updatedAt: "2026-04-01T00:00:00.000Z",
+      });
+      await repository.persistChanges({ placardVersions: [lateDraft] });
+
+      const persisted = await repository.getPlacardVersionRecord(id);
+      expect(persisted?.publishedAt).toBe(finalized.publishedAt);
+      expect(persisted?.artifactManifestHash).toBe("final-hash");
+
+      const genuinelyNewer = placardFixture({
+        placardVersionId: id,
+        artifactManifestHash: "newer-hash",
+        publishedAt: finalized.publishedAt,
+        updatedAt: "2026-04-03T00:00:00.000Z",
+      });
+      await repository.persistChanges({ placardVersions: [genuinelyNewer] });
+      const persistedAfterNewer = await repository.getPlacardVersionRecord(id);
+      expect(persistedAfterNewer?.artifactManifestHash).toBe("newer-hash");
+    });
+  });
+
+  describe("R8: a committed claim whose acknowledgement is lost must be reconciled, not left stuck", () => {
+    it("adopts its own committed-but-unacknowledged claim instead of rejecting it", async () => {
+      const { repository, rows, armNextClaimInsertFailure } =
+        createRealPlacardRepository();
+      const id = "placard_lost_ack";
+      const claim = placardFixture({
+        placardVersionId: id,
+        publishedAt: "2026-04-05T00:00:00.000Z",
+        updatedAt: "2026-04-05T00:00:00.000Z",
+        __publishClaimToken: randomUUID(),
+      });
+      armNextClaimInsertFailure(new Error("connection reset after commit"));
+
+      const result = await repository.claimPlacardPublish(claim);
+      expect(result.claimed).toBe(true);
+      expect(result.currentRecord?.placardVersionId).toBe(id);
+      expect(rows.get(id)?.record.publishedAt).toBe(claim.publishedAt);
+    });
+
+    it("does not fabricate success when the claim genuinely never committed", async () => {
+      const { repository, armNextClaimInsertFailure } =
+        createRealPlacardRepository();
+      const id = "placard_never_committed";
+      const claim = placardFixture({
+        placardVersionId: id,
+        publishedAt: "2026-04-05T00:00:00.000Z",
+        updatedAt: "2026-04-05T00:00:00.000Z",
+        __publishClaimToken: randomUUID(),
+      });
+      armNextClaimInsertFailure(
+        new Error("connection reset before commit"),
+        { commits: false },
+      );
+
+      await expect(repository.claimPlacardPublish(claim)).rejects.toThrow(
+        /connection reset before commit/,
+      );
+      expect(await repository.getPlacardVersionRecord(id)).toBeNull();
+    });
+  });
+
+  describe("R8: bounded abandoned-claim recovery", () => {
+    it("reclaims a pending claim once it is stale, but never a fresh pending claim or a finalized row", async () => {
+      const { repository, rows } = createRealPlacardRepository();
+
+      const abandonedId = "placard_abandoned_claim";
+      const abandonedUpdatedAt = new Date(
+        Date.now() - STALE_CLAIM_MS - 60_000,
+      ).toISOString();
+      rows.set(abandonedId, {
+        updatedAt: abandonedUpdatedAt,
+        record: placardFixture({
+          placardVersionId: abandonedId,
+          publishedAt: abandonedUpdatedAt,
+          updatedAt: abandonedUpdatedAt,
+          __publishClaimToken: randomUUID(),
+        }),
+      });
+      const reclaim = placardFixture({
+        placardVersionId: abandonedId,
+        publishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        __publishClaimToken: randomUUID(),
+      });
+      const reclaimed = await repository.claimPlacardPublish(reclaim);
+      expect(reclaimed.claimed).toBe(true);
+      expect(reclaimed.currentRecord?.publishedAt).toBe(reclaim.publishedAt);
+
+      const freshId = "placard_fresh_pending_claim";
+      const freshNow = new Date().toISOString();
+      rows.set(freshId, {
+        updatedAt: freshNow,
+        record: placardFixture({
+          placardVersionId: freshId,
+          publishedAt: freshNow,
+          updatedAt: freshNow,
+          __publishClaimToken: randomUUID(),
+        }),
+      });
+      const blockedFresh = await repository.claimPlacardPublish(
+        placardFixture({
+          placardVersionId: freshId,
+          publishedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          __publishClaimToken: randomUUID(),
+        }),
+      );
+      expect(blockedFresh.claimed).toBe(false);
+
+      const finalizedId = "placard_old_finalized";
+      const veryOld = new Date(Date.now() - 10 * STALE_CLAIM_MS).toISOString();
+      rows.set(finalizedId, {
+        updatedAt: veryOld,
+        record: placardFixture({
+          placardVersionId: finalizedId,
+          publishedAt: veryOld,
+          updatedAt: veryOld,
+        }),
+      });
+      const blockedFinalized = await repository.claimPlacardPublish(
+        placardFixture({
+          placardVersionId: finalizedId,
+          publishedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          __publishClaimToken: randomUUID(),
+        }),
+      );
+      expect(blockedFinalized.claimed).toBe(false);
+    });
+  });
+
+  describe("R9: a losing/booting instance must not trust an unfinalized claim snapshot as a completed publish", () => {
+    const PUBLIC_INFO_R9 = {
+      versionId: "public-info-r9-reader-trust",
+      title: "R9 Reader Trust Disclosure",
+      callPhone: "0800-010-010",
+      complaintPhone: "0800-010-020",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    class DelayedReadbackStore implements DocumentArtifactStore {
+      private readonly inner = new InMemoryDocumentArtifactStore();
+      private gate: Promise<void> | undefined;
+      putCount = 0;
+
+      armNextGet(): () => void {
+        let release!: () => void;
+        this.gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      async put(command: PutDocumentArtifactCommand) {
+        this.putCount += 1;
+        return this.inner.put(command);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        const result = await this.inner.get(...args);
+        if (this.gate) {
+          const held = this.gate;
+          this.gate = undefined;
+          await held;
+        }
+        return result;
+      }
+    }
+
+    it("a losing pod, and a pod booted mid-claim, both resolve the winner's authoritative bytes after it finalizes -- not their own stale pending snapshot", async () => {
+      const { repository } = createRealPlacardRepository([PUBLIC_INFO_R9]);
+      const sharedStore = new DelayedReadbackStore();
+      const sharedRegistry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r9-reader-trust",
+        publicInfoVersionId: PUBLIC_INFO_R9.versionId,
+        templateName: "seatback-r9",
+      });
+
+      const podB = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podB.onModuleInit();
+
+      sharedStore.putCount = 0;
+      const release = sharedStore.armNextGet();
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sharedStore.putCount).toBe(1);
+
+      // Pod B loses the claim while A's authentic read-back is still held;
+      // its own local cache now carries the pending (unfinalized) claim.
+      await expect(
+        podB.publishPlacardVersion(draft.placardVersionId),
+      ).rejects.toMatchObject({ code: "PLACARD_VERSION_ALREADY_PUBLISHED" });
+
+      // A third pod boots while the claim is still pending.
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podC.onModuleInit();
+
+      release();
+      const published = await publishA;
+
+      const controller = new ControlledDownloadController(
+        sharedStore,
+        sharedRegistry,
+      );
+
+      for (const [, reader] of [
+        ["losing pod", podB],
+        ["pod booted during claim", podC],
+      ] as const) {
+        const fresh = await reader.getPlacardVersion(draft.placardVersionId);
+        expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+        const file = (await resolve(
+          controller,
+          "placard",
+          draft.placardVersionId,
+          paramsOf(fresh.artifactDownloadUrl!),
+        )) as unknown as StreamableFileLike;
+        const bytes = await drain(file.getStream());
+        expect(sha256(bytes)).toBe(published.artifactManifestHash);
+      }
+    });
   });
 });
 

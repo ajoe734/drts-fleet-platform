@@ -13,8 +13,9 @@ function createService() {
     claimPlacardPublish: vi
       .fn()
       .mockResolvedValue({ claimed: true, currentRecord: null }),
-    finalizePlacardPublish: vi.fn().mockResolvedValue(undefined),
-    releasePlacardPublishClaim: vi.fn().mockResolvedValue(undefined),
+    finalizePlacardPublish: vi.fn().mockResolvedValue(true),
+    releasePlacardPublishClaim: vi.fn().mockResolvedValue(true),
+    getPlacardVersionRecord: vi.fn().mockResolvedValue(null),
   };
 
   const service = new PlatformAdminService(
@@ -126,6 +127,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
       platformAdminRepository.finalizePlacardPublish,
     ).toHaveBeenCalledWith(
       expect.objectContaining({ placardVersionId: placard.placardVersionId }),
+      expect.any(String),
     );
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({

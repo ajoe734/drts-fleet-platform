@@ -473,6 +473,35 @@ type PlatformAdminUserSnapshot = {
   status: PlatformAdminUserStatus;
 };
 
+/**
+ * `__publishClaimToken` (R7-followthrough/R8/R9) marks a placard record as
+ * a durable publish claim that has not been finalized yet -- see
+ * `PlatformAdminRepository.claimPlacardPublish`/`finalizePlacardPublish`.
+ * It is never part of the public `PlacardVersionRecord` contract; every
+ * path that returns a placard to a caller outside this module goes through
+ * `stripClaimToken`/`clonePlacardVersion` first.
+ */
+type PlacardWithClaimToken = PlacardVersionRecord & {
+  __publishClaimToken?: string | null;
+};
+
+function withClaimToken(
+  record: PlacardVersionRecord,
+  token: string,
+): PlacardWithClaimToken {
+  return { ...record, __publishClaimToken: token };
+}
+
+function stripClaimToken(record: PlacardVersionRecord): PlacardVersionRecord {
+  const clean: PlacardWithClaimToken = { ...record };
+  delete clean.__publishClaimToken;
+  return clean;
+}
+
+function hasPendingPublishClaim(record: PlacardVersionRecord): boolean {
+  return Boolean((record as PlacardWithClaimToken).__publishClaimToken);
+}
+
 @Injectable()
 export class PlatformAdminService implements OnModuleInit {
   private publicInfoVersions = PUBLIC_INFO_SEED.map((version) =>
@@ -573,7 +602,7 @@ export class PlatformAdminService implements OnModuleInit {
         if (!hasPersistedState) {
           this.placardVersions = await Promise.all(
             this.placardVersions.map((placard) =>
-              this.clonePlacardVersion(placard),
+              this.resolvePlacardVersion(placard),
             ),
           );
           this.persistChanges(
@@ -594,9 +623,13 @@ export class PlatformAdminService implements OnModuleInit {
           this.publicInfoVersions = persistedState.publicInfoVersions.map(
             (version) => this.clonePublicInfoVersion(version),
           );
+          // Keeps a still-pending `__publishClaimToken`, if a sibling
+          // instance's claim for one of these placards has not finalized
+          // yet (R9) -- `resolvePlacardVersion`, not the external-facing
+          // `clonePlacardVersion`, is what populates this cache.
           this.placardVersions = await Promise.all(
             persistedState.placardVersions.map((placard) =>
-              this.clonePlacardVersion(placard),
+              this.resolvePlacardVersion(placard),
             ),
           );
         }
@@ -921,7 +954,14 @@ export class PlatformAdminService implements OnModuleInit {
     // ALREADY_PUBLISHED even though no durable bytes exist. Staging first
     // means a failed write leaves the original record untouched and
     // retryable; only a successful write's results are copied back.
-    const staged: PlacardVersionRecord = { ...placard, publishedAt: now, updatedAt: now };
+    // `__publishClaimToken` (R8/R9) is this attempt's own unique marker --
+    // never part of the public contract, always stripped before this
+    // placard is returned to any caller -- see `claimPlacardPublish`.
+    const claimToken = randomUUID();
+    const staged: PlacardVersionRecord = withClaimToken(
+      { ...placard, publishedAt: now, updatedAt: now },
+      claimToken,
+    );
 
     // `runExclusivePlacardPublish` only rules out another publish call IN
     // THIS PROCESS reaching here concurrently -- it cannot see a different
@@ -941,6 +981,12 @@ export class PlatformAdminService implements OnModuleInit {
           (candidate) => candidate.placardVersionId === placardVersionId,
         );
         if (winnerIndex >= 0) {
+          // The winner's own claim snapshot, cached verbatim -- including
+          // its `__publishClaimToken` if it has not finalized yet (R9).
+          // `clonePlacardVersion`/`ensurePlacardArtifact` must not treat a
+          // record carrying that token as proof of a completed publish;
+          // they re-resolve it against the repository instead of trusting
+          // this snapshot's `artifactManifestHash`.
           this.placardVersions[winnerIndex] = { ...claim.currentRecord };
         }
       }
@@ -955,9 +1001,15 @@ export class PlatformAdminService implements OnModuleInit {
       );
     }
 
+    // The repository may have reconciled an earlier, ambiguously-acked
+    // attempt by THIS caller (R8) and returned that earlier attempt's own
+    // committed claim instead of rejecting outright. Keep working against
+    // whatever claim actually landed, not necessarily `staged` itself.
+    const wonClaim = claim.currentRecord ?? staged;
+
     try {
       // Force re-render so PDF reflects the actual publishedAt timestamp
-      await this.ensurePlacardArtifact(staged, true);
+      await this.ensurePlacardArtifact(wonClaim, true);
 
       // The claim above only fences the durable *record*; it cannot see a
       // sibling instance's unrelated write to the same durable *object* key
@@ -970,7 +1022,7 @@ export class PlatformAdminService implements OnModuleInit {
       );
       if (
         !storedEntry ||
-        storedEntry.record.sha256 !== staged.artifactManifestHash
+        storedEntry.record.sha256 !== wonClaim.artifactManifestHash
       ) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -978,7 +1030,7 @@ export class PlatformAdminService implements OnModuleInit {
           "This placard's durable artifact changed during publish. Retry the publish.",
           {
             placardVersionId,
-            expectedSha256: staged.artifactManifestHash,
+            expectedSha256: wonClaim.artifactManifestHash,
             actualSha256: storedEntry?.record.sha256 ?? null,
           },
         );
@@ -987,9 +1039,25 @@ export class PlatformAdminService implements OnModuleInit {
       // Fenced, awaited commit of the claim this call already won: the
       // caller never observes success before the durable record actually
       // reflects it, unlike the fire-and-forget `persistChanges` used
-      // elsewhere in this service.
+      // elsewhere in this service. Dropping the token here is what tells a
+      // later reader this row is actually finalized, not merely claimed
+      // (R9); a `false` result means something unexpected already moved
+      // the row out from under this claim, so treat it as a conflict
+      // rather than reporting success for a record that does not actually
+      // reflect it.
       if (this.platformAdminRepository) {
-        await this.platformAdminRepository.finalizePlacardPublish(staged);
+        const finalized = await this.platformAdminRepository.finalizePlacardPublish(
+          stripClaimToken(wonClaim),
+          claimToken,
+        );
+        if (!finalized) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "PLACARD_PUBLISH_CONFLICT",
+            "This placard's publish claim was superseded before it could be finalized. Retry the publish.",
+            { placardVersionId },
+          );
+        }
       }
     } catch (error) {
       if (this.platformAdminRepository) {
@@ -1000,20 +1068,21 @@ export class PlatformAdminService implements OnModuleInit {
         };
         await this.platformAdminRepository.releasePlacardPublishClaim(
           placardVersionId,
-          staged.publishedAt!,
+          wonClaim.publishedAt!,
           reverted,
+          claimToken,
         );
       }
       throw error;
     }
 
-    placard.publishedAt = staged.publishedAt;
-    placard.updatedAt = staged.updatedAt;
-    placard.artifactFileId = staged.artifactFileId;
-    placard.artifactManifestHash = staged.artifactManifestHash;
-    placard.artifactDownloadUrl = staged.artifactDownloadUrl;
-    placard.artifactExpiresAt = staged.artifactExpiresAt;
-    placard.downloadMetadata = staged.downloadMetadata ?? null;
+    placard.publishedAt = wonClaim.publishedAt;
+    placard.updatedAt = wonClaim.updatedAt;
+    placard.artifactFileId = wonClaim.artifactFileId;
+    placard.artifactManifestHash = wonClaim.artifactManifestHash;
+    placard.artifactDownloadUrl = wonClaim.artifactDownloadUrl;
+    placard.artifactExpiresAt = wonClaim.artifactExpiresAt;
+    placard.downloadMetadata = wonClaim.downloadMetadata ?? null;
 
     this.recordAudit(
       {
@@ -1107,7 +1176,12 @@ export class PlatformAdminService implements OnModuleInit {
       await this.clonePlacardVersion(placard),
       ...this.placardVersions,
     ];
-    this.persistChanges(
+    // Awaited, not fire-and-forget (R7-followthrough): this id is about to
+    // be returned to the caller, who can immediately try to publish it on
+    // this instance or a sibling one. If this draft write were still in
+    // flight when that publish's claim/finalize committed, it could land
+    // after them and regress the row back to pre-publish content.
+    await this.persistChanges(
       {
         placardVersions: [await this.clonePlacardVersion(placard)],
       },
@@ -2740,15 +2814,65 @@ export class PlatformAdminService implements OnModuleInit {
     });
   }
 
+  /**
+   * (R9) `placard` can be a losing/booting instance's cached snapshot of
+   * another instance's still-pending publish claim -- carrying
+   * `publishedAt` already set, but an `artifactManifestHash` that is only
+   * the pre-publish value (see `claimPlacardPublish`'s own comment). Taking
+   * that at face value would sign download links for bytes the claim owner
+   * has not actually produced yet. Resolve the authoritative row from the
+   * repository first whenever the cached copy still carries a pending
+   * claim token; once the claim has actually finalized (token gone), adopt
+   * that authoritative copy into this instance's own cache so later reads
+   * of the same id do not need to repeat the round trip. If the claim is
+   * still genuinely in flight elsewhere, there is nothing more authoritative
+   * to serve yet -- fall through on the last-known snapshot, same as
+   * before this fix.
+   *
+   * Returns the RAW resolved record -- including a still-pending
+   * `__publishClaimToken`, if that is genuinely the best known state -- so
+   * a caller populating `this.placardVersions` (bootstrap) keeps that
+   * marker instead of laundering it away before anything actually
+   * finalized. `clonePlacardVersion` is the external-facing wrapper that
+   * strips it.
+   */
+  private async resolvePlacardVersion(
+    placard: PlacardVersionRecord,
+  ): Promise<PlacardVersionRecord> {
+    let resolved = placard;
+    if (this.platformAdminRepository && hasPendingPublishClaim(resolved)) {
+      const authoritative =
+        await this.platformAdminRepository.getPlacardVersionRecord(
+          resolved.placardVersionId,
+        );
+      if (authoritative) {
+        resolved = authoritative;
+      }
+    }
+
+    const ensured = await this.ensurePlacardArtifact(resolved);
+    if (!hasPendingPublishClaim(ensured)) {
+      const idx = this.placardVersions.findIndex(
+        (candidate) => candidate.placardVersionId === ensured.placardVersionId,
+      );
+      if (idx >= 0) {
+        this.placardVersions[idx] = { ...ensured };
+      }
+    }
+
+    return ensured;
+  }
+
   private async clonePlacardVersion(
     placard: PlacardVersionRecord,
   ): Promise<PlacardVersionRecord> {
-    const ensured = await this.ensurePlacardArtifact(placard);
+    const ensured = await this.resolvePlacardVersion(placard);
+    const clean = stripClaimToken(ensured);
 
     return {
-      ...ensured,
-      downloadMetadata: ensured.downloadMetadata
-        ? { ...ensured.downloadMetadata }
+      ...clean,
+      downloadMetadata: clean.downloadMetadata
+        ? { ...clean.downloadMetadata }
         : null,
     };
   }
@@ -2834,15 +2958,23 @@ export class PlatformAdminService implements OnModuleInit {
     return JSON.stringify(value);
   }
 
+  /**
+   * Fire-and-forget by default -- most callers persist in the background and
+   * do not await the returned promise. `generatePlacardVersion` is the one
+   * exception (R7-followthrough): it awaits this so a placard's draft
+   * creation is durably committed before its id is ever handed back to a
+   * caller, closing the window where that same write could otherwise land
+   * late, after a competing publish claim/finalize for the same id.
+   */
   private persistChanges(
     changes: PersistPlatformAdminChanges,
     context: string,
-  ) {
+  ): Promise<void> {
     if (!this.platformAdminRepository) {
-      return;
+      return Promise.resolve();
     }
 
-    void this.platformAdminRepository
+    return this.platformAdminRepository
       .persistChanges(changes)
       .catch((error: unknown) => {
         this.platformAdminRepository!.reportPersistenceFailure(error, context);
