@@ -345,11 +345,9 @@ not configured` or an equivalent Postgres-dependent assertion — a VM
   `controlled-download`, or `platform-admin` logic.
 - Full repo-root `pnpm exec vitest run` (all of `tests/unit`, `tests/e2e`,
   `tests/integration`, etc., including the 8 mechanically-updated
-  out-of-`write_scopes` files): in progress at the time of writing this
-  section; the reviewer should treat any result recorded after this line in
-  a later revision of this document as the authoritative full-sweep status,
-  and should independently re-run it if this document does not contain a
-  recorded result.
+  out-of-`write_scopes` files): this local attempt was superseded by hosted
+  CI before it finished locally (see "Hosted CI exact-SHA evidence" below,
+  which is the authoritative full-sweep result for this candidate).
 
 ## Pi completion contribution (2026-10-03): strict runtime and actual S3 path
 
@@ -455,3 +453,28 @@ and broad-suite advice are not authorized practices. Full unit/browser/PG
 verification belongs in hosted CI. Independent exact-SHA review, hosted CI,
 merge and task acceptance are still required; no deployment, real object
 store, scanner, or other live acceptance is claimed by these local results.
+
+## Hosted CI exact-SHA evidence (`same_sha_review_ci`)
+
+PR #2295, candidate `df46be0e9784e7b9577ad364e9a4ee351138b443` (branch
+`claude2/audit-artifact-durability-20261002`, base `dev` at `d94d528f4`, one
+commit behind current `origin/dev` `98352db89` — that one additional dev
+commit, `SR-LIVE-MAIL-001`, touches only mail-bootstrap code with no overlap
+with this task's `write_scopes`, confirmed via `git log d94d528f4..98352db89`).
+`gh pr checks 2295 --required` at this exact SHA: `Commit trailers`,
+`Runtime mirror guard`, `Smoke acceptance`, `ci-integ` all `pass`.
+`gh pr checks 2295` (full set) at this exact SHA: every check `pass` except
+`orchestrator-tests` (`skipping`, not a required check, not applicable to
+this diff), including `unit` (pass, 8m46s — the full repo-root unit sweep the
+previous section above left unresolved locally), `integration` (pass, 1m53s),
+`iam-negative-matrix` (pass), `cross-surface-e2e` (pass, 4m0s — the exact job
+that failed pre-CI-G1-fix and is now green), `ui-route-e2e` (pass, 11m0s —
+the placard/`switchboard` route that also failed pre-fix), `typecheck`
+(pass), `lint` (pass), `build` (pass), `Product smoke acceptance`
+(completed all steps including `Apply migrations`, `Unit tests`, `API unit
+tests`). This is real hosted CI against a real Postgres instance and a
+booted API process, not a local mock — it closes the full-sweep and
+PG/browser-adjacent gaps the local-only verification above could not reach
+on this VM. This is the authoritative `same_sha_review_ci` evidence for
+candidate `df46be0e9`; reviewer should re-check `gh pr checks 2295` only if
+a later commit changes the head SHA.
