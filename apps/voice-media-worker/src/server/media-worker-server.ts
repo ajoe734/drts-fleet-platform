@@ -15,6 +15,7 @@ import type { MediaRecordingAdapter } from "../recording/media-recording-adapter
 import { isStrictVoiceMediaEnvironment } from "./environment";
 import { VoiceMediaAuthError, verifyVoiceMediaCaller } from "./internal-auth";
 import {
+  recordingScopesMatch,
   VoiceMediaSessionAuthority,
   VoiceMediaSessionAuthorityError,
 } from "./session-authority";
@@ -806,6 +807,25 @@ export class MediaWorkerServer extends EventEmitter {
               );
               return;
             }
+            // The finalize-specific token's OWN claims.scope must itself
+            // authorize sealing this exact resource -- resolving to the
+            // right session/epoch/principal is not, by itself, evidence the
+            // caller holds finalize authority for the attached recording.
+            // A token with no recording scope (not recording-eligible) or a
+            // scope for a different brand/call/recording/leg must be
+            // denied even though it is a genuine, unexpired, unrevoked
+            // token for this exact session and epoch.
+            if (!claims.scope || !recordingScopesMatch(claims.scope, scope)) {
+              res.statusCode = 403;
+              res.end(
+                JSON.stringify({
+                  error:
+                    "Call-authority token does not authorize this recording scope",
+                  code: "VOICE_MEDIA_CALL_AUTHORITY_SCOPE_MISMATCH",
+                }),
+              );
+              return;
+            }
             const segments = Array.isArray(parsed.segments)
               ? parsed.segments
               : [];
@@ -813,7 +833,12 @@ export class MediaWorkerServer extends EventEmitter {
               scope,
               segments,
             });
-            this.sessionAuthority.release(sessionId);
+            // Completed, not released: an authorized retry (lost response,
+            // retried request) for this exact session/epoch must still
+            // resolve this scope and reach the adapter's own reentrant
+            // sealing, rather than failing closed as if no authority had
+            // ever been granted.
+            this.sessionAuthority.markCompleted(sessionId, claims.epoch);
             res.statusCode = 200;
             res.end(JSON.stringify({ status: "sealed", ...result }));
           } catch (err) {

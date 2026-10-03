@@ -204,6 +204,31 @@ function createFrameReader(socket: Socket): {
   };
 }
 
+class TrackingAsrAdapter implements VoiceSpeechToTextAdapter {
+  readonly providerName = "tracking";
+  readonly isProductionCapable = false as const;
+  endAudioCalls = 0;
+  closeCalls = 0;
+
+  async transcribe(): Promise<VoiceAsrSegmentResult> {
+    return {
+      segmentId: "seg",
+      revision: 1,
+      text: "",
+      final: true,
+      language: "cmn-TW",
+    };
+  }
+
+  endAudio(): void {
+    this.endAudioCalls += 1;
+  }
+
+  close(): void {
+    this.closeCalls += 1;
+  }
+}
+
 describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS composition onto an attached session", () => {
   it("transcribes an inbound binary audio frame through the real session harness and emits the real ASR event back", async () => {
     const { server, port, callAuthority, asrAdapter } = await startServer();
@@ -307,5 +332,38 @@ describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS 
     (channel as unknown as EventEmitter).emit("close", 1000, "Normal closure");
 
     expect(composer.get("sess-closed-1")).toBeUndefined();
+  });
+
+  /**
+   * Codex review round 4 (reopen, AUDIT-VOICE-RUNTIME-20261002) R11:
+   * closing a session only ever deleted the composer's own `Map` entry --
+   * it never invoked the ASR adapter's `endAudio`/`close`. A provider
+   * connection, its waiters, and any billing/session resource it holds
+   * outlived the session's actual hangup/drain/idle closure.
+   */
+  it("invokes the ASR adapter's endAudio/close exactly once when the channel closes", () => {
+    const asrAdapter = new TrackingAsrAdapter();
+    const ttsAdapter = new DeterministicTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({ asrAdapter, ttsAdapter }),
+    });
+    const channel = new (class extends EventEmitter {
+      destroyed = false;
+      sendText(): void {}
+      sendBinary(): void {}
+    })() as unknown as import("../../../apps/voice-media-worker/src/server/websocket-channel").WebSocketServerChannel;
+
+    composer.attach("sess-cleanup-1", channel);
+    (channel as unknown as EventEmitter).emit("close", 1000, "Normal closure");
+
+    expect(asrAdapter.endAudioCalls).toBe(1);
+    expect(asrAdapter.closeCalls).toBe(1);
+
+    // A duplicate close (defensive: the channel's own close/cleanup is
+    // documented single-emission, but this must stay safe regardless)
+    // must not re-trigger cleanup for an already-removed session.
+    (channel as unknown as EventEmitter).emit("close", 1000, "Normal closure");
+    expect(asrAdapter.endAudioCalls).toBe(1);
+    expect(asrAdapter.closeCalls).toBe(1);
   });
 });

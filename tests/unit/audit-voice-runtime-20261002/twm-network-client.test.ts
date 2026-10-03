@@ -11,6 +11,7 @@ import type {
   TwmAsrRouteProfile,
   TwmTtsVoiceProfile,
 } from "../../../apps/voice-media-worker/src/providers/twm/twm-adapter";
+import type { VoiceAsrSegmentResult } from "../../../apps/voice-media-worker/src/media-provider";
 
 /**
  * Codex review round 1 (reopen, AUDIT-VOICE-RUNTIME-20261002) R4: the
@@ -455,6 +456,122 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     const second = await secondPromise;
     expect(second.segmentId).toBe("seg-other");
     expect(second.text).toBe("a different segment");
+  });
+
+  /**
+   * Codex review round 4 (reopen, AUDIT-VOICE-RUNTIME-20261002) R9:
+   * `connect()` checked `this.socket` before two awaited HTTP calls with no
+   * in-flight guard. Concurrent first frames (normal when
+   * `VoiceSessionComposer.handleMessage` fires per inbound WS message,
+   * never serialized behind a previous chunk's transcription) each started
+   * their own login/access-info/WebSocket, so the second overwrote
+   * `this.socket`, leaking the first connection's ticket/stream.
+   */
+  it("serializes concurrent connect() calls into a single login/access-info/socket (no duplicate connections from concurrent audio frames)", async () => {
+    let loginCalls = 0;
+    let accessCalls = 0;
+    const sockets: FakeSocket[] = [];
+    const wsFactory = vi.fn(() => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    });
+    const transport: TwmHttpTransport = async (_method, path) => {
+      if (path === "/api/v1/login") {
+        loginCalls++;
+        return jsonResponse(200, { token: "asr-tok" });
+      }
+      if (path === "/api/v1/streaming/transcript/access-info") {
+        accessCalls++;
+        return jsonResponse(200, {
+          websocketUrl: "wss://twm.example/stream",
+          ticket: `ticket-${accessCalls}`,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    };
+    const adapter = new TwmAsrNetworkAdapter(
+      transport,
+      wsFactory,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    // Two concurrent callers -- e.g. two audio frames arriving before the
+    // first connection attempt resolves -- must share one in-flight
+    // attempt instead of each independently racing login/access-info.
+    const firstConnect = adapter.connect();
+    const secondConnect = adapter.connect();
+
+    for (let i = 0; i < 20 && sockets.length === 0; i++) {
+      await Promise.resolve();
+    }
+    sockets[0]!.fire("open", {});
+
+    await Promise.all([firstConnect, secondConnect]);
+
+    expect(loginCalls).toBe(1);
+    expect(accessCalls).toBe(1);
+    expect(sockets.length).toBe(1);
+  });
+
+  /**
+   * Codex review round 4 R10: `receiveResult()` only ever resolved the next
+   * `transcribe()` call's promise or buffered a result until another
+   * `transcribe()` call dequeued it -- a later accepted revision for a
+   * segment (e.g. the final revision, arriving after the audio chunk it
+   * belongs to was already sent) was never delivered if no further audio
+   * chunk arrived to "poll" for it.
+   */
+  it("delivers a later revision for the same segment via onResult with no further audio chunk sent", async () => {
+    const socket = new FakeSocket();
+    const adapter = new TwmAsrNetworkAdapter(
+      transportFor("ticket-r10"),
+      () => socket,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+    const streamed: VoiceAsrSegmentResult[] = [];
+    adapter.onResult((result) => streamed.push(result));
+
+    const promise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    socket.fire("open", {});
+    socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-1",
+        revision: 1,
+        text: "partial",
+        final: 0,
+        language: "cmn-TW",
+      }),
+    });
+    await promise;
+
+    // The final revision for the SAME segment arrives later, with no
+    // further audio ever sent (end of speech) -- it must still reach a
+    // listener via the streaming channel.
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-1",
+        revision: 2,
+        text: "final text",
+        final: 1,
+        language: "cmn-TW",
+      }),
+    });
+
+    expect(streamed.map((r) => r.revision)).toEqual([1, 2]);
+    expect(streamed[0]?.final).toBe(false);
+    expect(streamed[1]?.final).toBe(true);
+    expect(streamed[1]?.text).toBe("final text");
   });
 
   it("sends the literal text EOS, not a JSON envelope, when audio ends", async () => {

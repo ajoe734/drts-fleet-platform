@@ -53,8 +53,13 @@ interface AttachedSession {
  * its slot forever.
  */
 export class VoiceMediaSessionAuthority extends EventEmitter {
+  /** Bound so a completed-finalization binding for a session id that is
+   * never reused (the common case) cannot grow this cache without limit. */
+  private static readonly MAX_COMPLETED_ENTRIES = 1000;
+
   private readonly pending = new Map<string, PendingGrant>();
   private readonly attached = new Map<string, AttachedSession>();
+  private readonly completed = new Map<string, AttachedSession>();
 
   constructor(private readonly grantTtlMs = 30_000) {
     super();
@@ -96,6 +101,7 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
     if (previousPending) clearTimeout(previousPending.expiryTimer);
     this.pending.delete(sessionId);
     this.attached.delete(sessionId);
+    this.completed.delete(sessionId);
 
     const token = randomBytes(32).toString("hex");
     const expiresAt = Date.now() + this.grantTtlMs;
@@ -115,9 +121,17 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
     return { token, epoch, expiresAt };
   }
 
+  /** The single authoritative expiry/cleanup path for a pending grant --
+   * called both by the TTL timer and by `consumeGrant` when it discovers
+   * the grant already expired before the timer fired. Epoch-checked so it
+   * can never evict a *different*, newer epoch's pending grant (e.g. one
+   * issued for a reused session id after this one was superseded), and
+   * guarded by `pending`'s own deletion so it emits `grant.expired` at most
+   * once per grant regardless of which path observes the expiry. */
   private handleGrantExpiry(sessionId: string, epoch: number): void {
     const record = this.pending.get(sessionId);
     if (!record || record.epoch !== epoch || record.consumed) return;
+    clearTimeout(record.expiryTimer);
     this.pending.delete(sessionId);
     this.emit("grant.expired", { sessionId, epoch });
   }
@@ -148,8 +162,14 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
       );
     }
     if (Date.now() > record.expiresAt) {
-      clearTimeout(record.expiryTimer);
-      this.pending.delete(sessionId);
+      // The grant expired before its own TTL timer fired (normal
+      // event-loop delay, or this upgrade attempt itself took long enough
+      // to cross `expiresAt`). Route through the same cleanup the timer
+      // uses so capacity is freed and `grant.expired` still fires exactly
+      // once -- previously this branch deleted the record directly without
+      // emitting, permanently cancelling the capacity reaper for this
+      // session id.
+      this.handleGrantExpiry(sessionId, record.epoch);
       throw new VoiceMediaSessionAuthorityError(
         "VOICE_MEDIA_SESSION_GRANT_EXPIRED",
         "This session grant has expired.",
@@ -170,32 +190,63 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
     });
   }
 
-  /** Authoritative recording scope bound at admission/attach time. Never
+  /** Authoritative recording scope bound at admission/attach time, or still
+   * resolvable from a completed finalization for the same session/epoch
+   * (see `markCompleted`) so an authorized retry keeps resolving it. Never
    * derived from a later caller-supplied value -- this is what
    * `/recording/finalize` must use instead of trusting its request body. */
   getAuthoritativeScope(sessionId: string): RecordingScope | undefined {
-    return this.attached.get(sessionId)?.scope;
+    return (this.attached.get(sessionId) ?? this.completed.get(sessionId))
+      ?.scope;
   }
 
-  /** The epoch currently bound for this session id, or `undefined` if none
-   * is attached (never admitted, never attached, or fenced by a later
-   * epoch). `/recording/finalize` must re-verify its own presented token
-   * resolves to this exact epoch, not merely that some scope exists. */
+  /** The epoch currently bound (attached or completed) for this session id,
+   * or `undefined` if none is (never admitted, never attached, or fenced by
+   * a later epoch). `/recording/finalize` must re-verify its own presented
+   * token resolves to this exact epoch, not merely that some scope exists. */
   getAuthoritativeEpoch(sessionId: string): number | undefined {
-    return this.attached.get(sessionId)?.epoch;
+    return (this.attached.get(sessionId) ?? this.completed.get(sessionId))
+      ?.epoch;
   }
 
   getAuthoritativePrincipal(sessionId: string): string | undefined {
-    return this.attached.get(sessionId)?.principalId;
+    return (this.attached.get(sessionId) ?? this.completed.get(sessionId))
+      ?.principalId;
   }
 
-  /** Releases all authority state for a session id once it is fully done
-   * (recording finalized, or the session was never usable for recording). */
+  /** Marks a successfully finalized session's epoch as completed instead of
+   * releasing all authority state for it. `MediaRecordingAdapter.
+   * sealFinalRecording` is documented reentrant (fixed manifest ref for the
+   * same scope/closure) -- the gap this closes is purely that releasing
+   * authority immediately after a successful seal made every *authorized*
+   * retry (a lost HTTP response, a caller that retries the same request)
+   * fail closed with "no authorized recording scope" before ever reaching
+   * that reentrant adapter. No-ops if a newer epoch has since superseded
+   * this one (e.g. a concurrent reattach for a reused session id raced this
+   * seal), so an in-flight older seal can never clobber newer authority. */
+  markCompleted(sessionId: string, epoch: number): void {
+    const record = this.attached.get(sessionId);
+    if (!record || record.epoch !== epoch) return;
+    this.attached.delete(sessionId);
+    this.completed.set(sessionId, record);
+    while (
+      this.completed.size > VoiceMediaSessionAuthority.MAX_COMPLETED_ENTRIES
+    ) {
+      const oldestKey = this.completed.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.completed.delete(oldestKey);
+    }
+  }
+
+  /** Releases all authority state for a session id (pending, attached, and
+   * completed) once it is fully done and will never be finalized or
+   * retried again, or was never usable for recording in the first place. */
   release(sessionId: string): void {
     const pending = this.pending.get(sessionId);
     if (pending) clearTimeout(pending.expiryTimer);
     this.pending.delete(sessionId);
     this.attached.delete(sessionId);
+    this.completed.delete(sessionId);
   }
 
   private timingSafeTokenEquals(provided: string, expected: string): boolean {
@@ -212,6 +263,21 @@ const RECORDING_SCOPE_KEYS: readonly (keyof RecordingScope)[] = [
   "recordingId",
   "legId",
 ];
+
+/** Compares two recording scopes field-by-field. Used by
+ * `/recording/finalize` to require that the *finalize-specific* token's own
+ * claimed scope is the exact resource bound to the session, instead of
+ * trusting that a finalize token resolving to the right session/epoch/
+ * principal is automatically entitled to whatever scope happens to be
+ * attached -- a token for a different brand/call/recording/leg, or one with
+ * no recording scope at all, must be denied even though it is otherwise a
+ * genuine, unexpired, unrevoked token for this exact session and epoch. */
+export function recordingScopesMatch(
+  a: RecordingScope,
+  b: RecordingScope,
+): boolean {
+  return RECORDING_SCOPE_KEYS.every((key) => a[key] === b[key]);
+}
 
 /** Validates an optional recording scope resolved from a verified
  * call-authority token (never caller-declared request-body JSON). Returns

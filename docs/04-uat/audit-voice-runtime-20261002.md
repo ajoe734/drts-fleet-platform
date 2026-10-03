@@ -599,3 +599,120 @@ a call ends is a different layer (the not-yet-existing CTI/IVR
 orchestration from 6a) driving this worker's control channel, not this
 worker deciding for itself. This is unchanged from §3 item 4, restated
 here because R4's fix narrows exactly how much of that item remains.
+
+## 9. Round-4 review (reopen on `c11abdd42a5e`, Codex, generation `abdb02e851f14dfba5746290012ed81b`, PR #2282)
+
+Preserved here (this record is itself the round-4 reopen; the original
+read-only dispatch that produced it could not edit this document, so owner
+Claude2 appends it now, on the next unlocked revision, per Guide §0.7).
+Codex's round-4 review confirmed R1/R2(partial)/R3/R4(structural)/R5(partial)/
+R6/R7 as repaired per §8 and the round-3 CI evidence, but found six
+findings -- two persistent (R2, R5, reusing their round-3 labels for the
+_same_ underlying defects, not new ones) and four new (R8-R11) surfaced by
+round 3's newly-wired real session composition:
+
+- **R2 (P1, `caller_session_authorization`, persistent)**: `/recording/
+finalize` checked only that the presented token's bound session/principal/
+  epoch matched the attached session, then used the _already-attached_
+  scope for sealing -- it never checked the finalize-specific token's own
+  `claims.scope` against that attached resource. A token resolving to the
+  right session/epoch/principal but with no recording scope, or a scope for
+  a different brand/call/recording/leg, still sealed the attached
+  recording.
+- **R5 (P2, `caller_session_authorization`, persistent)**: `consumeGrant`'s
+  own expired-grant branch deleted the pending record and threw without
+  emitting `grant.expired` -- only the TTL timer's `handleGrantExpiry` did.
+  An expired upgrade attempt that reached `consumeGrant` before the timer
+  callback ran left the reservation held forever once the timer later found
+  nothing to act on.
+- **R8 (P2, new)**: `/recording/finalize` called `sessionAuthority.release()`
+  unconditionally immediately after a successful seal, erasing the scope/
+  principal/epoch an authorized retry needs even though
+  `MediaRecordingAdapter.sealFinalRecording` is documented reentrant -- a
+  lost first HTTP response was not safely recoverable.
+- **R9 (P2, new)**: `TwmAsrNetworkAdapter.connect()` checked `this.socket`
+  before two awaited HTTP calls with no in-flight guard, so concurrent first
+  audio frames (normal under `VoiceSessionComposer.handleMessage`, which
+  fires per inbound WS message) could each start their own login/
+  access-info/WebSocket and overwrite `this.socket`.
+- **R10 (P2, new)**: ASR results were only ever delivered as the return
+  value of the `transcribe()` call that triggered them, pulled one-per-call
+  from a buffer/waiter queue -- a later accepted revision for the same
+  segment (e.g. a final revision arriving after the audio chunk it belongs
+  to was already sent, with no further audio to "poll" with) was never
+  delivered.
+- **R11 (P2, new)**: closing a session only ever deleted
+  `VoiceSessionComposer`'s own session map entry; it never invoked the ASR
+  adapter's `endAudio`/`close`. A provider connection, its waiters, and any
+  billing/session resource it holds outlived the session's actual hangup/
+  drain/idle closure.
+
+Required acceptance was assessed: `caller_session_authorization` NOT met
+(R2/R5 persistent); `approved_runtime_provider_paths` NOT met (R9/R10/R11);
+`remaining_external_blockers_precise` not fully met (persistent-vs-new
+framing corrected per the task brief); `same_sha_review_ci` not met (review
+rejected despite green same-SHA hosted CI). §10 repairs all six.
+
+## 10. Round-4 repair: finalize resource authorization, grant-expiry race unification, authorized retry, and ASR connection/streaming/cleanup
+
+| Finding / required_acceptance                       | Source and fix location                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Round-3 candidate -> this round                                                                                                                                                                                                                                                                                                                                                                                         | Command / evidence                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R2 (P1, `caller_session_authorization`, persistent) | `session-authority.ts`: new exported `recordingScopesMatch()` field-by-field comparator; `media-worker-server.ts` `/recording/finalize` (after the existing session/epoch/principal check) now also requires `claims.scope` to be defined and `recordingScopesMatch(claims.scope, scope)` to hold, denying with `VOICE_MEDIA_CALL_AUTHORITY_SCOPE_MISMATCH` otherwise                                                                                                                                                                                                                                                                                                                      | On `c11abdd42a5e`, a same-session/epoch/principal token with no scope, or a scope for a different brand/call/recording/leg, still sealed the attached recording under the already-bound scope. This round denies both cases before the ledger is ever consulted                                                                                                                                                         | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts` -- 12/12 passed, including the two new R2 regressions (`VOICE_MEDIA_CALL_AUTHORITY_SCOPE_MISMATCH`, zero ledger calls)                                                                                                                                      |
+| R5 (P2, `caller_session_authorization`, persistent) | `session-authority.ts`: `consumeGrant`'s expired branch now calls `handleGrantExpiry(sessionId, record.epoch)` -- the same single cleanup path the TTL timer uses -- instead of deleting the record directly; `handleGrantExpiry` itself now also clears the timer defensively                                                                                                                                                                                                                                                                                                                                                                                                             | On `c11abdd42a5e`, an expired grant observed first via `consumeGrant` (upgrade path) never emitted `grant.expired`, so `MediaWorkerServer`'s capacity-reaper listener never freed the reservation. This round emits it from whichever path observes the expiry first, exactly once                                                                                                                                      | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts` -- 3/3 passed (fake-timer deterministic reproduction: expiry observed via `consumeGrant` before the TTL timer fires; normal timer-first path; a superseded epoch's replayed token cannot evict a newer epoch's live grant)                                     |
+| R8 (P2, new)                                        | `session-authority.ts`: new `completed` map and `markCompleted(sessionId, epoch)` (moves the attached record instead of deleting it, bounded at 1000 entries, epoch-checked so an in-flight older seal cannot clobber a newer epoch); `getAuthoritativeScope`/`Epoch`/`Principal` now resolve from `attached ?? completed`; `issueGrant`'s epoch-fencing block and `release()` both also clear `completed`. `media-worker-server.ts` `/recording/finalize` calls `markCompleted` instead of `release` after a successful seal                                                                                                                                                              | On `c11abdd42a5e`, an identical authorized retry after a successful seal failed closed with `VOICE_MEDIA_SESSION_SCOPE_UNKNOWN` even though the manifest was durable. This round's retry resolves the same scope/epoch/principal and reaches `MediaRecordingAdapter`'s own reentrant cache, returning the identical `manifestRef`; a retry after the session id is reissued at a higher epoch is still correctly denied | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts` -- includes "allows an identical authorized retry..." (asserts `retry.body.manifestRef` equals the first seal's) and "rejects a finalize retry presenting a now-superseded (lower) epoch..." (post-reissue retry denied, no additional ledger consultation) |
+| R9 (P2, new)                                        | `twm-network-client.ts`: `TwmAsrNetworkAdapter.connect()` is now single-flight -- a `connectPromise` field is set on first call and returned to every concurrent caller, resolved by a new private `performConnect()` (the prior `connect()` body)                                                                                                                                                                                                                                                                                                                                                                                                                                         | On `c11abdd42a5e`, two frames arriving before the first connection attempt resolved produced two logins/access-info calls and two sockets. This round: concurrent `connect()` calls share one in-flight attempt -- exactly one login, one access-info call, one socket                                                                                                                                                  | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- 13/13 passed, including the new single-flight regression                                                                                                                                                                                                                     |
+| R10 (P2, new)                                       | `media-provider.ts`: new optional `onResult`/`endAudio`/`close` on `VoiceSpeechToTextAdapter`. `twm-network-client.ts`: `handleMessage` now pushes every accepted result to registered `onResult` listeners immediately, in addition to (unchanged) feeding the existing waiter/buffer queue `transcribe()`'s return relies on; new public `onResult()` registers a listener. `media-session.ts`: `VoiceMediaWorkerSession` registers a push listener at construction when the ASR adapter implements `onResult`, emitting `asr.segment.partial`/`final` as soon as each result arrives; `transcribeChunk` skips its own emission in that case to avoid double-reporting the same revision | On `c11abdd42a5e`, a later revision for an already-requested segment (e.g. a final revision with no further audio sent) sat in `bufferedResults` and was never delivered. This round delivers it via the push channel the instant it is decoded, independent of further audio                                                                                                                                           | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- includes "delivers a later revision for the same segment via onResult with no further audio chunk sent"                                                                                                                                                                      |
+| R11 (P2, new)                                       | `media-session.ts`: new `VoiceMediaWorkerSession.closeAsr()` (`asrAdapter.endAudio?.()` then `asrAdapter.close?.()`, idempotent). `session-composer.ts`: the channel's `"close"` handler now calls `session.closeAsr()` before deleting the composed-session map entry, guarded by `this.sessions.has(sessionId)` so a duplicate close emission cannot re-run cleanup                                                                                                                                                                                                                                                                                                                      | On `c11abdd42a5e`, closing a session only deleted the composer's `Map` entry; the ASR adapter's connection/waiters/billing resource outlived the session. This round invokes `endAudio`/`close` exactly once on every close path (normal close, drain, idle timeout, frame-limit closure -- all route through the channel's single authoritative `close()`)                                                             | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/session-composer.test.ts` -- includes "invokes the ASR adapter's endAudio/close exactly once when the channel closes" (and asserts a duplicate close emission does not double-invoke it)                                                                                                                    |
+
+Full regression for this round (Node v22.23.2, pnpm 10.33.0, TypeScript
+5.9.3, Vitest 4.1.4, this task's worktree):
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- clean (exit 0).
+- `pnpm --filter @drts/voice-media-worker lint` (`eslint src --max-warnings=0`) -- clean (exit 0).
+- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- **81
+  passed, 0 failed (11 files)**, run twice consecutively to confirm no
+  flakiness: the ten round-1/2/3 files (one call site updated --
+  `finalizeToken` in `media-recording-finalize-authorization.test.ts` now
+  accepts an explicit `scope` parameter, since the new R2 check requires
+  every success-path finalize token in that file to carry the exact
+  attached scope, not an implicit "no scope" default) plus one new file,
+  `session-authority-grant-expiry-race.test.ts`, and new test cases added
+  to `media-recording-finalize-authorization.test.ts`, `twm-network-client.
+test.ts`, and `session-composer.test.ts` for R2/R8/R9/R10/R11 above.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-recording-recovery-20260913
+tests/integration/uv-exec-023.integration.test.ts
+tests/integration/system-remediation/sr-recording-recovery-20260913` -- 23
+  passed, 0 failed (3 files): confirms this round's `session-authority.ts`/
+  `media-worker-server.ts`/`media-session.ts`/`session-composer.ts` changes
+  stay compatible with these pre-existing, out-of-write-scope callers.
+- `pnpm run typecheck:root` (`tsc -p tsconfig.json --noEmit`) -- clean (exit 0, zero errors anywhere in the repo).
+- `pnpm run lint:root` -- clean (exit 0).
+- `git diff --check c11abdd42a5e07740413743920014d2be71b3174 HEAD -- apps/voice-media-worker tests/unit/audit-voice-runtime-20261002` -- exit 0.
+
+**Environment note (not attributable to this task's code):** this
+worktree's shared `node_modules` symlink was again stale at the start of
+this round -- identical condition to prior rounds (§4/§6/§8's environment
+notes): `node_modules/typescript` (and others) resolved through a dangling
+absolute path into the removed sibling worktree
+`gemini-audit-dependency-gates-20261002`. Repaired via
+`tools/development-orchestrator/bin/ensure-local-node-modules.py repair
+--root .`, which materializes this worktree's own local `node_modules`
+(backed by its own `.pnpm` virtual store) in place of the stale symlink --
+scoped to this worktree, not the canonical root's shared one. After the
+repair, all commands above passed normally. No product/browser/DB/Compose
+server was started; no live network call was made.
+
+`same_sha_review_ci`: candidate SHA and branch are recorded via the task
+lifecycle at handoff; hosted CI and review run against that SHA per the
+normal candidate lifecycle, not asserted here. The locked round-3 candidate
+`c11abdd42a5e07740413743920014d2be71b3174` is superseded by this round.
+
+### Remaining blockers, restated precisely for this round
+
+Unchanged from §8's "Remaining blockers, restated precisely for this
+round" (6a: no call-authority issuer exists; 6b: dialogue/booking business
+logic is still not invoked) and §3 items 1/3/5 (vendor procurement,
+durable recording storage, deployment). This round's fixes are internal
+authorization/lifecycle/concurrency corrections to code already in this
+worker's write scope -- they neither close nor newly depend on any of
+those external gaps.

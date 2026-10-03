@@ -74,6 +74,16 @@ export class VoiceSessionComposer {
       void this.handleMessage(sessionId, data, isBinary);
     });
     channel.on("close", () => {
+      // Guards against a duplicate "close" emission re-running cleanup for
+      // an already-removed session -- defensive on top of the channel's
+      // own single-emission guarantee (see `./websocket-channel`).
+      if (!this.sessions.has(sessionId)) return;
+      // The ASR provider's connection/waiters/billing resource must not
+      // outlive this session -- this fires on every close path (normal
+      // close, drain, idle timeout, a frame-limit/failure-driven close),
+      // since all of them route through the channel's single authoritative
+      // `close()`.
+      session.closeAsr();
       this.sessions.delete(sessionId);
     });
   }

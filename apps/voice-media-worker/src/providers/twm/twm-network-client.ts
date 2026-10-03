@@ -251,6 +251,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   readonly isProductionCapable: boolean;
 
   private socket: TwmWebSocketLike | undefined;
+  private connectPromise: Promise<void> | undefined;
   private hasAccess = false;
   private ready = false;
   private eosSent = false;
@@ -259,6 +260,9 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   private readonly finalizedSegments = new Set<string>();
   private readonly bufferedResults: VoiceAsrSegmentResult[] = [];
   private readonly waiters: Array<(result: VoiceAsrSegmentResult) => void> = [];
+  private readonly resultListeners: Array<
+    (result: VoiceAsrSegmentResult) => void
+  > = [];
 
   constructor(
     private readonly transport: TwmHttpTransport,
@@ -325,9 +329,21 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   }
 
   /** Performs login, access-info, ticket binding and the WebSocket
-   * handshake. Idempotent no-op once an open socket exists. */
+   * handshake. Idempotent no-op once an open socket exists. Single-flight:
+   * concurrent callers (e.g. several inbound audio frames arriving before
+   * the first connection attempt resolves) await the same in-flight attempt
+   * instead of each independently racing login/access-info and overwriting
+   * `this.socket` with a second connection and a second consumed ticket. */
   async connect(): Promise<void> {
     if (this.socket) return;
+    if (this.connectPromise) return this.connectPromise;
+    this.connectPromise = this.performConnect().finally(() => {
+      this.connectPromise = undefined;
+    });
+    return this.connectPromise;
+  }
+
+  private async performConnect(): Promise<void> {
     const token = await this.login();
     const access = await this.getAccessInfo(token);
     if (
@@ -432,10 +448,28 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         final: isFinal,
         language: typeof message.language === "string" ? message.language : "",
       };
+      // Push to every registered streaming listener immediately, as soon as
+      // the provider message is decoded -- independent of whether another
+      // `transcribe()` call ever happens again for this session. Without
+      // this, a final revision that arrives after the audio chunk it
+      // belongs to has already been sent (no further audio to "poll" with)
+      // would sit in `bufferedResults` forever and never reach a caller.
+      for (const listener of this.resultListeners) listener(result);
       const waiter = this.waiters.shift();
       if (waiter) waiter(result);
       else this.bufferedResults.push(result);
     }
+  }
+
+  /** Registers a listener invoked for every accepted (monotonic,
+   * non-replayed) revision as soon as it is decoded from the provider's
+   * WebSocket, independent of `transcribe()`'s request/response pairing.
+   * Multiple listeners may be registered; none are ever removed
+   * automatically -- callers own exactly one `TwmAsrNetworkAdapter` per
+   * session (see `provider-composition.ts`), so this never needs to be
+   * shared/unregistered mid-session. */
+  onResult(listener: (result: VoiceAsrSegmentResult) => void): void {
+    this.resultListeners.push(listener);
   }
 
   async transcribe(

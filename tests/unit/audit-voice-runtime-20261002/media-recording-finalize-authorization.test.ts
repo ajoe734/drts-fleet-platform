@@ -221,13 +221,17 @@ async function postFinalize(port: number, body: Record<string, unknown>) {
 
 /** Mints a *second*, independent token for the same session id/epoch a
  * prior `admitAndAttach` call already attached -- finalize re-verifies its
- * own presented token rather than reusing the admission grant. */
+ * own presented token rather than reusing the admission grant. Defaults to
+ * no recording scope -- callers that expect a successful seal must pass the
+ * exact scope the session was admitted/attached with; the finalize-specific
+ * token's own claimed scope must authorize that exact resource. */
 function finalizeToken(
   callAuthority: FakeCallAuthority,
   sessionId: string,
   epoch: number,
+  scope?: RecordingScope,
 ): string {
-  return callAuthority.issue(sessionId, { epoch }).token;
+  return callAuthority.issue(sessionId, { epoch, scope }).token;
 }
 
 describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritative scope and closure", () => {
@@ -334,6 +338,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
         started.callAuthority,
         "sess-forged-close",
         epoch,
+        scope,
       ),
       credential: "forged-admin-credential",
       scope: { ...scope, recordingId: "a-different-recording" },
@@ -394,6 +399,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
         started.callAuthority,
         "sess-valid-finalize",
         epoch,
+        scope,
       ),
       // Even a well-formed but different scope in the body must be ignored.
       scope: {
@@ -463,6 +469,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
         started.callAuthority,
         "sess-cross-a",
         epochA,
+        scopeA,
       ),
     });
 
@@ -478,6 +485,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
         started.callAuthority,
         "sess-cross-b",
         epochB,
+        scopeB,
       ),
     });
     expect(legitimate.status).toBe(200);
@@ -647,5 +655,253 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     expect(staleResult.status).not.toBe(200);
     expect(staleResult.body).not.toMatchObject({ status: "sealed" });
     expect(ledger.calls).toBe(0);
+  });
+
+  /**
+   * Codex review round 4 (reopen, AUDIT-VOICE-RUNTIME-20261002) R2: a
+   * finalize-specific token that resolves to the exact same
+   * session/epoch/principal as the attached scope must still independently
+   * authorize the recording *resource* -- resolving session/epoch/
+   * principal alone was wrongly treated as sufficient, letting a token with
+   * no recording scope (or a scope for a different brand/call/recording/
+   * leg) seal the session's actual attached recording.
+   */
+  it("rejects finalization when the same-session/epoch/principal token carries no recording scope", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-A",
+      callId: "call-A",
+      recordingId: "recording-A",
+      legId: "leg-A",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-r2-no-scope-token",
+      scope,
+      started.callAuthority,
+    );
+
+    // Same session id, same epoch, same default principal -- but the
+    // finalize token itself carries no recording scope at all.
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-r2-no-scope-token",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-r2-no-scope-token",
+        epoch,
+      ),
+    });
+
+    expect(result.status).toBe(403);
+    expect(result.body.code).toBe("VOICE_MEDIA_CALL_AUTHORITY_SCOPE_MISMATCH");
+    expect(ledger.calls).toBe(0);
+  });
+
+  it("rejects finalization when the same-session/epoch/principal token carries a different brand/call/recording/leg", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-A",
+      callId: "call-A",
+      recordingId: "recording-A",
+      legId: "leg-A",
+    };
+    const otherScope: RecordingScope = {
+      brandId: "brand-B",
+      callId: "call-B",
+      recordingId: "recording-B",
+      legId: "leg-B",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-r2-cross-scope-token",
+      scope,
+      started.callAuthority,
+    );
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-r2-cross-scope-token",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-r2-cross-scope-token",
+        epoch,
+        otherScope,
+      ),
+    });
+
+    expect(result.status).toBe(403);
+    expect(result.body.code).toBe("VOICE_MEDIA_CALL_AUTHORITY_SCOPE_MISMATCH");
+    expect(ledger.calls).toBe(0);
+  });
+
+  /**
+   * Codex review round 4 R8: `release()` immediately after a successful
+   * seal erased the scope/principal/epoch an authorized retry needs,
+   * failing closed with VOICE_MEDIA_SESSION_SCOPE_UNKNOWN even though the
+   * underlying manifest is durable and `sealFinalRecording` is documented
+   * reentrant. A lost first HTTP response must be safely recoverable.
+   */
+  it("allows an identical authorized retry after a successful seal to reach the same reentrant result", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-retry",
+      callId: "call-retry",
+      recordingId: "rec-retry",
+      legId: "leg-retry",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-retry",
+      scope,
+      started.callAuthority,
+    );
+
+    const first = await postFinalize(started.port, {
+      sessionId: "sess-retry",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-retry",
+        epoch,
+        scope,
+      ),
+    });
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ status: "sealed" });
+
+    const retry = await postFinalize(started.port, {
+      sessionId: "sess-retry",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-retry",
+        epoch,
+        scope,
+      ),
+    });
+
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ status: "sealed" });
+    expect(retry.body.manifestRef).toEqual(first.body.manifestRef);
+  });
+
+  it("rejects a finalize retry presenting a now-superseded (lower) epoch after a session id is reissued", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-stale-retry",
+      callId: "call-stale-retry",
+      recordingId: "rec-stale-retry",
+      legId: "leg-stale-retry",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-stale-retry",
+      scope,
+      started.callAuthority,
+    );
+
+    const sealed = await postFinalize(started.port, {
+      sessionId: "sess-stale-retry",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-stale-retry",
+        epoch,
+        scope,
+      ),
+    });
+    expect(sealed.status).toBe(200);
+    const ledgerCallsAfterSeal = ledger.calls;
+
+    started.server.closeSession("sess-stale-retry");
+
+    // Reissue the same session id for an unrelated new call at a higher
+    // epoch -- the completed finalization for the old epoch must not keep
+    // authorizing anything once a newer epoch supersedes it.
+    const { token: newToken } = started.callAuthority.issue(
+      "sess-stale-retry",
+      {
+        scope: {
+          brandId: "brand-new",
+          callId: "call-new",
+          recordingId: "rec-new",
+          legId: "leg-new",
+        },
+      },
+    );
+    const newSessionRes = await fetch(
+      `http://127.0.0.1:${started.port}/sessions`,
+      {
+        method: "POST",
+        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+        body: JSON.stringify({ callAuthorityToken: newToken }),
+      },
+    );
+    expect(newSessionRes.status).toBe(201);
+
+    const retryAfterReissue = await postFinalize(started.port, {
+      sessionId: "sess-stale-retry",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-stale-retry",
+        epoch,
+        scope,
+      ),
+    });
+
+    expect(retryAfterReissue.status).not.toBe(200);
+    // No additional ledger consultation beyond the first, already-sealed
+    // call -- the denial happens before the adapter is ever reached.
+    expect(ledger.calls).toBe(ledgerCallsAfterSeal);
   });
 });
