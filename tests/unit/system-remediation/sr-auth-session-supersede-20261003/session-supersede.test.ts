@@ -2,9 +2,11 @@ import { generateKeyPairSync } from "node:crypto";
 import * as jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { TenantUserRoleRecord } from "@drts/contracts";
 import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
 import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
 import { AuthController } from "../../../../apps/api/src/modules/auth/auth.controller";
+import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import {
   GoogleWorkloadIdentityAdapter,
   GOOGLE_WORKLOAD_IDENTITY_HEADER,
@@ -373,5 +375,389 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003: Google workload identity reauthent
       first.token,
     );
     expect(verifiedFirst).not.toBeNull();
+  });
+});
+
+// R2 repair (second reopen): the previous fix only repaired the
+// workforce-version-fingerprint sub-cause. The actually reported incident
+// (mail-verification bootstrap vs. a running deploy-acceptance session for
+// the same tenant admin) never sends a custom `x-session-id` header -- real
+// callers are `tests/e2e/system-remediation/sr-live-mail-001/session-bootstrap.ts`
+// and `.github/workflows/deploy-dev.yml`, both of which authenticate with
+// Google workload identity proof plus tenant actor headers only. In that
+// request shape, `extractBootstrapRequestIdentity` was synthesizing the same
+// deterministic `bootstrap:<actorId>` session id on every call, so a second
+// exchange for the same actor always overwrote the first exchange's
+// `iam.identity_sessions` row (and its `currentTokenId`) regardless of the
+// workforce-version fix above. The repair: `POST /api/auth/token` now passes
+// `requireExplicitSessionId: true` to the extractor (auth.controller.ts),
+// so session issuance always mints a fresh random session id unless the
+// caller explicitly supplies `x-session-id` itself.
+//
+// `DRTS_ENV=development` + `NODE_ENV=production` reproduces deploy-dev.yml's
+// actual process environment (detectAuthEnvironment prioritizes DRTS_ENV, so
+// this is a non-strict/non-production auth environment that still allows
+// bootstrap headers).
+describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: no x-session-id header, matching the real mail/deploy caller shape", () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    vi.unstubAllGlobals();
+  });
+
+  describe("ops_user Google workload identity exchange", () => {
+    const AUDIENCE = "https://api.dev.drts.internal";
+    const SERVICE_ACCOUNT_EMAIL =
+      "review-ops@dev-project.iam.gserviceaccount.com";
+    const OPS_PRINCIPAL_ID = "review-ops-r2";
+
+    const googleKeyPair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const googleJwk = googleKeyPair.publicKey.export({ format: "jwk" }) as {
+      kty: string;
+      n: string;
+      e: string;
+    };
+    const GOOGLE_KID = "google-test-key-r2-ops";
+
+    let identityRepo: IdentityRepository;
+    let jwtAuthService: JwtAuthService;
+    let controller: AuthController;
+
+    function signGoogleAssertion(iatSeconds: number): string {
+      return jwt.sign(
+        {
+          iss: "https://accounts.google.com",
+          sub: "google-subject-review-ops-r2",
+          email: SERVICE_ACCOUNT_EMAIL,
+          email_verified: true,
+          aud: AUDIENCE,
+          iat: iatSeconds,
+          exp: iatSeconds + 300,
+        },
+        googleKeyPair.privateKey,
+        { algorithm: "RS256", keyid: GOOGLE_KID },
+      );
+    }
+
+    beforeEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      process.env.DRTS_ENV = "development";
+      process.env.NODE_ENV = "production";
+      process.env.JWT_KEY_RING_JSON = JSON.stringify([
+        {
+          kid: "key-test-2026",
+          status: "active",
+          algorithm: "RS256",
+          privateKey: testRsaKey.privateKey,
+          publicKey: testRsaKey.publicKey,
+        },
+      ]);
+      process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+        {
+          serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+          principalId: OPS_PRINCIPAL_ID,
+          actorId: OPS_PRINCIPAL_ID,
+          displayName: "Review Ops R2",
+          roles: ["ops_user"],
+          scopes: [],
+          allowedTokenAudiences: [AUDIENCE],
+          routeScopes: ["* *"],
+        },
+      ]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({
+              keys: [
+                {
+                  kty: googleJwk.kty,
+                  kid: GOOGLE_KID,
+                  n: googleJwk.n,
+                  e: googleJwk.e,
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      identityRepo = new IdentityRepository();
+      jwtAuthService = new JwtAuthService(identityRepo);
+      const googleAdapter = new GoogleWorkloadIdentityAdapter(identityRepo);
+      controller = new AuthController(
+        jwtAuthService,
+        {} as never,
+        {} as never,
+        undefined,
+        undefined,
+        undefined,
+        identityRepo,
+        undefined,
+        googleAdapter,
+        undefined,
+      );
+    });
+
+    it("R2-ops: two exchanges with no x-session-id both stay valid with distinct session ids, and explicit revoke still rejects", async () => {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+
+      const first = await controller.issueToken({
+        headers: {
+          [GOOGLE_WORKLOAD_IDENTITY_HEADER]: signGoogleAssertion(
+            nowSeconds - 60,
+          ),
+          "x-actor-type": "ops_user",
+          "x-actor-id": OPS_PRINCIPAL_ID,
+          "x-realm": "ops",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      } as never);
+
+      const second = await controller.issueToken({
+        headers: {
+          [GOOGLE_WORKLOAD_IDENTITY_HEADER]: signGoogleAssertion(
+            nowSeconds - 30,
+          ),
+          "x-actor-type": "ops_user",
+          "x-actor-id": OPS_PRINCIPAL_ID,
+          "x-realm": "ops",
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      } as never);
+
+      expect(first.token).not.toBe(second.token);
+
+      const firstPayload = jwt.decode(first.token) as { sid?: string };
+      const secondPayload = jwt.decode(second.token) as { sid?: string };
+      expect(firstPayload.sid).toBeTruthy();
+      expect(secondPayload.sid).toBeTruthy();
+      // This is the exact no-header collision the reopened review found:
+      // without the fix, both sids collapse onto `bootstrap:review-ops-r2`.
+      expect(firstPayload.sid).not.toBe(secondPayload.sid);
+
+      const verifiedSecond = await jwtAuthService.verifyAccessToken(
+        second.token,
+      );
+      expect(verifiedSecond).not.toBeNull();
+      const verifiedFirst = await jwtAuthService.verifyAccessToken(
+        first.token,
+      );
+      expect(verifiedFirst).not.toBeNull();
+
+      // An explicit revoke of just the second session must still work, and
+      // must not affect the first, still-live session.
+      await identityRepo.revokeSession(secondPayload.sid!, "test_explicit_revoke");
+      expect(
+        await jwtAuthService.verifyAccessToken(second.token),
+      ).toBeNull();
+      expect(
+        await jwtAuthService.verifyAccessToken(first.token),
+      ).not.toBeNull();
+    });
+  });
+
+  describe("tenant_admin CI tenant-actor Google workload identity exchange", () => {
+    const AUDIENCE = "https://api.dev.drts.internal";
+    const SERVICE_ACCOUNT_EMAIL =
+      "review-ci@dev-project.iam.gserviceaccount.com";
+    const CI_PRINCIPAL_ID = "review-ci-r2";
+    const TENANT_ID = "10000000-0000-0000-0000-000000000201";
+    const TENANT_USER_ID = "10000000-0000-0000-0000-000000000901";
+
+    const googleKeyPair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const googleJwk = googleKeyPair.publicKey.export({ format: "jwk" }) as {
+      kty: string;
+      n: string;
+      e: string;
+    };
+    const GOOGLE_KID = "google-test-key-r2-tenant";
+
+    let identityRepo: IdentityRepository;
+    let jwtAuthService: JwtAuthService;
+    let controller: AuthController;
+    let tenantUserRole: TenantUserRoleRecord;
+    let tenantPartnerService: TenantPartnerService;
+
+    function signGoogleAssertion(iatSeconds: number): string {
+      return jwt.sign(
+        {
+          iss: "https://accounts.google.com",
+          sub: "google-subject-review-ci-r2",
+          email: SERVICE_ACCOUNT_EMAIL,
+          email_verified: true,
+          aud: AUDIENCE,
+          iat: iatSeconds,
+          exp: iatSeconds + 300,
+        },
+        googleKeyPair.privateKey,
+        { algorithm: "RS256", keyid: GOOGLE_KID },
+      );
+    }
+
+    beforeEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+      process.env.DRTS_ENV = "development";
+      process.env.NODE_ENV = "production";
+      process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED = "true";
+      process.env.JWT_KEY_RING_JSON = JSON.stringify([
+        {
+          kid: "key-test-2026",
+          status: "active",
+          algorithm: "RS256",
+          privateKey: testRsaKey.privateKey,
+          publicKey: testRsaKey.publicKey,
+        },
+      ]);
+      process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+        {
+          serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+          principalId: CI_PRINCIPAL_ID,
+          actorId: CI_PRINCIPAL_ID,
+          displayName: "Review CI R2",
+          roles: [],
+          scopes: [],
+          allowedTokenAudiences: [AUDIENCE],
+          routeScopes: ["* *"],
+          ciTenantActorGrants: [
+            {
+              tenantId: TENANT_ID,
+              actorType: "tenant_admin",
+              actorId: TENANT_USER_ID,
+            },
+          ],
+        },
+      ]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({
+              keys: [
+                {
+                  kty: googleJwk.kty,
+                  kid: GOOGLE_KID,
+                  n: googleJwk.n,
+                  e: googleJwk.e,
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      identityRepo = new IdentityRepository();
+      jwtAuthService = new JwtAuthService(
+        identityRepo,
+        // Real JwtAuthService#validateDurableState tenant-realm branch and
+        // AuthController#issueToken tenant lookup both only need
+        // findTenantUser/findTenantUserBySubject/cloneUserRole; those are
+        // real, unmocked TenantPartnerService methods driven off a fixed
+        // `userRoles` fixture, matching the reviewer's reproduction. The full
+        // class constructor needs database/webhook/audit infra this unit
+        // test does not stand up, so the external (non-auth) boundary --
+        // which tenant users exist -- is seeded directly rather than mocked
+        // away at the method level.
+        Object.create(TenantPartnerService.prototype) as TenantPartnerService,
+      );
+      tenantUserRole = {
+        userId: TENANT_USER_ID,
+        tenantId: TENANT_ID,
+        email: "tenant-admin-r2@example.com",
+        displayName: "Tenant Admin R2",
+        roleCode: "tenant_admin",
+        status: "active",
+        approvalNotificationOptOut: false,
+        invitedAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-10-01T00:00:00.000Z",
+      };
+      tenantPartnerService = jwtAuthService["tenantPartnerService"] as TenantPartnerService;
+      (tenantPartnerService as unknown as { userRoles: TenantUserRoleRecord[] }).userRoles = [
+        tenantUserRole,
+      ];
+      const googleAdapter = new GoogleWorkloadIdentityAdapter(identityRepo);
+      controller = new AuthController(
+        jwtAuthService,
+        tenantPartnerService,
+        {} as never,
+        undefined,
+        undefined,
+        undefined,
+        identityRepo,
+        undefined,
+        googleAdapter,
+        undefined,
+      );
+    });
+
+    it("R2-tenant: two exchanges with no x-session-id both stay valid with distinct session ids; a genuine role change still invalidates both", async () => {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+
+      const first = await controller.issueToken({
+        headers: {
+          [GOOGLE_WORKLOAD_IDENTITY_HEADER]: signGoogleAssertion(
+            nowSeconds - 60,
+          ),
+          "x-actor-type": "tenant_admin",
+          "x-actor-id": TENANT_USER_ID,
+          "x-realm": "tenant",
+          "x-tenant-id": TENANT_ID,
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      } as never);
+
+      const second = await controller.issueToken({
+        headers: {
+          [GOOGLE_WORKLOAD_IDENTITY_HEADER]: signGoogleAssertion(
+            nowSeconds - 30,
+          ),
+          "x-actor-type": "tenant_admin",
+          "x-actor-id": TENANT_USER_ID,
+          "x-realm": "tenant",
+          "x-tenant-id": TENANT_ID,
+        },
+        method: "POST",
+        originalUrl: "/api/auth/token",
+      } as never);
+
+      expect(first.token).not.toBe(second.token);
+
+      const firstPayload = jwt.decode(first.token) as { sid?: string };
+      const secondPayload = jwt.decode(second.token) as { sid?: string };
+      expect(firstPayload.sid).toBeTruthy();
+      expect(secondPayload.sid).toBeTruthy();
+      // This is the actual reported incident: a mail-verification bootstrap
+      // exchange and a running deploy-acceptance exchange for the same
+      // tenant admin, neither sending `x-session-id`.
+      expect(firstPayload.sid).not.toBe(secondPayload.sid);
+
+      const verifiedSecond = await jwtAuthService.verifyAccessToken(
+        second.token,
+      );
+      expect(verifiedSecond).not.toBeNull();
+      const verifiedFirst = await jwtAuthService.verifyAccessToken(
+        first.token,
+      );
+      expect(verifiedFirst).not.toBeNull();
+
+      // A genuine role change (the tenant admin is demoted) must still
+      // invalidate every previously issued session for that tenant user.
+      (tenantPartnerService as unknown as { userRoles: TenantUserRoleRecord[] }).userRoles = [
+        {
+          ...tenantUserRole,
+          roleCode: "tenant_ops_admin",
+          updatedAt: "2026-10-03T00:00:00.000Z",
+        },
+      ];
+
+      expect(await jwtAuthService.verifyAccessToken(first.token)).toBeNull();
+      expect(await jwtAuthService.verifyAccessToken(second.token)).toBeNull();
+    });
   });
 });

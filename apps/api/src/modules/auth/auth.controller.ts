@@ -339,6 +339,13 @@ export class AuthController {
       allowAnonymous: false,
       method: request.method,
       requestUrl: request.originalUrl ?? request.url,
+      // This endpoint mints a durable iam.identity_sessions row below; it
+      // must never fall back to the deterministic bootstrap:<actorId>
+      // session id, or two independent exchanges for the same actor (e.g.
+      // a mail bootstrap call and a running deploy acceptance session)
+      // collide on one session row and the newer exchange revokes the
+      // older, still-valid one.
+      requireExplicitSessionId: true,
     });
 
     if (strictEnvironment && bootstrapIdentity && !rawGoogleAssertion) {
