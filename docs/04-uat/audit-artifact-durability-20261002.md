@@ -478,3 +478,176 @@ PG/browser-adjacent gaps the local-only verification above could not reach
 on this VM. This is the authoritative `same_sha_review_ci` evidence for
 candidate `df46be0e9`; reviewer should re-check `gh pr checks 2295` only if
 a later commit changes the head SHA.
+
+## R4/R5/R6 reopen (candidate `abfcd62b11f1900627a5f71e501924b2c14e3a74`, generation `730d8739b21d4a2abebb710c32f2b63d`, PR #2295): what Codex found and the repair
+
+This Codex REOPEN kept R1/R2/R3 above as confirmed, retained work and found
+three new trigger conditions. All three are now fixed on top of the same
+candidate lineage; this section records old/new results and provenance per
+finding, per `AI_COLLABORATION_GUIDE.md` §0.7.
+
+### R4 [P1; `durable_producer_reader_wiring` / `cross_instance_restart_bytes`] — legacy placard hash never certified store existence
+
+**Finding:** `ensurePlacardArtifact` (`platform-admin.service.ts`) treated any
+existing `placard.artifactManifestHash` as proof the durable store held the
+bytes, and `onModuleInit` reloaded persisted placards through that same path.
+A placard whose hash was recorded before this durable store existed (or on a
+sibling instance, or before a restart) had metadata that proved nothing about
+what the *current* instance's store actually held. No `"placard"` rebuilder
+was registered with `DocumentArtifactRebuildRegistry`, unlike `"tenant-invoice"`
+/ `"report"` (`BillingSettlementService`), so `ControlledDownloadController`'s
+existing not-found → rebuild fallback had nothing to call for this kind.
+Reproduced: GET → `ARTIFACT_NOT_MATERIALISED` (501), zero `put` calls.
+
+**Fix:** registered `"placard"` with `DocumentArtifactRebuildRegistry` in
+`PlatformAdminService`'s constructor (`platform-admin.service.ts:547`), the
+same convention `BillingSettlementService` already uses. The render step
+`ensurePlacardArtifact` used to inline is now the shared
+`renderPlacardArtifact` helper (`platform-admin.service.ts:2489`), and
+`rebuildPlacardArtifact` (`platform-admin.service.ts:2531`) calls it from this
+instance's own durably persisted placard + public-info records, returning
+`null` (not throwing) when this instance's own list has no such id — matching
+the existing `rebuildTenantInvoiceArtifact` contract exactly. No change was
+needed to `ensurePlacardArtifact`'s steady-state "trust the hash" fast path:
+the existing `resolveDocumentArtifact` → not-found → rebuild pipeline now has
+a producer to call for `"placard"`, which is the actual gap R4 identified.
+
+**Old → new result:** a legacy published or draft placard reloaded into an
+instance with an empty durable store previously failed every download with
+`ARTIFACT_NOT_MATERIALISED`; it now recovers deterministically, byte-identical
+to the original render, through the registered rebuilder, exactly like
+`tenant-invoice` / `report` already did. An already-expired legacy link is
+still correctly reissued over the unchanged, recovered hash.
+
+**New regression coverage** (`tests/unit/audit-artifact-durability-20261002.test.ts`,
+describe `"R4: a placard's artifactManifestHash does not by itself certify the
+durable store holds the object"`): a published legacy placard recovered via
+the registered rebuilder from a completely independent fresh instance +
+empty store + separately configured download controller; and a draft
+(never-published) legacy placard recovered the same way, including reissuing
+an already-expired link over the recovered, unchanged hash.
+
+### R5 [P2; `durable_producer_reader_wiring`] — a transient publish failure left a placard permanently "published"
+
+**Finding:** `publishPlacardVersion` mutated the live `placard.publishedAt` /
+`updatedAt` *before* awaiting the durable-store write
+(`ensurePlacardArtifact(placard, true)`). A transient write failure (network
+blip, throttled storage) still left the in-memory placard marked published
+with no durable bytes behind it; every retry then failed with
+`PLACARD_VERSION_ALREADY_PUBLISHED` (409) instead of being retryable.
+
+**Fix:** `publishPlacardVersion` (`platform-admin.service.ts:841`) now stages
+the mutation on a `{ ...placard, publishedAt: now, updatedAt: now }` copy,
+renders/writes against that staged copy, and only copies the result's fields
+(`publishedAt`, `updatedAt`, `artifactFileId`, `artifactManifestHash`,
+`artifactDownloadUrl`, `artifactExpiresAt`, `downloadMetadata`) back onto the
+live `placard` after the write succeeds. A failed write throws before any of
+that copy-back happens, leaving the live placard byte-for-byte as it was.
+
+**Old → new result:** a failed publish write previously left the placard
+stuck in a false "published" state (non-null `publishedAt`, but the OLD draft
+`artifactManifestHash`/bytes) with no way to retry; it now leaves the original
+draft record completely untouched and retryable, and a subsequent healthy
+publish succeeds normally.
+
+**New regression coverage** (same test file, describe `"R5: a transient
+durable-store failure during publish must not leave a placard permanently
+marked published"`): a `DocumentArtifactStore` double that fails exactly the
+publish `put` once (real render/service logic, only the write boundary is
+doubled) — confirms the draft is unchanged after the failure, a retry
+publishes successfully, and a second publish attempt then correctly reports
+`PLACARD_VERSION_ALREADY_PUBLISHED` (proving the retry really published it).
+
+### R6 [P2; `signature_hash_denial_regressions`] — a rejected stale-hash GET could overwrite a good shared artifact
+
+**Finding:** `ControlledDownloadController.resolve` invoked the rebuild
+fallback for *any* non-`"ok"` resolution status, including
+`"content_mismatch"` — i.e. an object that genuinely exists at this
+(kind, subjectId) but does not match the requesting link's manifest hash
+(a stale or forged link). `BillingSettlementService.renderTenantInvoiceArtifact`
+writes current-profile bytes directly to that same durable key with no
+comparison against the request/issued hash first. A stale/forged GET against
+an existing valid object therefore triggered a rebuild-and-overwrite,
+corrupting the real object and breaking every other still-valid link pointing
+at it.
+
+**Fix:** `ControlledDownloadController.resolve` (`controlled-download.controller.ts:142`)
+now only invokes the rebuild fallback when `resolution.status === "not_found"`,
+never for `"content_mismatch"`. An object that exists but does not match the
+link's hash is reported as `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` as-is,
+without ever calling a writer.
+
+**Old → new result:** a genuinely signed stale-hash link against an existing
+object previously rewrote that object with freshly rendered (and possibly
+different) bytes, changing its hash out from under every other valid link
+naming it; it now denies the stale request without touching the store at
+all, and the original, still-valid link keeps serving its original bytes
+unchanged.
+
+**New regression coverage** (same test file, describe `"R6: an existing-object
+hash mismatch must deny without invoking the rebuild writer or damaging
+another valid link"`): a real `BillingSettlementService` + registry-enabled
+`ControlledDownloadController` + shared store generate an invoice, mutate the
+billing profile (so a rebuild would visibly differ), then resolve a
+genuinely signed stale-hash link for the same subject against the existing
+object — asserts `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH`, the store's entry
+count and stored hash are unchanged, and the original valid link still
+resolves to the original bytes. A second case confirms genuine-miss recovery
+(the `not_found` path) still works — R6 narrows the trigger condition, it
+does not remove recovery.
+
+### Verification at this repair
+
+`pnpm exec tsc --noEmit -p apps/api/tsconfig.json`: the four
+`@drts/control-plane-auth` module-resolution errors are the same pre-existing
+local-toolchain gap the prior reopen recorded (missing generated
+declarations in this worktree, not a source regression); no other errors.
+An `exactOptionalPropertyTypes` error this repair introduced while staging
+`downloadMetadata` in `publishPlacardVersion` was found and fixed
+(`placard.downloadMetadata = staged.downloadMetadata ?? null`) before this
+check was considered clean.
+
+Scoped, network-blocked run (same `.local/audit-followthrough-20261003/no-network.cjs`
+preload as the prior reopen's verification, DB URL variables unset):
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts \
+  tests/unit/audit-artifact-durability-s3-20261003.test.ts \
+  tests/unit/system-remediation/sr-artifact-001/ \
+  tests/unit/system-remediation/sr-invoice-001/ \
+  tests/unit/system-remediation/sr-placard-001/ \
+  tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts \
+  tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts \
+  tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts \
+  --maxWorkers=1
+```
+=> exit 0, 12 files / 135 tests passed, zero skips. Also independently green:
+`tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts`,
+`.../c097-placard-printable-download.test.ts`,
+`tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts`,
+`tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts`,
+`tests/unit/platform-admin-switchboard-placard-source.test.ts`,
+`tests/unit/platform-admin-switchboard-placard-version-code.test.ts` (34/34);
+`tests/unit/system-remediation/sr-qa-governance-001/{c103,c104-c105,c109}*.test.ts`
+(18/18); `tests/unit/billing-settlement.test.ts` (8/8); and, run from `apps/api/`
+(the root config's `include` globs do not cover `apps/api/tests/unit/**`, so
+these must be invoked with `apps/api` as cwd, not bundled into the root-cwd
+command above): `apps/api/tests/unit/platform-admin.service.test.ts` (3/3),
+`apps/api/tests/unit/platform-admin-assistant.service.test.ts`,
+`platform-admin-assistant-read-tools.test.ts`,
+`platform-admin-assistant-action.test.ts` (24/24). None of these pre-existing
+suites' assertions were weakened or removed to make this repair pass.
+
+### Remaining limitations
+
+- `same_sha_review_ci`: not yet run for the new candidate SHA produced by this
+  repair; hosted CI must be re-verified at that exact SHA before this
+  acceptance item is closed, per the same convention the prior `df46be0e9`
+  evidence above used.
+- Real storage/Cloud Run/IAM acceptance remains `SR-LIVE-DOC-001` and was not
+  exercised by this repair.
+- No product/browser/DB/Compose server was started on this VM for this
+  repair; no real cloud storage was contacted. All new coverage above uses
+  `InMemoryDocumentArtifactStore` as the shared-boundary double, the same
+  convention the R1/R2/R3 regression suite already established — the
+  dedicated S3-transport-boundary suite (`audit-artifact-durability-s3-20261003.test.ts`)
+  was re-run unchanged and still passes against these fixes.

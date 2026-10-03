@@ -7,6 +7,9 @@ import { createControlledDownloadMetadata } from "../../apps/api/src/common/cont
 import {
   DocumentArtifactRebuildRegistry,
   InMemoryDocumentArtifactStore,
+  type DocumentArtifactStore,
+  type DocumentArtifactRecord,
+  type PutDocumentArtifactCommand,
 } from "../../apps/api/src/common/document-artifacts";
 import {
   createDocumentArtifactStore,
@@ -16,6 +19,8 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import type { BillingSettlementRepository } from "../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { ControlledDownloadController } from "../../apps/api/src/modules/controlled-download/controlled-download.controller";
+import type { PlatformAdminRepository } from "../../apps/api/src/modules/platform-admin/platform-admin.repository";
+import { PlatformAdminService } from "../../apps/api/src/modules/platform-admin/platform-admin.service";
 
 // Structural stand-in for `@nestjs/common`'s `StreamableFile`; see the same
 // caveat in sr-artifact-001/controlled-download-artifact-bytes.test.ts.
@@ -555,6 +560,395 @@ describe("document artifacts survive a restart / a sibling Cloud Run instance (A
         ),
       ).toBe("ARTIFACT_NOT_MATERIALISED");
     });
+  });
+});
+
+function emptyPlatformAdminRepository(
+  overrides: {
+    publicInfoVersions?: unknown[];
+    placardVersions?: unknown[];
+  } = {},
+): PlatformAdminRepository {
+  return {
+    loadState: vi.fn(async () => ({
+      platformTenants: [],
+      publicInfoVersions: [],
+      placardVersions: [],
+      platformAdapters: [],
+      ...overrides,
+    })),
+    persistChanges: vi.fn(async () => undefined),
+    reportPersistenceFailure: vi.fn(),
+  } as unknown as PlatformAdminRepository;
+}
+
+// Status is "draft" (not "published") on purpose: `generatePlacardVersion`
+// auto-derives `placard.publishedAt` from a "published" source version,
+// which would publish the placard as a side effect of generation and defeat
+// these tests' own explicit `publishPlacardVersion` call. The placard's own
+// publish lifecycle is independent of its source public-info version's
+// status.
+const PUBLIC_INFO_R4 = {
+  versionId: "public-info-r4-recover",
+  title: "R4 Recovery Disclosure",
+  callPhone: "0800-010-010",
+  complaintPhone: "0800-010-020",
+  callRateText: "依表計費",
+  fareText: "依公告",
+  paymentMethodText: "現金",
+  status: "draft" as const,
+  effectiveFrom: "2026-04-01T00:00:00Z",
+  effectiveTo: null,
+  publishedBy: null,
+  publishedAt: null,
+  createdAt: "2026-03-20T00:00:00Z",
+  updatedAt: "2026-04-01T00:00:00Z",
+};
+
+describe("R4: a placard's artifactManifestHash does not by itself certify the durable store holds the object", () => {
+  it("recovers a published legacy placard via the registered 'placard' rebuilder when a fresh instance's durable store genuinely has nothing behind an already-recorded manifest hash", async () => {
+    // Pod A: a real store, real render -- the placard exactly as it was
+    // originally published, with artifactManifestHash set the same way a
+    // placard published under the OLD process-local store would also have
+    // had it set.
+    const podAStore = new InMemoryDocumentArtifactStore();
+    const podARegistry = new DocumentArtifactRebuildRegistry();
+    const podAService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [PUBLIC_INFO_R4] }),
+      undefined,
+      podAStore,
+      podARegistry,
+    );
+    await podAService.onModuleInit();
+    const draft = await podAService.generatePlacardVersion({
+      versionCode: "placard-r4-recover",
+      publicInfoVersionId: PUBLIC_INFO_R4.versionId,
+      templateName: "seatback-r4",
+    });
+    const published = await podAService.publishPlacardVersion(
+      draft.placardVersionId,
+    );
+    expect(published.artifactManifestHash).toBeTruthy();
+
+    // Pod B: a brand-new instance -- same persisted placard + public-info
+    // records via repository reload (the record `artifactManifestHash`
+    // included), but its OWN durable store, which has never seen these
+    // bytes: a placard published before this durable store existed, or
+    // restored into a bucket that never held this particular object.
+    const podBStore = new InMemoryDocumentArtifactStore();
+    const podBRegistry = new DocumentArtifactRebuildRegistry();
+    const podBService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({
+        publicInfoVersions: [PUBLIC_INFO_R4],
+        placardVersions: [published],
+      }),
+      undefined,
+      podBStore,
+      podBRegistry,
+    );
+    await podBService.onModuleInit();
+
+    const reloaded = await podBService.getPlacardVersion(
+      draft.placardVersionId,
+    );
+    expect(reloaded.artifactManifestHash).toBe(
+      published.artifactManifestHash,
+    );
+    expect(reloaded.artifactDownloadUrl).toBe(published.artifactDownloadUrl);
+    // The durable store genuinely has nothing yet -- `getPlacardVersion`
+    // trusting the persisted hash never checked, by design (see
+    // `ensurePlacardArtifact`); only a real download attempt surfaces the
+    // gap, and only there must it be closed.
+    expect(await podBStore.get("placard", draft.placardVersionId)).toBeNull();
+
+    // A separately configured download controller, sharing only pod B's own
+    // store + registry (exactly how `ControlledDownloadController` is wired
+    // in the real app), must still serve the link pod B's own
+    // `getPlacardVersion` just handed back.
+    const controller = new ControlledDownloadController(
+      podBStore,
+      podBRegistry,
+    );
+    const params = paramsOf(reloaded.artifactDownloadUrl!);
+    const file = (await resolve(
+      controller,
+      "placard",
+      draft.placardVersionId,
+      params,
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(reloaded.artifactManifestHash);
+
+    // The rebuild also leaves pod B able to answer a second request without
+    // rebuilding again.
+    expect(
+      await podBStore.get("placard", draft.placardVersionId),
+    ).not.toBeNull();
+  });
+
+  it("recovers a DRAFT (never published) legacy placard the same way, and correctly reissues an already-expired link over the recovered, unchanged hash", async () => {
+    const draftPublicInfo = {
+      ...PUBLIC_INFO_R4,
+      status: "draft" as const,
+      publishedAt: null,
+    };
+    const podAStore = new InMemoryDocumentArtifactStore();
+    const podARegistry = new DocumentArtifactRebuildRegistry();
+    const podAService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [draftPublicInfo] }),
+      undefined,
+      podAStore,
+      podARegistry,
+    );
+    await podAService.onModuleInit();
+    const draft = await podAService.generatePlacardVersion({
+      versionCode: "placard-r4-draft-recover",
+      publicInfoVersionId: draftPublicInfo.versionId,
+      templateName: "seatback-r4-draft",
+    });
+    expect(draft.publishedAt).toBeNull();
+    expect(draft.artifactManifestHash).toBeTruthy();
+
+    // Pod B reloads the same draft but with an artificially EXPIRED signed
+    // link -- modelling an old link whose window has long since lapsed --
+    // and its own empty store.
+    const expiredDraft = {
+      ...draft,
+      artifactExpiresAt: "2020-01-01T00:00:00.000Z",
+    };
+    const podBStore = new InMemoryDocumentArtifactStore();
+    const podBRegistry = new DocumentArtifactRebuildRegistry();
+    const podBService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({
+        publicInfoVersions: [draftPublicInfo],
+        placardVersions: [expiredDraft],
+      }),
+      undefined,
+      podBStore,
+      podBRegistry,
+    );
+    await podBService.onModuleInit();
+
+    const reloaded = await podBService.getPlacardVersion(
+      draft.placardVersionId,
+    );
+    // The hash is unchanged -- still proof of the same original content;
+    // only the signature/expiry window is reissued, to a genuinely future
+    // expiry (not just a URL that happens to differ as a string).
+    expect(reloaded.artifactManifestHash).toBe(draft.artifactManifestHash);
+    expect(Date.parse(reloaded.artifactExpiresAt!)).toBeGreaterThan(
+      Date.now(),
+    );
+
+    const controller = new ControlledDownloadController(
+      podBStore,
+      podBRegistry,
+    );
+    const params = paramsOf(reloaded.artifactDownloadUrl!);
+    const file = (await resolve(
+      controller,
+      "placard",
+      draft.placardVersionId,
+      params,
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(draft.artifactManifestHash);
+  });
+});
+
+describe("R5: a transient durable-store failure during publish must not leave a placard permanently marked published", () => {
+  /** Throws on `put` exactly once (configurable), delegating to a real
+   * in-memory store otherwise -- only the external write boundary is
+   * doubled, never the service/render logic. */
+  class FlakyDocumentArtifactStore implements DocumentArtifactStore {
+    private readonly inner = new InMemoryDocumentArtifactStore();
+    failNextPut = false;
+
+    async put(
+      command: PutDocumentArtifactCommand,
+    ): Promise<DocumentArtifactRecord> {
+      if (this.failNextPut) {
+        this.failNextPut = false;
+        throw Object.assign(new Error("ServiceUnavailable"), {
+          name: "ServiceUnavailable",
+        });
+      }
+      return this.inner.put(command);
+    }
+
+    get(...args: Parameters<DocumentArtifactStore["get"]>) {
+      return this.inner.get(...args);
+    }
+  }
+
+  it("leaves the placard retryable as a draft, with its draft bytes/metadata unchanged, after a failed publish write -- then succeeds on a healthy retry", async () => {
+    const store = new FlakyDocumentArtifactStore();
+    const registry = new DocumentArtifactRebuildRegistry();
+    const service = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [PUBLIC_INFO_R4] }),
+      undefined,
+      store,
+      registry,
+    );
+    await service.onModuleInit();
+    const draft = await service.generatePlacardVersion({
+      versionCode: "placard-r5-flaky-publish",
+      publicInfoVersionId: PUBLIC_INFO_R4.versionId,
+      templateName: "seatback-r5",
+    });
+    const draftHash = draft.artifactManifestHash;
+    const draftUrl = draft.artifactDownloadUrl;
+
+    store.failNextPut = true;
+    await expect(
+      service.publishPlacardVersion(draft.placardVersionId),
+    ).rejects.toThrow(/ServiceUnavailable/);
+
+    const afterFailure = await service.getPlacardVersion(
+      draft.placardVersionId,
+    );
+    // Still an unpublished, retryable draft -- not stuck claiming success
+    // for a write that never actually happened.
+    expect(afterFailure.publishedAt).toBeNull();
+    expect(afterFailure.artifactManifestHash).toBe(draftHash);
+    expect(afterFailure.artifactDownloadUrl).toBe(draftUrl);
+
+    const published = await service.publishPlacardVersion(
+      draft.placardVersionId,
+    );
+    expect(published.publishedAt).toBeTruthy();
+    expect(published.artifactManifestHash).toBeTruthy();
+
+    // A second publish attempt now correctly reports the real conflict,
+    // proving the first retry genuinely published it.
+    await expect(
+      service.publishPlacardVersion(draft.placardVersionId),
+    ).rejects.toMatchObject({ code: "PLACARD_VERSION_ALREADY_PUBLISHED" });
+  });
+});
+
+describe("R6: an existing-object hash mismatch must deny without invoking the rebuild writer or damaging another valid link", () => {
+  it("does not overwrite a durably stored invoice when a genuinely signed stale-hash link is resolved against it, and the original link keeps working", async () => {
+    const store = new InMemoryDocumentArtifactStore();
+    const registry = new DocumentArtifactRebuildRegistry();
+    const service = new BillingSettlementService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      store,
+      undefined,
+      registry,
+    );
+    const controller = new ControlledDownloadController(store, registry);
+
+    await service.updateTenantBillingProfile(
+      "tenant-demo-001",
+      DEMO_PROFILE_P1,
+      "req",
+    );
+    const invoice = await service.generateTenantInvoice(
+      "tenant-demo-001",
+      {
+        tenantId: "tenant-demo-001",
+        periodStart: "2026-03-01T00:00:00Z",
+        periodEnd: "2026-03-31T23:59:59Z",
+      },
+      "req",
+    );
+    const originalHash = invoice.artifactDownloadMetadata.manifestHash;
+
+    // Tenant profile changes AFTER issuance -- if a rebuild were ever
+    // triggered, it would render visibly different (P2) bytes.
+    await service.updateTenantBillingProfile(
+      "tenant-demo-001",
+      DEMO_PROFILE_P2,
+      "req",
+    );
+
+    // A genuinely signed link for the SAME subject, but naming a manifest
+    // hash that does not match the real, existing object -- a stale link
+    // (the invoice was regenerated after signing) or a forged one, not an
+    // absent object.
+    const staleLink = createControlledDownloadMetadata({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      manifestHash: "0".repeat(64),
+    }).downloadUrl;
+
+    const putCallsBefore = (
+      store as unknown as { entries: Map<string, unknown> }
+    ).entries.size;
+
+    await expect(
+      resolve(controller, "tenant-invoice", invoice.invoiceId, paramsOf(staleLink)),
+    ).rejects.toMatchObject({ code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH" });
+
+    // The real, existing object must be completely untouched: same entry
+    // count, same bytes/hash as issued.
+    expect(
+      (store as unknown as { entries: Map<string, unknown> }).entries.size,
+    ).toBe(putCallsBefore);
+    const stillStored = await store.get("tenant-invoice", invoice.invoiceId);
+    expect(stillStored?.record.sha256).toBe(originalHash);
+
+    // The ORIGINAL, still-valid link must still resolve -- a rejected stale
+    // request must never have damaged it.
+    const originalParams = paramsOf(invoice.artifactUrl!);
+    const file = (await resolve(
+      controller,
+      "tenant-invoice",
+      invoice.invoiceId,
+      originalParams,
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(originalHash);
+    const text = bytes.toString("latin1");
+    expect(text).toContain(DEMO_PROFILE_P1.invoiceTitle);
+    expect(text).not.toContain(DEMO_PROFILE_P2.invoiceTitle);
+  });
+
+  it("still recovers a genuinely MISSING object via the rebuild path -- R6's guard narrows the trigger to not_found, it does not remove recovery", async () => {
+    const podA = buildInstance();
+    const profile = await podA.service.updateTenantBillingProfile(
+      "tenant-demo-001",
+      DEMO_PROFILE_P1,
+      "req",
+    );
+    const invoice = await podA.service.generateTenantInvoice(
+      "tenant-demo-001",
+      {
+        tenantId: "tenant-demo-001",
+        periodStart: "2026-03-01T00:00:00Z",
+        periodEnd: "2026-03-31T23:59:59Z",
+      },
+      "req",
+    );
+
+    const repository = emptyRepository({
+      tenantBillingProfiles: [profile],
+      tenantInvoices: [invoice],
+    });
+    const podB = buildInstance(repository);
+    await podB.service.onModuleInit();
+    expect(
+      await podB.store.get("tenant-invoice", invoice.invoiceId),
+    ).toBeNull();
+
+    const params = paramsOf(invoice.artifactUrl!);
+    const file = (await resolve(
+      podB.controller,
+      "tenant-invoice",
+      invoice.invoiceId,
+      params,
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(invoice.artifactDownloadMetadata.manifestHash);
   });
 });
 

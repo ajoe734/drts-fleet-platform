@@ -62,8 +62,10 @@ import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
 import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
+  type DocumentArtifactRebuildRegistry,
   type DocumentArtifactRecord,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
@@ -520,6 +522,9 @@ export class PlatformAdminService implements OnModuleInit {
     @Optional()
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {
     // Materialising real PDF bytes requires awaiting `documentArtifactStore`,
     // which a constructor cannot do; seed placards start as plain clones here
@@ -527,6 +532,21 @@ export class PlatformAdminService implements OnModuleInit {
     // which already runs -- and is already awaited -- before the app accepts
     // any request.
     this.placardVersions = PLACARD_SEED.map((placard) => ({ ...placard }));
+
+    // Registered unconditionally, same convention as
+    // `BillingSettlementService`'s "tenant-invoice"/"report" rebuilders: a
+    // placard whose `artifactManifestHash` was recorded under a process-local
+    // store that predates this durable one (or under a sibling instance, or
+    // before this instance restarted) has metadata that proves nothing about
+    // what the shared store currently holds. `resolveDocumentArtifact`
+    // reports that as "not_found" the same way it would a never-materialised
+    // placard, and this rebuilder answers it by deterministically
+    // re-deriving the file from this instance's own durably persisted
+    // placard + public-info records -- returning null, not throwing, when
+    // this instance's own list genuinely has no such id.
+    documentArtifactRebuildRegistry?.register("placard", (subjectId) =>
+      this.rebuildPlacardArtifact(subjectId),
+    );
   }
 
   async onModuleInit() {
@@ -846,11 +866,27 @@ export class PlatformAdminService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    placard.publishedAt = now;
-    placard.updatedAt = now;
+    // Render against a staged copy, not the live placard: `ensurePlacardArtifact`
+    // performs a real durable-store write (`put`), which can fail after this
+    // instance has already decided to publish (network blip, throttled
+    // storage, etc). Mutating `placard.publishedAt` before that write is
+    // confirmed would leave a transient failure indistinguishable from a
+    // genuine publish -- `placard.publishedAt` truthy blocks every retry with
+    // ALREADY_PUBLISHED even though no durable bytes exist. Staging first
+    // means a failed write leaves the original record untouched and
+    // retryable; only a successful write's results are copied back.
+    const staged: PlacardVersionRecord = { ...placard, publishedAt: now, updatedAt: now };
 
     // Force re-render so PDF reflects the actual publishedAt timestamp
-    await this.ensurePlacardArtifact(placard, true);
+    await this.ensurePlacardArtifact(staged, true);
+
+    placard.publishedAt = staged.publishedAt;
+    placard.updatedAt = staged.updatedAt;
+    placard.artifactFileId = staged.artifactFileId;
+    placard.artifactManifestHash = staged.artifactManifestHash;
+    placard.artifactDownloadUrl = staged.artifactDownloadUrl;
+    placard.artifactExpiresAt = staged.artifactExpiresAt;
+    placard.downloadMetadata = staged.downloadMetadata ?? null;
 
     this.persistChanges(
       { placardVersions: [await this.clonePlacardVersion(placard)] },
@@ -2423,35 +2459,7 @@ export class PlatformAdminService implements OnModuleInit {
       return placard;
     }
 
-    const publicInfoVersion = this.publicInfoVersions.find(
-      (v) => v.versionId === placard.publicInfoVersionId,
-    );
-
-    let record: DocumentArtifactRecord;
-    if (publicInfoVersion) {
-      const pdfBytes = buildMinimalPdf(
-        buildPlacardPdfRows(placard, publicInfoVersion),
-      );
-      record = await this.documentArtifactStore.put({
-        kind: "placard",
-        subjectId: placard.placardVersionId,
-        mimeType: "application/pdf",
-        bytes: pdfBytes,
-      });
-    } else {
-      const fallbackBytes = buildMinimalPdf([
-        `Vehicle Service Placard ${placard.versionCode}`,
-        `Placard ID: ${placard.placardVersionId}`,
-        `Source Version: ${placard.publicInfoVersionId}`,
-        `Generated At: ${placard.createdAt}`,
-      ]);
-      record = await this.documentArtifactStore.put({
-        kind: "placard",
-        subjectId: placard.placardVersionId,
-        mimeType: "application/pdf",
-        bytes: fallbackBytes,
-      });
-    }
+    const record = await this.renderPlacardArtifact(placard);
 
     const downloadMetadata = this.createPlacardDownloadMetadata(
       placard.placardVersionId,
@@ -2467,6 +2475,73 @@ export class PlatformAdminService implements OnModuleInit {
     placard.downloadMetadata = downloadMetadata;
 
     return placard;
+  }
+
+  /**
+   * Renders this placard's PDF bytes from its own fields and the source
+   * `PublicInfoVersionRecord` it was generated from, and writes the result to
+   * the durable store. The one rendering path both `ensurePlacardArtifact`'s
+   * first materialisation and `rebuildPlacardArtifact` go through, so a
+   * sibling instance or a post-restart instance recovering a verified link
+   * gets byte-identical content to what was originally issued (as long as
+   * the source public-info record has not itself changed since).
+   */
+  private renderPlacardArtifact(
+    placard: PlacardVersionRecord,
+  ): Promise<DocumentArtifactRecord> {
+    const publicInfoVersion = this.publicInfoVersions.find(
+      (v) => v.versionId === placard.publicInfoVersionId,
+    );
+
+    if (publicInfoVersion) {
+      return this.documentArtifactStore.put({
+        kind: "placard",
+        subjectId: placard.placardVersionId,
+        mimeType: "application/pdf",
+        bytes: buildMinimalPdf(
+          buildPlacardPdfRows(placard, publicInfoVersion),
+        ),
+      });
+    }
+
+    return this.documentArtifactStore.put({
+      kind: "placard",
+      subjectId: placard.placardVersionId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf([
+        `Vehicle Service Placard ${placard.versionCode}`,
+        `Placard ID: ${placard.placardVersionId}`,
+        `Source Version: ${placard.publicInfoVersionId}`,
+        `Generated At: ${placard.createdAt}`,
+      ]),
+    });
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind "placard":
+   * lets `ControlledDownloadController` recover a verified, unexpired link
+   * whose bytes are genuinely missing from the durable store -- including a
+   * placard whose `artifactManifestHash` was only ever recorded against an
+   * older process-local store, never this durable one -- by re-deriving the
+   * file from this placard's own durably persisted record. Returns null, not
+   * a thrown error, when this instance's own placard list has no such id,
+   * which the registry contract treats as "nothing to rebuild", not a
+   * rebuild failure.
+   */
+  private async rebuildPlacardArtifact(
+    placardVersionId: string,
+  ): Promise<DocumentArtifactRecord | null> {
+    const placard = this.placardVersions.find(
+      (candidate) => candidate.placardVersionId === placardVersionId,
+    );
+    if (!placard) {
+      return null;
+    }
+    try {
+      return await this.renderPlacardArtifact(placard);
+    } catch {
+      return null;
+    }
   }
 
   private async clonePlacardVersion(

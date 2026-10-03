@@ -139,7 +139,7 @@ export class ControlledDownloadController {
       manifestHash: manifestHash!,
     });
 
-    if (resolution.status !== "ok") {
+    if (resolution.status === "not_found") {
       // This instance's own store may simply never have seen these bytes --
       // a sibling Cloud Run instance rendered them, or this instance
       // restarted since. The signature and expiry are already verified
@@ -151,6 +151,16 @@ export class ControlledDownloadController {
       // authorization to serve whatever a rebuild happens to produce. A
       // kind with no registered rebuilder -- or one whose own source data
       // has no such subjectId either -- answers exactly as before.
+      //
+      // Deliberately NOT invoked for "content_mismatch": an object already
+      // exists at this (kind, subjectId) -- it is simply not the one this
+      // link names (a stale, forged, or otherwise mismatched manifest hash
+      // against a genuinely different stored object, possibly one a sibling
+      // instance legitimately restored). Rebuilding there would overwrite
+      // that real object with bytes derived from the *current* source
+      // record, which can sever every other still-valid link pointing at
+      // it. A hash mismatch against an object that does exist is reported
+      // as-is below; only a genuine absence is eligible for recovery.
       const rebuilt =
         (await this.rebuildRegistry?.rebuild(kind, subjectId)) ?? null;
       if (rebuilt) {
