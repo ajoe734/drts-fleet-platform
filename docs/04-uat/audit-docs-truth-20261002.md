@@ -173,6 +173,16 @@ task/owner is responsible for each one.
 | intentional machine-local reference | 3 | 11 |
 | **total** | **128** | **237** |
 
+Counts above are the original audit snapshot this task classified. As a side
+effect of the R1 fix below, 2 of the 11 `intentional machine-local reference`
+findings (the `README.md` and `local-development.md` citations of the
+gitignored local-development.local.md overlay) were genuinely resolved by
+pointing those two docs at a tracked file instead — not deleted or hidden.
+Reproducing `--audit` against this candidate now reports 235, not 237; the
+one remaining citation of that overlay filename lives in
+`docs/03-runbooks/local-development.local.example.md`, outside this task's
+`write_scopes`. All other category counts are unchanged.
+
 ### Full classification
 
 ```
@@ -280,7 +290,7 @@ No replacement found anywhere in the tracked tree under any name.
 INTENTIONAL MACHINE-LOCAL REFERENCES -- 3 unique cited paths, 11 findings
 Gitignored by design; citing them is not a defect.
 
-- docs/03-runbooks/local-development.local.md  (3x) -- gitignored local overlay; local-development.md and the .example template document this pattern
+- docs/03-runbooks/local-development.local.md  (3x originally; 1x after the R1 fix below, in the .example template only) -- gitignored local overlay; local-development.md documents this pattern in prose instead of citing the gitignored filename directly
 - tools/development-orchestrator/dashboard/ai-status.json  (2x) -- gitignored generated runtime state file (not tracked source)
 - tools/development-orchestrator/dashboard/current-work.md  (6x) -- gitignored generated runtime dashboard file (not tracked source)
 
@@ -302,10 +312,11 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
     apps/ops-console-web/app/dispatch/dispatch-workflow.tsx (x15)
 - [12] partner-portal-under-tenant-console early layout; superseded/paused partner booking scope
     apps/tenant-console-web/app/api/partner/bookings/route.ts (x2), apps/tenant-console-web/app/api/partner/eligibility/route.ts (x2), apps/tenant-console-web/app/api/partner/session/route.ts (x2), apps/tenant-console-web/app/partner/page.tsx (x2), apps/tenant-console-web/components/partner-shell.tsx, apps/tenant-console-web/lib/partner-session.ts (x3)
-- [5] partner booking live cutover is paused scope; plan doc never created
+- [5] partner booking live cutover is paused scope; plan doc committed only on unmerged side branch (d8714cfe3, origin/codex2/ph1gc-pbk-001), not an ancestor of dev
     docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md (x5)
-- [5] forwarder live-sandbox evidence; forwarder adapters remain stub (F08), live evidence pack never produced
-    support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-BLOCKER-20260524.md, support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-CLOSEOUT-20260523.md, support/sidecars/FWD-LIVE-001/README.md (x2), support/sidecars/FWD-LIVE-SANDBOX-20260519/FWD-LIVE-SANDBOX-EVIDENCE.md
+- [5] forwarder live-sandbox evidence drafted only on unmerged side branches, not an ancestor of dev; forwarder adapters remain stub (F08) regardless
+    support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-BLOCKER-20260524.md, support/sidecars/FWD-LIVE-001/PH1GC-FWD-001-CLOSEOUT-20260523.md, support/sidecars/FWD-LIVE-001/README.md (x2) -- 660d54d88/5743e0127/dcd6d9317, origin/codex2/ph1gc-fwd-001
+    support/sidecars/FWD-LIVE-SANDBOX-20260519/FWD-LIVE-SANDBOX-EVIDENCE.md -- b1707c55a, origin/codex2/wf-fwd-001-live-sandbox
 - [4] 2026-05 planning E2E script names for partner-booking/governance scope; never created, largely paused scope
     tests/e2e/E2E-007-partner-booking-pilot.sh, tests/e2e/E2E-008-cti-recording-filing.sh, tests/e2e/E2E-008-partner-eligibility-airport-transfer.sh, tests/e2e/E2E-009-governance-billing-reporting.sh
 - [3] Phase 2 AV/ODD/Tesla/ROC sandbox is explicit scope exclusion (REPORT.md section 6)
@@ -316,11 +327,11 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
     support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md (x2), support/sidecars/PARTNER-ELIG-LIVE-001/PH1GC-PARTNER-002-CLOSEOUT-20260522.md
 - [3] forwarder live-sandbox unblock doc chain; forwarder adapters remain stub (F08)
     support/unblock/WF-FWD-001-LIVE-SANDBOX/WF-FWD-001-LIVE-SANDBOX-UNBLOCK-MANUAL-UNBLOCK.md, support/unblock/WF-FWD-001-LIVE-SANDBOX/WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION.md (x2)
-- [2] CTI recording/filing live UAT belongs to still-open F05/F06 voice gates, not yet produced
+- [2] CTI recording/filing live UAT drafted only on unmerged side branch (0ab277dd2, origin/codex2/com-uat-001), not an ancestor of dev; F05/F06 voice gates remain open regardless
     docs/04-uat/cti-recording-filing-uat-20260519.md (x2)
-- [2] forwarder adapters remain stub (F08); formal proof spec never produced
+- [2] forwarder-adapter proof spec drafted only on unmerged side branch (b1707c55a, origin/codex2/wf-fwd-001-live-sandbox), not an ancestor of dev; forwarder adapters remain stub (F08) regardless
     docs/02-architecture/forwarder-adapter-proof-spec-20260519.md (x2)
-- [2] partner booking pilot is paused scope; UAT doc never created
+- [2] partner booking pilot is paused scope; UAT doc committed only on unmerged side branch (b148c7268, origin/codex2/pbk-uat-001), not an ancestor of dev
     docs/04-uat/partner-booking-pilot-uat-20260519.md (x2)
 - [2] 2026-05 planning E2E script name; never created
     tests/e2e/E2E-010-cti-recording-filing.sh, tests/e2e/E2E-010-platform-admin-control-plane.sh
@@ -334,11 +345,11 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
     infra/seeds/S0001__reference_data.sql, infra/seeds/S0002__demo_data.sql
 - [2] partner eligibility live-sandbox unblock doc chain; paused partner booking scope
     support/unblock/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK.md, support/unblock/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-001-UNBLOCK-PLANNING-DECISION.md
-- [1] runbook referenced by its own sibling execution packet; never created as a separate doc
+- [1] runbook referenced by its own sibling execution packet; committed only on unmerged side branch (9c37aa8e6, origin/codex/map-rel-001), not an ancestor of dev
     docs/03-runbooks/map-provider-operational-runbook-20260630.md
-- [1] 2026-05 planning runbook referenced by its own sibling plan doc; never created
+- [1] 2026-05 planning runbook referenced by its own sibling plan doc; committed only on unmerged side branch (ee6cfa758, origin/codex2/rel-sync-001), not an ancestor of dev
     docs/03-runbooks/release-truth-sync-runbook-20260519.md
-- [1] 2026-05 planning runbook never created; superseded by later tenant-governance sidecars
+- [1] 2026-05 planning runbook committed only on unmerged side branch (8f7747753, origin/codex/tgv-runbook-001), not an ancestor of dev; superseded by later tenant-governance sidecars
     docs/03-runbooks/tenant-governance-workflow-release-gate-20260519.md
 - [1] 2026-05 planning UAT doc superseded by later mob-uat-001/002 evidence packs
     docs/04-uat/driver-multi-platform-workbench-uat-20260519.md
@@ -362,7 +373,7 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
     packages/ui-web/src/ui-tokens-import-smoke.ts
 - [1] design-canvas requirements doc referenced by a later unblock doc; never added to the design canvas set
     docs/05-ui/drts-design-canvas/tenant-iam-session-screen-requirements-20260809.md
-- [1] production live-exec evidence pack tied to still-open SR-LIVE-* gates; never produced
+- [1] production live-exec evidence pack drafted only on unmerged side branch (0bca939f0, origin/claude2/wf-prod-001-live-exec), not an ancestor of dev; SR-LIVE-* gates remain open regardless
     support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md
 ```
 
@@ -386,3 +397,60 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
 - Did not re-run or re-verify the `smarttransport-tw-custom-domains.md`
   domain mappings against the live project; the historical record for the
   suspended project is left as written.
+
+## Review round 1 fixes (Codex, candidate `5f027a42a`)
+
+Codex reopened the first candidate (PR #2280, `5f027a42a`) with two findings.
+Both are fixed in this candidate:
+
+- **R1 (`same_sha_review_ci`, P1):** the hosted CI "Canonical consistency"
+  check failed on the first candidate because `README.md` and
+  `docs/03-runbooks/local-development.md` cited
+  docs/03-runbooks/local-development.local.md in backticks. That file is
+  intentionally gitignored, so `check_cited_paths` (diff-scoped, see Method
+  above) correctly flagged it as a new missing-path regression — the
+  checker has no way to know an untracked path is "intentional." Fix: both
+  docs now point readers at the tracked
+  `docs/03-runbooks/local-development.local.example.md` bootstrap file and
+  describe the generated overlay in prose, so the gitignored filename no
+  longer appears as a backtick-wrapped repo-rooted path. Reverified with
+  `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`
+  → `0 finding(s)`.
+- **R2 (`cited_path_findings_classified_without_fake_evidence`, P2):** nine
+  finding-groups in the "archived history" classification above (originally
+  describing docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md,
+  the `FWD-LIVE-001`/`FWD-LIVE-SANDBOX-20260519` sidecar group,
+  docs/04-uat/cti-recording-filing-uat-20260519.md,
+  docs/02-architecture/forwarder-adapter-proof-spec-20260519.md,
+  docs/04-uat/partner-booking-pilot-uat-20260519.md,
+  docs/03-runbooks/map-provider-operational-runbook-20260630.md,
+  docs/03-runbooks/release-truth-sync-runbook-20260519.md,
+  docs/03-runbooks/tenant-governance-workflow-release-gate-20260519.md, and
+  support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md) said
+  "never created" / "never produced" / "not yet produced." Codex showed with
+  `git ls-tree <sha>:<path>` that four of these files are retrievable at
+  specific commits. Re-running this document's own stated Method step 4
+  (`git log --all` / `git branch --all --contains` for each path) across the
+  full set confirmed Codex's finding and found it applied to five more
+  groups: every one of these nine files was in fact committed, but only on
+  an unmerged `codex`/`codex2`/`claude2` worker side branch that was never
+  merged into `dev` — the same "committed only on unmerged side branches"
+  pattern already correctly identified elsewhere in this classification
+  (e.g. the `64a653533` / `f80913225` entries above). "Never
+  created/produced" was the wrong description for "exists on an abandoned
+  branch, absent from dev"; both are real-world outcomes the checker's
+  missing-path rule cannot tell apart, but this document can and should.
+  Fix: each of the nine entries now names the actual commit and branch
+  (e.g. `b1707c55a`, `origin/codex2/wf-fwd-001-live-sandbox`) instead of
+  claiming the file was never written, while preserving the unchanged,
+  still-true program fact that drove the original "archived" conclusion
+  (forwarder adapters remain stub/F08, SR-LIVE-*/F05/F06 gates remain open,
+  partner booking remains paused scope, etc. — none of that changed). The
+  category totals (archived history: 79 unique paths / 171 findings) are
+  unchanged; only the per-group explanation text was corrected. Spot-checked
+  a sample of the other 70 archived-history paths and all 19
+  genuinely-missing paths against `git log --all`/`git branch --all
+  --contains` to confirm this was not a wider pattern: the `genuinely
+  missing` category makes a narrower, still-accurate claim ("no replacement
+  in the tracked tree under any name today"), not a "never existed" claim,
+  so it did not need correction.
