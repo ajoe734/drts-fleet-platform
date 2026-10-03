@@ -17,8 +17,13 @@ import { VoiceMediaAuthError, verifyVoiceMediaCaller } from "./internal-auth";
 import {
   VoiceMediaSessionAuthority,
   VoiceMediaSessionAuthorityError,
-  parseRecordingScope,
 } from "./session-authority";
+import {
+  VoiceCallAuthorityError,
+  type VoiceCallAuthorityClaims,
+  type VoiceCallAuthorityVerifier,
+} from "./call-authority";
+import type { VoiceSessionComposer } from "./session-composer";
 
 /** Default cap on a single HTTP control-plane request body (`/sessions`,
  * `/recording/finalize`). These carry JSON metadata, never raw audio, so this
@@ -56,6 +61,18 @@ export interface MediaWorkerServerConfig {
    * or 30s; kept short since the grant is meant to be redeemed immediately
    * by the same orchestrator call that just admitted the session. */
   sessionGrantTtlMs?: number | undefined;
+  /** Resolves and validates the caller-presented call-authority token on
+   * `POST /sessions` and `POST /recording/finalize`. No production
+   * implementation is composed by default (see
+   * docs/04-uat/audit-voice-runtime-20261002.md) -- without one, this
+   * worker refuses both routes rather than trusting the caller's own
+   * declared `sessionId`/`scope`. */
+  callAuthorityVerifier?: VoiceCallAuthorityVerifier | undefined;
+  /** Wires each attached session's binary/control frames to a real ASR/TTS
+   * composition (see `./session-composer`). Without one, the worker still
+   * admits sessions and negotiates the WebSocket, but nothing ever
+   * transcribes or synthesizes anything for them. */
+  sessionComposer?: VoiceSessionComposer | undefined;
 }
 
 export interface MediaSessionRecord {
@@ -87,13 +104,37 @@ export class MediaWorkerServer extends EventEmitter {
   private totalAdmitted = 0;
   private isRunning = false;
   private recordingAdapter?: MediaRecordingAdapter | undefined;
+  private readonly callAuthorityVerifier:
+    | VoiceCallAuthorityVerifier
+    | undefined;
+  private readonly sessionComposer: VoiceSessionComposer | undefined;
 
   constructor(config?: MediaWorkerServerConfig) {
     super();
     this.recordingAdapter = config?.recordingAdapter;
+    this.callAuthorityVerifier = config?.callAuthorityVerifier;
+    this.sessionComposer = config?.sessionComposer;
     this.sessionAuthority = new VoiceMediaSessionAuthority(
       config?.sessionGrantTtlMs ??
         Number(process.env.VOICE_MEDIA_SESSION_GRANT_TTL_MS ?? 30_000),
+    );
+    // A grant that is never consumed before its TTL (expired, never
+    // attached, or a failed handshake that never retries) must not hold its
+    // reserved slot forever -- free it as soon as the authority gives up on
+    // it, so a replacement session can be admitted.
+    this.sessionAuthority.on(
+      "grant.expired",
+      ({ sessionId }: { sessionId: string; epoch: number }) => {
+        const session = this.activeSessions.get(sessionId);
+        if (session && !session.channel) {
+          this.activeSessions.delete(sessionId);
+          this.emit("session.closed", {
+            sessionId,
+            code: 1008,
+            reason: "grant_expired",
+          });
+        }
+      },
     );
     this.config = {
       port:
@@ -527,17 +568,76 @@ export class MediaWorkerServer extends EventEmitter {
         return;
       }
       this.readBoundedBody(req, this.config.maxHttpBodyBytes)
-        .then((body) => {
+        .then(async (body) => {
           try {
+            // Operations-key-only is deliberately insufficient: the shared
+            // key only proves "a trusted operator of this worker," never
+            // which specific brand/call/recording this request is entitled
+            // to. `sessionId`/`scope` are never taken from this body --
+            // only from claims resolved through a verified call-authority
+            // token, which the caller cannot forge.
+            if (!this.callAuthorityVerifier) {
+              res.statusCode = 503;
+              res.end(
+                JSON.stringify({
+                  error:
+                    "No call-authority verifier is configured on this worker; refusing to admit a session.",
+                  code: "VOICE_MEDIA_CALL_AUTHORITY_NOT_CONFIGURED",
+                }),
+              );
+              return;
+            }
             const parsed = body ? JSON.parse(body) : {};
-            const sessionId =
-              parsed.sessionId ??
-              `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            // Validated before admission: a half-specified scope must never
-            // silently become "no recording scope for this session" later.
-            const scope = parseRecordingScope(parsed.scope);
-            const session = this.admitSession(sessionId, parsed.metadata);
-            const grant = this.sessionAuthority.issueGrant(sessionId, scope);
+            const callAuthorityToken =
+              typeof parsed.callAuthorityToken === "string"
+                ? parsed.callAuthorityToken
+                : undefined;
+            if (!callAuthorityToken) {
+              res.statusCode = 401;
+              res.end(
+                JSON.stringify({
+                  error: "callAuthorityToken is required.",
+                  code: "VOICE_MEDIA_CALL_AUTHORITY_TOKEN_REQUIRED",
+                }),
+              );
+              return;
+            }
+            let claims: VoiceCallAuthorityClaims;
+            try {
+              claims =
+                await this.callAuthorityVerifier.verifySessionAuthority(
+                  callAuthorityToken,
+                );
+            } catch (err) {
+              res.statusCode = 403;
+              res.end(
+                JSON.stringify({
+                  error: err instanceof Error ? err.message : String(err),
+                  code:
+                    err instanceof VoiceCallAuthorityError
+                      ? err.code
+                      : "VOICE_MEDIA_CALL_AUTHORITY_DENIED",
+                }),
+              );
+              return;
+            }
+
+            const session = this.admitSession(
+              claims.sessionId,
+              parsed.metadata,
+            );
+            let grant: { token: string; epoch: number; expiresAt: number };
+            try {
+              grant = this.sessionAuthority.issueGrant(
+                claims.sessionId,
+                claims.principalId,
+                claims.scope,
+                claims.epoch,
+              );
+            } catch (err) {
+              this.activeSessions.delete(claims.sessionId);
+              throw err;
+            }
             res.statusCode = 201;
             res.end(
               JSON.stringify({
@@ -553,13 +653,17 @@ export class MediaWorkerServer extends EventEmitter {
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             res.statusCode =
-              err instanceof VoiceMediaSessionAuthorityError
-                ? 400
-                : errorMsg.includes("DRAINING") || errorMsg.includes("CAPACITY")
-                  ? 503
-                  : errorMsg.includes("CONFLICT")
-                    ? 409
-                    : 400;
+              err instanceof VoiceMediaSessionAuthorityError &&
+              err.code === "VOICE_MEDIA_SESSION_EPOCH_STALE"
+                ? 409
+                : err instanceof VoiceMediaSessionAuthorityError
+                  ? 400
+                  : errorMsg.includes("DRAINING") ||
+                      errorMsg.includes("CAPACITY")
+                    ? 503
+                    : errorMsg.includes("CONFLICT")
+                      ? 409
+                      : 400;
             res.end(JSON.stringify({ error: errorMsg }));
           }
         })
@@ -612,6 +716,70 @@ export class MediaWorkerServer extends EventEmitter {
               res.end(JSON.stringify({ error: "sessionId is required" }));
               return;
             }
+            // Finalization is authorized separately from admission: holding
+            // the shared operations key and knowing a previously-admitted
+            // sessionId is not enough on its own to seal that session's
+            // recording. The caller must present a call-authority token
+            // that re-resolves to this exact session id and the epoch
+            // currently bound for it -- a token for a superseded/fenced
+            // epoch, or for an unrelated session, is rejected here even if
+            // it was once valid.
+            if (!this.callAuthorityVerifier) {
+              res.statusCode = 503;
+              res.end(
+                JSON.stringify({
+                  error:
+                    "No call-authority verifier is configured on this worker; refusing to finalize a recording.",
+                  code: "VOICE_MEDIA_CALL_AUTHORITY_NOT_CONFIGURED",
+                }),
+              );
+              return;
+            }
+            const callAuthorityToken =
+              typeof parsed.callAuthorityToken === "string"
+                ? parsed.callAuthorityToken
+                : undefined;
+            if (!callAuthorityToken) {
+              res.statusCode = 401;
+              res.end(
+                JSON.stringify({
+                  error: "callAuthorityToken is required.",
+                  code: "VOICE_MEDIA_CALL_AUTHORITY_TOKEN_REQUIRED",
+                }),
+              );
+              return;
+            }
+            let claims: VoiceCallAuthorityClaims;
+            try {
+              claims =
+                await this.callAuthorityVerifier.verifySessionAuthority(
+                  callAuthorityToken,
+                );
+            } catch (err) {
+              res.statusCode = 403;
+              res.end(
+                JSON.stringify({
+                  error: err instanceof Error ? err.message : String(err),
+                  code:
+                    err instanceof VoiceCallAuthorityError
+                      ? err.code
+                      : "VOICE_MEDIA_CALL_AUTHORITY_DENIED",
+                }),
+              );
+              return;
+            }
+            if (claims.sessionId !== sessionId) {
+              res.statusCode = 403;
+              res.end(
+                JSON.stringify({
+                  error:
+                    "Call-authority token does not resolve to this session id.",
+                  code: "VOICE_MEDIA_CALL_AUTHORITY_SESSION_MISMATCH",
+                }),
+              );
+              return;
+            }
+
             // The authoritative scope bound at POST /sessions time -- never
             // the caller's own `scope`/`closure`/`credential` claims in this
             // request body. A caller cannot finalize a recording for a
@@ -619,7 +787,16 @@ export class MediaWorkerServer extends EventEmitter {
             // forged closure for the trusted ledger's answer.
             const scope =
               this.sessionAuthority.getAuthoritativeScope(sessionId);
-            if (!scope) {
+            const boundEpoch =
+              this.sessionAuthority.getAuthoritativeEpoch(sessionId);
+            const boundPrincipal =
+              this.sessionAuthority.getAuthoritativePrincipal(sessionId);
+            if (
+              !scope ||
+              boundEpoch === undefined ||
+              boundEpoch !== claims.epoch ||
+              boundPrincipal !== claims.principalId
+            ) {
               res.statusCode = 403;
               res.end(
                 JSON.stringify({
@@ -636,6 +813,7 @@ export class MediaWorkerServer extends EventEmitter {
               scope,
               segments,
             });
+            this.sessionAuthority.release(sessionId);
             res.statusCode = 200;
             res.end(JSON.stringify({ status: "sealed", ...result }));
           } catch (err) {
@@ -729,6 +907,21 @@ export class MediaWorkerServer extends EventEmitter {
       return;
     }
 
+    // Checked before consuming the single-use grant: a request that will
+    // fail the handshake for a reason unrelated to session authority (no
+    // `Sec-WebSocket-Key`) must not burn the grant. Without this ordering,
+    // a client that retries the same grant after a transport-level mistake
+    // would find it already consumed, and -- because the grant's authority
+    // record had already moved from "pending" (TTL-reaped on expiry) to
+    // "attached" (held until an explicit close/finalize) -- the admitted
+    // slot would never be freed at all.
+    const secKey = req.headers["sec-websocket-key"] as string | undefined;
+    if (!secKey) {
+      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
     try {
       this.sessionAuthority.consumeGrant(sessionId, grantToken);
     } catch (err) {
@@ -740,7 +933,6 @@ export class MediaWorkerServer extends EventEmitter {
       return;
     }
 
-    const secKey = req.headers["sec-websocket-key"] as string | undefined;
     const channel = completeWebSocketHandshake(secKey, socket, {
       timeoutMs: this.config.wsTimeoutMs,
       maxPayloadBytes: this.config.maxWsFrameBytes,
@@ -762,6 +954,30 @@ export class MediaWorkerServer extends EventEmitter {
     channel.on("error", (err: Error) => {
       this.emit("session.error", { sessionId, error: err });
     });
+
+    // The actual ASR/TTS/dialogue-event composition entry: without this,
+    // every inbound audio/control frame only ever reached the generic
+    // `session.message` event above, with no composed ASR/TTS session ever
+    // consuming it (see docs/04-uat/audit-voice-runtime-20261002.md). The
+    // provider factory can still fail closed here (e.g. a strict
+    // environment reaching this handshake despite `/ready` already
+    // reporting not-ready) -- that must close the channel, never crash the
+    // worker or leave the socket silently unattended.
+    try {
+      this.sessionComposer?.attach(sessionId, channel);
+    } catch (err) {
+      // The channel's own "close" listener (registered above) performs the
+      // actual activeSessions/session.closed cleanup once this reaches the
+      // underlying socket's close event -- this must not duplicate it.
+      channel.sendText(
+        JSON.stringify({
+          type: "error",
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      channel.close(1011, "No ASR/TTS provider is available for this session");
+      return;
+    }
 
     this.emit("session.connected", session);
   }

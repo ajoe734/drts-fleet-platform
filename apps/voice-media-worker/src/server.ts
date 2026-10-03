@@ -1,8 +1,22 @@
 import { MediaWorkerServer } from "./server/media-worker-server";
 import { isStrictVoiceMediaEnvironment } from "./server/environment";
+import { composeVoiceMediaProviders } from "./server/provider-composition";
+import { VoiceSessionComposer } from "./server/session-composer";
 
 async function main() {
-  const server = new MediaWorkerServer();
+  const composition = composeVoiceMediaProviders();
+  const sessionComposer = new VoiceSessionComposer(composition.providerFactory);
+
+  const server = new MediaWorkerServer({
+    sessionComposer,
+    voiceRuntimeProductionCapable: composition.productionCapable,
+    voiceRuntimeNotCapableReason: composition.notCapableReason,
+    // No durable `RecorderObjectStore` implementation exists yet (see
+    // docs/04-uat/audit-voice-runtime-20261002.md) -- leaving
+    // `recordingAdapter` unset means `/recording/finalize` correctly fails
+    // closed (503) rather than claiming a storage backend this worker does
+    // not actually have.
+  });
 
   if (
     isStrictVoiceMediaEnvironment() &&
@@ -14,8 +28,13 @@ async function main() {
     );
   }
   console.warn(
-    "[voice-media-worker] No production-capable CTI/ASR/TTS/recording provider is wired into this worker " +
-      "(see docs/04-uat/audit-voice-runtime-20261002.md); /ready will report not-ready in a staging/production environment.",
+    `[voice-media-worker] ${composition.notCapableReason} /ready will report not-ready in a staging/production environment.`,
+  );
+  console.warn(
+    "[voice-media-worker] No call-authority verifier is configured (apps/api/src/modules/cti-ivr, " +
+      "which would issue/verify these tokens from the real call/line authority, does not exist yet -- " +
+      "see docs/04-uat/audit-voice-runtime-20261002.md). POST /sessions and POST /recording/finalize " +
+      "will refuse every request (503) until one is wired.",
   );
 
   let draining = false;

@@ -3,6 +3,7 @@ import * as http from "node:http";
 import type { Socket } from "node:net";
 import { MediaWorkerServer } from "../../../apps/voice-media-worker/src/server/media-worker-server";
 import { VOICE_MEDIA_INTERNAL_KEY_HEADER } from "../../../apps/voice-media-worker/src/server/internal-auth";
+import { FakeCallAuthority } from "./fake-call-authority";
 
 /**
  * Codex review round 1 (reopen, AUDIT-VOICE-RUNTIME-20261002) R3:
@@ -17,25 +18,29 @@ import { VOICE_MEDIA_INTERNAL_KEY_HEADER } from "../../../apps/voice-media-worke
 const INTERNAL_KEY = "test-internal-key-capacity-recovery";
 
 async function startServer() {
+  const callAuthority = new FakeCallAuthority();
   const server = new MediaWorkerServer({
     port: 0,
     internalKey: INTERNAL_KEY,
     maxConcurrentSessions: 1,
     maxWsFrameBytes: 8,
     wsTimeoutMs: 0,
+    callAuthorityVerifier: callAuthority,
   });
   const port = await server.start();
-  return { server, port };
+  return { server, port, callAuthority };
 }
 
 async function admit(
   port: number,
+  callAuthority: FakeCallAuthority,
   sessionId: string,
 ): Promise<{ status: number; grant?: { token: string } }> {
+  const { token } = callAuthority.issue(sessionId);
   const res = await fetch(`http://127.0.0.1:${port}/sessions`, {
     method: "POST",
     headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ callAuthorityToken: token }),
   });
   if (res.status !== 201) return { status: res.status };
   const body = (await res.json()) as { grant: { token: string } };
@@ -79,9 +84,9 @@ function attach(
 
 describe("AUDIT-VOICE-RUNTIME-20261002: worker session capacity recovers after a frame-size-limit closure", () => {
   it("frees the admitted session slot once an oversized frame closes the channel, allowing a replacement admission", async () => {
-    const { server, port } = await startServer();
+    const { server, port, callAuthority } = await startServer();
     try {
-      const admitted = await admit(port, "sess-cap-1");
+      const admitted = await admit(port, callAuthority, "sess-cap-1");
       expect(admitted.status).toBe(201);
       const socket = await attach(port, "sess-cap-1", admitted.grant!.token);
       expect(server.sessionCount).toBe(1);
@@ -108,7 +113,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: worker session capacity recovers after a
       expect(closeEvent.code).toBe(1009);
       expect(server.sessionCount).toBe(0);
 
-      const replacement = await admit(port, "sess-cap-2");
+      const replacement = await admit(port, callAuthority, "sess-cap-2");
       expect(replacement.status).toBe(201);
       expect(server.sessionCount).toBe(1);
 

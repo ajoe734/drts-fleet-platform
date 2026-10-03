@@ -11,6 +11,7 @@ import {
   type RecordingScope,
 } from "../../../apps/voice-media-worker/src/recording/sealed-recorder";
 import type { RecordingClosureLedger } from "../../../apps/voice-media-worker/src/recording/final-manifest";
+import { FakeCallAuthority } from "./fake-call-authority";
 
 /**
  * Codex review round 1 (reopen, AUDIT-VOICE-RUNTIME-20261002) R1: the HTTP
@@ -144,24 +145,30 @@ function makeCountingLedger(
 }
 
 async function startServer(adapter: MediaRecordingAdapter) {
+  const callAuthority = new FakeCallAuthority();
   const server = new MediaWorkerServer({
     port: 0,
     internalKey: INTERNAL_KEY,
     recordingAdapter: adapter,
+    callAuthorityVerifier: callAuthority,
   });
   const port = await server.start();
-  return { server, port };
+  return { server, port, callAuthority };
 }
 
 async function admitAndAttach(
   port: number,
   sessionId: string,
-  scope: RecordingScope,
-): Promise<void> {
+  scope: RecordingScope | undefined,
+  callAuthority: FakeCallAuthority,
+): Promise<{ epoch: number }> {
+  const { token: callAuthorityToken, claims } = callAuthority.issue(sessionId, {
+    scope,
+  });
   const sessionsRes = await fetch(`http://127.0.0.1:${port}/sessions`, {
     method: "POST",
     headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
-    body: JSON.stringify({ sessionId, scope }),
+    body: JSON.stringify({ callAuthorityToken }),
   });
   if (sessionsRes.status !== 201) {
     throw new Error(`admission failed: ${sessionsRes.status}`);
@@ -199,6 +206,7 @@ async function admitAndAttach(
     req.on("error", reject);
     req.end();
   });
+  return { epoch: claims.epoch };
 }
 
 async function postFinalize(port: number, body: Record<string, unknown>) {
@@ -209,6 +217,17 @@ async function postFinalize(port: number, body: Record<string, unknown>) {
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return { status: res.status, body: json };
+}
+
+/** Mints a *second*, independent token for the same session id/epoch a
+ * prior `admitAndAttach` call already attached -- finalize re-verifies its
+ * own presented token rather than reusing the admission grant. */
+function finalizeToken(
+  callAuthority: FakeCallAuthority,
+  sessionId: string,
+  epoch: number,
+): string {
+  return callAuthority.issue(sessionId, { epoch }).token;
 }
 
 describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritative scope and closure", () => {
@@ -228,12 +247,20 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     const started = await startServer(adapter);
     server = started.server;
 
+    // A caller can hold a validly-issued call-authority token for this
+    // session id (e.g. a stale one from before the call ever actually
+    // connected) without the session ever having attached -- the worker
+    // must still deny, never fall back to the request body's segments.
+    const { token: callAuthorityToken } =
+      started.callAuthority.issue("never-admitted");
     const result = await postFinalize(started.port, {
       sessionId: "never-admitted",
       segments: [],
+      callAuthorityToken,
     });
 
     expect(result.status).toBe(403);
+    expect(result.body.code).toBe("VOICE_MEDIA_SESSION_SCOPE_UNKNOWN");
     expect(ledger.calls).toBe(0);
   });
 
@@ -246,42 +273,21 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     const started = await startServer(adapter);
     server = started.server;
 
-    const sessionsRes = await fetch(
-      `http://127.0.0.1:${started.port}/sessions`,
-      {
-        method: "POST",
-        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
-        body: JSON.stringify({ sessionId: "no-scope-session" }),
-      },
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "no-scope-session",
+      undefined,
+      started.callAuthority,
     );
-    const { grant } = (await sessionsRes.json()) as {
-      grant: { token: string };
-    };
-    await new Promise<void>((resolve, reject) => {
-      const req = http.request({
-        host: "127.0.0.1",
-        port: started.port,
-        path: `/ws?sessionId=no-scope-session&grant=${grant.token}`,
-        method: "GET",
-        headers: {
-          Connection: "Upgrade",
-          Upgrade: "websocket",
-          "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-          "Sec-WebSocket-Version": "13",
-          [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY,
-        },
-      });
-      req.on("upgrade", (_res, socket) => {
-        socket.destroy();
-        resolve();
-      });
-      req.on("error", reject);
-      req.end();
-    });
 
     const result = await postFinalize(started.port, {
       sessionId: "no-scope-session",
       segments: [],
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "no-scope-session",
+        epoch,
+      ),
       // Attacker-supplied scope must be ignored entirely, not treated as a
       // fallback when the session itself has none bound.
       scope: {
@@ -314,11 +320,21 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     const started = await startServer(adapter);
     server = started.server;
 
-    await admitAndAttach(started.port, "sess-forged-close", scope);
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-forged-close",
+      scope,
+      started.callAuthority,
+    );
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-forged-close",
       segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-forged-close",
+        epoch,
+      ),
       credential: "forged-admin-credential",
       scope: { ...scope, recordingId: "a-different-recording" },
       closure: {
@@ -364,11 +380,21 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     const started = await startServer(adapter);
     server = started.server;
 
-    await admitAndAttach(started.port, "sess-valid-finalize", scope);
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-valid-finalize",
+      scope,
+      started.callAuthority,
+    );
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-valid-finalize",
       segments: bidirectionalSegments(scope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-valid-finalize",
+        epoch,
+      ),
       // Even a well-formed but different scope in the body must be ignored.
       scope: {
         brandId: "attacker-brand",
@@ -410,8 +436,18 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     const started = await startServer(adapter);
     server = started.server;
 
-    await admitAndAttach(started.port, "sess-cross-a", scopeA);
-    await admitAndAttach(started.port, "sess-cross-b", scopeB);
+    const { epoch: epochA } = await admitAndAttach(
+      started.port,
+      "sess-cross-a",
+      scopeA,
+      started.callAuthority,
+    );
+    const { epoch: epochB } = await admitAndAttach(
+      started.port,
+      "sess-cross-b",
+      scopeB,
+      started.callAuthority,
+    );
 
     // Target session A (whose authoritative scope is scopeA) but supply
     // scope B's segments and claim scope B in the body. The server must
@@ -423,6 +459,11 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       sessionId: "sess-cross-a",
       segments: bidirectionalSegments(scopeB),
       scope: scopeB,
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-cross-a",
+        epochA,
+      ),
     });
 
     expect(result.status).not.toBe(200);
@@ -433,8 +474,178 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     const legitimate = await postFinalize(started.port, {
       sessionId: "sess-cross-b",
       segments: bidirectionalSegments(scopeB),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-cross-b",
+        epochB,
+      ),
     });
     expect(legitimate.status).toBe(200);
     expect(legitimate.body.scope).toEqual(scopeB);
+  });
+
+  /**
+   * Codex review round 3 (reopen, AUDIT-VOICE-RUNTIME-20261002) R2: finalize
+   * must authorize itself, not merely trust that *some* scope is already
+   * bound to the session id. A token belonging to an unrelated session, or
+   * a revoked one, must be denied even though the real session-authoritative
+   * scope exists and is otherwise sealable.
+   */
+  it("rejects finalization when the presented call-authority token belongs to a different session (cross-principal denial)", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-x",
+      callId: "call-x",
+      recordingId: "rec-x",
+      legId: "leg-1",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    await admitAndAttach(
+      started.port,
+      "sess-finalize-x",
+      scope,
+      started.callAuthority,
+    );
+    const { token: unrelatedToken } =
+      started.callAuthority.issue("some-other-session");
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-finalize-x",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: unrelatedToken,
+    });
+
+    expect(result.status).toBe(403);
+    expect(result.body.code).toBe(
+      "VOICE_MEDIA_CALL_AUTHORITY_SESSION_MISMATCH",
+    );
+    expect(ledger.calls).toBe(0);
+  });
+
+  it("rejects finalization once the presented call-authority token has been revoked", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-y",
+      callId: "call-y",
+      recordingId: "rec-y",
+      legId: "leg-1",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-finalize-revoked",
+      scope,
+      started.callAuthority,
+    );
+    const revokedToken = finalizeToken(
+      started.callAuthority,
+      "sess-finalize-revoked",
+      epoch,
+    );
+    started.callAuthority.revoke(revokedToken);
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-finalize-revoked",
+      segments: bidirectionalSegments(scope),
+      callAuthorityToken: revokedToken,
+    });
+
+    expect(result.status).toBe(403);
+    expect(result.body.code).toBe("VOICE_MEDIA_CALL_AUTHORITY_REVOKED");
+    expect(ledger.calls).toBe(0);
+  });
+
+  /**
+   * Repair-boundary case from the same R2 finding: `closeSession` followed
+   * by reissuing the id for a *different* call must fence the old call's
+   * authority before the new epoch is ever attached -- finalize using the
+   * old scope must be denied, not silently allowed just because some scope
+   * was once bound to this session id.
+   */
+  it("fences the old epoch's recording authority once a session id is reissued for a new call, even before the new grant is attached", async () => {
+    const oldScope: RecordingScope = {
+      brandId: "brand-B",
+      callId: "call-B",
+      recordingId: "rec-B",
+      legId: "leg-B",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const adapter = new MediaRecordingAdapter(
+      new MemoryRecorderObjectStore(),
+      ledger,
+    );
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch: oldEpoch } = await admitAndAttach(
+      started.port,
+      "sess-reused-id",
+      oldScope,
+      started.callAuthority,
+    );
+    started.server.closeSession("sess-reused-id");
+
+    // Reissue the same session id for an unrelated new call (brand-C/
+    // call-C, a later epoch) without ever attaching it.
+    const { token: newToken } = started.callAuthority.issue("sess-reused-id", {
+      scope: {
+        brandId: "brand-C",
+        callId: "call-C",
+        recordingId: "rec-C",
+        legId: "leg-C",
+      },
+    });
+    const newSessionRes = await fetch(
+      `http://127.0.0.1:${started.port}/sessions`,
+      {
+        method: "POST",
+        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+        body: JSON.stringify({ callAuthorityToken: newToken }),
+      },
+    );
+    expect(newSessionRes.status).toBe(201);
+
+    // Before the new epoch's grant is ever attached, a finalize attempt
+    // using the *old* epoch's authority/scope must be denied.
+    const staleResult = await postFinalize(started.port, {
+      sessionId: "sess-reused-id",
+      segments: bidirectionalSegments(oldScope),
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-reused-id",
+        oldEpoch,
+      ),
+    });
+
+    expect(staleResult.status).not.toBe(200);
+    expect(staleResult.body).not.toMatchObject({ status: "sealed" });
+    expect(ledger.calls).toBe(0);
   });
 });

@@ -267,7 +267,9 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         segmentId: "seg-1",
         revision: 1,
         text: "hello",
-        final: true,
+        // SD §11.1 point 5: the real wire protocol encodes `final` as
+        // numeric 0/1, never a JSON boolean.
+        final: 1,
         language: "cmn-TW",
       }),
     });
@@ -361,7 +363,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         segmentId: "seg-1",
         revision: 1,
         text: "partial",
-        final: false,
+        final: 0,
         language: "cmn-TW",
       }),
     });
@@ -371,7 +373,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         segmentId: "seg-1",
         revision: 1,
         text: "partial-replayed",
-        final: false,
+        final: 0,
         language: "cmn-TW",
       }),
     });
@@ -379,5 +381,110 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     const first = await promise;
     expect(first.revision).toBe(1);
     expect(first.text).toBe("partial");
+  });
+
+  /**
+   * Codex review round 3 (reopen, AUDIT-VOICE-RUNTIME-20261002) R6:
+   * `message.final === true` never matched the documented wire value (a
+   * numeric `0`/`1`, SD §11.1 point 5), so every provider message was
+   * treated as non-final -- both misreporting `final: false` to the caller
+   * and leaving `finalizedSegments` empty, so a later revision for an
+   * already-finalized segment was never rejected either.
+   */
+  it("treats numeric final=1 as finalized, and drops a later revision for that same segment", async () => {
+    const socket = new FakeSocket();
+    const adapter = new TwmAsrNetworkAdapter(
+      transportFor("ticket-final"),
+      () => socket,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    const firstPromise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    socket.fire("open", {});
+    socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-final",
+        revision: 1,
+        text: "final text",
+        final: 1,
+        language: "cmn-TW",
+      }),
+    });
+    const first = await firstPromise;
+    expect(first.final).toBe(true);
+
+    // The provider resends a "revision" for the same, now-finalized segment
+    // (e.g. a duplicate delivery). It must be dropped, not delivered as a
+    // change to the sealed text. Prove it by making the *next* transcribe
+    // call -- for a genuinely different segment -- wait on the socket's
+    // 180-ready gate again; if the stale revision had been buffered, it
+    // would be returned here instead.
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-final",
+        revision: 2,
+        text: "mutated-after-final",
+        final: 0,
+        language: "cmn-TW",
+      }),
+    });
+
+    const secondPromise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([2]),
+      sequence: 2,
+    });
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-other",
+        revision: 1,
+        text: "a different segment",
+        final: 0,
+        language: "cmn-TW",
+      }),
+    });
+    const second = await secondPromise;
+    expect(second.segmentId).toBe("seg-other");
+    expect(second.text).toBe("a different segment");
+  });
+
+  it("sends the literal text EOS, not a JSON envelope, when audio ends", async () => {
+    const socket = new FakeSocket();
+    const adapter = new TwmAsrNetworkAdapter(
+      transportFor("ticket-eos"),
+      () => socket,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+    const promise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    socket.fire("open", {});
+    socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+    socket.fire("message", {
+      data: JSON.stringify({
+        providerSessionId: "p1",
+        segmentId: "seg-1",
+        revision: 1,
+        text: "hi",
+        final: 1,
+        language: "cmn-TW",
+      }),
+    });
+    await promise;
+
+    adapter.endAudio();
+    expect(socket.sent[socket.sent.length - 1]).toBe("EOS");
   });
 });

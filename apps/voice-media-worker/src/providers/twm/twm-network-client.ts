@@ -417,12 +417,19 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         return;
       }
       this.lastRevisionBySegment.set(key, revision);
-      if (message.final === true) this.finalizedSegments.add(key);
+      // SD §11.1 point 5: the wire protocol encodes `final` as the numeric
+      // `0`/`1`, not a JSON boolean. Comparing against `true` silently
+      // treated every provider message as non-final, which both reported a
+      // false `final: false` to callers and left `finalizedSegments` empty
+      // -- so a later, stale revision for an already-finalized segment was
+      // never dropped either.
+      const isFinal = message.final === 1;
+      if (isFinal) this.finalizedSegments.add(key);
       const result: VoiceAsrSegmentResult = {
         segmentId: message.segmentId,
         revision,
         text: typeof message.text === "string" ? message.text : "",
-        final: message.final === true,
+        final: isFinal,
         language: typeof message.language === "string" ? message.language : "",
       };
       const waiter = this.waiters.shift();
@@ -459,11 +466,12 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     });
   }
 
-  /** Sends the documented EOS control frame. Receive-side drain stays open
+  /** Sends the documented EOS control frame: SD §11.1 point 6 requires the
+   * literal text `EOS`, not a JSON envelope. Receive-side drain stays open
    * after sending stops; final is never consent. */
   endAudio(): void {
     if (!this.eosSent && this.socket) {
-      this.socket.send(JSON.stringify({ frame: "EOS" }));
+      this.socket.send("EOS");
     }
     this.eosSent = true;
     this.ready = false;
