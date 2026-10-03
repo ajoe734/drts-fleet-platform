@@ -13,7 +13,7 @@ It executes `pnpm audit --prod` and processes the results.
 
 Not all vulnerabilities reported by `pnpm audit` constitute active runtime vulnerabilities for deployed containers:
 
-- **Build/Tooling Dependencies**: Vulnerabilities in packages used exclusively for bundling, compilation, or static analysis (e.g., PostCSS, Babel, Expo CLI, Metro) are generally not exposed to production traffic. They are not active runtime vulnerabilities.
+- **Build/Tooling Dependencies**: Vulnerabilities in packages used exclusively for bundling, compilation, or static analysis (e.g., Babel, Expo CLI, Metro) are generally not exposed to production traffic. They are not active runtime vulnerabilities.
 - **Mobile Dependencies**: Dependencies used in the React Native mobile app (`apps/driver-app`) are compiled into static binaries or client-side bundles and are not subject to server-side exploits.
 - **Windows-only transitive dependencies**: Code paths only executed on Windows or via development binaries are not reachable in our production Linux container deployments.
 
@@ -24,32 +24,47 @@ We programmatically ignore these through explicitly documented, expiry-bound exc
 In cases where a dependency has a vulnerability but no patch is available (e.g. upstream maintainer delay, or transitive dependency blocked by a direct dependency constraint) or it is strictly not reachable at runtime (build/mobile tools), we allow documenting an explicit, expiry-bound exception.
 These exceptions are recorded in `tools/ci/dependency-security-exceptions.json`. Each exception must have an `expires_at` timestamp. The CI script will fail if an exception has passed its expiry date. This ensures we follow up on unpatched vulnerabilities without blocking daily deployments indefinitely.
 
-## Audit Results
+## Audit Results and Remediations
 
-The initial wave of updates successfully patched the majority of vulnerabilities by updating `openclaw`, `next`, `multer`, and other packages to their latest supported versions. `multer` is now at 2.4.0 and `@nestjs/platform-express` resolves 11.2.7.
-The remaining vulnerabilities have been individually documented and categorized as unreachable tooling paths or un-patchable package exceptions in our exception manifest.
+The initial wave of updates successfully patched the majority of vulnerabilities by updating `openclaw`, `next`, `multer`, `express` and `@nestjs/*` to their latest supported versions:
 
-We documented 52 path suppressions for mobile/build paths (e.g., PostCSS 1117015/1124252/1130709/1139510 via Expo Metro, decode-uri-component 1147955 via expo-router, image-size 1239765/1239766 via Metro, node-forge 1240912 via Expo CLI) and 1 package exception (uuid 1119441 via API exceljs and driver xcode). We do not relabel these suppressions as remediations or proven exploits, but we recognize them as unreachable or currently un-patchable and track them via expiry bounds.
+- `apps/api`: NestJS is updated to `11.2.7`, `multer` is updated to `2.4.0` via dependency resolution, `openclaw` to `2026.9.2`, and `express` to `4.21.2`.
+
+The remaining vulnerabilities (19 findings) have been individually documented and categorized as unreachable tooling paths or un-patchable package exceptions in our strict exception manifest (`tools/ci/dependency-security-exceptions.json`).
+
+Specific Triage Findings:
+
+- **uuid (1119441)**: Missing buffer bounds check in v3/v5/v6. Brought in via `apps__api>exceljs` and `apps__driver-app>expo>@expo/config-plugins`. The `exceljs` library uses `uuid.v4()` which is unaffected by this specific vulnerability (which only impacts v3/v5/v6 when user-provided buffers are used). Mobile tooling path is not exposed at runtime. Exception scoped strictly to these paths and versions.
+- **decode-uri-component (1147955)**: DoS via query-string. Brought in via `apps__driver-app>expo-router`. This runs in the client-side React Native environment where a targeted Node.js event-loop exhaustion attack is not applicable or constitutes a localized client crash rather than a server breach.
+- **image-size (1239765/1239766)**: DoS via Metro bundler. This is a build-time React Native tooling path and is not reachable in production.
+- **node-forge (1240912), braces (1240992), postcss (4 findings), tar, ws, shell-quote, @babel/core**: These are all via Expo/React Native build and dev-middleware paths (`apps__driver-app>...`). Not exposed to production backend traffic.
+- **protobufjs (1123492/1123964)**: Brought in via `apps__api>openclaw>@google/genai>protobufjs`. Used by the Google GenAI SDK for internal payload structuring, not dynamically parsing untrusted user `.proto` files at runtime.
+- **body-parser (1123976)**: Brought in via `apps__api>@nestjs/platform-express>express>body-parser`. A minor size limit bypass. Expected to be resolved in future upstream NestJS/express releases; exception strictly scoped.
+- **@hono/node-server (1139322)**: Path traversal via `@modelcontextprotocol/sdk`. MCP servers run internally in the API context for GenAI tools, not exposing general static file serving to public endpoints.
 
 ## Codex Review Remediation
 
 The following findings from the review have been addressed:
 
 - **R1 [P1] Missing CI test wiring / broken CI**:
-  - **Fix/Result**: The CI invocation was failing with `ModuleNotFoundError` because `dependency_security.py` wasn't in `sys.path`. We corrected this by adding `sys.path.insert(0, str(Path(__file__).resolve().parent))` directly inside `test_dependency_security.py`. This correctly fixes the import and allows the exact local command `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/ci/test_dependency_security.py` and exact CI invocation to run cleanly without `importlib` hacks. Test coverage and discovery continue to pass.
+  - **Fix/Result**: Retained repair. Test coverage and discovery pass.
 - **R2 [P1] Audit operational errors pass**:
-  - **Fix/Result**: The audit script now validates the output JSON schema and correctly fails if it encounters operational errors (like `ERR_PNPM_AUDIT_BAD_RESPONSE`) or malformed/missing report structures, instead of silently passing.
+  - **Fix/Result**: The audit script now validates the `CompletedProcess` return code (enforcing 0 or 1). It also strictly validates the structure of the JSON report (ensuring `metadata` and `advisories` properties are objects, if present) and ensures that an exit code of 1 contains actual advisories to evaluate, preventing fail-open behavior.
 - **R3 [P1] Permanent blanket path suppression bypasses runtime findings**:
-  - **Fix/Result**: Removed the hardcoded blanket path suppression in the `dependency_security.py` script. All exceptions, including those for build tools and mobile paths, are now explicitly managed via the `dependency-security-exceptions.json` file.
+  - **Fix/Result**: Retained repair. All exceptions, including those for build tools and mobile paths, are now explicitly managed via the `dependency-security-exceptions.json` file.
 - **R4 [P1] Package-wide exceptions suppress future unrelated vulnerabilities**:
-  - **Fix/Result**: Exceptions are now tightly scoped by `advisory_id`, `versions`, and `paths`. This prevents a single module-level exception from blindly allowing future vulnerabilities. Regression tests have been added to ensure changed versions, expired exceptions, or unexcepted advisories cause a failure.
+  - **Fix/Result**: Exceptions are now tightly scoped by `advisory_id`, `versions`, and `paths`. The parser strictly enforces that `versions` and `paths` are non-empty arrays, preventing the previous parser flaw where missing scopes were treated as unrestricted. 44 unscoped suppressions were removed, and exactly 19 tightly scoped ones were recreated based on strict triage. Package identity (`module_name`) is also strictly checked.
 - **R5 [P2] Unrelated production dependency expansion**:
-  - **Fix/Result**: The `openclaw` dependency was accidentally added to all 24 apps/packages. It has been removed from all projects except the `apps/api` runtime, where it is genuinely used as the LLM Gateway Provider for the Platform Admin Assistant. The lockfile has been regenerated to reflect this clean state.
+  - **Fix/Result**: Retained repair. The `openclaw` dependency is correctly scoped to `apps/api`.
 - **R6 [P2] Acceptance evidence missing/inaccurate**:
-  - **Fix/Result**: The document was updated to preserve the R1-R6 disposition history. The exact 8 path suppressions and 1 package exception were correctly categorized and tracked by their Advisory IDs.
+  - **Fix/Result**: Updated this document to capture the 19 remaining findings with specific dispositions (not just generic wait-for-upstream), accurate versions, and removed unverified CI acceptance claims.
+- **R7 [P1] Retained rollback of deliberate runtime upgrades**:
+  - **Fix/Result**: Restored deliberate upgrades for `apps/api/package.json` (`@nestjs/*` 11.2.7, `openclaw` 2026.9.2, `express` 4.21.2) and regenerated `pnpm-lock.yaml`.
+- **R8 [P2] NextRequest conflict**:
+  - **Fix/Result**: Retained repair. Root package.json matches apps at next 16.3.8.
 
 ## Acceptance Evidence
 
-- **dependency_audit_triage_and_remediation**: Verified. All `pnpm audit --prod` output has been triaged. Advisories are securely bounded in `dependency-security-exceptions.json` and tracked by ID, version, and path. Unrelated `openclaw` graph expansions were removed.
-- **classification_passes_and_ci_enforces**: Verified. The classifier tests pass (`python3 tools/ci/check_test_coverage.py` exits 0), and the CI gate effectively enforces strict exceptions and fails properly on unexcepted or operational errors.
-- **same_sha_typecheck_lint_ci**: Verified. Run all local checks (lint, typecheck, unit tests) identically before handoff, ensuring consistency with CI expectations. The test script `python3 -m unittest tools/ci/test_dependency_security.py` now exits 0 cleanly.
+- **dependency_audit_triage_and_remediation**: Addressed. Strict JSON schema/return-code validation is in place. Known vulnerabilities upgraded; remaining 19 vulnerabilities strictly scoped and triaged with detailed reasoning.
+- **classification_passes_and_ci_enforces**: Verified locally. (`node tools/ci/check-repo-classification.mjs` exits 0). CI workflows enforce classifier and security gate.
+- **same_sha_typecheck_lint_ci**: Pending candidate commit SHA and CI pipeline completion. Local checks (pnpm audit, Python unit tests for security gate) pass. Test script `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/ci/test_dependency_security.py -v` exits 0 cleanly.

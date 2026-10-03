@@ -20,12 +20,39 @@ def run_audit():
         print(result.stderr)
         sys.exit(1)
         
+    if not isinstance(data, dict):
+        print("Malformed audit report: not an object")
+        sys.exit(1)
+
     if 'error' in data:
         print(f"pnpm audit returned an operational error: {data['error']}")
         sys.exit(1)
         
+    if result.returncode not in (0, 1):
+        print(f"pnpm audit failed with unexpected exit code: {result.returncode}")
+        print(result.stderr)
+        sys.exit(1)
+
     if 'advisories' not in data and 'metadata' not in data:
         print("Malformed audit report: missing advisories and metadata")
+        sys.exit(1)
+        
+    if 'metadata' in data and not isinstance(data['metadata'], dict):
+        print("Malformed audit report: metadata is not an object")
+        sys.exit(1)
+        
+    if 'advisories' in data and not isinstance(data['advisories'], dict):
+        print("Malformed audit report: advisories is not an object")
+        sys.exit(1)
+        
+    advisories = data.get('advisories', {})
+    
+    if result.returncode == 1 and not advisories:
+        print("pnpm audit exited 1 but no advisories found to evaluate")
+        sys.exit(1)
+        
+    if result.returncode == 0 and advisories:
+        print("pnpm audit exited 0 but advisories are present")
         sys.exit(1)
         
     return data
@@ -44,13 +71,40 @@ def main():
     now = datetime.datetime.now(datetime.timezone.utc)
     valid_exceptions = {}
     for exc in exceptions:
-        expiry = datetime.datetime.fromisoformat(exc['expires_at'].replace('Z', '+00:00'))
-        if now > expiry:
-            print(f"Exception for advisory {exc.get('advisory_id', 'unknown')} has expired!")
+        if not isinstance(exc, dict):
+            print("Exception entry must be an object")
             sys.exit(1)
             
-        if 'advisory_id' in exc:
-            valid_exceptions[str(exc['advisory_id'])] = exc
+        required_keys = {'advisory_id', 'module_name', 'expires_at', 'versions', 'paths'}
+        missing = required_keys - set(exc.keys())
+        if missing:
+            print(f"Exception missing required keys {missing}: {exc}")
+            sys.exit(1)
+            
+        if not isinstance(exc['versions'], list) or not exc['versions']:
+            print(f"Exception versions must be a non-empty list: {exc}")
+            sys.exit(1)
+            
+        if not isinstance(exc['paths'], list) or not exc['paths']:
+            print(f"Exception paths must be a non-empty list: {exc}")
+            sys.exit(1)
+            
+        adv_id = str(exc['advisory_id'])
+        if adv_id in valid_exceptions:
+            print(f"Duplicate exception for advisory {adv_id}")
+            sys.exit(1)
+            
+        try:
+            expiry = datetime.datetime.fromisoformat(exc['expires_at'].replace('Z', '+00:00'))
+        except ValueError:
+            print(f"Invalid expires_at format in exception: {exc['expires_at']}")
+            sys.exit(1)
+            
+        if now > expiry:
+            print(f"Exception for advisory {adv_id} has expired!")
+            sys.exit(1)
+            
+        valid_exceptions[adv_id] = exc
             
     failed = False
     unexcepted = []
@@ -68,17 +122,22 @@ def main():
             unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): {title} (No exception found)")
             continue
             
-        expected_paths = set(exc.get('paths', []))
-        expected_versions = set(exc.get('versions', []))
+        if exc['module_name'] != module_name:
+            failed = True
+            unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Exception module {exc['module_name']} does not match.")
+            continue
+            
+        expected_paths = set(exc['paths'])
+        expected_versions = set(exc['versions'])
         
         for finding in vuln['findings']:
             ver = finding['version']
-            if expected_versions and ver not in expected_versions:
+            if ver not in expected_versions:
                 failed = True
                 unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Version {ver} is not excepted.")
                 
             for path in finding['paths']:
-                if expected_paths and path not in expected_paths:
+                if path not in expected_paths:
                     failed = True
                     unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Path {path} is not excepted.")
 

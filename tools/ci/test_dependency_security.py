@@ -10,17 +10,24 @@ import dependency_security
 
 class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.subprocess.run')
-    def test_no_vulnerabilities(self, mock_run):
+    @patch('dependency_security.Path')
+    def test_no_vulnerabilities(self, mock_path, mock_run):
         mock_result = MagicMock()
         mock_result.stdout = json.dumps({"advisories": {}})
+        mock_result.returncode = 0
         mock_run.return_value = mock_result
         
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
         with patch('sys.exit', side_effect=SystemExit) as mock_exit:
-            try:
-                dependency_security.main()
-            except SystemExit:
-                pass
-            mock_exit.assert_called_with(0)
+            with patch('builtins.open', mock_open(read_data="[]")):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(0)
 
     @patch('dependency_security.subprocess.run')
     @patch('dependency_security.Path')
@@ -38,6 +45,7 @@ class TestDependencySecurity(unittest.TestCase):
                 }
             }
         })
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
         mock_file = MagicMock()
@@ -78,6 +86,7 @@ class TestDependencySecurity(unittest.TestCase):
                 }
             }
         })
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
         mock_file = MagicMock()
@@ -101,6 +110,7 @@ class TestDependencySecurity(unittest.TestCase):
                 "message": "registry unavailable"
             }
         })
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
         with patch('sys.exit', side_effect=SystemExit) as mock_exit:
@@ -114,6 +124,7 @@ class TestDependencySecurity(unittest.TestCase):
     def test_malformed_report(self, mock_run):
         mock_result = MagicMock()
         mock_result.stdout = json.dumps({"unexpected": "format"})
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
         with patch('sys.exit', side_effect=SystemExit) as mock_exit:
@@ -127,7 +138,7 @@ class TestDependencySecurity(unittest.TestCase):
     def test_unexpected_exit_status_json_decode_error(self, mock_run):
         mock_result = MagicMock()
         mock_result.stdout = "Not JSON"
-        mock_result.returncode = 1
+        mock_result.returncode = 2
         mock_run.return_value = mock_result
         
         with patch('sys.exit', side_effect=SystemExit) as mock_exit:
@@ -153,6 +164,7 @@ class TestDependencySecurity(unittest.TestCase):
                 }
             }
         })
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
         mock_file = MagicMock()
@@ -182,7 +194,17 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_expired_exception(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"advisories": {}})
+        mock_result.stdout = json.dumps({"advisories": {
+            "123": {
+                "module_name": "expo",
+                "severity": "high",
+                "title": "Some expo vulnerability",
+                "findings": [
+                    {"version": "1.0.0", "paths": ["apps__driver-app>expo"]}
+                ]
+            }
+        }})
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
         mock_file = MagicMock()
@@ -193,7 +215,9 @@ class TestDependencySecurity(unittest.TestCase):
             {
                 "advisory_id": "123",
                 "module_name": "expo",
-                "expires_at": "2020-01-01T00:00:00Z"
+                "expires_at": "2020-01-01T00:00:00Z",
+                "versions": ["1.0.0"],
+                "paths": ["apps__driver-app>expo"]
             }
         ]
         

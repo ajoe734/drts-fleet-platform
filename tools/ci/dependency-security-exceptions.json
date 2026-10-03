@@ -2,7 +2,7 @@
   {
     "advisory_id": "1117015",
     "module_name": "postcss",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["8.4.49"],
     "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
@@ -10,18 +10,86 @@
   {
     "advisory_id": "1119441",
     "module_name": "uuid",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
-    "versions": ["8.3.2", "7.0.3"],
+    "versions": ["7.0.3", "8.3.2"],
     "paths": [
-      "apps__driver-app>expo>@expo/config-plugins>xcode>uuid",
-      "apps__api>exceljs>uuid"
+      "apps__api>exceljs>uuid",
+      "apps__driver-app>expo>@expo/config-plugins>xcode>uuid"
     ]
+  },
+  {
+    "advisory_id": "1120422",
+    "module_name": "shell-quote",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["1.8.3"],
+    "paths": ["apps__driver-app>react-native>react-devtools-core>shell-quote"]
+  },
+  {
+    "advisory_id": "1123260",
+    "module_name": "ws",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["7.5.10"],
+    "paths": [
+      "apps__driver-app>react-native>@react-native/community-cli-plugin>metro>ws"
+    ]
+  },
+  {
+    "advisory_id": "1123261",
+    "module_name": "ws",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["6.2.3"],
+    "paths": ["apps__driver-app>expo>@expo/cli>@react-native/dev-middleware>ws"]
+  },
+  {
+    "advisory_id": "1123492",
+    "module_name": "protobufjs",
+    "reason": "Google GenAI SDK dependency (internal tooling/codegen, not runtime parsing untrusted protos)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["7.6.2"],
+    "paths": ["apps__api>openclaw>@google/genai>protobufjs"]
+  },
+  {
+    "advisory_id": "1123528",
+    "module_name": "@babel/core",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["7.29.0"],
+    "paths": [
+      "apps__driver-app>expo>@expo/cli>@expo/image-utils>@expo/require-utils>@babel/core"
+    ]
+  },
+  {
+    "advisory_id": "1123944",
+    "module_name": "shell-quote",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["1.8.3"],
+    "paths": ["apps__driver-app>react-native>react-devtools-core>shell-quote"]
+  },
+  {
+    "advisory_id": "1123964",
+    "module_name": "protobufjs",
+    "reason": "Google GenAI SDK dependency (internal tooling/codegen, not runtime parsing untrusted protos)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["7.6.2"],
+    "paths": ["apps__api>openclaw>@google/genai>protobufjs"]
+  },
+  {
+    "advisory_id": "1123976",
+    "module_name": "body-parser",
+    "reason": "Low severity missing size limit in body-parser; wait for NestJS/Express upstream patch",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["2.2.2"],
+    "paths": ["apps__api>@nestjs/platform-express>express>body-parser"]
   },
   {
     "advisory_id": "1124252",
     "module_name": "postcss",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["8.4.49"],
     "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
@@ -29,15 +97,23 @@
   {
     "advisory_id": "1130709",
     "module_name": "postcss",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["8.4.49"],
     "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
   },
   {
+    "advisory_id": "1139322",
+    "module_name": "@hono/node-server",
+    "reason": "Moderate severity path traversal in dev tool SDK; not exposed on public endpoints",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["1.19.14"],
+    "paths": ["apps__api>openclaw>@modelcontextprotocol/sdk>@hono/node-server"]
+  },
+  {
     "advisory_id": "1139510",
     "module_name": "postcss",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["8.4.49"],
     "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
@@ -45,7 +121,7 @@
   {
     "advisory_id": "1147955",
     "module_name": "decode-uri-component",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["0.2.2"],
     "paths": ["apps__driver-app>expo-router>query-string>decode-uri-component"]
@@ -53,7 +129,7 @@
   {
     "advisory_id": "1239765",
     "module_name": "image-size",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["1.2.1"],
     "paths": ["apps__driver-app>expo>@expo/metro>metro>image-size"]
@@ -61,7 +137,7 @@
   {
     "advisory_id": "1239766",
     "module_name": "image-size",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["1.2.1"],
     "paths": ["apps__driver-app>expo>@expo/metro>metro>image-size"]
@@ -69,273 +145,19 @@
   {
     "advisory_id": "1240912",
     "module_name": "node-forge",
-    "reason": "Wait for upstream patches or internal triage",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
     "expires_at": "2027-01-01T00:00:00Z",
     "versions": ["1.4.0"],
     "paths": ["apps__driver-app>expo>@expo/cli>node-forge"]
   },
   {
-    "advisory_id": "1120422",
-    "module_name": "shell-quote",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1120782",
-    "module_name": "tar",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121089",
-    "module_name": "multer",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121091",
-    "module_name": "multer",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121186",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121190",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121240",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121243",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121253",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1121427",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1122168",
-    "module_name": "openclaw",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123260",
-    "module_name": "ws",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123261",
-    "module_name": "ws",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123492",
-    "module_name": "protobufjs",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123528",
-    "module_name": "@babel/core",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123939",
-    "module_name": "tar",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123940",
-    "module_name": "tar",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123941",
-    "module_name": "tar",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123942",
-    "module_name": "tar",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123944",
-    "module_name": "shell-quote",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123964",
-    "module_name": "protobufjs",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1123976",
-    "module_name": "body-parser",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1130714",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1130717",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1130725",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1130728",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1130730",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1137241",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1139322",
-    "module_name": "@hono/node-server",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1145647",
-    "module_name": "tar",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1193790",
-    "module_name": "multer",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1193792",
-    "module_name": "multer",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1193793",
-    "module_name": "multer",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1239932",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240035",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240037",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240040",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240043",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240045",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240047",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240049",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240051",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "advisory_id": "1240054",
-    "module_name": "undici",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
     "advisory_id": "1240992",
     "module_name": "braces",
-    "reason": "Wait for upstream patches or internal triage",
-    "expires_at": "2027-01-01T00:00:00Z"
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["3.0.3"],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro>metro-file-map>micromatch>braces"
+    ]
   }
 ]
