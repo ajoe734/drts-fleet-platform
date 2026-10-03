@@ -1069,3 +1069,188 @@ gh workflow run live-entry-map-acceptance.yml \
 This worker performed no deployment, cloud/secret/variable write, live product
 API call, workflow dispatch, or local runtime/PG/browser/E2E/Docker execution.
 All four required acceptance keys remain pending; the owner does not close them.
+
+## Hosted driver-isolation failure and repair (2026-10-03, after PR #2300)
+
+Previous candidate `80d4d88bce1097aa6da496d2b34b3314335c59bb` passed independent
+review and same-SHA CI (28 successful checks, one skipped check) and merged as
+`4b9531acaa5f45c077fea65bb71c35182f35f117`. [Deploy 37126736140](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37126736140)
+completed successfully, including operational acceptance. This is historical
+evidence for that candidate, not CI or acceptance for this repair.
+
+Supervisor's [map run 37128289733](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37128289733)
+used that exact candidate and deployment. Its artifact
+`live-map-acceptance-80d4d88bce1097aa6da496d2b34b3314335c59bb`, ID `11274949024`,
+has GitHub zip digest
+`0d1a55fad52b6791295762bdfd0e998dd467f4500572cc4a4cf4ab12c63ff949`.
+The owner downloaded and read all five artifact files and job `111218022691`:
+
+- `evidence-deployment.json`: API health and Google backend **passed**, full
+  runtime SHA `4b9531acaa5f45c077fea65bb71c35182f35f117`.
+- `evidence-sessions.json`: observer issuance and session verification now
+  **passed**, identity `ops/ops_observer/live-map-observer`, only
+  `regulatory:read`. Bootstrap then **failed** at `driver:isolation`, before
+  provisioner exchange or invitation creation; cleanup was `not-required`.
+- Provider, service-area/freshness and Chromium steps were **skipped**. There
+  is no new ops-render/runtime evidence and no completed acceptance gate.
+- Always-run teardown **failed** despite no invitation being created. The
+  final gate correctly exited 1; skipped steps cannot count as acceptance.
+
+Supervisor's 14:10Z instruction additionally reports API access-log statuses
+201 for token issuance, 200 for session verification and 200 for the registry
+GET at 14:03:39.833Z. The downloaded artifact does **not** retain the registry
+row or its raw field names. It cannot establish whether the driver was absent,
+online, dispatch eligible, or malformed. No product API call or dev data write
+was made by this worker to guess that missing observation.
+
+### Source diagnosis and repair boundaries
+
+`RegulatoryRegistryController.listDrivers` returns an envelope with
+`data.items`. The production `SnakeCaseInterceptor.deepToSnakeCase` emits
+`driver_id`, `work_state`, `dispatch_eligible`; the existing
+`createMapSessionRequest`/`normalizeApiResponse` restores camelCase before
+inspection. New regressions feed the **actual controller and registry seed**
+through that production serializer into `bootstrapMapSessions`, in both wire
+forms. This checks the real contract rather than inventing another registry
+response shape. No serializer change is needed.
+
+`DRIVER_SEED` defines `drv-demo-002` offline with valid licenses. That alone
+does not describe dev: `RegulatoryRegistryService.onModuleInit` replaces the
+seed with repository `loadState().drivers` whenever stored drivers exist.
+`RegulatoryRegistryRepository.persistChangesInternal` stores the work state
+and complete record in `reg.phase1_registry_drivers` (official V0012 schema).
+`createDriver` with active lifecycle starts available, and
+`updateDriverLifecycle(...active)` changes offline/suspended to available;
+`updateDriverWorkState` also persists changes. `decorateDriver` derives
+dispatch eligibility. The new controller regression exercises reactivation
+and the existing offline work-state command, with no network or notifications.
+These are verified ways state can differ from the seed, **not a claim about
+which operation changed the live DB**.
+
+The shared `driver-isolation.ts` records only the fixed driver ID, a bounded
+work-state enum (or `missing`/`invalid`), a boolean eligibility (or
+`missing`/`invalid`), envelope shape and fixed failure codes. Both bootstrap
+and coverage retain this evidence and include the safe summary in errors.
+Missing/duplicate drivers, malformed responses, non-offline work states and
+non-false eligibility all remain blocking. Raw rows, names, arbitrary values,
+tokens and response bodies never enter these diagnostics.
+
+Before the invitation POST, bootstrap exports the per-run
+`DRTS_LIVE_MAP_INVITATION_ATTEMPTED=true` marker through `GITHUB_ENV`. A lost
+issuance response remains `cleanup=unconfirmed`. Teardown returns
+`status=passed,recovery=not-required,revoked=false` only when no invitation code,
+attempt marker, driver token or device ID exists; this path performs **zero**
+HTTP/WIF calls. Missing recovery after an attempted mutation still fails.
+Existing consumed-invitation revocation is unchanged. The final evidence gate
+still requires both verified sessions, all live steps and confirmed revocation;
+a new regression proves that clean no-op teardown cannot make acceptance pass.
+No new GitHub secret or repository variable is required; the attempt marker is
+ephemeral job state, not an operator setting.
+
+| Finding / acceptance                                  | Source / repair                                                                                | Previous → repaired evidence                                                                                                               | Commands / evidence                                                                          | Remaining limitation                                                                      |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| F-DRIVER-ISOLATION-DIAGNOSTICS                        | `driver-isolation.ts`; `bootstrapMapSessions`; `runCoverage`                                   | Generic stage-only failure → bounded reasons plus actual accepted enum/boolean values; production controller/serializer contract exercised | `session-bootstrap.test.ts`, `coverage-runner.test.ts`; `isolation-before.log` → final suite | New hosted run must reveal actual reserved-driver state; no live state inferred from seed |
+| F-EMPTY-TEARDOWN                                      | `teardownMapSessions`, invitation attempt export before POST                                   | No invitation caused false cleanup failure → clean no-op without network; lost response/bound session still fails closed                   | `session-teardown.test.ts`, actual lifecycle/bootstrap→teardown regression, Python gate case | No-op cleanup is not a full live acceptance pass                                          |
+| F-OBSERVER-SEED / F-WIF-PRINCIPAL-REWRITE             | Previous dev provisioning and auth repair unchanged                                            | Old `ops:issue` failure → real observer session verified in run 37128289733                                                                | Previous candidate's artifact; observer/session-contract regressions remain in final suite   | New candidate still needs independent review, CI and hosted acceptance                    |
+| F-GOOGLE-DURABLE-DENIAL                               | Previous fixed 403 denial contract unchanged                                                   | Existing nine invalid-identity cases remain covered                                                                                        | `observer-identity.test.ts` in final suite                                                   | No new hosted negative identity probe claimed                                             |
+| service_area_live_decisions_for_real_taiwan_addresses | V0049 oracle and five decisions unchanged                                                      | Hosted coverage skipped                                                                                                                    | Run 37128289733, `run-status.json`                                                           | Pending new hosted address/coordinate/product decisions                                   |
+| location_freshness_live_states                        | Offline/no tasks/no vehicle checks and real >90s wait retained                                 | Hosted coverage skipped before driver provisioning                                                                                         | Same run; reserved-driver condition remains blocking                                         | Pending actual fresh/stale/low-accuracy/restored-fresh evidence                           |
+| browser_map_render_live                               | Existing Chromium/decoded imagery checks unchanged                                             | Hosted browser skipped                                                                                                                     | Same run                                                                                     | Pending ready/imagery/screenshots on dev ops                                              |
+| authorization_gate_and_allowed_targets_enforced       | Existing hosted authorization/allowlist/SHA gates plus strict no-op rejection by evidence gate | Old candidate preflight passed; failed/skip chain correctly rejected; repair preserves gate ordering                                       | Final suite includes 27 production Python gate cases                                         | Full new-candidate hosted chain remains pending                                           |
+
+The minimal repro was first committed as `ccf4caf3d` over unchanged production
+source `80d4d88b`: **16 failed / 33 passed**, exit 1 (no dependency/fixture
+failure). The focused repaired run passed **93 tests in four files**, exit 0.
+Final code/tests are anchored at
+`8d884f61e11e298ff2294fb1c0d100b752235ebf`; the final handoff commit additionally
+records this delivery evidence. Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4:
+
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/ --maxWorkers=2`:
+  **10 files / 165 tests passed**, zero skips, including 27 Python gate cases.
+- Scoped ESLint for the changed TypeScript files: exit 0.
+- `pnpm exec tsc -p tsconfig.json --noEmit`: exit 0 after isolated dependency
+  installation. The first run exited 2 because 22 worker `node_modules`
+  symlinks pointed outside this worktree, mixing distinct private `ApiClient`
+  types from another worker. Only these symlinks were detached; their targets
+  were preserved. `CI=true pnpm install --offline --frozen-lockfile --ignore-scripts`
+  exited 0, with no manifest/lockfile changes. The full 165-case suite also
+  passed again with these isolated dependencies.
+- External HTTP/auth boundaries are mocked in bootstrap tests. Actual registry,
+  controller, serializer, issuance/cleanup logic and evidence verifier execute.
+  These unit results are not PostgreSQL, live time, or browser evidence.
+
+Evidence directory in the assigned worktree:
+`.local/c114/acceptance-followup-20261003T140519Z/`.
+`isolation-before.log` SHA256:
+`57f1c0aeadbb778c33c82981f32b70ec46e2956dfa43aef752ff54bcb3b8e5d9`.
+`isolation-after.log` SHA256:
+`4f238bedf7672a06f8ef3483d9d65f9e553506a6ad8ff3c59a3e4051158112f0`.
+The acceptance audit and SHA256 manifest retain the downloaded evidence,
+completed verification logs and exact candidate/deployment identities.
+
+### Operator action if the next diagnostic confirms state drift
+
+Do not weaken the offline/non-dispatchable gate or reset a driver merely because
+its ID contains `demo`. The next hosted run will stop before provisioning if
+the reserved driver's live state is unsafe. Supervisor must first confirm that
+`drv-demo-002` is still reserved for this acceptance, has no active assignment,
+vehicle context or competing writer. Do not run alongside deploy/other tests.
+
+If it is still the reserved, unused fixture, the minimal operator repair is
+the **existing admin API**, with a short-lived authorized platform/ops session
+carrying `regulatory:write` (the observer session cannot write):
+
+```http
+POST https://drts-dev-api-r6ykdme3wa-uc.a.run.app/api/regulatory-registry/drivers/drv-demo-002/work-state
+Authorization: Bearer <operator's short-lived session, masked in hosted runner>
+Content-Type: application/json
+
+{"workState":"offline"}
+```
+
+Run only from the authorized hosted environment, after the same
+`DRTS_LIVE_MAP_TEST_AUTHORIZED=true`, API allowlist and expected deployment-SHA
+checks. Read back `GET /api/regulatory-registry/drivers` and require the exact
+row's `work_state == "offline"` and `dispatch_eligible == false` before map
+dispatch; retain only the bounded fields above. This does not activate a
+suspended/retired driver or bypass invalid licenses. It needs no registry D
+change because its fixed `driverProvisioningGrant.driverId` remains
+`drv-demo-002`. This worker did not perform the operator request.
+
+If the fixture is in real use or cannot be reserved, leave it unchanged. The
+alternative is a separately coordinated dedicated fixture `drv-live-map-c114`
+(the Google registry validator requires the `drv-` prefix):
+
+1. Operator uses `POST /api/regulatory-registry/drivers` with
+   `{"driverId":"drv-live-map-c114","name":"Live map acceptance fixture","lifecycleStatus":"draft","supportedServiceBuckets":["standard_taxi"],"licensesValid":true}`.
+   Supply no personal/payment data or supply pair. Conflict means inspect the
+   existing record, not overwrite it.
+2. After confirming it is solely a test fixture, use
+   `POST /api/regulatory-registry/drivers/drv-live-map-c114/lifecycle` with
+   `{"lifecycleStatus":"active","reason":"Dedicated hosted map acceptance fixture"}`,
+   then the work-state endpoint with `{"workState":"offline"}` and read back
+   the same isolation checks. Activation itself sets available, so it is not
+   the final isolation step.
+3. Supervisor updates only registry entry D (`principalId=dev-live-map`) in
+   `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` so
+   `driverProvisioningGrant={"driverId":"drv-live-map-c114"}`; retain the
+   narrow route/audience/scopes and all other entries, including observer E.
+   Load that version via the authorized deployment. Worker never writes it.
+4. This alternative also requires a reviewed harness change to the exact
+   allowed driver, expected evidence identity and matching fixtures, then
+   `DRTS_LIVE_MAP_TEST_DRIVER_ID=drv-live-map-c114` set by Supervisor. The
+   current candidate deliberately still rejects that ID; changing only a
+   variable or registry grant would not authorize it.
+
+### Next handoff and hosted run
+
+Supervisor's 14:10Z instruction reopened this task for the repair above. Keep
+the prior candidates and PRs as history. The new candidate needs Claude2's
+independent review, same-SHA CI and merge. Supervisor then verifies the full
+current API/ops deployed SHA and runs the existing dispatch recipe on r2 with
+the **new** candidate, `run_entry_profile=false`, `run_map_profile=true`, and
+no concurrent deployment/test. Do not re-use `80d4d88b` as the test candidate
+or assume `4b9531ac` is still the runtime. If only the harness changed, the
+runtime must still contain the previously accepted auth repair; any deployment
+decision remains with Supervisor. All four acceptance keys stay pending until
+that new hosted run supplies their evidence. The owner does not call `done`.
