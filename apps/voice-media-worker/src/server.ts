@@ -3,7 +3,7 @@ import { isStrictVoiceMediaEnvironment } from "./server/environment";
 import { composeVoiceMediaProviders } from "./server/provider-composition";
 import { VoiceSessionComposer } from "./server/session-composer";
 import { VoiceCallTurnCoordinator } from "./dialogue/call-turn-coordinator";
-import { OpenAiRealtimeFixtureAdapter } from "./providers/native-voice/native-voice-adapter";
+import { composeVoiceDialogueProvider } from "./dialogue/dialogue-provider-composition";
 import { createVoiceRecordingAdapter } from "./recording/recording-adapter-factory";
 import { createVoiceApiClient } from "./server/voice-api-client-factory";
 
@@ -23,9 +23,22 @@ async function main() {
   // implementation exists at all yet (see
   // ./providers/native-voice/native-voice-adapter.ts), so `production:
   // true` would make every turn fail closed with `voice_fixture_forbidden`
-  // rather than ever actually speaking to a caller.
+  // rather than ever actually speaking to a caller. R4 residual ("no
+  // explicit non-strict fixture opt-in"): `composeVoiceDialogueProvider`
+  // (see its own doc) now refuses to construct this provider at all in a
+  // strict environment, and requires an explicit
+  // `VOICE_DIALOGUE_PROVIDER_NAME=fixture` opt-in otherwise -- the same
+  // fail-closed-unless-configured convention `composeVoiceMediaProviders`
+  // already enforces for ASR/TTS, instead of this worker silently
+  // defaulting to fixture mode just because nothing else exists.
+  // `createProvider` throws per-attach (never at process startup) when
+  // unconfigured; `MediaWorkerServer`'s existing WS-upgrade handler already
+  // catches exactly that and closes the channel instead of crashing (see
+  // `provider-composition.ts`'s own `createAdapters` for the same
+  // established per-session fail-closed convention).
+  const dialogueComposition = composeVoiceDialogueProvider();
   const turnCoordinator = new VoiceCallTurnCoordinator(
-    () => new OpenAiRealtimeFixtureAdapter(),
+    dialogueComposition.createProvider,
     undefined,
     undefined,
     false,
@@ -72,6 +85,17 @@ async function main() {
   console.warn(
     `[voice-media-worker] ${composition.notCapableReason} /ready will report not-ready in a staging/production environment.`,
   );
+  if (isStrictVoiceMediaEnvironment()) {
+    console.warn(
+      `[voice-media-worker] ${dialogueComposition.notCapableReason} Every attach() will fail closed in this staging/production environment.`,
+    );
+  } else if (process.env.VOICE_DIALOGUE_PROVIDER_NAME?.trim() !== "fixture") {
+    console.warn(
+      "[voice-media-worker] VOICE_DIALOGUE_PROVIDER_NAME is not set to 'fixture'; every attach() will " +
+        "fail closed until this non-strict environment explicitly opts into fixture-mode dialogue " +
+        "(see ./dialogue/dialogue-provider-composition.ts).",
+    );
+  }
   console.warn(
     "[voice-media-worker] No call-authority verifier is configured (apps/api/src/modules/cti-ivr, " +
       "which would issue/verify these tokens from the real call/line authority, does not exist yet -- " +

@@ -109,6 +109,18 @@ export interface DialogueSnapshotRestorationResult {
     leaseEpoch: number;
     inputEpoch: number;
     pendingInput: boolean;
+    /** SD §5.4's ordered control-event watermark (`VoiceSessionRecord.
+     * lastAppliedControlSequence`, apps/api) -- `attach()`'s
+     * `restoreBoundAttachment` seeds this attachment's own next
+     * `recordControlEvent` `sequence` from `this value + 1` so a
+     * restored/reattached session's control-stream numbering stays
+     * contiguous with whatever a prior attachment already durably applied,
+     * instead of every fresh `attach()` wrongly restarting at 1 (AUDIT-
+     * VOICE-APPLICATION-WIRING-20261003 R4 residual). The real backend
+     * route already returns the full session record, including this
+     * field -- only this worker-side type was narrower than the actual
+     * response. */
+    lastAppliedControlSequence: number;
   };
   snapshot: PersistDialogueSnapshotResult["snapshot"] | null;
 }

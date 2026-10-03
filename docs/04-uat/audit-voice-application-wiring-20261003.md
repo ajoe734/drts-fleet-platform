@@ -2706,3 +2706,217 @@ because536 scoped tests pass is not independent review. All original code
 acceptance keys, exact-successor review/hosted CI and merge remain required.
 No DB migration was applied, no product/browser/server was started and no
 shared-dev or live-provider acceptance is claimed.
+
+## Round-15: ordered control-event watermark wired into a live turn + explicit non-strict fixture opt-in
+
+(candidate on `pi/audit-voice-application-wiring-20261003-v2`, atop `64ae42343`)
+
+This round implements the two obligations the coordinator's follow-through
+note (after `64ae4234`) named as still-open, already-authorized code work:
+"coordinator does not consume authoritative `recordControlEvent`" and
+"server.ts still unconditionally constructs fixture dialogue provider ...
+no explicit non-strict fixture opt-in."
+
+### R4 residual: the two-epoch-space reconciliation (`recordAuthoritativeSpeechStart`)
+
+Source: `apps/voice-media-worker/src/dialogue/call-turn-coordinator.ts`.
+
+Before this round, `executeTurn`'s `persist`/`execute` stages submitted
+`request.inputEpoch` -- this attachment's own process-local turn-
+sequencing counter (`turnSession.inputEpoch`, bumped on every
+`speech.started`/`media.epoch.advanced`/final) -- directly as the
+authoritative epoch to `resolveInput`, `persistDialogueSnapshot`, and
+`request_handoff`. The real backend's authoritative `inputEpoch`
+(`VoiceSessionService.resolveInput`'s CAS field) only ever advances via a
+durable `recordControlEvent("speech_start")` call, which this coordinator
+never made. The two counters are different epoch spaces (a local
+sequencing counter vs. a durable, speech-start-only watermark); submitting
+the local one directly means every bound-attachment `resolveInput` call
+would have been rejected the moment the authoritative session had not
+already been durably bumped to that exact value by some other path -- the
+prior rounds' `trusted-turn-composition.test.ts` fixture never caught this
+because it echoed back whatever `inputEpoch` the client submitted instead
+of modeling the server's own independent watermark.
+
+- New `recordAuthoritativeSpeechStart` (private method) durably opens (or
+  confirms already-open) this turn's own authoritative `inputEpoch` via
+  `apiClient.issueCapability` + `apiClient.recordControlEvent(eventType:
+  "speech_start")`, called from `executeTurn`'s `ports.persist` closure,
+  inside the SAME cancellation-fenced `boundedStage` `persistPort.persist`
+  already ran in -- a superseded/aborted turn is fenced by the exact same
+  `signal` checks `createTrustedDialoguePersistPort` already uses, not a
+  new mechanism.
+- `sourceEventId: request.turnId` makes the call idempotent per turn (a
+  retried call for the same turn dedupes server-side rather than consuming
+  a second sequence number). `sequence` is tracked per attachment in the
+  new `TurnSession.controlSequence` field, advanced only on a durable
+  deduped/applied response -- never on a `gap` -- so a failed attempt
+  safely retries the same sequence rather than permanently skipping it
+  (SD §5.4 "不得跳號處理後面的肯定").
+- The resolved authoritative `inputEpoch` is forwarded to
+  `persistPort.persist` via a shallow-copied request (`{...bounded,
+  inputEpoch: authoritativeInputEpoch}`), never by mutating `request`/
+  `bounded` itself -- `VoiceDialogueEngine.turn`'s own `isStale()` check
+  (which compares the ORIGINAL `request.inputEpoch` against the live local
+  counter for supersession fencing) is therefore completely unaffected;
+  the local counter's R1-R3 cancellation role is unchanged. The resolved
+  value is also stashed on `turnSession.authoritativeInputEpoch` for
+  `executeTools`'s `request_handoff` call later in the SAME turn (never
+  read across turns -- `VoiceDialogueEngine`'s own single-instance
+  `running` guard makes that safe), replacing its own prior use of
+  `request.inputEpoch`.
+- `binding.sessionVersion` is reconciled from `recordControlEvent`'s own
+  response whenever the session id correlates (its response shape has no
+  resourceScopeId/routeProfileVersion/leaseEpoch to cross-check further --
+  the best correlation its current shape allows), so the SUBSEQUENT
+  `resolveInput` CAS call always submits the correct, just-advanced
+  `expectedSessionVersion`.
+- A `gap` (non-contiguous sequence, or cross-media-epoch arrival) response
+  is fail-closed: `recordAuthoritativeSpeechStart` throws rather than let
+  `persist()` proceed with a watermark the authoritative session never
+  actually opened for this turn.
+- `restoreBoundAttachment` now also seeds `turnSession.controlSequence`
+  from the authoritative session's `lastAppliedControlSequence + 1` (a new
+  field added to `VoiceApiClient`'s `DialogueSnapshotRestorationResult.
+  session` type -- the real backend route already returns the full
+  `VoiceSessionRecord`, including this field; only the worker-side TS type
+  was narrower), so a restored/reattached session's control-stream
+  numbering stays contiguous with whatever a prior attachment already
+  durably applied, instead of every fresh `attach()` wrongly restarting at
+  sequence 1.
+
+New regression `tests/unit/audit-voice-application-wiring-20261003/
+trusted-turn-composition.test.ts`: "submits the authoritative, server-
+durable inputEpoch -- not this attachment's local turn-sequencing counter,
+which can diverge after an extra barge-in bump" -- emits a `speech.started`
+control frame BEFORE the triggering final (bumping the local counter from
+0 to 1, with no turn yet queued), then the final itself (bumping it again,
+1 to 2, so the local counter is 2 by the time the turn actually runs) --
+while the authoritative watermark this session's first-ever `speech_start`
+durably opens is 1. Asserts `/events`, `/input-resolutions`, the content
+`/dialogue-snapshot`, and `/handoffs` all submit `inputEpoch: 1`, proving
+the pre-fix code's would-be submission of the diverged local value (2) is
+gone. A second new test, "fails closed and never speaks when the
+control-event watermark reports a gap instead of applying", reproduces the
+gap fail-closed path and asserts zero speech and an untouched
+`sessionVersion`. The three existing trusted-composition tests (persist/
+tool-execution, R6 cancellation-fencing x4) were updated to add a realistic
+`/events` mock (previously absent, since the coordinator never called it)
+and to derive expected `sessionVersion` progressions from the request body
+instead of a hardcoded value, so they continue to model the REAL two-CAS-
+write sequence (`/events` then `/input-resolutions`) rather than silently
+passing with a mock that never modeled the first write at all.
+
+### R4 residual: explicit non-strict fixture opt-in for the dialogue provider
+
+Source: new `apps/voice-media-worker/src/dialogue/dialogue-provider-
+composition.ts`, consumed by `server.ts`.
+
+`server.ts` previously constructed `OpenAiRealtimeFixtureAdapter`
+unconditionally, in every environment, with no decision point -- unlike
+`composeVoiceMediaProviders` (ASR/TTS), which already refuses to fall back
+to an unverified/fixture provider in a strict (staging/production)
+environment. `composeVoiceDialogueProvider` mirrors that exact convention
+for the dialogue provider: a strict environment always fails closed
+(`VoiceMediaProviderError`, before any provider instance is constructed,
+regardless of configuration), and a non-strict one now requires an
+explicit `VOICE_DIALOGUE_PROVIDER_NAME=fixture` opt-in -- absent or any
+other value also fails closed, rather than silently defaulting to fixture
+mode. `createProvider` throws per-`attach()` call (never at process
+startup), which `MediaWorkerServer`'s existing WS-upgrade handler already
+catches and turns into a channel close -- the same established per-session
+fail-closed convention `provider-composition.ts`'s own `createAdapters`
+already uses, not a new mechanism. `server.ts` also gained a startup
+`console.warn` naming exactly which condition (strict environment, or a
+missing/wrong opt-in) will make every `attach()` fail.
+
+New `tests/unit/audit-voice-application-wiring-20261003/
+dialogue-provider-composition.test.ts` (6 cases): never production-capable;
+fails closed with no opt-in in a non-strict environment; constructs the
+real fixture adapter once opted in; fails closed in a strict environment
+even WITH the opt-in set; fails closed in a strict environment with no
+opt-in; rejects an unrecognized provider name the same as an absent one.
+
+### Precise remaining boundary: call-admission / `VoiceSessionBinding` construction
+
+Checked this round, with new concrete evidence (not a repeated claim):
+`apps/api/src/modules/voice-booking/voice-booking.controller.ts` has NO
+bare session-*creation* route -- every route is `sessions/:sessionId/...`,
+assuming a `voice.session` row already exists. `issueCapability`'s own
+request body (`IssueCapabilityCommand`) requires the CALLER to already
+know `resourceScopeId`/`routeProfileVersion` -- apps/api exposes no
+mechanism for this worker to discover or create them on its own. A real
+`VoiceSessionBinding` therefore cannot be constructed from anything this
+worker's own `POST /sessions`/WebSocket-upgrade path has access to today:
+it needs either (a) the already-documented, genuinely-missing `apps/api/
+src/modules/cti-ivr` call-authority verifier to supply these apps/api-
+specific identifiers via its resolved claims, or (b) a new voice.session
+*bootstrap* route/contract that does not exist and is not specified
+anywhere in SD -- inventing one here would be exactly the speculative-
+protocol risk this task's brief forbids. This is a genuine missing
+upstream contract, not unfinished code in this worker's own write scope;
+not attempted this round. `media-worker-server.ts`'s `attach(sessionId,
+channel)` call therefore still correctly supplies no binding.
+
+### Verification completed this round
+
+- `pnpm --filter @drts/contracts build`: exit 0 (required once after a
+  stale `dist/` made `@drts/contracts` typecheck falsely report missing
+  exports -- not a product defect).
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm --filter @drts/control-plane-auth build` + apps/api `tsc --noEmit`:
+  exit 0 (same pre-existing generated-declaration step prior rounds
+  documented, not a dependency change).
+- Root `tsc --noEmit`: the only errors are the same pre-existing, unrelated
+  cross-worktree `@drts/api-client` type-identity collision (`tests/unit/
+  fleet-partner-list-envelope.test.ts`, `tests/unit/system-remediation/
+  sr-admin-verify-001/fleet-lists.test.ts`) prior rounds already documented
+  as a local-environment limitation (stale sibling worktree node_modules
+  symlink), not a regression from this round's source changes -- this
+  round touched no file either error references.
+- `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/
+  voice-booking packages/contracts/src/voice-dialogue.ts tests/unit/
+  audit-voice-application-wiring-20261003 tests/integration/
+  unattended-voice-postgres.integration.test.ts --max-warnings=0`: exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,
+  media-recording-finalize-authorization,session-authority-grant-expiry-race,
+  websocket-channel-frame-limits,media-worker-server-shutdown-drain,
+  session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+  tests/unit/uv-exec-{008,010,012,017,020,026}.test.ts
+  tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts
+  --maxWorkers=1`: **27 files / 544 tests pass** (up from 26 files / 536 at
+  Round-14; zero regressions: 2 new cases in `trusted-turn-composition.
+  test.ts`, 1 new file `dialogue-provider-composition.test.ts` with 6
+  cases; 3 pre-existing `trusted-turn-composition.test.ts` cases updated to
+  model the real two-CAS-write sequence rather than a mock that silently
+  never modeled the first write).
+- `pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.test.ts`:
+  not re-run this round (no change to that file or to `apps/api`); Round-14's
+  collection/fail-closed confirmation stands unchanged.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider/GCP call, package install, git history rewrite, or force-push was
+performed this round. `apps/api` was not modified this round (the
+restoration route already returned the full session record; only the
+worker-side client type needed widening).
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: unchanged from Round-14 for the
+  recording-adapter side; the admitted-turn path now carries a real,
+  consumed authoritative-epoch reconciliation in addition to the dialogue-
+  content persistence Round-14 added. Not independently re-claimed as
+  fully met -- reviewer determines.
+- `authority_epoch_consent_fences`: the `recordControlEvent`/local-vs-
+  remote-epoch gap this task's own class doc and the coordinator's
+  follow-through note both named is now closed with regression evidence
+  (including the gap-fail-closed case); the call-admission/binding
+  boundary above remains genuinely open and is now precisely distinguished
+  from this.
+- `precise_unimplemented_and_external_boundaries`: the call-admission
+  boundary is restated this round with fresh, specific evidence (no bare
+  session-creation route; `issueCapability`'s body requires caller-known
+  identifiers this worker cannot discover) rather than a repeated claim.
+- `same_sha_review_ci`: pending independent review and hosted CI on this
+  exact candidate SHA; not claimed.

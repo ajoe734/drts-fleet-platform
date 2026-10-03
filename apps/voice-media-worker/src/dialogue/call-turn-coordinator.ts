@@ -107,6 +107,26 @@ interface TurnSession {
    * trusted/bound attachment whose restored state could not be verified
    * silently run turns against a blank/unverified one. */
   restoreFailed?: boolean;
+  /** This attachment's own next `recordControlEvent` `sequence` value
+   * (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4 residual: the "ordered
+   * control-event watermark" seam). Seeded by `restoreBoundAttachment`
+   * from the authoritative session's `lastAppliedControlSequence + 1`, so
+   * a restored/reattached session stays contiguous with whatever a prior
+   * attachment already durably applied. `undefined` for an unbound
+   * attachment, which never calls `recordControlEvent` at all. */
+  controlSequence?: number;
+  /** The authoritative, server-durable `inputEpoch` this turn's own
+   * `recordAuthoritativeSpeechStart` call resolved -- distinct from
+   * `inputEpoch` above (this class's process-local turn-sequencing
+   * counter, used only for local supersession/cancellation fencing, see
+   * `handle`). `resolveInput`'s CAS and `request_handoff`'s submission
+   * must both use THIS value, never the local counter, or they fence
+   * against a watermark the authoritative session never actually opened
+   * for this turn. Set once per turn (in the `persist` stage) and read
+   * once more later in the SAME turn's `execute` stage; never read across
+   * turns -- `VoiceDialogueEngine`'s own single-instance `running` guard
+   * is what makes that safe (see class doc). */
+  authoritativeInputEpoch?: number;
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
@@ -148,21 +168,27 @@ const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"]
  * genuinely unavailable is the call-admission flow that would supply any
  * attachment a real `VoiceSessionBinding` in the first place (see
  * `attach()`'s own doc and `../server/voice-session-binding.ts`), and the
- * ordered control-event watermark this worker does not yet call
- * `recordControlEvent`/an ASR-final-recording route for during a live turn
- * (R4 residual -- the route/client exist, see
- * `voice-api-client.ts#recordControlEvent`, but nothing in this
- * coordinator's `handle()` calls it yet): this attachment's own
- * process-local turn-sequencing counter (`turnSession.inputEpoch`) and the
- * authoritative, speech-start-only remote watermark `resolveInput` checks
- * against are two different epoch spaces today, and reconciling them needs
- * a dedicated, Supervisor-coordinated redesign of the turn-cancellation
- * invariants R1-R3 above already extensively regress-test -- deliberately
- * not attempted in this round; see this task's UAT artifact. Restoration on
- * attach/reconnect (session + latest dialogue snapshot) is implemented
- * below (`restoreBoundAttachment`) for any attachment that IS given a real
- * binding; restart-time re-attachment of an in-flight call is still gated
- * on the same genuinely-unavailable call-admission flow.
+ * ordered control-event watermark (R4 residual): `executeTurn`'s `persist`
+ * stage now calls `recordAuthoritativeSpeechStart`, which durably records
+ * a `recordControlEvent("speech_start")` for this turn's own admitted
+ * final (deduped by `turnId`, sequenced from `restoreBoundAttachment`'s
+ * restored watermark) and resolves the authoritative `inputEpoch`
+ * `resolveInput`/`persistDialogueSnapshot`/`request_handoff` must all use
+ * instead of this attachment's process-local turn-sequencing counter
+ * (`turnSession.inputEpoch`). That local counter is NOT replaced or
+ * removed -- it still fences local supersession/cancellation exactly as
+ * R1-R3 above describe (a stale turn's `recordAuthoritativeSpeechStart`
+ * call still durably opens a watermark even if the turn using it is
+ * itself superseded moments later; the SAME `isCurrent`/`isStale`/
+ * `abortController` checks that already gate every other effect gate this
+ * one too, via the engine's own `boundedStage`/`persist` fail-closed
+ * path). The two epoch spaces are therefore reconciled per turn, inside
+ * the existing cancellation-fenced stage, rather than by merging the two
+ * counters into one. Restoration on attach/reconnect (session + latest
+ * dialogue snapshot, plus this attachment's next control-event sequence)
+ * is implemented below (`restoreBoundAttachment`) for any attachment that
+ * IS given a real binding; restart-time re-attachment of an in-flight call
+ * is still gated on the same genuinely-unavailable call-admission flow.
  *
  * This coordinator therefore runs the real `VoiceDialogueEngine` /
  * `VoiceDialogueState` machinery against every admitted final transcript --
@@ -313,6 +339,14 @@ export class VoiceCallTurnCoordinator {
         );
       }
       binding.sessionVersion = restoration.session.sessionVersion;
+      // R4 residual: seed this attachment's own next `recordControlEvent`
+      // sequence from the authoritative watermark instead of always
+      // starting fresh at 1 -- a restored/reattached session (reconnect,
+      // worker restart) must stay contiguous with whatever a prior
+      // attachment already durably applied, or every one of this
+      // attachment's events would be rejected as a gap (SD §5.4).
+      turnSession.controlSequence =
+        restoration.session.lastAppliedControlSequence + 1;
       if (restoration.snapshot) {
         turnSession.state.restoreFromSnapshotContent(
           restoration.snapshot.content,
@@ -325,6 +359,97 @@ export class VoiceCallTurnCoordinator {
         error,
       );
     }
+  }
+
+  /** Durably opens (or confirms already-open) the authoritative,
+   * speech-start-only `inputEpoch` watermark for this turn's own admitted
+   * final, and returns the value `resolveInput`/`persistDialogueSnapshot`/
+   * `request_handoff` must all submit instead of this attachment's local
+   * `turnSession.inputEpoch` counter (R4 residual, see class doc).
+   *
+   * `sourceEventId: request.turnId` makes this call idempotent per turn
+   * (a retried call for the SAME turn dedupes server-side instead of
+   * consuming a second sequence number); `sequence` is this attachment's
+   * own monotonic control-stream position, tracked in
+   * `turnSession.controlSequence` and only advanced on a durable
+   * deduped/applied response, never on a gap -- so a failed attempt
+   * safely retries the same sequence next time instead of permanently
+   * skipping it. `result.session` is a fresh authoritative read in every
+   * branch (applied, deduped, or gap), so `binding.sessionVersion` is
+   * reconciled from it whenever the session id correlates, same principle
+   * `createTrustedDialoguePersistPort`'s own correlation check uses --
+   * except `RecordControlEventResult.session` carries no
+   * resourceScopeId/routeProfileVersion/leaseEpoch to cross-check further,
+   * so this is the best correlation its current response shape allows.
+   *
+   * A `gap` (non-contiguous sequence, or a cross-media-epoch arrival) is
+   * fail-closed here: it means the authoritative session never actually
+   * opened a resolvable input watermark for this turn, so proceeding to
+   * `resolveInput` with a stale/unresolved epoch would be worse than
+   * rejecting this turn outright (SD §5.4 "不得跳號處理後面的肯定"). */
+  private async recordAuthoritativeSpeechStart(
+    turnSession: TurnSession,
+    binding: VoiceSessionBinding,
+    request: VoiceDialogueRequest,
+  ): Promise<number> {
+    const apiClient = this.apiClient;
+    if (!apiClient) {
+      throw new Error(
+        "voice_control_event_unbound: no VoiceApiClient is configured.",
+      );
+    }
+    const { signal } = request;
+    if (signal.aborted) {
+      throw new Error(
+        "voice_control_event_aborted: request was already aborted before the control event was recorded.",
+      );
+    }
+    const capability = await apiClient.issueCapability(
+      {
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: ["session_execute"],
+      },
+      signal,
+    );
+    if (signal.aborted) {
+      throw new Error(
+        "voice_control_event_aborted: request was aborted while awaiting capability issuance.",
+      );
+    }
+    const sequence = turnSession.controlSequence ?? 1;
+    const result = await apiClient.recordControlEvent(
+      binding.voiceSessionId,
+      capability.token,
+      {
+        source: "voice_media_worker",
+        sourceEventId: request.turnId,
+        occurredAt: new Date().toISOString(),
+        sequence,
+        mediaEpoch: request.mediaEpoch ?? 0,
+        eventType: "speech_start",
+      },
+      signal,
+    );
+    if (result.applied || result.deduped) {
+      turnSession.controlSequence = sequence + 1;
+    }
+    if (result.session.voiceSessionId === binding.voiceSessionId) {
+      binding.sessionVersion = result.session.sessionVersion;
+    }
+    if (signal.aborted) {
+      throw new Error(
+        "voice_control_event_aborted: request was aborted while awaiting the control-event response.",
+      );
+    }
+    if (!result.applied && !result.deduped) {
+      throw new Error(
+        "voice_control_event_gap: the authoritative session did not durably open a new input watermark for this turn.",
+      );
+    }
+    return result.session.inputEpoch;
   }
 
   /** Call once an attachment's channel/session is gone (close, drain).
@@ -497,6 +622,30 @@ export class VoiceCallTurnCoordinator {
         if (this.production && persistPort.mode === "fixture") {
           throw new Error("voice_persist_untrusted_for_production");
         }
+        // R4 residual: a bound attachment's `request.inputEpoch` is only
+        // this attachment's local turn-sequencing counter (see class
+        // doc/`TurnSession.authoritativeInputEpoch`) -- never the
+        // authoritative watermark `resolveInput`'s CAS actually checks.
+        // Durably open (or confirm already-open) that watermark first,
+        // then forward the resolved authoritative value in place of the
+        // local one; an unbound attachment (no `binding`) or a
+        // coordinator-wide `"trusted"` port used with no binding (see the
+        // fixture-guard test above) is unaffected and keeps submitting
+        // `bounded` unchanged, exactly as before this residual existed.
+        if (persistPort.mode === "trusted" && turnSession.binding) {
+          const authoritativeInputEpoch =
+            await this.recordAuthoritativeSpeechStart(
+              turnSession,
+              turnSession.binding,
+              bounded,
+            );
+          turnSession.authoritativeInputEpoch = authoritativeInputEpoch;
+          await persistPort.persist(next, {
+            ...bounded,
+            inputEpoch: authoritativeInputEpoch,
+          });
+          return;
+        }
         await persistPort.persist(next, bounded);
       },
       execute: (output, bounded) =>
@@ -600,14 +749,25 @@ export class VoiceCallTurnCoordinator {
     // `VoiceCallTurnCoordinator.handle`) or its deadline passes. Checked
     // before each awaited HTTP call (never start one once already
     // cancelled) and forwarded into both calls so an in-flight request is
-    // actually aborted, not merely unsignalled. `request.inputEpoch` --
-    // never `turnSession.inputEpoch`, which may already have been bumped
-    // past this turn's own admitted value by the same supersession that
-    // aborted `request.signal` -- is what is submitted, so a stale
-    // proposal can never be laundered under a newer epoch merely because
-    // the HTTP call happened to still be let through.
+    // actually aborted, not merely unsignalled. `turnSession.
+    // authoritativeInputEpoch` -- set by this same turn's own `persist`
+    // stage (`recordAuthoritativeSpeechStart`, R4 residual), never
+    // `request.inputEpoch` (this attachment's local turn-sequencing
+    // counter, which may already have been bumped past this turn's own
+    // admitted value by the same supersession that aborted
+    // `request.signal`) and never the pre-residual `request.inputEpoch`
+    // either -- is what is submitted, so this turn's `request_handoff`
+    // CAS references the SAME authoritative watermark `persist` already
+    // admitted it under, and a stale proposal can never be laundered
+    // under a newer epoch merely because the HTTP call happened to still
+    // be let through. `execute` only ever runs after this same turn's
+    // `persist` stage has already set it (see `VoiceDialogueEngine.turn`'s
+    // own stage order), so this is never undefined on a bound attachment
+    // in practice; the local counter is kept as a defensive fallback only.
     if (turnSession.binding && this.apiClient) {
       const binding = turnSession.binding;
+      const authoritativeInputEpoch =
+        turnSession.authoritativeInputEpoch ?? request.inputEpoch;
       const results: unknown[] = [];
       for (const tool of output.tools) {
         if (tool.name !== "request_handoff") continue;
@@ -626,7 +786,7 @@ export class VoiceCallTurnCoordinator {
         const response = await this.apiClient.requestHandoff(
           binding.voiceSessionId,
           capability.token,
-          { inputEpoch: request.inputEpoch, output },
+          { inputEpoch: authoritativeInputEpoch, output },
           request.signal,
         );
         results.push(...response.results);

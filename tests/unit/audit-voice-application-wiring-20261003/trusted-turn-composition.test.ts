@@ -125,8 +125,29 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
               leaseEpoch: binding.leaseEpoch,
               inputEpoch: 0,
               pendingInput: false,
+              lastAppliedControlSequence: 0,
             },
             snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/events")) {
+        // Mirrors the real `VoiceSessionService.recordControlEvent`
+        // bootstrap case: the first-ever `speech_start` for this session
+        // (sequence 1) durably advances `sessionVersion`/`inputEpoch`
+        // together (R4 residual -- `recordAuthoritativeSpeechStart`).
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: (body as { sequence: number }).sequence,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
           },
         });
       }
@@ -136,12 +157,18 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
         // already matched the session's current one, so the real backend
         // always echoes it back unchanged (the client's response
         // correlation check in `createTrustedDialoguePersistPort` relies
-        // on exactly this).
+        // on exactly this). `sessionVersion` is derived from the submitted
+        // `expectedSessionVersion` (real CAS always advances by exactly
+        // 1), not hardcoded, so it stays correct regardless of how many
+        // prior CAS writes (e.g. the `/events` call above) already
+        // advanced the binding this turn.
         return jsonResponse(200, {
           data: {
             session: {
               voiceSessionId: binding.voiceSessionId,
-              sessionVersion: 6,
+              sessionVersion:
+                (body as { expectedSessionVersion: number })
+                  .expectedSessionVersion + 1,
               resourceScopeId: binding.resourceScopeId,
               routeProfileVersion: binding.routeProfileVersion,
               leaseEpoch: binding.leaseEpoch,
@@ -208,14 +235,23 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
       (c) => c.path === "/callcenter/voice/capabilities" && !(c.body as { scopes: string[] }).scopes.includes("handoff_request"),
     );
     expect(persistCapabilityCall).toBeDefined();
+    // The real `/events` call (R4 residual) durably opens the
+    // authoritative inputEpoch watermark first, advancing sessionVersion
+    // 5 -> 6, before `/input-resolutions` ever runs.
+    const controlEventCall = calls.find((c) => c.path.endsWith("/events"));
+    expect(controlEventCall?.body).toMatchObject({
+      sequence: 1,
+      eventType: "speech_start",
+    });
     const inputResolutionCall = calls.find((c) => c.path.endsWith("/input-resolutions"));
     expect(inputResolutionCall?.body).toMatchObject({
-      expectedSessionVersion: 5,
+      expectedSessionVersion: 6,
+      inputEpoch: 1,
       resolution: "relevant",
     });
-    // The binding's sessionVersion is now the real CAS response's value,
-    // not a locally invented one.
-    expect(binding.sessionVersion).toBe(6);
+    // The binding's sessionVersion reflects both real CAS writes (/events
+    // then /input-resolutions), not a locally invented value.
+    expect(binding.sessionVersion).toBe(7);
 
     // Real tool execution: a handoff_request-scoped capability was issued,
     // and the actual request_handoff result (not a local "unavailable"
@@ -233,6 +269,165 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
     // completed successfully end to end rather than throwing.
     expect(sentBinary.length).toBeGreaterThan(0);
     expect(sentBinary[0]!.toString("utf8")).toContain("緊急救援");
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4 residual: before
+   * `recordAuthoritativeSpeechStart` existed, `resolveInput`/
+   * `persistDialogueSnapshot`/`request_handoff` all submitted
+   * `turnSession.inputEpoch` -- this attachment's own process-local
+   * turn-sequencing counter -- directly as the authoritative epoch. That
+   * counter advances on `speech.started` too (barge-in), not only on a
+   * final, so a barge-in immediately before the triggering final makes it
+   * diverge from the server's actual speech-start-only watermark. This
+   * reproduces exactly that divergence (local counter reaches 2; the
+   * authoritative watermark this session's first-ever `speech_start`
+   * durably opens is 1) and proves every authoritative call now submits
+   * the resolved value 1, never the locally-diverged 2 a real
+   * `resolveInput`/`VoiceToolGatewayService` would reject as stale.
+   */
+  it("submits the authoritative, server-durable inputEpoch -- not this attachment's local turn-sequencing counter, which can diverge after an extra barge-in bump", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "88888888-8888-8888-8888-888888888888",
+      resourceScopeId: "99999999-9999-9999-9999-999999999999",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 10,
+    };
+
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ path, body });
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/events")) {
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: (body as { sequence: number }).sequence,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion:
+                (body as { expectedSessionVersion: number })
+                  .expectedSessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion:
+                (body as { expectedSessionVersion: number })
+                  .expectedSessionVersion + 1,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
+              turnId: (body as { turnId: string }).turnId,
+              content: (body as { content: unknown }).content,
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      if (path.endsWith("/handoffs")) {
+        return jsonResponse(200, {
+          data: { results: [{ status: "queued", handoffId: "handoff-real-2" }] },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    await flush(5);
+
+    // Barge-in BEFORE the triggering final: bumps the local
+    // `turnSession.inputEpoch` counter to 1 with no turn yet queued.
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({ type: "speech.started" }),
+      false,
+    );
+    // The triggering final then bumps the local counter again, to 2 --
+    // diverged from the authoritative watermark's eventual value of 1.
+    asr.emitFinal("救命", "seg-1");
+    await flush(10);
+
+    const controlEventCall = calls.find((c) => c.path.endsWith("/events"));
+    expect(controlEventCall?.body).toMatchObject({ sequence: 1 });
+    const inputResolutionCall = calls.find((c) => c.path.endsWith("/input-resolutions"));
+    expect(inputResolutionCall?.body).toMatchObject({ inputEpoch: 1 });
+    const snapshotCall = calls.find(
+      (c) => c.path.endsWith("/dialogue-snapshot") && (c.body as { content?: unknown })?.content,
+    );
+    expect(snapshotCall?.body).toMatchObject({ inputEpoch: 1 });
+    const handoffCall = calls.find((c) => c.path.endsWith("/handoffs"));
+    expect(handoffCall?.body).toMatchObject({ inputEpoch: 1 });
+
+    expect(sentBinary.length).toBeGreaterThan(0);
   });
 
   it("never calls apps/api for an attachment with no binding, even with a configured VoiceApiClient -- the existing fixture/local-stub behavior is unchanged by default", async () => {
@@ -262,6 +457,98 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
 
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(sentBinary.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4 residual, fail-closed case:
+   * a `gap` (non-contiguous sequence, or a cross-media-epoch arrival, SD
+   * §5.4) means the authoritative session never actually durably opened a
+   * resolvable input watermark for this turn. `recordAuthoritativeSpeechStart`
+   * must reject rather than let `persist()` proceed with a stale/unopened
+   * epoch -- never a partial success where the engine commits state/speaks
+   * without ever confirming authoritative admission.
+   */
+  it("fails closed and never speaks when the control-event watermark reports a gap instead of applying", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      resourceScopeId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 3,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/events")) {
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: false,
+            gap: true,
+            appliedThroughSequence: 0,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              inputEpoch: 0,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    await flush(5);
+
+    asr.emitFinal("救命", "seg-1");
+    await flush(10);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).endsWith("/input-resolutions"))).toBe(false);
+    // The session's own sessionVersion is left untouched -- a gap must
+    // never be silently reconciled as if it had advanced anything.
+    expect(binding.sessionVersion).toBe(3);
+    consoleError.mockRestore();
   });
 
   /**
@@ -313,8 +600,25 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
                 leaseEpoch: binding.leaseEpoch,
                 inputEpoch: 0,
                 pendingInput: false,
+                lastAppliedControlSequence: 0,
               },
               snapshot: null,
+            },
+          });
+        }
+        if (path.endsWith("/events")) {
+          return jsonResponse(200, {
+            data: {
+              deduped: false,
+              applied: true,
+              gap: false,
+              appliedThroughSequence: (body as { sequence: number }).sequence,
+              session: {
+                voiceSessionId: binding.voiceSessionId,
+                sessionVersion: binding.sessionVersion + 1,
+                inputEpoch: 1,
+                pendingInput: true,
+              },
             },
           });
         }
@@ -323,7 +627,9 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
             data: {
               session: {
                 voiceSessionId: binding.voiceSessionId,
-                sessionVersion: 5,
+                sessionVersion:
+                  (body as { expectedSessionVersion: number })
+                    .expectedSessionVersion + 1,
                 resourceScopeId: binding.resourceScopeId,
                 routeProfileVersion: binding.routeProfileVersion,
                 leaseEpoch: binding.leaseEpoch,
@@ -513,6 +819,7 @@ describe("Restoration on attach: real VoiceSessionComposer + VoiceCallTurnCoordi
               leaseEpoch: binding.leaseEpoch,
               inputEpoch: 0,
               pendingInput: false,
+              lastAppliedControlSequence: 0,
             },
             snapshot: {
               snapshotId: "snapshot-restored",
@@ -607,6 +914,7 @@ describe("Restoration on attach: real VoiceSessionComposer + VoiceCallTurnCoordi
               leaseEpoch: binding.leaseEpoch,
               inputEpoch: 0,
               pendingInput: false,
+              lastAppliedControlSequence: 0,
             },
             snapshot: null,
           },
