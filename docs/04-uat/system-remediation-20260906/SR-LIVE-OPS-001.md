@@ -77,6 +77,18 @@ This worker did not apply IAM, publish readiness, create a clone, dispatch a
 workflow, run a product server or run Playwright. New candidate CI results belong
 to its own SHA; no previous candidate's green result is reused.
 
+Hosted checkpoint verification was read to completion before this evidence update:
+at `fe64094cba7de0a1b360c0ba46533224ab5bdddc`,
+[CI run 37100160333](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37100160333)
+and [integration run 37100160345](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37100160345)
+both concluded **success**. The
+[changes job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37100160345/job/111137968835)
+log shows the registered command running **32 tests in 20.935 seconds**, followed
+by the coverage check reporting **all 80 test files**. Retrieved logs/results are
+`anchor-hosted-coverage.txt`, `anchor-ci-result.json` and
+`anchor-ci-integ-result.json` in the local evidence directory above. These are
+checkpoint results; the final candidate still requires its own CI and review.
+
 ## Supervisor decision and retained implementation (2026-10-03T02:20Z)
 
 The canonical task's `integration_notes` accepts the inability to enforce the
