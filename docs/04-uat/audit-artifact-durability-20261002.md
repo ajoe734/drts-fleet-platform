@@ -1940,3 +1940,116 @@ run locally from this VM.
   (also in this task's `write_scopes`) do not implement a custom
   `DocumentArtifactStore`, and a repo-wide search confirmed no other
   producer implements the claim/reclaim pattern this fix targets.
+
+## Follow-up: real-PostgreSQL integration matrix for the claim/finalize/release/generic-writer guards
+
+Prior rounds' "OPEN evidence gap" (most recently restated in the R7/R8
+byte-ownership reopen) was that every claim/finalize/release/generic-writer
+guard had only ever been proven against a fake SQL transport that models
+the same text/binding in JS -- never against real PostgreSQL JSONB `->>`
+text comparison, real `NOW() - INTERVAL`, or two genuinely separate pooled
+connections actually racing the same statement. This follow-up closes that
+specific gap at the repository layer.
+
+### What was added
+
+`tests/integration/platform-admin-artifact-publication.integration.test.ts`
+(new, root-level `tests/integration/`, matching this task's `write_scopes`):
+real `DatabaseService` + real `PlatformAdminRepository`, no mocked query
+transport, seven cases:
+
+- `claimPlacardPublish`: two genuinely separate `DatabaseService`/pool
+  connections racing `INSERT ... ON CONFLICT` for the same fresh
+  `placardVersionId` -- exactly one wins, the loser's `currentRecord`
+  carries the winner's own claim token.
+- `claimPlacardPublish`: a pending claim younger than two minutes is not
+  reclaimable by a second connection.
+- `claimPlacardPublish`: a pending claim whose `updated_at` is genuinely
+  (not simulated) older than two minutes IS reclaimable -- this is the one
+  case that cannot be proven at all without a real `NOW() - INTERVAL '2
+  minutes'` evaluation; a fake transport can only pattern-match the SQL
+  text, never actually evaluate it.
+- `finalizePlacardPublish`: a wrong claim token is a real no-op (row
+  unchanged, verified by a fresh `SELECT`); the correct token finalizes and
+  drops the token.
+- `releasePlacardPublishClaim`: wrong token is a no-op; after the claim is
+  finalized (token gone), attempting release against the original
+  claimed-`publishedAt` + original token is still correctly a no-op --
+  finalize can never be regressed back to unpublished by a loser's stale
+  release.
+- `persistChanges` generic-writer guard, two cases: (1) the exact
+  R7-followthrough Codex REOPEN shape -- a stale `publishedAt: null`
+  snapshot replayed with a newer `updated_at` than an already-finalized
+  row must NOT overwrite it (this is the real-Postgres JSONB-text-equality
+  proof the prior round's fake-transport test explicitly could not
+  provide), while a legitimate re-write carrying the SAME already-current
+  `publishedAt` with a newer clock is still allowed through; (2) a plain
+  older-`updated_at` writer never applies, independent of `publishedAt`.
+
+Every case runs against the actual `admin.phase1_placard_versions` table
+created by `infra/migrations/V0013__phase1_source_of_truth_snapshots.sql`,
+cleans up its own rows (unique `randomUUID()`-suffixed ids) in `afterEach`,
+and never starts a server or touches `DocumentArtifactStore`/S3 -- this
+matrix is deliberately DB-only; the byte-ownership S3 fence above is
+proven at the real adapter/service layer with the DB transport mocked
+(the complementary half), and a real-Postgres-plus-real-S3 combination
+stays out of reach of both this VM and the hosted CI job, remaining
+`SR-LIVE-DOC-001`.
+
+### Why no `.github/workflows/ci-integ.yml` change was needed
+
+`write_scopes` lists `.github/workflows/ci-integ.yml`, and the reopen's
+text explicitly anticipated wiring a new step for this matrix (as the
+existing UV-EXEC-015/UV-EXEC-024 PostgreSQL steps do). That wiring turned
+out to be unnecessary: the root `vitest.config.ts`'s `test.include` already
+has `"tests/integration/**/*.test.ts"`, and the `unit` job's "Run unit
+tests" step already runs `pnpm db:migrate` immediately before
+`pnpm run test:unit` (`vitest run --exclude ...`, with this new file not
+among the three excluded paths) against a real `postgis/postgis:16-3.4`
+service already defined on that job. A file placed at this exact path,
+named per `write_scopes`, is therefore already swept by the existing
+hosted job once the real schema is migrated -- confirmed by reading the
+job definition and the vitest include glob, not merely assumed. This
+mirrors the existing convention of
+`tests/integration/sr-partner-notify-nav-20260917.integration.test.ts`,
+which uses the identical `describe.skipIf(!process.env.DATABASE_URL)`
+guard for the same reason this new file does: `pnpm run test:unit` sweeps
+every file under `tests/integration/**` by default, including on a
+developer machine or any CI job with no database configured, so the suite
+must skip cleanly rather than hard-fail when `DATABASE_URL` is absent, and
+only actually execute where a real database is present.
+
+### Verification at this follow-up
+
+```
+cd /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-audit-artifact-durability-20261002-2
+pnpm exec tsc -p tsconfig.json --noEmit
+```
+=> the only errors are pre-existing, unrelated to this file: four
+`@drts/control-plane-auth` module-resolution errors (same known local
+gap recorded earlier in this doc) and a set of `fleet-partner-list-envelope`
+duplicate-package-identity errors caused by this worktree and a sibling
+worktree both resolving `packages/api-client` as structurally-different
+same-named types -- confirmed pre-existing by `git status --porcelain`
+showing no other files touched. Zero errors reference the new file.
+```
+pnpm exec eslint tests/integration/platform-admin-artifact-publication.integration.test.ts
+```
+=> exit 0, no findings.
+```
+pnpm exec vitest run tests/integration/platform-admin-artifact-publication.integration.test.ts
+```
+=> exit 0, 1 file / 7 tests, all SKIPPED (no `DATABASE_URL` on this VM) --
+confirms the file imports, resolves `@drts/contracts`/the repository
+module, and the `skipIf` guard all work correctly, which is the maximum
+this VM's standing no-DB/no-Compose restriction permits verifying locally.
+
+### Remaining limitation (this follow-up)
+
+This VM cannot provision PostgreSQL, so none of the seven new cases have
+actually been observed to PASS against a live database from here -- only
+that the suite is correctly structured, typed, linted, and skips cleanly.
+Real execution happens the first time this candidate's SHA runs the hosted
+`unit` CI job; that job's own pass/fail (visible in `same_sha_review_ci`
+evidence) is the actual acceptance evidence for these seven cases, not
+this local run.
