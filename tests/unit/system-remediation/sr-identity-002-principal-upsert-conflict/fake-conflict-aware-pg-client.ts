@@ -31,6 +31,62 @@ function splitTopLevelCommas(text: string): string[] {
   return parts.map((part) => part.trim()).filter(Boolean);
 }
 
+// A bare `col`, `EXCLUDED.col`, or `schema.table.col` reference. Table-
+// qualified references inside a `DO UPDATE` always mean the pre-update
+// (conflicting) row in real Postgres, which is this fake's `existingRow`.
+function resolveColumnRef(
+  ref: string,
+  excludedRow: FakeRow,
+  existingRow: FakeRow,
+): unknown {
+  const trimmed = ref.trim();
+  if (trimmed.startsWith("EXCLUDED.")) {
+    return excludedRow[trimmed.slice("EXCLUDED.".length)];
+  }
+  const column = trimmed.split(".").pop()!;
+  return existingRow[column];
+}
+
+function splitFunctionArgs(expr: string): string[] {
+  const openIdx = expr.indexOf("(");
+  const closeIdx = expr.lastIndexOf(")");
+  if (openIdx === -1 || closeIdx === -1 || closeIdx < openIdx) {
+    throw new Error(`FakeConflictAwarePgClient: not a function call "${expr}"`);
+  }
+  return splitTopLevelCommas(expr.slice(openIdx + 1, closeIdx));
+}
+
+// `jsonb_set(<record-expr>, '{key}', to_jsonb(<colref>))`, where
+// `<record-expr>` is either `EXCLUDED.record` or another `jsonb_set(...)`
+// call -- IdentityRepository nests these to patch multiple JSON keys (e.g.
+// the primary-key column and the immutable `created_at`) in one expression.
+function evaluateJsonbSetExpr(
+  expr: string,
+  excludedRow: FakeRow,
+  existingRow: FakeRow,
+): Record<string, unknown> {
+  const trimmed = expr.trim();
+  if (trimmed === "EXCLUDED.record") {
+    return { ...(excludedRow.record as Record<string, unknown>) };
+  }
+  if (!trimmed.startsWith("jsonb_set(")) {
+    throw new Error(
+      `FakeConflictAwarePgClient: unsupported jsonb_set expr "${expr}"`,
+    );
+  }
+  const [innerExpr, keyLiteral, toJsonbExpr] = splitFunctionArgs(trimmed);
+  const keyMatch = keyLiteral?.trim().match(/^'\{(\w+)\}'$/);
+  const colMatch = toJsonbExpr?.trim().match(/^to_jsonb\(([\w.]+)\)$/);
+  if (!innerExpr || !keyMatch?.[1] || !colMatch?.[1]) {
+    throw new Error(
+      `FakeConflictAwarePgClient: malformed jsonb_set expr "${expr}"`,
+    );
+  }
+  const base = evaluateJsonbSetExpr(innerExpr, excludedRow, existingRow);
+  const value = resolveColumnRef(colMatch[1], excludedRow, existingRow);
+  return { ...base, [keyMatch[1]]: value };
+}
+
 function evaluateSetExpr(
   expr: string,
   excludedRow: FakeRow,
@@ -41,23 +97,84 @@ function evaluateSetExpr(
     return excludedRow[trimmed.slice("EXCLUDED.".length)];
   }
 
-  const jsonbSet = trimmed.match(
-    /^jsonb_set\(\s*EXCLUDED\.record\s*,\s*'\{(\w+)\}'\s*,\s*to_jsonb\(([\w.]+)\)\s*\)$/,
-  );
-  if (jsonbSet) {
-    const jsonKey = jsonbSet[1];
-    const columnRef = jsonbSet[2];
-    if (!jsonKey || !columnRef) {
-      throw new Error(
-        `FakeConflictAwarePgClient: malformed jsonb_set SET expr "${expr}"`,
-      );
-    }
-    const column = columnRef.split(".").pop()!;
-    const base = excludedRow.record as Record<string, unknown>;
-    return { ...base, [jsonKey]: existingRow[column] };
+  if (trimmed.startsWith("jsonb_set(")) {
+    return evaluateJsonbSetExpr(trimmed, excludedRow, existingRow);
   }
 
   throw new Error(`FakeConflictAwarePgClient: unsupported SET expr "${expr}"`);
+}
+
+// A single `<colref> IS DISTINCT FROM <colref>` clause, as used in
+// IdentityRepository's `ON CONFLICT ... DO UPDATE ... WHERE` guard that
+// decides -- atomically, against the conflicting row -- whether any tracked
+// field actually changed.
+function evaluateIsDistinctFromClause(
+  clause: string,
+  excludedRow: FakeRow,
+  existingRow: FakeRow,
+): boolean {
+  const match = clause
+    .trim()
+    .match(/^([\w.]+)\s+IS\s+DISTINCT\s+FROM\s+([\w.]+)$/i);
+  if (!match || !match[1] || !match[2]) {
+    throw new Error(
+      `FakeConflictAwarePgClient: unsupported WHERE clause "${clause}"`,
+    );
+  }
+  const left = resolveColumnRef(match[1], excludedRow, existingRow);
+  const right = resolveColumnRef(match[2], excludedRow, existingRow);
+  return left !== right;
+}
+
+// Top-level `OR`-joined `IS DISTINCT FROM` clauses, outside any parens.
+function evaluateWhereClause(
+  where: string,
+  excludedRow: FakeRow,
+  existingRow: FakeRow,
+): boolean {
+  let depth = 0;
+  const clauses: string[] = [];
+  let current = "";
+  const tokens = where.trim().split(/(\(|\)|\bOR\b)/i);
+  for (const token of tokens) {
+    if (token === "(") {
+      depth++;
+      current += token;
+    } else if (token === ")") {
+      depth--;
+      current += token;
+    } else if (depth === 0 && /^OR$/i.test(token.trim())) {
+      clauses.push(current);
+      current = "";
+    } else {
+      current += token;
+    }
+  }
+  if (current.trim().length > 0) clauses.push(current);
+  return clauses
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+    .some((clause) =>
+      evaluateIsDistinctFromClause(clause, excludedRow, existingRow),
+    );
+}
+
+// Splits the text between `DO UPDATE SET` and `RETURNING` into the SET
+// assignment list and an optional top-level `WHERE` guard clause.
+function splitSetListAndWhere(text: string): {
+  setList: string;
+  where: string | null;
+} {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (depth === 0 && /^WHERE\b/i.test(text.slice(i))) {
+      return { setList: text.slice(0, i), where: text.slice(i + 5) };
+    }
+  }
+  return { setList: text, where: null };
 }
 
 export class FakeConflictAwarePgClient {
@@ -140,7 +257,17 @@ export class FakeConflictAwarePgClient {
           `FakeConflictAwarePgClient: missing DO UPDATE SET clause: ${sql}`,
         );
       }
-      for (const assignment of splitTopLevelCommas(setMatch[1])) {
+      const { setList, where } = splitSetListAndWhere(setMatch[1]);
+      if (
+        where &&
+        !evaluateWhereClause(where, excludedRow, existingRow)
+      ) {
+        // Real Postgres: the conflicting row had nothing tracked change, so
+        // the DO UPDATE is skipped entirely (row untouched) and no row is
+        // returned for it -- the caller must fall back to a plain SELECT.
+        return { rows: [] as T[] };
+      }
+      for (const assignment of splitTopLevelCommas(setList)) {
         const eqIndex = assignment.indexOf("=");
         const column = assignment.slice(0, eqIndex).trim();
         const expr = assignment.slice(eqIndex + 1).trim();

@@ -2524,40 +2524,29 @@ export class IdentityRepository implements OnModuleInit {
     );
   }
 
+  // The three upserts below decide "did a tracked field actually change"
+  // via the ON CONFLICT ... WHERE clause instead of a separate SELECT +
+  // JS comparison. A no-op "ensure" (session re-issuance) must leave
+  // updated_at untouched -- it feeds JwtAuthService.validateDurableState's
+  // workforce version fingerprint, and bumping it on every re-issuance
+  // would silently revoke every other still-valid session for the same
+  // principal. Doing the comparison in application code from a prior
+  // SELECT is racy: a concurrent genuine mutation (e.g. principal
+  // suspension) landing between that read and this write can be
+  // overwritten by a stale "unchanged" decision, resurrecting a token that
+  // should have been invalidated. The WHERE clause instead compares
+  // EXCLUDED against the row Postgres has already locked for this same
+  // INSERT ... ON CONFLICT statement, so the decision and the write happen
+  // atomically with no gap for another transaction to land in between.
+  // When nothing tracked changed, Postgres skips the DO UPDATE entirely
+  // (RETURNING yields no row), so the row -- and its embedded JSON -- is
+  // left byte-for-byte as it was; the caller falls back to a plain SELECT
+  // purely to obtain a return value, not to decide anything.
+
   private async upsertPrincipal(
     client: PoolClient,
     record: CanonicalIdentityPrincipalRecord,
   ) {
-    const existingResult = await client.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_principals WHERE source_ref = $1 LIMIT 1`,
-      [record.sourceRef],
-    );
-    const existing = existingResult.rows[0]?.record
-      ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
-          existingResult.rows[0].record,
-          "iam.identity_principals",
-        )
-      : null;
-    // A session is issued every time a principal is re-verified
-    // (login, token refresh, workload identity exchange), and each issuance
-    // calls through here to "ensure" the principal still exists. If this
-    // unconditionally bumped updated_at, every re-issuance would advance the
-    // durable version fingerprint that JwtAuthService.validateDurableState
-    // compares against, silently revoking every other still-valid session
-    // for the same principal. Only a real field change may advance it.
-    const unchanged =
-      existing !== null &&
-      existing.issuer === record.issuer &&
-      existing.subject === record.subject &&
-      existing.principalType === record.principalType &&
-      existing.email === record.email &&
-      existing.emailVerified === record.emailVerified &&
-      existing.displayName === record.displayName &&
-      existing.status === record.status;
-    const createdAt = existing?.createdAt ?? record.createdAt;
-    const updatedAt = unchanged ? existing.updatedAt : record.updatedAt;
-    const effectiveRecord = { ...record, createdAt, updatedAt };
-
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_principals (
@@ -2586,29 +2575,51 @@ export class IdentityRepository implements OnModuleInit {
           account_status = EXCLUDED.account_status,
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
-            EXCLUDED.record,
-            '{principalId}',
-            to_jsonb(iam.identity_principals.principal_id)
+            jsonb_set(
+              EXCLUDED.record,
+              '{principalId}',
+              to_jsonb(iam.identity_principals.principal_id)
+            ),
+            '{createdAt}',
+            to_jsonb(iam.identity_principals.created_at)
           )
+        WHERE
+          iam.identity_principals.issuer IS DISTINCT FROM EXCLUDED.issuer
+          OR iam.identity_principals.subject IS DISTINCT FROM EXCLUDED.subject
+          OR iam.identity_principals.principal_type IS DISTINCT FROM EXCLUDED.principal_type
+          OR iam.identity_principals.email_normalized IS DISTINCT FROM EXCLUDED.email_normalized
+          OR iam.identity_principals.email_verified IS DISTINCT FROM EXCLUDED.email_verified
+          OR iam.identity_principals.display_name IS DISTINCT FROM EXCLUDED.display_name
+          OR iam.identity_principals.account_status IS DISTINCT FROM EXCLUDED.account_status
         RETURNING record
       `,
       [
-        effectiveRecord.principalId,
-        effectiveRecord.sourceRef,
-        effectiveRecord.issuer,
-        effectiveRecord.subject,
-        effectiveRecord.principalType,
-        effectiveRecord.email,
-        effectiveRecord.emailVerified,
-        effectiveRecord.displayName,
-        effectiveRecord.status,
-        createdAt,
-        updatedAt,
-        JSON.stringify(effectiveRecord),
+        record.principalId,
+        record.sourceRef,
+        record.issuer,
+        record.subject,
+        record.principalType,
+        record.email,
+        record.emailVerified,
+        record.displayName,
+        record.status,
+        record.createdAt,
+        record.updatedAt,
+        JSON.stringify(record),
       ],
     );
+    if (result.rows[0]?.record) {
+      return this.parseRecord<CanonicalIdentityPrincipalRecord>(
+        result.rows[0].record,
+        "iam.identity_principals",
+      );
+    }
+    const current = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_principals WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
+    );
     return this.parseRecord<CanonicalIdentityPrincipalRecord>(
-      result.rows[0]?.record,
+      current.rows[0]?.record,
       "iam.identity_principals",
     );
   }
@@ -2617,32 +2628,6 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityMembershipRecord,
   ) {
-    const existingResult = await client.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 LIMIT 1`,
-      [record.sourceRef],
-    );
-    const existing = existingResult.rows[0]?.record
-      ? this.parseRecord<CanonicalIdentityMembershipRecord>(
-          existingResult.rows[0].record,
-          "iam.identity_memberships",
-        )
-      : null;
-    // See upsertPrincipal: membership.updated_at feeds the same durable
-    // version fingerprint, so a no-op "ensure" must not advance it.
-    const unchanged =
-      existing !== null &&
-      existing.principalId === record.principalId &&
-      existing.realm === record.realm &&
-      existing.scopeRef === record.scopeRef &&
-      existing.tenantId === record.tenantId &&
-      existing.partnerId === record.partnerId &&
-      existing.status === record.status &&
-      existing.invitedByPrincipalId === record.invitedByPrincipalId &&
-      existing.invitationId === record.invitationId;
-    const createdAt = existing?.createdAt ?? record.createdAt;
-    const updatedAt = unchanged ? existing.updatedAt : record.updatedAt;
-    const effectiveRecord = { ...record, createdAt, updatedAt };
-
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_memberships (
@@ -2673,30 +2658,53 @@ export class IdentityRepository implements OnModuleInit {
           invitation_id = EXCLUDED.invitation_id,
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
-            EXCLUDED.record,
-            '{membershipId}',
-            to_jsonb(iam.identity_memberships.membership_id)
+            jsonb_set(
+              EXCLUDED.record,
+              '{membershipId}',
+              to_jsonb(iam.identity_memberships.membership_id)
+            ),
+            '{createdAt}',
+            to_jsonb(iam.identity_memberships.created_at)
           )
+        WHERE
+          iam.identity_memberships.principal_id IS DISTINCT FROM EXCLUDED.principal_id
+          OR iam.identity_memberships.realm IS DISTINCT FROM EXCLUDED.realm
+          OR iam.identity_memberships.scope_ref IS DISTINCT FROM EXCLUDED.scope_ref
+          OR iam.identity_memberships.tenant_id IS DISTINCT FROM EXCLUDED.tenant_id
+          OR iam.identity_memberships.partner_id IS DISTINCT FROM EXCLUDED.partner_id
+          OR iam.identity_memberships.membership_status IS DISTINCT FROM EXCLUDED.membership_status
+          OR iam.identity_memberships.invited_by_principal_id IS DISTINCT FROM EXCLUDED.invited_by_principal_id
+          OR iam.identity_memberships.invitation_id IS DISTINCT FROM EXCLUDED.invitation_id
         RETURNING record
       `,
       [
-        effectiveRecord.membershipId,
-        effectiveRecord.sourceRef,
-        effectiveRecord.principalId,
-        effectiveRecord.realm,
-        effectiveRecord.scopeRef,
-        effectiveRecord.tenantId,
-        effectiveRecord.partnerId,
-        effectiveRecord.status,
-        effectiveRecord.invitedByPrincipalId,
-        effectiveRecord.invitationId,
-        createdAt,
-        updatedAt,
-        JSON.stringify(effectiveRecord),
+        record.membershipId,
+        record.sourceRef,
+        record.principalId,
+        record.realm,
+        record.scopeRef,
+        record.tenantId,
+        record.partnerId,
+        record.status,
+        record.invitedByPrincipalId,
+        record.invitationId,
+        record.createdAt,
+        record.updatedAt,
+        JSON.stringify(record),
       ],
     );
+    if (result.rows[0]?.record) {
+      return this.parseRecord<CanonicalIdentityMembershipRecord>(
+        result.rows[0].record,
+        "iam.identity_memberships",
+      );
+    }
+    const current = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
+    );
     return this.parseRecord<CanonicalIdentityMembershipRecord>(
-      result.rows[0]?.record,
+      current.rows[0]?.record,
       "iam.identity_memberships",
     );
   }
@@ -2705,30 +2713,6 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityRoleBindingRecord,
   ) {
-    const existingResult = await client.query<JsonRecordRow>(
-      `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 LIMIT 1`,
-      [record.sourceRef],
-    );
-    const existing = existingResult.rows[0]?.record
-      ? this.parseRecord<CanonicalIdentityRoleBindingRecord>(
-          existingResult.rows[0].record,
-          "iam.identity_role_bindings",
-        )
-      : null;
-    // See upsertPrincipal: role-binding updated_at also feeds the durable
-    // version fingerprint, so a no-op "ensure" must not advance it.
-    const unchanged =
-      existing !== null &&
-      existing.membershipId === record.membershipId &&
-      existing.roleCode === record.roleCode &&
-      existing.grantedByPrincipalId === record.grantedByPrincipalId &&
-      existing.approvalId === record.approvalId &&
-      existing.validFrom === record.validFrom &&
-      existing.validTo === record.validTo;
-    const createdAt = existing?.createdAt ?? record.createdAt;
-    const updatedAt = unchanged ? existing.updatedAt : record.updatedAt;
-    const effectiveRecord = { ...record, createdAt, updatedAt };
-
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_role_bindings (
@@ -2755,28 +2739,49 @@ export class IdentityRepository implements OnModuleInit {
           valid_to = EXCLUDED.valid_to,
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
-            EXCLUDED.record,
-            '{roleBindingId}',
-            to_jsonb(iam.identity_role_bindings.role_binding_id)
+            jsonb_set(
+              EXCLUDED.record,
+              '{roleBindingId}',
+              to_jsonb(iam.identity_role_bindings.role_binding_id)
+            ),
+            '{createdAt}',
+            to_jsonb(iam.identity_role_bindings.created_at)
           )
+        WHERE
+          iam.identity_role_bindings.membership_id IS DISTINCT FROM EXCLUDED.membership_id
+          OR iam.identity_role_bindings.role_code IS DISTINCT FROM EXCLUDED.role_code
+          OR iam.identity_role_bindings.granted_by_principal_id IS DISTINCT FROM EXCLUDED.granted_by_principal_id
+          OR iam.identity_role_bindings.approval_id IS DISTINCT FROM EXCLUDED.approval_id
+          OR iam.identity_role_bindings.valid_from IS DISTINCT FROM EXCLUDED.valid_from
+          OR iam.identity_role_bindings.valid_to IS DISTINCT FROM EXCLUDED.valid_to
         RETURNING record
       `,
       [
-        effectiveRecord.roleBindingId,
-        effectiveRecord.sourceRef,
-        effectiveRecord.membershipId,
-        effectiveRecord.roleCode,
-        effectiveRecord.grantedByPrincipalId,
-        effectiveRecord.approvalId,
-        effectiveRecord.validFrom,
-        effectiveRecord.validTo,
-        createdAt,
-        updatedAt,
-        JSON.stringify(effectiveRecord),
+        record.roleBindingId,
+        record.sourceRef,
+        record.membershipId,
+        record.roleCode,
+        record.grantedByPrincipalId,
+        record.approvalId,
+        record.validFrom,
+        record.validTo,
+        record.createdAt,
+        record.updatedAt,
+        JSON.stringify(record),
       ],
     );
+    if (result.rows[0]?.record) {
+      return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+        result.rows[0].record,
+        "iam.identity_role_bindings",
+      );
+    }
+    const current = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
+    );
     return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
-      result.rows[0]?.record,
+      current.rows[0]?.record,
       "iam.identity_role_bindings",
     );
   }
