@@ -10,6 +10,7 @@ export {
   type DocumentArtifactStore,
   type PutDocumentArtifactCommand,
   type PutIfAbsentDocumentArtifactResult,
+  type PutIfUnchangedDocumentArtifactResult,
 } from "./document-artifact.types";
 export { InMemoryDocumentArtifactStore } from "./in-memory-document-artifact-store";
 export { S3DocumentArtifactStoreAdapter } from "./s3-document-artifact-store.adapter";

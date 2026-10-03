@@ -1025,8 +1025,28 @@ export class PlatformAdminService implements OnModuleInit {
     const wonClaim = claim.currentRecord ?? staged;
 
     try {
+      // (R7/R8 byte-ownership fix, Codex REOPEN generation
+      // f556818456f9441c80a29478e7910bea) The claim above only fences the
+      // durable *record* -- it does not stop this attempt's own object
+      // write from landing late. A previous version of this method relied
+      // solely on the read-back below, which only catches a stale write
+      // that lands BEFORE it runs; a write delayed past finalize (a slow
+      // network, not a slow claimant) still silently clobbered the actual
+      // winner's bytes. Capturing this attempt's baseline generation here,
+      // before render, and fencing the write itself against it (see
+      // `renderPlacardArtifact`'s `fenceGeneration`) closes that gap: ANY
+      // write that lands after another writer has changed the object is
+      // rejected by the store, no matter how late it arrives.
+      const baselineArtifact = await this.documentArtifactStore.get(
+        "placard",
+        placard.placardVersionId,
+      );
       // Force re-render so PDF reflects the actual publishedAt timestamp
-      await this.ensurePlacardArtifact(wonClaim, true);
+      await this.ensurePlacardArtifact(
+        wonClaim,
+        true,
+        baselineArtifact?.record.generation ?? null,
+      );
 
       // The claim above only fences the durable *record*; it cannot see a
       // sibling instance's unrelated write to the same durable *object* key
@@ -2648,6 +2668,7 @@ export class PlatformAdminService implements OnModuleInit {
   private async ensurePlacardArtifact(
     placard: PlacardVersionRecord,
     forceRerender = false,
+    fenceGeneration?: string | null,
   ): Promise<PlacardVersionRecord> {
     const materialised = !forceRerender && placard.artifactManifestHash != null;
     const expired = this.isPlacardArtifactExpired(
@@ -2673,7 +2694,9 @@ export class PlatformAdminService implements OnModuleInit {
       return placard;
     }
 
-    const record = await this.renderPlacardArtifact(placard);
+    const record = await this.renderPlacardArtifact(placard, {
+      fenceGeneration,
+    });
 
     const downloadMetadata = this.createPlacardDownloadMetadata(
       placard.placardVersionId,
@@ -2706,13 +2729,29 @@ export class PlatformAdminService implements OnModuleInit {
    * instance's own concurrent recovery of the exact same (kind, subjectId),
    * and an unconditional overwrite could clobber bytes the sibling already
    * correctly restored. A producer's own explicit issuance/republish
-   * (`recover` left `false`) is never racing a *recovery* in this sense --
-   * writing its own newly rendered bytes is the legitimate, intended
-   * overwrite -- so it keeps using `put`.
+   * (`recover` left `false` and `fenceGeneration` left `undefined`) is never
+   * racing a *recovery* in this sense -- writing its own newly rendered
+   * bytes is the legitimate, intended overwrite -- so it keeps using `put`.
+   *
+   * `fenceGeneration` (R7/R8 byte-ownership fix, Codex REOPEN generation
+   * f556818456f9441c80a29478e7910bea), used only by the publish path via
+   * `ensurePlacardArtifact`, conditions the write on the object's state not
+   * having moved since the caller's own baseline read: `null` means the
+   * caller believed nothing was stored yet, a string means the caller
+   * observed exactly that generation. This is what actually stops a
+   * publish attempt whose claim was reclaimed and finalized by another
+   * instance while this attempt's own write was still in flight (a slow
+   * network, not a slow claimant) from clobbering the real winner's bytes
+   * on arrival -- the DB claim token alone fences the *record*, never the
+   * object. A fenced-out write throws `PLACARD_PUBLISH_CONFLICT` instead of
+   * returning a record for bytes that were never actually stored.
    */
   private async renderPlacardArtifact(
     placard: PlacardVersionRecord,
-    options: { recover?: boolean } = {},
+    options: {
+      recover?: boolean;
+      fenceGeneration?: string | null | undefined;
+    } = {},
   ): Promise<DocumentArtifactRecord> {
     const publicInfoVersion = this.publicInfoVersions.find(
       (v) => v.versionId === placard.publicInfoVersionId,
@@ -2737,6 +2776,25 @@ export class PlatformAdminService implements OnModuleInit {
         command,
       );
       return record;
+    }
+    if (options.fenceGeneration !== undefined) {
+      const result = await this.documentArtifactStore.putIfUnchanged(
+        command,
+        options.fenceGeneration,
+      );
+      if (!result.applied) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PLACARD_PUBLISH_CONFLICT",
+          "This placard's durable artifact changed during publish. Retry the publish.",
+          {
+            placardVersionId: placard.placardVersionId,
+            expectedSha256: createHash("sha256").update(bytes).digest("hex"),
+            actualSha256: result.record?.sha256 ?? null,
+          },
+        );
+      }
+      return result.record;
     }
     return this.documentArtifactStore.put(command);
   }

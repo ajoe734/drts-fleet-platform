@@ -955,20 +955,30 @@ describe("R5: a transient durable-store failure during publish must not leave a 
     private readonly inner = new InMemoryDocumentArtifactStore();
     failNextPut = false;
 
-    async put(
+    put(
       command: PutDocumentArtifactCommand,
     ): Promise<DocumentArtifactRecord> {
+      return this.inner.put(command);
+    }
+
+    putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+      return this.inner.putIfAbsent(...args);
+    }
+
+    // The publish path's own object write goes through `putIfUnchanged`
+    // (the byte-ownership fix), not plain `put` -- the failure injection
+    // has to live here to actually land on the write a publish attempts.
+    async putIfUnchanged(
+      command: PutDocumentArtifactCommand,
+      expectedGeneration: string | null,
+    ) {
       if (this.failNextPut) {
         this.failNextPut = false;
         throw Object.assign(new Error("ServiceUnavailable"), {
           name: "ServiceUnavailable",
         });
       }
-      return this.inner.put(command);
-    }
-
-    putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
-      return this.inner.putIfAbsent(...args);
+      return this.inner.putIfUnchanged(command, expectedGeneration);
     }
 
     get(...args: Parameters<DocumentArtifactStore["get"]>) {
@@ -1169,6 +1179,12 @@ describe("R6-followthrough: a recovery write racing a concurrent restoration mus
         return this.inner.putIfAbsent(...args);
       }
 
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.inner.putIfUnchanged(...args);
+      }
+
       async get(...args: Parameters<DocumentArtifactStore["get"]>) {
         const result = await this.inner.get(...args);
         if (state.armed) {
@@ -1296,7 +1312,22 @@ describe("R7: concurrent publishes for the same placard must not leave metadata 
     class ReorderedDocumentArtifactStore implements DocumentArtifactStore {
       private readonly inner = new InMemoryDocumentArtifactStore();
 
-      async put(command: PutDocumentArtifactCommand) {
+      put(command: PutDocumentArtifactCommand) {
+        return this.inner.put(command);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      // The publish path's own object write goes through `putIfUnchanged`
+      // (the byte-ownership fix) -- the hold-the-response instrumentation
+      // has to live here, not on plain `put`, to actually model a slow
+      // acknowledgement of a publish's own write.
+      async putIfUnchanged(
+        command: PutDocumentArtifactCommand,
+        expectedGeneration: string | null,
+      ) {
         const shouldHold = holdNextPut;
         holdNextPut = false;
         if (shouldHold) {
@@ -1304,15 +1335,14 @@ describe("R7: concurrent publishes for the same placard must not leave metadata 
         }
         // Commit real bytes immediately -- only THIS call's own response is
         // held, modelling a slow acknowledgement, not a slow write.
-        const record = await this.inner.put(command);
+        const result = await this.inner.putIfUnchanged(
+          command,
+          expectedGeneration,
+        );
         if (shouldHold && putResponseState.gate) {
           await putResponseState.gate;
         }
-        return record;
-      }
-
-      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
-        return this.inner.putIfAbsent(...args);
+        return result;
       }
 
       get(...args: Parameters<DocumentArtifactStore["get"]>) {
@@ -1396,6 +1426,12 @@ describe("R7: concurrent publishes for the same placard must not leave metadata 
 
       putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
         return this.inner.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.inner.putIfUnchanged(...args);
       }
 
       async get(kind: Parameters<DocumentArtifactStore["get"]>[0], subjectId: string) {
@@ -1520,9 +1556,19 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
   class DelayedReadbackStore implements DocumentArtifactStore {
     private readonly inner = new InMemoryDocumentArtifactStore();
     private gate: Promise<void> | undefined;
+    private skip = 0;
     putCount = 0;
 
-    armNextGet(): () => void {
+    /**
+     * Holds the next `get` call, after letting `skip` of them pass through
+     * untouched. The publish path now reads its own baseline generation
+     * (the byte-ownership fix) before it ever writes, so its FIRST `get`
+     * call is that baseline read, not the authentic post-write read-back
+     * this test wants to hold open -- callers pass `skip: 1` to target the
+     * read-back instead of the baseline read.
+     */
+    armNextGet(skip = 0): () => void {
+      this.skip = skip;
       let release!: () => void;
       this.gate = new Promise<void>((resolve) => {
         release = resolve;
@@ -1539,12 +1585,24 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
       return this.inner.putIfAbsent(...args);
     }
 
+    async putIfUnchanged(
+      command: PutDocumentArtifactCommand,
+      expectedGeneration: string | null,
+    ) {
+      this.putCount += 1;
+      return this.inner.putIfUnchanged(command, expectedGeneration);
+    }
+
     async get(...args: Parameters<DocumentArtifactStore["get"]>) {
       const result = await this.inner.get(...args);
       if (this.gate) {
-        const held = this.gate;
-        this.gate = undefined;
-        await held;
+        if (this.skip > 0) {
+          this.skip -= 1;
+        } else {
+          const held = this.gate;
+          this.gate = undefined;
+          await held;
+        }
       }
       return result;
     }
@@ -1586,7 +1644,7 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
     // initial `put`; only writes from here on are what this test counts.
     sharedStore.putCount = 0;
 
-    const release = sharedStore.armNextGet();
+    const release = sharedStore.armNextGet(1);
     // Pod A: claims, writes its real bytes, then blocks on its own
     // (authentic, successful) read-back -- it has not yet committed
     // anything past the claim.
@@ -1640,18 +1698,27 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
       private readonly inner = new InMemoryDocumentArtifactStore();
       failNextPut = false;
 
-      async put(command: PutDocumentArtifactCommand) {
+      put(command: PutDocumentArtifactCommand) {
+        return this.inner.put(command);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      // See `FlakyDocumentArtifactStore` (R5) for why the failure injection
+      // lives on `putIfUnchanged`, not `put`.
+      async putIfUnchanged(
+        command: PutDocumentArtifactCommand,
+        expectedGeneration: string | null,
+      ) {
         if (this.failNextPut) {
           this.failNextPut = false;
           throw Object.assign(new Error("ServiceUnavailable"), {
             name: "ServiceUnavailable",
           });
         }
-        return this.inner.put(command);
-      }
-
-      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
-        return this.inner.putIfAbsent(...args);
+        return this.inner.putIfUnchanged(command, expectedGeneration);
       }
 
       get(...args: Parameters<DocumentArtifactStore["get"]>) {
@@ -2036,9 +2103,18 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
     class DelayedReadbackStore implements DocumentArtifactStore {
       private readonly inner = new InMemoryDocumentArtifactStore();
       private gate: Promise<void> | undefined;
+      private skip = 0;
       putCount = 0;
 
-      armNextGet(): () => void {
+      /**
+       * Holds the next `get` call, after letting `skip` of them pass
+       * through untouched -- see the R7-followthrough `DelayedReadbackStore`
+       * above for why the publish path's own baseline-generation read
+       * means the authentic post-write read-back is no longer its first
+       * `get` call.
+       */
+      armNextGet(skip = 0): () => void {
+        this.skip = skip;
         let release!: () => void;
         this.gate = new Promise<void>((resolve) => {
           release = resolve;
@@ -2055,12 +2131,24 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         return this.inner.putIfAbsent(...args);
       }
 
+      async putIfUnchanged(
+        command: PutDocumentArtifactCommand,
+        expectedGeneration: string | null,
+      ) {
+        this.putCount += 1;
+        return this.inner.putIfUnchanged(command, expectedGeneration);
+      }
+
       async get(...args: Parameters<DocumentArtifactStore["get"]>) {
         const result = await this.inner.get(...args);
         if (this.gate) {
-          const held = this.gate;
-          this.gate = undefined;
-          await held;
+          if (this.skip > 0) {
+            this.skip -= 1;
+          } else {
+            const held = this.gate;
+            this.gate = undefined;
+            await held;
+          }
         }
         return result;
       }
@@ -2095,7 +2183,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       await podB.onModuleInit();
 
       sharedStore.putCount = 0;
-      const release = sharedStore.armNextGet();
+      const release = sharedStore.armNextGet(1);
       const publishA = podA.publishPlacardVersion(draft.placardVersionId);
       await new Promise((r) => setTimeout(r, 10));
       expect(sharedStore.putCount).toBe(1);
@@ -2186,6 +2274,12 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
 
       putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
         return this.inner.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.inner.putIfUnchanged(...args);
       }
 
       async get(...args: Parameters<DocumentArtifactStore["get"]>) {
@@ -2437,6 +2531,187 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       await expect(
         podC.publishPlacardVersion(draft.placardVersionId),
       ).rejects.toMatchObject({ code: "PLACARD_VERSION_ALREADY_PUBLISHED" });
+    });
+  });
+
+  describe("R7/R8 byte-ownership fix: a stale owner's delayed object write must not replace a reclaimed-and-finalized winner's bytes", () => {
+    const PUBLIC_INFO_R7R8_BYTES = {
+      versionId: "public-info-r7r8-byte-ownership",
+      title: "R7/R8 Byte Ownership Disclosure",
+      callPhone: "0800-040-040",
+      complaintPhone: "0800-040-050",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /**
+     * Holds a `putIfUnchanged` call's entire execution -- precondition
+     * evaluation AND write, not merely delivery of an already-decided
+     * response -- until released, for exactly one matching subjectId. This
+     * is what models a real `PutObjectCommand` that has not yet reached the
+     * transport (the task's "hold its genuine S3 PutObjectCommand BEFORE
+     * the transport commits it"): the fencing check inside `inner`'s own
+     * `putIfUnchanged` only runs against whatever the store actually holds
+     * at RELEASE time, which may have changed while this call sat held.
+     */
+    class HeldWriteDocumentArtifactStore implements DocumentArtifactStore {
+      readonly inner = new InMemoryDocumentArtifactStore();
+      private holdSubjectId: string | null = null;
+      private gate: Promise<void> | undefined;
+
+      holdNextWriteFor(subjectId: string): () => void {
+        this.holdSubjectId = subjectId;
+        let release!: () => void;
+        this.gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.inner.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      async putIfUnchanged(
+        command: PutDocumentArtifactCommand,
+        expectedGeneration: string | null,
+      ) {
+        if (this.holdSubjectId === command.subjectId && this.gate) {
+          const held = this.gate;
+          this.holdSubjectId = null;
+          this.gate = undefined;
+          await held;
+        }
+        return this.inner.putIfUnchanged(command, expectedGeneration);
+      }
+
+      get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        return this.inner.get(...args);
+      }
+    }
+
+    it("fences out a stale owner's write that resumes after a reclaimed claim finalizes -- the winner's bytes, DB row, original link and a freshly issued link all stay correct", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R7R8_BYTES,
+      ]);
+      const store = new HeldWriteDocumentArtifactStore();
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r7r8-byte-ownership",
+        publicInfoVersionId: PUBLIC_INFO_R7R8_BYTES.versionId,
+        templateName: "seatback-r7r8-byte-ownership",
+      });
+
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      // A claims publication and starts rendering/writing; its own
+      // PutObjectCommand is held BEFORE it reaches the transport.
+      const release = store.holdNextWriteFor(draft.placardVersionId);
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const claimedRow = rows.get(draft.placardVersionId);
+      expect(claimedRow?.record.publishedAt).toBeTruthy();
+      expect(claimedRow?.record.__publishClaimToken).toBeTruthy();
+
+      // Age A's claim past the repository's 2-minute abandonment window --
+      // A is modelled as stalled in flight, not crashed, but the guard only
+      // looks at elapsed time, exactly like a real abandoned claim.
+      claimedRow!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // C reclaims the now-stale claim, renders, writes and finalizes for
+      // real -- A's own write has not landed yet, so C's baseline read
+      // still observes the plain draft object, same as A's did.
+      const published = await podC.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+      expect(rows.get(draft.placardVersionId)?.record.__publishClaimToken).toBeUndefined();
+
+      // Only now does A's held write actually reach the store -- AFTER C
+      // has already finalized. A's baseline (the plain draft's generation)
+      // no longer matches what C just wrote, so the store itself refuses
+      // the write instead of silently replacing C's bytes.
+      release();
+      await expect(publishA).rejects.toMatchObject({
+        code: "PLACARD_PUBLISH_CONFLICT",
+      });
+
+      // The durable row still reflects C's finalize, untouched by A's
+      // rejected, superseded write.
+      const persisted = rows.get(draft.placardVersionId);
+      expect(persisted?.record.publishedAt).toBe(published.publishedAt);
+      expect(persisted?.record.artifactManifestHash).toBe(
+        published.artifactManifestHash,
+      );
+
+      // The actual stored bytes are C's, not corrupted by A's rejected
+      // write -- the core regression this fix closes.
+      const stored = await store.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      // C's own successful link still resolves to the exact bytes it names.
+      const controller = new ControlledDownloadController(store, registry);
+      const winnerFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(winnerFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      // A freshly booted, independent reader -- never itself a claimant --
+      // resolves the same winning bytes via its own freshly issued link.
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
     });
   });
 

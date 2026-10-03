@@ -4,6 +4,7 @@ import type {
   DocumentArtifactEntry,
   DocumentArtifactStore,
   PutIfAbsentDocumentArtifactResult,
+  PutIfUnchangedDocumentArtifactResult,
 } from "./document-artifact.types";
 import { InMemoryDocumentArtifactStore } from "./in-memory-document-artifact-store";
 import { S3DocumentArtifactStoreAdapter } from "./s3-document-artifact-store.adapter";
@@ -39,6 +40,10 @@ export class UnprovisionedDocumentArtifactStore implements DocumentArtifactStore
   }
 
   async putIfAbsent(): Promise<PutIfAbsentDocumentArtifactResult> {
+    throw new Error(this.reason);
+  }
+
+  async putIfUnchanged(): Promise<PutIfUnchangedDocumentArtifactResult> {
     throw new Error(this.reason);
   }
 

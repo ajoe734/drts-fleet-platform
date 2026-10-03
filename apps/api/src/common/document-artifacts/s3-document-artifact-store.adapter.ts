@@ -13,6 +13,7 @@ import type {
   DocumentArtifactStore,
   PutDocumentArtifactCommand,
   PutIfAbsentDocumentArtifactResult,
+  PutIfUnchangedDocumentArtifactResult,
 } from "./document-artifact.types";
 import { validatePutDocumentArtifactCommand } from "./document-artifact-validation";
 
@@ -56,6 +57,21 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
     return `document-artifacts/${kind}/${encodeURIComponent(subjectId)}`;
   }
 
+  /**
+   * S3 always returns an `ETag` for a successful `PutObject`/`GetObject`; a
+   * missing one means the response shape is not what this adapter assumes,
+   * which must fail loudly rather than silently fall back to something that
+   * is not actually a correct fencing token (see `putIfUnchanged`).
+   */
+  private requireGeneration(etag: string | undefined): string {
+    if (!etag) {
+      throw new Error(
+        "Stored document artifact has no generation token (missing ETag).",
+      );
+    }
+    return etag;
+  }
+
   async put(
     command: PutDocumentArtifactCommand,
   ): Promise<DocumentArtifactRecord> {
@@ -66,7 +82,7 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
     }
 
     const storedAt = new Date().toISOString();
-    await this.client.send(
+    const response = await this.client.send(
       new PutObjectCommand({
         Bucket: this.config.bucket,
         Key: this.key(command.kind, subjectId),
@@ -84,7 +100,69 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: bytes.length,
       storedAt,
+      generation: this.requireGeneration(response.ETag),
     };
+  }
+
+  /**
+   * Conditional overwrite fenced by the object's own state (`DocumentArtifactStore.putIfUnchanged`):
+   * `IfNoneMatch: "*"` when the caller's baseline was "nothing stored yet",
+   * `IfMatch: expectedGeneration` otherwise -- both native S3 conditional
+   * `PutObject` preconditions, evaluated atomically server-side. A
+   * `PreconditionFailed` response means some other write already changed
+   * (or created) the object since the caller's baseline was captured; this
+   * never retries or silently overwrites, it re-reads and reports whatever
+   * is actually there now.
+   *
+   * This is what actually stops a publish attempt whose ownership claim was
+   * reclaimed and finalized by another instance while this attempt's own
+   * `PutObjectCommand` was still in flight (a slow network, not a slow
+   * claimant) from clobbering the real winner's bytes on arrival -- a
+   * database-level claim token alone fences the record, never this object.
+   */
+  async putIfUnchanged(
+    command: PutDocumentArtifactCommand,
+    expectedGeneration: string | null,
+  ): Promise<PutIfUnchangedDocumentArtifactResult> {
+    const { subjectId, mimeType, bytes } =
+      validatePutDocumentArtifactCommand(command);
+    if (bytes.length > MAX_DOCUMENT_ARTIFACT_BYTES) {
+      throw new Error("DocumentArtifactStore.put exceeds the byte limit.");
+    }
+
+    const storedAt = new Date().toISOString();
+    try {
+      const response = await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.config.bucket,
+          Key: this.key(command.kind, subjectId),
+          Body: bytes,
+          ContentType: mimeType,
+          ContentLength: bytes.length,
+          Metadata: { "stored-at": storedAt },
+          ...(expectedGeneration === null
+            ? { IfNoneMatch: "*" }
+            : { IfMatch: expectedGeneration }),
+        }),
+      );
+
+      return {
+        applied: true,
+        record: {
+          kind: command.kind,
+          subjectId,
+          mimeType,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          byteLength: bytes.length,
+          storedAt,
+          generation: this.requireGeneration(response.ETag),
+        },
+      };
+    } catch (error) {
+      if (!isConditionFailed(error)) throw error;
+      const existing = await this.get(command.kind, subjectId);
+      return { applied: false, record: existing?.record ?? null };
+    }
   }
 
   /**
@@ -105,8 +183,9 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
     }
 
     const storedAt = new Date().toISOString();
+    let response;
     try {
-      await this.client.send(
+      response = await this.client.send(
         new PutObjectCommand({
           Bucket: this.config.bucket,
           Key: this.key(command.kind, subjectId),
@@ -138,6 +217,7 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
         sha256: createHash("sha256").update(bytes).digest("hex"),
         byteLength: bytes.length,
         storedAt,
+        generation: this.requireGeneration(response.ETag),
       },
     };
   }
@@ -203,6 +283,7 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
         sha256: createHash("sha256").update(bytes).digest("hex"),
         byteLength: bytes.length,
         storedAt,
+        generation: this.requireGeneration(object.ETag),
       },
       bytes,
     };

@@ -1734,3 +1734,209 @@ not include this repair's changes.
   multi-replica Cloud Run acceptance remains `SR-LIVE-DOC-001`.
 - No product/browser/DB/Compose server was started on this VM; no real cloud
   storage was contacted.
+
+## R7/R8 byte-ownership reopen (Codex REOPEN of locked candidate `c5a7bf10a61a82b2fbf6f0fe59bcc9fad40493f2`, generation `f556818456f9441c80a29478e7910bea`, PR #2295): what Codex found and why
+
+Codex independently reproduced, for the second consecutive round, the gap
+the previous repair explicitly disclosed as not fixed: a stale publish
+attempt's own object write can still land AFTER a different instance has
+reclaimed its abandoned claim, rendered, written and finalized. The ownership
+token guards `finalizePlacardPublish`/`releasePlacardPublishClaim` at the DB
+row, but nothing fenced the object write itself — `renderPlacardArtifact`'s
+non-recovery path called `DocumentArtifactStore.put`, an unconditional
+overwrite of the same fixed `document-artifacts/placard/<subjectId>` key
+regardless of which attempt's claim is actually current. The reopen's probe
+showed the exact sequence: instance A claims and starts rendering, its
+`PutObjectCommand` is held before reaching the transport; the claim goes
+stale; instance C reclaims, writes and finalizes; a reader resolves C's
+bytes successfully; A's held write then resumes and succeeds unconditionally,
+replacing C's bytes while the DB row still (correctly) names C's hash —
+leaving the previously-good link, and any freshly re-resolved link, failing
+`CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` against corrupted storage that no
+restart or fresh reader can repair. The reopen was explicit that a longer
+lease, another pre-write ownership query, a readback, or DB-token checks
+alone do not fence a request already in flight — the fix has to make a
+superseded write structurally unable to replace the winner's bytes.
+
+## This repair: conditional object writes fence a stale owner's PUT out after reclaim
+
+`DocumentArtifactStore` gained a third write primitive, `putIfUnchanged`,
+alongside the existing `put` (unconditional) and `putIfAbsent` (create-only).
+Every `DocumentArtifactRecord` now also carries a `generation`: an opaque
+fencing token for the object's exact current state — a real S3 `ETag` in
+`S3DocumentArtifactStoreAdapter`, a synthetic per-write id in
+`InMemoryDocumentArtifactStore`. `putIfUnchanged(command, expectedGeneration)`
+writes only when the object's CURRENT generation still equals
+`expectedGeneration` (or the object is still absent, when
+`expectedGeneration` is `null`); otherwise it returns `applied: false` and
+whatever record now actually exists, without touching the store. The S3
+adapter implements this with S3's own native conditional-write preconditions
+(`IfNoneMatch: "*"` for an absent baseline, `IfMatch: <etag>` otherwise),
+evaluated atomically server-side — the same mechanism `putIfAbsent` already
+used for `IfNoneMatch`, extended to the general compare-and-swap case.
+
+`PlatformAdminService.publishPlacardVersionExclusive` now reads this
+attempt's baseline generation (`documentArtifactStore.get(...)`) immediately
+after winning the DB claim, BEFORE calling `ensurePlacardArtifact`/
+`renderPlacardArtifact`, and that baseline is threaded through as a new
+`fenceGeneration` option so the actual publish write goes through
+`putIfUnchanged` instead of `put`. This is what actually closes the gap: a
+request already in flight is fenced not by how long it waited, or by another
+query it could still race, but by the store itself refusing to apply a write
+whose baseline the object has already moved past — no matter how late that
+write's request finally arrives. In the reopen's exact sequence, A's baseline
+generation is the plain pre-publish draft's; when A's held write finally
+reaches the store, C has already moved the object past that generation, so
+A's write fails closed (`PLACARD_PUBLISH_CONFLICT`) instead of silently
+replacing C's bytes. Every other producer (`billing-settlement`'s invoices
+and driver statements) still uses plain `put` unconditionally — none of them
+have a claim/reclaim flow that republishes the same `(kind, subjectId)` key
+under contention, so they are not exposed to this defect class and are left
+unchanged.
+
+### New regression coverage
+
+- `tests/unit/audit-artifact-durability-20261002.test.ts`, new describe
+  `"R7/R8 byte-ownership fix: a stale owner's delayed object write must not
+  replace a reclaimed-and-finalized winner's bytes"`: exercises the REAL
+  `PlatformAdminService` + real `PlatformAdminRepository` (against the
+  existing fake SQL transport that implements the actual claim/finalize/
+  release guard text) + a new `HeldWriteDocumentArtifactStore` that holds a
+  `putIfUnchanged` call's entire execution — precondition evaluation AND
+  write, not merely response delivery — until released, modelling a
+  `PutObjectCommand` that has not yet reached the transport. Reproduces the
+  reopen's exact sequence (A claims and starts writing, held; A's claim ages
+  past the 2-minute window; C reclaims, writes and finalizes for real; A's
+  held write is released and resumes) and asserts: A's publish call rejects
+  with `PLACARD_PUBLISH_CONFLICT`; the DB row still names C's hash/
+  `publishedAt`; the store's actual stored bytes match C's hash (the core
+  regression — this assertion is what the old code could not have passed);
+  C's own already-issued link still resolves correctly; and an independent,
+  freshly booted reader's own freshly issued link also resolves correctly.
+- `tests/unit/audit-artifact-durability-s3-20261003.test.ts`, new test
+  `"putIfUnchanged fences a write by real IfMatch/IfNoneMatch semantics..."`:
+  exercises the REAL `S3DocumentArtifactStoreAdapter` against the file's
+  existing mocked SDK transport (now extended to track a real per-object
+  `ETag` and honour `IfMatch`/`IfNoneMatch` preconditions the same way S3
+  itself does). Proves, at the adapter boundary alone: an absent-baseline
+  create succeeds once and is rejected for a second writer with the same
+  baseline; a legitimate republish with the current generation as its
+  baseline succeeds and sends a real `IfMatch` header with that exact ETag;
+  and — the exact R7/R8 shape — a write whose baseline has gone stale is
+  rejected and reports the current winner's record, never silently
+  replacing its bytes.
+- Every pre-existing test double in `audit-artifact-durability-20261002.test.ts`
+  that implements `DocumentArtifactStore` (`FlakyDocumentArtifactStore`,
+  `ReorderedDocumentArtifactStore`, `FailOnceStore`, both
+  `DelayedReadbackStore` classes, `ClobberedReadbackDocumentArtifactStore`,
+  `InterleavedDocumentArtifactStore`, `DelayedMissingObjectStore`) was
+  updated for the new interface method: the three whose instrumentation
+  (failure injection, held response) specifically modelled the publish
+  path's own object write (`FlakyDocumentArtifactStore`,
+  `ReorderedDocumentArtifactStore`, `FailOnceStore`) had that instrumentation
+  moved from `put` to `putIfUnchanged`, since that is now the method the
+  publish path actually calls; the two `DelayedReadbackStore` classes had
+  their `armNextGet` gated by a new `skip` parameter, because the publish
+  path's new baseline-generation read is now its first `get` call, ahead of
+  the authentic post-write read-back these tests want to hold open; the
+  remaining classes only needed a passthrough `putIfUnchanged` delegate to
+  keep implementing the interface. Every pre-existing test in both files
+  still passes unchanged in outcome — only the mechanics of a handful of
+  test doubles needed to track where in the call sequence the publish path's
+  own object write now actually happens.
+
+### Verification at this repair
+
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts --maxWorkers=1
+```
+=> exit 0, 1 file / 73 tests passed (72 pre-existing + 1 new case), zero
+skips.
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-s3-20261003.test.ts --maxWorkers=1
+```
+=> exit 0, 1 file / 14 tests passed (13 pre-existing + 1 new case), zero
+skips.
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts \
+  tests/unit/audit-artifact-durability-s3-20261003.test.ts \
+  tests/unit/system-remediation/sr-artifact-001/ \
+  tests/unit/system-remediation/sr-invoice-001/ \
+  tests/unit/system-remediation/sr-placard-001/ \
+  tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts \
+  tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts \
+  tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts \
+  tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts \
+  tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts \
+  --maxWorkers=1
+```
+=> exit 0, 16 files / 184 tests passed, zero skips.
+From `apps/api`: `pnpm exec vitest run tests/unit/platform-admin.service.test.ts
+--maxWorkers=1` => exit 0, 1 file / 3 tests (unchanged).
+Also run: `tests/unit/billing-settlement-statements.test.ts`,
+`tests/unit/billing-settlement.service.test.ts`,
+`tests/unit/billing-settlement.test.ts`,
+`tests/unit/billing-settlement.repository.test.ts` (the other
+`DocumentArtifactStore` consumer, unaffected since it only ever calls
+`put`/`putIfAbsent`) => exit 0, 4 files / 20 tests. Also run:
+`tests/unit/platform-admin-switchboard-placard-source.test.ts`,
+`tests/unit/platform-admin-switchboard-placard-version-code.test.ts`,
+`tests/unit/system-remediation/sr-artifact-001/controlled-download-artifact-bytes.test.ts`
+=> exit 0, 3 files / 16 tests.
+`pnpm exec eslint` on every touched production and test file => exit 0, no
+findings. `cd apps/api && pnpm exec tsc --noEmit -p tsconfig.json` => the
+only errors are four pre-existing `Cannot find module
+'@drts/control-plane-auth'` module-resolution errors in unrelated auth
+files (that workspace package's `dist` is not built in this worktree, same
+class of local-toolchain gap prior rounds in this lineage recorded for
+`@drts/contracts`); zero errors from any file this repair touched, confirmed
+by fixing one real `exactOptionalPropertyTypes` violation this repair
+introduced (`ensurePlacardArtifact`'s `fenceGeneration` option needed to
+accept an explicit `undefined`, not just an absent key) and re-running to a
+clean diff of only those four pre-existing errors.
+
+Hosted CI for this repair's own candidate SHA is pending — produced by the
+handoff/candidate lifecycle after this repair is committed and pushed, not
+run locally from this VM.
+
+### Acceptance mapping (this repair)
+
+| Finding/acceptance | Source location | Old → new | Evidence | Limitation |
+| --- | --- | --- | --- | --- |
+| R7/R8 reclaim safety (stale PUT after reclaim) | `document-artifact.types.ts` (new `putIfUnchanged`/`generation`), `s3-document-artifact-store.adapter.ts`, `in-memory-document-artifact-store.ts`, `platform-admin.service.ts` publish path | unconditional `put` could be superseded by a stale, delayed write landing after reclaim/finalize → the actual object write is now conditioned on a baseline captured right after the claim, via S3's native `IfMatch`/`IfNoneMatch` preconditions (or the in-memory adapter's equivalent compare-and-swap) | new tests in both files above; full scoped suite 184/184 | Proven against the real adapter's SDK command shape and a transport mock that honours the same preconditions S3 does, and against the real repository's SQL-shaped guard text with a fake query transport — not a live S3 bucket or live PostgreSQL connection/process restart. Real multi-replica Cloud Run acceptance remains `SR-LIVE-DOC-001` |
+| `durable_producer_reader_wiring` | R7/R8 byte-ownership fix above | the last of the four adjacent gaps (R7-followthrough, R8-followthrough, R9-additional-reader-gap, R7/R8 byte-ownership) is now closed | same as above | real S3/Cloud Run acceptance remains `SR-LIVE-DOC-001` |
+| `cross_instance_restart_bytes` | R7/R8 byte-ownership fix above | same | same as above | same |
+| `signature_hash_denial_regressions` | unchanged fail-closed mismatch checks | still passing | scoped suites above | n/a |
+| `same_sha_review_ci` | this candidate's own SHA | pending (produced after handoff) | n/a yet | previous SHA's hosted CI does not cover this repair |
+
+### Remaining limitations (this repair, R7/R8 byte-ownership round)
+
+- The fencing mechanism is proven at the adapter level against a transport
+  mock that models S3's real documented conditional-write precondition
+  semantics (`IfMatch`/`IfNoneMatch`, atomic server-side evaluation,
+  `PreconditionFailed`/412 on mismatch), and at the service/repository level
+  against a fake SQL transport that implements the actual guard text — not
+  against a live S3 bucket or a live PostgreSQL connection. No VM
+  product/browser/DB/Compose server was started for this repair, consistent
+  with this task's standing restriction; real multi-replica Cloud Run
+  acceptance, including genuine network-level request reordering, remains
+  `SR-LIVE-DOC-001`.
+- The previously open "OPEN evidence gap from previous review" — a real-schema
+  production-repository integration matrix against a hosted PostgreSQL job
+  (`tests/integration/platform-admin-artifact-publication.integration.test.ts`,
+  `.github/workflows/ci-integ.yml` wiring) — is still not implemented. Both
+  paths remain in this task's `write_scopes`, but authoring and wiring an
+  integration suite against a real hosted database is a separate, larger
+  undertaking this repair did not attempt; it is not required to reproduce
+  or close the R7/R8 byte-ownership defect itself, which this repair's own
+  new regressions exercise against the real adapter/service/repository code
+  paths with transport-level mocks only.
+- `billing-settlement`'s invoice/driver-statement producers were not changed:
+  they generate a fresh, unique `subjectId` (`randomUUID()`) per issuance
+  and never republish under contention for the same key, so they were never
+  exposed to this defect class; `reporting-filing`/`regulatory-registry`
+  (also in this task's `write_scopes`) do not implement a custom
+  `DocumentArtifactStore`, and a repo-wide search confirmed no other
+  producer implements the claim/reclaim pattern this fix targets.

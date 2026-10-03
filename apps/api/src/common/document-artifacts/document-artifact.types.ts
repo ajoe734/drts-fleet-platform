@@ -15,6 +15,13 @@ export interface DocumentArtifactRecord {
   sha256: string;
   byteLength: number;
   storedAt: string;
+  /**
+   * Opaque fencing token for this exact object state -- an S3 ETag in the
+   * durable adapter, a synthetic per-write id in the in-memory adapter.
+   * Compare only for equality (see `putIfUnchanged`'s `expectedGeneration`);
+   * never parse it or derive meaning from its value or format.
+   */
+  generation: string;
 }
 
 export interface DocumentArtifactEntry {
@@ -39,6 +46,10 @@ export interface PutIfAbsentDocumentArtifactResult {
    */
   created: boolean;
 }
+
+export type PutIfUnchangedDocumentArtifactResult =
+  | { applied: true; record: DocumentArtifactRecord }
+  | { applied: false; record: DocumentArtifactRecord | null };
 
 /**
  * The read/write seam producers (tenant invoice, placard, report generation)
@@ -65,6 +76,24 @@ export interface DocumentArtifactStore {
   putIfAbsent(
     command: PutDocumentArtifactCommand,
   ): Promise<PutIfAbsentDocumentArtifactResult>;
+  /**
+   * Conditional overwrite fenced by object state, not caller identity:
+   * writes only when the object's CURRENT generation still equals
+   * `expectedGeneration` (or the object is still absent, when
+   * `expectedGeneration` is `null`). A writer that captured its baseline
+   * generation right after winning some other, caller-level ownership
+   * fence (e.g. a database publish claim) -- then rendered and attempted
+   * this write, possibly much later if its own request stalled in
+   * transit -- cannot silently replace bytes a different, legitimate
+   * writer already stored in between: `applied: false` means exactly that
+   * happened, and `record` is whatever now actually exists (or `null`, if
+   * even that could not be re-resolved) for the caller to adopt instead of
+   * trusting its own unwritten render.
+   */
+  putIfUnchanged(
+    command: PutDocumentArtifactCommand,
+    expectedGeneration: string | null,
+  ): Promise<PutIfUnchangedDocumentArtifactResult>;
   get(
     kind: DocumentArtifactKind,
     subjectId: string,

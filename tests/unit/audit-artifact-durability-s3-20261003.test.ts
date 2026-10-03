@@ -37,6 +37,7 @@ interface ObjectInput {
   ContentLength?: number;
   Metadata?: Record<string, string>;
   IfNoneMatch?: string;
+  IfMatch?: string;
 }
 const { S3Client, GetObjectCommand, PutObjectCommand } = apiRequire(
   "@aws-sdk/client-s3",
@@ -53,10 +54,13 @@ interface StoredObject {
   ContentType?: string | undefined;
   ContentLength?: number | undefined;
   Metadata?: Record<string, string> | undefined;
+  ETag?: string | undefined;
 }
 const objects = new Map<string, StoredObject>();
 let unreadableBody = false;
 let transportError: Error | undefined;
+let etagCounter = 0;
+const nextETag = () => `"offline-etag-${++etagCounter}"`;
 let sends: ReturnType<typeof vi.spyOn>;
 const clients = new Set<Client>();
 const hash = (bytes: Buffer) =>
@@ -108,6 +112,7 @@ beforeEach(() => {
   clients.clear();
   unreadableBody = false;
   transportError = undefined;
+  etagCounter = 0;
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("DRTS_ENV", "production");
   vi.stubEnv("APP_ENV", "production");
@@ -131,19 +136,31 @@ beforeEach(() => {
         const input = command.input;
         expect(Buffer.isBuffer(input.Body)).toBe(true);
         const objectKey = `${input.Bucket}/${input.Key}`;
-        if (input.IfNoneMatch === "*" && objects.has(objectKey)) {
+        const existing = objects.get(objectKey);
+        if (input.IfNoneMatch === "*" && existing) {
           throw Object.assign(new Error("At least one of the pre-conditions you specified did not hold."), {
             name: "PreconditionFailed",
             $metadata: { httpStatusCode: 412 },
           });
         }
+        if (
+          input.IfMatch !== undefined &&
+          input.IfMatch !== (existing?.ETag ?? null)
+        ) {
+          throw Object.assign(new Error("At least one of the pre-conditions you specified did not hold."), {
+            name: "PreconditionFailed",
+            $metadata: { httpStatusCode: 412 },
+          });
+        }
+        const ETag = nextETag();
         objects.set(objectKey, {
           bytes: Buffer.from(input.Body as Buffer),
           ContentType: input.ContentType,
           ContentLength: input.ContentLength,
           Metadata: { ...input.Metadata },
+          ETag,
         });
-        return { $metadata: { httpStatusCode: 200 } };
+        return { $metadata: { httpStatusCode: 200 }, ETag };
       }
       expect(command).toBeInstanceOf(GetObjectCommand);
       const input = (command as InstanceType<typeof GetObjectCommand>).input;
@@ -155,6 +172,7 @@ beforeEach(() => {
         ContentType: object.ContentType,
         ContentLength: object.ContentLength,
         Metadata: { ...object.Metadata },
+        ETag: object.ETag ?? nextETag(),
         Body: unreadableBody
           ? {}
           : (async function* () {
@@ -430,6 +448,64 @@ describe("configured durable document path with SDK transport boundary only", ()
         ([command]: readonly unknown[]) => command instanceof PutObjectCommand,
       ).length,
     ).toBe(puts + 1);
+  });
+
+  it("putIfUnchanged fences a write by real IfMatch/IfNoneMatch semantics: a stale baseline is rejected, not silently overwritten", async () => {
+    const store = configuredModuleStore() as S3DocumentArtifactStoreAdapter;
+
+    // Baseline "nothing stored yet": the adapter must send IfNoneMatch, and
+    // the real transport's own atomic create-if-absent check applies.
+    const firstBytes = Buffer.from("%PDF-1.4 baseline writer\n%%EOF");
+    const created = await store.putIfUnchanged(
+      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: firstBytes },
+      null,
+    );
+    expect(created.applied).toBe(true);
+    expect(created.record!.sha256).toBe(hash(firstBytes));
+    const firstGeneration = created.record!.generation;
+    expect(
+      (sends.mock.calls.at(-1)![0] as InstanceType<typeof PutObjectCommand>)
+        .input.IfNoneMatch,
+    ).toBe("*");
+
+    // A second writer, holding the SAME baseline (generation null) the
+    // first writer started from, must now be rejected: the object exists.
+    const staleWriterBytes = Buffer.from(
+      "%PDF-1.4 a stale writer's bytes\n%%EOF",
+    );
+    const staleAttempt = await store.putIfUnchanged(
+      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: staleWriterBytes },
+      null,
+    );
+    expect(staleAttempt.applied).toBe(false);
+    expect(staleAttempt.record!.sha256).toBe(hash(firstBytes));
+    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(firstBytes);
+
+    // A legitimate republish that captured the CURRENT generation as its
+    // baseline succeeds, sending a real IfMatch against that exact ETag.
+    const secondBytes = Buffer.from("%PDF-1.4 legitimate republish\n%%EOF");
+    const legitimate = await store.putIfUnchanged(
+      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: secondBytes },
+      firstGeneration,
+    );
+    expect(legitimate.applied).toBe(true);
+    expect(legitimate.record!.sha256).toBe(hash(secondBytes));
+    expect(
+      (sends.mock.calls.at(-1)![0] as InstanceType<typeof PutObjectCommand>)
+        .input.IfMatch,
+    ).toBe(firstGeneration);
+    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(secondBytes);
+
+    // The exact R7/R8 shape: a write whose baseline is now stale (someone
+    // else already moved the object past it) must be rejected and must
+    // report the CURRENT winner, not silently replace its bytes.
+    const lateStaleWrite = await store.putIfUnchanged(
+      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: staleWriterBytes },
+      firstGeneration,
+    );
+    expect(lateStaleWrite.applied).toBe(false);
+    expect(lateStaleWrite.record!.sha256).toBe(hash(secondBytes));
+    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(secondBytes);
   });
 
   it("rejects oversize uploads before any transport and fails configured-module reads closed when unprovisioned", async () => {

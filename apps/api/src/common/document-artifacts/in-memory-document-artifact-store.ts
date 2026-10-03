@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { DocumentArtifactKind } from "./document-artifact-kinds";
 import type {
@@ -7,6 +7,7 @@ import type {
   DocumentArtifactStore,
   PutDocumentArtifactCommand,
   PutIfAbsentDocumentArtifactResult,
+  PutIfUnchangedDocumentArtifactResult,
 } from "./document-artifact.types";
 import { validatePutDocumentArtifactCommand } from "./document-artifact-validation";
 
@@ -44,6 +45,7 @@ export class InMemoryDocumentArtifactStore implements DocumentArtifactStore {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: bytes.length,
       storedAt: new Date().toISOString(),
+      generation: randomUUID(),
     };
 
     this.entries.set(storageKey(command.kind, subjectId), {
@@ -92,8 +94,45 @@ export class InMemoryDocumentArtifactStore implements DocumentArtifactStore {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: bytes.length,
       storedAt: new Date().toISOString(),
+      generation: randomUUID(),
     };
     this.entries.set(existingKey, { record, bytes });
     return { created: true, record: { ...record } };
+  }
+
+  /**
+   * No `await` separates the generation check from the write below, for the
+   * same reason as `putIfAbsent`: the in-process analogue of a real store's
+   * atomic compare-and-swap, so nothing can observably interleave between
+   * reading the current generation and committing a new one.
+   */
+  async putIfUnchanged(
+    command: PutDocumentArtifactCommand,
+    expectedGeneration: string | null,
+  ): Promise<PutIfUnchangedDocumentArtifactResult> {
+    const { subjectId, mimeType, bytes } =
+      validatePutDocumentArtifactCommand(command);
+    const key = storageKey(command.kind, subjectId);
+    const existing = this.entries.get(key);
+    const currentGeneration = existing?.record.generation ?? null;
+
+    if (currentGeneration !== expectedGeneration) {
+      return {
+        applied: false,
+        record: existing ? { ...existing.record } : null,
+      };
+    }
+
+    const record: DocumentArtifactRecord = {
+      kind: command.kind,
+      subjectId,
+      mimeType,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.length,
+      storedAt: new Date().toISOString(),
+      generation: randomUUID(),
+    };
+    this.entries.set(key, { record, bytes });
+    return { applied: true, record: { ...record } };
   }
 }
