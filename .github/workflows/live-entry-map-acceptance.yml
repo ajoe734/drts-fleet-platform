@@ -12,12 +12,12 @@ name: Live Entry & Map Acceptance (SR-LIVE-ENTRY-MAP-RUNNER-001)
 #                       Geocoding/Routes/Maps JS checks), plus V0049 service
 #                       areas, isolated driver tracking and hosted Chromium.
 #
-# This workflow never deploys anything: both jobs only verify a candidate
-# that a separate deploy workflow already published. Each job independently
-# verifies (a) the checked-out git SHA matches the requested candidate_sha
-# and (b) the deployed target itself reports that
-# same candidate SHA via its x-drts-candidate-sha response header, so a
-# stale/rolled-back deployment cannot silently pass. All inputs are
+# This workflow never deploys anything. Both jobs verify that the checkout
+# matches candidate_sha. Entry requires that candidate to be deployed; map
+# permits an explicitly pinned deployed_sha for test-only harness revisions.
+# Map health and every API/ops response must report that deployment SHA;
+# evidence retains both the harness candidate and observed runtime version.
+# A stale/rolled-back deployment cannot silently pass. All inputs are
 # explicit, fail-closed allowlists; there is no historical staging default
 # fallback. Neither job runs on this project's VM (no product dev/preview/
 # HTTP/browser server permitted there); both run entirely on GitHub-hosted
@@ -28,6 +28,10 @@ on:
     inputs:
       candidate_sha:
         description: "Immutable candidate commit SHA to verify (full 40-char SHA); leave blank to use the dispatch ref's HEAD"
+        required: false
+        default: ""
+      deployed_sha:
+        description: "Map only: immutable shared-dev deployment SHA (40 lowercase hex); blank requires candidate_sha to be deployed"
         required: false
         default: ""
       run_entry_profile:
@@ -198,6 +202,7 @@ jobs:
       CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
       WORKFLOW_SHA: ${{ github.workflow_sha }}
       DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: ${{ github.event.inputs.deployed_sha || github.event.inputs.candidate_sha || github.sha }}
       DRTS_LIVE_MAP_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/live-map-acceptance/evidence-map.json
       DRTS_LIVE_MAP_TEST_AUTHORIZED: ${{ vars.DRTS_LIVE_MAP_TEST_AUTHORIZED }}
       DRTS_LIVE_MAP_ALLOWED_TARGETS: ${{ vars.DRTS_LIVE_MAP_ALLOWED_TARGETS }}

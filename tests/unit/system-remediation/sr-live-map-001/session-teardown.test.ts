@@ -19,7 +19,12 @@ const env = {
   DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN: "cached-session",
 };
 function harness(
-  options: { expired?: boolean; fail?: boolean; wrongSha?: boolean } = {},
+  options: {
+    expired?: boolean;
+    fail?: boolean;
+    wrongSha?: boolean;
+    deployedSha?: string;
+  } = {},
 ) {
   const readGoogleIdToken = vi.fn(() => "fresh-google-assertion");
   const mask = vi.fn();
@@ -33,12 +38,14 @@ function harness(
       Response.json(data, {
         status,
         headers: {
-          "x-drts-candidate-sha": options.wrongSha ? "b".repeat(40) : sha,
+          "x-drts-candidate-sha": options.wrongSha
+            ? "b".repeat(40)
+            : (options.deployedSha ?? sha),
         },
       });
     if (url.pathname === "/api/health")
       return reply({
-        candidateSha: sha,
+        candidateSha: options.deployedSha ?? sha,
         mapProvider: { effectiveBackend: "google" },
       });
     if (url.pathname === "/api/auth/token") {
@@ -92,6 +99,23 @@ it("revokes the invite and bound device using the existing restricted session", 
   );
   expect(JSON.stringify(deps.save.mock.calls)).not.toContain("private-code");
 });
+it("revokes on the separately pinned deployment after refreshing WIF and retains both SHAs", async () => {
+  const deployedSha = "c".repeat(40);
+  const deps = harness({ deployedSha, expired: true });
+  await teardownMapSessions(
+    { ...env, DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: deployedSha },
+    deps,
+  );
+  expect(deps.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      candidate_sha: sha,
+      deployed_sha: deployedSha,
+      status: "passed",
+      revoked: true,
+    }),
+  );
+});
+
 it("uses fresh WIF after expiry, without reading a secret or issuing a workforce session", async () => {
   const deps = harness({ expired: true });
   await teardownMapSessions(env, deps);
