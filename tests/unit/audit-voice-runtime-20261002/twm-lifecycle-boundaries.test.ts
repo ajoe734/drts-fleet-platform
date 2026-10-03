@@ -19,6 +19,7 @@ import type { TwmAsrRouteProfile } from "../../../apps/voice-media-worker/src/pr
 class Socket implements TwmWebSocketLike {
   state = "connecting";
   closes = 0;
+  deferClose = false;
   sent: Array<Uint8Array | string> = [];
   listeners = new Map<string, Array<(event: TwmWebSocketEvent) => void>>();
   addEventListener(type: string, listener: (event: TwmWebSocketEvent) => void) {
@@ -42,10 +43,10 @@ class Socket implements TwmWebSocketLike {
     this.sent.push(bytes);
   }
   close() {
-    if (this.state !== "closed") {
-      this.state = "closed";
+    if (this.state !== "closed" && this.state !== "closing") {
+      this.state = this.deferClose ? "closing" : "closed";
       this.closes++;
-      this.emit("close");
+      if (!this.deferClose) this.emit("close");
     }
   }
 }
@@ -211,6 +212,49 @@ describe("ASR lifecycle acceptance with non-replaying external boundaries", () =
       expect(f.sockets).toHaveLength(0);
     },
   );
+  it.each([false, true])(
+    "fences old socket events during a fresh attempt (ready=%s)",
+    async (ready) => {
+      const f = fixture();
+      f.chunk();
+      const old = await f.open(false);
+      old.deferClose = true;
+      await vi.advanceTimersByTimeAsync(25);
+      expect(old.state).toBe("closing");
+      const next = f.chunk(2);
+      await vi.advanceTimersByTimeAsync(0);
+      const current = f.sockets[1]!;
+      current.open();
+      await vi.advanceTimersByTimeAsync(0);
+      if (ready) current.message({ status: 180 });
+      old.emit("open");
+      old.emit("message", { data: JSON.stringify({ status: 180 }) });
+      old.emit("message", {
+        data: JSON.stringify({
+          providerSessionId: "unit-provider",
+          segmentId: "unit-segment",
+          revision: 99,
+          final: 1,
+        }),
+      });
+      old.emit("error");
+      old.state = "closed";
+      old.emit("close");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(next.done).toBe(false);
+      expect(current.state).toBe("open");
+      if (!ready) {
+        expect(current.sent).toEqual([]);
+        current.message({ status: 180 });
+      }
+      f.result(current, 1, 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(next.done).toBe(true);
+      expect(next.error).toBeUndefined();
+      await f.adapter.close();
+      expect(current.closes).toBe(1);
+    },
+  );
   it("bounds a handshake that never opens", async () => {
     const f = fixture();
     const outcome = f.chunk();
@@ -250,15 +294,25 @@ describe("ASR lifecycle acceptance with non-replaying external boundaries", () =
       0,
     );
   });
-  it("bounds retained ingress even while login is pending, and fails the entire queue on overflow", async () => {
-    const f = fixture("login");
-    for (let n = 0; n < 65; n++) f.chunk(n);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(f.outcomes.every((o) => o.done && o.error)).toBe(true);
-    f.release();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(f.sockets).toHaveLength(0);
-  });
+  it.each(["login", "access", "handshake", "ready-wait"] as const)(
+    "bounds retained ingress during %s and fails the queue on overflow",
+    async (phase) => {
+      const f = fixture(
+        phase === "login" || phase === "access" ? phase : undefined,
+      );
+      f.chunk(0);
+      if (phase === "handshake") await vi.advanceTimersByTimeAsync(0);
+      if (phase === "ready-wait") await f.open(false);
+      for (let n = 1; n < 65; n++) f.chunk(n);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(f.outcomes.every((o) => o.done && o.error)).toBe(true);
+      f.release();
+      await vi.advanceTimersByTimeAsync(0);
+      if (phase === "login" || phase === "access")
+        expect(f.sockets).toHaveLength(0);
+      expect(f.sockets.every((socket) => socket.state === "closed")).toBe(true);
+    },
+  );
   it("settles provider errors occurring after open, not only handshake errors", async () => {
     const f = fixture();
     const outcome = f.chunk();
@@ -384,6 +438,49 @@ describe("configured provider → composer → server cleanup, socket-free", () 
       expect(socket.closes).toBe(1);
     },
   );
+  it("retains an old epoch's pending drain when the same session ID is reused", async () => {
+    const f = composedFixture();
+    f.channel.emit("message", Buffer.from([1]), true);
+    await vi.advanceTimersByTimeAsync(0);
+    const old = f.sockets[0]!;
+    old.open();
+    await vi.advanceTimersByTimeAsync(0);
+    old.message({ status: 180 });
+    old.message({
+      providerSessionId: "old",
+      segmentId: "s",
+      revision: 1,
+      final: 0,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    f.server.closeSession("configured");
+    const peer = new Duplex({
+      read() {},
+      write(_data, _encoding, done) {
+        done();
+      },
+    });
+    const replacement = new WebSocketServerChannel(peer, { timeoutMs: 0 });
+    f.server.admitSession("configured").channel = replacement;
+    f.composer.attach("configured", replacement);
+    let stopped = false;
+    const stopping = f.server.stop().then(() => {
+      stopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(5);
+    expect(stopped).toBe(false);
+    expect(old.state).toBe("open");
+    old.message({
+      providerSessionId: "old",
+      segmentId: "s",
+      revision: 2,
+      final: 1,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await stopping;
+    expect(old.closes).toBe(1);
+    peer.destroy();
+  });
   it("forwards AbortSignal into configured fetch and cancels a never-resolving login", async () => {
     const f = composedFixture();
     let signal: AbortSignal | undefined;

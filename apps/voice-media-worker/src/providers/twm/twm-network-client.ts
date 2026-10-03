@@ -274,7 +274,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   private socket: TwmWebSocketLike | undefined;
   private connectPromise: Promise<void> | undefined;
   private closePromise: Promise<void> | undefined;
-  private readonly setupController = new AbortController();
+  private setupController = new AbortController();
   private pendingIngress = 0;
   /** `true` only once the provider's WebSocket `open` event has actually
    * fired -- distinct from `this.socket` being assigned, which happens
@@ -433,19 +433,24 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     }
     if (this.connectPromise) return this.connectPromise;
     if (this.socket && this.socketOpen) return;
-    this.connectGeneration += 1;
+    const generation = ++this.connectGeneration;
+    if (this.setupController.signal.aborted)
+      this.setupController = new AbortController();
     this.armSetupDeadline();
-    this.connectPromise = this.performConnect(this.connectGeneration)
+    const connecting: Promise<void> = this.performConnect(generation)
       .catch((error: unknown) => {
-        this.failSession(
-          error instanceof Error ? error : new Error(String(error)),
-        );
+        if (generation === this.connectGeneration) {
+          this.failSession(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
         throw error;
       })
       .finally(() => {
-        this.connectPromise = undefined;
+        if (this.connectPromise === connecting) this.connectPromise = undefined;
       });
-    return this.connectPromise;
+    this.connectPromise = connecting;
+    return connecting;
   }
 
   private assertNotTerminated(reason: string): void {
@@ -493,18 +498,18 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * unreached (R12): rejects whatever `connect()` attempt is still
    * in-flight, settles every queued chunk/result waiter instead of
    * leaving them pending forever, and releases the stalled socket (if
-   * any). Terminal: late upstream responses cannot resurrect this adapter;
-   * reconnect requires a new session-owned adapter and fresh authority. */
+   * any). The failed attempt is fenced and aborted. A fresh attempt may
+   * reconnect, but none of the abandoned socket's events can act on it. */
   private failSetup(): void {
     const err = new TwmNetworkError(
       "TWM_ASR_SETUP_TIMEOUT",
       `TWM ASR provider did not reach '180' send-ready status within ${this.profile.timeouts.noSpeechTimeoutMs}ms of connecting.`,
     );
-    this.failSession(err);
+    this.failSession(err, false);
   }
 
-  private failSession(err: Error): void {
-    this.terminated = true;
+  private failSession(err: Error, terminal = true): void {
+    this.terminated ||= terminal;
     this.clearSetupDeadline();
     // Retain the owner's generation fence as well as aborting transports:
     // external boundaries are permitted to ignore an AbortSignal.
@@ -612,9 +617,13 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       );
     }
     this.socket = socket;
-    socket.addEventListener("message", (event) => this.handleMessage(event));
+    const isCurrentSocket = () =>
+      this.socket === socket && generation === this.connectGeneration;
+    socket.addEventListener("message", (event) => {
+      if (isCurrentSocket()) this.handleMessage(event);
+    });
     socket.addEventListener("close", () => {
-      if (this.socket !== socket) return;
+      if (!isCurrentSocket()) return;
       this.failSession(
         new TwmNetworkError(
           "TWM_ASR_CONNECTION_CLOSED",
@@ -623,7 +632,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       );
     });
     socket.addEventListener("error", () => {
-      if (this.socket !== socket) return;
+      if (!isCurrentSocket()) return;
       this.failSession(
         new TwmNetworkError("TWM_ASR_WS_ERROR", "TWM ASR WebSocket failed."),
       );
@@ -632,7 +641,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       socket.addEventListener("open", () => {
-        if (settled) return;
+        if (settled || !isCurrentSocket()) return;
         settled = true;
         this.socketOpen = true;
         resolve();

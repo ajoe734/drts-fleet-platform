@@ -1285,24 +1285,10 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
       expect(accessCalls).toBe(0);
       expect(wsFactory).not.toHaveBeenCalled();
 
-      // Failure is terminal for this session-owned adapter. A new adapter
-      // can connect, but repeated ingress must not resurrect the failed one.
-      await expect(
-        adapter.transcribe({
-          sessionId: "sess",
-          audioChunk: new Uint8Array([2]),
-          sequence: 2,
-        }),
-      ).rejects.toMatchObject({ code: "TWM_ASR_TERMINATED" });
+      // The old attempt is fenced; a genuinely fresh attempt can recover.
       const freshSocket = new StatefulSocket();
       wsFactory.mockImplementation(() => freshSocket);
-      const freshAdapter = new TwmAsrNetworkAdapter(
-        transport,
-        wsFactory,
-        { accountId: "a", accountSecret: "s" },
-        shortSetupProfile,
-      );
-      const freshPromise = freshAdapter.transcribe({
+      const freshPromise = adapter.transcribe({
         sessionId: "sess",
         audioChunk: new Uint8Array([2]),
         sequence: 2,
@@ -1327,7 +1313,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
       });
       await expect(freshPromise).resolves.toMatchObject({ text: "fresh" });
       expect(wsFactory).toHaveBeenCalledTimes(1);
-      await freshAdapter.close();
+      await adapter.close();
     } finally {
       vi.useRealTimers();
     }
