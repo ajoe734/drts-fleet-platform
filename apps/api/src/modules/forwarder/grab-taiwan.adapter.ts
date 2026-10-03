@@ -9,9 +9,7 @@ import type {
   ForwarderAdapterActionResult,
   ForwarderAdapterCompleteInput,
   ForwarderAdapterEarningsResult,
-  ForwarderAdapterFetchEarningsInput,
   ForwarderAdapterHealthSnapshot,
-  ForwarderAdapterHeartbeatInput,
   ForwarderAdapterHeartbeatResult,
   ForwarderAdapterInterface,
   ForwarderAdapterRejectInput,
@@ -82,9 +80,7 @@ export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
     };
   }
 
-  async heartbeat(
-    input?: ForwarderAdapterHeartbeatInput,
-  ): Promise<ForwarderAdapterHeartbeatResult> {
+  async heartbeat(): Promise<ForwarderAdapterHeartbeatResult> {
     this.logger.error(
       `Rejecting heartbeat for ${this.platformCode}: MISSING_PROVIDER_CONTRACT`,
     );
@@ -95,37 +91,33 @@ export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
     };
   }
 
-  async fetchEarnings(
-    input?: ForwarderAdapterFetchEarningsInput,
-  ): Promise<ForwarderAdapterEarningsResult> {
+  async fetchEarnings(): Promise<ForwarderAdapterEarningsResult> {
     this.logger.error(
       `Rejecting fetchEarnings for ${this.platformCode}: MISSING_PROVIDER_CONTRACT`,
     );
     throw new Error("MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.");
   }
 
-  async verifyWebhook(
-    input: { headers: Record<string, string | string[] | undefined>; payload: Record<string, unknown> }
-  ): Promise<ForwarderAdapterWebhookVerificationResult> {
+  async verifyWebhook(): Promise<ForwarderAdapterWebhookVerificationResult> {
     this.logger.error(
       `Rejecting verifyWebhook for ${this.platformCode}: MISSING_PROVIDER_CONTRACT`,
     );
     return {
       accepted: false,
       detail: "MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.",
-      credentialStatus: "missing",
-      authStatus: "unauthenticated",
-      webhookStatus: "unverified",
+      credentialStatus: "not_configured",
+      authStatus: "unknown",
+      webhookStatus: "not_configured",
     };
   }
 
   async getHealthSnapshot(): Promise<ForwarderAdapterHealthSnapshot> {
     return {
       status: "degraded",
-      reason: "MISSING_PROVIDER_CONTRACT",
-      credentialStatus: "missing",
-      authStatus: "unauthenticated",
-      webhookStatus: "unverified",
+      reason: "credential",
+      credentialStatus: "not_configured",
+      authStatus: "unknown",
+      webhookStatus: "not_configured",
       rateLimitStatus: "unknown",
       message: "Grab Taiwan adapter is unavailable (missing real upstream contracts).",
       checkedAt: new Date().toISOString(),

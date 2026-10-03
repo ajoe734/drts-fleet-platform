@@ -1018,15 +1018,23 @@ export class ForwarderService implements OnModuleInit {
     const seededHealth: AdapterHealthRecord[] = [];
 
     for (const adapter of this.adapters) {
-      if (
-        this.adapterHealth.some(
-          (record) => record.platformCode === adapter.platformCode,
-        )
-      ) {
+      const existing = this.adapterHealth.find(
+        (record) => record.platformCode === adapter.platformCode,
+      );
+      const snapshot = await this.safeGetHealthSnapshot(adapter);
+
+      if (existing) {
+        if (snapshot) {
+          seededHealth.push(
+            this.updateAdapterHealth(
+              adapter.platformCode,
+              this.buildHealthSnapshotPatch(snapshot),
+            ),
+          );
+        }
         continue;
       }
 
-      const snapshot = await this.safeGetHealthSnapshot(adapter);
       seededHealth.push(
         this.updateAdapterHealth(adapter.platformCode, {
           ...this.buildAdapterHealthBaseline(adapter.platformCode, adapter),
@@ -1352,6 +1360,19 @@ export class ForwarderService implements OnModuleInit {
       platformCode,
       this.findAdapter(platformCode),
     );
+
+    const existing = this.adapterHealth.find(
+      (record) => record.platformCode === platformCode,
+    );
+    if (existing?.status === "degraded" && existing?.reason === "credential") {
+      return {
+        status: existing.status,
+        reason: existing.reason,
+        lastCheckedAt: new Date().toISOString(),
+        lastError: existing.lastError,
+        ...patch,
+      };
+    }
 
     return {
       status: "healthy",
