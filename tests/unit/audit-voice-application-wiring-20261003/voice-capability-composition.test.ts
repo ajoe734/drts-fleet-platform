@@ -446,7 +446,7 @@ describe("VoiceBookingController.requestHandoff (backs VoiceToolGatewayService.e
     usage: { inputTokens: null, outputTokens: null },
   };
 
-  it("initiates a real handoff through VoiceHandoffService and maps a queued outcome", async () => {
+  it("routes through the real gateway/port to the handoff service boundary and maps a queued outcome", async () => {
     const guardAuthenticate = vi.fn(async () => claims());
     const initiateHandoff = vi.fn(async () => ({
       session: session(),
@@ -475,6 +475,12 @@ describe("VoiceBookingController.requestHandoff (backs VoiceToolGatewayService.e
         expectedLeaseEpoch: claims().leaseEpoch,
         reason: "customer_requested",
       }),
+      {
+        inputEpoch: 2,
+        resourceScopeId: claims().resourceScopeId,
+        routeProfileVersion: claims().routeProfileVersion,
+        signal: expect.any(AbortSignal),
+      },
     );
     expect(result.data).toEqual({
       results: [{ status: "queued", handoffId: "handoff-1" }],

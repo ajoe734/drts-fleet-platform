@@ -2124,3 +2124,184 @@ reopen content and both outside this task's normal review loop:
 No product/listening server, browser/E2E, DB, Compose, real network
 provider/GCP/apps/api call, package install, git history rewrite, or
 force-push was performed this round.
+
+## Round-13: preserve the rejected review, recover policy-valid history, repair the actual R7 service boundary
+
+This is a **partial implementation checkpoint, not a review handoff**.
+Original owner remains Claude2, independent reviewer Codex; Pi contributed
+history recovery and the bounded R7 unit. R4 and R4-persist remain OPEN.
+Round-11's claim that authority_epoch_consent_fences is met is superseded.
+Round-12's two-option history dilemma is also superseded: a new successor
+branch can preserve every original published commit without including the
+invalid ancestor in the replacement candidate's ancestry. No gate change,
+force push, rebase, reset or amendment is needed.
+
+### Retained independent review of 770516318a29e5cebec85d7f7fcd7c79bf24ff5c
+
+Codex reopened generation `c02cd2b278604c968968cb5755f5ed59` on
+2026-10-03 11:50:05Z, after the previous independent review of
+`1994a76ec5fa5a96e37bd0abb81bf1f99cefcd9d`. The reviewer kept the
+candidate/artifact immutable. The canonical `worker_outcomes` entry
+retains the verbatim report and execution transcript. Its findings and
+reproducible boundaries are retained here together, rather than replacing
+all unresolved work with a new green summary:
+
+- **Confirmed progress:** 23 scoped files / 472 passing tests, including
+  playback/release/drain/queue, R2 direct retained-session cancellation,
+  R6 worker capability-await cancellation, R8 lowercase S3 metadata, R9
+  null-version rejection. recordControlEvent route/client exist, and the
+  fixture persistence test now reaches the intended guard. Post-resolve
+  abort, response id/version and identity-signal checks are partial progress.
+- **R7, P1 residual:** real gateway -> VoiceHandoffOnlyToolPorts.execute
+  -> VoiceHandoffService.initiateHandoff drops the signal after the port.
+  The inner service awaits findSessionById then starts CAS without checking
+  cancellation. Reproduction: real gateway/port/service/queue, only repo
+  and authentication boundaries doubled. Admit human/request_handoff at
+  epoch1/version4/lease2/AI owner. Allow gateway and port reads, hold the
+  service's INNER read. Abort and observe gateway voice_aborted; release
+  read. Actual: one new CAS after abort, owner coordinator/lease3 and one
+  queue item. Healthy control also gives one CAS and queued result.
+  Expected: zero new CAS/queue effects after an unaccepted cancelled turn.
+  Previous tests doubled initiateHandoff and missed this production logic.
+  Carry admitted authority/signal/deadline to the actual mutation boundary,
+  recheck after reads and reconcile already accepted effects instead of
+  claiming cancellation rolls back them. Hosted PG semantics are separate.
+- **R4, P1 repeated, runtime composition/durability:** server.ts still
+  always constructs the fixture provider with production=false, without
+  explicit non-strict opt-in. Actual MediaWorkerServer attach lacks trusted
+  binding/restoration; coordinator starts fresh state/epoch0. Configured
+  unbound runtime still succeeds via fixture fallback. The trusted persist
+  port ignores _state and sends only input resolution: real empty and
+  emergency dialogue snapshots produce IDENTICAL successful request bodies,
+  with no content/turn ID/media epoch. No durable restore consumer exists.
+  recordControlEvent has NO coordinator caller; local speech-start/media
+  change AND finals increment epoch, but real resolveInput rejects epoch1/2
+  against authoritative epoch0 with zero CAS. The trusted-composition double
+  merely echoes epochs and hides this missing integration.
+  Required: real configured main/server consumes restored session/scope/
+  lease/input/media/revision authority, persists ordered events/dedup and
+  encrypted dialogue content before effects, fails closed on missing/stale/
+  rejected authority, allows fixtures only by explicit non-strict opt-in.
+  Schema scope was ALREADY coordinated in EXECUTION.md: V0106 under
+  infra/migrations plus hosted unattended-voice-postgres integration tests;
+  API voice-booking, contracts and worker source are authorized. Missing
+  storage/transport/consumer/default isolation are implementation work,
+  not external procurement. A dialogue candidate snapshot must not become
+  booking proof, qualified addresses or consent. Integrate finite retention.
+  Required regressions: actual configured composition with external
+  boundaries doubled, epoch sync, CAS/scope/dedup denial, restart/restore,
+  retention and hosted formal-schema repository tests. No local DB/server.
+- **R4-persist, P1 residual:** ambiguous committed/cancelled CAS is thrown
+  away, no restoration/read method exists. Reproduction uses real client,
+  persist port and VoiceSessionService.resolveInput with HTTP/identity/repo
+  boundaries doubled: CAS commits version4->5, hold response, abort, release.
+  Reject correctly leaves binding4, but next fresh turn sends version4 again;
+  service rejects VOICE_DRAFT_STALE. Actual: capability+resolve twice, only
+  one CAS, authority5/binding4, no reconciliation/read. Expected: reconcile
+  committed authority before admitting later turns; abort is not rollback.
+  Separate response with correct id/epoch/version5 but foreign scope,
+  lease99, route99 and pendingInput=true was accepted and advanced binding.
+  Validate full scope/lease/media/revision/resolution against immutable
+  attachment/request; do not blindly adopt a stale/cross-scope response.
+- **R10, P1 delivery gate:** exact-candidate CI FAILED, not merely pending.
+  Commit trailers job111194983283/run37120293141 rejects published
+  5306154f7524's test(...) subject. Canonical consistency job111194983278
+  found the missing V0106 citation. A valid tip does not repair bad ancestry.
+  Preserve history while constructing a policy-valid successor. Implement
+  the coordinated missing migration/behavior; hiding a missing-path citation
+  to green the checker does not close the implementation finding.
+
+Codex acceptance on 770516318: composed_turn_and_recording_path NOT met
+(R4); authority_epoch_consent_fences NOT met (R7, R4-persist, epoch integration);
+precise_unimplemented_and_external_boundaries NOT met (false scope claims);
+same_sha_review_ci NOT met (rejected review and two completed CI failures).
+Real CTI/issuer/model/key/storage/closure/PSTN/live gates stay separate.
+
+Reviewer checks completed: scoped Vitest 23 files/472 tests exit0; worker
+typecheck exit0; worker/API-voice-booking/changed-test lint exit0; API
+typecheck exit2 from four missing generated control-plane-auth declarations
+(toolchain limitation, not source regression or pass); diff-check exit0.
+Socket-free TS transpileModule probes loaded that checkout's production
+source/contracts. The R7 positive/defect and final R4/persist probes exited0
+because their defect-observation assertions matched, NOT product acceptance.
+The first R4 probe instead exited1 because its harness matched
+HttpException.message rather than getResponse/code; that harness failure
+is not defect evidence. No live provider/cloud/DB calls, file changes,
+installs or servers. Hosted typecheck/lint/integration/build/cross-surface/
+product smoke were successful, unit/ui-route-e2e pending and orchestrator
+skipped at the review's last observation; none certify successors.
+
+### Append-only replacement history
+
+Original PR #2293 and published head
+`6356631f73e882a8ff62280446307f70b5984479` are retained. New branch
+`pi/audit-voice-application-wiring-20261003-v2` starts at valid ancestor
+`18cf8126c2194b78095b93f3b645f32ee8bb7212`; the complete binary diff from
+that ancestor to 6356631 was applied and committed as `6efa1f19d` with the
+actual Task-ID subject/trailers. `git diff --exit-code 6356631 HEAD` was
+empty immediately afterward: the ENTIRE tracked tree was identical, not
+just selected source files. The real unchanged trailer checker passed
+all 23 branch commits. Original 5306154, 770516318 and 6356631 refs/PR
+remain historical evidence; no published history was rewritten. Subsequent
+R7 changes below deliberately change this tree and require fresh review/CI.
+
+### Bounded R7 contribution and evidence
+
+`voice-handoff-tool-ports.ts` captures immutable input/scope/route authority
+and the gateway's bounded AbortSignal, then passes them into the REAL
+`voice-handoff.service.ts` as an internal admission argument (not an HTTP
+payload). The service checks before and after its inner repository read,
+checks AI ownership/session/scope/route/input and existing lease/revision
+fences, and checks cancellation immediately before starting CAS. There is
+no await between the final check and CAS invocation. After CAS has been
+submitted, cancellation cannot establish rollback: an accepted CAS still
+finishes its queue result instead of being discarded by a late abort check.
+Existing non-tool coordinator callers keep their existing API semantics.
+
+New `handoff-service-cancellation.test.ts` runs actual gateway, port,
+service and queue. Only authentication and repository I/O are doubled;
+spies observe real service execution, never replace it. The prior
+composition test's second-argument assertion now verifies the passed
+admission and its name honestly identifies its mocked service boundary.
+
+| Finding / acceptance | Old -> repaired | Checks / limits |
+| --- | --- | --- |
+| R7 inner-read caller cancellation | New CAS and queued item after gateway rejected -> no new CAS/queue, unchanged version4/lease2 | Real full path, signal asserted after repository read |
+| R7 inner-read deadline cancellation | Same late mutation after gateway deadline -> no new CAS/queue | Fake clock only, actual bounded gateway signal |
+| R7 scope/input/route/owner/closed drift | Five stale-authority variants accepted -> denied before CAS | Existing lease/revision denial controls retained |
+| R7 healthy/accepted effects | Healthy handoff and abort AFTER storage accepted CAS -> one CAS, one queue result | No assertion that a sent DB query rolls back on abort |
+| R10 policy | Invalid published ancestor blocks original PR -> exact-tree replacement with valid ancestry | Original PR/history retained; no policy relaxation |
+| R4/R4-persist and overall authority acceptance | STILL OPEN | R7 tests cannot certify durable snapshots/restoration or actual consumed admission |
+
+Before product edits, the corrected 12-case R7 regression against
+6efa1f19d (tree-identical to 6356631) produced **7 failed / 5 passed**:
+caller/deadline and five authority variants failed; healthy, pre-abort,
+lease/revision and already-accepted-CAS controls passed. The initial harness
+used an invalid dialogue shape and timed out waiting for an unreached read;
+that is a HARNESS failure, not product evidence. It was corrected to the
+actual VoiceDialogueOutput contract BEFORE the failing baseline above.
+First repaired run passed new R7 and UV-EXEC-017 but failed one old
+single-argument mock assertion, then that assertion was strengthened to
+verify the new admission argument. All failures/logs are retained.
+
+Completed verification of the repaired checkpoint's code:
+- **25 files / 496 tests, zero skips**, exit0. Command:
+  `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/ tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts tests/unit/uv-exec-{008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts --maxWorkers=1`.
+  DB URL variables unset; existing no-network preload denies TCP/UDP
+  connect/listen/bind/send. No full-repository or browser/server sweep.
+- Root and API `tsc --noEmit`, worker typecheck: exit0. Existing
+  TypeScript-only control-plane-auth build supplies generated declarations.
+- ESLint on two changed services and two changed tests: exit0. Initial
+  invocation referenced a nonexistent combined service filename, exit2;
+  corrected invocation completed. No suppressed rules or weakened assertions.
+- Private `pnpm install --frozen-lockfile --ignore-scripts --offline`:
+  exit0; no shared dependency symlink installation or downloads.
+- Logs under local audit-followthrough evidence: voice-r7-before.log
+  (harness timeout), voice-r7-before-corrected.log, voice-r7-after.log,
+  voice-completion-scoped.log, voice-completion-*-typecheck.log,
+  voice-completion-lint-attempt.log and voice-completion-lint.log.
+
+This does NOT close R4 or R4-persist, prove PostgreSQL transactions, create
+live model/issuer/storage accounts, approve the replacement SHA, or deploy.
+Original owner must implement the already-coordinated remaining content
+persistence/restoration and consumed composition before final handoff.

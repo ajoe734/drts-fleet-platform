@@ -51,6 +51,12 @@ export class VoiceHandoffOnlyToolPorts implements VoiceToolDomainPorts {
     // keep running to completion regardless. Checked directly, not
     // inferred from the race's own outcome.
     context.signal.throwIfAborted();
+    const admission = Object.freeze({
+      signal: context.signal,
+      inputEpoch: context.inputEpoch,
+      resourceScopeId: context.claims.resourceScopeId,
+      routeProfileVersion: context.claims.routeProfileVersion,
+    });
 
     // The session's current `sessionVersion`/`leaseEpoch` are the exact CAS
     // values `initiateHandoff` itself re-checks, so the only trustworthy
@@ -91,7 +97,7 @@ export class VoiceHandoffOnlyToolPorts implements VoiceToolDomainPorts {
       expectedSessionVersion: session.sessionVersion,
       expectedLeaseEpoch: context.claims.leaseEpoch,
       reason: proposal.args.reason,
-    });
+    }, admission);
 
     return {
       status: mapQueueStatus(result.queueItem.status),
