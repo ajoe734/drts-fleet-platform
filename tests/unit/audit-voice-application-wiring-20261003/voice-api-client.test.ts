@@ -79,7 +79,7 @@ describe("GoogleMetadataIdentityTokenSource", () => {
 
   it("requests the configured audience and caches the token until near its own expiry", async () => {
     const token = tokenWithExp(600);
-    const fetchImpl = vi.fn(async (url: string | URL) => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
       expect(String(url)).toContain("audience=https%3A%2F%2Fapi.example.test");
       return new Response(token);
     });
@@ -132,7 +132,7 @@ describe("VoiceApiClient", () => {
   }
 
   it("issues a capability using the workload token as bearer auth", async () => {
-    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       expect(String(url)).toBe("https://api.example.test/callcenter/voice/capabilities");
       expect(init?.headers).toMatchObject({ authorization: "Bearer workload-token" });
       return jsonResponse(200, {
@@ -156,7 +156,7 @@ describe("VoiceApiClient", () => {
   });
 
   it("calls resolveInput using the capability token as bearer auth, scoped to the session path", async () => {
-    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       expect(String(url)).toBe(
         `https://api.example.test/callcenter/voice/sessions/${binding.voiceSessionId}/input-resolutions`,
       );
@@ -240,7 +240,7 @@ describe("createTrustedDialoguePersistPort", () => {
       sessionVersion: 5,
     };
     let resolveInputBody: unknown;
-    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).endsWith("/capabilities")) {
         return jsonResponse(200, {
           data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
@@ -273,7 +273,7 @@ describe("createTrustedDialoguePersistPort", () => {
       leaseEpoch: 1,
       sessionVersion: 5,
     };
-    const fetchImpl = vi.fn(async (url: string | URL) => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
       if (String(url).endsWith("/capabilities")) {
         return jsonResponse(200, {
           data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },

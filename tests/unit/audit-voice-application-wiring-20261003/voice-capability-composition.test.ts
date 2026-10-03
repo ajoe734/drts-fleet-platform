@@ -114,14 +114,14 @@ function buildController(opts: {
 
   const controller = new VoiceBookingController(
     { deriveCohortFromDurableEvidence: vi.fn() } as never,
+    { listUsageRecords: vi.fn(), listRateCards: vi.fn(), reconcileInvoice: vi.fn() } as never,
+    undefined,
     capabilityService,
     guard,
     sessionService,
     repository,
     authorization,
     handoffService,
-    { listUsageRecords: vi.fn(), listRateCards: vi.fn(), reconcileInvoice: vi.fn() } as never,
-    undefined,
   );
   return { controller, repository, guard, capabilityService, sessionService, handoffService };
 }

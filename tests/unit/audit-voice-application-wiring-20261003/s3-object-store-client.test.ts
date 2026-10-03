@@ -1,11 +1,23 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import type { S3Client } from "@aws-sdk/client-s3";
 
 import { S3ObjectStoreClient } from "../../../apps/voice-media-worker/src/recording/s3-object-store-client";
 import { resolveVoiceRecordingS3StorageConfig } from "../../../apps/voice-media-worker/src/recording/s3-object-store-client.config";
 import { ObjectStoreRecorderObjectStore } from "../../../apps/voice-media-worker/src/recording/object-store-recorder";
+
+/**
+ * This root-level `tests/unit/` file is typechecked under the repo-root
+ * tsconfig, which only depends on `@drts/contracts`/`@drts/control-plane-auth`
+ * -- `@aws-sdk/client-s3` is a dependency of `apps/voice-media-worker` alone,
+ * so it cannot be imported directly here (TS2307 on a clean install). The
+ * mocked client's type is instead derived from `S3ObjectStoreClient`'s own
+ * constructor, which is typechecked as part of its own package and already
+ * resolves the real `@aws-sdk/client-s3` `S3Client` type there.
+ */
+type MockedS3Client = NonNullable<
+  NonNullable<ConstructorParameters<typeof S3ObjectStoreClient>[1]>["client"]
+>;
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4 (Codex reopen round 5/6):
@@ -47,7 +59,7 @@ describe("S3ObjectStoreClient", () => {
       };
     });
     const client = new S3ObjectStoreClient(config, {
-      client: { send } as unknown as S3Client,
+      client: { send } as unknown as MockedS3Client,
     });
 
     const result = await client.putObjectVersion("voice-recording/key", bytes, {
@@ -61,7 +73,7 @@ describe("S3ObjectStoreClient", () => {
   it("fails closed when the backend does not return a VersionId (bucket versioning not enabled)", async () => {
     const send = vi.fn(async () => ({}));
     const client = new S3ObjectStoreClient(config, {
-      client: { send } as unknown as S3Client,
+      client: { send } as unknown as MockedS3Client,
     });
 
     await expect(
@@ -82,7 +94,7 @@ describe("S3ObjectStoreClient", () => {
       };
     });
     const client = new S3ObjectStoreClient(config, {
-      client: { send } as unknown as S3Client,
+      client: { send } as unknown as MockedS3Client,
     });
 
     await expect(
@@ -102,7 +114,7 @@ describe("S3ObjectStoreClient", () => {
       Body: bodyStream(new Uint8Array([1])),
     }));
     const client = new S3ObjectStoreClient(config, {
-      client: { send } as unknown as S3Client,
+      client: { send } as unknown as MockedS3Client,
     });
 
     await expect(client.getObjectVersion("key", "v1")).rejects.toThrow(
@@ -144,7 +156,7 @@ describe("S3ObjectStoreClient", () => {
       },
     );
     const client = new S3ObjectStoreClient(config, {
-      client: { send } as unknown as S3Client,
+      client: { send } as unknown as MockedS3Client,
     });
     const recorder = new ObjectStoreRecorderObjectStore(client);
 

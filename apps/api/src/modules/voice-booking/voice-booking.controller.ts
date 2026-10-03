@@ -39,16 +39,46 @@ const MAX_TOOL_TURN_TIMEOUT_MS = 30_000;
 export class VoiceBookingController {
   constructor(
     private readonly voiceBookingMetricsService: VoiceBookingMetricsService,
-    private readonly voiceCapabilityService: VoiceCapabilityService,
-    private readonly voiceCapabilityGuard: VoiceCapabilityGuard,
-    private readonly voiceSessionService: VoiceSessionService,
-    private readonly voiceBookingRepository: VoiceBookingRepository,
-    private readonly voiceBookingAuthorizationService: VoiceBookingAuthorizationService,
-    private readonly voiceHandoffService: VoiceHandoffService,
     private readonly voiceUsageService: VoiceUsageService,
     @Optional()
     private readonly voiceCommandRunnerService?: VoiceCommandRunnerService,
+    @Optional()
+    private readonly voiceCapabilityService?: VoiceCapabilityService,
+    @Optional()
+    private readonly voiceCapabilityGuard?: VoiceCapabilityGuard,
+    @Optional()
+    private readonly voiceSessionService?: VoiceSessionService,
+    @Optional()
+    private readonly voiceBookingRepository?: VoiceBookingRepository,
+    @Optional()
+    private readonly voiceBookingAuthorizationService?: VoiceBookingAuthorizationService,
+    @Optional()
+    private readonly voiceHandoffService?: VoiceHandoffService,
   ) {}
+
+  /**
+   * `voiceCapabilityService`/`voiceCapabilityGuard`/`voiceSessionService`/
+   * `voiceBookingRepository`/`voiceBookingAuthorizationService`/
+   * `voiceHandoffService` are `@Optional()` only so this controller keeps
+   * constructing in call sites (legacy unit tests outside this task's
+   * write scope) that predate the SD §4.2/§10.1 routes below and only
+   * exercise `repairWorkItem`. The real module (`voice-booking.module.ts`)
+   * always provides them; this guard fails closed instead of masking an
+   * actually-missing dependency as a silent no-op.
+   */
+  private requireVoiceApplicationDependency<T>(
+    value: T | undefined,
+    name: string,
+  ): T {
+    if (value === undefined) {
+      throw new ApiRequestError(
+        500,
+        "VOICE_APPLICATION_DEPENDENCY_UNAVAILABLE",
+        `Voice application dependency '${name}' is unavailable.`,
+      );
+    }
+    return value;
+  }
 
   @Get("metrics/cohort")
   @RequireRealms("ops", "platform")
@@ -202,7 +232,11 @@ export class VoiceBookingController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const scopes = body.scopes.map((scope) => VoiceCapabilityScopeSchema.parse(scope));
-    const envelope = this.voiceCapabilityService.issue(identity, {
+    const voiceCapabilityService = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityService,
+      "voiceCapabilityService",
+    );
+    const envelope = voiceCapabilityService.issue(identity, {
       voiceSessionId: body.voiceSessionId,
       resourceScopeId: body.resourceScopeId,
       routeProfileVersion: body.routeProfileVersion,
@@ -237,7 +271,15 @@ export class VoiceBookingController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    const claims = await this.voiceCapabilityGuard.authenticate(headers);
+    const voiceCapabilityGuard = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityGuard,
+      "voiceCapabilityGuard",
+    );
+    const voiceSessionService = this.requireVoiceApplicationDependency(
+      this.voiceSessionService,
+      "voiceSessionService",
+    );
+    const claims = await voiceCapabilityGuard.authenticate(headers);
     if (claims.voiceSessionId !== sessionId) {
       throw new ApiRequestError(
         403,
@@ -246,7 +288,7 @@ export class VoiceBookingController {
       );
     }
     assertVoiceCapabilityScope(claims, "session_execute");
-    const session = await this.voiceSessionService.resolveInput(
+    const session = await voiceSessionService.resolveInput(
       sessionId,
       body.expectedSessionVersion,
       body.inputEpoch,
@@ -281,7 +323,23 @@ export class VoiceBookingController {
     // Defense in depth, same as `resolveInput` above: the gateway itself
     // re-authenticates the capability per-proposal regardless, but a
     // mismatched path/token pair is rejected before any proposal runs.
-    const claims = await this.voiceCapabilityGuard.authenticate(headers);
+    const voiceCapabilityGuard = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityGuard,
+      "voiceCapabilityGuard",
+    );
+    const voiceBookingRepository = this.requireVoiceApplicationDependency(
+      this.voiceBookingRepository,
+      "voiceBookingRepository",
+    );
+    const voiceBookingAuthorizationService = this.requireVoiceApplicationDependency(
+      this.voiceBookingAuthorizationService,
+      "voiceBookingAuthorizationService",
+    );
+    const voiceHandoffService = this.requireVoiceApplicationDependency(
+      this.voiceHandoffService,
+      "voiceHandoffService",
+    );
+    const claims = await voiceCapabilityGuard.authenticate(headers);
     if (claims.voiceSessionId !== sessionId) {
       throw new ApiRequestError(
         403,
@@ -295,12 +353,12 @@ export class VoiceBookingController {
     );
     const signal = AbortSignal.timeout(deadlineMs + 1_000);
     const gateway = new VoiceToolGatewayService(
-      this.voiceCapabilityGuard,
-      this.voiceBookingRepository,
-      this.voiceBookingAuthorizationService,
+      voiceCapabilityGuard,
+      voiceBookingRepository,
+      voiceBookingAuthorizationService,
       new VoiceHandoffOnlyToolPorts(
-        this.voiceBookingRepository,
-        this.voiceHandoffService,
+        voiceBookingRepository,
+        voiceHandoffService,
       ),
       {
         headers,

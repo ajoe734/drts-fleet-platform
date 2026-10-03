@@ -965,17 +965,16 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     });
     const { channel, sentBinary } = makeChannel();
     const playbackId = "pb-sess-raw-epoch-advance-1";
-    let session: ReturnType<VoiceSessionComposer["get"]>;
     composer.on("session.event", (payload) => {
       const event = (payload as { event?: { type?: string } }).event;
       if (event?.type === "tts.playback.started") {
         queueMicrotask(() => {
-          session!.advanceMediaEpoch();
+          session.advanceMediaEpoch();
         });
       }
     });
     composer.attach("sess-raw-epoch-advance", channel);
-    session = composer.get("sess-raw-epoch-advance")!;
+    const session = composer.get("sess-raw-epoch-advance")!;
 
     (channel as unknown as EventEmitter).emit(
       "message",

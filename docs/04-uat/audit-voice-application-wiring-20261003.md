@@ -1374,3 +1374,127 @@ HEAD at `bc4274944ae4576564f205362ba0fbff1e2f61b0` and worktree clean after
 every command above. No product/listening server, browser/E2E, DB,
 Compose, real network provider/GCP/apps/api call, or git mutation beyond
 the commits/push themselves was performed.
+
+## Round-8: hosted CI typecheck+lint failure on candidate `aa07fcc08` (compile-only fix, no R1/R2/R4 behavior change)
+
+Hosted CI (`CI (integration trunk)` run `37112862426`, PR #2293) failed its
+`typecheck` and `lint` jobs on the round-7 candidate
+`aa07fcc08a1b8bd34dcb6320ba09f767eb3a20c2`, blocking `same_sha_review_ci`.
+Codex had not yet reopened this candidate; this round only fixes the
+reported compile failures.
+
+**typecheck failures and fixes:**
+
+1. `tests/unit/audit-voice-application-wiring-20261003/s3-object-store-client.test.ts(4)`:
+   `Cannot find module '@aws-sdk/client-s3'`. Cause: this file lives under
+   the repo-root `tests/unit/` tree, typechecked by the root `tsconfig.json`
+   (`pnpm typecheck:root`), whose own `package.json` has no
+   `@aws-sdk/client-s3` dependency -- only `apps/voice-media-worker`
+   declares it, so Node module resolution starting from the test file's
+   directory never reaches it. (The real source file
+   `apps/voice-media-worker/src/recording/s3-object-store-client.ts`
+   resolves it fine, since `apps/voice-media-worker/node_modules` is an
+   ancestor of *that* file's path -- this was never an installation/lockfile
+   problem, confirmed by the fact CI's `pnpm install --frozen-lockfile`
+   step passed and no error was reported from inside the source file
+   itself.) Fix: removed the direct `import type { S3Client }` and derived
+   the mock's type from `S3ObjectStoreClient`'s own constructor instead
+   (`ConstructorParameters<typeof S3ObjectStoreClient>[1]["client"]`), which
+   is typechecked as part of its own package and already resolves the real
+   type there. No behavior change; same mock shape.
+2. `voice-api-client.test.ts` (5 call sites) and
+   `trusted-turn-composition.test.ts` (1 call site): `Mock<(url: string |
+   URL, ...) => ...>` not assignable to `typeof fetch`. Cause: `fetchImpl`
+   is typed `typeof fetch`, whose real signature takes `RequestInfo | URL`
+   (a union that includes `Request`), not the narrower `string | URL` the
+   mocks declared. Fix: widened each mock's `url` parameter type to
+   `RequestInfo | URL`; `trusted-turn-composition.test.ts`'s
+   `new URL(url)` call (which only accepts `string | URL`) became
+   `new URL(String(url))`. No behavior change -- every caller in these
+   tests only ever passes a `string`/`URL`.
+3. `tests/unit/system-remediation/sr-recording-recovery-20260913/recording-recovery.test.ts(1429)`:
+   `Expected 8-9 arguments, but got 3` against
+   `new VoiceBookingController({} as any, {} as any, runner)`. This
+   pre-existing test (outside this task's `write_scopes`, not touched) was
+   broken by round-7's R4 fix, which inserted six new required constructor
+   parameters (`voiceCapabilityService`, `voiceCapabilityGuard`,
+   `voiceSessionService`, `voiceBookingRepository`,
+   `voiceBookingAuthorizationService`, `voiceHandoffService`) *before* the
+   pre-existing `voiceUsageService`/`voiceCommandRunnerService` pair,
+   shifting every positional argument. Fix: reordered the constructor so
+   the original three parameters (`voiceBookingMetricsService`,
+   `voiceUsageService`, `voiceCommandRunnerService?`) keep their original
+   position, and appended the six round-7 additions after them, all marked
+   `@Optional()`. NestJS's Nest DI container resolves constructor
+   parameters by *type* (`design:paramtypes` reflection), not by position
+   or name, so the real module wiring
+   (`voice-booking.module.ts`'s single `controllers: [VoiceBookingController]`
+   entry) is unaffected by the reorder -- confirmed by reading that module
+   file, which does no manual provider wiring. Because the six new
+   dependencies are now optional at the type level, each of the three
+   routes that use them (`issueCapability`, `resolveInput`,
+   `requestHandoff`) now resolves them through a new
+   `requireVoiceApplicationDependency` helper that throws a `500
+   VOICE_APPLICATION_DEPENDENCY_UNAVAILABLE` `ApiRequestError` if a
+   dependency is unexpectedly missing, matching the existing fail-closed
+   pattern already used for `voiceCommandRunnerService` in
+   `repairWorkItem` -- this never fires in the real module (all six are
+   always provided there) and only changes behavior for a future caller
+   that, like this legacy test, constructs the controller directly without
+   them. The in-scope test
+   `tests/unit/audit-voice-application-wiring-20261003/voice-capability-composition.test.ts`'s
+   single construction call site was updated to the new parameter order.
+
+**lint failure and fix:**
+
+- `session-composer-turn-coordinator.test.ts(968)`:
+  `'session' is never reassigned. Use 'const' instead` (`prefer-const`).
+  The variable was declared with `let` (no initializer) ahead of a
+  `composer.on(...)` handler closing over it, then assigned exactly once
+  after `composer.attach(...)`. Fix: moved the single assignment into a
+  `const session = composer.get(...)!` declaration in the same position;
+  the closure (invoked asynchronously via `queueMicrotask`, always after
+  this line has executed) references the `const` binding by name, which is
+  valid because JS closures resolve identifiers at call time, not
+  definition time. No behavior change -- same assignment, same one-time
+  value.
+
+**Local verification note (unrelated cross-worktree noise, same as
+Round-3).** `pnpm typecheck:root` locally also reports `TS2345` errors in
+`tests/unit/fleet-partner-list-envelope.test.ts` and
+`tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+(both outside `write_scopes`, neither touched this round, and absent from
+CI's own annotation list) -- two different absolute worktree paths
+(`claude2-audit-voice-application-wiring-20261003` and
+`claude2-audit-artifact-durability-20261002`) appear as distinct type
+identities for the same relative `packages/api-client` import. This is
+this VM's shared-worktree `node_modules` symlink farm, not reproducible in
+CI's isolated checkout, and confirmed present identically whether or not
+this round's fixes are applied.
+
+**Commands run this round, all green on the working tree before
+commit:**
+
+- `pnpm exec tsc -p tsconfig.json --noEmit` (root) -- the 13 pre-existing
+  cross-worktree errors noted above only; zero errors in any of the four
+  files CI flagged.
+- `pnpm --filter @drts/voice-media-worker typecheck` -- exit 0.
+- `pnpm --filter @drts/api typecheck` -- exit 0.
+- `pnpm --filter @drts/voice-media-worker lint` -- exit 0.
+- `pnpm --filter @drts/api lint` -- exit 0.
+- `pnpm run lint:root` (`eslint eslint.config.mjs playwright*.config.ts
+  vitest.config.ts tests --max-warnings=0`) -- exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`
+  -- 7 files / 73 tests passed.
+- `pnpm exec vitest run
+  tests/unit/system-remediation/sr-recording-recovery-20260913/recording-recovery.test.ts
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+  tests/unit/uv-exec-{008,010,012,026}.test.ts` -- 14 files / 253 tests
+  passed, zero regressions; explicitly includes the previously-broken
+  `recording-recovery.test.ts` to prove the constructor-order fix, and
+  deliberately excludes the four VM-prohibited `server.start()`/real-`fetch`
+  files per the task brief.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider/GCP/apps/api call was performed. `same_sha_review_ci` pending
+hosted CI on the new SHA produced by this round's commit.

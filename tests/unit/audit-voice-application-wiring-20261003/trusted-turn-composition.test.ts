@@ -103,8 +103,8 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
     };
 
     const calls: Array<{ path: string; body: unknown }> = [];
-    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      const path = new URL(url).pathname;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
       calls.push({ path, body });
       if (path === "/callcenter/voice/capabilities") {
