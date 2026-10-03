@@ -2905,6 +2905,20 @@ export class IdentityRepository implements OnModuleInit {
     );
   }
 
+  // On an unchanged "ensure", keep whichever updatedAt is earlier instead of
+  // unconditionally keeping the already-persisted value: the fallback store
+  // has no single shared source of truth across repository instances, so
+  // "existing" can itself be a bootstrap artifact from this instance's own
+  // onModuleInit (e.g. restoring a principal from a persisted snapshot taken
+  // by another instance, see tests/unit/iam-min-accses-001.test.ts criterion
+  // 8). The earlier timestamp is always the one closer to the record's true
+  // last-genuine-change time, and this is equivalent to "keep existing" in
+  // the real reauthentication case the no-op guard exists for, since a fresh
+  // "now" is never earlier than what is already persisted.
+  private static earlierIso(a: string, b: string): string {
+    return a < b ? a : b;
+  }
+
   private upsertFallbackPrincipal(record: CanonicalIdentityPrincipalRecord) {
     const existingPrincipalId = record.sourceRef
       ? (this.fallbackPrincipalSourceRefs.get(record.sourceRef) ??
@@ -2935,7 +2949,9 @@ export class IdentityRepository implements OnModuleInit {
           emailVerified: record.emailVerified,
           displayName: record.displayName,
           status: record.status,
-          updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
+          updatedAt: unchanged
+            ? IdentityRepository.earlierIso(existing.updatedAt, record.updatedAt)
+            : record.updatedAt,
         }
       : { ...record };
     this.fallbackPrincipals.set(persisted.principalId, persisted);
@@ -2978,7 +2994,9 @@ export class IdentityRepository implements OnModuleInit {
           status: record.status,
           invitedByPrincipalId: record.invitedByPrincipalId,
           invitationId: record.invitationId,
-          updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
+          updatedAt: unchanged
+            ? IdentityRepository.earlierIso(existing.updatedAt, record.updatedAt)
+            : record.updatedAt,
         }
       : { ...record };
     this.fallbackMemberships.set(persisted.membershipId, persisted);
@@ -3028,7 +3046,9 @@ export class IdentityRepository implements OnModuleInit {
           validFrom: allowValidFromMutation
             ? record.validFrom
             : existing.validFrom,
-          updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
+          updatedAt: unchanged
+            ? IdentityRepository.earlierIso(existing.updatedAt, record.updatedAt)
+            : record.updatedAt,
         }
       : { ...record };
     this.fallbackRoleBindings.set(persisted.roleBindingId, persisted);
