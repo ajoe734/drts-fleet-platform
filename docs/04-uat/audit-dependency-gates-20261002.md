@@ -28,19 +28,19 @@ These exceptions are recorded in `tools/ci/dependency-security-exceptions.json`.
 
 The initial wave of updates successfully patched the majority of vulnerabilities by updating `openclaw`, `next`, `multer`, `express` and `@nestjs/*` to their latest supported versions:
 
-- `apps/api`: NestJS is updated to `11.2.7`, `multer` is updated to `2.4.0` via dependency resolution, `openclaw` to `2026.9.2`, and `express` to `4.21.2`.
+- `apps/api`: NestJS is updated to `11.2.7`, `multer` is updated to `2.4.0` via dependency resolution, `openclaw` to `2026.9.2`, and `express` implicitly to `5.2.1`.
 
 The remaining vulnerabilities (19 findings) have been individually documented and categorized as unreachable tooling paths or un-patchable package exceptions in our strict exception manifest (`tools/ci/dependency-security-exceptions.json`).
 
 Specific Triage Findings:
 
-- **uuid (1119441)**: Missing buffer bounds check in v3/v5/v6. Brought in via `apps__api>exceljs` and `apps__driver-app>expo>@expo/config-plugins`. The `exceljs` library uses `uuid.v4()` which is unaffected by this specific vulnerability (which only impacts v3/v5/v6 when user-provided buffers are used). Mobile tooling path is not exposed at runtime. Exception scoped strictly to these paths and versions.
-- **decode-uri-component (1147955)**: DoS via query-string. Brought in via `apps__driver-app>expo-router`. This runs in the client-side React Native environment where a targeted Node.js event-loop exhaustion attack is not applicable or constitutes a localized client crash rather than a server breach.
+- **uuid (1119441)**: Missing buffer bounds check in v3/v5/v6. Brought in via `apps__api>exceljs` and `apps__driver-app>expo>@expo/config-plugins`. The `exceljs` library uses `uuid.v4()` (lib/xlsx/xform/sheet/cf-ext/cf-rule-ext-xform.js:1,43,77) which is unaffected by this specific vulnerability. Mobile tooling path is not exposed at runtime. Exception scoped strictly to these paths and versions.
+- **decode-uri-component (1147955)**: DoS via query-string. Brought in via `apps__driver-app>expo-router`. While graph inclusion is established via `expo-router/entry`, the vulnerable `queryString.parse` in `getStateFromPath.js:538` is commented out. The fork uses `new URL(...).searchParams` and `expo.parseQueryParams`. Thus, the affected decoder in `query-string` is not actually reachable through Expo Router.
 - **image-size (1239765/1239766)**: DoS via Metro bundler. This is a build-time React Native tooling path and is not reachable in production.
 - **node-forge (1240912), braces (1240992), postcss (4 findings), tar, ws, shell-quote, @babel/core**: These are all via Expo/React Native build and dev-middleware paths (`apps__driver-app>...`). Not exposed to production backend traffic.
 - **protobufjs (1123492/1123964)**: Brought in via `apps__api>openclaw>@google/genai>protobufjs`. Used by the Google GenAI SDK for internal payload structuring, not dynamically parsing untrusted user `.proto` files at runtime.
-- **body-parser (1123976)**: Brought in via `apps__api>@nestjs/platform-express>express>body-parser`. A minor size limit bypass. Expected to be resolved in future upstream NestJS/express releases; exception strictly scoped.
-- **@hono/node-server (1139322)**: Path traversal via `@modelcontextprotocol/sdk`. MCP servers run internally in the API context for GenAI tools, not exposing general static file serving to public endpoints.
+- **body-parser (1123976)**: Brought in via `apps__api>@nestjs/platform-express>express>body-parser`. A minor size limit bypass. The advisory requires an INVALID supplied limit, not ordinary default parsing. `apps/api/src/main.ts:15-17` uses default NestFactory options which register default JSON/urlencoded parsers with a 100kb limit, without override. Thus, this vulnerability is not reachable with the default configuration.
+- **@hono/node-server (1139322)**: Path traversal via `@modelcontextprotocol/sdk`. The vulnerability is Windows serve-static specific. `apps/api/Dockerfile` selects `node:22-alpine` (Linux), meaning this vulnerability is not applicable to our deployed platform.
 
 ## Codex Review Remediation
 
@@ -49,7 +49,7 @@ The following findings from the review have been addressed:
 - **R1 [P1] Missing CI test wiring / broken CI**:
   - **Fix/Result**: Retained repair. Test coverage and discovery pass.
 - **R2 [P1] Audit operational errors pass**:
-  - **Fix/Result**: The audit script now validates the `CompletedProcess` return code (enforcing 0 or 1). It also strictly validates the structure of the JSON report (ensuring `metadata` and `advisories` properties are objects, if present) and ensures that an exit code of 1 contains actual advisories to evaluate, preventing fail-open behavior.
+  - **Fix/Result**: Completed report schema validation and 24-case real-main regressions. The script now strictly validates `metadata.vulnerabilities` and ensures findings have nonempty `version` and `paths` arrays. Adjacent candidate SHA `1ae89472e38a56433fe43d192b84d5922257209f` and `a6581c9958e65c74512834af32d2ec47f139f82c` regressions were added, confirming that previously accepted invalid empty schemas (e.g. empty findings, empty paths) are correctly rejected with exit code 1. The script preserves valid clean and valid exit-1 fully excepted reports.
 - **R3 [P1] Permanent blanket path suppression bypasses runtime findings**:
   - **Fix/Result**: Retained repair. All exceptions, including those for build tools and mobile paths, are now explicitly managed via the `dependency-security-exceptions.json` file.
 - **R4 [P1] Package-wide exceptions suppress future unrelated vulnerabilities**:
@@ -67,4 +67,16 @@ The following findings from the review have been addressed:
 
 - **dependency_audit_triage_and_remediation**: Addressed. Strict JSON schema/return-code validation is in place. Known vulnerabilities upgraded; remaining 19 vulnerabilities strictly scoped and triaged with detailed reasoning.
 - **classification_passes_and_ci_enforces**: Verified locally. (`node tools/ci/check-repo-classification.mjs` exits 0). CI workflows enforce classifier and security gate.
-- **same_sha_typecheck_lint_ci**: Pending candidate commit SHA and CI pipeline completion. Local checks (pnpm audit, Python unit tests for security gate) pass. Test script `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/ci/test_dependency_security.py -v` exits 0 cleanly.
+- **same_sha_typecheck_lint_ci**: Pending candidate commit SHA and CI pipeline completion. Local `pnpm audit --prod --json` exits 1, with 19 distinct IDs and metadata low=2/moderate=8/high=9/critical=1. The security gate returns 0 only AFTER applying 19 exceptions. Test script `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/ci/test_dependency_security.py -v` exits 0 cleanly.
+
+### R2 Regression Evidence (Guide 0.7)
+
+| Condition | Return Code | Input / Finding Evidence | Expected Result | Actual Validation Outcome |
+| :--- | :---: | :--- | :--- | :--- |
+| `rc=0`, missing advisories/vulnerabilities | 0 | `{"metadata":{}}` | REJECT (Missing metadata.vulnerabilities) | `exit 1` (Malformed audit report) |
+| `rc=0`, non-zero vulnerabilities | 0 | `{"metadata":{"vulnerabilities":{"high":1}}}` | REJECT (Mismatch) | `exit 1` (exited 0 but metadata indicates vulnerabilities) |
+| `rc=0`, empty advisories | 0 | `{"advisories":{},"metadata":{"vulnerabilities":{"high":1}}}` | REJECT (Mismatch) | `exit 1` (exited 0 but metadata indicates vulnerabilities) |
+| `rc=1`, empty findings array | 1 | `uuid` advisory `1119441` with `findings=[]` | REJECT (Fail-open prevention) | `exit 1` (Missing or empty findings) |
+| `rc=1`, empty paths array | 1 | `uuid` 8.3.2 with `paths=[]` | REJECT (Fail-open prevention) | `exit 1` (Missing or empty paths in finding) |
+| `rc=1`, string path instead of array | 1 | `uuid` 8.3.2 with `paths=""` | REJECT (Type mismatch) | `exit 1` (Missing or empty paths in finding) |
+
