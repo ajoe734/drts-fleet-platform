@@ -407,3 +407,55 @@ normal candidate lifecycle, not asserted here.
 | R4 (P2, `approved_runtime_provider_paths` / `remaining_external_blockers_precise`): doc called TWM "accepted" against SD §92/SA §312, and conflated "can't call live" with "can't implement/verify"; invented an undeclared cross-task dependency | §1 ASR/TTS row and conclusion corrected to "reference route, not awarded"; §2.5 separates documented protocol / missing decision / implementation (now done: `twm-network-client.ts`) / live acceptance; §3 item 3 no longer claims a dependency this task's board does not declare | N/A (documentation + new implementation, not a behavioral regression)                                                                                                                                                                                  | This document §1/§2.5/§3; `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- 9/9 passed       |
 | `remaining_external_blockers_precise`                                                                                                                                                                                                             | §3 (1)-(6), each naming the exact external decision/account/storage/ops gap, with no implementation obligation substituted by blocker prose                                                                                                                                         | --                                                                                                                                                                                                                                                     | §3 above                                                                                                                                |
 | `same_sha_review_ci`                                                                                                                                                                                                                              | Candidate lifecycle (`handoff`/`approve`/GitHub bus)                                                                                                                                                                                                                                | Round-1 candidate `ae016843c` was reopened before a same-SHA review+CI pass completed                                                                                                                                                                  | New candidate SHA from this round's commit, pending review/CI per the normal lifecycle                                                  |
+
+## 6. Round-2 CI repair (hosted typecheck break on `641e2381742f`)
+
+Hosted CI on candidate `641e2381742fbd4d76df7380b778535eb4435ef6` (PR #2282,
+run `37085121032`, job "Product smoke acceptance") failed at the `Typecheck`
+step: `tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts:44`
+-- `TS2322: Type '() => Promise<ArrayBuffer | SharedArrayBuffer>' is not
+assignable to type '() => Promise<ArrayBuffer>'`. The mocked
+`audioResponse().arrayBuffer()` returned `bytes.buffer.slice(...)`, which is
+typed `ArrayBufferLike` (`ArrayBuffer | SharedArrayBuffer`) because
+`Uint8Array#buffer` is not narrowed to a concrete `ArrayBuffer`, while
+`TwmHttpResponse.arrayBuffer()` declares `Promise<ArrayBuffer>`
+(`apps/voice-media-worker/src/providers/twm/twm-network-client.ts:36`). This
+was a test-only type error -- no change to `twm-network-client.ts` or any
+other production file was needed.
+
+Fix, new commit `8bd818874` (not an amend of `641e2381742f`, per the
+candidate-lifecycle rule that a reviewed/CI'd candidate is not rewritten):
+`audioResponse()` now allocates a fresh `ArrayBuffer` of the same length and
+copies `bytes` into it via `new Uint8Array(buffer).set(bytes)`, which types
+concretely as `ArrayBuffer`. Same byte content delivered to the adapter under
+test; no behavioral change to the test's assertions.
+
+Validation on `8bd818874` (Node v22.23.2, pnpm 10.33.0, TypeScript 5.9.3,
+Vitest 4.1.4, this task's worktree):
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- clean (exit 0).
+- `pnpm run typecheck:root` (`tsc -p tsconfig.json --noEmit`) -- the
+  `twm-network-client.test.ts` `TS2322` is gone. The only remaining errors
+  are `tests/unit/fleet-partner-list-envelope.test.ts` and
+  `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+  reporting two non-identical `ApiClient` types, traced to this worktree's
+  `apps/platform-admin-web/node_modules/@drts/api-client` being a stale pnpm
+  symlink into a concurrent sibling worktree
+  (`.artifacts/worktrees/auto/gemini-audit-dependency-gates-20261002/packages/api-client`)
+  instead of this worktree's own `packages/api-client`. This is a local
+  dev-VM node_modules artifact, not a source change in this task's
+  `write_scopes`, and it is not present in the hosted CI run: the CI log for
+  run `37085121032` shows `tsc` emitting exactly the one
+  `twm-network-client.test.ts` error before failing, with no
+  `fleet-partner-list-envelope`/`fleet-lists` errors, confirming a clean CI
+  checkout does not have this cross-worktree symlink.
+- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- 43
+  passed, 0 failed (6 files, same counts as round 2's §4).
+- `pnpm run lint:root` -- clean (exit 0).
+
+`same_sha_review_ci`: candidate SHA is now `8bd818874` (branch
+`claude2/audit-voice-runtime-20261002`, pushed normally, not force-pushed,
+on top of `641e2381742f`). Hosted review and CI must run fresh against this
+SHA per the normal candidate lifecycle; the round-1 Codex findings (R1-R4,
+§2.2b/§2.3/§2.5) and their regression tests are unchanged from `641e2381742f`
+-- only this one test-file type annotation moved.
