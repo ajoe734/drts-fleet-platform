@@ -10,6 +10,11 @@ function createService() {
   const platformAdminRepository = {
     persistChanges: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
+    claimPlacardPublish: vi
+      .fn()
+      .mockResolvedValue({ claimed: true, currentRecord: null }),
+    finalizePlacardPublish: vi.fn().mockResolvedValue(undefined),
+    releasePlacardPublishClaim: vi.fn().mockResolvedValue(undefined),
   };
 
   const service = new PlatformAdminService(
@@ -114,11 +119,14 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
     );
 
     expect(published.publishedAt).toEqual(expect.any(String));
-    expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith({
-      placardVersions: [
-        expect.objectContaining({ placardVersionId: placard.placardVersionId }),
-      ],
-    });
+    // Publish commits through the fenced, awaited
+    // `finalizePlacardPublish` path, not the fire-and-forget
+    // `persistChanges` used by other mutations (see R7-followthrough).
+    expect(
+      platformAdminRepository.finalizePlacardPublish,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ placardVersionId: placard.placardVersionId }),
+    );
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: "req-publish-placard",

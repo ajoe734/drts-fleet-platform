@@ -923,33 +923,88 @@ export class PlatformAdminService implements OnModuleInit {
     // retryable; only a successful write's results are copied back.
     const staged: PlacardVersionRecord = { ...placard, publishedAt: now, updatedAt: now };
 
-    // Force re-render so PDF reflects the actual publishedAt timestamp
-    await this.ensurePlacardArtifact(staged, true);
+    // `runExclusivePlacardPublish` only rules out another publish call IN
+    // THIS PROCESS reaching here concurrently -- it cannot see a different
+    // Cloud Run instance racing to publish the same never-before-published
+    // placard. Claim the publish in the durable record BEFORE either
+    // instance touches the document-artifact store: the claim is an atomic
+    // `WHERE publishedAt IS NULL` conditional write, so exactly one
+    // concurrent caller wins it. A losing caller must never render or store
+    // bytes -- it adopts whatever the winner actually persisted instead.
+    const claim = this.platformAdminRepository
+      ? await this.platformAdminRepository.claimPlacardPublish(staged)
+      : { claimed: true, currentRecord: null };
 
-    // `runExclusivePlacardPublish` already rules out another publish call
-    // IN THIS PROCESS reaching here concurrently, but it cannot see a
-    // different Cloud Run instance's publish for the same placard landing in
-    // the shared durable store between this call's own write (just above)
-    // and this read-back. Trust what the store actually has, not only what
-    // this call's own render produced, before committing metadata to it.
-    const storedEntry = await this.documentArtifactStore.get(
-      "placard",
-      placard.placardVersionId,
-    );
-    if (
-      !storedEntry ||
-      storedEntry.record.sha256 !== staged.artifactManifestHash
-    ) {
+    if (!claim.claimed) {
+      if (claim.currentRecord) {
+        const winnerIndex = this.placardVersions.findIndex(
+          (candidate) => candidate.placardVersionId === placardVersionId,
+        );
+        if (winnerIndex >= 0) {
+          this.placardVersions[winnerIndex] = { ...claim.currentRecord };
+        }
+      }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
-        "PLACARD_PUBLISH_CONFLICT",
-        "This placard's durable artifact changed during publish. Retry the publish.",
+        "PLACARD_VERSION_ALREADY_PUBLISHED",
+        "This placard version has already been published.",
         {
           placardVersionId,
-          expectedSha256: staged.artifactManifestHash,
-          actualSha256: storedEntry?.record.sha256 ?? null,
+          publishedAt: claim.currentRecord?.publishedAt ?? null,
         },
       );
+    }
+
+    try {
+      // Force re-render so PDF reflects the actual publishedAt timestamp
+      await this.ensurePlacardArtifact(staged, true);
+
+      // The claim above only fences the durable *record*; it cannot see a
+      // sibling instance's unrelated write to the same durable *object* key
+      // landing between this call's own write (just above) and this
+      // read-back. Trust what the store actually has, not only what this
+      // call's own render produced, before committing metadata to it.
+      const storedEntry = await this.documentArtifactStore.get(
+        "placard",
+        placard.placardVersionId,
+      );
+      if (
+        !storedEntry ||
+        storedEntry.record.sha256 !== staged.artifactManifestHash
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PLACARD_PUBLISH_CONFLICT",
+          "This placard's durable artifact changed during publish. Retry the publish.",
+          {
+            placardVersionId,
+            expectedSha256: staged.artifactManifestHash,
+            actualSha256: storedEntry?.record.sha256 ?? null,
+          },
+        );
+      }
+
+      // Fenced, awaited commit of the claim this call already won: the
+      // caller never observes success before the durable record actually
+      // reflects it, unlike the fire-and-forget `persistChanges` used
+      // elsewhere in this service.
+      if (this.platformAdminRepository) {
+        await this.platformAdminRepository.finalizePlacardPublish(staged);
+      }
+    } catch (error) {
+      if (this.platformAdminRepository) {
+        const reverted: PlacardVersionRecord = {
+          ...placard,
+          publishedAt: null,
+          updatedAt: now,
+        };
+        await this.platformAdminRepository.releasePlacardPublishClaim(
+          placardVersionId,
+          staged.publishedAt!,
+          reverted,
+        );
+      }
+      throw error;
     }
 
     placard.publishedAt = staged.publishedAt;
@@ -960,10 +1015,6 @@ export class PlatformAdminService implements OnModuleInit {
     placard.artifactExpiresAt = staged.artifactExpiresAt;
     placard.downloadMetadata = staged.downloadMetadata ?? null;
 
-    this.persistChanges(
-      { placardVersions: [await this.clonePlacardVersion(placard)] },
-      "publish_placard_version",
-    );
     this.recordAudit(
       {
         actorId: this.normalizeNullableText(publishActorId),

@@ -400,6 +400,138 @@ export class PlatformAdminRepository {
     });
   }
 
+  /**
+   * Cross-instance fencing for `PlatformAdminService.publishPlacardVersion`
+   * (R7-followthrough): the in-process `placardPublishQueue` only serializes
+   * calls within one Cloud Run instance, so a sibling instance racing to
+   * publish the same never-before-published placard can independently decide
+   * to write durable artifact bytes unless something stops it *before* either
+   * one touches the document-artifact store. This is that something: an
+   * atomic `INSERT ... ON CONFLICT DO UPDATE ... WHERE record->>'publishedAt'
+   * IS NULL` claim. Exactly one caller's row lands with `claim.publishedAt`
+   * committed; every other concurrent caller's conflicting write is filtered
+   * out by the `WHERE` guard, so it affects zero rows and never becomes the
+   * one that overwrites this row. The loser must not render or store
+   * anything -- it reads back whatever the winner actually persisted
+   * instead.
+   */
+  async claimPlacardPublish(
+    claim: PlacardVersionRecord,
+  ): Promise<{ claimed: boolean; currentRecord: PlacardVersionRecord | null }> {
+    if (!this.isEnabled()) {
+      return { claimed: true, currentRecord: null };
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        INSERT INTO admin.phase1_placard_versions (
+          placard_version_id,
+          public_info_version_id,
+          version_code,
+          created_at,
+          updated_at,
+          record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6::jsonb
+        )
+        ON CONFLICT (placard_version_id) DO UPDATE SET
+          updated_at = EXCLUDED.updated_at,
+          record = EXCLUDED.record
+        WHERE admin.phase1_placard_versions.record->>'publishedAt' IS NULL
+        RETURNING record
+      `,
+      [
+        claim.placardVersionId,
+        claim.publicInfoVersionId,
+        claim.versionCode,
+        claim.createdAt,
+        claim.updatedAt,
+        JSON.stringify(claim),
+      ],
+    );
+
+    if (result.rows.length === 1) {
+      return {
+        claimed: true,
+        currentRecord: this.parseRecord<PlacardVersionRecord>(
+          result.rows[0]!.record,
+          "admin.phase1_placard_versions",
+        ),
+      };
+    }
+
+    const current = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_placard_versions WHERE placard_version_id = $1`,
+      [claim.placardVersionId],
+    );
+    return {
+      claimed: false,
+      currentRecord: current.rows[0]
+        ? this.parseRecord<PlacardVersionRecord>(
+            current.rows[0].record,
+            "admin.phase1_placard_versions",
+          )
+        : null,
+    };
+  }
+
+  /**
+   * Commits the fully-rendered publish result over a claim already won by
+   * `claimPlacardPublish`. No other instance can be mid-claim for the same
+   * row at this point (the claim's non-null `publishedAt` already excludes
+   * them), so this write is unconditional -- but still awaited by the
+   * caller, unlike the fire-and-forget `persistChanges`, so the HTTP response
+   * never reports success before the durable record actually reflects it.
+   */
+  async finalizePlacardPublish(record: PlacardVersionRecord): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        UPDATE admin.phase1_placard_versions
+        SET updated_at = $2, record = $3::jsonb
+        WHERE placard_version_id = $1
+      `,
+      [record.placardVersionId, record.updatedAt, JSON.stringify(record)],
+    );
+  }
+
+  /**
+   * Reverts a claim this same call won via `claimPlacardPublish` but then
+   * failed to materialise (render/store failure, or the pre-existing
+   * store-changed-during-publish readback check). The `WHERE
+   * record->>'publishedAt' = $4` guard only releases *this* claim -- it is
+   * `publishedAt` on this row only while this caller still holds it, so the
+   * guard is a no-op safety net, not the primary protection -- keeping the
+   * placard retryable (R5) without ever being able to clobber a different
+   * claim.
+   */
+  async releasePlacardPublishClaim(
+    placardVersionId: string,
+    claimedPublishedAt: string,
+    revertedRecord: PlacardVersionRecord,
+  ): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        UPDATE admin.phase1_placard_versions
+        SET updated_at = $2, record = $3::jsonb
+        WHERE placard_version_id = $1 AND record->>'publishedAt' = $4
+      `,
+      [
+        placardVersionId,
+        revertedRecord.updatedAt,
+        JSON.stringify(revertedRecord),
+        claimedPublishedAt,
+      ],
+    );
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(

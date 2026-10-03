@@ -579,6 +579,17 @@ function emptyPlatformAdminRepository(
     })),
     persistChanges: vi.fn(async () => undefined),
     reportPersistenceFailure: vi.fn(),
+    // Single-instance tests only: this stub has no shared row to fence
+    // against, so every claim trivially wins. Cross-instance arbitration is
+    // exercised separately below, against a repository double that
+    // actually implements the conditional guard (see
+    // `sharedFencedRepository` in the "R7-followthrough" describe block).
+    claimPlacardPublish: vi.fn(async () => ({
+      claimed: true,
+      currentRecord: null,
+    })),
+    finalizePlacardPublish: vi.fn(async () => undefined),
+    releasePlacardPublishClaim: vi.fn(async () => undefined),
   } as unknown as PlatformAdminRepository;
 }
 
@@ -1429,6 +1440,259 @@ describe("R7: concurrent publishes for the same placard must not leave metadata 
     expect(afterConflict.publishedAt).toBeNull();
     expect(afterConflict.artifactManifestHash).toBe(draftHash);
     expect(afterConflict.artifactDownloadUrl).toBe(draftUrl);
+  });
+});
+
+describe("R7-followthrough: two independent PlatformAdminService instances (two Cloud Run pods) racing to publish the same never-before-published placard must not both succeed", () => {
+  /**
+   * Models the shared `admin.phase1_placard_versions` row both pods write
+   * through: `claimPlacardPublish`'s guard mirrors the real `WHERE
+   * record->>'publishedAt' IS NULL` conditional write this review requires
+   * in `PlatformAdminRepository`. Using the SAME `rows` Map for both pods'
+   * repository handle is what actually proves cross-instance fencing --
+   * each pod only ever sees the other's committed state through this one
+   * shared table, never through any in-process field.
+   */
+  function sharedFencedRepository(publicInfoVersions: unknown[]) {
+    const rows = new Map<string, any>();
+    const repository = {
+      loadState: vi.fn(async () => ({
+        platformTenants: [],
+        publicInfoVersions,
+        placardVersions: [...rows.values()].map((row) => ({ ...row })),
+        platformAdapters: [],
+      })),
+      persistChanges: vi.fn(async (changes: { placardVersions?: readonly any[] }) => {
+        for (const placard of changes.placardVersions ?? []) {
+          rows.set(placard.placardVersionId, { ...placard });
+        }
+      }),
+      reportPersistenceFailure: vi.fn(),
+      isEnabled: () => true,
+      claimPlacardPublish: vi.fn(async (claim: any) => {
+        const current = rows.get(claim.placardVersionId);
+        if (current?.publishedAt) {
+          return { claimed: false, currentRecord: { ...current } };
+        }
+        rows.set(claim.placardVersionId, { ...claim });
+        return { claimed: true, currentRecord: { ...claim } };
+      }),
+      finalizePlacardPublish: vi.fn(async (record: any) => {
+        rows.set(record.placardVersionId, { ...record });
+      }),
+      releasePlacardPublishClaim: vi.fn(
+        async (
+          placardVersionId: string,
+          claimedPublishedAt: string,
+          reverted: any,
+        ) => {
+          const current = rows.get(placardVersionId);
+          if (current?.publishedAt === claimedPublishedAt) {
+            rows.set(placardVersionId, { ...reverted });
+          }
+        },
+      ),
+    };
+    return {
+      repository: repository as unknown as PlatformAdminRepository,
+      rows,
+    };
+  }
+
+  /**
+   * `get` returns the real bytes the store actually holds AT THE MOMENT it
+   * is called (never fabricated), but delivery of that already-captured
+   * response can be held open -- modelling a slow acknowledgement of an
+   * authentic successful S3 GetObject, exactly the window the original
+   * defect exploited. Only armed once; subsequent `get` calls (e.g. a fresh
+   * reader) are never held.
+   */
+  class DelayedReadbackStore implements DocumentArtifactStore {
+    private readonly inner = new InMemoryDocumentArtifactStore();
+    private gate: Promise<void> | undefined;
+    putCount = 0;
+
+    armNextGet(): () => void {
+      let release!: () => void;
+      this.gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => release();
+    }
+
+    async put(command: PutDocumentArtifactCommand) {
+      this.putCount += 1;
+      return this.inner.put(command);
+    }
+
+    putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+      return this.inner.putIfAbsent(...args);
+    }
+
+    async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+      const result = await this.inner.get(...args);
+      if (this.gate) {
+        const held = this.gate;
+        this.gate = undefined;
+        await held;
+      }
+      return result;
+    }
+  }
+
+  it("fences the losing instance out before it ever writes bytes, even though the winner's own authentic read-back is held in flight", async () => {
+    const { repository, rows } = sharedFencedRepository([PUBLIC_INFO_R4]);
+    const sharedStore = new DelayedReadbackStore();
+    const sharedRegistry = new DocumentArtifactRebuildRegistry();
+
+    const podAService = new PlatformAdminService(
+      new AuditNotificationService(),
+      repository,
+      undefined,
+      sharedStore,
+      sharedRegistry,
+    );
+    await podAService.onModuleInit();
+    const draft = await podAService.generatePlacardVersion({
+      versionCode: "placard-r7-followthrough-cross-instance",
+      publicInfoVersionId: PUBLIC_INFO_R4.versionId,
+      templateName: "seatback-r7-followthrough",
+    });
+    // Pod B boots from the same durable row pod A's draft was just
+    // committed to -- two independently booted Cloud Run instances reading
+    // the same table, not a shared in-process cache.
+    await repository.persistChanges({ placardVersions: [draft] });
+
+    const podBService = new PlatformAdminService(
+      new AuditNotificationService(),
+      repository,
+      undefined,
+      sharedStore,
+      sharedRegistry,
+    );
+    await podBService.onModuleInit();
+
+    // `generatePlacardVersion` above already issued the draft's own
+    // initial `put`; only writes from here on are what this test counts.
+    sharedStore.putCount = 0;
+
+    const release = sharedStore.armNextGet();
+    // Pod A: claims, writes its real bytes, then blocks on its own
+    // (authentic, successful) read-back -- it has not yet committed
+    // anything past the claim.
+    const publishA = podAService.publishPlacardVersion(draft.placardVersionId);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sharedStore.putCount).toBe(1);
+    expect(rows.get(draft.placardVersionId)?.publishedAt).toBeTruthy();
+
+    // Pod B: its own in-memory cache still shows this placard unpublished,
+    // but the shared claim it must go through first rejects it immediately
+    // -- it must never reach `put` at all, let alone overwrite pod A's
+    // bytes or metadata.
+    await expect(
+      podBService.publishPlacardVersion(draft.placardVersionId),
+    ).rejects.toMatchObject({ code: "PLACARD_VERSION_ALREADY_PUBLISHED" });
+    expect(sharedStore.putCount).toBe(1);
+
+    // Only now does pod A's held read-back resolve (reversed completion
+    // order vs. issue order): it must still see its own bytes, because
+    // nothing else was ever allowed to write.
+    release();
+    const published = await publishA;
+
+    const persisted = rows.get(draft.placardVersionId);
+    expect(persisted?.artifactManifestHash).toBe(
+      published.artifactManifestHash,
+    );
+    const stored = await sharedStore.get("placard", draft.placardVersionId);
+    expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+    // An independent, freshly booted reader (a third pod) resolving the
+    // winner's own link must succeed.
+    const freshController = new ControlledDownloadController(
+      sharedStore,
+      sharedRegistry,
+    );
+    const file = (await resolve(
+      freshController,
+      "placard",
+      draft.placardVersionId,
+      paramsOf(published.artifactDownloadUrl!),
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(published.artifactManifestHash);
+  });
+
+  it("releases the claim after a failed store write, so a sibling instance's healthy retry still succeeds", async () => {
+    const { repository, rows } = sharedFencedRepository([PUBLIC_INFO_R4]);
+
+    class FailOnceStore implements DocumentArtifactStore {
+      private readonly inner = new InMemoryDocumentArtifactStore();
+      failNextPut = false;
+
+      async put(command: PutDocumentArtifactCommand) {
+        if (this.failNextPut) {
+          this.failNextPut = false;
+          throw Object.assign(new Error("ServiceUnavailable"), {
+            name: "ServiceUnavailable",
+          });
+        }
+        return this.inner.put(command);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        return this.inner.get(...args);
+      }
+    }
+
+    const sharedStore = new FailOnceStore();
+    const sharedRegistry = new DocumentArtifactRebuildRegistry();
+
+    const podAService = new PlatformAdminService(
+      new AuditNotificationService(),
+      repository,
+      undefined,
+      sharedStore,
+      sharedRegistry,
+    );
+    await podAService.onModuleInit();
+    const draft = await podAService.generatePlacardVersion({
+      versionCode: "placard-r7-followthrough-retry",
+      publicInfoVersionId: PUBLIC_INFO_R4.versionId,
+      templateName: "seatback-r7-followthrough-retry",
+    });
+    await repository.persistChanges({ placardVersions: [draft] });
+
+    const podBService = new PlatformAdminService(
+      new AuditNotificationService(),
+      repository,
+      undefined,
+      sharedStore,
+      sharedRegistry,
+    );
+    await podBService.onModuleInit();
+
+    sharedStore.failNextPut = true;
+    await expect(
+      podAService.publishPlacardVersion(draft.placardVersionId),
+    ).rejects.toThrow(/ServiceUnavailable/);
+    // Pod A's failed attempt must not leave the shared row claimed.
+    expect(rows.get(draft.placardVersionId)?.publishedAt).toBeNull();
+
+    const published = await podBService.publishPlacardVersion(
+      draft.placardVersionId,
+    );
+    expect(published.publishedAt).toBeTruthy();
+    expect(rows.get(draft.placardVersionId)?.publishedAt).toBe(
+      published.publishedAt,
+    );
+
+    const stored = await sharedStore.get("placard", draft.placardVersionId);
+    expect(stored?.record.sha256).toBe(published.artifactManifestHash);
   });
 });
 

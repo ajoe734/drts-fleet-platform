@@ -963,3 +963,213 @@ https://github.com/ajoe734/drts-fleet-platform/actions/runs/37127370622.
   behaviour is exercised against the SDK transport double's modelled
   `IfNoneMatch`/`PreconditionFailed` semantics
   (`audit-artifact-durability-s3-20261003.test.ts`), not a live S3 bucket.
+
+## R7-followthrough reopen (candidate `90263d6a908d99918a50565c239a8dbfdae98da1`, generation `181ac31645bd4dca8d9b12d15da598cb`, PR #2295): what Codex found and the repair
+
+### R7-followthrough [P2; `durable_producer_reader_wiring` / `cross_instance_restart_bytes`] — shared publication had no atomic ownership or fenced metadata commit
+
+**Finding:** the R7 fix above (candidate `1ff6dacff660b4bb4b6ff73057a40e07dffd6b77`)
+correctly serialized concurrent publishes _within one process_ and detected a
+foreign write landing between this call's own write and its own read-back,
+but explicitly left cross-instance publish ownership unresolved (see that
+round's own "Unverified / limitation" note). Codex's reopen reproduced this
+offline against the exact locked candidate with a probe that constructs two
+independently configured S3-backed `PlatformAdminService` instances, lets
+instance A commit its real `PutObject` and begin its own real `GetObject`
+read-back, **holds delivery of that already-captured, genuinely successful
+response**, lets instance B publish and commit to completion in the
+meantime, then releases A's held response. Because the read-back check only
+ever compared this call's own staged hash against whatever the store
+returned to it — never against a fenced, shared claim on the record — A's
+stale-but-honest response still matched A's own staged hash and overwrote
+B's just-committed metadata, while the object store was left holding B's
+bytes. A fresh/restarted reader resolving the persisted link then failed
+`CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` even though both publishes had
+individually reported success. `PlatformAdminRepository.persistChanges` was
+also fire-and-forget (`void ... .catch(...)`, never awaited by the caller),
+so a publish could report success to its own HTTP caller before the durable
+record even reflected it.
+
+**Fix:** shared publication arbitration now happens in the durable record
+*before* either instance touches the document-artifact store, plus an
+awaited, fenced commit of the final result:
+
+- `PlatformAdminRepository.claimPlacardPublish(claim)` (new) — an atomic
+  `INSERT ... ON CONFLICT (placard_version_id) DO UPDATE ... WHERE
+  record->>'publishedAt' IS NULL RETURNING record`. Exactly one concurrent
+  caller's conditional write lands; every other caller's write is excluded
+  by the `WHERE` guard and affects zero rows, so it is told `claimed: false`
+  together with whatever the winner actually persisted (`currentRecord`).
+  When `DATABASE_URL` is not configured (`isEnabled()` false — the normal
+  state for this unit-test suite and for any single-instance deployment)
+  this trivially returns `claimed: true`, preserving the existing
+  single-process behaviour exactly.
+- `PlatformAdminRepository.finalizePlacardPublish(record)` (new) — commits
+  the fully-rendered result over a claim already won. No other instance can
+  be mid-claim for the same row at this point, so the write itself is
+  unconditional, but `PlatformAdminService.publishPlacardVersionExclusive`
+  now `await`s it directly instead of going through the fire-and-forget
+  `persistChanges` the rest of the service uses: the caller cannot observe a
+  successful publish before the durable record actually reflects it.
+- `PlatformAdminRepository.releasePlacardPublishClaim(id, claimedPublishedAt,
+  reverted)` (new) — a conditional `UPDATE ... WHERE record->>'publishedAt'
+  = $claimedPublishedAt` that only releases *this* call's own claim. Used
+  when the claim is won but the subsequent render/store write or the
+  existing store-changed-during-publish read-back check fails, so the
+  placard remains retryable (preserving R5) both within this instance and
+  for a sibling instance that might retry it next.
+- `PlatformAdminService.publishPlacardVersionExclusive` now calls
+  `claimPlacardPublish` with the staged (not-yet-rendered) record
+  immediately after the existing in-process `placard.publishedAt` guard, and
+  before `ensurePlacardArtifact`'s store write. A lost claim throws the
+  existing `PLACARD_VERSION_ALREADY_PUBLISHED` (409) using the winner's own
+  persisted `publishedAt`, and also refreshes this instance's in-memory
+  `placardVersions` cache entry from the winner's record so a subsequent
+  read on this same instance is not stale. A render/store failure or the
+  existing read-back conflict check releases the claim before rethrowing,
+  exactly like the pre-existing R5 failure path. The existing read-back
+  check against the actual store (R7) is unchanged and kept as a second,
+  independent line of defense for the object-store key itself, which the
+  record-level claim does not by itself observe.
+
+**Old → new result:** the probe's exact reproduction — hold instance A's
+authentic, already-successful `GetObject` response in flight, let instance B
+independently publish and commit to completion, then release A's response —
+previously produced `bothPublishesSucceeded: true` with the persisted
+metadata's hash pointing at bytes the object store no longer held
+(`persistedHashMatchesStored: false`), and a fresh/restarted reader's link
+failing `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH`. With this repair, instance B
+can no longer even attempt a claim once instance A has committed one: B's
+`publishPlacardVersion` call rejects immediately with
+`PLACARD_VERSION_ALREADY_PUBLISHED`, before issuing a single store write, and
+instance A's delayed read-back resolves to its own, still-intact bytes.
+Exactly one publish ever writes to the shared object key for that placard;
+the persisted record's hash and the object store's actual bytes always
+agree; a fresh/restarted reader resolving the winner's link always succeeds.
+
+**New regression coverage** (same test file, new describe
+`"R7-followthrough: two independent PlatformAdminService instances (two
+Cloud Run pods) racing to publish the same never-before-published placard
+must not both succeed"`, `tests/unit/audit-artifact-durability-20261002.test.ts`):
+- A `sharedFencedRepository` test double backs `claimPlacardPublish`/
+  `finalizePlacardPublish`/`releasePlacardPublishClaim` with one shared
+  `Map` keyed by `placardVersionId` and the same `WHERE publishedAt IS NULL`
+  guard the real repository's SQL implements, used by **two separately
+  constructed `PlatformAdminService` instances** (pod A, pod B) — proving
+  cross-instance fencing through the shared row, never through any
+  in-process field.
+- `"fences the losing instance out before it ever writes bytes, even though
+  the winner's own authentic read-back is held in flight"`: a
+  `DelayedReadbackStore` double returns the real bytes a `get()` call
+  actually captured, then holds *delivery* of that already-captured,
+  genuinely successful response — modelling the probe's exact held-GET
+  technique, not merely injecting a foreign write synchronously inside
+  `get()` (that remains the separate, pre-existing R7 "clobbered readback"
+  test above). Pod A claims and writes its real bytes, then blocks on its
+  own held read-back; pod B's concurrent publish attempt is asserted to
+  reject with `PLACARD_VERSION_ALREADY_PUBLISHED` **and to never increment
+  the store's `put` counter** before pod A's held response is released;
+  after release, pod A's publish still fulfils, and the persisted record's
+  hash, the object store's actual bytes, and a freshly constructed, third,
+  independent `ControlledDownloadController` resolving the winning link via
+  a real download all agree.
+- `"releases the claim after a failed store write, so a sibling instance's
+  healthy retry still succeeds"`: pod A's publish fails on its own store
+  write (a `FailOnceStore` double, mirroring R5's `FlakyDocumentArtifactStore`
+  but shared across both pods); asserts the shared row's `publishedAt` is
+  released back to `null`, then pod B — a different instance — successfully
+  claims and publishes the same placard, with the persisted record and the
+  store's actual bytes agreeing afterward. This is the cross-instance
+  analogue of the pre-existing single-instance R5 retry regression, which
+  was re-run unchanged and still passes.
+- The pre-existing `emptyPlatformAdminRepository` single-instance test
+  double (used by the R4/R4-followthrough/R5/R6/R6-followthrough/R7
+  describe blocks above) was extended with trivial
+  (`claimed: true`) stand-ins for the three new methods, since it has no
+  shared row to fence against; `apps/api/tests/unit/platform-admin.service.test.ts`'s
+  repository double was extended the same way, and its publish test's
+  assertion was updated from checking the now-unused `persistChanges` call
+  to checking `finalizePlacardPublish` (the fenced, awaited path the publish
+  commit now actually goes through).
+
+**Unverified / limitation:** this closes the specific, reproduced defect —
+an atomic, fenced claim now exists in the durable record, and publish's
+final commit is awaited rather than fire-and-forget. It still does not
+implement real PostgreSQL row locking/`SELECT ... FOR UPDATE` or an actual
+production-schema integration test against a live database from this VM
+(no DB/server was started here, per this task's standing VM restriction);
+the claim's correctness here is proven against the SQL text and against a
+test double that implements the same conditional-write semantics in-memory,
+not against a live Postgres instance. Real cross-instance/Cloud-Run/IAM
+acceptance, including validating the actual SQL against the real
+`admin.phase1_placard_versions` schema under genuine concurrent connections,
+remains `SR-LIVE-DOC-001` / hosted CI's `integration`/`iam-negative-matrix`
+jobs, not this local repair.
+
+### Verification at this repair
+
+`pnpm --filter @drts/contracts build` and `pnpm --filter @drts/control-plane-auth
+build` (both worktrees' generated declarations were stale/missing, the same
+disclosed local-toolchain gap every prior round in this lineage recorded),
+then `pnpm --filter @drts/api typecheck`: exit 0, no errors. Root
+`pnpm exec tsc -p tsconfig.json --noEmit`: no errors from any file this
+repair touches; the only remaining errors are the same pre-existing,
+unrelated cross-worktree type-identity collision between this worktree's and
+a sibling worktree's `packages/api-client` noted by the prior round above
+(`tests/unit/fleet-partner-list-envelope.test.ts` and
+`tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`,
+neither in this task's `write_scopes` nor touching document artifacts,
+billing-settlement, controlled-download or platform-admin).
+
+Scoped vitest run (`DATABASE_URL`/`API_DATABASE_URL`/`TEST_DATABASE_URL`/
+`PG_DATABASE_URL` unset; no real DB/network call is exercised by any file in
+this selection regardless):
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts \
+  tests/unit/audit-artifact-durability-s3-20261003.test.ts \
+  tests/unit/system-remediation/sr-artifact-001/ \
+  tests/unit/system-remediation/sr-invoice-001/ \
+  tests/unit/system-remediation/sr-placard-001/ \
+  tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts \
+  tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts \
+  tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts \
+  apps/api/tests/unit/platform-admin.service.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts \
+  tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts \
+  tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts \
+  --maxWorkers=1
+```
+=> exit 0, **16 files / 173 tests passed, zero skips**, including the two new
+R7-followthrough cases above and every pre-existing R1-R7/R4-R6-followthrough
+case unchanged and still passing. No pre-existing suite's assertions were
+weakened or removed to make this repair pass; the one pre-existing assertion
+that genuinely could not stay as written (`platform-admin.service.test.ts`'s
+publish test checking `persistChanges`) was updated to check the new,
+stricter `finalizePlacardPublish` path it now actually exercises, not
+deleted or loosened.
+
+Hosted CI for this repair's own candidate SHA is pending — it is produced by
+the handoff/candidate lifecycle after this repair is committed and pushed,
+not run locally from this VM. The prior round's hosted CI evidence above
+(`same_sha_review_ci` for `1ff6dacff660b4bb4b6ff73057a40e07dffd6b77`) remains
+valid for everything it covered, which did not include this repair's new
+repository methods or tests.
+
+### Remaining limitations (this repair)
+
+- Real PostgreSQL row-locking/concurrency behaviour for
+  `claimPlacardPublish`/`finalizePlacardPublish`/`releasePlacardPublishClaim`
+  against the actual `admin.phase1_placard_versions` schema under genuine
+  concurrent connections is not exercised from this VM; it is proven against
+  the SQL text and an in-memory double implementing the same conditional-
+  write semantics. Real multi-replica Cloud Run acceptance remains
+  `SR-LIVE-DOC-001`.
+- The claim is a record-level fence on `publishedAt`; it does not add a
+  separate lock/version column to `PlacardVersionRecord` (outside this
+  task's `write_scopes`, and unnecessary here since `publishedAt` already
+  transitions exactly once from `null` to a committed value for this
+  record's entire lifecycle). The pre-existing R7 object-store read-back
+  check remains the independent defense for the object-store key itself.
+- No product/browser/DB/Compose server was started on this VM; no real cloud
+  storage was contacted.
