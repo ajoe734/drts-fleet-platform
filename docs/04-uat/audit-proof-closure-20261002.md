@@ -148,3 +148,34 @@ No in-memory storage or EICAR-signature-only scanner is selectable as a producti
 | same_sha_review_ci | Required on final candidate; independent review and hosted CI are not owner-self-approved by this document. |
 
 Before claiming production readiness, obtain same-candidate evidence for real object-store conditional writes, two-instance/process restart readback, durable DB concurrency, private scanner clean/infected/error behavior, signed URLs through the deployed API/BFF/IAP, allowed/denied identities and step-up policy, and actual operator browser download. Existing SR-LIVE-DOC-001 and finance/storage/signing gates remain open until this evidence exists. Shared generated-document artifact durability is a separate dependent task; this proof controller does not pretend to fix all generated artifact kinds.
+
+## Second R3 reopen: persisted UUID admission (2026-10-03)
+
+Codex independently reopened candidate `587b4451f17a83db104abb8749689040e7e8f863` (generation `6986acfa3c4d449f96480c57fe7ae242`, PR #2285). R1 root TypeScript and R2 actual driver guard authorization were verified repaired; R3 remained wrong for every durable proof. V0098 defines `proof_id uuid DEFAULT gen_random_uuid()`. The real `BillingSettlementRepository.insertRemittanceProof` returns this raw UUID through its actual mapper. Only the test-memory service path adds `remit-proof-`. The first middleware repair admitted only that test identity; the prior positive fixture therefore concealed the production mismatch. Reviewer's offline production-function probe successfully served a raw-UUID signed URL from the actual controller but the same URL failed middleware with 503 `INTERNAL_KEY_NOT_CONFIGURED` / 401 `INTERNAL_KEY_REQUIRED`. Authenticated BFF admission was not the failing path. This is a repeated R3 finding, not a new feature or a reason to reopen R1/R2.
+
+The interactive coordinator reconciled the canonical write scopes for the already disclosed `auth.policy.ts` and `internal-key.middleware.ts` before this repair. Scope remains the existing user-authorized proof closure; no broader public route registry, DB identity change or cloud ingress relaxation is introduced.
+
+### Reproduction and focused correction
+
+`proof-download-auth.test.ts` now runs the complete matrix against both the test-memory service and the **actual durable repository**. Only database I/O is doubled: a strict SQL boundary accepts insert/select/scan-update against the V0098 table, returns a schema-shaped raw-UUID row, verifies insert never supplies `proof_id`, and leaves row mapping to production code. Real staged/committed bytes remain in the storage-boundary test adapter. Service upload, scan update/read, signer, middleware, actual BootstrapAuthGuard metadata, controller and StreamableFile are not replaced. The controller gets the ID extracted from the tested URL, not an unrelated fixture ID.
+
+Before changing production code, this stronger suite on `587b4451` produced **9 failed / 13 passed**; raw-UUID requests were rejected at middleware instead of reaching their expected grant/content checks. Preserved local evidence: `.local/proof-ci-evidence/raw-uuid-before.log`. The successor changes only the exact GET matcher to accept a raw UUID or the existing test-memory prefix. Other methods, kinds, children, trailing slash and encoded-path tricks remain outside this admission; downstream signature/expiry/scan/content verification is unchanged.
+
+After repair: **22/22** download authorization cases pass. Positives read identical bytes with and without a configured internal key, without requiring its header. Negatives cover forged/missing/expired grants before storage access, a different URL identity, pending scan, hash/length/MIME mismatch and missing objects. The authenticated BFF header cannot turn an invalid grant into access. A `net.Server.listen` prohibition guard prevents this suite from starting a listener.
+
+Completed source verification: **11 files / 136 tests passed, zero skips** (119 proof/client/payment cases plus 17 strict-auth/internal-key cases), root TypeScript and changed-file lint passed, internal-key exception audit passed with no registry entries. Commands:
+
+```sh
+NODE_ENV=test env -u DATABASE_URL -u API_DATABASE_URL pnpm exec vitest run \
+  tests/unit/audit-proof-client.test.ts tests/unit/audit-proof-closure.test.ts \
+  tests/unit/system-remediation/sr-proof-001/ tests/unit/billing-settlement.test.ts \
+  tests/unit/system-remediation/sr-qa-finance-001/c080-c081-reimbursement-remittance-proof.test.ts \
+  tests/integration/conf-idem-005-client-intent.integration.test.ts --maxWorkers=1
+NODE_ENV=test env -u DATABASE_URL -u API_DATABASE_URL pnpm exec vitest run \
+  tests/unit/internal-key.middleware.test.ts tests/unit/bootstrap-auth-guard-strict-env.test.ts --maxWorkers=1
+pnpm run typecheck:root
+pnpm exec eslint apps/api/src/common/auth/internal-key.middleware.ts tests/unit/system-remediation/sr-proof-001/proof-download-auth.test.ts
+python3 operations/security/verify-internal-key-exceptions.py
+```
+
+Logs: `.local/proof-ci-evidence/raw-uuid-{after-tests,auth-tests,typecheck,lint}.log`. Source checks do not establish real PostgreSQL/schema execution, object-store durability, antivirus service readiness, cloud ingress/browser acceptance or deployment. Independent review and hosted CI must bind the exact append-only successor SHA recorded in the canonical handoff; earlier CI does not certify it. All external gates above remain open.
