@@ -25,9 +25,16 @@ def mime(recipient='unit+invite@gmail.com', body='Invitation code: ti_SUPER_SECR
 
 
 class MailboxObservationTest(unittest.TestCase):
+    def test_placeholder_domains_are_rejected_for_both_flows(self):
+        for domain in ('example.com', 'EXAMPLE.NET', 'sub.example.org', 'fixture-mail.org',
+                       'demo.mail.org', 'mail.invalid', 'mail.test', 'mail.localhost'):
+            for flow in ('invite', 'approve'):
+                with self.subTest(domain=domain, flow=flow), self.assertRaises(ValueError):
+                    observer.derive_alias_recipient('unit@' + domain, flow)
+
     def test_aliases_preserve_gmail_and_workspace_domains(self):
-        for username in ('unit@gmail.com', 'unit@googlemail.com', 'unit@EXAMPLE.COM',
-                         'unit@sub-domain.example.org', 'unit@xn--bcher-kva.example', "o'neil+dev@example.com"):
+        for username in ('unit@gmail.com', 'unit@googlemail.com', 'unit@WORKSPACE-MAIL.ORG',
+                         'unit@sub-domain.workspace-mail.org', 'unit@xn--bcher-kva.org', "o'neil+dev@workspace-mail.org"):
             for flow in ('invite', 'approve'):
                 with self.subTest(username=username, flow=flow):
                     local, domain = username.split('@')
@@ -58,14 +65,14 @@ class MailboxObservationTest(unittest.TestCase):
         client.select.return_value = ('OK', [])
         client.response.return_value = ('UIDVALIDITY', [b'900'])
         message = EmailMessage()
-        message['From'] = 'mail.acceptance@example.com'
-        message['To'] = 'mail.acceptance+invite@example.com'
+        message['From'] = 'mail.acceptance@workspace-mail.org'
+        message['To'] = 'mail.acceptance+invite@workspace-mail.org'
         message['Message-ID'] = MESSAGE_ID
         message['Subject'] = 'Invitation'
         message.set_content('Business content')
         client.uid.side_effect = [('OK', [b'45']), ('OK', [(b'data', message.as_bytes())])]
-        secrets = {'drts-dev-smtp-username': 'mail.acceptance@example.com',
-                   'drts-dev-smtp-password': 'private-password', 'drts-dev-smtp-from-email': 'mail.acceptance@example.com'}
+        secrets = {'drts-dev-smtp-username': 'mail.acceptance@workspace-mail.org',
+                   'drts-dev-smtp-password': 'private-password', 'drts-dev-smtp-from-email': 'mail.acceptance@workspace-mail.org'}
         output = io.StringIO()
         with patch.dict(observer.os.environ, {'GITHUB_ACTIONS': 'true', 'DEV_GCP_PROJECT_ID': observer.PROJECT}), \
              patch.object(observer.sys, 'stdin', io.StringIO(json.dumps(request))), \
@@ -75,7 +82,7 @@ class MailboxObservationTest(unittest.TestCase):
              patch.object(observer.imaplib, 'IMAP4_SSL', return_value=client):
             opener.return_value.open.return_value = health
             observer.main()
-        client.login.assert_called_once_with('mail.acceptance@example.com', 'private-password')
+        client.login.assert_called_once_with('mail.acceptance@workspace-mail.org', 'private-password')
         client.select.assert_called_once_with('"[Gmail]/All Mail"', readonly=True)
         self.assertTrue(json.loads(output.getvalue())['matched_content'])
         self.assertNotIn('private-password', output.getvalue())

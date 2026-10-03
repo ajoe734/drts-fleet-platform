@@ -319,6 +319,8 @@ export function deriveAliasRecipient(baseEmail: string, tag: string): string {
     local.includes("..") ||
     local.length + tag.length + 1 > 64 ||
     recipient.length > 254 ||
+    /(?:^|[.-])(?:fixture|demo|example)(?:[.-]|$)/i.test(domain) ||
+    /\.(?:invalid|test|localhost)$/i.test(domain) ||
     labels.length < 2 ||
     !labels.every((label) =>
       /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(label),
