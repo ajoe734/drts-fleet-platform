@@ -21,6 +21,7 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 type JsonRecordRow = {
   record: unknown;
@@ -252,7 +253,12 @@ export class IdentityRepository implements OnModuleInit {
     principal: CanonicalIdentityPrincipalRecord;
     membership: CanonicalIdentityMembershipRecord;
   } | null> {
-    if (process.env.DRTS_E2E_PROVISIONING !== "true") {
+    const environment = detectAuthEnvironment(process.env);
+    if (
+      process.env.DRTS_E2E_PROVISIONING !== "true" ||
+      environment === "production" ||
+      environment === "staging"
+    ) {
       return null;
     }
     const existingPrincipal = await this.findPrincipalById("live-map-observer");
