@@ -122,8 +122,10 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
             capabilitySummary: {
               mode: "stub",
               productionStatus: "stub",
-              notes: "Obsolete stub",
+              notes: ["Obsolete stub"],
               supportsInboundWebhook: false,
+              supportsOutboundActions: false,
+              supportedWebhookEvents: [],
             },
             lastCheckedAt: "2026-01-01T00:00:00Z",
             lastError: null,
@@ -142,9 +144,17 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     );
     await service.onModuleInit();
 
+    expect(mockRepo.reportPersistenceFailure).not.toHaveBeenCalled();
+
     const snapshot = service.listAdapterHealth().find((r) => r.platformCode === PLATFORM_CODE_GRAB_TAIWAN);
     expect(snapshot?.status).toBe("degraded");
     expect(snapshot?.capabilitySummary.productionStatus).toBe("configuration_required");
+    expect(snapshot?.capabilitySummary.mode).toBe("real");
+    expect(snapshot?.capabilitySummary.notes).toEqual(["Awaiting provider contract and real test account credentials"]);
+    expect(snapshot?.capabilitySummary.supportsInboundWebhook).toBe(true);
+    expect(snapshot?.capabilitySummary.supportsOutboundActions).toBe(true);
+    expect(snapshot?.capabilitySummary.supportedWebhookEvents).toEqual(["order.create", "order.cancel"]);
+    expect(snapshot?.lastCheckedAt).toBe("2026-01-01T00:00:00Z");
     
     // Ensure the capability was persisted with the configured one
     expect(mockRepo.persistChanges).toHaveBeenCalledWith(
@@ -152,9 +162,8 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
         adapterHealth: expect.arrayContaining([
           expect.objectContaining({
             platformCode: PLATFORM_CODE_GRAB_TAIWAN,
-            capabilitySummary: expect.objectContaining({
-              productionStatus: "configuration_required",
-            }),
+            capabilitySummary: snapshot?.capabilitySummary,
+            lastCheckedAt: "2026-01-01T00:00:00Z",
           }),
         ]),
       })
