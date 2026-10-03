@@ -1159,6 +1159,7 @@ export class PlatformAdminService implements OnModuleInit {
       updatedPrincipal,
       updatedMembership,
       [updatedRoleBinding],
+      { allowValidFromMutation: true },
     );
     const revokedSessionIds = await this.revokePlatformAdminSessions({
       principalId: principal.principalId,

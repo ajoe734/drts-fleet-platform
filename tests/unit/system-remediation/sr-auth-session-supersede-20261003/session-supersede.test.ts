@@ -7,6 +7,8 @@ import { IdentityRepository } from "../../../../apps/api/src/modules/identity/id
 import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
 import { AuthController } from "../../../../apps/api/src/modules/auth/auth.controller";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { PlatformAdminService } from "../../../../apps/api/src/modules/platform-admin/platform-admin.service";
 import {
   GoogleWorkloadIdentityAdapter,
   GOOGLE_WORKLOAD_IDENTITY_HEADER,
@@ -970,5 +972,88 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R3: concurrent first-time authentic
       first.token,
     );
     expect(verifiedFirst).not.toBeNull();
+  });
+});
+
+// SR-AUTH-SESSION-SUPERSEDE-20261003 R4 regression: the R3 fix made
+// IdentityRepository's role-binding upsert treat validFrom as set-once on
+// *every* ON CONFLICT, not just the idempotent authentication-provisioning
+// path it was meant to protect. That silently discarded a genuine
+// administrator-driven grant-start change: PlatformAdminService.
+// updatePlatformAdminUserRole deliberately bumps validFrom to "now" when
+// roleCode changes, and that intentional value must persist.
+describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R4: genuine administrator role changes must persist their own grant start", () => {
+  it("R4: updatePlatformAdminUserRole's new validFrom survives the shared upsert, while concurrent first-auth validFrom protection (R3) still holds", async () => {
+    const identityRepo = new IdentityRepository();
+    const service = new PlatformAdminService(
+      new AuditNotificationService(),
+      undefined,
+      identityRepo,
+    );
+    await service.onModuleInit();
+
+    const user = await service.createPlatformAdminUser(
+      {
+        email: "r4-regression@platform.drts",
+        displayName: "R4 Regression",
+        roleCode: "admin",
+        reason: "r4 fixture",
+      },
+      "r4-create",
+      "principal_platform_supervisor",
+    );
+    const before = (
+      await identityRepo.findRoleBindingsByMembershipId(user.userId)
+    )[0]!;
+
+    await service.updatePlatformAdminUserRole(
+      user.userId,
+      { roleCode: "superadmin", status: "active", reason: "r4 promotion" },
+      "r4-update",
+      "principal_platform_supervisor",
+    );
+    const after = (
+      await identityRepo.findRoleBindingsByMembershipId(user.userId)
+    )[0]!;
+
+    expect(after.roleCode).toBe("superadmin");
+    // This is the R4 regression: a genuine role change must persist the new
+    // grant start the production service supplied, not the prior grant's.
+    expect(after.validFrom).not.toBe(before.validFrom);
+    expect(after.updatedAt).not.toBe(before.updatedAt);
+  });
+
+  it("R4 does not reopen R3: idempotent ensureRoleBindingRecord calls still protect the first writer's validFrom on conflict", async () => {
+    const identityRepo = new IdentityRepository();
+
+    const firstWrite = await identityRepo.ensureRoleBindingRecord({
+      roleBindingId: "role_binding_r4_guard",
+      sourceRef: "r4_guard:role_binding",
+      membershipId: "membership_r4_guard",
+      roleCode: "ops_user",
+      grantedByPrincipalId: null,
+      approvalId: null,
+      validFrom: "2026-10-03T00:00:00.000Z",
+      validTo: null,
+      createdAt: "2026-10-03T00:00:00.000Z",
+      updatedAt: "2026-10-03T00:00:00.000Z",
+    });
+
+    const secondWrite = await identityRepo.ensureRoleBindingRecord({
+      roleBindingId: "role_binding_r4_guard",
+      sourceRef: "r4_guard:role_binding",
+      membershipId: "membership_r4_guard",
+      roleCode: "ops_user",
+      grantedByPrincipalId: null,
+      approvalId: null,
+      validFrom: "2026-10-03T00:00:30.000Z",
+      validTo: null,
+      createdAt: "2026-10-03T00:00:30.000Z",
+      updatedAt: "2026-10-03T00:00:30.000Z",
+    });
+
+    expect(firstWrite.validFrom).toBe("2026-10-03T00:00:00.000Z");
+    expect(secondWrite.validFrom).toBe("2026-10-03T00:00:00.000Z");
+    expect(secondWrite.updatedAt).toBe("2026-10-03T00:00:00.000Z");
   });
 });

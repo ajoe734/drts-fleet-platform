@@ -27,6 +27,27 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+/**
+ * Controls whether an upsert may overwrite an existing role binding's
+ * validFrom.
+ *
+ * Default (false): validFrom is set-once, like createdAt. This protects
+ * idempotent authentication provisioning (Google workload identity re-auth,
+ * IAP auto-provisioning) where two callers can race to create the same
+ * previously-unseen role binding; the second writer must not stomp the
+ * first writer's already-persisted validFrom/updatedAt and bump the
+ * workforce token version, which would invalidate the first writer's
+ * still-valid session (SR-AUTH-SESSION-SUPERSEDE-20261003 R3).
+ *
+ * true: the caller has read the current binding and is making an
+ * intentional grant change (e.g. an administrator changing roleCode), and
+ * the new validFrom it supplies must persist, even if validFrom is the
+ * only field that changed (SR-AUTH-SESSION-SUPERSEDE-20261003 R4).
+ */
+export type RoleBindingMutationOptions = {
+  allowValidFromMutation?: boolean;
+};
+
 type PersistedSessionRow = {
   session_id: string;
   source_ref: string | null;
@@ -840,14 +861,15 @@ export class IdentityRepository implements OnModuleInit {
 
   async ensureRoleBindingRecord(
     roleBinding: CanonicalIdentityRoleBindingRecord,
+    options: RoleBindingMutationOptions = {},
   ): Promise<CanonicalIdentityRoleBindingRecord> {
     if (!this.isEnabled()) {
-      return this.upsertFallbackRoleBinding(roleBinding);
+      return this.upsertFallbackRoleBinding(roleBinding, options);
     }
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertRoleBinding(client, roleBinding);
+      return await this.upsertRoleBinding(client, roleBinding, options);
     } finally {
       client.release();
     }
@@ -1183,6 +1205,7 @@ export class IdentityRepository implements OnModuleInit {
     principal: CanonicalIdentityPrincipalRecord,
     membership: CanonicalIdentityMembershipRecord,
     roleBindings: CanonicalIdentityRoleBindingRecord[],
+    options: RoleBindingMutationOptions = {},
   ): Promise<{
     principal: CanonicalIdentityPrincipalRecord;
     membership: CanonicalIdentityMembershipRecord;
@@ -1195,10 +1218,13 @@ export class IdentityRepository implements OnModuleInit {
         principalId: p.principalId,
       });
       const rbs = roleBindings.map((b) =>
-        this.upsertFallbackRoleBinding({
-          ...b,
-          membershipId: m.membershipId,
-        }),
+        this.upsertFallbackRoleBinding(
+          {
+            ...b,
+            membershipId: m.membershipId,
+          },
+          options,
+        ),
       );
       return { principal: p, membership: m, roleBindings: rbs };
     }
@@ -1213,10 +1239,14 @@ export class IdentityRepository implements OnModuleInit {
       });
       const rbs: CanonicalIdentityRoleBindingRecord[] = [];
       for (const binding of roleBindings) {
-        const rb = await this.upsertRoleBinding(client, {
-          ...binding,
-          membershipId: m.membershipId,
-        });
+        const rb = await this.upsertRoleBinding(
+          client,
+          {
+            ...binding,
+            membershipId: m.membershipId,
+          },
+          options,
+        );
         rbs.push(rb);
       }
       await client.query("COMMIT");
@@ -2712,16 +2742,19 @@ export class IdentityRepository implements OnModuleInit {
   private async upsertRoleBinding(
     client: PoolClient,
     record: CanonicalIdentityRoleBindingRecord,
+    options: RoleBindingMutationOptions = {},
   ) {
-    // valid_from is set-once, like created_at: ON CONFLICT never takes it
-    // from EXCLUDED, so Postgres preserves whichever row actually won the
-    // INSERT race. Without this, two callers that both read "no existing
-    // binding" for the same previously-unseen role binding and each submit
-    // their own authTime as a candidate valid_from could have the second
-    // writer's conflicting UPDATE overwrite the first writer's already-
-    // persisted valid_from/updated_at, bumping the workforce token version
-    // and invalidating the first writer's still-valid session
-    // (SR-AUTH-SESSION-SUPERSEDE-20261003 R3).
+    const allowValidFromMutation = options.allowValidFromMutation ?? false;
+    // valid_from is set-once, like created_at, unless allowValidFromMutation
+    // is set: see the RoleBindingMutationOptions doc comment and
+    // SR-AUTH-SESSION-SUPERSEDE-20261003 R3/R4.
+    const recordExpr = allowValidFromMutation
+      ? "EXCLUDED.record"
+      : `jsonb_set(
+                EXCLUDED.record,
+                '{validFrom}',
+                to_jsonb(iam.identity_role_bindings.valid_from)
+              )`;
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_role_bindings (
@@ -2745,19 +2778,16 @@ export class IdentityRepository implements OnModuleInit {
           granted_by_principal_id = EXCLUDED.granted_by_principal_id,
           approval_id = EXCLUDED.approval_id,
           valid_to = EXCLUDED.valid_to,
+          ${allowValidFromMutation ? "valid_from = EXCLUDED.valid_from," : ""}
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
             jsonb_set(
-              jsonb_set(
-                EXCLUDED.record,
-                '{roleBindingId}',
-                to_jsonb(iam.identity_role_bindings.role_binding_id)
-              ),
-              '{createdAt}',
-              to_jsonb(iam.identity_role_bindings.created_at)
+              ${recordExpr},
+              '{roleBindingId}',
+              to_jsonb(iam.identity_role_bindings.role_binding_id)
             ),
-            '{validFrom}',
-            to_jsonb(iam.identity_role_bindings.valid_from)
+            '{createdAt}',
+            to_jsonb(iam.identity_role_bindings.created_at)
           )
         WHERE
           iam.identity_role_bindings.membership_id IS DISTINCT FROM EXCLUDED.membership_id
@@ -2765,6 +2795,7 @@ export class IdentityRepository implements OnModuleInit {
           OR iam.identity_role_bindings.granted_by_principal_id IS DISTINCT FROM EXCLUDED.granted_by_principal_id
           OR iam.identity_role_bindings.approval_id IS DISTINCT FROM EXCLUDED.approval_id
           OR iam.identity_role_bindings.valid_to IS DISTINCT FROM EXCLUDED.valid_to
+          ${allowValidFromMutation ? "OR iam.identity_role_bindings.valid_from IS DISTINCT FROM EXCLUDED.valid_from" : ""}
         RETURNING record
       `,
       [
@@ -2962,7 +2993,9 @@ export class IdentityRepository implements OnModuleInit {
 
   private upsertFallbackRoleBinding(
     record: CanonicalIdentityRoleBindingRecord,
+    options: RoleBindingMutationOptions = {},
   ) {
+    const allowValidFromMutation = options.allowValidFromMutation ?? false;
     const existingRoleBindingId = record.sourceRef
       ? (this.fallbackRoleBindingSourceRefs.get(record.sourceRef) ??
         record.roleBindingId)
@@ -2972,21 +3005,17 @@ export class IdentityRepository implements OnModuleInit {
     // Mirrors upsertFallbackPrincipal: see upsertPrincipal for why a no-op
     // "ensure" must not advance updatedAt.
     //
-    // validFrom is set-once, like createdAt: once a binding row exists, this
-    // method never changes its validFrom, regardless of what the caller
-    // passes. This is what makes concurrent first-time authentication for
-    // the same (previously unseen) role binding converge correctly -- two
-    // interleaved calls that both read "no existing binding" and each pass
-    // their own authTime as a candidate validFrom cannot make the second
-    // writer stomp the first writer's already-persisted validFrom/updatedAt
-    // (SR-AUTH-SESSION-SUPERSEDE-20261003 R3).
+    // validFrom is set-once, like createdAt, unless allowValidFromMutation
+    // is set: see the RoleBindingMutationOptions doc comment and
+    // SR-AUTH-SESSION-SUPERSEDE-20261003 R3/R4.
     const unchanged =
       existing !== null &&
       existing.membershipId === record.membershipId &&
       existing.roleCode === record.roleCode &&
       existing.grantedByPrincipalId === record.grantedByPrincipalId &&
       existing.approvalId === record.approvalId &&
-      existing.validTo === record.validTo;
+      existing.validTo === record.validTo &&
+      (!allowValidFromMutation || existing.validFrom === record.validFrom);
     const persisted = existing
       ? {
           ...existing,
@@ -2996,6 +3025,9 @@ export class IdentityRepository implements OnModuleInit {
           grantedByPrincipalId: record.grantedByPrincipalId,
           approvalId: record.approvalId,
           validTo: record.validTo,
+          validFrom: allowValidFromMutation
+            ? record.validFrom
+            : existing.validFrom,
           updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
         }
       : { ...record };
