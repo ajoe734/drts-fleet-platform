@@ -8,9 +8,16 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { VoiceCapabilityScopeSchema, type VoiceCapabilityScope } from "@drts/contracts";
 
 import { ApiRequestError, toApiSuccessEnvelope } from "../../common/api-envelope";
-import { RequireRealms } from "../../common/auth";
+import { OpenRoute, RequireRealms, RequireScopes, CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  VoiceCapabilityService,
+  assertVoiceCapabilityScope,
+} from "../../common/auth/voice-capability.service";
+import { VoiceCapabilityGuard } from "../../common/auth/voice-capability.guard";
 import { VoiceBookingMetricsService, type CohortEvaluationFilter } from "../../observability/voice-booking-metrics.service";
 import {
   VoiceUsageService,
@@ -18,11 +25,26 @@ import {
   type VoiceUsageServiceType,
 } from "./voice-usage.service";
 import { VoiceCommandRunnerService } from "./voice-command-runner.service";
+import { VoiceSessionService, type InputResolution } from "./voice-session.service";
+import { VoiceBookingRepository } from "./voice-booking.repository";
+import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
+import { VoiceHandoffService } from "./voice-handoff.service";
+import { VoiceToolGatewayService } from "./voice-tool-gateway.service";
+import { VoiceHandoffOnlyToolPorts } from "./voice-handoff-tool-ports";
+
+const DEFAULT_TOOL_TURN_TIMEOUT_MS = 8_000;
+const MAX_TOOL_TURN_TIMEOUT_MS = 30_000;
 
 @Controller("callcenter/voice")
 export class VoiceBookingController {
   constructor(
     private readonly voiceBookingMetricsService: VoiceBookingMetricsService,
+    private readonly voiceCapabilityService: VoiceCapabilityService,
+    private readonly voiceCapabilityGuard: VoiceCapabilityGuard,
+    private readonly voiceSessionService: VoiceSessionService,
+    private readonly voiceBookingRepository: VoiceBookingRepository,
+    private readonly voiceBookingAuthorizationService: VoiceBookingAuthorizationService,
+    private readonly voiceHandoffService: VoiceHandoffService,
     private readonly voiceUsageService: VoiceUsageService,
     @Optional()
     private readonly voiceCommandRunnerService?: VoiceCommandRunnerService,
@@ -151,5 +173,143 @@ export class VoiceBookingController {
     });
 
     return toApiSuccessEnvelope(result, headerRequestId);
+  }
+
+  /**
+   * SD §4.2 stage 2: exchanges an already-authenticated workload service
+   * principal (stage 1, `BootstrapAuthGuard`/`JwtAuthService` -- a Google
+   * workload-identity-verified or dev-bootstrap `actorType=system`
+   * identity holding `voice:capability:issue`) for a short-lived,
+   * session-bound `voice-tool-gateway` capability token. This is the
+   * issuance call site that previously did not exist anywhere in
+   * production code (Codex reopen round 5/6, R4) -- `VoiceCapabilityService.issue`
+   * itself is unchanged; only this route is new.
+   */
+  @Post("capabilities")
+  @RequireRealms("system")
+  @RequireScopes("voice:capability:issue")
+  issueCapability(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body()
+    body: {
+      voiceSessionId: string;
+      resourceScopeId: string;
+      routeProfileVersion: number;
+      leaseEpoch: number;
+      scopes: VoiceCapabilityScope[];
+      ttlSeconds?: number;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopes = body.scopes.map((scope) => VoiceCapabilityScopeSchema.parse(scope));
+    const envelope = this.voiceCapabilityService.issue(identity, {
+      voiceSessionId: body.voiceSessionId,
+      resourceScopeId: body.resourceScopeId,
+      routeProfileVersion: body.routeProfileVersion,
+      leaseEpoch: body.leaseEpoch,
+      scopes,
+      ...(body.ttlSeconds !== undefined ? { ttlSeconds: body.ttlSeconds } : {}),
+    });
+    return toApiSuccessEnvelope(envelope, requestId);
+  }
+
+  /**
+   * Backs `VoiceDialoguePersistPort`'s `mode: "trusted"` seam
+   * (apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts): a
+   * turn's CAS-bound input resolution, authenticated by the SD §4.2
+   * capability (`VoiceCapabilityGuard`), never by this route's own bearer
+   * token claims being trusted blindly -- `VoiceCapabilityGuard.authenticate`
+   * re-verifies signature/issuer/audience/expiry and the resolved
+   * `voiceSessionId` must match the path; `VoiceSessionService.resolveInput`
+   * itself re-checks `expectedSessionVersion`/`inputEpoch` CAS and rejects
+   * (never silently no-ops) on a stale caller.
+   */
+  @Post("sessions/:sessionId/input-resolutions")
+  @OpenRoute()
+  async resolveInput(
+    @Param("sessionId") sessionId: string,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body()
+    body: {
+      expectedSessionVersion: number;
+      inputEpoch: number;
+      resolution: InputResolution;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const claims = await this.voiceCapabilityGuard.authenticate(headers);
+    if (claims.voiceSessionId !== sessionId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice capability is bound to a different session id.",
+      );
+    }
+    assertVoiceCapabilityScope(claims, "session_execute");
+    const session = await this.voiceSessionService.resolveInput(
+      sessionId,
+      body.expectedSessionVersion,
+      body.inputEpoch,
+      body.resolution,
+    );
+    return toApiSuccessEnvelope({ session }, requestId);
+  }
+
+  /**
+   * Backs `VoiceCallTurnCoordinator.executeTools`'s (apps/voice-media-worker)
+   * only real tool outcome, `request_handoff`, through the actual
+   * `VoiceToolGatewayService.execute` repair anchor (Codex reopen round
+   * 5/6, R4) instead of leaving it an unconsumed interface. `headers` is
+   * forwarded as-is to the gateway, which re-authenticates the capability
+   * itself (`this.guard.authenticate`) on every proposal, immediately
+   * before and after calling the domain port -- this route performs no
+   * authorization decision of its own.
+   */
+  @Post("sessions/:sessionId/handoffs")
+  @OpenRoute()
+  async requestHandoff(
+    @Param("sessionId") sessionId: string,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body()
+    body: {
+      inputEpoch: number;
+      deadlineMs?: number;
+      output: unknown;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    // Defense in depth, same as `resolveInput` above: the gateway itself
+    // re-authenticates the capability per-proposal regardless, but a
+    // mismatched path/token pair is rejected before any proposal runs.
+    const claims = await this.voiceCapabilityGuard.authenticate(headers);
+    if (claims.voiceSessionId !== sessionId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice capability is bound to a different session id.",
+      );
+    }
+    const deadlineMs = Math.min(
+      body.deadlineMs ?? DEFAULT_TOOL_TURN_TIMEOUT_MS,
+      MAX_TOOL_TURN_TIMEOUT_MS,
+    );
+    const signal = AbortSignal.timeout(deadlineMs + 1_000);
+    const gateway = new VoiceToolGatewayService(
+      this.voiceCapabilityGuard,
+      this.voiceBookingRepository,
+      this.voiceBookingAuthorizationService,
+      new VoiceHandoffOnlyToolPorts(
+        this.voiceBookingRepository,
+        this.voiceHandoffService,
+      ),
+      {
+        headers,
+        inputEpoch: body.inputEpoch,
+        deadline: Date.now() + deadlineMs,
+        signal,
+      },
+    );
+    const results = await gateway.execute(body.output);
+    return toApiSuccessEnvelope({ results }, requestId);
   }
 }

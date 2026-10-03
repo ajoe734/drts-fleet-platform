@@ -28,6 +28,10 @@ import { VoiceRetentionService } from "./voice-retention.service";
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { VoiceBookingController } from "./voice-booking.controller";
+import {
+  VoiceCapabilityService,
+  VoiceCapabilityGuard,
+} from "../../common/auth";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -41,6 +45,8 @@ import { VoiceBookingController } from "./voice-booking.controller";
   imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
   controllers: [VoiceBookingController],
   providers: [
+    VoiceCapabilityService,
+    VoiceCapabilityGuard,
     OwnedMobilityRepository,
     VoiceBookingCommandService,
     VoiceCommandRunnerService,
