@@ -31,6 +31,20 @@ async function main() {
               voiceSessionId,
               signal,
             );
+            // R4-entry (Codex reopen, canonical 2026-10-03T17:41:28Z): do
+            // not blindly project whatever `voiceSessionId` the API
+            // response body happens to carry -- verify it is actually the
+            // session this call asked for before trusting any of its
+            // other fields as this attachment's binding. A mismatched
+            // response (wrong route, stale cache, compromised/misrouted
+            // upstream) must fail this resolution closed, the same as a
+            // network error, rather than silently bind this attachment to
+            // someone else's session.
+            if (session.voiceSessionId !== voiceSessionId) {
+              throw new Error(
+                `voice session binding mismatch: requested '${voiceSessionId}' but apps/api returned session '${session.voiceSessionId}'`,
+              );
+            }
             return {
               voiceSessionId: session.voiceSessionId,
               resourceScopeId: session.resourceScopeId,

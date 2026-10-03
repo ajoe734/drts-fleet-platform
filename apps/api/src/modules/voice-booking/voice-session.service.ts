@@ -276,6 +276,25 @@ export class VoiceSessionService {
       );
     }
 
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+    // canonical 2026-10-03T17:41:28Z): `deduped` only tells us this exact
+    // row was already durable -- it says NOTHING about whether that row
+    // was ever actually applied to the watermark. The previous code
+    // returned `gap:false` here unconditionally on a dedup hit, using the
+    // `session` read from BEFORE this insert. That is a false success for
+    // the retry-after-CAS-failure case: a prior attempt can durably insert
+    // this exact (voiceSessionId, sequence) row and then fail its own
+    // `casUpdateSessionControl` below (stale `sessionVersion`), leaving the
+    // row durable but unapplied; a caller that retries the same sequence
+    // (necessarily with a fresh `sourceEventId`, since it never received
+    // the first attempt's id back) must NOT be told "no gap, nothing to
+    // do" -- it must fall through to the exact same contiguous-apply
+    // attempt a fresh insert would take, using a NEWLY read session so a
+    // since-resolved concurrent writer's CAS can now succeed. Whether this
+    // call's own insert was the one that landed the row or found it
+    // already there changes nothing about what application work is still
+    // owed, so `deduped` is carried through to the result purely as
+    // metadata from here on and never again used to skip that work.
     const { deduped } = await this.repository.insertControlEvent({
       voiceSessionId: command.voiceSessionId,
       legId: command.legId ?? null,
@@ -292,16 +311,6 @@ export class VoiceSessionService {
       payloadRef: command.payloadRef ?? null,
     });
 
-    if (deduped) {
-      return {
-        deduped: true,
-        applied: false,
-        gap: false,
-        appliedThroughSequence: session.lastAppliedControlSequence,
-        session,
-      };
-    }
-
     const appliedEpoch =
       session.lastAppliedControlSequence > 0
         ? await this.repository.findAppliedMediaEpoch(command.voiceSessionId)
@@ -313,7 +322,7 @@ export class VoiceSessionService {
       // epoch final 不得覆蓋新連線內容"). The event is durable (inserted
       // above) but is left unapplied until an explicit epoch transition.
       return {
-        deduped: false,
+        deduped,
         applied: false,
         gap: true,
         appliedThroughSequence: session.lastAppliedControlSequence,
@@ -328,7 +337,7 @@ export class VoiceSessionService {
     ) {
       // Already applied (or superseded) -- safe no-op.
       return {
-        deduped: false,
+        deduped,
         applied: false,
         gap: false,
         appliedThroughSequence: session.lastAppliedControlSequence,
@@ -344,7 +353,7 @@ export class VoiceSessionService {
       // applying seq N > 1 on bootstrap would permanently skip seqs 1..N-1
       // and corrupt the ordered-event invariant.
       return {
-        deduped: false,
+        deduped,
         applied: false,
         gap: true,
         appliedThroughSequence: session.lastAppliedControlSequence,
@@ -358,7 +367,7 @@ export class VoiceSessionService {
       // Not the next contiguous frame: durably buffered, but the waterline
       // must not skip past this gap (SD §5.4: "不得跳號處理後面的肯定").
       return {
-        deduped: false,
+        deduped,
         applied: false,
         gap: true,
         appliedThroughSequence: session.lastAppliedControlSequence,
@@ -408,7 +417,7 @@ export class VoiceSessionService {
     }
 
     return {
-      deduped: false,
+      deduped,
       applied: true,
       gap: false,
       appliedThroughSequence: appliedThrough,

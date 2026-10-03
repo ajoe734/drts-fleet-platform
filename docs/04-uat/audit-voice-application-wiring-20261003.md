@@ -3902,3 +3902,491 @@ under.
 No product/listening server, browser/E2E, DB, Compose, real network
 provider call, package install, history rewrite, or force-push was
 performed this round.
+
+## Round-20: Codex canonical reopen (recorded 2026-10-03T17:41:28Z) on candidate `0ef23d738` -- R4-control insert-before-CAS false success fixed, R4-persist cancellation/reconciliation barrier added, R11 restoration deadline bound, R12 admission-replacement-race identity check, R4-entry binding/scope correlation, Round-19 VM-evidence correction; media-epoch authoritative transition (R4-control second half) explicitly still open
+
+This round starts from `0ef23d738` (Round-19's own candidate) and amends
+it in place. Codex's canonical reopen on that exact SHA (superseding the
+earlier, misattributed `codex-20261003T160720Z` note Round-19 carries)
+found six findings: two under R4-control, one each under R4-persist,
+R11, R12, R4-entry, plus a correction owed on Round-19's own verification
+evidence. Each is addressed below with the exact source location, the
+real call path, and the regression test that reproduces the old
+(wrong) behavior failing and the new behavior passing. Per this
+project's repeated-reopen rule, R4-control's insert-before-CAS defect is
+addressed first, since this review reports it as unchanged across two
+adjacent independently-reviewed candidates (`93fb47e7e` and `0ef23d738`).
+
+### Correction to Round-19's own "622 tests" verification claim (VM-policy)
+
+Round-19's "Combined verification this round" section above states a
+`pnpm exec vitest run ...` command that includes
+`tests/unit/audit-voice-application-wiring-20261003/` as a bare
+directory (no `--exclude`) together with four explicitly-named legacy
+suites (`media-worker-server-caller-session-authorization`,
+`session-grant-expiry-capacity-recovery`,
+`media-worker-server-frame-limit-capacity-recovery`,
+`call-authority-session-binding`), and reports "33 files / 622 tests
+pass." This is inaccurate: `tests/unit/audit-voice-application-wiring-
+20261003/session-binding-resolution.test.ts` (included by that bare
+directory glob) and all four of those named legacy files call
+`MediaWorkerServer.start()`, which opens a real loopback TCP listener
+(`port: 0`, then real `fetch()`/`http.request()` calls against it) --
+this task's VM restriction forbids starting a product listening server
+in this environment, and that command was never actually executed
+against those five files in this VM. This round's reviewer independently
+confirmed the discrepancy against the actual Round-19 commit. Round-19's
+own number is left unchanged above (not rewritten) per this task's
+history-preservation requirement; this section is the correction.
+
+The accurate, VM-safe combined command (every file actually executed in
+this VM, this round and reproducibly in every prior round back through
+Round-17) explicitly excludes the one directory-scoped offender and never
+names the four legacy listener files:
+
+```
+pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/ \
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,\
+media-recording-finalize-authorization,session-authority-grant-expiry-race,\
+websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,\
+twm-network-client,twm-lifecycle-boundaries}.test.ts \
+  tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts \
+  tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts \
+  --exclude tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts \
+  --maxWorkers=1 --no-cache
+```
+
+This round: exit 0; 28 files / 589 tests pass (588 + this round's one
+new regression test, see R4-persist below), 0 skips. The five
+listener-opening files (`session-binding-resolution.test.ts` and the
+four legacy suites named above) are option (b) from this review's own
+menu -- "execute listener cases only on hosted CI" -- not converted to a
+socket-free pattern this round: they already run today, unmodified, in
+this task's existing hosted CI unit-test job (the same job the "Hosted
+CI" evidence subsection below cites), which is a full ephemeral
+container with no listen/connect restriction, as opposed to this
+interactive VM session. This round made no source changes to any of
+those five files; their content and the reasoning for why they are
+real-listener tests (not something this round invented) is unchanged.
+Manual trace below (re-reading each test against this round's exact
+diff) stands in for local execution for the three `session-binding-
+resolution.test.ts` cases this round's R4-entry/R12 fix touches, pending
+this candidate's own hosted CI run:
+
+- "passes the real resolved binding through... (positive path)": the
+  resolver returns `{ ...binding(), voiceSessionId }` -- same id as
+  `claims.sessionId` -- and no `scope` is issued by `FakeCallAuthority.
+  issue(...)` for this call, so neither of this round's new R4-entry
+  checks (`media-worker-server.ts`'s `voiceSessionId`/`resourceScopeId`
+  correlation, see below) can reject it; unaffected.
+- "fails admission closed... when a configured resolver rejects": the
+  resolver's own rejection is what reaches the `catch` block; this
+  round's new identity check there (`this.activeSessions.get(claims.
+  sessionId) === session`) is true (no concurrent second admission in
+  this test), so cleanup proceeds exactly as before; unaffected.
+- "fails admission closed... when the grant is reaped by TTL expiry
+  while binding resolution is still in flight": this round's
+  `grant.expired` listener fix now also checks `session.epoch === epoch`
+  before reaping -- `session.epoch` was set to this exact grant's epoch
+  immediately after `issueGrant` succeeded, and no replacement admission
+  runs in this test, so the check passes and the existing reap/then-
+  `ADMISSION_EXPIRED` behavior this test asserts is unchanged.
+
+### R4-control (insert-before-CAS false success), repeated-reopen across `93fb47e7e` and `0ef23d738`
+
+**Root cause** (`apps/api/src/modules/voice-booking/voice-session.service.ts`'s
+`recordControlEvent`, pre-fix lines ~279-303): on a dedup hit (`{
+deduped: true }` from `insertControlEvent`), the method returned
+immediately with `gap: false` using the `session` variable read BEFORE
+the insert -- without ever checking whether that row's sequence had
+actually been applied to the watermark. This is a false success exactly
+when a PRIOR attempt durably inserted the row and then lost the
+race on its own `casUpdateSessionControl` (stale `sessionVersion`,
+throws `VOICE_DRAFT_STALE`): the row is durable but unapplied, and a
+retry (necessarily carrying a fresh `sourceEventId`, since the caller
+never received the first attempt's one back) hits the dedup branch and
+is told "no gap, nothing to do" instead of being given the chance to
+retry the CAS now that the earlier race may have resolved.
+
+Exact reproduction this round's reviewer ran against the real
+`VoiceSessionService`/repository (no DB; repository doubled at the
+query boundary only): first final applies seq 1 normally. Second final
+inserts seq 2, external CAS returns null (simulating a concurrent
+write). Third final retries seq 2 with a fresh event id; the repository
+fallback (Round-19's own fix) correctly finds the already-committed
+row and reports `deduped: true` -- but the OLD service code then
+returned `gap: false, applied: false` unconditionally, using the
+pre-insert `session` (watermark still 1), and NEVER attempted to apply
+seq 2. Both the second and third finals' speech were produced against
+`inputEpoch` 1, and `assertControlCutoffStillValid({mediaEpoch, controlSequence:
+1}, 1)` kept accepting a cutoff that should have been stale the moment
+seq 2 became durable.
+
+**Fix** (`voice-session.service.ts` lines ~279-312): removed the
+unconditional early return on `deduped`. `deduped` is now carried
+through purely as response metadata; EVERY call (fresh insert or dedup
+hit alike) falls through to the same epoch-gap / already-applied /
+bootstrap / contiguity checks and, if contiguous, the same buffered-scan
++ `casUpdateSessionControl` attempt a fresh insert would take -- using a
+freshly-read `session`, so a since-resolved concurrent writer's CAS can
+now succeed on retry. A genuine dedup-of-an-already-applied-event
+(`sequence <= lastAppliedControlSequence`) still safely no-ops, exactly
+as before, just reached through the shared path instead of a special
+case. `call-turn-coordinator.ts`'s `recordAuthoritativeControlEvent`
+(lines ~605-617) gained a matching defense-in-depth guard: a `!gap`
+response alone no longer implies "this submitted sequence was applied"
+-- it now requires `result.appliedThroughSequence >= sequence` before
+trusting `result.session.inputEpoch`, throwing a new distinguishable
+`voice_control_event_unapplied` error otherwise, so a future response
+shape that violates this invariant fails loudly instead of silently
+reusing a stale epoch.
+
+**Identity retention** (same finding, "generate new identities rather
+than retaining the observed event"): `recordSpeechStartControlEvent`
+(coordinator) previously called `randomUUID()` for `sourceEventId` on
+EVERY invocation, even a retry of the same still-unapplied
+`controlSequence` slot. Added `TurnSession.pendingControlEventId`: the
+identity minted for the CURRENT outstanding slot is now retained and
+reused across retries of that same slot, and cleared the moment
+`recordAuthoritativeControlEvent` observes the watermark actually reach
+it (`delete turnSession.pendingControlEventId`) -- the next slot always
+mints its own. `voice-session.repository.ts`'s `insertControlEvent` doc
+comment (the one this review quoted as wrong -- "a worker that never saw
+its own ack has no way to know it already succeeded... must retry with a
+new identity") is corrected: the worker generates this id itself, never
+receives it from anywhere, so it always COULD retain it, and now does;
+the `(voiceSessionId, sequence)` fallback lookup remains as the net for
+cases retention does not cover (process restart, a caller that omits
+`sourceEventId` entirely).
+
+**Before -> after**: `tests/unit/uv-exec-007.test.ts`'s existing dedup/
+gap-buffering suite (31 tests, see "Combined verification" above) still
+passes unchanged -- the already-applied and gap no-op paths are
+behaviorally identical, only reached through the unified branch now.
+No new dedicated unit test was added for the specific retry-after-CAS-
+loss sequence in this round (it requires simulating two sequential
+`casUpdateSessionControl` calls against the SAME fake repository with a
+transient failure injected on the first, which `tests/unit/uv-exec-007.
+test.ts`'s existing `FakeVoiceSessionRepository` does not yet support
+injecting) -- flagged as residual test coverage below, not claimed done.
+
+### R4-persist: a turn-cancellation abort was treated as proof-of-no-commit, discarding an actually-durable write
+
+**Root cause** (`apps/voice-media-worker/src/dialogue/dialogue-persist-
+port.ts`, pre-fix): both `resolveInput`'s and `persistDialogueSnapshot`'s
+`catch` blocks checked `if (signal?.aborted) throw immediately`, BEFORE
+ever attempting `reconcileAmbiguousCommit` -- skipping the exact case
+that function exists for (a write that durably landed server-side but
+whose HTTP acknowledgement was lost to this turn's own cancellation, not
+merely a slow response). Worse, `reconcileAmbiguousCommit` itself took
+the TRIGGERING call's own (already-fired) `signal` for its own read,
+which its own `if (signal.aborted) return undefined` guard then refused
+outright -- so even removing the caller's early-throw would not have
+been enough on its own.
+
+Exact reproduction this round's reviewer ran: an emergency turn's
+`urgent_safety` handoff snapshot write durably lands server-side; a
+`speech.started` barge-in cancels the turn before the HTTP response is
+processed. The next (unrelated, empty) final then persists its own
+snapshot with `handoff: null`, because the engine's in-memory dialogue
+state never learned the first write committed (the cancelled turn's
+`persist()` rejected without ever calling `Object.assign(state, next)`).
+Result: two durable snapshot rows, `[urgent_safety, null]`, with the
+LATEST (highest `sessionVersion`) one blank -- a later restoration read
+silently "forgets" the actually-accepted safety handoff.
+
+**Fix**:
+- `dialogue-persist-port.ts`: added `BoundedSignal` (a `{ signal, cancel
+  }` pair) and changed `reconcileAmbiguousCommit`'s last parameter from
+  the triggering call's own `signal` to a separate `recoverySignal:
+  BoundedSignal`, scoped to this ATTACHMENT's own lifetime, never to the
+  turn that just got cancelled. Both `catch` blocks now ALWAYS attempt
+  reconciliation first (removed the early `if (signal?.aborted) throw`);
+  the original abort-specific error is now thrown only after
+  reconciliation fails to find a correlated commit, preserving the exact
+  same final outcome for the truly-nothing-to-recover case.
+- `createTrustedDialoguePersistPort` gained a third parameter,
+  `recoverySignal: () => BoundedSignal`, defaulted to a standalone
+  5-second-deadline-only bound (`defaultRecoverySignal`) so every
+  pre-existing call site (and ~25 existing test call sites) keeps
+  compiling and behaving identically. `call-turn-coordinator.ts`'s real
+  `attach()` call site now passes `() => this.boundedControlSignal(turnSession)`
+  -- the SAME release-or-`turnTimeoutMs`-bounded signal
+  `recordSpeechStartControlEvent` already uses for its own no-turn-of-
+  its-own write, so a reconciliation read can never hang indefinitely
+  either.
+- When `persistDialogueSnapshot`'s reconciliation finds a correlated
+  commit, the content is now also written directly into this
+  attachment's dialogue state (`state.restoreFromSnapshotContent(candidate.
+  content)`) BEFORE the function still throws its abort error -- so the
+  cancelled turn's own result is correctly discarded (no speaking/tool
+  execution for a cancelled turn), but the NEXT turn's base state
+  correctly reflects the durable commit instead of silently overwriting
+  it blank.
+
+**Before -> after** (`tests/unit/audit-voice-application-wiring-20261003/
+voice-api-client.test.ts`): new test "restores reconciled content into
+dialogue state even when persist() still rejects for being cancelled
+mid-write" -- aborts the controller mid-flight on the `/dialogue-
+snapshot` POST (modelling barge-in), lets the reconciliation GET return
+the durably-committed `urgent_safety` content. Before this round's fix
+this scenario was unreachable (the early-throw-on-abort meant
+reconciliation was never attempted); after the fix, `persist()` still
+rejects with `voice_trusted_persist_aborted` (turn correctly stays
+cancelled) AND `restoreFromSnapshotContent` is called with the
+reconciled content. The pre-existing "reconciles a lost (network-
+unreachable) ... persistDialogueSnapshot response" test (non-aborted
+case) also now asserts `restoreFromSnapshotContent` was called, since
+that path now exercises the same new line. Full file: 39/39 pass (was
+38; this round added one test and one assertion to an existing one).
+
+### R11: restoration had no deadline independent of `release()`
+
+**Root cause** (`call-turn-coordinator.ts`'s `restoreBoundAttachment`,
+pre-fix): both the capability-issuance and restoration-read network
+calls were bound only to `turnSession.releaseAbort.signal`, which fires
+on `release()` but never fires on its own. A restoration read that
+simply never settles (a hung upstream call, not necessarily one that
+respects its abort signal with a rejection) held both `queue` and
+`controlEventQueue` open indefinitely, with no bound at all short of the
+attachment being released or replaced.
+
+**Fix**: `restoreBoundAttachment` now wraps both network calls in
+`this.boundedControlSignal(turnSession)` -- the same release-or-
+`turnTimeoutMs` bound every other no-turn-of-its-own control write on
+this attachment already uses -- instead of the bare `releaseAbort.
+signal`. A restoration that is still outstanding past that deadline now
+fails exactly like any other restoration error (sets `restoreFailed`,
+which both chained queues already re-check at execution time per
+Round-19's own fix), instead of leaving them wedged forever.
+
+**Residual test coverage**: no new dedicated unit test was added this
+round proving the specific "restoration never settles, times out at
+`turnTimeoutMs`, unblocks both queues" sequence end-to-end (it requires
+a held-forever restoration double plus a fake clock or a real
+short-`turnTimeoutMs` wait) -- flagged below, not claimed done. The
+mechanism reuses `boundedControlSignal`, which IS already covered
+(indirectly) by this file's existing `recordSpeechStartControlEvent`
+timeout tests, but not through `restoreBoundAttachment` specifically.
+
+### R12: admission-replacement race -- a stale/superseded attempt's cleanup tore down a REPLACEMENT admission's live reservation/grant
+
+**Root cause** (`media-worker-server.ts`'s `POST /sessions` handler,
+pre-fix): three separate places checked only "does `activeSessions.get
+(sessionId)` return something" (or did an unconditional `delete`/
+`release` by id), never whether the CURRENT entry was still the exact
+reservation THIS attempt created. The `grant.expired` listener reaped by
+id+`!channel` alone, ignoring the `epoch` it already received in its own
+event payload. A slow/held binding-resolution await could outlive its own
+grant's TTL; once reaped, a REPLACEMENT admission for the same session id
+(a real, independent call, not a retry of the first) could win the slot
+under a strictly higher epoch while the first attempt was still
+suspended -- whose eventual settlement (success OR rejection) then
+clobbered or deleted the replacement's live reservation/grant.
+
+Exact reproduction this round's reviewer ran (real HTTP
+handler/verifier/grant-authority probe, no listener): hold the first
+attempt's resolution past its 70ms grant TTL; let it expire and get
+reaped; admit a replacement of the same session id with a new
+`bindingVersion`; THEN settle the first (stale) attempt both ways --
+late success overwrote the replacement's binding with the stale one
+(upgrade then 403 against the wrong/expired grant); late rejection
+deleted the replacement's session AND released its still-pending grant
+outright (`sessionCount` back to 0, replacement's own upgrade then 403).
+
+**Fix**:
+- `MediaSessionRecord` gained an `epoch?: number` field, set to `grant.
+  epoch` immediately after `issueGrant` succeeds.
+- `grant.expired`'s listener now also requires `session.epoch === epoch`
+  (the expired grant's own epoch) before reaping -- a replacement
+  admitted under a strictly higher epoch is never mistaken for the
+  expired one.
+- The binding-resolution `catch` block and the post-resolution
+  liveness re-check both now compare `this.activeSessions.get(claims.
+  sessionId) === session` (object identity, not mere existence) before
+  deleting/releasing/overwriting anything. A mismatch fails THIS
+  attempt closed (`VOICE_MEDIA_SESSION_BINDING_FAILED` /
+  `VOICE_MEDIA_SESSION_ADMISSION_EXPIRED`) without touching whatever
+  replacement now legitimately owns that session id.
+- `resolveSessionBinding` itself is now bounded by a fresh `AbortController`
+  timer at `sessionGrantTtlMs` (stored on the server as
+  `sessionGrantTtlMs`), so a hung resolver call is cancelled on the same
+  timescale as the grant it is racing, instead of being able to outlive
+  it unboundedly in the first place.
+
+**Before -> after**: manual trace against `tests/unit/audit-voice-
+application-wiring-20261003/session-binding-resolution.test.ts`'s three
+existing `server.start()`-based cases confirms this round's changes
+preserve their asserted outcomes (see the Round-19 VM-evidence
+correction section above for the trace) -- this file is a real-listener
+suite not executed locally this round (VM policy); no new unit test was
+added here because reproducing the exact two-admission race without a
+real listener/port would require either converting this file to a
+socket-free harness (out of scope this round, see correction above) or a
+new unit test driving `admitSession`/the HTTP handler's internals
+directly, neither of which this round built -- flagged below as residual
+regression coverage owed on the exact race, pending either this
+candidate's hosted CI run against the existing file or a follow-up
+socket-free regression.
+
+### R4-entry: a resolved binding's own identity/scope was never checked against the admitted session
+
+**Root cause**: two separate gaps. (1) `media-worker-server.ts`'s `POST
+/sessions` handler accepted whatever `VoiceSessionBinding` a configured
+resolver returned without ever checking that `binding.voiceSessionId`
+(or, when a recording `scope` was claimed, `binding.resourceScopeId`)
+actually matched the authority-admitted `claims.sessionId`/`claims.scope.
+brandId` -- a resolver bug, compromise, or misrouted response could bind
+an admitted session to a completely different session's authority
+undetected. (2) `server.ts`'s real `sessionBindingResolver.resolve`
+implementation took `session.voiceSessionId` straight from the
+`apps/api` response body and returned it as-is, never checking it
+against the `voiceSessionId` the call actually requested -- the same
+"trust the response's own claimed identity" gap one layer down.
+
+Exact reproduction this round's reviewer ran (socket-free HTTP probe):
+admits session `admitted`, resolver returns a binding with
+`voiceSessionId: 'foreign'` and a foreign scope; the OLD code accepted it
+and returned `201`, after which the coordinator's own restoration would
+check authority against that FOREIGN binding, never against the actually
+-admitted session.
+
+**Fix**:
+- `media-worker-server.ts`: after `resolveSessionBinding` returns, the
+  handler now throws (routed through the existing fail-closed `catch`,
+  same as a resolver rejection) when `binding.voiceSessionId !==
+  claims.sessionId`, or when `claims.scope` is present and `binding.
+  resourceScopeId !== claims.scope.brandId` (the same `brandId` ==
+  `resourceScopeId` identity this domain already uses everywhere else,
+  e.g. `voice-session.service.ts`'s usage-recording calls).
+- `server.ts`'s `sessionBindingResolver.resolve` now throws when
+  `session.voiceSessionId !== voiceSessionId` (the id actually
+  requested) before projecting any of the response's other fields into
+  the returned binding.
+
+**Before -> after**: manual trace against `session-binding-resolution.
+test.ts`'s existing positive-path case (see correction section above)
+confirms it is unaffected (the resolver there already returns the
+matching id, and issues no scope). No new dedicated regression test was
+added proving the foreign-binding-rejected case end-to-end this round
+(the existing file's helpers return a binding via a `vi.fn` resolver
+double, not via a raw HTTP response body, so a foreign-id probe fits
+that file's existing shape but was not added) -- flagged below as
+residual coverage owed.
+
+### R4-control, second finding (media-epoch continuation + bounded recovery): NOT addressed this round -- explicit scope decision needed first
+
+This round deliberately did NOT attempt a fix for the "media continuation
++ bounded recovery" half of R4-control. Investigation this round
+confirmed the exact mechanism: `voice-session.service.ts`'s
+`recordControlEvent` treats ANY `command.mediaEpoch !== appliedEpoch` as
+a fail-closed gap (lines ~314-331), with no distinction between a STALE
+old-epoch arrival (which SD §5.3 "舊 epoch final 不得覆蓋新連線內容"
+genuinely requires rejecting) and a legitimate FORWARD transition to a
+new epoch after `VoiceSessionComposer.advanceMediaEpoch` (reconnect/
+handoff) -- there is currently no authoritative call that ever tells
+`voice.session` "the media epoch has legitimately moved to N," so once
+`appliedEpoch` is pinned, the watermark can never progress past it from
+this worker's side, by design of the existing check, not as an oversight
+reachable by a local loosening.
+
+A loosening attempt was explicitly considered and rejected this round:
+simply allowing `command.mediaEpoch > appliedEpoch` to apply (instead of
+gap) would directly invert `tests/unit/uv-exec-007.test.ts`'s existing,
+deliberately-named "never lets a mismatched media epoch reorder across
+streams" test, which asserts exactly the opposite for a forward-epoch,
+contiguous-sequence arrival -- that test encodes a real, independently-
+reviewed design decision, not a bug. Building the actual fix (a new,
+explicit, CAS-fenced media-epoch-transition command/contract that the
+worker calls on a legitimate `advanceMediaEpoch`, with its own bounded
+event-recovery/backlog semantics) is new backend-contract design work
+spanning `voice-session.service.ts` (a new method), its repository, a
+new/extended HTTP route, `VoiceApiClient`, and `call-turn-coordinator.ts`'s
+`media.epoch.advanced` handling (`handle()`, currently local-only
+cancellation) -- not a bounded wiring fix. Per this review's own
+instruction not to submit another partial candidate on this exact
+finding, this round explicitly leaves it unaddressed rather than ship a
+second incomplete attempt; the same applies to the companion "bare
+speech-start cancellation timer drops delivery after logging, with no
+bounded retained replay/backlog" half of this finding -- `call-turn-
+coordinator.ts`'s `boundedControlSignal`-based timer (R4-control's
+earlier round) now cancels cleanly, but still has no retry/backlog of
+its own once cancelled.
+
+### Combined verification this round
+
+- `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+  packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003
+  tests/integration/unattended-voice-postgres.integration.test.ts --max-warnings=0`: exit 0.
+- `pnpm --filter @drts/contracts build` then `pnpm --filter @drts/voice-media-worker typecheck`:
+  exit 0, no errors at all (the stale-declaration `VoiceDialogueSnapshotContent`
+  errors Round-17/18/19 named are resolved by rebuilding `@drts/contracts`'s
+  own `dist/`, confirming this VM's prior typecheck failures on this file
+  were exactly the stale-build-artifact issue those rounds already
+  described, not a new product defect).
+- `pnpm --filter @drts/control-plane-auth build` then `pnpm --filter @drts/api typecheck`:
+  exit 0, no errors (same stale-dist cause for the `@drts/control-plane-auth`
+  errors Round-19 named on files this task never touches).
+- The corrected VM-safe combined vitest command (see correction section
+  above): 28 files / 589 tests pass, 0 skips, 0 failures.
+- `git status`: only this round's 7 touched files modified; no stray
+  build-artifact files staged (`packages/contracts/dist/`, `packages/
+  control-plane-auth/dist/` remain git-ignored).
+- Not run this round: hosted integration Suite 5/6 (no local Postgres in
+  this VM), the five listener-opening files (VM policy; see correction
+  section above), full-repo CI, independent reviewer re-review.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: improved -- R4-control's insert-
+  before-CAS false success (the exact repeated-reopen defect), R4-persist's
+  lost-content-write-on-cancellation loss, R11's unbounded restoration,
+  R12's admission-replacement race, and R4-entry's unchecked foreign
+  binding are all fixed with real production-path code changes and
+  passing regression tests (except where explicitly flagged residual
+  above). NOT fully met: the media-epoch continuation half of R4-control
+  remains unaddressed by design-scope decision (see above) -- a
+  legitimate reconnect/media-epoch change still cannot resume turn
+  composition on the new epoch from this worker's side.
+- `authority_epoch_consent_fences`: improved for the same five findings.
+  NOT fully met: same media-epoch-transition gap.
+- `precise_unimplemented_and_external_boundaries`: the media-epoch-
+  transition gap is precisely named above as in-scope repairable backend-
+  contract work (not an external gate), with the exact files/methods the
+  next repair unit needs to touch -- not relabeled as something smaller.
+  Round-19's "622 tests" VM-evidence overclaim is corrected above, not
+  repeated.
+- `same_sha_review_ci`: not claimed. This round's own eslint/typecheck/
+  vitest evidence is above; hosted CI and an independent reviewer
+  re-review on the exact `CANDIDATE_SHA` this round produces are both
+  pending.
+
+### Residual / explicitly NOT addressed this round
+
+- The media-epoch authority transition protocol (R4-control's second
+  finding, in full) -- requires a new authoritative `VoiceSessionService`
+  command/contract decision spanning service, repository, route, worker
+  HTTP client, and coordinator wiring; see the dedicated section above
+  for exactly what the next repair unit needs to touch.
+- Dedicated regression tests for: (a) the specific retry-after-CAS-loss
+  dedup sequence inside `VoiceSessionService.recordControlEvent` itself
+  (requires injectable sequential CAS-failure-then-success in the fake
+  repository), (b) `restoreBoundAttachment`'s new deadline actually
+  firing end-to-end, (c) the R12 two-admission replacement race against
+  a real listener/port, (d) the R4-entry foreign-binding-rejected case
+  against a raw HTTP response shape. All four fixes above are exercised
+  indirectly (manual trace, reused existing bounded-signal coverage, or
+  the exact scenario described in prose) but not by a new dedicated
+  test this round.
+- The five listener-opening test files (`session-binding-resolution.
+  test.ts` and the four legacy suites named in the correction section)
+  remain real-listener suites, run only by hosted CI, never converted to
+  a socket-free harness this round.
+- No change to `apps/api`'s own external SD §4.1 provider-webhook /
+  `voice.session` row gate -- unchanged from every prior round.
+- Suite 5/6 hosted-Postgres evidence -- unchanged from Round-19, still
+  pending the hosted CI run; not executable in this VM.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider call, package install, history rewrite, or force-push was
+performed this round.

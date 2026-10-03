@@ -1337,9 +1337,13 @@ describe("createTrustedDialoguePersistPort", () => {
       { getToken: vi.fn(async () => "workload-token") },
     );
     const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const restoreFromSnapshotContent = vi.fn();
 
     await port.persist(
-      { toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }) } as unknown as VoiceDialogueState,
+      {
+        toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),
+        restoreFromSnapshotContent,
+      } as unknown as VoiceDialogueState,
       request,
     );
 
@@ -1349,6 +1353,122 @@ describe("createTrustedDialoguePersistPort", () => {
     // committed, instead of silently believing this turn's content was
     // never recorded and letting the next turn overwrite it.
     expect(binding.sessionVersion).toBe(6);
+    // R4-persist (Codex reopen, canonical 2026-10-03T17:41:28Z): the
+    // reconciled content is also restored directly into this
+    // attachment's dialogue state, not only inferred from `persist()`
+    // resolving successfully.
+    expect(restoreFromSnapshotContent).toHaveBeenCalledWith({
+      handoff: { reason: "urgent_safety" },
+    });
+  });
+
+  /**
+   * Codex reopen, canonical 2026-10-03T17:41:28Z, R4-persist ("abort is
+   * not proof of no commit"): the exact reopened probe -- an emergency
+   * turn's handoff snapshot is durably accepted server-side, but
+   * `speech.started` cancels the turn (aborts `signal`) before the HTTP
+   * acknowledgement is processed. `persist()` must still reject (this
+   * turn was genuinely cancelled), but the reconciled content must be
+   * carried into the attachment's own dialogue state anyway, or the next
+   * (unrelated, empty) turn would silently overwrite the durably-accepted
+   * handoff with blank content -- the "snapshot handoffs=[urgent_safety,
+   * null]" regression this reopened on.
+   */
+  it("restores reconciled content into dialogue state even when persist() still rejects for being cancelled mid-write", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const controller = new AbortController();
+    let releasePost!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releasePost = resolve;
+    });
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        // The content commit actually lands server-side; this attempt's
+        // own `signal` fires (simulating barge-in) before the gate is
+        // released, modelling the response being lost to cancellation.
+        controller.abort();
+        await gate;
+        throw new Error("voice_media_turn_cancelled: aborted mid-write");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: { handoff: { reason: "urgent_safety" } },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const restoreFromSnapshotContent = vi.fn();
+
+    const pending = port.persist(
+      {
+        toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),
+        restoreFromSnapshotContent,
+      } as unknown as VoiceDialogueState,
+      { ...request, signal: controller.signal } as VoiceDialogueRequest,
+    );
+    for (let i = 0; i < 50 && !controller.signal.aborted; i++) {
+      await Promise.resolve();
+    }
+    expect(controller.signal.aborted).toBe(true);
+    releasePost();
+
+    await expect(pending).rejects.toThrow(/voice_trusted_persist_aborted/);
+    expect(restoreFromSnapshotContent).toHaveBeenCalledWith({
+      handoff: { reason: "urgent_safety" },
+    });
   });
 
   it("still fails closed when a lost persistDialogueSnapshot response cannot be reconciled (the reconciliation read shows an unrelated/older snapshot)", async () => {

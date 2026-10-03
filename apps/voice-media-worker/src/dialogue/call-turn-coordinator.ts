@@ -115,6 +115,20 @@ interface TurnSession {
    * attachment already durably applied. `undefined` for an unbound
    * attachment, which never calls `recordControlEvent` at all. */
   controlSequence?: number;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+   * canonical 2026-10-03T17:41:28Z): the `sourceEventId` already
+   * generated for the CURRENT (still-unapplied) `controlSequence` slot,
+   * so a retry of that exact slot (another `speech.started` arriving, or
+   * `executeTurn`'s fallback, while the authoritative session has not
+   * yet advanced past it) reuses the SAME identity instead of minting a
+   * fresh `randomUUID()` every attempt. This worker generates these ids
+   * itself -- it is never "replaying one it never received" (the old,
+   * now-corrected framing) -- so retaining one it already minted for an
+   * outstanding slot is always possible. Cleared (set to `undefined`)
+   * the moment `recordAuthoritativeControlEvent` observes the
+   * authoritative watermark has actually reached this slot, so the NEXT
+   * slot always mints its own fresh id. */
+  pendingControlEventId?: string;
   /** The authoritative, server-durable `inputEpoch` the most recent
    * `recordAuthoritativeControlEvent` call resolved -- distinct from
    * `inputEpoch` above (this class's process-local turn-sequencing
@@ -332,6 +346,13 @@ export class VoiceCallTurnCoordinator {
       turnSession.persistPort = createTrustedDialoguePersistPort(
         this.apiClient,
         () => turnSession.binding,
+        // R4-persist (Codex reopen, canonical 2026-10-03T17:41:28Z): a
+        // fresh attachment-scoped bound for each reconciliation read --
+        // never a turn's own `request.signal`, which is exactly what has
+        // already fired whenever a cancelled turn needs this. Same
+        // release+deadline bound every other no-turn-of-its-own control
+        // write on this attachment already uses (`boundedControlSignal`).
+        () => this.boundedControlSignal(turnSession),
       );
       // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: seed this bound
       // attachment's dialogue state and `binding.sessionVersion` from
@@ -384,6 +405,20 @@ export class VoiceCallTurnCoordinator {
     apiClient: VoiceApiClient,
     binding: VoiceSessionBinding,
   ): Promise<void> {
+    // R11 (Codex reopen, canonical 2026-10-03T17:41:28Z): the previous
+    // signal here was only `releaseAbort.signal`, which fires on
+    // `release()` but never on its own -- a restoration read that simply
+    // never settles (an uncooperative/hung apps/api call, not necessarily
+    // an abort-respecting rejection) held BOTH `queue` and
+    // `controlEventQueue` open indefinitely, since neither this method
+    // nor `VoiceApiClient` imposed any deadline of its own. Bound this
+    // whole restoration stage to the same `turnTimeoutMs` every other
+    // bounded control write on this attachment already uses, independent
+    // of whether a turn or a release ever happens -- a restoration that
+    // is still outstanding past that deadline must fail exactly like any
+    // other restoration error (sets `restoreFailed`, unblocks both
+    // chained queues) instead of leaving them wedged forever.
+    const bounded = this.boundedControlSignal(turnSession);
     try {
       const capability = await apiClient.issueCapability(
         {
@@ -393,12 +428,12 @@ export class VoiceCallTurnCoordinator {
           leaseEpoch: binding.leaseEpoch,
           scopes: ["session_execute"],
         },
-        turnSession.releaseAbort.signal,
+        bounded.signal,
       );
       const restoration = await apiClient.getDialogueSnapshotRestoration(
         binding.voiceSessionId,
         capability.token,
-        turnSession.releaseAbort.signal,
+        bounded.signal,
       );
       if (
         // Codex reopen round 18, R4-persist: `voiceSessionId` itself was
@@ -465,6 +500,8 @@ export class VoiceCallTurnCoordinator {
         "[voice-call-turn-coordinator] bound attachment restoration failed",
         error,
       );
+    } finally {
+      bounded.cancel();
     }
   }
 
@@ -607,7 +644,26 @@ export class VoiceCallTurnCoordinator {
         "voice_control_event_gap: the authoritative session did not durably open a new input watermark for this event.",
       );
     }
+    // R4-control (Codex reopen, canonical 2026-10-03T17:41:28Z): a
+    // `!gap` response alone does not prove THIS submitted sequence was
+    // ever applied -- `VoiceSessionService.recordControlEvent`'s
+    // "already applied" no-op path also returns `gap:false` for a
+    // sequence at or behind the current watermark. Require the
+    // authoritative watermark to have actually reached (or passed) what
+    // was just submitted before trusting `result.session.inputEpoch` as
+    // this event's correlated outcome; a durable-but-unapplied row
+    // (service CAS loss) must keep retrying through the next write on
+    // this queue, never be mistaken for a correlated acknowledgement.
+    if (result.appliedThroughSequence < sequence) {
+      throw new Error(
+        "voice_control_event_unapplied: the authoritative session has not yet applied this submitted sequence.",
+      );
+    }
     turnSession.controlSequence = result.appliedThroughSequence + 1;
+    // This slot is now durably applied; the next slot must mint its own
+    // fresh identity rather than inherit this one (see
+    // `TurnSession.pendingControlEventId`).
+    delete turnSession.pendingControlEventId;
     // Codex reopen round 15/16, R4-persist ("audit the same mutable update
     // at recordAuthoritativeSpeechStart"): same monotonic guard as
     // `dialogue-persist-port.ts`'s `persist()` -- a genuinely correlated
@@ -704,14 +760,23 @@ export class VoiceCallTurnCoordinator {
     // use, so a hang here is cancelled on the same bounded timescale
     // instead of blocking every later write for this attachment.
     const bounded = this.boundedControlSignal(turnSession);
-    this.chainControlEvent(turnSession, () =>
-      this.recordAuthoritativeControlEvent(turnSession, binding, {
-        sourceEventId: randomUUID(),
+    this.chainControlEvent(turnSession, () => {
+      // R4-control (Codex reopen, canonical 2026-10-03T17:41:28Z): reuse
+      // the identity already minted for this attachment's current
+      // outstanding (still-unapplied) control-sequence slot, rather than
+      // mint a fresh `randomUUID()` on every call -- see
+      // `TurnSession.pendingControlEventId`'s own doc. A genuinely new
+      // slot (the previous one already advanced the watermark, which
+      // clears this field below) always gets its own new identity.
+      const sourceEventId = turnSession.pendingControlEventId ?? randomUUID();
+      turnSession.pendingControlEventId = sourceEventId;
+      return this.recordAuthoritativeControlEvent(turnSession, binding, {
+        sourceEventId,
         occurredAt: event.occurredAt,
         mediaEpoch: event.mediaEpoch,
         signal: bounded.signal,
-      }),
-    ).then(
+      });
+    }).then(
       (epoch) => {
         bounded.cancel();
         turnSession.authoritativeInputEpoch = epoch;

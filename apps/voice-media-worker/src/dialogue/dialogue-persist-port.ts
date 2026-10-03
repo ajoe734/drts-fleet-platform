@@ -9,6 +9,14 @@ import type {
   VoiceApiClient,
 } from "../server/voice-api-client";
 
+/** A signal paired with an explicit `cancel()` to release whatever bounds
+ * it (a timer, a listener) once the caller is done with it -- see
+ * `createTrustedDialoguePersistPort`'s `recoverySignal` parameter. */
+export interface BoundedSignal {
+  readonly signal: AbortSignal;
+  cancel(): void;
+}
+
 /**
  * Codex reopen round 18, R4-persist: a single, best-effort authoritative
  * read used to disambiguate a `resolveInput`/`persistDialogueSnapshot` call
@@ -17,27 +25,40 @@ import type {
  * `catch` block, after the real write attempt already failed; its own
  * failure (apps/api also unreachable right now) must never replace the
  * original error with a confusing new one, so it swallows every error from
- * this read and lets the caller fall back to the original failure. Returns
- * `undefined` on any such secondary failure or `signal` abort -- the caller
- * still re-checks `signal.aborted` itself afterward, since this read's own
- * success/failure says nothing about whether the turn that triggered it is
- * still live.
+ * this read and lets the caller fall back to the original failure.
+ *
+ * Correction (Codex reopen, canonical 2026-10-03T17:41:28Z, R4-persist):
+ * an earlier version of this function took the TRIGGERING call's own
+ * `signal` and bailed out immediately whenever it was already aborted --
+ * which is exactly the one case this reconciliation exists for (a turn
+ * cancelled mid-write, not merely a slow response). `recoverySignal` is a
+ * SEPARATE, freshly-bounded signal scoped to this attachment's own
+ * lifetime (fires on `release()` or its own short deadline, never on a
+ * single turn's cancellation) -- this read runs under that bound
+ * regardless of whether the turn that triggered it was itself aborted.
+ * Still returns `undefined` on any secondary failure or `recoverySignal`
+ * abort (attachment released / recovery deadline exceeded while this read
+ * was in flight) -- the caller re-checks the ORIGINAL triggering signal
+ * itself afterward, since this read's own success/failure says nothing
+ * about whether the turn that triggered it is still live.
  */
 async function reconcileAmbiguousCommit(
   client: VoiceApiClient,
   voiceSessionId: string,
   capabilityToken: string,
-  signal: AbortSignal | undefined,
+  recoverySignal: BoundedSignal,
 ): Promise<DialogueSnapshotRestorationResult | undefined> {
-  if (signal?.aborted) return undefined;
+  if (recoverySignal.signal.aborted) return undefined;
   try {
     return await client.getDialogueSnapshotRestoration(
       voiceSessionId,
       capabilityToken,
-      signal,
+      recoverySignal.signal,
     );
   } catch {
     return undefined;
+  } finally {
+    recoverySignal.cancel();
   }
 }
 
@@ -146,9 +167,32 @@ const PERSIST_CAPABILITY_SCOPES: IssueCapabilityCommand["scopes"] = [
  * state where a turn's input was admitted but its content silently wasn't
  * recorded.
  */
+/** Default `recoverySignal` for a caller with no attachment-level
+ * release signal of its own (tests, or any future caller outside
+ * `VoiceCallTurnCoordinator`) -- bounded purely by its own short
+ * deadline, never tied to any turn's cancellation. */
+const DEFAULT_RECOVERY_TIMEOUT_MS = 5_000;
+function defaultRecoverySignal(): BoundedSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    DEFAULT_RECOVERY_TIMEOUT_MS,
+  );
+  return {
+    signal: controller.signal,
+    cancel: () => clearTimeout(timer),
+  };
+}
+
 export function createTrustedDialoguePersistPort(
   client: VoiceApiClient,
   binding: () => VoiceSessionBinding | undefined,
+  /** Mints a fresh, attachment-scoped bounded signal for a single
+   * reconciliation read -- see `reconcileAmbiguousCommit`'s own doc.
+   * Never the turn's own `request.signal`: that one is exactly what just
+   * fired when this is needed. Defaults to a standalone deadline-only
+   * bound for callers with no attachment/release signal of their own. */
+  recoverySignal: () => BoundedSignal = defaultRecoverySignal,
 ): VoiceDialoguePersistPort {
   return {
     mode: "trusted",
@@ -200,26 +244,26 @@ export function createTrustedDialoguePersistPort(
           )
         ).session;
       } catch (err) {
-        if (signal?.aborted) {
-          throw new Error(
-            "voice_trusted_persist_aborted: request was aborted while awaiting the resolveInput response.",
-          );
-        }
         // Codex reopen round 18, R4-persist ("regress lost replies, not
-        // only delayed ones"): a transport-level failure here (timeout,
-        // dropped response, proxy reset) does not prove the CAS never
-        // committed -- the write can genuinely have landed server-side
-        // with only its own HTTP acknowledgement lost in transit. Read
-        // authoritative truth back once before concluding this turn's
-        // admission never happened; `reconcileAmbiguousCommit` applies the
-        // exact same correlation discipline the success path below does,
-        // so an unrelated/foreign/stale read can never be mistaken for
-        // this turn's own outcome.
+        // only delayed ones"), corrected again (Codex reopen, canonical
+        // 2026-10-03T17:41:28Z, R4-persist: "abort is not proof of no
+        // commit"): a transport-level failure here (timeout, dropped
+        // response, proxy reset) -- OR this exact turn having just been
+        // cancelled (barge-in, a newer final) -- does NOT prove the CAS
+        // never committed; the write can genuinely have landed
+        // server-side with only its own HTTP acknowledgement lost in
+        // transit, in EITHER case. Always read authoritative truth back
+        // once, under a separate attachment-scoped recovery signal (never
+        // this turn's own, already-fired `signal`), before concluding
+        // this turn's admission never happened; `reconcileAmbiguousCommit`
+        // applies the exact same correlation discipline the success path
+        // below does, so an unrelated/foreign/stale read can never be
+        // mistaken for this turn's own outcome.
         const reconciled = await reconcileAmbiguousCommit(
           client,
           current.voiceSessionId,
           capability.token,
-          signal,
+          recoverySignal(),
         );
         const candidate = reconciled?.session;
         const reconciledCorrelates =
@@ -231,7 +275,14 @@ export function createTrustedDialoguePersistPort(
           candidate.inputEpoch === request.inputEpoch &&
           candidate.sessionVersion === expectedSessionVersion + 1 &&
           !candidate.pendingInput;
-        if (!reconciledCorrelates) throw err;
+        if (!reconciledCorrelates) {
+          if (signal?.aborted) {
+            throw new Error(
+              "voice_trusted_persist_aborted: request was aborted while awaiting the resolveInput response.",
+            );
+          }
+          throw err;
+        }
         sessionInfo = candidate;
       }
       const result = { session: sessionInfo };
@@ -327,28 +378,29 @@ export function createTrustedDialoguePersistPort(
           )
         ).snapshot;
       } catch (err) {
-        if (signal?.aborted) {
-          throw new Error(
-            "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",
-          );
-        }
-        // Codex reopen round 18, R4-persist: the exact probe this
-        // reopened on -- a turn's content commit durably lands (the
-        // server accepted the write) but its own HTTP acknowledgement is
-        // lost. Without reconciling, the engine's in-memory `state` never
-        // learns this turn's content was actually durably recorded (see
-        // `VoiceDialogueEngine.turn`'s `Object.assign(state, next)`, which
-        // only runs once `persist()` resolves) and the NEXT turn silently
-        // starts a new, unrelated commit that supersedes/erases the
-        // already-accepted one -- loss of previously accepted dialogue
-        // state, not safe recovery. Read authoritative truth back once
-        // before concluding the content was never recorded; a mismatched
+        // Codex reopen round 18, R4-persist, corrected again (Codex
+        // reopen, canonical 2026-10-03T17:41:28Z, R4-persist: "abort is
+        // not proof of no commit"): the exact probe this reopened on --
+        // a turn's content commit durably lands (the server accepted the
+        // write) but its own HTTP acknowledgement is lost, EITHER from a
+        // transport failure or because this exact turn was just
+        // cancelled (barge-in) while the write was still in flight.
+        // Neither case may short-circuit past reconciliation: without it,
+        // the engine's in-memory `state` never learns this turn's content
+        // was actually durably recorded (see `VoiceDialogueEngine.turn`'s
+        // `Object.assign(state, next)`, which only runs once `persist()`
+        // resolves -- never for a cancelled turn) and the NEXT turn
+        // silently starts a new, unrelated commit that supersedes/erases
+        // the already-accepted one -- loss of previously accepted
+        // dialogue state, not safe recovery. Read authoritative truth
+        // back once, under a separate attachment-scoped recovery signal
+        // (never this turn's own, already-fired `signal`); a mismatched
         // or expired read still fails this call exactly as before.
         const reconciled = await reconcileAmbiguousCommit(
           client,
           current.voiceSessionId,
           capability.token,
-          signal,
+          recoverySignal(),
         );
         const candidate = reconciled?.snapshot;
         const reconciledCorrelates =
@@ -359,7 +411,22 @@ export function createTrustedDialoguePersistPort(
           candidate.mediaEpoch === (request.mediaEpoch ?? 0) &&
           candidate.turnId === request.turnId &&
           new Date(candidate.retentionExpiresAt).getTime() > Date.now();
-        if (!reconciledCorrelates) throw err;
+        if (!reconciledCorrelates) {
+          if (signal?.aborted) {
+            throw new Error(
+              "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",
+            );
+          }
+          throw err;
+        }
+        // This turn's content commit DID durably land -- carry it into
+        // this attachment's own in-memory dialogue state now, even
+        // though this specific (cancelled) turn's own result is about to
+        // be discarded below (the re-check right after this block still
+        // throws when `signal.aborted`). Otherwise the NEXT turn's base
+        // state never learns this commit happened and silently overwrites
+        // it with blank/unrelated content.
+        state.restoreFromSnapshotContent(candidate.content);
         snapshot = candidate;
       }
       if (signal?.aborted) {
