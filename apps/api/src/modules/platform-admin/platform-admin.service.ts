@@ -481,6 +481,18 @@ export class PlatformAdminService implements OnModuleInit {
 
   private placardVersions: PlacardVersionRecord[] = [];
 
+  /**
+   * Serializes `publishPlacardVersion` calls per `placardVersionId` within
+   * this process. Without it, two concurrent publish requests for the same
+   * placard can both pass the `publishedAt` guard before either awaits
+   * anything, race the durable-store write, and leave the live placard's
+   * metadata pointing at a hash a *different* completion's bytes actually
+   * occupy (R7). A later publish for the same id chains onto whatever
+   * promise is already queued, so it only runs -- and only re-checks the
+   * guard -- after every earlier one has fully settled, success or failure.
+   */
+  private readonly placardPublishQueue = new Map<string, Promise<unknown>>();
+
   private adapters: PlatformAdapter[] = PLATFORM_ADAPTERS_SEED.map((adapter) =>
     this.clonePlatformAdapter(adapter),
   );
@@ -845,6 +857,40 @@ export class PlatformAdminService implements OnModuleInit {
     publishActorId?: string | null,
   ) {
     void command;
+    return this.runExclusivePlacardPublish(placardVersionId, () =>
+      this.publishPlacardVersionExclusive(
+        placardVersionId,
+        requestId,
+        publishActorId,
+      ),
+    );
+  }
+
+  /**
+   * Chains `fn` onto whatever publish for this `placardVersionId` is already
+   * queued, so concurrent calls run one at a time, in call order, and a
+   * later one always observes an earlier one's fully-settled result (success
+   * or failure) before it re-checks `placard.publishedAt` -- see
+   * `placardPublishQueue`'s own comment for why this matters (R7). `fn` runs
+   * via `.then(fn, fn)` so a rejected predecessor still unblocks the next
+   * queued call instead of wedging it forever.
+   */
+  private runExclusivePlacardPublish<T>(
+    placardVersionId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.placardPublishQueue.get(placardVersionId) ?? Promise.resolve();
+    const next = previous.then(fn, fn);
+    this.placardPublishQueue.set(placardVersionId, next);
+    return next;
+  }
+
+  private async publishPlacardVersionExclusive(
+    placardVersionId: string,
+    requestId?: string,
+    publishActorId?: string | null,
+  ) {
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );
@@ -879,6 +925,32 @@ export class PlatformAdminService implements OnModuleInit {
 
     // Force re-render so PDF reflects the actual publishedAt timestamp
     await this.ensurePlacardArtifact(staged, true);
+
+    // `runExclusivePlacardPublish` already rules out another publish call
+    // IN THIS PROCESS reaching here concurrently, but it cannot see a
+    // different Cloud Run instance's publish for the same placard landing in
+    // the shared durable store between this call's own write (just above)
+    // and this read-back. Trust what the store actually has, not only what
+    // this call's own render produced, before committing metadata to it.
+    const storedEntry = await this.documentArtifactStore.get(
+      "placard",
+      placard.placardVersionId,
+    );
+    if (
+      !storedEntry ||
+      storedEntry.record.sha256 !== staged.artifactManifestHash
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLACARD_PUBLISH_CONFLICT",
+        "This placard's durable artifact changed during publish. Retry the publish.",
+        {
+          placardVersionId,
+          expectedSha256: staged.artifactManifestHash,
+          actualSha256: storedEntry?.record.sha256 ?? null,
+        },
+      );
+    }
 
     placard.publishedAt = staged.publishedAt;
     placard.updatedAt = staged.updatedAt;
@@ -2479,42 +2551,52 @@ export class PlatformAdminService implements OnModuleInit {
 
   /**
    * Renders this placard's PDF bytes from its own fields and the source
-   * `PublicInfoVersionRecord` it was generated from, and writes the result to
-   * the durable store. The one rendering path both `ensurePlacardArtifact`'s
-   * first materialisation and `rebuildPlacardArtifact` go through, so a
-   * sibling instance or a post-restart instance recovering a verified link
-   * gets byte-identical content to what was originally issued (as long as
-   * the source public-info record has not itself changed since).
+   * `PublicInfoVersionRecord` it was generated from. The one rendering logic
+   * both `ensurePlacardArtifact`'s first materialisation/republish and
+   * `rebuildPlacardArtifact` go through, so a sibling instance or a
+   * post-restart instance recovering a verified link gets byte-identical
+   * content to what was originally issued (as long as the source public-info
+   * record has not itself changed since -- see `rebuildPlacardArtifact` for
+   * what happens when it has).
+   *
+   * `recover: true` (used only by `rebuildPlacardArtifact`) writes with
+   * `putIfAbsent` instead of `put`: that recovery path can race a sibling
+   * instance's own concurrent recovery of the exact same (kind, subjectId),
+   * and an unconditional overwrite could clobber bytes the sibling already
+   * correctly restored. A producer's own explicit issuance/republish
+   * (`recover` left `false`) is never racing a *recovery* in this sense --
+   * writing its own newly rendered bytes is the legitimate, intended
+   * overwrite -- so it keeps using `put`.
    */
-  private renderPlacardArtifact(
+  private async renderPlacardArtifact(
     placard: PlacardVersionRecord,
+    options: { recover?: boolean } = {},
   ): Promise<DocumentArtifactRecord> {
     const publicInfoVersion = this.publicInfoVersions.find(
       (v) => v.versionId === placard.publicInfoVersionId,
     );
-
-    if (publicInfoVersion) {
-      return this.documentArtifactStore.put({
-        kind: "placard",
-        subjectId: placard.placardVersionId,
-        mimeType: "application/pdf",
-        bytes: buildMinimalPdf(
-          buildPlacardPdfRows(placard, publicInfoVersion),
-        ),
-      });
-    }
-
-    return this.documentArtifactStore.put({
-      kind: "placard",
+    const bytes = publicInfoVersion
+      ? buildMinimalPdf(buildPlacardPdfRows(placard, publicInfoVersion))
+      : buildMinimalPdf([
+          `Vehicle Service Placard ${placard.versionCode}`,
+          `Placard ID: ${placard.placardVersionId}`,
+          `Source Version: ${placard.publicInfoVersionId}`,
+          `Generated At: ${placard.createdAt}`,
+        ]);
+    const command = {
+      kind: "placard" as const,
       subjectId: placard.placardVersionId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf([
-        `Vehicle Service Placard ${placard.versionCode}`,
-        `Placard ID: ${placard.placardVersionId}`,
-        `Source Version: ${placard.publicInfoVersionId}`,
-        `Generated At: ${placard.createdAt}`,
-      ]),
-    });
+      bytes,
+    };
+
+    if (options.recover) {
+      const { record } = await this.documentArtifactStore.putIfAbsent(
+        command,
+      );
+      return record;
+    }
+    return this.documentArtifactStore.put(command);
   }
 
   /**
@@ -2527,6 +2609,19 @@ export class PlatformAdminService implements OnModuleInit {
    * a thrown error, when this instance's own placard list has no such id,
    * which the registry contract treats as "nothing to rebuild", not a
    * rebuild failure.
+   *
+   * The re-derived bytes depend on the CURRENT `PublicInfoVersionRecord` --
+   * `buildPlacardPdfRows` bakes in its `status`/`effectiveTo`, which
+   * `publishPublicInfoVersion` mutates for any version a later one retires.
+   * A placard generated before that mutation has an `artifactManifestHash`
+   * recovery can no longer reproduce: exact-byte recovery is not possible
+   * without a durable snapshot of those inputs at issuance time, which this
+   * store does not keep. Rather than silently write mismatching bytes under
+   * a hash that still claims to be the original -- or leave this placard's
+   * own get/reissue path advertising a hash the store can now never produce
+   * again -- `migratePlacardArtifactAfterSourceDrift` adopts the
+   * deterministic current-state render as this placard's new canonical
+   * artifact, explicitly and audited, once that drift is detected.
    */
   private async rebuildPlacardArtifact(
     placardVersionId: string,
@@ -2538,10 +2633,60 @@ export class PlatformAdminService implements OnModuleInit {
       return null;
     }
     try {
-      return await this.renderPlacardArtifact(placard);
+      const record = await this.renderPlacardArtifact(placard, {
+        recover: true,
+      });
+      if (
+        placard.artifactManifestHash &&
+        record.sha256 !== placard.artifactManifestHash
+      ) {
+        await this.migratePlacardArtifactAfterSourceDrift(placard, record);
+      }
+      return record;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Called only when a recovery render's hash disagrees with this placard's
+   * own recorded `artifactManifestHash` -- the source has drifted since
+   * issuance (see `rebuildPlacardArtifact`). Adopts `record` as this
+   * placard's new canonical artifact: an explicit, audited migration to the
+   * best currently-derivable render, not a claim that these are the
+   * originally issued bytes.
+   */
+  private async migratePlacardArtifactAfterSourceDrift(
+    placard: PlacardVersionRecord,
+    record: DocumentArtifactRecord,
+  ): Promise<void> {
+    const previousManifestHash = placard.artifactManifestHash;
+    const downloadMetadata = this.createPlacardDownloadMetadata(
+      placard.placardVersionId,
+      record.sha256,
+    );
+    placard.artifactManifestHash = record.sha256;
+    placard.artifactFileId = `placard-${record.sha256.slice(0, 16)}`;
+    placard.artifactDownloadUrl = downloadMetadata.downloadUrl;
+    placard.artifactExpiresAt = downloadMetadata.expiresAt;
+    placard.downloadMetadata = downloadMetadata;
+    placard.updatedAt = new Date().toISOString();
+
+    this.persistChanges(
+      { placardVersions: [await this.clonePlacardVersion(placard)] },
+      "migrate_placard_artifact_after_source_drift",
+    );
+    this.recordAudit({
+      actorId: null,
+      actorType: "platform_admin",
+      tenantId: null,
+      moduleName: "platform-admin",
+      actionName: "migrate_placard_artifact_after_source_drift",
+      resourceType: "placard_version",
+      resourceId: placard.placardVersionId,
+      oldValuesSummary: { artifactManifestHash: previousManifestHash },
+      newValuesSummary: { artifactManifestHash: record.sha256 },
+    });
   }
 
   private async clonePlacardVersion(

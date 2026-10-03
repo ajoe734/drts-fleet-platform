@@ -12,6 +12,7 @@ import type {
   DocumentArtifactRecord,
   DocumentArtifactStore,
   PutDocumentArtifactCommand,
+  PutIfAbsentDocumentArtifactResult,
 } from "./document-artifact.types";
 import { validatePutDocumentArtifactCommand } from "./document-artifact-validation";
 
@@ -21,6 +22,11 @@ const isMissing = (error: unknown) =>
   (error as { name?: string })?.name === "NoSuchKey" ||
   (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
     ?.httpStatusCode === 404;
+
+const isConditionFailed = (error: unknown) =>
+  (error as { name?: string })?.name === "PreconditionFailed" ||
+  (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
+    ?.httpStatusCode === 412;
 
 /**
  * Shared, durable object storage for `DocumentArtifactStore`, modelled on
@@ -78,6 +84,61 @@ export class S3DocumentArtifactStoreAdapter implements DocumentArtifactStore {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: bytes.length,
       storedAt,
+    };
+  }
+
+  /**
+   * Recovery-only conditional create: `IfNoneMatch: "*"` is S3's own atomic
+   * "fail if this key already exists" guard, so this never overwrites an
+   * object a concurrent recoverer (sibling instance or this same instance's
+   * own retry) already wrote. A `PreconditionFailed` response means exactly
+   * that race happened -- the object now exists -- so this re-reads and
+   * returns the winner's record instead of trusting its own unwritten bytes.
+   */
+  async putIfAbsent(
+    command: PutDocumentArtifactCommand,
+  ): Promise<PutIfAbsentDocumentArtifactResult> {
+    const { subjectId, mimeType, bytes } =
+      validatePutDocumentArtifactCommand(command);
+    if (bytes.length > MAX_DOCUMENT_ARTIFACT_BYTES) {
+      throw new Error("DocumentArtifactStore.put exceeds the byte limit.");
+    }
+
+    const storedAt = new Date().toISOString();
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.config.bucket,
+          Key: this.key(command.kind, subjectId),
+          Body: bytes,
+          ContentType: mimeType,
+          ContentLength: bytes.length,
+          Metadata: { "stored-at": storedAt },
+          IfNoneMatch: "*",
+        }),
+      );
+    } catch (error) {
+      if (!isConditionFailed(error)) throw error;
+      const existing = await this.get(command.kind, subjectId);
+      if (!existing) {
+        // Lost the race against a delete, not a create: the object is
+        // genuinely absent again. Surface the original failure rather than
+        // claiming a winner that is not actually there.
+        throw error;
+      }
+      return { created: false, record: existing.record };
+    }
+
+    return {
+      created: true,
+      record: {
+        kind: command.kind,
+        subjectId,
+        mimeType,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        byteLength: bytes.length,
+        storedAt,
+      },
     };
   }
 

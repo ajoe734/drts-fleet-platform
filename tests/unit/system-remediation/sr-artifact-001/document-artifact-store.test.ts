@@ -116,6 +116,62 @@ describe("InMemoryDocumentArtifactStore", () => {
     expect(first.bytes.equals(second.bytes)).toBe(true);
     expect(first.record.sha256).toBe(second.record.sha256);
   });
+
+  describe("putIfAbsent", () => {
+    it("creates the object and reports created:true when nothing exists yet", async () => {
+      const store = new InMemoryDocumentArtifactStore();
+      const bytes = Buffer.from("first writer's bytes");
+
+      const result = await store.putIfAbsent({
+        kind: "tenant-invoice",
+        subjectId: "race-1",
+        mimeType: "application/pdf",
+        bytes,
+      });
+
+      expect(result.created).toBe(true);
+      expect(result.record.sha256).toBe(sha256(bytes));
+      const entry = await store.get("tenant-invoice", "race-1");
+      expect(entry!.bytes.equals(bytes)).toBe(true);
+    });
+
+    it("preserves an existing object and reports created:false instead of overwriting it", async () => {
+      const store = new InMemoryDocumentArtifactStore();
+      const winnerBytes = Buffer.from("concurrent winner's bytes");
+      await store.put({
+        kind: "report",
+        subjectId: "race-2",
+        mimeType: "application/pdf",
+        bytes: winnerBytes,
+      });
+
+      const loserBytes = Buffer.from("a different, losing render");
+      const result = await store.putIfAbsent({
+        kind: "report",
+        subjectId: "race-2",
+        mimeType: "application/pdf",
+        bytes: loserBytes,
+      });
+
+      expect(result.created).toBe(false);
+      expect(result.record.sha256).toBe(sha256(winnerBytes));
+      const entry = await store.get("report", "race-2");
+      expect(entry!.bytes.equals(winnerBytes)).toBe(true);
+      expect(entry!.bytes.equals(loserBytes)).toBe(false);
+    });
+
+    it("validates its input the same way put() does", async () => {
+      const store = new InMemoryDocumentArtifactStore();
+      await expect(
+        store.putIfAbsent({
+          kind: "report",
+          subjectId: "x",
+          mimeType: "application/pdf",
+          bytes: Buffer.alloc(0),
+        }),
+      ).rejects.toThrow(/non-empty bytes/);
+    });
+  });
 });
 
 describe("resolveDocumentArtifact", () => {

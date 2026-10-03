@@ -3,6 +3,7 @@ import type { S3ClientConfig } from "@aws-sdk/client-s3";
 import type {
   DocumentArtifactEntry,
   DocumentArtifactStore,
+  PutIfAbsentDocumentArtifactResult,
 } from "./document-artifact.types";
 import { InMemoryDocumentArtifactStore } from "./in-memory-document-artifact-store";
 import { S3DocumentArtifactStoreAdapter } from "./s3-document-artifact-store.adapter";
@@ -34,6 +35,10 @@ export class UnprovisionedDocumentArtifactStore implements DocumentArtifactStore
     "Durable document artifact storage is not configured.";
 
   async put(): Promise<never> {
+    throw new Error(this.reason);
+  }
+
+  async putIfAbsent(): Promise<PutIfAbsentDocumentArtifactResult> {
     throw new Error(this.reason);
   }
 

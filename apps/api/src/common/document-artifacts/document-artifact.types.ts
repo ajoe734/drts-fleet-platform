@@ -29,9 +29,20 @@ export interface PutDocumentArtifactCommand {
   bytes: Buffer;
 }
 
+export interface PutIfAbsentDocumentArtifactResult {
+  record: DocumentArtifactRecord;
+  /**
+   * `true` when this call's own bytes were the ones actually stored.
+   * `false` means a concurrent writer's object was already there --
+   * `record` describes THAT object, not the bytes this call offered, and
+   * nothing was overwritten.
+   */
+  created: boolean;
+}
+
 /**
  * The read/write seam producers (tenant invoice, placard, report generation)
- * and `ControlledDownloadController` share. Both methods are async: the
+ * and `ControlledDownloadController` share. Both `put`/`get` are async: the
  * durable adapter (`S3DocumentArtifactStoreAdapter`) talks to real object
  * storage over the network, and the in-process adapter
  * (`InMemoryDocumentArtifactStore`) implements the same async signature so
@@ -40,6 +51,20 @@ export interface PutDocumentArtifactCommand {
  */
 export interface DocumentArtifactStore {
   put(command: PutDocumentArtifactCommand): Promise<DocumentArtifactRecord>;
+  /**
+   * A conditional create: writes `command`'s bytes only when nothing exists
+   * yet at this (kind, subjectId). Used by the controlled-download recovery
+   * path (never by a producer's own explicit issuance/republish), where an
+   * unconditional `put` could race a sibling instance's own concurrent
+   * recovery of a genuinely good, still-existing object and overwrite it
+   * with independently re-derived bytes. When the object already exists --
+   * whether from a concurrent winner or because it was never actually
+   * missing -- this returns that existing record with `created: false`
+   * instead of touching the store.
+   */
+  putIfAbsent(
+    command: PutDocumentArtifactCommand,
+  ): Promise<PutIfAbsentDocumentArtifactResult>;
   get(
     kind: DocumentArtifactKind,
     subjectId: string,

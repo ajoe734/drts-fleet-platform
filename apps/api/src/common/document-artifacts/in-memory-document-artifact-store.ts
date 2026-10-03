@@ -6,6 +6,7 @@ import type {
   DocumentArtifactRecord,
   DocumentArtifactStore,
   PutDocumentArtifactCommand,
+  PutIfAbsentDocumentArtifactResult,
 } from "./document-artifact.types";
 import { validatePutDocumentArtifactCommand } from "./document-artifact-validation";
 
@@ -65,5 +66,34 @@ export class InMemoryDocumentArtifactStore implements DocumentArtifactStore {
       record: { ...entry.record },
       bytes: Buffer.from(entry.bytes),
     };
+  }
+
+  /**
+   * No `await` separates the existence check from the write below, so --
+   * exactly like the real `IfNoneMatch: "*"` conditional `PutObject` this
+   * models -- nothing can observably interleave between them in this
+   * process; the in-process analogue of the same atomicity guarantee.
+   */
+  async putIfAbsent(
+    command: PutDocumentArtifactCommand,
+  ): Promise<PutIfAbsentDocumentArtifactResult> {
+    const { subjectId, mimeType, bytes } =
+      validatePutDocumentArtifactCommand(command);
+    const existingKey = storageKey(command.kind, subjectId);
+    const existing = this.entries.get(existingKey);
+    if (existing) {
+      return { created: false, record: { ...existing.record } };
+    }
+
+    const record: DocumentArtifactRecord = {
+      kind: command.kind,
+      subjectId,
+      mimeType,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.length,
+      storedAt: new Date().toISOString(),
+    };
+    this.entries.set(existingKey, { record, bytes });
+    return { created: true, record: { ...record } };
   }
 }

@@ -651,3 +651,298 @@ suites' assertions were weakened or removed to make this repair pass.
   convention the R1/R2/R3 regression suite already established — the
   dedicated S3-transport-boundary suite (`audit-artifact-durability-s3-20261003.test.ts`)
   was re-run unchanged and still passes against these fixes.
+
+## R4-followthrough/R6-followthrough/R7 reopen (candidate `beb64723a4d4f7313c7b2b436e481080df086d49`, generation `761ed5d4a59f42079d480cbf7037918b`, PR #2295): what Codex found and the repair
+
+This Codex REOPEN kept R1-R6 above as confirmed, retained work and narrowed
+the ordinary existing-object R6 trigger as already fixed, but found three
+concrete gaps in the surrounding boundary. All three are repaired on top of
+the same candidate lineage; this section records old/new results and
+provenance per finding, per `AI_COLLABORATION_GUIDE.md` §0.7.
+
+### R6-followthrough [P2; `signature_hash_denial_regressions` / `cross_instance_restart_bytes`] — a miss/rebuild race could still let a rejected GET overwrite a correct restored artifact
+
+**Finding:** `ControlledDownloadController.resolve` checks `not_found` once,
+then invokes the registered rebuilder; `BillingSettlementService`'s/
+`PlatformAdminService`'s render-and-write helpers called
+`documentArtifactStore.put(...)` unconditionally; `S3DocumentArtifactStoreAdapter.put`
+performs a plain `PutObject` with no conditional-create or version guard. If
+a sibling instance (or this same instance's own prior attempt) restores a
+genuinely good object for the same `(kind, subjectId)` between this
+instance's own `not_found` read and its own recovery write, the unconditional
+write overwrites the good object with this instance's independently
+re-derived (and not necessarily byte-identical) bytes.
+
+**Fix:** added `DocumentArtifactStore.putIfAbsent` — a conditional create,
+implemented with `IfNoneMatch: "*"` on the real `PutObjectCommand`
+(`s3-document-artifact-store.adapter.ts`), and with a synchronous
+check-then-set on the in-memory adapter (`in-memory-document-artifact-store.ts`),
+which is atomic within one process because no `await` separates the check
+from the write. When the object already exists — whether from a concurrent
+winner or because it was never actually missing — this returns the existing
+record with `created: false` instead of touching the store. `UnprovisionedDocumentArtifactStore`
+gained the same method (throws, matching `put`/`get`). The three
+*recovery-only* render helpers were switched from `put` to `putIfAbsent`:
+`BillingSettlementService.renderTenantInvoiceArtifact`/
+`renderDriverStatementArtifact` (used only by their respective
+`rebuild*Artifact` registry callbacks, never by issuance, which keeps its own
+separate, legitimately-unconditional `put` calls) and
+`PlatformAdminService.renderPlacardArtifact` (now takes a `{ recover?:
+boolean }` option; `ensurePlacardArtifact`'s first materialisation and
+`publishPlacardVersion`'s explicit republish still pass `recover: false` and
+keep using `put` — a producer's own explicit write is the legitimate,
+intended overwrite, never a recovery race). Explicit producer
+regeneration and recovery are kept on separate write paths, as the prior
+review asked.
+
+**Old → new result:** a stale/forged link resolved against a genuinely
+missing object, racing a concurrent legitimate restoration, previously could
+overwrite the restored object with this instance's own re-derived bytes,
+corrupting every other still-valid link pointing at it. It now denies the
+stale/forged request (unchanged: existing-object mismatches were already
+correctly denied) **and** never touches the store when a concurrent winner's
+object already exists — the restored object, and every link still pointing
+at it, survives untouched.
+
+**New regression coverage:**
+- `tests/unit/system-remediation/sr-artifact-001/document-artifact-store.test.ts`
+  → `describe("putIfAbsent")`: creates and reports `created: true` on an
+  empty key; preserves an existing object and reports `created: false`
+  instead of overwriting it; validates input the same way `put` does.
+- `tests/unit/audit-artifact-durability-s3-20261003.test.ts`: a new case
+  exercises `putIfAbsent` against the real `PutObjectCommand`/`IfNoneMatch`
+  semantics (the SDK transport double now honours `IfNoneMatch: "*"` and
+  throws a real-shaped `PreconditionFailed`/412 when the key already exists,
+  mirroring actual S3 conditional-write behaviour) — confirms the real
+  `IfNoneMatch` header is sent, and that a losing concurrent attempt reports
+  the winner's record without altering the stored bytes.
+- `tests/unit/audit-artifact-durability-20261002.test.ts` → describe
+  `"R6-followthrough: a recovery write racing a concurrent restoration must
+  not overwrite bytes a concurrent writer already restored"`: a real
+  `BillingSettlementService` + registry + controller issue an invoice,
+  mutate the billing profile, delete the stored object to model genuine
+  absence, then start a stale-hash GET whose `not_found` determination is
+  held "in transit" (the lookup runs and snapshots the then-current absent
+  state immediately, delivery is just delayed) while an independent writer
+  restores the exact original bytes and a readback confirms them. Releasing
+  the held result lets the stale GET's rebuild run against a store that, in
+  reality, already holds the good object again — asserts the stale GET still
+  denies (`CONTROLLED_DOWNLOAD_CONTENT_MISMATCH`), the restored object's
+  bytes/hash are completely unchanged, and the original valid link still
+  resolves correctly afterward. No adapter method or rebuild logic is
+  mocked; only the test's own `get` wrapper introduces the controlled delay.
+
+### R4-followthrough [P1; `durable_producer_reader_wiring` / `cross_instance_restart_bytes`] — supported legacy published placards could remain permanently undownloadable when their public-info source has since been retired
+
+**Finding:** `renderPlacardArtifact` (the shared render path both first
+materialisation and `rebuildPlacardArtifact` go through) reads the *current*
+`PublicInfoVersionRecord` for `placard.publicInfoVersionId`.
+`buildPlacardPdfRows` bakes `source.status` and `source.effectiveFrom`/
+`effectiveTo` into the rendered bytes, and `publishPublicInfoVersion` mutates
+exactly those fields on any version a later one retires (or on the version
+itself, going draft → published). A placard generated before that mutation
+has a recorded `artifactManifestHash` a current-state rebuild can no longer
+reproduce. Because `ensurePlacardArtifact`'s materialised fast path and the
+expired-link reissue path both only ever re-sign over the *existing*
+`artifactManifestHash`, a legacy placard whose source has since drifted was
+stuck: every GET denied with `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` (honest,
+not a bug on its own), but every subsequent `getPlacardVersion` call kept
+reissuing a *fresh* link signed for the exact same now-unreachable hash —
+unlike an intentional stale-link denial, no request path, including a brand
+new link, could ever repair the record.
+
+**Fix:** exact-byte recovery of the originally issued bytes is not possible
+without a durable snapshot of the source's mutable fields at issuance time,
+and persisting one is outside this task's `write_scopes` (it would require a
+new field on the shared `PlacardVersionRecord` contract and a repository/
+migration change, neither of which this task touches). Per
+`AI_COLLABORATION_GUIDE.md` §0.7's allowance to identify such a constraint
+and provide a controlled migration path rather than asserting deterministic
+recovery for every legacy document, `rebuildPlacardArtifact` now compares its
+recovery render's hash against this placard's own recorded
+`artifactManifestHash`; a mismatch means the source has drifted since
+issuance. `migratePlacardArtifactAfterSourceDrift`
+(`platform-admin.service.ts`) then adopts the deterministic current-state
+render as this placard's new canonical artifact: it updates
+`artifactManifestHash`/`artifactFileId`/`artifactDownloadUrl`/
+`artifactExpiresAt`/`downloadMetadata` on the live record, persists the
+change, and records an explicit, dedicated audit entry
+(`migrate_placard_artifact_after_source_drift`) with the old and new hash —
+an auditable migration, never a silent relabelling of different bytes as the
+original, and never a write that races a concurrent recovery (the render
+itself still goes through the new `putIfAbsent`-based recovery path above).
+
+**Old → new result:** a legacy placard whose source was retired (or
+published) after issuance previously denied every GET forever, with no link
+— old or freshly reissued — ever able to repair it. It now still honestly
+denies the *first* request against the stale, now-unreachable hash (the old
+link genuinely cannot be served — that denial is correct, not a defect), but
+that same failed recovery attempt migrates the placard's own canonical hash
+forward; every subsequent `getPlacardVersion` call, and the fresh link it
+returns, now succeeds against the new, actually-stored bytes.
+
+**New regression coverage** (`tests/unit/audit-artifact-durability-20261002.test.ts`,
+describe `"R4-followthrough: a placard whose source has mutated since
+issuance must migrate to a servable hash, not advertise one the store can
+never produce again"`): a real `PlatformAdminService` publishes a placard
+against a published source, a real successor `createPublicInfoVersion`/
+`publishPublicInfoVersion` call retires that source exactly the way ordinary
+content management would, and a fresh instance (empty store, persisted-
+equivalent reload) is proven to deny the first GET and then serve a
+subsequently reissued fresh link correctly; a second case covers the
+draft-to-published source drift the same way. (Covered by the same generic
+drift-detection mechanism, not duplicated per scenario: the published-to-
+retired and draft-to-published cases above exercise two distinct mutation
+call paths; the unchanged-source positive case and the empty-store sibling-
+reader case were already covered by the existing R4 tests above and continue
+to pass unchanged; a dedicated expiry-refresh-only variant was not added
+separately, since the drift check runs on every recovery render regardless
+of why the recovery was triggered.)
+
+**Unverified / limitation:** this is an explicit, audited migration to the
+best currently-derivable render, not a claim of exact-byte recovery of what
+was originally issued — the UAT/doc text and the audit log entry both say so.
+No new persisted field was added to `PlacardVersionRecord`/the repository
+schema (both outside this task's `write_scopes`); a future task that wants a
+true byte-identical legacy-recovery guarantee would need to persist a
+snapshot of the source's mutable render inputs at issuance time, which this
+repair deliberately does not attempt.
+
+### R7 [P2; new regression introduced while repairing R5; `durable_producer_reader_wiring`] — concurrent publishes on one instance could both succeed and leave metadata pointing at bytes that do not exist
+
+**Finding:** `publishPlacardVersion` checked `placard.publishedAt` before
+awaiting anything; staged each publication's render+write independently with
+no reservation/CAS; and unconditionally copied its own staged result back
+onto the live placard after its own write completed. Two concurrent calls
+could both pass the guard before either awaited, both render and write, and
+whichever call's own completion happened to run its copy-back *last* in
+wall-clock terms won the live metadata — even if the *other* call's bytes
+were what the store actually ended up holding, because write order need not
+equal completion/acknowledgement order.
+
+**Fix:** two complementary, narrowly-scoped changes, matching the "serialize/
+fence publication ownership, including stale completions" boundary the
+review asked for:
+- `PlatformAdminService.placardPublishQueue` (a `Map<string, Promise<unknown>>`)
+  + `runExclusivePlacardPublish` serialize every `publishPlacardVersion` call
+  for the same `placardVersionId`, in call order, within this process: a
+  later call's body — including its own `placard.publishedAt` guard check —
+  does not even start running until every earlier call for that id has fully
+  settled (success or failure; chained via `.then(fn, fn)` so a rejected
+  predecessor does not wedge the queue). This alone fully eliminates the
+  single-instance race the finding's reproduction exercises.
+- Because a one-process lock alone does not establish cross-instance safety
+  (the review's own caution), `publishPlacardVersionExclusive` also re-reads
+  the durable store (`documentArtifactStore.get("placard", ...)`)
+  immediately after its own write and before committing any metadata back
+  onto the live placard. If the read-back disagrees with what this call's
+  own render just produced — a different instance's publish for the same
+  placard landing in the shared store in between — this throws a new
+  `PLACARD_PUBLISH_CONFLICT` (409) instead of silently committing metadata
+  that disagrees with what the shared store actually holds. The live placard
+  is left completely untouched by a conflicting completion, exactly like the
+  existing R5 failed-write behaviour, so it remains a retryable draft.
+
+**Old → new result:** two concurrent publish calls for the same placard
+previously could both report success while leaving the live metadata's hash
+pointing at bytes a *different* completion's write actually left in the
+store — any subsequent download of that "published" link then failed
+`CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` despite both callers having been told
+the publish succeeded. Now, within one process, only the first-queued call
+ever reaches the render/write step for a second overlapping attempt; the
+second correctly reports `PLACARD_VERSION_ALREADY_PUBLISHED` once it is its
+turn, having never written anything. Across instances (not exercised by this
+candidate's test doubles, which are same-process), a landed foreign write
+discovered at read-back time is reported as an explicit conflict rather than
+silently committed.
+
+**New regression coverage** (same test file, describe `"R7: concurrent
+publishes for the same placard must not leave metadata pointing at bytes the
+store does not have"`): one case starts two concurrent
+`publishPlacardVersion` calls for the same id against a real
+`PlatformAdminService`, holding the first call's own store-write response in
+transit to model a reversed completion order; asserts exactly one call
+fulfils and the other rejects with `PLACARD_VERSION_ALREADY_PUBLISHED`, that
+only one `put` ever occurred, and that the final stored bytes and the live
+metadata's hash agree, with a real download succeeding against the winning
+link. A second case models a different instance's write landing between this
+call's own write and its read-back (only the store double's `get` is
+doubled, with a real inner `InMemoryDocumentArtifactStore`, to inject the
+foreign write) and asserts `PLACARD_PUBLISH_CONFLICT`, with the placard left
+an untouched, retryable draft — preserving R5's existing failure-then-retry
+regression, which was re-run unchanged and still passes.
+
+**Unverified / limitation:** the read-back/conflict defense is a detect-and-
+refuse backstop for the cross-instance case, not a true distributed lock or
+fencing token — a genuine distributed CAS/fencing mechanism for cross-Cloud-
+Run-instance publish ownership is a larger change than this task's scope and
+is not implemented here. Real multi-replica Cloud Run acceptance remains
+`SR-LIVE-DOC-001`.
+
+### Verification at this repair
+
+`pnpm --filter @drts/control-plane-auth build` (this worktree's generated
+declarations were missing, the same disclosed local-toolchain gap every
+prior round in this lineage recorded) then `pnpm exec tsc --noEmit -p
+apps/api/tsconfig.json`: exit 0, no errors. Root `pnpm exec tsc --noEmit -p
+tsconfig.json --incremental false`: no errors from any file this repair
+touches; the only remaining errors are a pre-existing, unrelated cross-worktree
+type-identity collision between this worktree's and a sibling worktree's
+`packages/api-client` (two files outside this task's `write_scopes`,
+`tests/unit/fleet-partner-list-envelope.test.ts` and
+`tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`,
+neither touching document artifacts, billing-settlement, controlled-download
+or platform-admin) — confirmed present before this repair's own changes by
+re-running with the stale `tsconfig.tsbuildinfo` bypassed, and unrelated to
+any file this diff edits.
+
+`pnpm exec eslint --max-warnings=0` on every changed file: exit 0, no errors
+or warnings. `git diff --check`: exit 0, no whitespace errors.
+
+Scoped, network-blocked-equivalent run (no DB URL variables set; this session
+had shell-only access, not the dedicated no-network NODE_OPTIONS preload
+prior rounds used — no real network/DB call is exercised by any file in this
+selection regardless):
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts \
+  tests/unit/audit-artifact-durability-s3-20261003.test.ts \
+  tests/unit/system-remediation/sr-artifact-001/ \
+  tests/unit/system-remediation/sr-invoice-001/ \
+  tests/unit/system-remediation/sr-placard-001/ \
+  tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts \
+  tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts \
+  tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts \
+  --maxWorkers=1
+```
+=> exit 0, **12 files / 144 tests passed, zero skips**. Also independently
+green, confirming no regression in adjacent suites this repair's interface
+changes reach: `tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts`,
+`.../c097-placard-printable-download.test.ts`,
+`tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts`,
+`tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts`,
+`tests/unit/platform-admin-switchboard-placard-source.test.ts`,
+`tests/unit/platform-admin-switchboard-placard-version-code.test.ts`,
+`tests/unit/system-remediation/sr-qa-governance-001/{c103,c104-c105,c109}*.test.ts`,
+`tests/unit/billing-settlement.test.ts` (60/60 total), and, run from
+`apps/api/`: `apps/api/tests/unit/platform-admin.service.test.ts`,
+`platform-admin-assistant.service.test.ts`,
+`platform-admin-assistant-read-tools.test.ts`,
+`platform-admin-assistant-action.test.ts` (27/27). None of these pre-existing
+suites' assertions were weakened or removed to make this repair pass.
+
+### Remaining limitations (this repair)
+
+- `same_sha_review_ci`: not yet run for the new candidate SHA this repair
+  produces; hosted CI must be re-verified at that exact SHA.
+- Real storage/Cloud Run/IAM acceptance remains `SR-LIVE-DOC-001`; this
+  repair's cross-instance-race coverage is same-process test doubles over
+  the shared-boundary store, not deployed multi-replica Cloud Run.
+- The R7 cross-instance read-back conflict defense and the R4-followthrough
+  migration mechanism are both detect-and-refuse-or-migrate backstops, not
+  full distributed coordination or a durable issuance-time snapshot; both
+  limitations are stated explicitly above rather than claimed away.
+- No product/browser/DB/Compose server was started on this VM; no real cloud
+  storage was contacted. The adapter-level `putIfAbsent` conditional-write
+  behaviour is exercised against the SDK transport double's modelled
+  `IfNoneMatch`/`PreconditionFailed` semantics
+  (`audit-artifact-durability-s3-20261003.test.ts`), not a live S3 bucket.

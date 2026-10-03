@@ -1686,14 +1686,20 @@ export class BillingSettlementService implements OnModuleInit {
     return refreshed;
   }
 
-  /** The render step `generateTenantInvoice` runs at issuance, and the sole
-   * fallback (see `rebuildTenantInvoiceArtifact`) a controlled-download
-   * rebuild re-derives the identical file from, instead of maintaining a
-   * second copy of this rendering logic. */
-  private renderTenantInvoiceArtifact(
+  /**
+   * Used ONLY by `rebuildTenantInvoiceArtifact`, the recovery fallback for a
+   * verified link whose object is genuinely missing -- never by issuance,
+   * which writes its own bytes directly. `putIfAbsent` (not `put`) matters
+   * here specifically because this path races a sibling instance's own
+   * concurrent recovery of the exact same (kind, subjectId): an unconditional
+   * overwrite could clobber bytes a sibling already correctly restored with
+   * this instance's independently re-rendered (and not necessarily
+   * byte-identical, if the current billing profile has since changed) copy.
+   */
+  private async renderTenantInvoiceArtifact(
     invoice: StoredTenantInvoice,
   ): Promise<DocumentArtifactRecord> {
-    return this.documentArtifactStore.put({
+    const { record } = await this.documentArtifactStore.putIfAbsent({
       kind: "tenant-invoice",
       subjectId: invoice.invoiceId,
       mimeType: "application/pdf",
@@ -1710,6 +1716,7 @@ export class BillingSettlementService implements OnModuleInit {
         }),
       ),
     });
+    return record;
   }
 
   /**
@@ -2287,19 +2294,23 @@ export class BillingSettlementService implements OnModuleInit {
     return refreshed;
   }
 
-  /** The render step `generateDriverStatements` runs at issuance, and the
-   * sole fallback (see `rebuildDriverStatementArtifact`) a controlled-download
-   * rebuild re-derives the identical file from, instead of maintaining a
-   * second copy of this rendering logic. */
-  private renderDriverStatementArtifact(
+  /**
+   * Used ONLY by `rebuildDriverStatementArtifact`, the recovery fallback for
+   * a verified link whose object is genuinely missing -- never by issuance.
+   * `putIfAbsent`, not `put`: see `renderTenantInvoiceArtifact`'s comment for
+   * why an unconditional write here could clobber a sibling's concurrent
+   * recovery of a genuinely good object.
+   */
+  private async renderDriverStatementArtifact(
     statement: DriverStatementRecord,
   ): Promise<DocumentArtifactRecord> {
-    return this.documentArtifactStore.put({
+    const { record } = await this.documentArtifactStore.putIfAbsent({
       kind: "report",
       subjectId: statement.statementId,
       mimeType: "application/pdf",
       bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
     });
+    return record;
   }
 
   /**

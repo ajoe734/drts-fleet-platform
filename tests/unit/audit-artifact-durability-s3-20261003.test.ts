@@ -36,6 +36,7 @@ interface ObjectInput {
   ContentType?: string;
   ContentLength?: number;
   Metadata?: Record<string, string>;
+  IfNoneMatch?: string;
 }
 const { S3Client, GetObjectCommand, PutObjectCommand } = apiRequire(
   "@aws-sdk/client-s3",
@@ -129,7 +130,14 @@ beforeEach(() => {
       if (command instanceof PutObjectCommand) {
         const input = command.input;
         expect(Buffer.isBuffer(input.Body)).toBe(true);
-        objects.set(`${input.Bucket}/${input.Key}`, {
+        const objectKey = `${input.Bucket}/${input.Key}`;
+        if (input.IfNoneMatch === "*" && objects.has(objectKey)) {
+          throw Object.assign(new Error("At least one of the pre-conditions you specified did not hold."), {
+            name: "PreconditionFailed",
+            $metadata: { httpStatusCode: 412 },
+          });
+        }
+        objects.set(objectKey, {
           bytes: Buffer.from(input.Body as Buffer),
           ContentType: input.ContentType,
           ContentLength: input.ContentLength,
@@ -374,6 +382,54 @@ describe("configured durable document path with SDK transport boundary only", ()
       name: "AccessDenied",
     });
     await expect(store.get("report", "bad")).rejects.toBe(transportError);
+  });
+
+  it("putIfAbsent creates the object over real IfNoneMatch semantics, and preserves a concurrent winner instead of overwriting it", async () => {
+    const store = configuredModuleStore() as S3DocumentArtifactStoreAdapter;
+    const firstBytes = Buffer.from("%PDF-1.4 first writer\n%%EOF");
+
+    const created = await store.putIfAbsent({
+      kind: "report",
+      subjectId: "race-s3-1",
+      mimeType: "application/pdf",
+      bytes: firstBytes,
+    });
+    expect(created.created).toBe(true);
+    expect(created.record.sha256).toBe(hash(firstBytes));
+    expect(
+      sends.mock.calls.filter(
+        ([command]: readonly unknown[]) => command instanceof PutObjectCommand,
+      ),
+    ).toHaveLength(1);
+    expect(
+      (sends.mock.calls.at(-1)![0] as InstanceType<typeof PutObjectCommand>)
+        .input.IfNoneMatch,
+    ).toBe("*");
+
+    // A concurrent recoverer's own attempt, after the object above already
+    // exists: must not overwrite it, and must report the real winner.
+    const losingBytes = Buffer.from("%PDF-1.4 a different render\n%%EOF");
+    const puts = sends.mock.calls.filter(
+      ([command]: readonly unknown[]) => command instanceof PutObjectCommand,
+    ).length;
+    const lost = await store.putIfAbsent({
+      kind: "report",
+      subjectId: "race-s3-1",
+      mimeType: "application/pdf",
+      bytes: losingBytes,
+    });
+    expect(lost.created).toBe(false);
+    expect(lost.record.sha256).toBe(hash(firstBytes));
+    expect(objects.get(key("report", "race-s3-1"))!.bytes).toEqual(
+      firstBytes,
+    );
+    // The attempted (failed) PutObject still counted as a transport call,
+    // but no NEW object content landed because of it.
+    expect(
+      sends.mock.calls.filter(
+        ([command]: readonly unknown[]) => command instanceof PutObjectCommand,
+      ).length,
+    ).toBe(puts + 1);
   });
 
   it("rejects oversize uploads before any transport and fails configured-module reads closed when unprovisioned", async () => {

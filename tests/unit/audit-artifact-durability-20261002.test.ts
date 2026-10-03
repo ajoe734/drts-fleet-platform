@@ -760,6 +760,179 @@ describe("R4: a placard's artifactManifestHash does not by itself certify the du
   });
 });
 
+describe("R4-followthrough: a placard whose source has mutated since issuance must migrate to a servable hash, not advertise one the store can never produce again", () => {
+  it("migrates a legacy placard's canonical hash when its source public-info version was retired by an ordinary successor publish, so a fresh link succeeds after the first, honest denial", async () => {
+    const publishedSource = {
+      ...PUBLIC_INFO_R4,
+      status: "published" as const,
+      publishedAt: "2026-04-01T00:00:00Z",
+    };
+    const podAStore = new InMemoryDocumentArtifactStore();
+    const podARegistry = new DocumentArtifactRebuildRegistry();
+    const podAService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [publishedSource] }),
+      undefined,
+      podAStore,
+      podARegistry,
+    );
+    await podAService.onModuleInit();
+    const published = await podAService.generatePlacardVersion({
+      versionCode: "placard-r4ft-published-source",
+      publicInfoVersionId: publishedSource.versionId,
+      templateName: "seatback-r4ft",
+    });
+    const originalHash = published.artifactManifestHash!;
+
+    // An ordinary content-management action: a successor public-info
+    // version is published, which retires the one this placard was
+    // generated from. Not a test-only mutation.
+    const successor = podAService.createPublicInfoVersion({
+      title: "R4-followthrough successor disclosure",
+      callPhone: "0800-020-020",
+    });
+    podAService.publishPublicInfoVersion(
+      successor.versionId,
+      {},
+      "req",
+      "platform-admin-r4ft-actor",
+    );
+    const retiredSource = podAService
+      .listPublicInfoVersions()
+      .find((v) => v.versionId === publishedSource.versionId)!;
+    expect(retiredSource.status).toBe("retired");
+
+    // Pod B: a fresh instance, persisted-equivalent records reloaded
+    // (the NOW-RETIRED source and the placard's ORIGINAL hash included),
+    // but its own durable store has never seen these bytes.
+    const podBStore = new InMemoryDocumentArtifactStore();
+    const podBRegistry = new DocumentArtifactRebuildRegistry();
+    const podBService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({
+        publicInfoVersions: [retiredSource, successor],
+        placardVersions: [published],
+      }),
+      undefined,
+      podBStore,
+      podBRegistry,
+    );
+    await podBService.onModuleInit();
+
+    const reloaded = await podBService.getPlacardVersion(
+      published.placardVersionId,
+    );
+    expect(reloaded.artifactManifestHash).toBe(originalHash);
+
+    const controller = new ControlledDownloadController(
+      podBStore,
+      podBRegistry,
+    );
+    const staleParams = paramsOf(reloaded.artifactDownloadUrl!);
+
+    // The OLD link, signed for bytes this instance's store can never
+    // reproduce again (the source has moved on since issuance), honestly
+    // denies -- it must never be silently served mismatching bytes under
+    // the old hash.
+    await expect(
+      resolve(controller, "placard", published.placardVersionId, staleParams),
+    ).rejects.toMatchObject({ code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH" });
+
+    // That failed recovery attempt must have migrated this placard's own
+    // canonical hash forward -- explicitly and audited, not silently -- so
+    // a FRESH link now succeeds instead of repeating the same denial
+    // forever.
+    const afterMigration = await podBService.getPlacardVersion(
+      published.placardVersionId,
+    );
+    expect(afterMigration.artifactManifestHash).not.toBe(originalHash);
+
+    const freshParams = paramsOf(afterMigration.artifactDownloadUrl!);
+    const file = (await resolve(
+      controller,
+      "placard",
+      published.placardVersionId,
+      freshParams,
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(afterMigration.artifactManifestHash);
+  });
+
+  it("migrates a legacy placard's canonical hash when its DRAFT source was later published, covering the draft-to-published source drift", async () => {
+    const draftSource = { ...PUBLIC_INFO_R4 };
+    const podAStore = new InMemoryDocumentArtifactStore();
+    const podARegistry = new DocumentArtifactRebuildRegistry();
+    const podAService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [draftSource] }),
+      undefined,
+      podAStore,
+      podARegistry,
+    );
+    await podAService.onModuleInit();
+    const draftPlacard = await podAService.generatePlacardVersion({
+      versionCode: "placard-r4ft-draft-source",
+      publicInfoVersionId: draftSource.versionId,
+      templateName: "seatback-r4ft-draft",
+    });
+    const originalHash = draftPlacard.artifactManifestHash!;
+
+    podAService.publishPublicInfoVersion(
+      draftSource.versionId,
+      {},
+      "req",
+      "platform-admin-r4ft-actor",
+    );
+    const publishedSource = podAService
+      .listPublicInfoVersions()
+      .find((v) => v.versionId === draftSource.versionId)!;
+    expect(publishedSource.status).toBe("published");
+
+    const podBStore = new InMemoryDocumentArtifactStore();
+    const podBRegistry = new DocumentArtifactRebuildRegistry();
+    const podBService = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({
+        publicInfoVersions: [publishedSource],
+        placardVersions: [draftPlacard],
+      }),
+      undefined,
+      podBStore,
+      podBRegistry,
+    );
+    await podBService.onModuleInit();
+
+    const reloaded = await podBService.getPlacardVersion(
+      draftPlacard.placardVersionId,
+    );
+    const controller = new ControlledDownloadController(
+      podBStore,
+      podBRegistry,
+    );
+    await expect(
+      resolve(
+        controller,
+        "placard",
+        draftPlacard.placardVersionId,
+        paramsOf(reloaded.artifactDownloadUrl!),
+      ),
+    ).rejects.toMatchObject({ code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH" });
+
+    const afterMigration = await podBService.getPlacardVersion(
+      draftPlacard.placardVersionId,
+    );
+    expect(afterMigration.artifactManifestHash).not.toBe(originalHash);
+    const file = (await resolve(
+      controller,
+      "placard",
+      draftPlacard.placardVersionId,
+      paramsOf(afterMigration.artifactDownloadUrl!),
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(afterMigration.artifactManifestHash);
+  });
+});
+
 describe("R5: a transient durable-store failure during publish must not leave a placard permanently marked published", () => {
   /** Throws on `put` exactly once (configurable), delegating to a real
    * in-memory store otherwise -- only the external write boundary is
@@ -778,6 +951,10 @@ describe("R5: a transient durable-store failure during publish must not leave a 
         });
       }
       return this.inner.put(command);
+    }
+
+    putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+      return this.inner.putIfAbsent(...args);
     }
 
     get(...args: Parameters<DocumentArtifactStore["get"]>) {
@@ -949,6 +1126,309 @@ describe("R6: an existing-object hash mismatch must deny without invoking the re
     )) as unknown as StreamableFileLike;
     const bytes = await drain(file.getStream());
     expect(sha256(bytes)).toBe(invoice.artifactDownloadMetadata.manifestHash);
+  });
+});
+
+describe("R6-followthrough: a recovery write racing a concurrent restoration must not overwrite bytes the concurrent writer already restored", () => {
+  it("does not let a stale-link GET's not_found recovery clobber bytes an independent writer restores while this GET's not_found result is still in flight", async () => {
+    // Holds an already-determined `get` result "in transit": the lookup
+    // itself runs (and snapshots the then-current state) immediately, but
+    // the result is only delivered to the caller once `armed` is consumed
+    // and `gate` resolves -- modelling a real GetObject response that is
+    // already a NoSuchKey, just not yet delivered over the wire.
+    // `armed`/`gate` are declared together as one mutable holder (instead
+    // of separate `let`s) so the one-time `gate` assignment below does not
+    // trip `prefer-const` -- the class's `get()` closes over `state` by
+    // reference, which is itself never reassigned.
+    const state: { armed: boolean; gate?: Promise<void> } = {
+      armed: false,
+    };
+
+    class InterleavedDocumentArtifactStore implements DocumentArtifactStore {
+      readonly inner = new InMemoryDocumentArtifactStore();
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.inner.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        const result = await this.inner.get(...args);
+        if (state.armed) {
+          state.armed = false;
+          await state.gate;
+        }
+        return result;
+      }
+    }
+
+    const store = new InterleavedDocumentArtifactStore();
+    const registry = new DocumentArtifactRebuildRegistry();
+    const service = new BillingSettlementService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      store,
+      undefined,
+      registry,
+    );
+    const controller = new ControlledDownloadController(store, registry);
+
+    await service.updateTenantBillingProfile(
+      "tenant-demo-001",
+      DEMO_PROFILE_P1,
+      "req",
+    );
+    const invoice = await service.generateTenantInvoice(
+      "tenant-demo-001",
+      {
+        tenantId: "tenant-demo-001",
+        periodStart: "2026-03-01T00:00:00Z",
+        periodEnd: "2026-03-31T23:59:59Z",
+      },
+      "req",
+    );
+    const originalHash = invoice.artifactDownloadMetadata.manifestHash;
+    const originalBytes = Buffer.from(
+      (await store.get("tenant-invoice", invoice.invoiceId))!.bytes,
+    );
+
+    // Profile changes AFTER issuance -- if THIS instance's own rebuild were
+    // ever to win, it would render visibly different (P2) bytes.
+    await service.updateTenantBillingProfile(
+      "tenant-demo-001",
+      DEMO_PROFILE_P2,
+      "req",
+    );
+
+    // Model actual absence: the durable store genuinely lost the object.
+    (
+      store.inner as unknown as { entries: Map<string, unknown> }
+    ).entries.delete(`tenant-invoice::${invoice.invoiceId}`);
+
+    // A genuinely signed link for the SAME subject, but naming a manifest
+    // hash that does not match the real object (stale/forged) -- this is
+    // the request whose not_found check we suspend below.
+    const staleLink = createControlledDownloadMetadata({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      manifestHash: "0".repeat(64),
+    }).downloadUrl;
+
+    let release!: () => void;
+    state.gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    state.armed = true;
+
+    const stalePending = resolve(
+      controller,
+      "tenant-invoice",
+      invoice.invoiceId,
+      paramsOf(staleLink),
+    );
+
+    // While A's not_found determination is held in transit, an independent
+    // writer (a sibling instance, or any other legitimate restorer) puts
+    // the exact ORIGINAL bytes back.
+    await store.put({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      mimeType: "application/pdf",
+      bytes: originalBytes,
+    });
+    const restored = await store.get("tenant-invoice", invoice.invoiceId);
+    expect(restored?.record.sha256).toBe(originalHash);
+
+    // Release A's held not_found result; its rebuild now runs against a
+    // store that, in reality, already holds a good object again.
+    release();
+
+    await expect(stalePending).rejects.toMatchObject({
+      code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH",
+    });
+
+    // The real, restored object must be completely untouched by A's
+    // rebuild attempt: still the original bytes/hash, never A's P2 render.
+    const finalEntry = await store.get("tenant-invoice", invoice.invoiceId);
+    expect(finalEntry?.record.sha256).toBe(originalHash);
+    expect(finalEntry?.bytes.equals(originalBytes)).toBe(true);
+
+    // The ORIGINAL, still-valid link must still resolve correctly.
+    const file = (await resolve(
+      controller,
+      "tenant-invoice",
+      invoice.invoiceId,
+      paramsOf(invoice.artifactUrl!),
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(originalHash);
+  });
+});
+
+describe("R7: concurrent publishes for the same placard must not leave metadata pointing at bytes the store does not have", () => {
+  it("serializes concurrent publish attempts for the same placardVersionId, so a stale completion cannot overwrite a newer committed publish", async () => {
+    let publishPutCount = 0;
+    let holdNextPut = false;
+    let releasePutResponse: (() => void) | undefined;
+    // See the R6-followthrough test above for why this is one mutable
+    // holder rather than a separate `let putResponseGate`.
+    const putResponseState: { gate?: Promise<void> } = {};
+
+    class ReorderedDocumentArtifactStore implements DocumentArtifactStore {
+      private readonly inner = new InMemoryDocumentArtifactStore();
+
+      async put(command: PutDocumentArtifactCommand) {
+        const shouldHold = holdNextPut;
+        holdNextPut = false;
+        if (shouldHold) {
+          publishPutCount += 1;
+        }
+        // Commit real bytes immediately -- only THIS call's own response is
+        // held, modelling a slow acknowledgement, not a slow write.
+        const record = await this.inner.put(command);
+        if (shouldHold && putResponseState.gate) {
+          await putResponseState.gate;
+        }
+        return record;
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        return this.inner.get(...args);
+      }
+    }
+
+    const store = new ReorderedDocumentArtifactStore();
+    const registry = new DocumentArtifactRebuildRegistry();
+    const service = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [PUBLIC_INFO_R4] }),
+      undefined,
+      store,
+      registry,
+    );
+    await service.onModuleInit();
+    // The draft's own issuance put happens here, BEFORE any publish-related
+    // counting/gating is armed below.
+    const draft = await service.generatePlacardVersion({
+      versionCode: "placard-r7-concurrent-publish",
+      publicInfoVersionId: PUBLIC_INFO_R4.versionId,
+      templateName: "seatback-r7",
+    });
+
+    putResponseState.gate = new Promise((resolve) => {
+      releasePutResponse = resolve;
+    });
+    holdNextPut = true;
+
+    // A starts, commits its bytes, and is held waiting on its own response.
+    const publishA = service.publishPlacardVersion(draft.placardVersionId);
+    // B starts "after" A in wall-clock terms; the in-process publish lock
+    // means B cannot even begin its own render/write until A's entire call
+    // (including its held response) settles -- the fix's serialization.
+    const publishB = service.publishPlacardVersion(draft.placardVersionId);
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(publishPutCount).toBe(1);
+
+    releasePutResponse!();
+    const [resultA, resultB] = await Promise.allSettled([publishA, publishB]);
+
+    expect(resultA.status).toBe("fulfilled");
+    expect(resultB.status).toBe("rejected");
+    expect((resultB as PromiseRejectedResult).reason).toMatchObject({
+      code: "PLACARD_VERSION_ALREADY_PUBLISHED",
+    });
+    // B never reached its own render/write: the lock resolved its guard
+    // check against A's already-committed state before any put occurred.
+    expect(publishPutCount).toBe(1);
+
+    const published = (
+      resultA as PromiseFulfilledResult<
+        Awaited<ReturnType<typeof service.publishPlacardVersion>>
+      >
+    ).value;
+    const stored = await store.get("placard", draft.placardVersionId);
+    expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+    const controller = new ControlledDownloadController(store, registry);
+    const file = (await resolve(
+      controller,
+      "placard",
+      draft.placardVersionId,
+      paramsOf(published.artifactDownloadUrl!),
+    )) as unknown as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(sha256(bytes)).toBe(published.artifactManifestHash);
+  });
+
+  it("reports a conflict instead of committing metadata when the durable store's read-back disagrees with what publish just wrote (a cross-instance clobber)", async () => {
+    class ClobberedReadbackDocumentArtifactStore
+      implements DocumentArtifactStore
+    {
+      private readonly inner = new InMemoryDocumentArtifactStore();
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.inner.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      async get(kind: Parameters<DocumentArtifactStore["get"]>[0], subjectId: string) {
+        // Model a different instance's own publish landing between THIS
+        // publish's put and its own read-back verification.
+        await this.inner.put({
+          kind,
+          subjectId,
+          mimeType: "application/pdf",
+          bytes: Buffer.from(
+            "%PDF-1.4 a different instance's publish\n%%EOF",
+          ),
+        });
+        return this.inner.get(kind, subjectId);
+      }
+    }
+
+    const store = new ClobberedReadbackDocumentArtifactStore();
+    const registry = new DocumentArtifactRebuildRegistry();
+    const service = new PlatformAdminService(
+      new AuditNotificationService(),
+      emptyPlatformAdminRepository({ publicInfoVersions: [PUBLIC_INFO_R4] }),
+      undefined,
+      store,
+      registry,
+    );
+    await service.onModuleInit();
+    const draft = await service.generatePlacardVersion({
+      versionCode: "placard-r7-clobbered-readback",
+      publicInfoVersionId: PUBLIC_INFO_R4.versionId,
+      templateName: "seatback-r7-clobber",
+    });
+    const draftHash = draft.artifactManifestHash;
+    const draftUrl = draft.artifactDownloadUrl;
+
+    await expect(
+      service.publishPlacardVersion(draft.placardVersionId),
+    ).rejects.toMatchObject({ code: "PLACARD_PUBLISH_CONFLICT" });
+
+    // The conflicting completion must not have committed its metadata: the
+    // placard stays an unpublished, retryable draft.
+    const afterConflict = await service.getPlacardVersion(
+      draft.placardVersionId,
+    );
+    expect(afterConflict.publishedAt).toBeNull();
+    expect(afterConflict.artifactManifestHash).toBe(draftHash);
+    expect(afterConflict.artifactDownloadUrl).toBe(draftUrl);
   });
 });
 
