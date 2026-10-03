@@ -122,7 +122,7 @@ class DeferredTtsAdapter implements VoiceTextToSpeechAdapter {
   readonly providerName = "deferred-tts";
   readonly isProductionCapable = false as const;
   calls = 0;
-  private resolveSynth?: (handle: VoiceTtsPlaybackHandle) => void;
+  private resolveSynth?: () => void;
 
   synthesize(request: VoiceTtsSynthesizeRequest): Promise<VoiceTtsPlaybackHandle> {
     this.calls += 1;
