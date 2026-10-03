@@ -57,6 +57,7 @@ jobs:
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
           python3 -m unittest tools/ci/test_canonical_consistency.py
+          python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_driver_web_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_data_acceptance_workflow.py
@@ -113,6 +114,18 @@ jobs:
         if: steps.ctx.outputs.skip == 'true'
         run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered dev.)"
 
+  repo-classification:
+    name: Repo classification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify repository file classification
+        run: node tools/ci/check-repo-classification.mjs
+
   spec-source-archive:
     name: Spec source archive
     runs-on: ubuntu-latest
@@ -121,6 +134,28 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify archived source specs are full UTF-8 originals (not derived summaries)
         run: python3 tools/ci/check_spec_source_archive.py
+
+  dependency-security:
+    name: Dependency security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Run dependency security gate
+        run: python3 tools/ci/dependency_security.py
 
   canonical-consistency:
     name: Canonical consistency

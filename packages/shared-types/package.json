@@ -11,5 +11,6 @@
     "lint": "eslint src --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
-  }
+  },
+  "dependencies": {}
 }
