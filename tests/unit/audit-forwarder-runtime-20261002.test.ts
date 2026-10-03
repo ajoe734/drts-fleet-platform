@@ -129,6 +129,9 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
             },
             lastCheckedAt: "2026-01-01T00:00:00Z",
             lastError: null,
+            lastWebhookReceivedAt: "2026-01-02T00:00:00Z",
+            lastRateLimitAt: "2026-01-03T00:00:00Z",
+            lastAuthFailureAt: "2026-01-04T00:00:00Z",
           }
         ],
       }),
@@ -149,12 +152,23 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     const snapshot = service.listAdapterHealth().find((r) => r.platformCode === PLATFORM_CODE_GRAB_TAIWAN);
     expect(snapshot?.status).toBe("degraded");
     expect(snapshot?.capabilitySummary.productionStatus).toBe("configuration_required");
-    expect(snapshot?.capabilitySummary.mode).toBe("real");
-    expect(snapshot?.capabilitySummary.notes).toEqual(["Awaiting provider contract and real test account credentials"]);
+    expect(snapshot?.capabilitySummary.mode).toBe("api");
+    expect(snapshot?.capabilitySummary.notes).toEqual([
+      "Honest unavailable posture: this adapter lacks real upstream contracts.",
+      "Not approved for production auth, webhook verification, or rate-limit governance."
+    ]);
     expect(snapshot?.capabilitySummary.supportsInboundWebhook).toBe(true);
     expect(snapshot?.capabilitySummary.supportsOutboundActions).toBe(true);
-    expect(snapshot?.capabilitySummary.supportedWebhookEvents).toEqual(["order.create", "order.cancel"]);
-    expect(snapshot?.lastCheckedAt).toBe("2026-01-01T00:00:00Z");
+    expect(snapshot?.capabilitySummary.supportedWebhookEvents).toEqual([
+      "forwarder.order.received",
+      "forwarder.order.accept_pending",
+      "forwarder.order.confirmed_by_platform",
+      "forwarder.order.sync_failed"
+    ]);
+    expect(new Date(snapshot!.lastCheckedAt).getTime()).toBeGreaterThan(new Date("2026-01-01T00:00:00Z").getTime());
+    expect(snapshot?.lastWebhookReceivedAt).toBe("2026-01-02T00:00:00Z");
+    expect(snapshot?.lastRateLimitAt).toBe("2026-01-03T00:00:00Z");
+    expect(snapshot?.lastAuthFailureAt).toBe("2026-01-04T00:00:00Z");
     
     // Ensure the capability was persisted with the configured one
     expect(mockRepo.persistChanges).toHaveBeenCalledWith(
@@ -163,7 +177,10 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
           expect.objectContaining({
             platformCode: PLATFORM_CODE_GRAB_TAIWAN,
             capabilitySummary: snapshot?.capabilitySummary,
-            lastCheckedAt: "2026-01-01T00:00:00Z",
+            lastCheckedAt: snapshot?.lastCheckedAt,
+            lastWebhookReceivedAt: "2026-01-02T00:00:00Z",
+            lastRateLimitAt: "2026-01-03T00:00:00Z",
+            lastAuthFailureAt: "2026-01-04T00:00:00Z",
           }),
         ]),
       })
