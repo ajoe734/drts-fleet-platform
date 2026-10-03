@@ -2,10 +2,24 @@ import { MediaWorkerServer } from "./server/media-worker-server";
 import { isStrictVoiceMediaEnvironment } from "./server/environment";
 import { composeVoiceMediaProviders } from "./server/provider-composition";
 import { VoiceSessionComposer } from "./server/session-composer";
+import { VoiceCallTurnCoordinator } from "./dialogue/call-turn-coordinator";
+import { OpenAiRealtimeFixtureAdapter } from "./providers/native-voice/native-voice-adapter";
 
 async function main() {
   const composition = composeVoiceMediaProviders();
-  const sessionComposer = new VoiceSessionComposer(composition.providerFactory);
+  // The dialogue *provider* always stays fixture-mode here regardless of
+  // `composition.productionCapable`: no live VoiceDialogueProvider
+  // implementation exists at all yet (see
+  // ./providers/native-voice/native-voice-adapter.ts), so `production:
+  // true` would make every turn fail closed with `voice_fixture_forbidden`
+  // rather than ever actually speaking to a caller.
+  const turnCoordinator = new VoiceCallTurnCoordinator(
+    () => new OpenAiRealtimeFixtureAdapter(),
+  );
+  const sessionComposer = new VoiceSessionComposer(
+    composition.providerFactory,
+    turnCoordinator,
+  );
 
   const server = new MediaWorkerServer({
     sessionComposer,
@@ -35,6 +49,13 @@ async function main() {
       "which would issue/verify these tokens from the real call/line authority, does not exist yet -- " +
       "see docs/04-uat/audit-voice-runtime-20261002.md). POST /sessions and POST /recording/finalize " +
       "will refuse every request (503) until one is wired.",
+  );
+  console.warn(
+    "[voice-media-worker] Dialogue turns run against the real VoiceDialogueEngine/VoiceDialogueState " +
+      "machinery but every tool proposal other than request_handoff forces an honest 'unavailable' " +
+      "handoff: this process has no database and apps/api/src/modules/cti-ivr (the verified channel " +
+      "into apps/api's VoiceToolGatewayService/VoiceBookingRepository) does not exist yet -- see " +
+      "docs/04-uat/audit-voice-application-wiring-20261003.md.",
   );
 
   let draining = false;

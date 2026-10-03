@@ -8,6 +8,7 @@ import type {
   VoiceSpeechToTextAdapter,
   VoiceTextToSpeechAdapter,
 } from "../media-provider";
+import type { VoiceCallTurnCoordinator } from "../dialogue/call-turn-coordinator";
 
 /** Builds the ASR/TTS adapter pair for one freshly attached session. Called
  * once per session id -- never shared across sessions, since an adapter
@@ -69,7 +70,15 @@ export class VoiceSessionComposer extends EventEmitter {
    * that close on their own, not during a drain) never accumulates. */
   private readonly pendingCloses = new Set<Promise<void>>();
 
-  constructor(private readonly providerFactory: VoiceSessionProviderFactory) {
+  constructor(
+    private readonly providerFactory: VoiceSessionProviderFactory,
+    /** Drives the actual session.event -> bounded-turn -> TTS composition
+     * (see `../dialogue/call-turn-coordinator.ts`) for every attached
+     * session. Optional so tests/diagnostics that only need the raw
+     * ASR/TTS/control-frame mechanics (no dialogue turn at all) can omit
+     * it. */
+    private readonly turnCoordinator?: VoiceCallTurnCoordinator,
+  ) {
     super();
   }
 
@@ -87,6 +96,18 @@ export class VoiceSessionComposer extends EventEmitter {
         // worker's control-plane consumer, independently of the media socket.
         this.emit("session.event", { sessionId, event });
         this.sendEvent(channel, event);
+        this.turnCoordinator?.handle(sessionId, event, {
+          speak: async (text, languageCode) => {
+            const handle = await session.startPlayback(
+              text,
+              languageCode,
+              new Date().toISOString(),
+            );
+            for (const chunk of handle.audioChunks) {
+              channel.sendBinary(Buffer.from(chunk));
+            }
+          },
+        });
       },
     });
     const composed: ComposedSession = { session, channel };
@@ -101,6 +122,9 @@ export class VoiceSessionComposer extends EventEmitter {
       // own single-emission guarantee (see `./websocket-channel`).
       if (this.sessions.get(sessionId) !== composed) return;
       this.sessions.delete(sessionId);
+      // A session id may be reused by an unrelated later call; its turn
+      // state (collected slots, handoff) must never bleed into that call.
+      this.turnCoordinator?.release(sessionId);
       // The ASR provider's connection/waiters/billing resource must not
       // outlive this session -- this fires on every close path (normal
       // close, drain, idle timeout, a frame-limit/failure-driven close),
