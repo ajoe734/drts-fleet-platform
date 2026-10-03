@@ -57,6 +57,34 @@ export class VoiceDialogueState {
    * attachment yet (fresh session, or restored with no prior snapshot). */
   committedSessionVersion: number | null = null;
 
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+   * canonical 2026-10-03T21:09:40Z, "unresolved commit still admits
+   * destructive subsequent dialogue"): non-null exactly when a content
+   * commit's own HTTP acknowledgement was lost AND the immediate
+   * best-effort reconciliation read (`reconcileAmbiguousCommit`) also
+   * failed to resolve it -- the server-side outcome of this exact write
+   * (landed, or never landed) is genuinely unknown, not merely "failed".
+   * Captures the exact identity of the ambiguous write so a later
+   * reconciliation attempt (possibly for a completely different,
+   * subsequent turn) can still recognize and resolve THIS ONE. Must be
+   * cleared only by `reconcileUnresolvedCommit` actually resolving it --
+   * never by a later turn's own persist attempt proceeding past it,
+   * which is exactly the defect this marker exists to block. */
+  unresolvedCommit: {
+    expectedSessionVersion: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+  } | null = null;
+  /** The in-flight bounded reconciliation attempting to resolve
+   * `unresolvedCommit`, if one is already running -- a concurrent second
+   * caller (e.g. a barge-in-abandoned turn's own still-running background
+   * persist racing a brand new turn's foreground one, see
+   * `reconcileUnresolvedCommit`'s own doc) joins this SAME attempt
+   * instead of starting a redundant, independent one. Cleared together
+   * with `unresolvedCommit` once the attempt settles. */
+  unresolvedCommitRecovery: Promise<unknown> | null = null;
+
   apply(output: VoiceDialogueOutput, turnId: string): void {
     if (this.handoff) return;
     const reasons: Record<string, string> = {

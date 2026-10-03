@@ -343,6 +343,35 @@ export class VoiceSessionService {
         ? await this.repository.findAppliedMediaEpoch(command.voiceSessionId)
         : null;
 
+    const isBootstrap = appliedEpoch === null;
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+    // canonical 2026-10-03T21:09:40Z, "media transitions and speech
+    // backlog do not share causal delivery/recovery", probe 4): a
+    // dedup-retry of an event THIS SESSION HAS ALREADY DURABLY APPLIED
+    // (its own `event.sequence` at or behind the current watermark) is
+    // always a safe no-op, regardless of eventType -- checked BEFORE the
+    // transition/mismatch gates below, which only make sense for a
+    // genuinely new, not-yet-applied attempt. Previously this check ran
+    // AFTER the `media_epoch_transition` gate, so a retried transition
+    // whose own prior application is EXACTLY what advanced `appliedEpoch`
+    // to its current value was indistinguishable from a stale/superseded
+    // NEW transition targeting that same epoch: `event.mediaEpoch <=
+    // appliedEpoch` was true in BOTH cases, so a worker retrying a
+    // transition whose acknowledgement it never received got back
+    // `gap: true` for a call that, in fact, had already durably
+    // succeeded -- `VoiceCallTurnCoordinator.recordAuthoritativeControlEvent`
+    // then threw `voice_control_event_gap` and the worker's own
+    // `controlSequence` could never advance past it.
+    if (!isBootstrap && event.sequence <= session.lastAppliedControlSequence) {
+      return {
+        deduped,
+        applied: false,
+        gap: false,
+        appliedThroughSequence: session.lastAppliedControlSequence,
+        session,
+      };
+    }
+
     // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (media-epoch
     // continuation, Codex reopen canonical 2026-10-03T19:24:15Z and
     // 2026-10-03T20:13:00Z): `media_epoch_transition` is the one
@@ -355,10 +384,11 @@ export class VoiceSessionService {
     // mismatched media epoch reorder across streams" case intact -- that
     // case uses `eventType: "clear"`, never this branch). A
     // same-or-backward transition attempt (`event.mediaEpoch <=
-    // appliedEpoch`) is a stale/superseded claim and must fail exactly
-    // like an ordinary old-epoch arrival (SD §5.3 "舊 epoch final 不得覆蓋
-    // 新連線內容") -- durable evidence, never applied. Only a STRICTLY
-    // forward epoch may ever pin a new value here.
+    // appliedEpoch`) that has NOT already been durably applied (the check
+    // above already excluded that case) is a stale/superseded claim and
+    // must fail exactly like an ordinary old-epoch arrival (SD §5.3 "舊
+    // epoch final 不得覆蓋新連線內容") -- durable evidence, never applied.
+    // Only a STRICTLY forward epoch may ever pin a new value here.
     const isMediaEpochTransition = event.eventType === "media_epoch_transition";
     if (isMediaEpochTransition) {
       if (appliedEpoch !== null && event.mediaEpoch <= appliedEpoch) {
@@ -388,17 +418,6 @@ export class VoiceSessionService {
       };
     }
 
-    const isBootstrap = appliedEpoch === null;
-    if (!isBootstrap && event.sequence <= session.lastAppliedControlSequence) {
-      // Already applied (or superseded) -- safe no-op.
-      return {
-        deduped,
-        applied: false,
-        gap: false,
-        appliedThroughSequence: session.lastAppliedControlSequence,
-        session,
-      };
-    }
     if (isBootstrap && event.sequence !== 1) {
       // SD §5.4: the watermark starts at 0 (no event applied); the first
       // event to bootstrap the session MUST be sequence 1. Any earlier
