@@ -71,21 +71,26 @@ describe("validateMailSessionInputs", () => {
 });
 
 describe("deriveAliasRecipient", () => {
+  it.each(["example.com", "EXAMPLE.NET", "sub.example.org", "fixture-mail.org", "demo.mail.org", "mail.invalid", "mail.test", "mail.localhost"])("rejects placeholder mailbox domain %s for both flows", (domain) => {
+    for (const tag of ["invite", "approve"]) {
+      expect(() => deriveAliasRecipient(`unit@${domain}`, tag)).toThrow();
+    }
+  });
   it.each(["invite", "approve"])(
     "accepts the authorized sender's Workspace domain for %s",
     (tag) => {
-      expect(deriveAliasRecipient("mail.acceptance@example.com", tag)).toBe(
-        `mail.acceptance+${tag}@example.com`,
-      );
+      expect(
+        deriveAliasRecipient("mail.acceptance@workspace-mail.org", tag),
+      ).toBe(`mail.acceptance+${tag}@workspace-mail.org`);
     },
   );
 
   it.each([
     "unit@googlemail.com",
-    "unit@sub-domain.example.org",
-    "unit@EXAMPLE.COM",
-    "unit@xn--bcher-kva.example",
-    "o'neil+dev@example.com",
+    "unit@sub-domain.workspace-mail.org",
+    "unit@WORKSPACE-MAIL.ORG",
+    "unit@xn--bcher-kva.org",
+    "o'neil+dev@workspace-mail.org",
   ])("preserves the supplied mailbox domain: %s", (mailbox) => {
     const [local, domain] = mailbox.split("@");
     expect(deriveAliasRecipient(mailbox, "invite")).toBe(
@@ -207,7 +212,7 @@ describe("hosted bootstrap entry point and safe failure diagnostics", () => {
       fetch: fetcher,
       mask: vi.fn(),
       appendEnvironment: vi.fn(),
-      readMailbox: vi.fn(() => "mail.acceptance@example.com"),
+      readMailbox: vi.fn(() => "mail.acceptance@workspace-mail.org"),
       assertions: vi.fn(() => ({ next })),
     };
     return { env, deps, identity, proof, next };
@@ -220,7 +225,7 @@ describe("hosted bootstrap entry point and safe failure diagnostics", () => {
     expect(deps.appendEnvironment.mock.calls.map((call) => call[1])).toEqual([
       "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=private-session-token\n",
       `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${proof.stepUpReference}\n`,
-      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT=mail.acceptance+invite@example.com\n",
+      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT=mail.acceptance+invite@workspace-mail.org\n",
       "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-mail-001-negative@reserved.invalid\n",
     ]);
     expect(deps.mask).toHaveBeenCalledWith(proof.stepUpReference);

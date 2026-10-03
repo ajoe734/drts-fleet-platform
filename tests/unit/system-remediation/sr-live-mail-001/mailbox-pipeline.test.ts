@@ -1,6 +1,6 @@
 import * as childProcess from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootstrapMailSession } from "../../../e2e/system-remediation/sr-live-mail-001/session-bootstrap";
 import {
   realIssueInvitation,
@@ -34,6 +34,7 @@ const tenantId = "10000000-0000-0000-0000-000000000201";
 const actorId = "10000000-0000-0000-0000-000000000901";
 
 afterEach(() => vi.restoreAllMocks());
+beforeEach(() => vi.clearAllMocks());
 
 describe("bootstrap → runner → Python mailbox observer", () => {
   it.each([

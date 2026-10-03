@@ -150,6 +150,8 @@ def derive_alias_recipient(username, flow):
     require(re.fullmatch(r"[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+", local)
             and not local.startswith(".") and not local.endswith(".") and ".." not in local
             and len(local) + len(flow) + 1 <= 64 and len(recipient) <= 254
+            and not re.search(r"(?:^|[.-])(?:fixture|demo|example)(?:[.-]|$)", domain, re.IGNORECASE)
+            and not re.search(r"\.(?:invalid|test|localhost)$", domain, re.IGNORECASE)
             and len(labels) >= 2
             and all(re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label) for label in labels),
             "Invalid dedicated mailbox")
