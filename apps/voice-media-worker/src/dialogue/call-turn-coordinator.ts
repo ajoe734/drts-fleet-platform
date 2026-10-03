@@ -66,6 +66,18 @@ export interface VoiceCallAttachment {
   readonly sessionId: string;
 }
 
+/** One durably-not-yet-confirmed real `speech.started` observation -- see
+ * `TurnSession.pendingSpeechStarts`. */
+interface PendingSpeechStart {
+  sourceEventId: string;
+  occurredAt: string;
+  mediaEpoch: number;
+}
+
+/** Bound on `TurnSession.pendingSpeechStarts` -- see that field's own doc
+ * on the drop-oldest policy this enforces. */
+const MAX_CONTROL_EVENT_BACKLOG = 8;
+
 interface TurnSession {
   engine: VoiceDialogueEngine;
   state: VoiceDialogueState;
@@ -115,20 +127,41 @@ interface TurnSession {
    * attachment already durably applied. `undefined` for an unbound
    * attachment, which never calls `recordControlEvent` at all. */
   controlSequence?: number;
-  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
-   * canonical 2026-10-03T17:41:28Z): the `sourceEventId` already
-   * generated for the CURRENT (still-unapplied) `controlSequence` slot,
-   * so a retry of that exact slot (another `speech.started` arriving, or
-   * `executeTurn`'s fallback, while the authoritative session has not
-   * yet advanced past it) reuses the SAME identity instead of minting a
-   * fresh `randomUUID()` every attempt. This worker generates these ids
-   * itself -- it is never "replaying one it never received" (the old,
-   * now-corrected framing) -- so retaining one it already minted for an
-   * outstanding slot is always possible. Cleared (set to `undefined`)
-   * the moment `recordAuthoritativeControlEvent` observes the
-   * authoritative watermark has actually reached this slot, so the NEXT
-   * slot always mints its own fresh id. */
-  pendingControlEventId?: string;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (bounded retained
+   * delivery, Codex reopen canonical 2026-10-03T20:13:00Z): one entry per
+   * genuinely distinct real `speech.started` observation this attachment
+   * has seen but not yet confirmed durably applied, in arrival order.
+   * Replaces the earlier single-slot `pendingControlEventId` design,
+   * which reused the SAME identity/slot for a SECOND, later barge-in
+   * while the first attempt was still outstanding -- silently replacing
+   * the first observation's own distinct `occurredAt` with the second's
+   * the moment a write finally succeeded, even though the first write
+   * never actually completed. `flushControlEventBacklog` always drains
+   * this strictly from the front (oldest first) so an earlier failed
+   * observation is retried before a later one is ever attempted at the
+   * next sequence slot -- never skipped, never overwritten. Bounded at
+   * `MAX_CONTROL_EVENT_BACKLOG`: under a sustained outage the OLDEST
+   * entry is dropped once the cap is exceeded rather than retaining state
+   * unboundedly for this attachment's lifetime (a deliberate, documented
+   * loss policy, not an oversight). */
+  pendingSpeechStarts: PendingSpeechStart[];
+  /** Armed by `flushControlEventBacklog` whenever a flush attempt fails
+   * and this attachment is neither released nor restoration-failed, so a
+   * still-outstanding backlog resumes draining on its own even if no
+   * later `speech.started`/final ever arrives to naturally retrigger it
+   * ("no-final outage recovery"). Cleared on `release` and at the start
+   * of every flush attempt. */
+  controlEventRetryTimer?: ReturnType<typeof setTimeout>;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (media-epoch
+   * continuation): the `sourceEventId` already generated for the CURRENT
+   * still-unapplied `media_epoch_transition` sequence slot, mirroring
+   * `pendingSpeechStarts`'s single-observation identity reuse but for the
+   * transition call, which (unlike speech-start) has no later-observation
+   * backlog concern of its own -- only one legitimate transition is ever
+   * in flight for this attachment at a time. Cleared the moment
+   * `recordAuthoritativeControlEvent` observes the authoritative
+   * watermark has reached this slot. */
+  pendingMediaEpochTransitionId?: string;
   /** The authoritative, server-durable `inputEpoch` the most recent
    * `recordAuthoritativeControlEvent` call resolved -- distinct from
    * `inputEpoch` above (this class's process-local turn-sequencing
@@ -340,6 +373,7 @@ export class VoiceCallTurnCoordinator {
       releaseAbort: new AbortController(),
       released: false,
       activeAbort: null,
+      pendingSpeechStarts: [],
       ...(binding ? { binding } : {}),
     };
     if (binding && this.apiClient) {
@@ -541,6 +575,7 @@ export class VoiceCallTurnCoordinator {
       sourceEventId: request.turnId,
       occurredAt: new Date().toISOString(),
       mediaEpoch: request.mediaEpoch ?? 0,
+      eventType: "speech_start",
       signal: request.signal,
     });
   }
@@ -591,6 +626,12 @@ export class VoiceCallTurnCoordinator {
       sourceEventId: string;
       occurredAt: string;
       mediaEpoch: number;
+      /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (media-epoch
+       * continuation): previously hardcoded to `"speech_start"` -- this
+       * method is now also the single submission path
+       * `recordMediaEpochTransition` uses for `"media_epoch_transition"`,
+       * so the actual type must come from the caller, never be assumed. */
+      eventType: string;
       signal: AbortSignal;
     },
   ): Promise<number> {
@@ -631,7 +672,7 @@ export class VoiceCallTurnCoordinator {
         occurredAt: event.occurredAt,
         sequence,
         mediaEpoch: event.mediaEpoch,
-        eventType: "speech_start",
+        eventType: event.eventType,
       },
       signal,
     );
@@ -661,10 +702,13 @@ export class VoiceCallTurnCoordinator {
       );
     }
     turnSession.controlSequence = result.appliedThroughSequence + 1;
-    // This slot is now durably applied; the next slot must mint its own
-    // fresh identity rather than inherit this one (see
-    // `TurnSession.pendingControlEventId`).
-    delete turnSession.pendingControlEventId;
+    // This slot is now durably applied; whichever single-slot identity a
+    // caller was retaining for it (`pendingMediaEpochTransitionId`) must
+    // not be reused for the NEXT slot, regardless of which eventType this
+    // particular call was for -- only one write is ever in flight for this
+    // attachment's `controlEventQueue` at a time, so clearing both here
+    // unconditionally is always safe (see each field's own doc).
+    delete turnSession.pendingMediaEpochTransitionId;
     // Codex reopen round 15/16, R4-persist ("audit the same mutable update
     // at recordAuthoritativeSpeechStart"): same monotonic guard as
     // `dialogue-persist-port.ts`'s `persist()` -- a genuinely correlated
@@ -726,19 +770,11 @@ export class VoiceCallTurnCoordinator {
    * `assertControlCutoffStillValid`).
    *
    * Called directly from `handle()`, which is synchronous and must not
-   * await this; chained onto `controlEventQueue` (never `queue`, which
-   * only serializes turns and does not exist yet for a `speech.started`
-   * with no turn) so this write and `executeTurn`'s own fallback below
-   * can never race the shared `controlSequence` counter. Never throws
-   * into `handle()` and never rejects into the queue -- same reasoning as
-   * `runTurn`: a long-lived worker must not let one failed write wedge
-   * every later one for this attachment. A failure here (including a
-   * genuine `gap`) simply leaves `authoritativeInputEpoch`/
-   * `authoritativeInputEpochConsumed` exactly as they were -- the next
-   * turn's `executeTurn` fallback then opens its own watermark exactly as
-   * it would have before this method existed, so a failed real-time
-   * write still eventually self-heals instead of permanently losing the
-   * attempt. */
+   * await this. Enqueues this exact observation into
+   * `turnSession.pendingSpeechStarts` (bounded retained delivery, Codex
+   * reopen canonical 2026-10-03T20:13:00Z) and kicks off a flush --
+   * never drops or overwrites an earlier still-outstanding observation
+   * the way the previous single-slot `pendingControlEventId` design did. */
   private recordSpeechStartControlEvent(
     turnSession: TurnSession,
     event: VoiceMediaWorkerEvent,
@@ -746,48 +782,148 @@ export class VoiceCallTurnCoordinator {
     const binding = turnSession.binding;
     const persistPort = turnSession.persistPort ?? this.persistPort;
     if (!binding || !this.apiClient || persistPort.mode !== "trusted") return;
-    // Codex reopen round 18, R4-control (boundedness): this call's
-    // `signal` was previously only `turnSession.releaseAbort.signal`,
-    // which never fires on its own (R4-control's own doc on that same
-    // hazard) -- an uncooperative/hung apps/api `/events` call could hold
-    // `controlEventQueue` open indefinitely, and every later chained
-    // write (including a turn's own fallback at `executeTurn`'s
-    // `await turnSession.controlEventQueue`) waits on that exact queue.
-    // `recordAuthoritativeSpeechStart`'s own call to the same underlying
-    // method is already bounded by the turn's own `request.signal`
-    // (`runTurn`'s `setTimeout(() => abortController.abort(), ...)`); this
-    // is the one caller with no turn, and therefore no deadline, of its
-    // own -- bound it to the same `turnTimeoutMs` a turn's stages already
-    // use, so a hang here is cancelled on the same bounded timescale
-    // instead of blocking every later write for this attachment.
+    turnSession.pendingSpeechStarts.push({
+      sourceEventId: randomUUID(),
+      occurredAt: event.occurredAt,
+      mediaEpoch: event.mediaEpoch,
+    });
+    if (turnSession.pendingSpeechStarts.length > MAX_CONTROL_EVENT_BACKLOG) {
+      // Bounded backlog (see `TurnSession.pendingSpeechStarts`'s own doc):
+      // drop the OLDEST under sustained outage rather than grow without
+      // bound.
+      turnSession.pendingSpeechStarts.shift();
+    }
+    this.flushControlEventBacklog(turnSession, binding);
+  }
+
+  /** Drains `turnSession.pendingSpeechStarts` strictly from the front
+   * (oldest observation first), one `recordAuthoritativeControlEvent`
+   * call per entry, removing each entry only once its own write is
+   * confirmed durably applied -- never skipped, never overwritten by a
+   * later observation sharing its slot (see `pendingSpeechStarts`'s own
+   * doc on the single-slot design this replaces).
+   *
+   * Called both directly (a new `speech.started` arriving) and from a
+   * self-armed retry timer so an outstanding backlog resumes draining on
+   * its own even with no later `speech.started`/final to naturally
+   * retrigger it ("no-final outage recovery", Codex reopen canonical
+   * 2026-10-03T20:13:00Z). Bounded by the same `turnTimeoutMs`-based
+   * signal every other no-turn-of-its-own control write on this
+   * attachment already uses; never throws into `handle()` and never
+   * rejects into `controlEventQueue` -- same reasoning as `runTurn`: a
+   * long-lived worker must not let one failed write wedge every later
+   * one for this attachment. */
+  private flushControlEventBacklog(
+    turnSession: TurnSession,
+    binding: VoiceSessionBinding,
+  ): void {
+    if (turnSession.controlEventRetryTimer !== undefined) {
+      clearTimeout(turnSession.controlEventRetryTimer);
+      delete turnSession.controlEventRetryTimer;
+    }
+    const bounded = this.boundedControlSignal(turnSession);
+    this.chainControlEvent(turnSession, async () => {
+      while (turnSession.pendingSpeechStarts.length > 0) {
+        const next = turnSession.pendingSpeechStarts[0]!;
+        const epoch = await this.recordAuthoritativeControlEvent(
+          turnSession,
+          binding,
+          {
+            sourceEventId: next.sourceEventId,
+            occurredAt: next.occurredAt,
+            mediaEpoch: next.mediaEpoch,
+            eventType: "speech_start",
+            signal: bounded.signal,
+          },
+        );
+        // This exact entry is now durably applied -- remove it before
+        // attempting the next one, so a later failure in this same flush
+        // never re-sends an already-confirmed observation.
+        turnSession.pendingSpeechStarts.shift();
+        turnSession.authoritativeInputEpoch = epoch;
+        turnSession.authoritativeInputEpochConsumed = false;
+      }
+    }).then(
+      () => {
+        bounded.cancel();
+      },
+      (error) => {
+        bounded.cancel();
+        // Never retry past release, and never retry an attachment whose
+        // restoration is permanently failed (`handle()` already stopped
+        // accepting new observations for it) -- both would otherwise
+        // schedule an unbounded fail/reschedule loop against a dialogue
+        // state that can never apply anything again.
+        if (
+          !turnSession.releaseAbort.signal.aborted &&
+          !turnSession.restoreFailed
+        ) {
+          console.error(
+            "[voice-call-turn-coordinator] speech-start control event failed; will retry",
+            error,
+          );
+          turnSession.controlEventRetryTimer = setTimeout(() => {
+            delete turnSession.controlEventRetryTimer;
+            if (turnSession.pendingSpeechStarts.length > 0) {
+              this.flushControlEventBacklog(turnSession, binding);
+            }
+          }, this.turnTimeoutMs);
+        }
+      },
+    );
+  }
+
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (media-epoch
+   * continuation, Codex reopen canonical 2026-10-03T19:24:15Z and
+   * 2026-10-03T20:13:00Z): a real `media.epoch.advanced` event
+   * (reconnect/handoff, published by `VoiceMediaWorkerSession.
+   * advanceMediaEpoch`) previously only invalidated this attachment's own
+   * local turn bookkeeping (`handle()`'s `inputEpoch`/`activeAbort`
+   * cancellation) -- `VoiceSessionService.recordControlEvent` pins
+   * whichever media epoch first reaches it and fail-closed-rejects every
+   * later mismatched arrival forever after (SD §5.3 "舊 epoch final 不得
+   * 覆蓋新連線內容"), so without an explicit authoritative transition call
+   * no legitimate new epoch could ever resume turn composition through
+   * this worker again. Durably records this exact transition via the
+   * dedicated `media_epoch_transition` eventType the service recognizes
+   * as a strictly-forward pin advance, never a mismatch gap (see
+   * `VoiceSessionService.recordControlEvent`'s own doc on that branch).
+   *
+   * Mirrors `recordSpeechStartControlEvent`'s shape (bounded by the same
+   * `turnTimeoutMs`, chained on the same `controlEventQueue`, never
+   * throws into `handle()`) but deliberately never touches
+   * `authoritativeInputEpoch`/`authoritativeInputEpochConsumed` -- a
+   * media-epoch transition is a different authority axis than ASR input
+   * (SD §5.3 vs §5.4) and must never be mistaken for one opening or
+   * consuming a speech-start watermark. */
+  private recordMediaEpochTransition(
+    turnSession: TurnSession,
+    event: VoiceMediaWorkerEvent,
+  ): void {
+    const binding = turnSession.binding;
+    const persistPort = turnSession.persistPort ?? this.persistPort;
+    if (!binding || !this.apiClient || persistPort.mode !== "trusted") return;
     const bounded = this.boundedControlSignal(turnSession);
     this.chainControlEvent(turnSession, () => {
-      // R4-control (Codex reopen, canonical 2026-10-03T17:41:28Z): reuse
-      // the identity already minted for this attachment's current
-      // outstanding (still-unapplied) control-sequence slot, rather than
-      // mint a fresh `randomUUID()` on every call -- see
-      // `TurnSession.pendingControlEventId`'s own doc. A genuinely new
-      // slot (the previous one already advanced the watermark, which
-      // clears this field below) always gets its own new identity.
-      const sourceEventId = turnSession.pendingControlEventId ?? randomUUID();
-      turnSession.pendingControlEventId = sourceEventId;
+      const sourceEventId =
+        turnSession.pendingMediaEpochTransitionId ?? randomUUID();
+      turnSession.pendingMediaEpochTransitionId = sourceEventId;
       return this.recordAuthoritativeControlEvent(turnSession, binding, {
         sourceEventId,
         occurredAt: event.occurredAt,
         mediaEpoch: event.mediaEpoch,
+        eventType: "media_epoch_transition",
         signal: bounded.signal,
       });
     }).then(
-      (epoch) => {
+      () => {
         bounded.cancel();
-        turnSession.authoritativeInputEpoch = epoch;
-        turnSession.authoritativeInputEpochConsumed = false;
       },
       (error) => {
         bounded.cancel();
         if (!turnSession.releaseAbort.signal.aborted) {
           console.error(
-            "[voice-call-turn-coordinator] speech-start control event failed",
+            "[voice-call-turn-coordinator] media-epoch transition control event failed",
             error,
           );
         }
@@ -831,6 +967,15 @@ export class VoiceCallTurnCoordinator {
     turnSession.released = true;
     turnSession.activeAbort?.abort();
     turnSession.releaseAbort.abort();
+    // Bounded retained delivery (R4-control): a pending backlog retry
+    // timer must never keep firing against a released attachment -- the
+    // bounded signal it would use is already aborted, so a surviving
+    // timer would otherwise keep rescheduling itself (fail, reschedule,
+    // fail, ...) for this attachment's entire remaining process lifetime.
+    if (turnSession.controlEventRetryTimer !== undefined) {
+      clearTimeout(turnSession.controlEventRetryTimer);
+      delete turnSession.controlEventRetryTimer;
+    }
     this.sessions.delete(attachment);
   }
 
@@ -866,12 +1011,19 @@ export class VoiceCallTurnCoordinator {
       turnSession.activeAbort?.abort();
       // R4-control (Codex reopen round 16/17): a real `speech.started`
       // barge-in must durably open its own authoritative watermark right
-      // now, independent of whatever turn it just cancelled -- a
+      // now, independent of whatever turn it just cancelled.
       // `media.epoch.advanced` is a different authority-transition
-      // concern (handoff/reconnect, already fenced by `leaseEpoch` at the
-      // service layer) and is not one, see `recordSpeechStartControlEvent`.
+      // concern (handoff/reconnect) -- it durably submits the
+      // authoritative media-epoch-transition control event instead (R4-
+      // control, media-epoch continuation; see
+      // `recordMediaEpochTransition`'s own doc), rather than rely only on
+      // the existing `leaseEpoch` fencing at the service layer, which
+      // fences WRITER identity but never actually advances the pinned
+      // media epoch itself.
       if (event.type === "speech.started") {
         this.recordSpeechStartControlEvent(turnSession, event);
+      } else {
+        this.recordMediaEpochTransition(turnSession, event);
       }
       return;
     }

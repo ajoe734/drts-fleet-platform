@@ -343,7 +343,38 @@ export class VoiceSessionService {
         ? await this.repository.findAppliedMediaEpoch(command.voiceSessionId)
         : null;
 
-    if (appliedEpoch !== null && event.mediaEpoch !== appliedEpoch) {
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (media-epoch
+    // continuation, Codex reopen canonical 2026-10-03T19:24:15Z and
+    // 2026-10-03T20:13:00Z): `media_epoch_transition` is the one
+    // authoritative, explicit claim that the media epoch has legitimately
+    // moved forward (reconnect/handoff via `VoiceSessionComposer.
+    // advanceMediaEpoch`) -- the only call this worker ever makes that is
+    // ALLOWED to differ from `appliedEpoch`. Every other eventType keeps
+    // the unconditional fail-closed mismatch rule exactly as before (this
+    // is what keeps `tests/unit/uv-exec-007.test.ts`'s "never lets a
+    // mismatched media epoch reorder across streams" case intact -- that
+    // case uses `eventType: "clear"`, never this branch). A
+    // same-or-backward transition attempt (`event.mediaEpoch <=
+    // appliedEpoch`) is a stale/superseded claim and must fail exactly
+    // like an ordinary old-epoch arrival (SD §5.3 "舊 epoch final 不得覆蓋
+    // 新連線內容") -- durable evidence, never applied. Only a STRICTLY
+    // forward epoch may ever pin a new value here.
+    const isMediaEpochTransition = event.eventType === "media_epoch_transition";
+    if (isMediaEpochTransition) {
+      if (appliedEpoch !== null && event.mediaEpoch <= appliedEpoch) {
+        return {
+          deduped,
+          applied: false,
+          gap: true,
+          appliedThroughSequence: session.lastAppliedControlSequence,
+          session,
+        };
+      }
+      // Else: a legitimate forward transition (or the session's bootstrap
+      // epoch) -- fall through to the normal sequence/bootstrap contiguity
+      // checks below, skipping only the generic mismatch gate immediately
+      // above, since this event's whole purpose is to pin a NEW epoch.
+    } else if (appliedEpoch !== null && event.mediaEpoch !== appliedEpoch) {
       // Cross-epoch arrival: fail closed rather than guess whether this is a
       // legitimate reconnect or a stale/superseded stream (SD §5.3: "舊
       // epoch final 不得覆蓋新連線內容"). The event is durable (inserted
