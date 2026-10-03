@@ -501,4 +501,106 @@ describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS 
     expect(awaited).toBe(true);
     expect(asrAdapter.closeSettled).toBe(true);
   });
+
+  /**
+   * Codex review round 7 R14: `pendingCloses` was keyed only by `sessionId`.
+   * A session id reused for a new attach (e.g. a higher-epoch re-admission,
+   * exactly as `MediaWorkerServer.closeSession` followed by a fresh
+   * `/sessions` admission produces) while the OLD attach's async `close()`
+   * was still draining had its *new* attach's own close overwrite -- and
+   * thereby silently drop from `awaitPendingCloses` -- the still-pending
+   * OLD teardown. An orderly shutdown awaiting `awaitPendingCloses()` must
+   * wait for every outstanding teardown, not just the most recently
+   * attached one for a given id.
+   */
+  it("awaitPendingCloses waits for both an old and a new attach's teardown when a session id is reused while the old one is still draining", async () => {
+    let resolveOldClose: (() => void) | undefined;
+    class AsyncClosingAsrAdapter implements VoiceSpeechToTextAdapter {
+      readonly providerName = "async-closing";
+      readonly isProductionCapable = false as const;
+      closeSettled = false;
+      constructor(private readonly onClose: () => Promise<void>) {}
+
+      async transcribe(): Promise<VoiceAsrSegmentResult> {
+        return {
+          segmentId: "seg",
+          revision: 1,
+          text: "",
+          final: true,
+          language: "cmn-TW",
+        };
+      }
+
+      async close(): Promise<void> {
+        await this.onClose();
+        this.closeSettled = true;
+      }
+    }
+
+    const oldAdapter = new AsyncClosingAsrAdapter(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveOldClose = resolve;
+        }),
+    );
+    const newAdapter = new AsyncClosingAsrAdapter(() => Promise.resolve());
+    const ttsAdapter = new DeterministicTtsAdapter();
+    let attachCount = 0;
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => {
+        attachCount += 1;
+        return {
+          asrAdapter: attachCount === 1 ? oldAdapter : newAdapter,
+          ttsAdapter,
+        };
+      },
+    });
+
+    function makeChannel() {
+      return new (class extends EventEmitter {
+        destroyed = false;
+        sendText(): void {}
+        sendBinary(): void {}
+      })() as unknown as import("../../../apps/voice-media-worker/src/server/websocket-channel").WebSocketServerChannel;
+    }
+
+    const oldChannel = makeChannel();
+    composer.attach("sess-reused-id", oldChannel);
+    (oldChannel as unknown as EventEmitter).emit(
+      "close",
+      1000,
+      "Normal closure",
+    );
+    expect(oldAdapter.closeSettled).toBe(false);
+
+    // Reuse the same session id for a new attach while the old one's
+    // close() is still draining.
+    const newChannel = makeChannel();
+    composer.attach("sess-reused-id", newChannel);
+    (newChannel as unknown as EventEmitter).emit(
+      "close",
+      1000,
+      "Normal closure",
+    );
+
+    let awaited = false;
+    const awaitPromise = composer.awaitPendingCloses().then(() => {
+      awaited = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    // The new attach's close() has already resolved on its own, but the
+    // old attach's teardown is still pending -- awaitPendingCloses must not
+    // resolve just because the newer (reused-id) entry settled.
+    expect(newAdapter.closeSettled).toBe(true);
+    expect(awaited).toBe(false);
+    expect(oldAdapter.closeSettled).toBe(false);
+
+    resolveOldClose!();
+    await awaitPromise;
+    expect(awaited).toBe(true);
+    expect(oldAdapter.closeSettled).toBe(true);
+  });
 });

@@ -1006,7 +1006,9 @@ session is ready -- that was outside R12's setup/readiness repair
 boundary as stated in the round-6 reopen, and is recorded here precisely
 so it is not mistaken for in scope or already closed.
 
-## 15. Interactive completion follow-up: strict recording evidence and lifecycle failure boundaries
+## Interactive completion follow-up: strict recording evidence and lifecycle failure boundaries
+
+This parallel supplement was originally section 15 on the companion branch. It is retained alongside, not in place of, the owner's numbered review history below.
 
 User requested completion on 2026-10-03. Companion PR #2290 preserves and merges owner commits `7dd52c0e3` and `23cf0ead0` without rewriting published history. Its final immutable SHA is bound by the PR head and the canonical integration note. Earlier sections remain historical evidence; their claims that fabricated recording readback or transport cancellation are still unaddressed are superseded by this section, not silently retroactively certified.
 
@@ -1054,3 +1056,144 @@ The remaining HTTP-listening suites were not run here. Root/full suites, browser
 - `approved_runtime_provider_paths`: deterministic R11/R12 repairs and configured-composition offline regressions supplied for independent review; no TWM/PSTN production attestation.
 - `remaining_external_blockers_precise`: CTI/procurement, provisioned account/model/voice matrix, durable production recording backend, call authority, dialogue/booking orchestration and shared-dev/PSTN acceptance remain open. `productionCapable` stays false. Ready-state idle/max-duration policy remains the explicitly documented separate remainder above.
 - `same_sha_review_ci`: new combined candidate requires fresh independent review and hosted CI. Local success is not merge, deployment, or live acceptance.
+## 15. Round-7 review (reopen on `23cf0ead0849`, Codex, generation `7615f783a51e45a38888312d939799b5`, PR #2282)
+
+Preserved here per Guide §0.7 (the read-only reopen dispatch that produced
+it could not edit this document; owner Claude2 appends it now). Codex's
+round-7 review confirmed R11's partial-before-close/partial-during-drain
+cases, R12's login/access-info/handshake/open-without-180 setup-deadline
+cases, and R1/R2/R8 HTTP admission/finalize authorization (including the
+strict-store negative matrix) as repaired on this candidate, but found two
+newly-exposed defects in this round's own new bookkeeping, plus the
+previously-recorded repeated evidence-quality gap still unaddressed:
+
+- **R12 (P2, setup backpressure still bypassed before `connect()`)**:
+  `MAX_QUEUED_AUDIO_CHUNKS` was only compared against `audioQueue.length`,
+  which `transcribe()` never populated until _after_ `await this.connect()`
+  returned. A provider stuck before login/access-info/the handshake (e.g.
+  a stuck-login repro with `noSpeechTimeoutMs=70` and 128 concurrent
+  one-byte `transcribe()` calls) let all 128 calls pile up awaiting the
+  same single-flight `connect()`, each retaining its own audio chunk in
+  its own suspended stack frame, none of them ever counted against the
+  64-chunk cap. All 128 eventually rejected `TWM_ASR_SETUP_TIMEOUT` once
+  the deadline fired (proving that part of round-6's fix sound), but nothing
+  capped the number of concurrent calls retained during the wait itself.
+- **R13 (P2, new setup-retry fencing gap: a late OLD socket close event
+  destroys NEW connection state)**: `failSetup()`/`terminate()` abandon a
+  stale attempt and _request_ its socket's close, but a real WebSocket's
+  `close` _event_ fires asynchronously and can still arrive after a newer
+  attempt has replaced `this.socket`. The `message`/`close` listeners
+  installed when a socket was adopted (and the handshake promise's `open`
+  listener's `this.socketOpen = true` write) were unfenced against socket
+  identity, so a stale attempt A's delayed close event -- firing after a
+  fresh attempt B had already opened, reached `180`, and sent audio --
+  cleared `this.socket`, reset `ready`/`hasAccess`, and rejected B's
+  pending result via `failPendingWork`, even though B itself was still
+  perfectly healthy.
+- **R14 (P2, new awaitable-shutdown tracking loses old teardown when a
+  session ID is reused)**: round-6's `VoiceSessionComposer.pendingCloses`
+  was a `Map<string, Promise<void>>` keyed by `sessionId`. A session id
+  reissued for a new call (e.g. `MediaWorkerServer.closeSession` followed
+  immediately by a fresh `/sessions` admission at a higher epoch, exactly
+  as the recording-authority fencing tests already exercise) while the
+  OLD attach's async `closeAsr()` was still draining had the NEW attach's
+  own (fast) close overwrite the map entry for that id -- silently
+  dropping the still-pending OLD teardown from whatever
+  `awaitPendingCloses()` later collects. `MediaWorkerServer.stop()`
+  returned in ~0ms with the old epoch's provider still open and never
+  closed.
+- **Repeated evidence-quality gap (unchanged since round-4/5/6)**:
+  `media-recording-finalize-authorization.test.ts`'s
+  `MemoryRecorderObjectStore.readVersion` fabricated matching
+  bytes/metadata for any requested scope/objectKey/objectVersion that was
+  never actually written via `putRecordingImmutable`, so every
+  success-path test in that file was exercising `verifyRecordedObject`'s
+  checksum/version/metadata checks against a boundary that could never
+  fail them. A pointer to a companion PR (#2290/`b6042315b`) was not
+  accepted as evidence for this candidate.
+
+Required-acceptance mapping per the round-7 reopen: `approved_runtime_provider_paths`
+not fully met while R12's pre-connect retention and the new R13/R14
+resource-lifecycle regressions remained; `caller_session_authorization`
+assessed as passing the worker-owned operation/resource/session/
+principal/epoch/closure boundary itself, with the recording evidence-test
+fidelity gap called out as incomplete and the production issuer/audience
+integration restated as the separate external gate it always was;
+`remaining_external_blockers_precise` required keeping R12/R13/R14 and the
+test-boundary repair as deterministic in-scope code work, never recast as
+an external/procurement blocker; `same_sha_review_ci` not met as a
+completion claim (hosted CI green on this SHA, but review REJECTED; CI
+success does not override a reproduced review finding). §16 repairs all
+four items above on this same candidate.
+
+## 16. Round-7 repair: bounded pre-connect backpressure, stale-socket-event fencing, reused-sessionId teardown tracking, and genuine persisted-recording test evidence
+
+| Finding / required_acceptance                                                                        | Source and fix location                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Round-6 candidate (`23cf0ead0849`) -> this round                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Command / evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R12 (P2, setup backpressure bypassed before `connect()`)                                             | `twm-network-client.ts`: new private `pendingConnectChunks` counter. `transcribe()` now checks `this.audioQueue.length + this.pendingConnectChunks >= MAX_QUEUED_AUDIO_CHUNKS` and throws `TWM_ASR_QUEUE_OVERFLOW` **before** the `await this.connect()` call (moved ahead of it, along with the pre-existing frame-size check); increments the counter immediately before awaiting `connect()`, decrements it in a `finally` regardless of outcome (success, rejection, or a setup-deadline/terminate abort of the in-flight `connect()`). The post-connect `eosSent`/queue-push/flush/`receiveResult()` sequence is unchanged.                                                                                                                                                                                                                                                                                                                                                                 | On `23cf0ead0849`: 128 concurrent one-byte `transcribe()` calls against a stuck-login transport all passed the (post-connect-only) capacity check and piled up awaiting the same single-flight `connect()` -- 0 rejected after 10ms. This round: exactly 64 are admitted past the gate; the other 64 reject `TWM_ASR_QUEUE_OVERFLOW` synchronously, before `wsFactory` is ever invoked; the 64 admitted calls still correctly reject `TWM_ASR_SETUP_TIMEOUT` once the deadline fires (unchanged from round-6).                                                                                                                            | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- new "(R12 round-7) bounds concurrent setup-phase transcribe() calls..." regression; standalone Node probe (ts.transpileModule against the actual candidate source, no vitest) independently reproduced the same 64/64 split and confirmed it fails (0 early rejections) against the pre-fix source via a scoped `git stash` of only the two source files                                                                                 |
+| R13 (P2, stale OLD socket close destroys NEW connection state)                                       | `twm-network-client.ts`: in `runConnectSteps`, right after `this.socket = socket` is assigned, a local `isCurrentSocket = () => this.socket === socket` closure now fences the `message` listener (no-op if stale), the outer `close` listener (no-op if stale -- previously unconditionally cleared `this.socket`/`ready`/`hasAccess` and called `failPendingWork`), and the handshake promise's `open` listener's `this.socketOpen = true` write (still always `resolve()`s its own local promise regardless, so this specific attempt's own flow is never blocked).                                                                                                                                                                                                                                                                                                                                                                                                                           | On `23cf0ead0849`: attempt A opens, never reaches `180`; the setup deadline fires and `failSetup()` requests `socketA.close()`, but (matching a real asynchronous WebSocket close event) the close event itself is delivered later. A fresh attempt B connects, reaches `180`, and sends audio in the meantime. When A's delayed close event finally arrives, the unfenced handler cleared `this.socket` (B's live socket) and rejected B's pending result with `TWM_ASR_CONNECTION_CLOSED`. This round: A's late close event is a no-op once `this.socket !== socketA`; B remains OPEN and its pending `transcribe()` resolves normally. | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- new "(R13 round-7) a stale attempt's delayed close event does not tear down a newer attempt's state" regression, using a new `DelayedCloseSocket` double (close() transitions to CLOSING without firing the close event until a separate `deliverClose()` call, modeling the real asynchronous gap `StatefulSocket` does not); independently reproduced via the same standalone probe                                                    |
+| R14 (P2, reused-sessionId teardown lost from `pendingCloses`)                                        | `session-composer.ts`: `pendingCloses` re-typed from `Map<string, Promise<void>>` to `Map<ComposedSession, Promise<void>>`, keyed by the `composed` object created fresh in each `attach()` call instead of by `sessionId`. The channel `"close"` handler's stale-close guard also switched from `if (!this.sessions.has(sessionId)) return;` to `if (this.sessions.get(sessionId) !== composed) return;` (identity, not mere presence) so a newer attach for the same reused id can never have its session-map entry deleted by an older attach's close handler either.                                                                                                                                                                                                                                                                                                                                                                                                                         | On `23cf0ead0849`: closing a session then immediately re-admitting/attaching the same id at a higher epoch (while the old attach's `closeAsr()` was still draining) let the new attach's own fast-resolving close overwrite the old attach's entry in the string-keyed map; `awaitPendingCloses()` (and therefore `MediaWorkerServer.stop()`) returned without ever having collected the old attach's still-pending promise -- `stop()` resolved in ~0ms with the old provider still open. This round: each attach's teardown gets its own map entry regardless of id reuse; `awaitPendingCloses()` correctly waits for both.             | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/session-composer.test.ts` -- new "awaitPendingCloses waits for both an old and a new attach's teardown when a session id is reused while the old one is still draining" regression, directly on `VoiceSessionComposer` with two distinct controllable-async-close adapter instances; independently reproduced via the same standalone probe                                                                                                                             |
+| Repeated evidence-quality gap (`media-recording-finalize-authorization.test.ts` fabricated readback) | `media-recording-finalize-authorization.test.ts`: `MemoryRecorderObjectStore.readVersion` rewritten to strict key+version lookup against an internal `Map` populated only by its own `putRecordingImmutable`/`putImmutable` -- the prior fallback that fabricated `DUMMY_AUDIO_BYTES`/matching metadata for any requested-but-never-stored key is gone entirely; a miss or a version mismatch now throws, exactly as a real immutable object store would. New `sealBidirectionalSegments(store, scope)` helper actually calls the real `SealedRecorder.seal()` (only its external `RecorderIngress` is a test double) to durably write both channels' audio before every test that previously called the old ad hoc `bidirectionalSegments(scope)` builder; all 15 call sites across the file were converted. Two new regression tests added: a segment whose `objectKey` is tampered to reference an object never written, and one whose `objectVersion` is tampered to a version never stored. | Before: every success-path test (`seals a valid authorized finalization...`, the `finalize`-only-operation test, the authorized-retry test, session B's leg of the cross-session test) sealed successfully against bytes/metadata the store invented on the spot, not evidence that real persisted recorder data was read back and verified; a missing or wrong-version object was structurally unable to fail. This round: the exact same assertions now pass against genuinely durable `SealedRecorder`-written objects, and the two new tampering cases prove a missing/wrong-version object is rejected, not papered over.            | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts` -- all 15 cases (13 existing + 2 new) pass against the real `MediaWorkerServer` HTTP listener + `MediaRecordingAdapter`/`SealedRecorder`/`FinalRecordingManifests`/`ImmutableRecordingManifests` chain; independently reproduced via a standalone Node probe (same `ts.transpileModule` harness) exercising a genuine seal-and-finalize round trip plus the two tampering cases directly against the actual HTTP server |
+
+Full regression for this round (Node v22.23.2, pnpm 10.33.0, TypeScript
+5.9.3, Vitest 4.1.4, this task's worktree):
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- clean (exit 0).
+- `pnpm --filter @drts/voice-media-worker lint` (`eslint src --max-warnings=0`) -- clean (exit 0).
+- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- **106
+  passed, 0 failed (12 files)**, run twice consecutively to confirm no
+  flakiness (up from round-6's 101; 5 new cases: R12/R13 round-7
+  regressions in `twm-network-client.test.ts`, the R14 round-7 regression
+  in `session-composer.test.ts`, and 2 new missing-object/wrong-version
+  negatives in `media-recording-finalize-authorization.test.ts`).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-recording-recovery-20260913 tests/integration/uv-exec-023.integration.test.ts tests/integration/system-remediation/sr-recording-recovery-20260913 tests/unit/uv-exec-008.test.ts` -- 40 passed, 0 failed (4 files), unchanged from round-6: confirms this round's `twm-network-client.ts`/`session-composer.ts` changes stay compatible with these pre-existing, out-of-write-scope callers.
+- `pnpm run typecheck:root` -- clean (exit 0, zero errors anywhere in the repo).
+- `pnpm run lint:root` -- clean (exit 0).
+
+**Environment note (not attributable to this task's code):** this
+worktree's shared `node_modules` was again stale at the start of this
+round -- identical condition and root cause documented in §10/§12/§14's
+environment notes (top-level symlinks, this time including
+`node_modules/typescript` itself in addition to the `vitest`/`tsc`
+wrapper scripts previously noted, resolving through dangling absolute
+paths into the still-removed sibling worktree
+`gemini-audit-dependency-gates-20261002`). Before the repair, `tsc`/
+`vitest` could not run at all; three standalone Node scripts (read-only,
+using `ts.transpileModule` against the actual candidate `.ts` source via
+a custom `require.extensions`/`Module._resolveFilename` hook, remapping
+`@drts/contracts` to its real `packages/contracts/src` source, never a
+build artifact) independently verified all four fixes above against the
+real candidate source and, for R12, additionally confirmed the exact
+same probe assertion fails on the pre-fix source via a scoped
+`git stash push -u -- <the two source files>` / `git stash apply` /
+`git stash drop` round trip (never a bare `git stash`, never touching
+this round's other changes) before the repair made `vitest` usable again.
+Repeated the same scoped repair as round-6 via
+`python3 tools/development-orchestrator/bin/ensure-local-node-modules.py
+repair --root .` (re-materializes this worktree's own local `node_modules`
+backed by its own `.pnpm` virtual store via `CI=true pnpm install
+--frozen-lockfile --prefer-offline`; scoped to this worktree, not the
+canonical root's shared one; not a lockfile change -- "Lockfile is up to
+date, resolution step is skipped"). After the repair, all commands above
+passed normally, both via `vitest` and matching the standalone probes'
+results. No product/browser/DB/Compose server was started; no live
+network call was made; the recording-finalize probe's HTTP server bound
+only to `127.0.0.1` on an OS-assigned port, identical to the existing
+vitest suite's own `startServer()` helper.
+
+`same_sha_review_ci`: candidate SHA and branch are recorded via the task
+lifecycle at handoff; hosted CI and review run against that SHA per the
+normal candidate lifecycle, not asserted here. The locked round-6
+candidate `23cf0ead0849d9d5f49570af03fec4b081d6ed99` is superseded by
+this round.
+
+**Remaining blockers, restated precisely for this round:** unchanged from
+§12/§14's "Remaining blockers, restated precisely for this round"
+(6a/6b, and §3 items 1/3/5), and from §14's note that `idleTimeoutMs`/
+`maxDurationMs` remain unread/unenforced past the setup window -- that
+remains outside this round's repair boundary (R12/R13/R14 and the
+recording-test evidence fix) exactly as it was outside round-6's. This
+round's four fixes are internal lifecycle/concurrency/test-fidelity
+corrections to code and tests already in this task's write scope; none
+of them depend on, or newly require, a real call-authority issuer, a
+provisioned TWM account, or any other external gap.
