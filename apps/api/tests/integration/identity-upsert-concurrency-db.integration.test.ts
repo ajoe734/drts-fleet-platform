@@ -62,6 +62,64 @@ async function insertMembershipFixture(
   );
 }
 
+// SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V: waits for a second real
+// backend to report itself blocked specifically on `blockingPid`'s lock,
+// instead of hoping a fixed sleep outlasts connect+submit latency. Shared
+// by the deterministic collision cases below (and mirrors the inline
+// version already proven in the R2/R6 case further down this file).
+async function waitUntilBlockedOn(
+  monitor: DatabaseService,
+  blockingPid: number,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const blocked = await monitor.query<{ pid: number }>(
+      `
+        SELECT pid
+        FROM pg_stat_activity
+        WHERE pid <> $1
+          AND $1 = ANY (pg_blocking_pids(pid))
+      `,
+      [blockingPid],
+    );
+    if (blocked.rows.length > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(
+    `Timed out waiting for a backend to block on pid ${blockingPid}`,
+  );
+}
+
+// SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V: records the exact SQL text a
+// DatabaseService's connections send, so a test can observe that the real
+// SAVEPOINT/ROLLBACK TO SAVEPOINT recovery branch in
+// identity.repository.ts actually executed against real Postgres, instead
+// of only inferring it from a converged final result (which a lucky,
+// error-free ON CONFLICT resolution could also produce).
+function traceClientQueries(db: DatabaseService): { queries: string[] } {
+  const trace: { queries: string[] } = { queries: [] };
+  const originalConnect = db.connect.bind(db);
+  (db as unknown as { connect: typeof db.connect }).connect = async () => {
+    const client = await originalConnect();
+    const originalQuery = client.query.bind(client);
+    (client as unknown as { query: (...args: unknown[]) => unknown }).query =
+      (...args: unknown[]) => {
+        const first = args[0];
+        const sql =
+          typeof first === "string"
+            ? first
+            : ((first as { text?: string } | undefined)?.text ?? "");
+        trace.queries.push(sql);
+        return (originalQuery as (...a: unknown[]) => unknown)(...args);
+      };
+    return client;
+  };
+  return trace;
+}
+
 describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/concurrency against real Postgres", () => {
   const databases: DatabaseService[] = [];
   const principalIds = new Set<string>();
@@ -1152,5 +1210,618 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     expect(afterRow.rows[0]?.updated_at.toISOString()).toBe(
       beforeRow.rows[0]?.updated_at.toISOString(),
     );
+  });
+
+  // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): the R9-TX
+  // case above only races two upsertWorkforceIdentity calls via
+  // Promise.all. That is timing-only -- real Postgres's ON CONFLICT
+  // speculative-insertion protocol can also resolve this race without ever
+  // raising a unique_violation at all, so a green run there does not prove
+  // runUpsertWithConflictRecovery's SAVEPOINT/ROLLBACK TO SAVEPOINT branch
+  // executed; it could pass on ordinary ON CONFLICT serialization alone.
+  // This case instead uses a gate connection (the same deterministic
+  // lock-wait technique as the R2/R6 case above) to guarantee a genuine,
+  // uncommitted collision on the *identical* principal_id, membership_id
+  // and role_binding_id, then reads back the actual SQL this connection
+  // sent to confirm the recovery branch, not just the final row, is what
+  // ran. principal_id is the table's PRIMARY KEY while source_ref is a
+  // separate UNIQUE column and the ON CONFLICT arbiter (see
+  // infra/migrations/V0068__canonical_identity_authority.sql); concurrent
+  // inserts that share both columns can surface a genuine 23505 on the
+  // PRIMARY KEY index before the arbiter's own conflict is resolved, which
+  // ON CONFLICT (source_ref) does not suppress.
+  it("R9-TX-DET (real Postgres): a genuine concurrent first-time collision on the exact same not-yet-committed identity forces the real SAVEPOINT recovery branch inside upsertWorkforceIdentity, observed via the actual SQL trace, and the bundle still commits with converged content", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const dbGate = new DatabaseService();
+    const dbA = new DatabaseService();
+    const dbMonitor = new DatabaseService();
+    databases.push(dbGate, dbA, dbMonitor);
+    const repoGate = new IdentityRepository(dbGate);
+    const repoA = new IdentityRepository(dbA);
+
+    const principalId = `principal_wfi_det_${randomUUID()}`;
+    const principalSourceRef = `source_wfi_det_${principalId}`;
+    principalIds.add(principalId);
+    const membershipId = `membership_wfi_det_${randomUUID()}`;
+    const membershipSourceRef = `source_wfi_det_${membershipId}`;
+    membershipIds.add(membershipId);
+    const roleBindingId = `role_binding_wfi_det_${randomUUID()}`;
+    const roleBindingSourceRef = `source_wfi_det_${roleBindingId}`;
+    roleBindingIds.add(roleBindingId);
+
+    const tsA = new Date(Date.now() - 60_000).toISOString();
+    const tsGate = new Date(Date.now() - 30_000).toISOString();
+
+    const trace = traceClientQueries(dbA);
+    const gateClient = await dbGate.connect();
+    let gateCommitted = false;
+    try {
+      await gateClient.query("BEGIN");
+      const gatePidResult = await gateClient.query<{ pid: number }>(
+        "SELECT pg_backend_pid() AS pid",
+      );
+      const gatePid = gatePidResult.rows[0]!.pid;
+
+      // Gate holds the exact same, previously-unseen principal row
+      // uncommitted -- the production shape of two parallel first-time
+      // authentications racing for the identical identity.
+      await (
+        repoGate as unknown as {
+          upsertPrincipal(
+            client: PoolClient,
+            record: CanonicalIdentityPrincipalRecord,
+            insideTransaction: boolean,
+          ): Promise<CanonicalIdentityPrincipalRecord>;
+        }
+      ).upsertPrincipal(
+        gateClient,
+        {
+          principalId,
+          sourceRef: principalSourceRef,
+          issuer: "test_issuer",
+          subject: `sub_${principalId}`,
+          principalType: "human",
+          email: "wfi-det@example.com",
+          emailVerified: true,
+          displayName: "WFI Det Fixture",
+          status: "active",
+          createdAt: tsGate,
+          updatedAt: tsGate,
+        },
+        false,
+      );
+
+      // A's real, public, transaction-owning entry point racing for the
+      // identical principal/membership/role-binding identity. Not yet
+      // awaited: it must block on gate's still-open row.
+      const aPromise = repoA.upsertWorkforceIdentity(
+        {
+          principalId,
+          sourceRef: principalSourceRef,
+          issuer: "test_issuer",
+          subject: `sub_${principalId}`,
+          principalType: "human",
+          email: "wfi-det@example.com",
+          emailVerified: true,
+          displayName: "WFI Det Fixture",
+          status: "active",
+          createdAt: tsA,
+          updatedAt: tsA,
+        },
+        {
+          membershipId,
+          sourceRef: membershipSourceRef,
+          principalId,
+          realm: "tenant",
+          scopeRef: `scope_${membershipId}`,
+          tenantId: "tenant_fixture",
+          partnerId: null,
+          status: "active",
+          invitedByPrincipalId: null,
+          invitationId: null,
+          createdAt: tsA,
+          updatedAt: tsA,
+        },
+        [
+          {
+            roleBindingId,
+            sourceRef: roleBindingSourceRef,
+            membershipId,
+            roleCode: "ops_user",
+            grantedByPrincipalId: null,
+            approvalId: null,
+            validFrom: tsA,
+            validTo: null,
+            createdAt: tsA,
+            updatedAt: tsA,
+          },
+        ],
+      );
+
+      await waitUntilBlockedOn(dbMonitor, gatePid);
+
+      await gateClient.query("COMMIT");
+      gateCommitted = true;
+
+      const result = await aPromise;
+
+      // Convergence: both racers' content for this source_ref must agree
+      // on exactly one of the two writers' timestamps -- never a torn mix.
+      expect([tsA, tsGate]).toContain(result.principal.updatedAt);
+
+      const principalRow = await dbMonitor.query<{ updated_at: Date }>(
+        `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+        [principalId],
+      );
+      expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
+        result.principal.updatedAt,
+      );
+      const membershipRow = await dbMonitor.query<{ updated_at: Date }>(
+        `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+        [membershipId],
+      );
+      expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
+        result.membership.updatedAt,
+      );
+
+      // The real recovery branch -- not an injected double -- actually
+      // fired against real Postgres on A's connection: SAVEPOINT before
+      // the attempt, a genuine unique-violation, ROLLBACK TO SAVEPOINT,
+      // then a successful retry, and the whole bundle still reached
+      // COMMIT rather than being lost to an aborted transaction.
+      const savepointHits = trace.queries.filter((sql) =>
+        sql.startsWith("SAVEPOINT upsert_principal_sp"),
+      );
+      const rollbackToHits = trace.queries.filter((sql) =>
+        sql.startsWith("ROLLBACK TO SAVEPOINT upsert_principal_sp"),
+      );
+      expect(savepointHits).toHaveLength(1);
+      expect(rollbackToHits).toHaveLength(1);
+      expect(trace.queries).toContain("COMMIT");
+      expect(trace.queries).not.toContain("ROLLBACK");
+    } finally {
+      if (!gateCommitted) {
+        await gateClient.query("ROLLBACK").catch(() => undefined);
+      }
+      gateClient.release();
+    }
+  });
+
+  // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): the real
+  // public first-login path (IapSubjectAdapter.verify,
+  // apps/api/src/modules/auth/iap-subject.adapter.ts:301-347) never races
+  // two calls with the *identical* principal_id the way the case above
+  // does -- every attempt mints its own fresh `principal_iap_${randomUUID()}`
+  // draft id and relies purely on the shared, deterministic
+  // `iap_subject:${subject}` source_ref to converge. This case exercises
+  // that real shape (distinct draft ids, shared source_ref) through the
+  // same deterministic gate technique, then drives a genuine, later
+  // compatible status mutation through a *third* distinct draft id to
+  // confirm canonical source_ref resolution, FK/JSON coherence and prior
+  // token invalidation all hold for upsertWorkforceIdentity specifically,
+  // not only for the standalone ensurePrincipalRecord path the R2/R6 case
+  // above already covers.
+  it("R9-TX-DRAFT (real Postgres): two concurrent first-time upsertWorkforceIdentity calls with distinct draft principal ids sharing one source_ref converge on the canonical identity, and a later genuine suspension through a third distinct draft id applies while staying FK/JSON coherent and invalidating a token issued before it landed", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const dbGate = new DatabaseService();
+    const dbA = new DatabaseService();
+    const dbMonitor = new DatabaseService();
+    databases.push(dbGate, dbA, dbMonitor);
+    const repoGate = new IdentityRepository(dbGate);
+    const repoA = new IdentityRepository(dbA);
+
+    const testKeyPair = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    const originalKeyRing = process.env.JWT_KEY_RING_JSON;
+    process.env.JWT_KEY_RING_JSON = JSON.stringify([
+      {
+        kid: "key-r9tx-draft",
+        status: "active",
+        algorithm: "RS256",
+        privateKey: testKeyPair.privateKey,
+        publicKey: testKeyPair.publicKey,
+      },
+    ]);
+
+    try {
+      const subject = `sub_wfi_draft_${randomUUID()}`;
+      const principalSourceRef = `iap_subject:${subject}`;
+      const gateDraftPrincipalId = `principal_wfi_draft_gate_${randomUUID()}`;
+      const aDraftPrincipalId = `principal_wfi_draft_a_${randomUUID()}`;
+      principalIds.add(gateDraftPrincipalId);
+      principalIds.add(aDraftPrincipalId);
+
+      const membershipId = `membership_wfi_draft_${randomUUID()}`;
+      const membershipSourceRef = `iap_membership:${subject}`;
+      membershipIds.add(membershipId);
+      const roleBindingId = `role_binding_wfi_draft_${randomUUID()}`;
+      const roleBindingSourceRef = `iap_role_binding:${subject}`;
+      roleBindingIds.add(roleBindingId);
+
+      const t0 = new Date(Date.now() - 60_000).toISOString();
+
+      const gateClient = await dbGate.connect();
+      let gateCommitted = false;
+      let canonicalPrincipalId = "";
+      try {
+        await gateClient.query("BEGIN");
+        const gatePidResult = await gateClient.query<{ pid: number }>(
+          "SELECT pg_backend_pid() AS pid",
+        );
+        const gatePid = gatePidResult.rows[0]!.pid;
+
+        await (
+          repoGate as unknown as {
+            upsertPrincipal(
+              client: PoolClient,
+              record: CanonicalIdentityPrincipalRecord,
+              insideTransaction: boolean,
+            ): Promise<CanonicalIdentityPrincipalRecord>;
+          }
+        ).upsertPrincipal(
+          gateClient,
+          {
+            principalId: gateDraftPrincipalId,
+            sourceRef: principalSourceRef,
+            issuer: "google_iap",
+            subject,
+            principalType: "human",
+            email: "wfi-draft@example.com",
+            emailVerified: true,
+            displayName: "WFI Draft Fixture",
+            status: "active",
+            createdAt: t0,
+            updatedAt: t0,
+          },
+          false,
+        );
+
+        // A mints its own, different random draft principal_id for the
+        // exact same external subject -- the real
+        // IapSubjectAdapter.verify shape, where every first-login attempt
+        // generates a fresh randomUUID principal_id but reuses the
+        // deterministic `iap_subject:${subject}` source_ref.
+        const aPromise = repoA.upsertWorkforceIdentity(
+          {
+            principalId: aDraftPrincipalId,
+            sourceRef: principalSourceRef,
+            issuer: "google_iap",
+            subject,
+            principalType: "human",
+            email: "wfi-draft@example.com",
+            emailVerified: true,
+            displayName: "WFI Draft Fixture",
+            status: "active",
+            createdAt: t0,
+            updatedAt: t0,
+          },
+          {
+            membershipId,
+            sourceRef: membershipSourceRef,
+            principalId: aDraftPrincipalId,
+            realm: "ops",
+            scopeRef: "platform:control_plane",
+            tenantId: null,
+            partnerId: null,
+            status: "active",
+            invitedByPrincipalId: null,
+            invitationId: null,
+            createdAt: t0,
+            updatedAt: t0,
+          },
+          [
+            {
+              roleBindingId,
+              sourceRef: roleBindingSourceRef,
+              membershipId,
+              roleCode: "operator",
+              grantedByPrincipalId: null,
+              approvalId: null,
+              validFrom: t0,
+              validTo: null,
+              createdAt: t0,
+              updatedAt: t0,
+            },
+          ],
+        );
+
+        await waitUntilBlockedOn(dbMonitor, gatePid);
+
+        await gateClient.query("COMMIT");
+        gateCommitted = true;
+
+        const result = await aPromise;
+
+        // Canonical source_ref resolution: whichever draft actually
+        // committed first for this source_ref wins; the other caller's
+        // own discarded draft principal_id must never leak into the
+        // returned/persisted identity, and every dependent row must point
+        // at that one canonical principal_id (FK coherence).
+        canonicalPrincipalId = result.principal.principalId;
+        expect([gateDraftPrincipalId, aDraftPrincipalId]).toContain(
+          canonicalPrincipalId,
+        );
+        expect(result.membership.principalId).toBe(canonicalPrincipalId);
+
+        const principalCountRow = await dbMonitor.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM iam.identity_principals WHERE source_ref = $1`,
+          [principalSourceRef],
+        );
+        expect(principalCountRow.rows[0]?.count).toBe("1");
+
+        const membershipRow = await dbMonitor.query<{
+          principal_id: string;
+        }>(
+          `SELECT principal_id FROM iam.identity_memberships WHERE membership_id = $1`,
+          [membershipId],
+        );
+        expect(membershipRow.rows[0]?.principal_id).toBe(
+          canonicalPrincipalId,
+        );
+      } finally {
+        if (!gateCommitted) {
+          await gateClient.query("ROLLBACK").catch(() => undefined);
+        }
+        gateClient.release();
+      }
+
+      const jwtAuthService = new JwtAuthService(repoA);
+      const identity = {
+        authMode: "jwt_bearer" as const,
+        actorType: "ops_user" as const,
+        actorId: canonicalPrincipalId,
+        principalId: canonicalPrincipalId,
+        realm: "ops" as const,
+        tenantId: null,
+        roles: ["operator"],
+        roleFamilies: ["ops" as const],
+        scopes: [] as string[],
+      };
+
+      // tokenVersion is set explicitly from the known, just-converged
+      // updatedAt rather than through issueSessionToken's own
+      // ensurePrincipal path: that path's buildPrincipalRecord mints a
+      // distinct `jwt_principal:${realm}:${principalId}` source_ref, which
+      // is the wrong identity scheme for a principal provisioned through
+      // the IAP workforce path under test here.
+      const issued = await jwtAuthService.issueSessionToken(
+        { ...identity, membershipId },
+        {
+          tokenVersion: Date.parse(t0),
+          authTime: new Date().toISOString(),
+        },
+      );
+      sessionIds.add(issued.sessionId);
+      expect(
+        await jwtAuthService.verifyAccessToken(issued.token),
+      ).not.toBeNull();
+
+      // A genuinely newer, compatible mutation lands through the exact
+      // same transactional entry point, via a THIRD distinct draft
+      // principal_id (e.g. a concurrent automated re-provisioning run that
+      // also observed the subject should now be suspended) -- not a race
+      // this time, so no retry is required, but the same canonical
+      // source_ref resolution and FK/JSON coherence must hold for a
+      // genuine content change too.
+      const thirdDraftPrincipalId = `principal_wfi_draft_c_${randomUUID()}`;
+      principalIds.add(thirdDraftPrincipalId);
+      const t1 = new Date().toISOString();
+
+      const mutated = await repoA.upsertWorkforceIdentity(
+        {
+          principalId: thirdDraftPrincipalId,
+          sourceRef: principalSourceRef,
+          issuer: "google_iap",
+          subject,
+          principalType: "human",
+          email: "wfi-draft@example.com",
+          emailVerified: true,
+          displayName: "WFI Draft Fixture",
+          status: "suspended",
+          createdAt: t0,
+          updatedAt: t1,
+        },
+        {
+          membershipId,
+          sourceRef: membershipSourceRef,
+          principalId: thirdDraftPrincipalId,
+          realm: "ops",
+          scopeRef: "platform:control_plane",
+          tenantId: null,
+          partnerId: null,
+          status: "active",
+          invitedByPrincipalId: null,
+          invitationId: null,
+          createdAt: t0,
+          updatedAt: t0,
+        },
+        [
+          {
+            roleBindingId,
+            sourceRef: roleBindingSourceRef,
+            membershipId,
+            roleCode: "operator",
+            grantedByPrincipalId: null,
+            approvalId: null,
+            validFrom: t0,
+            validTo: null,
+            createdAt: t0,
+            updatedAt: t0,
+          },
+        ],
+      );
+
+      // The suspension's new content applies, but the canonical
+      // principal_id from the earlier race -- not this third call's own
+      // discarded draft -- is what persists, with the record JSON
+      // re-stamped to match.
+      expect(mutated.principal.principalId).toBe(canonicalPrincipalId);
+      expect(mutated.principal.status).toBe("suspended");
+      expect(mutated.principal.updatedAt).toBe(t1);
+
+      const principalRow = await dbMonitor.query<{
+        principal_id: string;
+        account_status: string;
+        updated_at: Date;
+        record: { principalId: string };
+      }>(
+        `SELECT principal_id, account_status, updated_at, record FROM iam.identity_principals WHERE source_ref = $1`,
+        [principalSourceRef],
+      );
+      expect(principalRow.rows[0]?.principal_id).toBe(canonicalPrincipalId);
+      expect(principalRow.rows[0]?.account_status).toBe("suspended");
+      expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(t1);
+      expect(principalRow.rows[0]?.record.principalId).toBe(
+        canonicalPrincipalId,
+      );
+
+      // The actual acceptance requirement: a token issued while the
+      // subject was still active must be rejected once the genuine
+      // suspension has landed, even though it arrived through a brand-new
+      // draft identity bundle rather than a direct ensurePrincipalRecord
+      // call.
+      expect(
+        await jwtAuthService.verifyAccessToken(issued.token),
+      ).toBeNull();
+    } finally {
+      if (originalKeyRing === undefined) {
+        delete process.env.JWT_KEY_RING_JSON;
+      } else {
+        process.env.JWT_KEY_RING_JSON = originalKeyRing;
+      }
+    }
+  });
+
+  // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): R10 above
+  // already proves a genuine, non-arbiter conflict rejects the *single*
+  // statement that triggers it. This case proves the surrounding
+  // transaction in upsertWorkforceIdentity is still atomic when that
+  // happens on the *second* statement of the bundle -- the first
+  // statement's write (a genuine status mutation on an already-existing
+  // principal, not a no-op) must not survive if a later statement in the
+  // same transaction hits an unrecoverable conflict and the whole bundle
+  // rolls back.
+  it("R9-TX-ROLLBACK (real Postgres): a genuine non-recoverable conflict on the membership statement rolls back the earlier, already-succeeded principal mutation inside the same upsertWorkforceIdentity transaction", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+
+    const existingPrincipalId = `principal_r9rb_existing_${randomUUID()}`;
+    principalIds.add(existingPrincipalId);
+    await insertPrincipalFixture(
+      db,
+      existingPrincipalId,
+      `source_${existingPrincipalId}`,
+    );
+
+    const existingMembershipId = `membership_r9rb_existing_${randomUUID()}`;
+    membershipIds.add(existingMembershipId);
+    await insertMembershipFixture(
+      db,
+      existingMembershipId,
+      `source_${existingMembershipId}`,
+      existingPrincipalId,
+    );
+    const sharedScopeRef = `scope_${existingMembershipId}`;
+
+    const beforeRow = await db.query<{
+      account_status: string;
+      updated_at: Date;
+    }>(
+      `SELECT account_status, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [existingPrincipalId],
+    );
+
+    const newMembershipId = `membership_r9rb_new_${randomUUID()}`;
+    membershipIds.add(newMembershipId);
+    const roleBindingId = `role_binding_r9rb_${randomUUID()}`;
+    roleBindingIds.add(roleBindingId);
+    const t1 = new Date().toISOString();
+
+    // Statement 1 (principal): a genuine mutation of the already-existing
+    // principal -- not a no-op -- so there is a real write to roll back.
+    // Statement 2 (membership): a brand-new membership_id/source_ref, but
+    // targeting the SAME (principal_id, realm, scope_ref) as the
+    // pre-existing membership above. That hits
+    // uq_identity_memberships_context against a genuinely different,
+    // already-committed row, not the source_ref arbiter, so the retry
+    // inside runUpsertWithConflictRecovery hits the identical conflict
+    // again and must propagate (R10 semantics), aborting the whole
+    // transaction.
+    await expect(
+      repo.upsertWorkforceIdentity(
+        {
+          principalId: existingPrincipalId,
+          sourceRef: `source_${existingPrincipalId}`,
+          issuer: "test_issuer",
+          subject: `sub_${existingPrincipalId}`,
+          principalType: "human",
+          email: `${existingPrincipalId}@example.com`,
+          emailVerified: true,
+          displayName: "Upsert Concurrency Fixture",
+          status: "suspended",
+          createdAt: t1,
+          updatedAt: t1,
+        },
+        {
+          membershipId: newMembershipId,
+          sourceRef: `source_${newMembershipId}`,
+          principalId: existingPrincipalId,
+          realm: "tenant",
+          scopeRef: sharedScopeRef,
+          tenantId: "tenant_fixture",
+          partnerId: null,
+          status: "active",
+          invitedByPrincipalId: null,
+          invitationId: null,
+          createdAt: t1,
+          updatedAt: t1,
+        },
+        [
+          {
+            roleBindingId,
+            sourceRef: `source_${roleBindingId}`,
+            membershipId: newMembershipId,
+            roleCode: "ops_user",
+            grantedByPrincipalId: null,
+            approvalId: null,
+            validFrom: t1,
+            validTo: null,
+            createdAt: t1,
+            updatedAt: t1,
+          },
+        ],
+      ),
+    ).rejects.toThrow();
+
+    // The earlier, genuinely-succeeded statement in the same transaction
+    // must not have survived: the principal must still show its pre-call
+    // status and updated_at, not the suspension this failed call
+    // attempted.
+    const afterRow = await db.query<{
+      account_status: string;
+      updated_at: Date;
+    }>(
+      `SELECT account_status, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [existingPrincipalId],
+    );
+    expect(afterRow.rows[0]?.account_status).toBe(
+      beforeRow.rows[0]?.account_status,
+    );
+    expect(afterRow.rows[0]?.updated_at.toISOString()).toBe(
+      beforeRow.rows[0]?.updated_at.toISOString(),
+    );
+
+    const newMembershipRow = await db.query(
+      `SELECT 1 FROM iam.identity_memberships WHERE membership_id = $1`,
+      [newMembershipId],
+    );
+    expect(newMembershipRow.rows).toHaveLength(0);
   });
 });
