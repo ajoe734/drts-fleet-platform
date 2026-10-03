@@ -12,7 +12,5 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {
-    "openclaw": "2026.9.2"
-  }
+  "dependencies": {}
 }

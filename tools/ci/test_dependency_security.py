@@ -1,8 +1,18 @@
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 import json
+import importlib.util
+from pathlib import Path
 import sys
-import dependency_security
+
+MODULE_PATH = Path(__file__).with_name("dependency_security.py")
+SPEC = importlib.util.spec_from_file_location("dependency_security", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+dependency_security = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(dependency_security)
+
+# For patch('dependency_security...') to work
+sys.modules['dependency_security'] = dependency_security
 
 class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.subprocess.run')
@@ -11,12 +21,16 @@ class TestDependencySecurity(unittest.TestCase):
         mock_result.stdout = json.dumps({"advisories": {}})
         mock_run.return_value = mock_result
         
-        with patch('sys.exit') as mock_exit:
-            dependency_security.main()
-            mock_exit.assert_not_called()
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(0)
 
     @patch('dependency_security.subprocess.run')
-    def test_ignored_mobile_vulnerabilities(self, mock_run):
+    @patch('dependency_security.Path')
+    def test_ignored_mobile_vulnerabilities(self, mock_path, mock_run):
         mock_result = MagicMock()
         mock_result.stdout = json.dumps({
             "advisories": {
@@ -25,16 +39,34 @@ class TestDependencySecurity(unittest.TestCase):
                     "severity": "high",
                     "title": "Some expo vulnerability",
                     "findings": [
-                        {"paths": ["apps__driver-app>expo"]}
+                        {"version": "1.0.0", "paths": ["apps__driver-app>expo"]}
                     ]
                 }
             }
         })
         mock_run.return_value = mock_result
         
-        with patch('sys.exit') as mock_exit:
-            dependency_security.main()
-            mock_exit.assert_not_called()
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
+        exceptions = [
+            {
+                "advisory_id": "123",
+                "module_name": "expo",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "versions": ["1.0.0"],
+                "paths": ["apps__driver-app>expo"]
+            }
+        ]
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            with patch('builtins.open', mock_open(read_data=json.dumps(exceptions))):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(0)
             
     @patch('dependency_security.subprocess.run')
     @patch('dependency_security.Path')
@@ -47,7 +79,7 @@ class TestDependencySecurity(unittest.TestCase):
                     "severity": "critical",
                     "title": "Remote code execution",
                     "findings": [
-                        {"paths": ["apps__api>some-server-lib"]}
+                        {"version": "2.0.0", "paths": ["apps__api>some-server-lib"]}
                     ]
                 }
             }
@@ -58,9 +90,125 @@ class TestDependencySecurity(unittest.TestCase):
         mock_file.exists.return_value = True
         mock_path.return_value.parent.__truediv__.return_value = mock_file
         
-        with patch('sys.exit') as mock_exit:
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
             with patch('builtins.open', mock_open(read_data="[]")):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_error_json(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({
+            "error": {
+                "code": "ERR_PNPM_AUDIT_BAD_RESPONSE",
+                "message": "registry unavailable"
+            }
+        })
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
                 dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_malformed_report(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"unexpected": "format"})
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_unexpected_exit_status_json_decode_error(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = "Not JSON"
+        mock_result.returncode = 1
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+            
+    @patch('dependency_security.subprocess.run')
+    @patch('dependency_security.Path')
+    def test_changed_version_reject(self, mock_path, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({
+            "advisories": {
+                "123": {
+                    "module_name": "expo",
+                    "severity": "high",
+                    "title": "Some expo vulnerability",
+                    "findings": [
+                        {"version": "2.0.0", "paths": ["apps__driver-app>expo"]}
+                    ]
+                }
+            }
+        })
+        mock_run.return_value = mock_result
+        
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
+        # Exception is for version 1.0.0 only
+        exceptions = [
+            {
+                "advisory_id": "123",
+                "module_name": "expo",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "versions": ["1.0.0"],
+                "paths": ["apps__driver-app>expo"]
+            }
+        ]
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            with patch('builtins.open', mock_open(read_data=json.dumps(exceptions))):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    @patch('dependency_security.Path')
+    def test_expired_exception(self, mock_path, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"advisories": {}})
+        mock_run.return_value = mock_result
+        
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
+        exceptions = [
+            {
+                "advisory_id": "123",
+                "module_name": "expo",
+                "expires_at": "2020-01-01T00:00:00Z"
+            }
+        ]
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            with patch('builtins.open', mock_open(read_data=json.dumps(exceptions))):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
                 mock_exit.assert_called_with(1)
 
 if __name__ == '__main__':

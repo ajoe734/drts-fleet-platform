@@ -17,8 +17,7 @@
   },
   "dependencies": {
     "@drts/contracts": "workspace:*",
-    "@drts/ui-tokens": "workspace:*",
-    "openclaw": "2026.9.2"
+    "@drts/ui-tokens": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

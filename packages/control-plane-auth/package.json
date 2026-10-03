@@ -18,8 +18,7 @@
   ],
   "dependencies": {
     "@drts/contracts": "workspace:*",
-    "jsonwebtoken": "^9.0.3",
-    "openclaw": "2026.9.2"
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10"

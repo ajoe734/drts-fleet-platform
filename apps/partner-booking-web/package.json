@@ -17,7 +17,6 @@
     "@drts/ui-tokens": "workspace:*",
     "@drts/ui-web": "workspace:*",
     "next": "^16.3.8",
-    "openclaw": "2026.9.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

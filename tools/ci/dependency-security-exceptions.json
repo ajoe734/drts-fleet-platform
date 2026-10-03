@@ -1,52 +1,77 @@
 [
   {
-    "module_name": "multer",
-    "reason": "Wait for @nestjs/platform-express to update multer dependency or upstream patch",
-    "expires_at": "2027-01-01T00:00:00Z"
+    "advisory_id": "1117015",
+    "module_name": "postcss",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["8.4.49"],
+    "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
   },
   {
-    "module_name": "brace-expansion",
-    "reason": "Transitive dependency of exceljs, waiting for archiver/exceljs patch",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "fast-uri",
-    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for openclaw patch",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "hono",
-    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for openclaw patch",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "ip-address",
-    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for openclaw patch",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "body-parser",
-    "reason": "Transitive dependency of @nestjs/platform-express > express, wait for upstream",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "@hono/node-server",
-    "reason": "Transitive dependency of openclaw > @modelcontextprotocol/sdk, wait for upstream",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "protobufjs",
-    "reason": "Transitive dependency of openclaw > @google/genai, wait for upstream",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
-    "module_name": "qs",
-    "reason": "Transitive dependency of @nestjs/platform-express > express, wait for upstream",
-    "expires_at": "2027-01-01T00:00:00Z"
-  },
-  {
+    "advisory_id": "1119441",
     "module_name": "uuid",
-    "reason": "Transitive dependency of exceljs, wait for upstream",
-    "expires_at": "2027-01-01T00:00:00Z"
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["8.3.2", "7.0.3"],
+    "paths": [
+      "apps__driver-app>expo>@expo/config-plugins>xcode>uuid",
+      "apps__api>exceljs>uuid"
+    ]
+  },
+  {
+    "advisory_id": "1124252",
+    "module_name": "postcss",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["8.4.49"],
+    "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
+  },
+  {
+    "advisory_id": "1130709",
+    "module_name": "postcss",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["8.4.49"],
+    "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
+  },
+  {
+    "advisory_id": "1139510",
+    "module_name": "postcss",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["8.4.49"],
+    "paths": ["apps__driver-app>expo>@expo/metro-config>postcss"]
+  },
+  {
+    "advisory_id": "1147955",
+    "module_name": "decode-uri-component",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["0.2.2"],
+    "paths": ["apps__driver-app>expo-router>query-string>decode-uri-component"]
+  },
+  {
+    "advisory_id": "1239765",
+    "module_name": "image-size",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["1.2.1"],
+    "paths": ["apps__driver-app>expo>@expo/metro>metro>image-size"]
+  },
+  {
+    "advisory_id": "1239766",
+    "module_name": "image-size",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["1.2.1"],
+    "paths": ["apps__driver-app>expo>@expo/metro>metro>image-size"]
+  },
+  {
+    "advisory_id": "1240912",
+    "module_name": "node-forge",
+    "reason": "Wait for upstream patches or internal triage",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": ["1.4.0"],
+    "paths": ["apps__driver-app>expo>@expo/cli>node-forge"]
   }
 ]

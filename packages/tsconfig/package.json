@@ -2,7 +2,5 @@
   "name": "@drts/tsconfig",
   "version": "0.1.0",
   "private": true,
-  "dependencies": {
-    "openclaw": "2026.9.2"
-  }
+  "dependencies": {}
 }
