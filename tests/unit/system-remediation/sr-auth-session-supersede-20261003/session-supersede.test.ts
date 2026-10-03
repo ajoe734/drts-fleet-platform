@@ -761,3 +761,214 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: no x-session-id header, matchin
     });
   });
 });
+
+// R3 repair (third reopen): R1/R2 made a *sequential* reauthentication for
+// an *existing* role binding safe, but left a narrower window open.
+// GoogleWorkloadIdentityAdapter.verifyServicePrincipal decides a role
+// binding's `validFrom` from a prior, non-atomic read
+// (IdentityRepository.findRoleBindingsByMembershipId): if no binding is
+// found, it treats this as a true first grant and submits its own
+// `authTime` as `validFrom`. Two *concurrent* first-time authentications
+// for the same previously-unseen ops principal can both read "no existing
+// binding" before either writes. Both then submit a candidate `validFrom`;
+// whichever `ensureRoleBindingRecord` call lands second used to overwrite
+// the first call's already-persisted `validFrom`/`updatedAt`
+// (IdentityRepository.upsertRoleBinding / upsertFallbackRoleBinding took
+// `valid_from` unconditionally from the caller on conflict), bumping the
+// workforce token version fingerprint out from under the first,
+// already-issued, still-valid session.
+//
+// The fix makes `validFrom` set-once at the repository layer, exactly like
+// `createdAt`: once a role-binding row exists, neither upsert path ever
+// changes its `validFrom` again, regardless of which racing caller's read
+// decided to submit a fresh candidate. This converges correctly regardless
+// of write order, without needing the two callers' reads to agree.
+//
+// This test drives the real controller/adapter/repository and
+// deterministically forces the exact interleaving above: both calls must
+// reach `ensureRoleBindingRecord` (i.e. both adapters have already made
+// their validFrom decision from a stale "no existing binding" read) before
+// either call's actual write is allowed to proceed.
+describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R3: concurrent first-time authentication for a previously unseen role binding", () => {
+  const AUDIENCE = "https://api.dev.drts.internal";
+  const SERVICE_ACCOUNT_EMAIL =
+    "review-ops-r3@dev-project.iam.gserviceaccount.com";
+  const OPS_PRINCIPAL_ID = "review-ops-r3";
+
+  const googleKeyPair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const googleJwk = googleKeyPair.publicKey.export({ format: "jwk" }) as {
+    kty: string;
+    n: string;
+    e: string;
+  };
+  const GOOGLE_KID = "google-test-key-r3";
+
+  const ORIGINAL_ENV = { ...process.env };
+
+  let identityRepo: IdentityRepository;
+  let jwtAuthService: JwtAuthService;
+  let controller: AuthController;
+
+  function signGoogleAssertion(iatSeconds: number): string {
+    return jwt.sign(
+      {
+        iss: "https://accounts.google.com",
+        sub: "google-subject-review-ops-r3",
+        email: SERVICE_ACCOUNT_EMAIL,
+        email_verified: true,
+        aud: AUDIENCE,
+        iat: iatSeconds,
+        exp: iatSeconds + 300,
+      },
+      googleKeyPair.privateKey,
+      { algorithm: "RS256", keyid: GOOGLE_KID },
+    );
+  }
+
+  function makeDeferred<T = void>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    process.env.DRTS_ENV = "development";
+    process.env.NODE_ENV = "production";
+    process.env.JWT_KEY_RING_JSON = JSON.stringify([
+      {
+        kid: "key-test-2026",
+        status: "active",
+        algorithm: "RS256",
+        privateKey: testRsaKey.privateKey,
+        publicKey: testRsaKey.publicKey,
+      },
+    ]);
+    process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+      {
+        serviceAccountEmail: SERVICE_ACCOUNT_EMAIL,
+        principalId: OPS_PRINCIPAL_ID,
+        actorId: OPS_PRINCIPAL_ID,
+        displayName: "Review Ops R3",
+        roles: ["ops_user"],
+        scopes: [],
+        allowedTokenAudiences: [AUDIENCE],
+        routeScopes: ["* *"],
+      },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            keys: [
+              {
+                kty: googleJwk.kty,
+                kid: GOOGLE_KID,
+                n: googleJwk.n,
+                e: googleJwk.e,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    identityRepo = new IdentityRepository();
+    jwtAuthService = new JwtAuthService(identityRepo);
+    const googleAdapter = new GoogleWorkloadIdentityAdapter(identityRepo);
+    controller = new AuthController(
+      jwtAuthService,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      identityRepo,
+      undefined,
+      googleAdapter,
+      undefined,
+    );
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("R3: two sessions from concurrent first-time authentications for the same new principal both stay valid", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    const writeStarted = [makeDeferred<void>(), makeDeferred<void>()];
+    const writeGate = [makeDeferred<void>(), makeDeferred<void>()];
+    let callIndex = 0;
+
+    const originalEnsure =
+      identityRepo.ensureRoleBindingRecord.bind(identityRepo);
+    const ensureSpy = vi
+      .spyOn(identityRepo, "ensureRoleBindingRecord")
+      .mockImplementation(async (roleBinding) => {
+        const index = callIndex++;
+        // By this point the adapter has already made its validFrom decision
+        // from its own (independent, stale) read -- pausing here, before
+        // the real write, forces both concurrent callers' decisions to be
+        // made from "no existing binding" before either write proceeds.
+        writeStarted[index]?.resolve();
+        await writeGate[index]?.promise;
+        return originalEnsure(roleBinding);
+      });
+
+    const headers = (sessionSuffix: string, iatOffsetSeconds: number) => ({
+      [GOOGLE_WORKLOAD_IDENTITY_HEADER]: signGoogleAssertion(
+        nowSeconds + iatOffsetSeconds,
+      ),
+      "x-actor-type": "ops_user",
+      "x-actor-id": OPS_PRINCIPAL_ID,
+      "x-realm": "ops",
+      "x-session-id": `r3-session-${sessionSuffix}`,
+    });
+
+    const firstPromise = controller.issueToken({
+      headers: headers("a", -60),
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    } as never);
+    const secondPromise = controller.issueToken({
+      headers: headers("b", -30),
+      method: "POST",
+      originalUrl: "/api/auth/token",
+    } as never);
+
+    await writeStarted[0]!.promise;
+    await writeStarted[1]!.promise;
+    expect(callIndex).toBe(2);
+
+    writeGate[0]!.resolve();
+    const first = await firstPromise;
+
+    writeGate[1]!.resolve();
+    const second = await secondPromise;
+
+    ensureSpy.mockRestore();
+
+    expect(first.token).not.toBe(second.token);
+
+    const verifiedSecond = await jwtAuthService.verifyAccessToken(
+      second.token,
+    );
+    expect(verifiedSecond).not.toBeNull();
+
+    // This is the R3 regression: completing the second, concurrent
+    // first-time authentication must not retroactively overwrite the role
+    // binding's validFrom/updatedAt out from under the first, already-valid
+    // session.
+    const verifiedFirst = await jwtAuthService.verifyAccessToken(
+      first.token,
+    );
+    expect(verifiedFirst).not.toBeNull();
+  });
+});

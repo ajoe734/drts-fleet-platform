@@ -2713,6 +2713,15 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityRoleBindingRecord,
   ) {
+    // valid_from is set-once, like created_at: ON CONFLICT never takes it
+    // from EXCLUDED, so Postgres preserves whichever row actually won the
+    // INSERT race. Without this, two callers that both read "no existing
+    // binding" for the same previously-unseen role binding and each submit
+    // their own authTime as a candidate valid_from could have the second
+    // writer's conflicting UPDATE overwrite the first writer's already-
+    // persisted valid_from/updated_at, bumping the workforce token version
+    // and invalidating the first writer's still-valid session
+    // (SR-AUTH-SESSION-SUPERSEDE-20261003 R3).
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_role_bindings (
@@ -2735,24 +2744,26 @@ export class IdentityRepository implements OnModuleInit {
           role_code = EXCLUDED.role_code,
           granted_by_principal_id = EXCLUDED.granted_by_principal_id,
           approval_id = EXCLUDED.approval_id,
-          valid_from = EXCLUDED.valid_from,
           valid_to = EXCLUDED.valid_to,
           updated_at = EXCLUDED.updated_at,
           record = jsonb_set(
             jsonb_set(
-              EXCLUDED.record,
-              '{roleBindingId}',
-              to_jsonb(iam.identity_role_bindings.role_binding_id)
+              jsonb_set(
+                EXCLUDED.record,
+                '{roleBindingId}',
+                to_jsonb(iam.identity_role_bindings.role_binding_id)
+              ),
+              '{createdAt}',
+              to_jsonb(iam.identity_role_bindings.created_at)
             ),
-            '{createdAt}',
-            to_jsonb(iam.identity_role_bindings.created_at)
+            '{validFrom}',
+            to_jsonb(iam.identity_role_bindings.valid_from)
           )
         WHERE
           iam.identity_role_bindings.membership_id IS DISTINCT FROM EXCLUDED.membership_id
           OR iam.identity_role_bindings.role_code IS DISTINCT FROM EXCLUDED.role_code
           OR iam.identity_role_bindings.granted_by_principal_id IS DISTINCT FROM EXCLUDED.granted_by_principal_id
           OR iam.identity_role_bindings.approval_id IS DISTINCT FROM EXCLUDED.approval_id
-          OR iam.identity_role_bindings.valid_from IS DISTINCT FROM EXCLUDED.valid_from
           OR iam.identity_role_bindings.valid_to IS DISTINCT FROM EXCLUDED.valid_to
         RETURNING record
       `,
@@ -2960,13 +2971,21 @@ export class IdentityRepository implements OnModuleInit {
       this.fallbackRoleBindings.get(existingRoleBindingId) ?? null;
     // Mirrors upsertFallbackPrincipal: see upsertPrincipal for why a no-op
     // "ensure" must not advance updatedAt.
+    //
+    // validFrom is set-once, like createdAt: once a binding row exists, this
+    // method never changes its validFrom, regardless of what the caller
+    // passes. This is what makes concurrent first-time authentication for
+    // the same (previously unseen) role binding converge correctly -- two
+    // interleaved calls that both read "no existing binding" and each pass
+    // their own authTime as a candidate validFrom cannot make the second
+    // writer stomp the first writer's already-persisted validFrom/updatedAt
+    // (SR-AUTH-SESSION-SUPERSEDE-20261003 R3).
     const unchanged =
       existing !== null &&
       existing.membershipId === record.membershipId &&
       existing.roleCode === record.roleCode &&
       existing.grantedByPrincipalId === record.grantedByPrincipalId &&
       existing.approvalId === record.approvalId &&
-      existing.validFrom === record.validFrom &&
       existing.validTo === record.validTo;
     const persisted = existing
       ? {
@@ -2976,7 +2995,6 @@ export class IdentityRepository implements OnModuleInit {
           roleCode: record.roleCode,
           grantedByPrincipalId: record.grantedByPrincipalId,
           approvalId: record.approvalId,
-          validFrom: record.validFrom,
           validTo: record.validTo,
           updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
         }
