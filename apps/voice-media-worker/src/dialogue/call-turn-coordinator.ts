@@ -399,7 +399,8 @@ export class VoiceCallTurnCoordinator {
         }
         await persistPort.persist(next, bounded);
       },
-      execute: (output) => this.executeTools(output, turnSession),
+      execute: (output, bounded) =>
+        this.executeTools(output, turnSession, bounded),
     };
     const result = await turnSession.engine.turn(
       request,
@@ -464,6 +465,7 @@ export class VoiceCallTurnCoordinator {
   private async executeTools(
     output: VoiceDialogueOutput,
     turnSession: TurnSession,
+    request: VoiceDialogueRequest,
   ): Promise<unknown[]> {
     const { state } = turnSession;
     if (output.tools.length === 0) return [];
@@ -490,22 +492,42 @@ export class VoiceCallTurnCoordinator {
     // a local stub -- see `attach()`'s doc. Any other attachment (today,
     // every one -- no call-admission flow supplies a binding yet) keeps
     // the existing honest local stub unchanged.
+    //
+    // R6 (same reopen, residual): `request.signal` is this stage's own
+    // bounded controller (see `dialogue-engine.ts#boundedStage`) -- already
+    // aborted the moment this turn is superseded (barge-in, release, a
+    // newer final, or a media-authority epoch advance, see
+    // `VoiceCallTurnCoordinator.handle`) or its deadline passes. Checked
+    // before each awaited HTTP call (never start one once already
+    // cancelled) and forwarded into both calls so an in-flight request is
+    // actually aborted, not merely unsignalled. `request.inputEpoch` --
+    // never `turnSession.inputEpoch`, which may already have been bumped
+    // past this turn's own admitted value by the same supersession that
+    // aborted `request.signal` -- is what is submitted, so a stale
+    // proposal can never be laundered under a newer epoch merely because
+    // the HTTP call happened to still be let through.
     if (turnSession.binding && this.apiClient) {
       const binding = turnSession.binding;
       const results: unknown[] = [];
       for (const tool of output.tools) {
         if (tool.name !== "request_handoff") continue;
-        const capability = await this.apiClient.issueCapability({
-          voiceSessionId: binding.voiceSessionId,
-          resourceScopeId: binding.resourceScopeId,
-          routeProfileVersion: binding.routeProfileVersion,
-          leaseEpoch: binding.leaseEpoch,
-          scopes: HANDOFF_CAPABILITY_SCOPES,
-        });
+        request.signal.throwIfAborted();
+        const capability = await this.apiClient.issueCapability(
+          {
+            voiceSessionId: binding.voiceSessionId,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            scopes: HANDOFF_CAPABILITY_SCOPES,
+          },
+          request.signal,
+        );
+        request.signal.throwIfAborted();
         const response = await this.apiClient.requestHandoff(
           binding.voiceSessionId,
           capability.token,
-          { inputEpoch: turnSession.inputEpoch, output },
+          { inputEpoch: request.inputEpoch, output },
+          request.signal,
         );
         results.push(...response.results);
       }

@@ -223,4 +223,156 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(sentBinary.length).toBeGreaterThan(0);
   });
+
+  /**
+   * Codex reopen round 5/6, R6: a turn's handoff tool execution must not
+   * escape cancellation and must never submit a newer `inputEpoch` than
+   * the one admitted when the triggering transcript arrived. Reproduces
+   * the reviewer's exact finding -- close/speech.started/media-epoch-
+   * advance, each raised while the handoff-scoped capability call is
+   * still outstanding -- against the real `VoiceSessionComposer` +
+   * `VoiceCallTurnCoordinator` + `VoiceDialogueEngine` +
+   * `OpenAiRealtimeFixtureAdapter` + `VoiceApiClient` composition, with
+   * only the channel and the real `fetch` transport doubled.
+   */
+  describe("R6: a turn's handoff call must be fenced by the same cancellation that supersedes it", () => {
+    function setup() {
+      const binding: VoiceSessionBinding = {
+        voiceSessionId: "44444444-4444-4444-4444-444444444444",
+        resourceScopeId: "55555555-5555-5555-5555-555555555555",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        sessionVersion: 4,
+      };
+      const calls: Array<{ path: string; body: unknown; hasSignal: boolean }> = [];
+      let releaseHandoffCapability: () => void = () => {};
+      const handoffCapabilityHeld = new Promise<void>((resolve) => {
+        releaseHandoffCapability = resolve;
+      });
+      const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(url)).pathname;
+        const body = init?.body ? JSON.parse(init.body as string) : undefined;
+        calls.push({ path, body, hasSignal: init?.signal != null });
+        if (path === "/callcenter/voice/capabilities") {
+          const scopes = (body as { scopes: string[] }).scopes;
+          if (scopes.includes("handoff_request")) {
+            await handoffCapabilityHeld;
+          }
+          return jsonResponse(200, {
+            data: { token: `capability-for-${scopes.join(",")}`, tokenType: "Bearer", expiresIn: 120 },
+          });
+        }
+        if (path.endsWith("/input-resolutions")) {
+          return jsonResponse(200, {
+            data: {
+              session: {
+                sessionVersion: 5,
+                inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+                pendingInput: false,
+              },
+            },
+          });
+        }
+        if (path.endsWith("/handoffs")) {
+          return jsonResponse(200, {
+            data: { results: [{ status: "queued", handoffId: "handoff-should-not-happen" }] },
+          });
+        }
+        throw new Error(`unexpected path ${path}`);
+      });
+      const apiClient = new VoiceApiClient(
+        { baseUrl: "https://api.example.test", fetchImpl },
+        { getToken: vi.fn(async () => "workload-token") },
+      );
+      const asr = new StreamingAsrAdapter();
+      const tts = new DeterministicTtsAdapter();
+      const coordinator = new VoiceCallTurnCoordinator(
+        () => new OpenAiRealtimeFixtureAdapter(),
+        undefined,
+        undefined,
+        false,
+        apiClient,
+      );
+      const composer = new VoiceSessionComposer(
+        { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+        coordinator,
+      );
+      const { channel, sentBinary } = makeChannel();
+      composer.attach(binding.voiceSessionId, channel, binding);
+      return { binding, calls, releaseHandoffCapability, asr, channel, composer, sentBinary };
+    }
+
+    it("sends no /handoffs request when the channel closes while the handoff capability call is still outstanding", async () => {
+      const { calls, releaseHandoffCapability, asr, channel, sentBinary } =
+        setup();
+
+      asr.emitFinal("救命", "seg-1");
+      await flush(10);
+      expect(calls.some((c) => c.path.endsWith("/handoffs"))).toBe(false);
+
+      (channel as unknown as EventEmitter).emit("close");
+      releaseHandoffCapability();
+      await flush(10);
+
+      expect(calls.some((c) => c.path.endsWith("/handoffs"))).toBe(false);
+      expect(sentBinary).toHaveLength(0);
+    });
+
+    it("sends no /handoffs request when a speech.started control frame arrives (barge-in) while the handoff capability call is still outstanding", async () => {
+      const { calls, releaseHandoffCapability, asr, channel, sentBinary } =
+        setup();
+
+      asr.emitFinal("救命", "seg-1");
+      await flush(10);
+      expect(calls.some((c) => c.path.endsWith("/handoffs"))).toBe(false);
+
+      (channel as unknown as EventEmitter).emit(
+        "message",
+        JSON.stringify({ type: "speech.started" }),
+        false,
+      );
+      releaseHandoffCapability();
+      await flush(10);
+
+      expect(calls.some((c) => c.path.endsWith("/handoffs"))).toBe(false);
+      // Zero audio for the invalidated turn -- no laundered output either.
+      expect(sentBinary).toHaveLength(0);
+    });
+
+    it("sends no /handoffs request when the media-authority epoch advances (handoff/reconnect) while the handoff capability call is still outstanding", async () => {
+      const { binding, calls, releaseHandoffCapability, asr, composer, sentBinary } = setup();
+
+      asr.emitFinal("救命", "seg-1");
+      await flush(10);
+      expect(calls.some((c) => c.path.endsWith("/handoffs"))).toBe(false);
+
+      expect(composer.advanceMediaEpoch(binding.voiceSessionId)).toBe(2);
+      releaseHandoffCapability();
+      await flush(10);
+
+      expect(calls.some((c) => c.path.endsWith("/handoffs"))).toBe(false);
+      expect(sentBinary).toHaveLength(0);
+    });
+
+    it("positive control: with no invalidation, the handoff capability call carries a signal and submits the admitted inputEpoch, and the turn completes normally", async () => {
+      const { calls, releaseHandoffCapability, asr, sentBinary } = setup();
+
+      asr.emitFinal("救命", "seg-1");
+      await flush(5);
+      releaseHandoffCapability();
+      await flush(10);
+
+      const handoffCapabilityCall = calls.find(
+        (c) =>
+          c.path === "/callcenter/voice/capabilities" &&
+          (c.body as { scopes: string[] }).scopes.includes("handoff_request"),
+      );
+      expect(handoffCapabilityCall?.hasSignal).toBe(true);
+      const handoffCall = calls.find((c) => c.path.endsWith("/handoffs"));
+      expect(handoffCall).toBeDefined();
+      expect(handoffCall?.hasSignal).toBe(true);
+      expect(handoffCall?.body).toMatchObject({ inputEpoch: 1 });
+      expect(sentBinary.length).toBeGreaterThan(0);
+    });
+  });
 });

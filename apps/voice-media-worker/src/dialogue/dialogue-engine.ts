@@ -15,8 +15,20 @@ export interface VoiceDialogueTurnPorts {
     state: VoiceDialogueState,
     request: VoiceDialogueRequest,
   ): Promise<void>;
-  /** Uses one authenticated VoiceToolGatewayService for this admitted turn. */
-  execute(output: VoiceDialogueOutput): Promise<unknown[]>;
+  /** Uses one authenticated VoiceToolGatewayService for this admitted turn.
+   * `request` (Codex reopen round 5/6, R6) is the same per-stage bounded
+   * request `persist` above receives: its `signal` is already aborted the
+   * moment this turn is superseded (barge-in, release, a newer final, a
+   * media-authority epoch advance, or its own deadline) and its
+   * `inputEpoch` is the immutable epoch admitted when this turn's final
+   * transcript arrived -- an implementation must honor `signal` at every
+   * awaited external call it makes (never start one once already aborted)
+   * and must submit `request.inputEpoch`, never a mutable later value, so a
+   * stale proposal can never be re-labeled under a newer epoch. */
+  execute(
+    output: VoiceDialogueOutput,
+    request: VoiceDialogueRequest,
+  ): Promise<unknown[]>;
 }
 
 /** Model text is diagnostic data, never a playback script or booking receipt.
@@ -75,8 +87,8 @@ export class VoiceDialogueEngine {
       if (isStale() || Date.now() >= request.deadline)
         throw new Error("voice_stale_epoch");
       Object.assign(state, next);
-      const results = await this.boundedStage(request, isStale, () =>
-        ports.execute(output),
+      const results = await this.boundedStage(request, isStale, (bounded) =>
+        ports.execute(output, bounded),
       );
       request.signal.throwIfAborted();
       if (isStale() || Date.now() >= request.deadline)
