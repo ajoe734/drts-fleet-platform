@@ -113,7 +113,21 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
         });
       }
       if (path.endsWith("/input-resolutions")) {
-        return jsonResponse(200, { data: { session: { sessionVersion: 6 } } });
+        // Mirrors the real `VoiceSessionService.resolveInput`: it only
+        // reaches a success response when the submitted `inputEpoch`
+        // already matched the session's current one, so the real backend
+        // always echoes it back unchanged (the client's response
+        // correlation check in `createTrustedDialoguePersistPort` relies
+        // on exactly this).
+        return jsonResponse(200, {
+          data: {
+            session: {
+              sessionVersion: 6,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
       }
       if (path.endsWith("/handoffs")) {
         return jsonResponse(200, {

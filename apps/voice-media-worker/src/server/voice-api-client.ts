@@ -78,6 +78,7 @@ export class VoiceApiClient {
    * then exchanges it for a short-lived, session-bound capability. */
   async issueCapability(
     command: IssueCapabilityCommand,
+    signal?: AbortSignal,
   ): Promise<VoiceCapabilityTokenEnvelope> {
     const workloadToken = await this.workloadTokenSource.getToken();
     return this.request<VoiceCapabilityTokenEnvelope>(
@@ -85,6 +86,7 @@ export class VoiceApiClient {
       "/callcenter/voice/capabilities",
       workloadToken,
       command,
+      signal,
     );
   }
 
@@ -92,12 +94,14 @@ export class VoiceApiClient {
     sessionId: string,
     capabilityToken: string,
     command: ResolveInputCommand,
+    signal?: AbortSignal,
   ): Promise<ResolveInputResult> {
     return this.request<ResolveInputResult>(
       "POST",
       `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/input-resolutions`,
       capabilityToken,
       command,
+      signal,
     );
   }
 
@@ -105,20 +109,29 @@ export class VoiceApiClient {
     sessionId: string,
     capabilityToken: string,
     command: RequestHandoffCommand,
+    signal?: AbortSignal,
   ): Promise<RequestHandoffResult> {
     return this.request<RequestHandoffResult>(
       "POST",
       `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/handoffs`,
       capabilityToken,
       command,
+      signal,
     );
   }
 
+  /** `signal` is forwarded to the real `fetch` so an in-flight request is
+   * actually cancelled on abort, not merely ignored after the fact --
+   * callers (e.g. `createTrustedDialoguePersistPort`) still must re-check
+   * `signal.aborted` at every await boundary themselves, since an
+   * already-settled promise cannot be un-resolved by a signal firing
+   * afterward. */
   private async request<T>(
     method: string,
     path: string,
     bearerToken: string,
     body: unknown,
+    signal?: AbortSignal,
   ): Promise<T> {
     const fetchImpl = this.config.fetchImpl ?? fetch;
     let response: Response;
@@ -130,6 +143,7 @@ export class VoiceApiClient {
           authorization: `Bearer ${bearerToken}`,
         },
         body: JSON.stringify(body),
+        signal: signal ?? null,
       });
     } catch (err) {
       throw new VoiceApiError(

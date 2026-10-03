@@ -247,7 +247,9 @@ describe("createTrustedDialoguePersistPort", () => {
         });
       }
       resolveInputBody = JSON.parse(init!.body as string);
-      return jsonResponse(200, { data: { session: { sessionVersion: 6 } } });
+      return jsonResponse(200, {
+        data: { session: { sessionVersion: 6, inputEpoch: 3, pendingInput: false } },
+      });
     });
     const client_ = new VoiceApiClient(
       { baseUrl: "https://api.example.test", fetchImpl },
@@ -290,6 +292,109 @@ describe("createTrustedDialoguePersistPort", () => {
     await expect(port.persist({} as VoiceDialogueState, request)).rejects.toMatchObject({
       code: "VOICE_DRAFT_STALE",
     });
+    expect(binding.sessionVersion).toBe(5);
+  });
+
+  it("fails closed immediately on an already-aborted request, issuing no HTTP call at all", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn();
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      port.persist(
+        {} as VoiceDialogueState,
+        { ...request, signal: controller.signal } as VoiceDialogueRequest,
+      ),
+    ).rejects.toThrow(/voice_trusted_persist_aborted/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(binding.sessionVersion).toBe(5);
+  });
+
+  it("stops before the CAS write when the request is aborted while capability issuance is still pending, forwarding the signal to fetch", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    let releaseCapability!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCapability = resolve;
+    });
+    const calls: Array<{ path: string; hadSignal: boolean }> = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ path: String(url), hadSignal: init?.signal != null });
+      if (String(url).endsWith("/capabilities")) {
+        await gate;
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      return jsonResponse(200, {
+        data: { session: { sessionVersion: 6, inputEpoch: 3, pendingInput: false } },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const controller = new AbortController();
+
+    const pending = port.persist(
+      {} as VoiceDialogueState,
+      { ...request, signal: controller.signal } as VoiceDialogueRequest,
+    );
+    for (let i = 0; i < 10 && calls.length === 0; i++) await Promise.resolve();
+    controller.abort();
+    releaseCapability();
+
+    await expect(pending).rejects.toThrow(/voice_trusted_persist_aborted/);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.hadSignal).toBe(true);
+    expect(binding.sessionVersion).toBe(5);
+  });
+
+  it("rejects a resolveInput response whose inputEpoch does not correlate with the request, leaving sessionVersion untouched", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      return jsonResponse(200, {
+        data: { session: { sessionVersion: 6, inputEpoch: 999, pendingInput: false } },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(port.persist({} as VoiceDialogueState, request)).rejects.toThrow(
+      /voice_trusted_persist_stale_response/,
+    );
     expect(binding.sessionVersion).toBe(5);
   });
 

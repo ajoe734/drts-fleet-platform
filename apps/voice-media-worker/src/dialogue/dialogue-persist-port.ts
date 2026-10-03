@@ -85,6 +85,23 @@ const PERSIST_CAPABILITY_SCOPES: IssueCapabilityCommand["scopes"] = [
  * and `persist` rejects rather than silently no-op/succeed in that case --
  * a `production: true` engine must never be told persistence succeeded
  * when there was nothing trustworthy to persist through.
+ *
+ * `_state` stays unused: `VoiceSessionService.resolveInput` (SD §10.1) is
+ * a CAS *admission* seam over `sessionVersion`/`inputEpoch` only -- it has
+ * no field for the dialogue content itself (slot evidence, address
+ * history, handoff reason). No SD-approved route or schema exists yet to
+ * carry `VoiceDialogueState` to apps/api (the closest table,
+ * `voice.draft_revision`, belongs to the separate post-call booking-intent
+ * domain, keyed by `intent_id`, not this live call's `voiceSessionId`),
+ * and `infra/migrations/` is outside this task's write scope, so a durable
+ * per-turn state store cannot be added here. Appending unused fields to
+ * this request body would not make persistence real, only look real; do
+ * not do that to make request payloads differ across calls. Until that
+ * route/schema is designed, `VoiceDialogueEngine`'s in-memory
+ * `Object.assign(state, next)` remains the only state store even in
+ * `mode: "trusted"` -- the one new guarantee this mode adds is that the
+ * *admission* (the turn's revision/epoch) is checked against apps/api's
+ * real authority before that in-memory commit, tools, or playback run.
  */
 export function createTrustedDialoguePersistPort(
   client: VoiceApiClient,
@@ -93,19 +110,37 @@ export function createTrustedDialoguePersistPort(
   return {
     mode: "trusted",
     async persist(_state, request) {
+      const { signal } = request;
+      if (signal?.aborted) {
+        throw new Error(
+          "voice_trusted_persist_aborted: request was already aborted before persistence began.",
+        );
+      }
       const current = binding();
       if (!current) {
         throw new Error(
           "voice_trusted_persist_unbound: no VoiceSessionBinding is attached for this session.",
         );
       }
-      const capability = await client.issueCapability({
-        voiceSessionId: current.voiceSessionId,
-        resourceScopeId: current.resourceScopeId,
-        routeProfileVersion: current.routeProfileVersion,
-        leaseEpoch: current.leaseEpoch,
-        scopes: PERSIST_CAPABILITY_SCOPES,
-      });
+      const capability = await client.issueCapability(
+        {
+          voiceSessionId: current.voiceSessionId,
+          resourceScopeId: current.resourceScopeId,
+          routeProfileVersion: current.routeProfileVersion,
+          leaseEpoch: current.leaseEpoch,
+          scopes: PERSIST_CAPABILITY_SCOPES,
+        },
+        signal,
+      );
+      // `issueCapability` can settle after `signal` already fired (an
+      // abort does not retroactively un-resolve a promise); re-check
+      // before the CAS write itself ever goes out, or a cancelled turn
+      // could still advance the authoritative revision underneath it.
+      if (signal?.aborted) {
+        throw new Error(
+          "voice_trusted_persist_aborted: request was aborted while awaiting capability issuance.",
+        );
+      }
       const result = await client.resolveInput(
         current.voiceSessionId,
         capability.token,
@@ -114,7 +149,20 @@ export function createTrustedDialoguePersistPort(
           inputEpoch: request.inputEpoch,
           resolution: "relevant",
         },
+        signal,
       );
+      // Defense in depth against a misattributed response (proxy/transport
+      // bug, replay): only trust a response that actually correlates with
+      // the input epoch this call just resolved. The real backend already
+      // guarantees this on success (`resolveInput` rejects on a mismatched
+      // `inputEpoch` before responding), so this never fires against a
+      // genuine apps/api reply -- it exists to reject a corrupted one
+      // instead of silently advancing the binding's revision off it.
+      if (result.session.inputEpoch !== request.inputEpoch) {
+        throw new Error(
+          "voice_trusted_persist_stale_response: resolveInput response does not correlate with the resolved inputEpoch.",
+        );
+      }
       // The CAS write just advanced the authoritative revision -- the next
       // call through this same binding must submit *that* value, never the
       // one just consumed, or every subsequent call would deterministically

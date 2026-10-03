@@ -1618,3 +1618,51 @@ No product/listening server, browser/E2E, DB, Compose, real network
 provider/GCP/apps/api call, or git mutation beyond the commit/push
 itself was performed. `same_sha_review_ci` pending hosted CI on the new
 SHA produced by this round's commit.
+
+## Round-10: machine-local audit follow-through probe on `5e4f1ca28` --
+four `createTrustedDialoguePersistPort`/`VoiceApiClient` defects, fixed
+on this candidate
+
+An interactive, read-only audit probe (not Codex's own reviewer
+dispatch; recorded at
+`.local/audit-followthrough-20261003/README.md` and
+`voice-trusted-persist-probe.cjs`, reproduced against the immutable
+`eca2dcd4c`/`5e4f1ca28` source objects via `git show` + TypeScript
+`transpileModule`, with `net.Server.listen` and real `fetch` both
+disabled) found four defects in the Round-7 `mode: "trusted"` persist
+seam (`apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts`,
+`apps/voice-media-worker/src/server/voice-api-client.ts`). The task's own
+`next` field carried this forward rather than treating the probe's
+exit-0 as a pass: "exit0 means observed defects, NOT pass." All four are
+addressed on this candidate, confirmed by failing-before/passing-after
+regression tests in `tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`
+(the probe's own `.cjs` script is machine-local audit evidence, not part
+of this repo's test suite, and is left untouched).
+
+| # | Defect (probe's own wording) | Root cause | Fix |
+| --- | --- | --- | --- |
+| 1 | "Pre-aborted persistence still obtains a capability, sends CAS and advances the local binding revision." | `persist()` never checked `request.signal.aborted` before doing anything. | `persist()` now checks `signal?.aborted` first and throws `voice_trusted_persist_aborted` before calling `client.issueCapability` at all -- zero HTTP calls for an already-cancelled turn. |
+| 2 | "Abort while capability acquisition is pending still allows a later CAS request; neither HTTP request has an AbortSignal." | `VoiceApiClient`'s `request()` never forwarded any `AbortSignal` to `fetch`, and the persist port never re-checked `signal.aborted` after `issueCapability` resolved. | `VoiceApiClient.issueCapability`/`resolveInput`/`requestHandoff` now take an optional `signal` forwarded into `fetch`'s `init.signal` (so a real in-flight request can actually be cancelled). The persist port re-checks `signal?.aborted` immediately after `issueCapability` settles and throws `voice_trusted_persist_aborted` before ever calling `resolveInput` -- an abort that lands while capability issuance is in flight now stops the CAS write, not merely leaves it unsignalled. |
+| 3 | "Different actual dialogue snapshots generate identical HTTP payloads. The port ignores `_state`; actual API `resolveInput` only resolves the input watermark/confirmation, not dialogue data." | Genuine, confirmed by re-reading both sides: `VoiceSessionService.resolveInput` (SD §10.1) is a CAS *admission* seam over `sessionVersion`/`inputEpoch` only; it has no field for dialogue content (slots, address history, handoff reason), and no other SD-approved route has one either. The closest schema object, `voice.draft_revision` (`infra/migrations/V0086__voice_persistence_domain_schema.sql`), belongs to the separate post-call booking-intent domain (keyed by `intent_id`, written only from `voice-confirmation.service.ts`), not this live call's `voiceSessionId`. `infra/migrations/` is outside this task's `write_scopes`, so a durable per-turn dialogue-state store cannot be added by this task. | Not implementable within this task's scope as a persistence fix -- doing so would require a new SD-approved route/schema and a migration this task cannot author. Instead: (a) documented this precisely in `dialogue-persist-port.ts`'s own doc comment (naming the exact missing route/schema and the exact existing-but-different table, so a future task has the real seam to design rather than relabeling it undesigned), and (b) explicitly did **not** pad the request body with unused `state`-derived fields just to make two calls' payloads differ cosmetically -- that would look like a fix without being one. `VoiceDialogueEngine`'s in-memory `Object.assign(state, next)` remains the only state store even in `mode: "trusted"`; what Round-7/this round's fixes add is that the turn's *admission* (revision/epoch) is checked against apps/api's real authority before that in-memory commit, tools, or playback run -- the one guarantee the current approved contract actually supports. |
+| 4 | "Response input epoch 999 is accepted for request epoch 7; response correlation is unchecked." | `persist()` trusted `result.session.sessionVersion` unconditionally, with no check that the response actually correlates with the `inputEpoch` just resolved. | Added an explicit correlation check: if `result.session.inputEpoch !== request.inputEpoch`, throw `voice_trusted_persist_stale_response` and leave `binding.sessionVersion` untouched. The real backend already guarantees this invariant on every success response (`VoiceSessionService.resolveInput` rejects on a mismatched `inputEpoch` before responding, see `voice-session.service.ts:422-428`), so this never fires against a genuine apps/api reply; it exists as defense-in-depth against a misattributed/corrupted one. |
+
+**Regression tests added** (`voice-api-client.test.ts`, `createTrustedDialoguePersistPort` describe block): pre-aborted request issues no HTTP call; abort while capability issuance is pending stops before the CAS write and the capability call itself carried a signal; a response with a non-correlating `inputEpoch` is rejected and `sessionVersion` stays untouched. The pre-existing "issues a capability... advances sessionVersion" test's mock response was corrected to include a correlated `inputEpoch` (it previously omitted the field entirely, which is not a shape the real backend's `ResolveInputResult` type allows). `trusted-turn-composition.test.ts`'s end-to-end mock was corrected the same way, echoing the submitted `inputEpoch` back in its `/input-resolutions` response, matching the real backend's own guarantee rather than an incomplete fixture.
+
+**Local verification on this exact candidate** (the sibling-worktree symlink breakage Round-9 recorded is no longer present in this session):
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm --filter @drts/voice-media-worker lint`: exit 0.
+- `pnpm exec eslint tests/unit/audit-voice-application-wiring-20261003 --max-warnings=0`: exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/ tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts tests/unit/uv-exec-{008,010,012,026}.test.ts`: 20 files / 312 tests pass, exit 0 (up from 309 at Round-9; +4 tests, net of the one pre-existing test whose incomplete mock response was corrected rather than duplicated).
+
+The machine-local probe log asserting the old (defective) behavior,
+`.local/audit-followthrough-20261003/voice-trusted-persist-5e4f1ca2.log`,
+is left as historical evidence of the pre-fix state and is expected to
+no longer reproduce against this candidate's SHA (its own hard-coded
+assertions -- e.g. `calls.every(call => !call.hasSignal)` -- now
+describe behavior this fix deliberately removed).
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider/GCP/apps/api call, package install, or apps/api source change
+was performed this round. `same_sha_review_ci` pending hosted CI and
+original reviewer (Codex) re-review on the new SHA this round's commit
+produces.
