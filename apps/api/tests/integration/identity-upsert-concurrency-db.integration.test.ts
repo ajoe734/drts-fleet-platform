@@ -1515,6 +1515,203 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     30_000,
   );
 
+  // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-NEWER (third reopen of
+  // R9-TX-V): R9-TX-DET above proves the SAVEPOINT recovery branch itself
+  // fires and the bundle still converges, but both of its racers send
+  // byte-identical tracked content (status/displayName/roleCode are all
+  // "active"/"WFI Det Fixture"/"ops_user" on both sides) -- only their
+  // timestamps differ. upsertPrincipal/upsertRoleBinding's own
+  // `ON CONFLICT ... WHERE (<tracked column> IS DISTINCT FROM EXCLUDED....)
+  // AND EXCLUDED.updated_at >= current.updated_at` guard only reaches the
+  // timestamp half of that AND once the content half is true; with DET's
+  // identical content the first half is always false, so DET's retry is a
+  // guaranteed no-op regardless of the timestamp half -- it would pass
+  // identically even if `AND EXCLUDED.updated_at >= ...` were deleted
+  // outright. This case repeats DET's genuine non-arbiter PK collision
+  // technique (same shared principal_id/membership_id/role_binding_id and
+  // source_ref across both racers, forcing the identical real 23505 +
+  // ROLLBACK TO SAVEPOINT + retry), but gives the two racers content that
+  // actually differs (principal.displayName, roleBindings[0].roleCode) on
+  // top of distinct timestamps.
+  //
+  // Which physical racer is the one forced through recovery is still not
+  // deterministic (it depends on real lock-wait timing, not on which
+  // bundle carries the newer timestamp -- see DET's comment on why this
+  // cannot be choreographed without collapsing the race). So this does not
+  // assert a specific side wins; it asserts the guard's actual contract,
+  // which holds either way: bundleB (the later timestamp, differing
+  // content) must be the only content ever persisted or returned --
+  // whether bundleA is the one whose retry correctly loses to it (its
+  // stale content must never overwrite bundleB once bundleB has committed)
+  // or bundleB is the one whose retry correctly wins over bundleA's
+  // already-committed row (its newer, differing content must actually
+  // apply, not be silently discarded in favor of returning bundleA's
+  // stale row).
+  it(
+    "R9-TX-NEWER (real Postgres): when the real SAVEPOINT recovery branch fires on a genuine non-arbiter collision, a writer carrying genuinely newer differing content always ends up persisted and returned, whichever racer is the one observed retrying",
+    async () => {
+      expect(DATABASE_URL).toBeTruthy();
+
+      const dbA = new DatabaseService();
+      const dbB = new DatabaseService();
+      databases.push(dbA, dbB);
+      const repoA = new IdentityRepository(dbA);
+      const repoB = new IdentityRepository(dbB);
+      const traceA = traceClientQueries(dbA);
+      const traceB = traceClientQueries(dbB);
+
+      const countHits = (queries: string[], prefix: string) =>
+        queries.filter((sql) => sql.startsWith(prefix)).length;
+
+      const MAX_ATTEMPTS = 60;
+      let recovered = false;
+
+      for (let attempt = 0; attempt < MAX_ATTEMPTS && !recovered; attempt++) {
+        const principalId = `principal_wfi_newer_${attempt}_${randomUUID()}`;
+        const principalSourceRef = `source_wfi_newer_${principalId}`;
+        principalIds.add(principalId);
+        const membershipId = `membership_wfi_newer_${attempt}_${randomUUID()}`;
+        const membershipSourceRef = `source_wfi_newer_${membershipId}`;
+        membershipIds.add(membershipId);
+        const roleBindingId = `role_binding_wfi_newer_${attempt}_${randomUUID()}`;
+        const roleBindingSourceRef = `source_wfi_newer_${roleBindingId}`;
+        roleBindingIds.add(roleBindingId);
+
+        const tsA = new Date(Date.now() - 60_000).toISOString();
+        const tsB = new Date(Date.now() - 30_000).toISOString();
+
+        const makeBundle = (ts: string, variant: "A" | "B") => ({
+          principal: {
+            principalId,
+            sourceRef: principalSourceRef,
+            issuer: "test_issuer",
+            subject: `sub_${principalId}`,
+            principalType: "human",
+            email: "wfi-newer@example.com",
+            emailVerified: true,
+            displayName: `WFI Newer Fixture ${variant}`,
+            status: "active",
+            createdAt: ts,
+            updatedAt: ts,
+          } satisfies CanonicalIdentityPrincipalRecord,
+          membership: {
+            membershipId,
+            sourceRef: membershipSourceRef,
+            principalId,
+            realm: "tenant",
+            scopeRef: `scope_${membershipId}`,
+            tenantId: "tenant_fixture",
+            partnerId: null,
+            status: "active",
+            invitedByPrincipalId: null,
+            invitationId: null,
+            createdAt: ts,
+            updatedAt: ts,
+          } satisfies CanonicalIdentityMembershipRecord,
+          roleBindings: [
+            {
+              roleBindingId,
+              sourceRef: roleBindingSourceRef,
+              membershipId,
+              roleCode: variant === "A" ? "ops_user" : "ops_admin",
+              grantedByPrincipalId: null,
+              approvalId: null,
+              validFrom: ts,
+              validTo: null,
+              createdAt: ts,
+              updatedAt: ts,
+            } satisfies CanonicalIdentityRoleBindingRecord,
+          ],
+        });
+
+        const bundleA = makeBundle(tsA, "A");
+        const bundleB = makeBundle(tsB, "B");
+
+        // Both racers' real, public, transaction-owning entry points fired
+        // together with no await between them, so neither's statement can
+        // have resolved before the other's own conflict check runs (same
+        // technique as R9-TX-DET above).
+        const [resultA, resultB] = await Promise.all([
+          repoA.upsertWorkforceIdentity(
+            bundleA.principal,
+            bundleA.membership,
+            bundleA.roleBindings,
+          ),
+          repoB.upsertWorkforceIdentity(
+            bundleB.principal,
+            bundleB.membership,
+            bundleB.roleBindings,
+          ),
+        ]);
+
+        const aQueries = findConnectionByBoundParam(traceA, principalId).map(
+          (q) => q.sql,
+        );
+        const bQueries = findConnectionByBoundParam(traceB, principalId).map(
+          (q) => q.sql,
+        );
+
+        const rollbackToHits =
+          countHits(aQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") +
+          countHits(bQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp");
+        if (rollbackToHits < 1) {
+          continue;
+        }
+
+        // The real recovery branch actually fired against real Postgres
+        // for this attempt's identity. Whichever racer it fired on, the
+        // only correct converged content is bundleB's -- it carries both
+        // the later timestamp and the genuinely differing content. Both
+        // callers' return values must agree with each other and with what
+        // is actually persisted; bundleA's stale, differing content must
+        // never win regardless of which side physically retried.
+        expect(resultA.principal.displayName).toBe("WFI Newer Fixture B");
+        expect(resultB.principal.displayName).toBe("WFI Newer Fixture B");
+        expect(resultA.principal.updatedAt).toBe(tsB);
+        expect(resultB.principal.updatedAt).toBe(tsB);
+        expect(resultA.roleBindings[0]?.roleCode).toBe("ops_admin");
+        expect(resultB.roleBindings[0]?.roleCode).toBe("ops_admin");
+
+        const principalRow = await dbA.query<{
+          display_name: string;
+          updated_at: Date;
+        }>(
+          `SELECT display_name, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+          [principalId],
+        );
+        expect(principalRow.rows[0]?.display_name).toBe(
+          "WFI Newer Fixture B",
+        );
+        expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(tsB);
+
+        const roleBindingRow = await dbA.query<{ role_code: string }>(
+          `SELECT role_code FROM iam.identity_role_bindings WHERE role_binding_id = $1`,
+          [roleBindingId],
+        );
+        expect(roleBindingRow.rows[0]?.role_code).toBe("ops_admin");
+
+        // Same recovery-branch-health contract as R9-TX-DET: the branch
+        // fired cleanly (exactly one SAVEPOINT per racer's own connection)
+        // and both racers' transactions still reached COMMIT, not ROLLBACK.
+        expect(countHits(aQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+        expect(countHits(bQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+        expect(aQueries).toContain("COMMIT");
+        expect(bQueries).toContain("COMMIT");
+        expect(aQueries).not.toContain("ROLLBACK");
+        expect(bQueries).not.toContain("ROLLBACK");
+
+        recovered = true;
+      }
+
+      if (!recovered) {
+        throw new Error(
+          `Never observed a real non-arbiter unique-violation + ROLLBACK TO SAVEPOINT recovery after ${MAX_ATTEMPTS} genuinely concurrent attempts with genuinely differing content against real Postgres; either the recovery branch has regressed, or this environment cannot produce the required race window at all.`,
+        );
+      }
+    },
+    30_000,
+  );
+
   // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): the real
   // public first-login path (IapSubjectAdapter.verify,
   // apps/api/src/modules/auth/iap-subject.adapter.ts:301-347) never races
