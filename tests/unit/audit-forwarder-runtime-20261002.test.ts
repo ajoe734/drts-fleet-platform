@@ -15,14 +15,20 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
 
     const accept = await adapter.accept({ externalOrderId: "grab-test-1", driverId: "drv-1" });
     expect(accept.acknowledged).toBe(false);
+    expect(accept.platformCode).toBe(PLATFORM_CODE_GRAB_TAIWAN);
+    expect(accept.externalOrderId).toBe("grab-test-1");
     expect(accept.detail).toContain("MISSING_PROVIDER_CONTRACT");
 
     const complete = await adapter.complete({ externalOrderId: "grab-test-1" });
     expect(complete.acknowledged).toBe(false);
+    expect(complete.platformCode).toBe(PLATFORM_CODE_GRAB_TAIWAN);
+    expect(complete.externalOrderId).toBe("grab-test-1");
     expect(complete.detail).toContain("MISSING_PROVIDER_CONTRACT");
 
     const reject = await adapter.reject({ externalOrderId: "grab-test-1", reason: "test" });
     expect(reject.acknowledged).toBe(false);
+    expect(reject.platformCode).toBe(PLATFORM_CODE_GRAB_TAIWAN);
+    expect(reject.externalOrderId).toBe("grab-test-1");
     expect(reject.detail).toContain("MISSING_PROVIDER_CONTRACT");
     
     const hb = await adapter.heartbeat();
@@ -91,6 +97,69 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     });
     expect(secondOrder.mirrorOrderId).toBe(order.mirrorOrderId);
   });
+
+  it("F7: runtime adapter capability is authoritative over old persisted stub record", async () => {
+    const auditService = new AuditNotificationService();
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
+    );
+    const adapter = new GrabTaiwanAdapter();
+
+    const mockRepo = {
+      loadState: vi.fn().mockResolvedValue({
+        forwardedOrders: [],
+        adapterHealth: [
+          {
+            platformCode: PLATFORM_CODE_GRAB_TAIWAN,
+            status: "healthy",
+            reason: "stub",
+            credentialStatus: "stub",
+            authStatus: "stub",
+            webhookStatus: "stub",
+            rateLimitStatus: "stub",
+            capabilitySummary: {
+              mode: "stub",
+              productionStatus: "stub",
+              notes: "Obsolete stub",
+              supportsInboundWebhook: false,
+            },
+            lastCheckedAt: "2026-01-01T00:00:00Z",
+            lastError: null,
+          }
+        ],
+      }),
+      persistChanges: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new ForwarderService(
+      regulatoryRegistryService,
+      auditService,
+      [adapter],
+      mockRepo,
+    );
+    await service.onModuleInit();
+
+    const snapshot = service.listAdapterHealth().find((r) => r.platformCode === PLATFORM_CODE_GRAB_TAIWAN);
+    expect(snapshot?.status).toBe("degraded");
+    expect(snapshot?.capabilitySummary.productionStatus).toBe("configuration_required");
+    
+    // Ensure the capability was persisted with the configured one
+    expect(mockRepo.persistChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterHealth: expect.arrayContaining([
+          expect.objectContaining({
+            platformCode: PLATFORM_CODE_GRAB_TAIWAN,
+            capabilitySummary: expect.objectContaining({
+              productionStatus: "configuration_required",
+            }),
+          }),
+        ]),
+      })
+    );
+  });
   
   it("F4/fail-closed driver outcomes: relay driver accept rejects due to sync_failed", async () => {
     const auditService = new AuditNotificationService();
@@ -156,16 +225,18 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     await service.onModuleInit();
 
     for (let i = 0; i < 2; i++) {
+      let threw = false;
       try {
         await service.ingestGrabTaiwanWebhook(
           { orderId: "replayed-unapproved" },
           { "x-grab-signature": "unapproved" }
         );
-        expect.unreachable("Should have thrown");
       } catch (e: any) {
-        expect(e).toBeDefined();
-        if (e.code) expect(e.code).toBe("FORWARDER_WEBHOOK_VERIFICATION_FAILED");
+        threw = true;
+        expect(e.status).toBe(401);
+        expect(e.code).toBe("FORWARDER_WEBHOOK_VERIFICATION_FAILED");
       }
+      expect(threw).toBe(true);
     }
 
     expect(service.listOrders().length).toBe(0);

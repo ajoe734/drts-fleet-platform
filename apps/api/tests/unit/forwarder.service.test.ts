@@ -205,9 +205,9 @@ describe("ForwarderService", () => {
         status: "degraded",
         reason: "credential",
         credentialStatus: "not_configured",
-        authStatus: "not_configured",
+        authStatus: "unknown",
         webhookStatus: "not_configured",
-        rateLimitStatus: "not_configured",
+        rateLimitStatus: "unknown",
         capabilitySummary: expect.objectContaining({
           productionStatus: "configuration_required",
         }),

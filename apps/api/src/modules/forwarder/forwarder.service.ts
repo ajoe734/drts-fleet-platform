@@ -1292,9 +1292,10 @@ export class ForwarderService implements OnModuleInit {
   }
 
   private normalizeAdapterHealthRecord(record: Partial<AdapterHealthRecord>) {
+    const adapter = this.findAdapter(record.platformCode as PlatformCode);
     const baseline = this.buildAdapterHealthBaseline(
       record.platformCode as PlatformCode,
-      this.findAdapter(record.platformCode as PlatformCode),
+      adapter,
     );
 
     if (baseline.status !== "healthy") {
@@ -1309,7 +1310,7 @@ export class ForwarderService implements OnModuleInit {
         rateLimitStatus: baseline.rateLimitStatus,
         platformCode: record.platformCode ?? baseline.platformCode,
         capabilitySummary: this.cloneCapabilitySummary(
-          record.capabilitySummary ?? baseline.capabilitySummary,
+          adapter?.capabilitySummary ?? record.capabilitySummary ?? baseline.capabilitySummary,
         ),
         lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
         lastRateLimitAt: record.lastRateLimitAt ?? null,
@@ -1322,7 +1323,7 @@ export class ForwarderService implements OnModuleInit {
       ...record,
       platformCode: record.platformCode ?? baseline.platformCode,
       capabilitySummary: this.cloneCapabilitySummary(
-        record.capabilitySummary ?? baseline.capabilitySummary,
+        adapter?.capabilitySummary ?? record.capabilitySummary ?? baseline.capabilitySummary,
       ),
       lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
       lastRateLimitAt: record.lastRateLimitAt ?? null,
