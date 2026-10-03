@@ -25,6 +25,26 @@ def mime(recipient='unit+invite@gmail.com', body='Invitation code: ti_SUPER_SECR
 
 
 class MailboxObservationTest(unittest.TestCase):
+    def test_aliases_preserve_gmail_and_workspace_domains(self):
+        for username in ('unit@gmail.com', 'unit@googlemail.com', 'unit@EXAMPLE.COM',
+                         'unit@sub-domain.example.org', 'unit@xn--bcher-kva.example', "o'neil+dev@example.com"):
+            for flow in ('invite', 'approve'):
+                with self.subTest(username=username, flow=flow):
+                    local, domain = username.split('@')
+                    self.assertEqual(observer.derive_alias_recipient(username, flow), local + '+' + flow + '@' + domain)
+
+    def test_aliases_reject_injection_malformed_addresses_and_unsupported_tags(self):
+        for username in ('unit@', '@example.com', 'unit@@example.com', 'unit@example.com\n',
+                         'unit\n@example.com', 'unit@example.com\r\nEVIL=value', 'Name <unit@example.com>',
+                         'unit@example.com,other@example.com', 'unit@-example.com', 'unit@example-.com',
+                         'unit@exam_ple.com', 'unit@example..com', '.unit@example.com', 'unit.@example.com',
+                         'unit..test@example.com', 'a' * 58 + '@example.com', 'unit@' + 'a' * 64 + '.com'):
+            with self.subTest(username=username), self.assertRaisesRegex(ValueError, '^Invalid dedicated mailbox$'):
+                observer.derive_alias_recipient(username, 'invite')
+        for flow in ('', 'other', 'invite\nPRIVATE=value', 'approve@elsewhere.example'):
+            with self.subTest(flow=flow), self.assertRaisesRegex(ValueError, '^Unauthorized alias$'):
+                observer.derive_alias_recipient('unit@example.com', flow)
+
     def test_workspace_sender_reaches_readonly_imap_and_real_mime_inspection(self):
         request = {'candidate_sha': 'a' * 40, 'api_origin': 'https://drts-dev-api-r6ykdme3wa-uc.a.run.app',
                    'delivery_id': '11111111-1111-1111-1111-111111111111', 'flow': 'invite',
