@@ -1,18 +1,12 @@
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 import json
-import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
-MODULE_PATH = Path(__file__).with_name("dependency_security.py")
-SPEC = importlib.util.spec_from_file_location("dependency_security", MODULE_PATH)
-assert SPEC is not None and SPEC.loader is not None
-dependency_security = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(dependency_security)
-
-# For patch('dependency_security...') to work
-sys.modules['dependency_security'] = dependency_security
+# Add the directory containing this file to sys.path so we can import dependency_security
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dependency_security
 
 class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.subprocess.run')
