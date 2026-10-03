@@ -1270,188 +1270,228 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
   // inserts that share both columns can surface a genuine 23505 on the
   // PRIMARY KEY index before the arbiter's own conflict is resolved, which
   // ON CONFLICT (source_ref) does not suppress.
-  it("R9-TX-DET (real Postgres): a genuine concurrent first-time collision on the exact same not-yet-committed identity forces the real SAVEPOINT recovery branch inside upsertWorkforceIdentity, observed via the actual SQL trace, and the bundle still commits with converged content", async () => {
-    expect(DATABASE_URL).toBeTruthy();
+  it(
+    "R9-TX-DET (real Postgres): a genuine concurrent first-time collision on the exact same not-yet-committed identity forces the real SAVEPOINT recovery branch inside upsertWorkforceIdentity, observed via the actual SQL trace, and the bundle still commits with converged content",
+    async () => {
+      expect(DATABASE_URL).toBeTruthy();
 
-    // This deliberately does NOT sequence one writer's commit before the
-    // other starts (e.g. an explicit gate transaction held open until a
-    // second connection reports itself blocked via pg_blocking_pids, then
-    // committed). An INSERT ... ON CONFLICT statement confirms its own
-    // speculatively-inserted tuple -- resolving whether it is a fresh
-    // INSERT or a DO UPDATE -- entirely within that one statement's own
-    // execution, before its surrounding transaction ever commits. A second
-    // writer that only *waits on the row lock* and resumes after the first
-    // transaction commits therefore resolves cleanly through the arbiter's
-    // ordinary ON CONFLICT DO UPDATE path: Postgres updates the
-    // already-committed row in place and never re-validates the
-    // non-arbiter primary key for an UPDATE that doesn't touch it, so the
-    // recovery branch this test exists to force is never reached (this was
-    // verified against real Postgres: a gate-commits-first version of this
-    // test reliably produced zero ROLLBACK TO SAVEPOINT statements).
-    //
-    // Two insert attempts that are *actually* concurrent -- neither one's
-    // statement having resolved before the other's own conflict check runs
-    // -- is what the production race (two parallel first-time
-    // authentications for the same account) looks like, and what reaches
-    // the non-arbiter conflict: both racers' speculative tuples are live
-    // at once, so the loser's non-arbiter primary-key index entry collides
-    // with the winner's, raising a hard 23505 that only the SAVEPOINT
-    // recovery in runUpsertWithConflictRecovery absorbs (see R9-TX above,
-    // which proved this mechanism is necessary on real Postgres: without
-    // it, the losing transaction's follow-up SELECT itself fails with
-    // 25P02 and the whole bundle is lost instead of converging). This test
-    // adds the explicit SQL-trace evidence that R9-TX alone cannot supply:
-    // a passing outcome there could equally be explained by a lucky,
-    // error-free ON CONFLICT resolution on both sides.
-    const dbA = new DatabaseService();
-    const dbB = new DatabaseService();
-    databases.push(dbA, dbB);
-    const repoA = new IdentityRepository(dbA);
-    const repoB = new IdentityRepository(dbB);
+      // This deliberately does NOT sequence one writer's commit before the
+      // other starts (e.g. an explicit gate transaction held open until a
+      // second connection reports itself blocked via pg_blocking_pids, then
+      // committed). An INSERT ... ON CONFLICT statement confirms its own
+      // speculatively-inserted tuple -- resolving whether it is a fresh
+      // INSERT or a DO UPDATE -- entirely within that one statement's own
+      // execution, before its surrounding transaction ever commits. A second
+      // writer that only *waits on the row lock* and resumes after the first
+      // transaction commits therefore resolves cleanly through the arbiter's
+      // ordinary ON CONFLICT DO UPDATE path: Postgres updates the
+      // already-committed row in place and never re-validates the
+      // non-arbiter primary key for an UPDATE that doesn't touch it, so the
+      // recovery branch this test exists to force is never reached (this was
+      // verified against real Postgres: a gate-commits-first version of this
+      // test reliably produced zero ROLLBACK TO SAVEPOINT statements).
+      //
+      // Two insert attempts that are *actually* concurrent -- neither one's
+      // statement having resolved before the other's own conflict check runs
+      // -- is what the production race (two parallel first-time
+      // authentications for the same account) looks like, and what reaches
+      // the non-arbiter conflict: both racers' speculative tuples are live
+      // at once, so the loser's non-arbiter primary-key index entry collides
+      // with the winner's, raising a hard 23505 that only the SAVEPOINT
+      // recovery in runUpsertWithConflictRecovery absorbs (see R9-TX above,
+      // which proved this mechanism is necessary on real Postgres: without
+      // it, the losing transaction's follow-up SELECT itself fails with
+      // 25P02 and the whole bundle is lost instead of converging). This test
+      // adds the explicit SQL-trace evidence that R9-TX alone cannot supply:
+      // a passing outcome there could equally be explained by a lucky,
+      // error-free ON CONFLICT resolution on both sides.
+      //
+      // Whether any single pair of unmodified, genuinely concurrent
+      // statements actually lands inside that narrow non-arbiter conflict
+      // window is real network/scheduling timing this test does not and
+      // must not choreograph (two adjacent prior candidates on this same
+      // task independently confirmed a gate-based choreography collapses
+      // the race into the ordinary arbiter-only path instead -- see this
+      // task's review history for 5a04fc798/f8c0822e4). So this repeats the
+      // same unmodified race -- a fresh, never-before-used identity per
+      // attempt, so no attempt can leak state into another -- until a real
+      // non-arbiter 23505 + SAVEPOINT recovery is actually observed via the
+      // SQL trace, bounded by MAX_ATTEMPTS so an actual regression in the
+      // recovery branch still fails loudly instead of looping forever.
+      const dbA = new DatabaseService();
+      const dbB = new DatabaseService();
+      databases.push(dbA, dbB);
+      const repoA = new IdentityRepository(dbA);
+      const repoB = new IdentityRepository(dbB);
+      const traceA = traceClientQueries(dbA);
+      const traceB = traceClientQueries(dbB);
 
-    const principalId = `principal_wfi_det_${randomUUID()}`;
-    const principalSourceRef = `source_wfi_det_${principalId}`;
-    principalIds.add(principalId);
-    const membershipId = `membership_wfi_det_${randomUUID()}`;
-    const membershipSourceRef = `source_wfi_det_${membershipId}`;
-    membershipIds.add(membershipId);
-    const roleBindingId = `role_binding_wfi_det_${randomUUID()}`;
-    const roleBindingSourceRef = `source_wfi_det_${roleBindingId}`;
-    roleBindingIds.add(roleBindingId);
+      const countHits = (queries: string[], prefix: string) =>
+        queries.filter((sql) => sql.startsWith(prefix)).length;
 
-    const makeBundle = (ts: string) => ({
-      principal: {
-        principalId,
-        sourceRef: principalSourceRef,
-        issuer: "test_issuer",
-        subject: `sub_${principalId}`,
-        principalType: "human",
-        email: "wfi-det@example.com",
-        emailVerified: true,
-        displayName: "WFI Det Fixture",
-        status: "active",
-        createdAt: ts,
-        updatedAt: ts,
-      } satisfies CanonicalIdentityPrincipalRecord,
-      membership: {
-        membershipId,
-        sourceRef: membershipSourceRef,
-        principalId,
-        realm: "tenant",
-        scopeRef: `scope_${membershipId}`,
-        tenantId: "tenant_fixture",
-        partnerId: null,
-        status: "active",
-        invitedByPrincipalId: null,
-        invitationId: null,
-        createdAt: ts,
-        updatedAt: ts,
-      } satisfies CanonicalIdentityMembershipRecord,
-      roleBindings: [
-        {
-          roleBindingId,
-          sourceRef: roleBindingSourceRef,
-          membershipId,
-          roleCode: "ops_user",
-          grantedByPrincipalId: null,
-          approvalId: null,
-          validFrom: ts,
-          validTo: null,
-          createdAt: ts,
-          updatedAt: ts,
-        } satisfies CanonicalIdentityRoleBindingRecord,
-      ],
-    });
+      const MAX_ATTEMPTS = 60;
+      let recovered = false;
 
-    const tsA = new Date(Date.now() - 60_000).toISOString();
-    const tsB = new Date(Date.now() - 30_000).toISOString();
-    const bundleA = makeBundle(tsA);
-    const bundleB = makeBundle(tsB);
+      for (let attempt = 0; attempt < MAX_ATTEMPTS && !recovered; attempt++) {
+        const principalId = `principal_wfi_det_${attempt}_${randomUUID()}`;
+        const principalSourceRef = `source_wfi_det_${principalId}`;
+        principalIds.add(principalId);
+        const membershipId = `membership_wfi_det_${attempt}_${randomUUID()}`;
+        const membershipSourceRef = `source_wfi_det_${membershipId}`;
+        membershipIds.add(membershipId);
+        const roleBindingId = `role_binding_wfi_det_${attempt}_${randomUUID()}`;
+        const roleBindingSourceRef = `source_wfi_det_${roleBindingId}`;
+        roleBindingIds.add(roleBindingId);
 
-    const traceA = traceClientQueries(dbA);
-    const traceB = traceClientQueries(dbB);
+        const makeBundle = (ts: string) => ({
+          principal: {
+            principalId,
+            sourceRef: principalSourceRef,
+            issuer: "test_issuer",
+            subject: `sub_${principalId}`,
+            principalType: "human",
+            email: "wfi-det@example.com",
+            emailVerified: true,
+            displayName: "WFI Det Fixture",
+            status: "active",
+            createdAt: ts,
+            updatedAt: ts,
+          } satisfies CanonicalIdentityPrincipalRecord,
+          membership: {
+            membershipId,
+            sourceRef: membershipSourceRef,
+            principalId,
+            realm: "tenant",
+            scopeRef: `scope_${membershipId}`,
+            tenantId: "tenant_fixture",
+            partnerId: null,
+            status: "active",
+            invitedByPrincipalId: null,
+            invitationId: null,
+            createdAt: ts,
+            updatedAt: ts,
+          } satisfies CanonicalIdentityMembershipRecord,
+          roleBindings: [
+            {
+              roleBindingId,
+              sourceRef: roleBindingSourceRef,
+              membershipId,
+              roleCode: "ops_user",
+              grantedByPrincipalId: null,
+              approvalId: null,
+              validFrom: ts,
+              validTo: null,
+              createdAt: ts,
+              updatedAt: ts,
+            } satisfies CanonicalIdentityRoleBindingRecord,
+          ],
+        });
 
-    // Both racers' real, public, transaction-owning entry points fired
-    // together with no await between them, so neither's statement can
-    // have resolved before the other's own conflict check runs.
-    const [resultA, resultB] = await Promise.all([
-      repoA.upsertWorkforceIdentity(
-        bundleA.principal,
-        bundleA.membership,
-        bundleA.roleBindings,
-      ),
-      repoB.upsertWorkforceIdentity(
-        bundleB.principal,
-        bundleB.membership,
-        bundleB.roleBindings,
-      ),
-    ]);
+        const tsA = new Date(Date.now() - 60_000).toISOString();
+        const tsB = new Date(Date.now() - 30_000).toISOString();
+        const bundleA = makeBundle(tsA);
+        const bundleB = makeBundle(tsB);
 
-    // Convergence: both racers' content for this source_ref must agree on
-    // exactly one of the two writers' timestamps -- never a torn mix.
-    expect(resultA.principal.updatedAt).toBe(resultB.principal.updatedAt);
-    expect([tsA, tsB]).toContain(resultA.principal.updatedAt);
-    expect(resultA.membership.updatedAt).toBe(resultB.membership.updatedAt);
-    expect(resultA.roleBindings[0]?.updatedAt).toBe(
-      resultB.roleBindings[0]?.updatedAt,
-    );
+        // Both racers' real, public, transaction-owning entry points fired
+        // together with no await between them, so neither's statement can
+        // have resolved before the other's own conflict check runs.
+        const [resultA, resultB] = await Promise.all([
+          repoA.upsertWorkforceIdentity(
+            bundleA.principal,
+            bundleA.membership,
+            bundleA.roleBindings,
+          ),
+          repoB.upsertWorkforceIdentity(
+            bundleB.principal,
+            bundleB.membership,
+            bundleB.roleBindings,
+          ),
+        ]);
 
-    const principalRow = await dbA.query<{ updated_at: Date }>(
-      `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
-      [principalId],
-    );
-    expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
-      resultA.principal.updatedAt,
-    );
-    const membershipRow = await dbA.query<{ updated_at: Date }>(
-      `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
-      [membershipId],
-    );
-    expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
-      resultA.membership.updatedAt,
-    );
+        // Both repos' constructors also fire an unawaited, best-effort
+        // ensureDefaultPlatformAccount()/ensureLiveMapObserverAccount() seed
+        // call on a separate connection from this same traced
+        // DatabaseService; isolate each racer's own connection (the one
+        // that actually inserted this attempt's `principalId`) before
+        // counting SAVEPOINT/ROLLBACK traffic, so unrelated background
+        // seeding -- and every other attempt's own connections -- never
+        // pollutes this assertion.
+        const aQueries = findConnectionByBoundParam(traceA, principalId).map(
+          (q) => q.sql,
+        );
+        const bQueries = findConnectionByBoundParam(traceB, principalId).map(
+          (q) => q.sql,
+        );
 
-    // The real recovery branch -- not an injected double -- actually fired
-    // against real Postgres on at least one racer's connection: SAVEPOINT
-    // before the attempt, a genuine unique violation, ROLLBACK TO
-    // SAVEPOINT, then a successful retry, and that racer's bundle still
-    // reached COMMIT rather than being lost to an aborted transaction.
-    //
-    // Both repos' constructors also fire an unawaited, best-effort
-    // ensureDefaultPlatformAccount()/ensureLiveMapObserverAccount() seed
-    // call on a separate connection from this same traced DatabaseService;
-    // isolate each racer's own connection (the one that actually inserted
-    // this test's `principalId`) before counting SAVEPOINT/ROLLBACK
-    // traffic, so unrelated background seeding never pollutes this
-    // assertion.
-    const aQueries = findConnectionByBoundParam(traceA, principalId).map(
-      (q) => q.sql,
-    );
-    const bQueries = findConnectionByBoundParam(traceB, principalId).map(
-      (q) => q.sql,
-    );
-    const countHits = (queries: string[], prefix: string) =>
-      queries.filter((sql) => sql.startsWith(prefix)).length;
+        // Exactly one of the two genuinely-concurrent first-time inserts
+        // must lose the race on the non-arbiter primary key and recover via
+        // ROLLBACK TO SAVEPOINT + retry; which one loses is not
+        // deterministic, only that the recovery branch fired on at least
+        // one of them. If this attempt's statements instead both resolved
+        // via the ordinary arbiter DO UPDATE path, that is not a recovery
+        // observation either way -- retry with a fresh identity.
+        const rollbackToHits =
+          countHits(aQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") +
+          countHits(bQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp");
+        if (rollbackToHits < 1) {
+          continue;
+        }
 
-    // runUpsertWithConflictRecovery always takes a SAVEPOINT before its
-    // first attempt, win or lose, so each racer's own connection shows
-    // exactly one.
-    expect(countHits(aQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
-    expect(countHits(bQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+        // The real recovery branch -- not an injected double -- actually
+        // fired against real Postgres on at least one racer's connection
+        // for this attempt's identity: SAVEPOINT before the attempt, a
+        // genuine unique violation, ROLLBACK TO SAVEPOINT, then a
+        // successful retry, and that racer's bundle still reached COMMIT
+        // rather than being lost to an aborted transaction.
 
-    // Exactly one of the two genuinely-concurrent first-time inserts must
-    // lose the race on the non-arbiter primary key and recover via
-    // ROLLBACK TO SAVEPOINT + retry; which one loses is not deterministic,
-    // only that the recovery branch fired on at least one of them.
-    const rollbackToHits =
-      countHits(aQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") +
-      countHits(bQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp");
-    expect(rollbackToHits).toBeGreaterThanOrEqual(1);
-    expect(aQueries).toContain("COMMIT");
-    expect(bQueries).toContain("COMMIT");
-    expect(aQueries).not.toContain("ROLLBACK");
-    expect(bQueries).not.toContain("ROLLBACK");
-  });
+        // Convergence: both racers' content for this source_ref must agree
+        // on exactly one of the two writers' timestamps -- never a torn
+        // mix.
+        expect(resultA.principal.updatedAt).toBe(resultB.principal.updatedAt);
+        expect([tsA, tsB]).toContain(resultA.principal.updatedAt);
+        expect(resultA.membership.updatedAt).toBe(
+          resultB.membership.updatedAt,
+        );
+        expect(resultA.roleBindings[0]?.updatedAt).toBe(
+          resultB.roleBindings[0]?.updatedAt,
+        );
+
+        const principalRow = await dbA.query<{ updated_at: Date }>(
+          `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+          [principalId],
+        );
+        expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
+          resultA.principal.updatedAt,
+        );
+        const membershipRow = await dbA.query<{ updated_at: Date }>(
+          `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+          [membershipId],
+        );
+        expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
+          resultA.membership.updatedAt,
+        );
+
+        // runUpsertWithConflictRecovery always takes a SAVEPOINT before its
+        // first attempt, win or lose, so each racer's own connection shows
+        // exactly one.
+        expect(countHits(aQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+        expect(countHits(bQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+        expect(aQueries).toContain("COMMIT");
+        expect(bQueries).toContain("COMMIT");
+        expect(aQueries).not.toContain("ROLLBACK");
+        expect(bQueries).not.toContain("ROLLBACK");
+
+        recovered = true;
+      }
+
+      if (!recovered) {
+        throw new Error(
+          `Never observed a real non-arbiter unique-violation + ROLLBACK TO SAVEPOINT recovery after ${MAX_ATTEMPTS} genuinely concurrent attempts against real Postgres; either the SAVEPOINT recovery branch has regressed, or this environment cannot produce the required race window at all.`,
+        );
+      }
+    },
+    30_000,
+  );
 
   // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): the real
   // public first-login path (IapSubjectAdapter.verify,
