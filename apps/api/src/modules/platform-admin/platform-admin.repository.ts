@@ -235,6 +235,23 @@ export class PlatformAdminRepository {
     // creation, bootstrap seeding, source-drift migration) a safe no-op
     // against a newer claim/finalize, without needing a separate revision
     // column.
+    //
+    // (R7-followthrough Codex REOPEN, generation 2b738adf3c2d4a508800cb3a8df0f553)
+    // `updated_at` ordering alone is not enough: a caller whose OWN cached
+    // snapshot is stale (e.g. `migratePlacardArtifactAfterSourceDrift`
+    // recovering a reader's held GET against a placard this instance never
+    // saw get published) can stamp a brand-new `updated_at` on a write that
+    // still carries that stale snapshot's `publishedAt: null`, which would
+    // then legitimately win the ordering fence and erase a sibling
+    // instance's already-finalized publish. `publishedAt` is sticky once a
+    // row has one: this generic writer may only apply when the durable row
+    // is not yet published, or when its own incoming `publishedAt` agrees
+    // exactly with what is already persisted (a legitimate re-write of a
+    // row this caller already knows is published, e.g. the owning
+    // instance's own post-publish source-drift migration). Only the
+    // dedicated `claimPlacardPublish` / `finalizePlacardPublish` /
+    // `releasePlacardPublishClaim` statements are allowed to move
+    // `publishedAt` itself.
     for (const placard of changes.placardVersions ?? []) {
       writes.push(
         this.databaseService!.query(
@@ -256,6 +273,11 @@ export class PlatformAdminRepository {
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
             WHERE admin.phase1_placard_versions.updated_at <= EXCLUDED.updated_at
+              AND (
+                admin.phase1_placard_versions.record->>'publishedAt' IS NULL
+                OR admin.phase1_placard_versions.record->>'publishedAt'
+                   = EXCLUDED.record->>'publishedAt'
+              )
           `,
           [
             placard.placardVersionId,

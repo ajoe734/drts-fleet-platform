@@ -2141,6 +2141,381 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       }
     });
   });
+
+  describe("R7-followthrough: a stale reader's source-drift recovery write must not erase a sibling's already-finalized publication", () => {
+    const PUBLIC_INFO_R7_RECOVERY = {
+      versionId: "public-info-r7-recovery-erase",
+      title: "R7 Recovery Erase Disclosure",
+      callPhone: "0800-020-020",
+      complaintPhone: "0800-020-030",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /**
+     * Models a `get` whose underlying lookup genuinely returns "missing"
+     * (the real entry condition `rebuildPlacardArtifact` recovers from), but
+     * whose delivery to the caller is held open -- an authentic NoSuchKey
+     * response that simply has not reached the caller yet. Only the FIRST
+     * missing result is held; everything after (including the rebuild
+     * path's own re-check) resolves immediately.
+     */
+    class DelayedMissingObjectStore implements DocumentArtifactStore {
+      readonly inner = new InMemoryDocumentArtifactStore();
+      private gate: Promise<void> | undefined;
+
+      armNextMissingGet(): () => void {
+        let release!: () => void;
+        this.gate = new Promise((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.inner.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        const result = await this.inner.get(...args);
+        if (result === null && this.gate) {
+          const held = this.gate;
+          this.gate = undefined;
+          await held;
+        }
+        return result;
+      }
+    }
+
+    it("denies the stale GET but keeps the durable row's publishedAt/hash exactly as the finalizing sibling left them", async () => {
+      const { repository } = createRealPlacardRepository([
+        PUBLIC_INFO_R7_RECOVERY,
+      ]);
+      const sharedStore = new DelayedMissingObjectStore();
+      const sharedRegistry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r7-recovery-erase",
+        publicInfoVersionId: PUBLIC_INFO_R7_RECOVERY.versionId,
+        templateName: "seatback-r7-recovery",
+      });
+
+      // Pod B boots from the same durable draft row; its own in-memory copy
+      // is -- correctly, at this moment -- a plain unpublished draft.
+      const podB = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podB.onModuleInit();
+
+      // The object is genuinely absent -- the supported recovery entry
+      // condition, not a hash mismatch against something that does exist.
+      (
+        sharedStore.inner as unknown as { entries: Map<string, unknown> }
+      ).entries.delete(`placard::${draft.placardVersionId}`);
+
+      const controller = new ControlledDownloadController(
+        sharedStore,
+        sharedRegistry,
+      );
+      const release = sharedStore.armNextMissingGet();
+      const staleRecovery = resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(draft.artifactDownloadUrl!),
+      );
+      await new Promise((r) => setTimeout(r, 10));
+
+      // While B's missing-object determination is held in flight, A
+      // publishes and finalizes successfully -- its link and bytes are
+      // genuinely good.
+      const published = await podA.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      const publishedFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(publishedFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      // Deliver B's already-captured miss. Its own stale draft snapshot
+      // (publishedAt still null) is not proof of what the durable row
+      // actually holds now; the link it names can never match A's
+      // published bytes, so the GET itself is correctly denied.
+      release();
+      await expect(staleRecovery).rejects.toMatchObject({
+        code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH",
+      });
+
+      // The regression under review: B's recovery write must not have
+      // regressed the durable row back to unpublished just because its own
+      // write carried a newer wall-clock `updatedAt`.
+      const persisted = await repository.getPlacardVersionRecord(
+        draft.placardVersionId,
+      );
+      expect(persisted?.publishedAt).toBe(published.publishedAt);
+      expect(persisted?.artifactManifestHash).toBe(
+        published.artifactManifestHash,
+      );
+
+      // A's own link must still be valid, and the placard must still be
+      // reported as published everywhere -- a second publish attempt must
+      // still be rejected, not allowed to invalidate A's publication.
+      await expect(
+        podB.publishPlacardVersion(draft.placardVersionId),
+      ).rejects.toMatchObject({ code: "PLACARD_VERSION_ALREADY_PUBLISHED" });
+      const refetchedFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(refetchedFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
+
+  describe("R8-followthrough: an instance booted after an abandoned claim must still reach the repository's reclaim guard through the actual service entry point", () => {
+    const PUBLIC_INFO_R8_RESTART = {
+      versionId: "public-info-r8-restart-reclaim",
+      title: "R8 Restart Reclaim Disclosure",
+      callPhone: "0800-030-030",
+      complaintPhone: "0800-030-040",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    it("lets a freshly booted instance reclaim a stale (>2 minute) pending claim instead of rejecting it from cache alone", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R8_RESTART,
+      ]);
+      const store = new InMemoryDocumentArtifactStore();
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r8-restart-reclaim",
+        publicInfoVersionId: PUBLIC_INFO_R8_RESTART.versionId,
+        templateName: "seatback-r8-restart",
+      });
+
+      // A takes a real claim via the actual repository, then is modelled as
+      // crashed/lost before it ever finalizes or releases it -- the only
+      // trace left is the stale, still-pending row itself.
+      const abandonedClaim = {
+        ...draft,
+        publishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        __publishClaimToken: randomUUID(),
+      } as PlacardVersionRecord & { __publishClaimToken: string };
+      const claimed = await repository.claimPlacardPublish(abandonedClaim);
+      expect(claimed.claimed).toBe(true);
+
+      // Age the row past the 2-minute abandonment window the repository's
+      // own `claimPlacardPublish` guard uses, exactly as a real crashed
+      // claim would look after enough wall-clock time has passed.
+      const row = rows.get(draft.placardVersionId)!;
+      row.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // A restarted/freshly-booted instance boots AFTER the abandoned
+      // claim: its very first in-memory copy of this placard already has
+      // `publishedAt` set (from the pending claim), never having published
+      // anything itself.
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podC.onModuleInit();
+      // Pod C's very first in-memory copy of this placard already carries
+      // `publishedAt` from the abandoned claim -- confirmed indirectly
+      // below: the old bug rejected this publish from that cached value
+      // alone, with zero repository claim calls.
+      const before = rows.get(draft.placardVersionId)?.updatedAt;
+
+      const published = await podC.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+
+      const persisted = await repository.getPlacardVersionRecord(
+        draft.placardVersionId,
+      );
+      expect(persisted?.publishedAt).toBe(published.publishedAt);
+      expect((persisted as any)?.__publishClaimToken).toBeUndefined();
+      // A genuine reclaim write happened at the service boundary, not a
+      // no-op fallthrough on the stale cached value.
+      expect(rows.get(draft.placardVersionId)?.updatedAt).not.toBe(before);
+    });
+
+    it("still rejects a restarted instance's publish attempt while the pending claim is genuinely fresh (not yet abandoned)", async () => {
+      const { repository } = createRealPlacardRepository([
+        PUBLIC_INFO_R8_RESTART,
+      ]);
+      const store = new InMemoryDocumentArtifactStore();
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r8-restart-fresh-claim",
+        publicInfoVersionId: PUBLIC_INFO_R8_RESTART.versionId,
+        templateName: "seatback-r8-restart-fresh",
+      });
+
+      // Claim left genuinely fresh -- not aged past the 2-minute window --
+      // so this is NOT an abandoned claim; reclaim must stay blocked.
+      const freshClaim = {
+        ...draft,
+        publishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        __publishClaimToken: randomUUID(),
+      } as PlacardVersionRecord & { __publishClaimToken: string };
+      await repository.claimPlacardPublish(freshClaim);
+
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      await expect(
+        podC.publishPlacardVersion(draft.placardVersionId),
+      ).rejects.toMatchObject({ code: "PLACARD_VERSION_ALREADY_PUBLISHED" });
+    });
+  });
+
+  describe("R9 additional reader gap: an ordinary reader booted before any claim must still discover a sibling's finalized publish", () => {
+    const PUBLIC_INFO_R9_ORDINARY = {
+      versionId: "public-info-r9-ordinary-reader",
+      title: "R9 Ordinary Reader Disclosure",
+      callPhone: "0800-040-040",
+      complaintPhone: "0800-040-050",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    it("a sibling booted before the claim and never itself publishing still resolves the finalized metadata on its next get", async () => {
+      const { repository } = createRealPlacardRepository([
+        PUBLIC_INFO_R9_ORDINARY,
+      ]);
+      const sharedStore = new InMemoryDocumentArtifactStore();
+      const sharedRegistry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r9-ordinary-reader",
+        publicInfoVersionId: PUBLIC_INFO_R9_ORDINARY.versionId,
+        templateName: "seatback-r9-ordinary",
+      });
+
+      // Pod D boots BEFORE any publish claim is ever taken -- a plain
+      // draft reader that never itself attempts to publish.
+      const podD = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        sharedStore,
+        sharedRegistry,
+      );
+      await podD.onModuleInit();
+
+      const published = await podA.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+
+      // D never saw a claim token and never called publish itself; its own
+      // next get/list must still resolve the authoritative finalized
+      // metadata, not keep signing its original draft hash forever.
+      const fresh = await podD.getPlacardVersion(draft.placardVersionId);
+      expect(fresh.publishedAt).toBe(published.publishedAt);
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+
+      const controller = new ControlledDownloadController(
+        sharedStore,
+        sharedRegistry,
+      );
+      const file = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(file.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
 });
 
 describe("createDocumentArtifactStore provider resolution", () => {

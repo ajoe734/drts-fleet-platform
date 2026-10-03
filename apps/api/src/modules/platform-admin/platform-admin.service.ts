@@ -935,7 +935,24 @@ export class PlatformAdminService implements OnModuleInit {
         { placardVersionId },
       );
     }
-    if (placard.publishedAt) {
+    // (R8-followthrough, Codex REOPEN generation 2b738adf3c2d4a508800cb3a8df0f553)
+    // This cached `placard` can be a restarted/freshly-booted instance's
+    // bootstrap snapshot of ANOTHER instance's claim that has since been
+    // abandoned (crashed/lost network before finalize/release). Such a
+    // snapshot still carries `publishedAt` (set when the claim was taken)
+    // AND the pending `__publishClaimToken` -- it is not proof of a
+    // finalized publish (see `hasPendingPublishClaim`). Rejecting here
+    // purely on cached `publishedAt`, without ever reaching
+    // `claimPlacardPublish`'s own stale-claim reclaim guard below, would
+    // make every instance booted after an abandoned claim permanently
+    // unable to publish this placard even once the abandonment window has
+    // elapsed. Only a cached record that is ALREADY known-finalized (no
+    // repository to double-check against, or no pending claim token) is
+    // trustworthy enough to reject without a round trip.
+    if (
+      placard.publishedAt &&
+      (!this.platformAdminRepository || !hasPendingPublishClaim(placard))
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "PLACARD_VERSION_ALREADY_PUBLISHED",
@@ -2829,6 +2846,18 @@ export class PlatformAdminService implements OnModuleInit {
    * to serve yet -- fall through on the last-known snapshot, same as
    * before this fix.
    *
+   * (R9 additional reader gap, Codex REOPEN generation
+   * 2b738adf3c2d4a508800cb3a8df0f553) An instance that never itself
+   * attempted a claim -- e.g. booted before any publish and only ever
+   * holding the plain, never-published draft -- carries NO claim token at
+   * all, so the original `hasPendingPublishClaim` gate above never fires
+   * for it even after a sibling instance finishes publishing elsewhere.
+   * Any cached snapshot that is not yet a known-finalized row (`publishedAt`
+   * unset, OR set but still carrying a pending token) must re-resolve
+   * against the repository on every read; only a snapshot this instance
+   * already knows is finalized (no token) is safe to trust without a round
+   * trip, because a finalized `publishedAt` never regresses.
+   *
    * Returns the RAW resolved record -- including a still-pending
    * `__publishClaimToken`, if that is genuinely the best known state -- so
    * a caller populating `this.placardVersions` (bootstrap) keeps that
@@ -2840,7 +2869,10 @@ export class PlatformAdminService implements OnModuleInit {
     placard: PlacardVersionRecord,
   ): Promise<PlacardVersionRecord> {
     let resolved = placard;
-    if (this.platformAdminRepository && hasPendingPublishClaim(resolved)) {
+    if (
+      this.platformAdminRepository &&
+      (!resolved.publishedAt || hasPendingPublishClaim(resolved))
+    ) {
       const authoritative =
         await this.platformAdminRepository.getPlacardVersionRecord(
           resolved.placardVersionId,

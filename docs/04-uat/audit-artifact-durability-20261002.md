@@ -1432,3 +1432,305 @@ repository methods, the `__publishClaimToken` marker, or these new tests.
   `packages/contracts` is outside this task's `write_scopes`.
 - No product/browser/DB/Compose server was started on this VM; no real cloud
   storage was contacted.
+
+## R7-followthrough/R8-followthrough/R9-additional-reader-gap reopen (Codex REOPEN of locked candidate `4d3dc39c5b107cf4af79b96873fa1a7209717dbd`, generation `2b738adf3c2d4a508800cb3a8df0f553`, PR #2295): what Codex found and why
+
+This reopen kept the full prior finding text verbatim (see the canonical
+reopen message appended to the task brief) rather than summarizing it away,
+per the two-consecutive-round repeated-defect protocol in
+`AI_COLLABORATION_GUIDE.md` §0.7. It confirmed all 178 previously-selected
+regressions still pass, and reproduced four NEW/adjacent defects against the
+`93a28b03b` round's claim/reclaim/reader fix with two runnable, read-only
+probes (Probe A, Probe B — exact commands and sha256 of the harness/preload
+recorded in the task brief). Reported as P2 against
+`durable_producer_reader_wiring` / `cross_instance_restart_bytes`:
+
+- **R7-followthrough (generic recovery erases a finalized publication):**
+  `ControlledDownloadController.resolve`'s missing-object recovery path
+  (`rebuildPlacardArtifact` → `migratePlacardArtifactAfterSourceDrift`) wrote
+  a stale reader's own cached snapshot (still `publishedAt: null`) back
+  through the generic `persistChanges` upsert with a brand-new `updatedAt`.
+  The existing `updated_at <= EXCLUDED.updated_at` guard alone let that
+  newer timestamp win over an already-finalized row, silently erasing the
+  sibling's publication (`databasePublishedAtAfterDeniedGet` regressed to
+  `null`) and letting the placard be published a second time.
+- **R8-followthrough (restart can never reach the reclaim guard):**
+  `publishPlacardVersionExclusive` rejected with `ALREADY_PUBLISHED` on ANY
+  cached non-null `publishedAt` before ever consulting the repository. A
+  freshly booted/restarted instance that loaded an abandoned pending claim at
+  bootstrap therefore could never call `claimPlacardPublish` at all (Probe A:
+  `repositoryReclaimCalls: 0`), even after the 2-minute abandonment window
+  the `93a28b03b` round's own reclaim SQL already supported.
+- **R9 additional reader gap (ordinary pre-claim reader never refreshes):**
+  `resolvePlacardVersion` only re-resolved a cached record against the
+  repository when it still carried a pending `__publishClaimToken`. An
+  instance that booted before any claim was ever taken, and never itself
+  attempted to publish, has a plain draft snapshot with no token at all — it
+  never refreshed, and kept signing its stale draft hash on every later
+  `get`/list call indefinitely after a sibling published.
+- **R7/R8 reclaim safety — stale owner's delayed PUT after reclaim (NOT
+  fixed in this repair, see below):** the DB-side 2-minute reclaim lets a
+  second owner publish while the original (timed-out, not necessarily dead)
+  owner's `PUT` may still be in flight; `S3DocumentArtifactStoreAdapter.put`
+  has no fencing token at the object-key level, so the stale PUT can land
+  after the replacement finalizes and silently replace its bytes at the
+  shared mutable key, breaking both the replacement's already-handed-out
+  link and any later reader's fresh link. Reviewer explicitly required an
+  object-level fencing design (e.g. immutable per-hash objects with an
+  atomic authoritative pointer), not a widened lease or another pre-write
+  readback, and flagged that it may need schema/contract scope beyond this
+  task's `write_scopes`.
+
+## This repair: sticky `publishedAt` at the generic-writer boundary, and resolving authoritative state before rejecting a restart/ordinary reader
+
+Per §0.7's two-consecutive-round-same-defect protocol, this repair fixes the
+three adjacent, independently-verifiable defects whose localization and
+minimal reproduction the reopen already supplied, as one small unit each.
+The fourth (byte-level fencing of a stale PUT after reclaim) is left
+explicitly open below, not hidden behind a partial fix that the reviewer
+already ruled out in advance (a widened lease or an extra readback).
+
+**R7-followthrough fix** (`apps/api/src/modules/platform-admin/platform-admin.repository.ts`,
+`persistChanges`'s placard upsert): added a second `WHERE` condition
+alongside the existing `updated_at` ordering fence —
+
+```sql
+WHERE admin.phase1_placard_versions.updated_at <= EXCLUDED.updated_at
+  AND (
+    admin.phase1_placard_versions.record->>'publishedAt' IS NULL
+    OR admin.phase1_placard_versions.record->>'publishedAt'
+       = EXCLUDED.record->>'publishedAt'
+  )
+```
+
+`publishedAt` is treated as sticky once a durable row has one: the generic
+writer (draft creation, bootstrap seeding, source-drift migration — every
+caller of this one upsert) may only apply when the durable row is not yet
+published, or when its own incoming `publishedAt` agrees exactly with what
+is already persisted (the legitimate case: the SAME instance that owns the
+publish later re-persists metadata, e.g. its own post-publish source-drift
+migration, with `publishedAt` correctly carried forward). Only
+`claimPlacardPublish`/`finalizePlacardPublish`/`releasePlacardPublishClaim`'s
+own dedicated, token-guarded statements may move `publishedAt` itself. A
+stale reader's recovery write, whose own cached `publishedAt` disagrees with
+what is actually durable, is now a safe no-op instead of a silent
+regression — exactly the probe's scenario.
+
+**R8-followthrough fix** (`apps/api/src/modules/platform-admin/platform-admin.service.ts`,
+`publishPlacardVersionExclusive`): the early rejection now reads —
+
+```ts
+if (
+  placard.publishedAt &&
+  (!this.platformAdminRepository || !hasPendingPublishClaim(placard))
+) {
+  throw ALREADY_PUBLISHED;
+}
+```
+
+A cached record is only trustworthy enough to reject without a repository
+round trip when it is already known-finalized (no pending claim token) or
+there is no repository to check against. A cached record that still carries
+a pending claim token — exactly what a restarted instance's bootstrap
+snapshot of an abandoned claim looks like — now falls through to the
+existing `claimPlacardPublish` call, whose own `WHERE ... OR (token IS NOT
+NULL AND updated_at < NOW() - INTERVAL '2 minutes')` guard is the actual,
+already-correct authority on whether the claim is genuinely reclaimable.
+
+**R9 additional reader gap fix** (`apps/api/src/modules/platform-admin/platform-admin.service.ts`,
+`resolvePlacardVersion`): the refresh condition widened from "has a pending
+claim token" to "is not yet known-finalized" —
+
+```ts
+if (
+  this.platformAdminRepository &&
+  (!resolved.publishedAt || hasPendingPublishClaim(resolved))
+) {
+  // re-resolve from the repository
+}
+```
+
+A plain, never-published draft snapshot (`publishedAt` unset) now also
+re-resolves against the repository on every read, same as a pending-token
+snapshot already did. Only a snapshot this instance already knows is
+finalized (`publishedAt` set, no token) is trusted without a round trip —
+safe because a finalized `publishedAt` never regresses once set (enforced by
+the R7-followthrough fix above).
+
+**Old → new result:**
+
+- R7-followthrough: a stale reader's source-drift recovery write can no
+  longer erase a sibling's already-finalized `publishedAt`/hash, regardless
+  of its own write's wall-clock `updatedAt`; the denied GET's outcome
+  (`CONTROLLED_DOWNLOAD_CONTENT_MISMATCH`) is unchanged, but the durable row
+  and a second publish attempt now correctly stay rejected afterward.
+- R8-followthrough: a freshly booted/restarted instance holding a cached
+  abandoned pending claim now reaches the real repository reclaim guard
+  (confirmed by a nonzero `claimPlacardPublish` call and the row's
+  `updated_at` actually advancing), and still correctly stays rejected while
+  the same claim is genuinely fresh (not yet past the 2-minute window).
+- R9 additional reader gap: an ordinary reader booted before any claim and
+  never itself publishing now resolves the authoritative finalized metadata
+  on its next `getPlacardVersion`/link resolution, instead of indefinitely
+  re-signing its original draft hash.
+- R7/R8 reclaim safety (stale PUT after reclaim): **unchanged, not fixed** —
+  see Remaining limitations below.
+
+### New regression coverage
+
+(`tests/unit/audit-artifact-durability-20261002.test.ts`, three new describe
+blocks appended after the existing `"R7-followthrough/R8/R9 (Codex REOPEN,
+generation 93a28b03b0574b038810ca5c0d435beb)"` block, inside the same
+top-level describe so they share its `createRealPlacardRepository` harness
+exercising the REAL `PlatformAdminRepository` against a fake query
+transport, not an interface-level stand-in):
+
+- `"R7-followthrough: a stale reader's source-drift recovery write must not
+  erase a sibling's already-finalized publication"` — two real
+  `PlatformAdminService` instances share the real repository and one shared
+  store. Pod A generates a draft, pod B boots from the same persisted draft
+  row. The object is deleted (genuine absence). Pod B's GET is held exactly
+  at the authentic "missing" determination (new `DelayedMissingObjectStore`,
+  same held-delivery technique as the existing `DelayedReadbackStore`
+  classes elsewhere in this file, applied to a `null` result instead of a
+  found one). While held, pod A publishes and finalizes for real. Releasing
+  pod B's held miss drives it through the actual `rebuildPlacardArtifact` →
+  `migratePlacardArtifactAfterSourceDrift` → `persistChanges` path with its
+  own genuinely stale `publishedAt: null` snapshot. Asserts: the GET is
+  denied as `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` (unchanged), the durable
+  row's `publishedAt`/`artifactManifestHash` still exactly match pod A's
+  finalized values (the actual regression check), pod A's own link still
+  resolves to the correct bytes afterward, and a second publish attempt is
+  still correctly rejected as `ALREADY_PUBLISHED`.
+- `"R8-followthrough: an instance booted after an abandoned claim must still
+  reach the repository's reclaim guard through the actual service entry
+  point"` — two cases against the real repository: (1) a claim is taken,
+  then its row's `updated_at` is aged past the 2-minute window (modelling a
+  crashed owner), a freshly constructed instance boots directly into that
+  state and its `publishPlacardVersion` call is asserted to succeed, land a
+  claim-token-free finalized row, and have actually advanced the row's
+  `updated_at` (ruling out a cached pass-through); (2) the same setup with a
+  genuinely fresh (not aged) pending claim still correctly rejects with
+  `ALREADY_PUBLISHED`.
+- `"R9 additional reader gap: an ordinary reader booted before any claim must
+  still discover a sibling's finalized publish"` — pod D boots before pod A
+  ever takes a claim (plain draft, no token, never calls publish itself);
+  after pod A publishes, pod D's own `getPlacardVersion` and the controller
+  resolving its returned link are asserted to match pod A's finalized
+  metadata/bytes exactly.
+
+All three new blocks call the actual `PlatformAdminService`/
+`PlatformAdminRepository`/`ControlledDownloadController` production classes
+and the actual `renderPlacardArtifact`/`migratePlacardArtifactAfterSourceDrift`
+code paths; only the SQL query transport and the document-artifact store are
+test doubles (the same contained substitution every prior round in this
+lineage used), and both model the real conditional-write/object-key
+semantics being verified, not a simplified stand-in of the logic under test.
+
+### Verification at this repair
+
+One pre-existing, unrelated TypeScript error was found and fixed in the new
+test code itself during verification (not a product-code issue): the new
+`DelayedMissingObjectStore`'s `gate` field was declared as `gate?:
+Promise<void>` and later explicitly assigned `undefined`, which this
+repo's `exactOptionalPropertyTypes: true` rejects (`TS2412`); corrected to
+`gate: Promise<void> | undefined`, matching the exact convention the two
+pre-existing `DelayedReadbackStore` classes elsewhere in this same file
+already use.
+
+`pnpm --filter @drts/control-plane-auth run build` (this worktree's
+generated declarations were missing, the same disclosed local-toolchain gap
+every prior round in this lineage recorded — `@drts/contracts`'s own dist
+was already present this round), then `pnpm --filter @drts/api run
+typecheck`: exit 0, no errors. Root `pnpm run typecheck:root`: no errors
+from `audit-artifact-durability-20261002.test.ts` or either touched
+production file; the only remaining errors (13, pre-existing, confirmed
+unrelated) are a structural type-identity collision between
+`packages/api-client` as seen from this worktree
+(`.../auto/claude2-audit-artifact-durability-20261002-2`) versus a sibling
+worktree directory at the same path minus the `-2` suffix
+(`.../auto/claude2-audit-artifact-durability-20261002`), which both exist
+on disk in this environment — an orchestrator worktree-management artifact
+unrelated to this task's `write_scopes`, not a regression from this repair
+(`fleet-partner-list-envelope.test.ts`, `sr-admin-verify-001/fleet-lists.test.ts`,
+neither touched or owned by this task).
+
+Scoped vitest run (no `DATABASE_URL`/`API_DATABASE_URL`/`TEST_DATABASE_URL`/
+`PG_DATABASE_URL` set in this environment; confirmed via `env | grep -i
+"DATABASE\|POSTGRES\|PG_"` returning nothing — no real DB/network call is
+exercised by any file in this selection regardless):
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts \
+  tests/unit/audit-artifact-durability-s3-20261003.test.ts \
+  tests/unit/system-remediation/sr-artifact-001/ \
+  tests/unit/system-remediation/sr-invoice-001/ \
+  tests/unit/system-remediation/sr-placard-001/ \
+  tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts \
+  tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts \
+  tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts \
+  --maxWorkers=1
+```
+=> exit 0, 12 files / 155 tests passed, zero skips. Separately:
+```
+pnpm exec vitest run tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts \
+  tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts \
+  tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts \
+  tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts \
+  --maxWorkers=1
+```
+=> exit 0, 4 files / 27 tests passed, zero skips. And, isolated (the new
+describe blocks' own file, run alone to confirm the new cases individually):
+```
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts --maxWorkers=1
+```
+=> exit 0, 1 file / 72 tests passed (69 pre-existing + 3 new test cases
+across the three new describe blocks above), zero skips — every
+pre-existing R1-R9/R4-R7-followthrough case unchanged and still passing.
+From `apps/api`: `pnpm exec vitest run tests/unit/platform-admin.service.test.ts
+--maxWorkers=1` => exit 0, 1 file / 3 tests.
+
+Hosted CI for this repair's own candidate SHA is pending — produced by the
+handoff/candidate lifecycle after this repair is committed and pushed, not
+run locally from this VM. The reopen's own observed hosted CI for the
+PREVIOUS candidate SHA (`4d3dc39c5b107cf4af79b96873fa1a7209717dbd`, runs
+37133195553/37133195487) remains valid only for what it covered, which did
+not include this repair's changes.
+
+### Acceptance mapping (this repair)
+
+| Finding/acceptance | Source location | Old → new | Evidence | Limitation |
+| --- | --- | --- | --- | --- |
+| R7-followthrough (generic recovery erases finalized publication) | `platform-admin.repository.ts` `persistChanges` placard upsert `WHERE` guard | newer-timestamp stale write erased a finalized row → sticky `publishedAt` guard makes it a safe no-op | new service-level test above; scoped suites 155/155 + 27/27 + 72/72 | Real PG JSONB `->>'publishedAt'` text comparison not exercised from this VM (`SR-LIVE-DOC-001`) |
+| R8-followthrough (restart can't reach reclaim) | `platform-admin.service.ts` `publishPlacardVersionExclusive` early-reject condition | restart permanently blocked before `claimPlacardPublish` → falls through to the real reclaim guard when a pending claim token is cached | new service-level tests above (aged + fresh cases) | Real process restart was modelled by constructing a fresh service instance against the same repository, not an actual process kill/VM restart |
+| R9 additional reader gap (ordinary reader never refreshes) | `platform-admin.service.ts` `resolvePlacardVersion` refresh condition | pre-claim reader never re-resolved → re-resolves whenever not already known-finalized | new service-level test above | n/a |
+| R7/R8 reclaim safety (stale PUT after reclaim) | `S3DocumentArtifactStoreAdapter.put` / `platform-admin.service.ts` publish path | **not fixed** — see Remaining limitations | Probe A in the reopen message (not re-run this repair; no product code path changed for this finding) | Requires an object-level fencing design (content-addressed keys + authoritative pointer, or an equivalently enforceable conditional write), explicitly out of scope for a quick guard per reviewer; needs Supervisor-coordinated scope (likely a new DB column/migration and adapter contract change) before implementation |
+| `durable_producer_reader_wiring` | R7-followthrough/R8-followthrough/R9 fixes above | three of four adjacent gaps closed | same as above | R7/R8 byte-fencing gap remains open |
+| `cross_instance_restart_bytes` | R7-followthrough/R8-followthrough/R9 fixes above | three of four adjacent gaps closed | same as above | R7/R8 byte-fencing gap remains open |
+| `signature_hash_denial_regressions` | unchanged fail-closed mismatch checks | still passing | scoped suites above | n/a |
+| `same_sha_review_ci` | this candidate's own SHA | pending (produced after handoff) | n/a yet | previous SHA's hosted CI does not cover this repair |
+
+### Remaining limitations (this repair, R7-followthrough/R8-followthrough/R9-additional-reader-gap round)
+
+- **R7/R8 reclaim safety (stale PUT after reclaim) is explicitly NOT fixed
+  in this repair.** The reopen was explicit that a widened lease or an
+  additional pre-write readback does not solve this — it requires a design
+  where a stale writer structurally cannot replace the winner's bytes (e.g.
+  immutable per-version/per-hash object keys with a separate atomic
+  authoritative pointer record, or an equivalently enforceable conditional
+  object write). That is a storage/schema-shape change, not a guard-logic
+  fix, and may need DB migration and/or `S3DocumentArtifactStoreAdapter`
+  contract changes outside this task's current `write_scopes`
+  (`infra/migrations/` is not listed). Per `AI_COLLABORATION_GUIDE.md` §0.7
+  ("需要額外檔案時，由 Supervisor 核對平行任務衝突並更新原 task 的
+  `write_scopes`"), this needs Supervisor scope coordination before
+  implementation, not a same-unit workaround that the reviewer already ruled
+  out in advance.
+- Real PostgreSQL JSONB text-comparison semantics for the widened
+  `persistChanges` guard, and genuine concurrent-connection/process-restart
+  behaviour for the R8-followthrough fix, are not exercised from this VM;
+  both are proven against the repository's actual SQL text and parameter
+  binding with a fake query transport that models the same conditional-write
+  semantics, not a live Postgres instance or an actual killed process. Real
+  multi-replica Cloud Run acceptance remains `SR-LIVE-DOC-001`.
+- No product/browser/DB/Compose server was started on this VM; no real cloud
+  storage was contacted.
