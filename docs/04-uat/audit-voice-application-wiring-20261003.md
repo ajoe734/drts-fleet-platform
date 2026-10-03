@@ -1362,9 +1362,10 @@ A transient environment issue was hit and resolved, not a code defect:
 `pnpm --filter @drts/api typecheck` briefly failed with
 `Cannot find module '@drts/control-plane-auth'` because this worktree's own
 (gitignored) `packages/control-plane-auth/dist` was absent -- apps/api's
-`tsconfig.json` `paths` maps that import straight to
-`packages/control-plane-auth/dist/index.d.ts`, resolved relative to this
-worktree, independent of the node_modules symlink farm (which this VM's
+`tsconfig.json` `paths` maps that import straight to the generated
+`index.d.ts` under `packages/control-plane-auth/dist/` (gitignored, not a
+tracked repo path), resolved relative to this worktree, independent of the
+node_modules symlink farm (which this VM's
 worktrees share across sessions). `pnpm --filter @drts/control-plane-auth build`
 regenerated it (a build-output-only, gitignored, fully reversible action
 touching no source); the typecheck above is the clean re-run after that.
