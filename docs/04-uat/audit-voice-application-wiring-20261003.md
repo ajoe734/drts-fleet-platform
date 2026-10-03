@@ -1666,3 +1666,382 @@ provider/GCP/apps/api call, package install, or apps/api source change
 was performed this round. `same_sha_review_ci` pending hosted CI and
 original reviewer (Codex) re-review on the new SHA this round's commit
 produces.
+
+## Round-11: Codex reopen on `1994a76ec5fa5a96e37bd0abb81bf1f99cefcd9d` -- R2/R6/R7/R4-persist/R8/R9 fixed, R4 partially repaired
+
+Codex independently re-reviewed exact detached HEAD
+`1994a76ec5fa5a96e37bd0abb81bf1f99cefcd9d` (generation
+`4be61085686a448cbd6893abcebe50a8`; PR #2293 head matched) and reopened
+with seven findings: R6, R7, R4 (repeated across this and the prior
+candidate), an R4-persist follow-through, R8, R9, and an R2 residual
+entry. This round fixes R2/R6/R7/R4-persist/R8/R9 completely, with
+regression coverage for every reviewer-described reproduction, and
+repairs a separable, in-scope slice of R4 while precisely documenting
+what remains and why it is not completed in this round. Dispatch
+explicitly prohibited any file/artifact edits by the reopening session;
+all repairs below were made by the original owner (Claude2) in a
+subsequent dispatch, per `AI_COLLABORATION_GUIDE.md` §0.7.
+
+### R8 -- S3 recorder metadata case-folding (`composed_turn_and_recording_path`)
+
+**Root cause.** `object-store-recorder.ts#decodeSegmentMetadataHeaders`
+looked up S3 object metadata by the exact camelCase keys
+`encodeSegmentMetadataHeaders` wrote (`brandId`, `callId`, ...). Real S3
+(and any S3-compatible backend) normalizes user-defined metadata keys to
+lowercase on write
+(https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html),
+so every lookup silently missed and `readVersion.recordingMetadata` was
+always `undefined` against a real backend, even though the existing
+roundtrip test's mock `send` echoed the camelCase keys back unchanged and
+therefore never caught it.
+
+**Fix** (`object-store-recorder.ts`): `decodeSegmentMetadataHeaders` now
+lowercases incoming header keys (via a new `lowercaseHeaderKeys` helper)
+before every lookup, matching real S3 transport behavior. The existing
+roundtrip test's mock `send` was corrected to lowercase metadata keys on
+write, same as real S3, and its assertion was widened from checking only
+`checksum` to the full decoded `recordingMetadata` object. Two more
+focused tests were added directly against the lowercase-transport
+contract.
+
+### R9 -- Mutable `VersionId='null'` accepted as immutable (`composed_turn_and_recording_path`)
+
+**Root cause.** `s3-object-store-client.ts#putObjectVersion` rejected only
+a falsy/missing `VersionId`. A versioning-suspended (or never-enabled)
+bucket returns the literal string `"null"` for every write to a given
+key -- truthy, but not a distinct version; a same-key overwrite replaces
+that one mutable object in place
+(https://docs.aws.amazon.com/AmazonS3/latest/userguide/AddingObjectstoVersionSuspendedBuckets.html).
+
+**Fix**: `putObjectVersion` now also rejects the literal string `"null"`,
+and `getObjectVersion` rejects a request for that literal identity too
+(defense in depth, since `putObjectVersion` can no longer produce it).
+Added tests for both the put-side rejection and the get-side rejection of
+a forged/stale `"null"` reference.
+
+### R2 residual -- one authority-transition boundary, not two divergent paths (`authority_epoch_consent_fences`)
+
+**Root cause.** `VoiceSessionComposer.advanceMediaEpoch(sessionId)` (the
+composed wrapper) called both `composed.session.advanceMediaEpoch()` and
+`turnCoordinator.invalidateCurrentTurn(...)` -- but
+`VoiceMediaWorkerSession.advanceMediaEpoch()` itself (reachable directly
+via `composer.get(id).advanceMediaEpoch()`, as an existing unit test
+driving the session alone already did) only updated local epoch/playback
+bookkeeping, with no way to reach the turn coordinator at all. Calling
+the composed wrapper correctly cancelled a pending provider call;
+calling the underlying session method directly did not -- the exact
+previously-reported reproduction (`composer.get(id).advanceMediaEpoch()`
+leaves `request.signal.aborted === false`) still failed on the candidate
+under review.
+
+**Fix**: `VoiceMediaWorkerSession.advanceMediaEpoch` now publishes a new
+`media.epoch.advanced` event through the same `eventSink` every other
+session event already flows through (`media-session.ts`).
+`VoiceCallTurnCoordinator.handle` treats that event exactly like
+`speech.started` (bump `inputEpoch`, abort `activeAbort`) in
+`call-turn-coordinator.ts`. `VoiceSessionComposer.advanceMediaEpoch` was
+simplified to just call `composed.session.advanceMediaEpoch()` -- the
+now-dead, duplicate `VoiceCallTurnCoordinator.invalidateCurrentTurn`
+method was deleted. There is now exactly one authority-transition
+boundary (the session's own `emit`), reachable identically from either
+call path. Added a direct regression test calling
+`session.advanceMediaEpoch()` on the retained reference (not through the
+composer) and asserting the same synchronous-cancellation guarantee the
+existing composed-call test already proved.
+
+### R6 -- Worker handoff tool execution escaped cancellation and could adopt a newer input epoch (`authority_epoch_consent_fences`)
+
+**Root cause.** `VoiceDialogueTurnPorts.execute(output)` took no
+request/signal at all, and `dialogue-engine.ts#turn`'s own `boundedStage`
+call for the execute stage discarded the per-stage bounded request it
+received (`() => ports.execute(output)`, ignoring `bounded`). This meant
+`VoiceCallTurnCoordinator.executeTools`'s `issueCapability`/
+`requestHandoff` calls had no `AbortSignal` of any kind, and submitted
+the *mutable* `turnSession.inputEpoch` (read at call time, after awaiting
+the capability) rather than the *immutable* epoch admitted when the
+turn's final transcript arrived. Three independently reproduced
+triggers -- the real `speech.started` control frame, closing the
+channel, and `composer.advanceMediaEpoch` -- each still let one
+`/handoffs` request go out *after* the turn was superseded, with
+`hasSignal: false`, and a stale proposal's `inputEpoch` could be
+silently relabeled under a newer value.
+
+**Fix**: `VoiceDialogueTurnPorts.execute` now takes `(output, request)`
+(`dialogue-engine.ts`), and `turn()`'s `boundedStage` call for the
+execute stage passes its own `bounded` request through, exactly like the
+persist stage already did. `VoiceCallTurnCoordinator.executeTools` now
+receives that per-stage bounded request, checks
+`request.signal.throwIfAborted()` before issuing the handoff capability
+and again before calling `requestHandoff`, forwards `request.signal`
+into both `VoiceApiClient` calls, and submits `request.inputEpoch` (the
+immutable admitted epoch) instead of `turnSession.inputEpoch`
+(`call-turn-coordinator.ts`). Added four reproductions in
+`trusted-turn-composition.test.ts` mirroring the reviewer's exact
+scenario (hold the handoff-scoped capability response; separately trigger
+channel close, `speech.started`, and `composer.advanceMediaEpoch` before
+releasing it) plus a positive control proving the legitimate path still
+completes with signal forwarding and the correct `inputEpoch`.
+
+### R7 -- API handoff tool port ignored the gateway's signal/inputEpoch and could refresh a stale proposal into eligibility (`authority_epoch_consent_fences`)
+
+**Root cause.** `VoiceHandoffOnlyToolPorts.execute` declared its context
+parameter narrowed to `{ claims }` only -- TypeScript's method-parameter
+bivariance let this satisfy the wider `VoiceToolDomainPorts` interface
+(`claims`, `inputEpoch`, `boundOrderId`, `signal`) without a type error,
+so the port never read `context.inputEpoch`/`context.signal` at all. Its
+own `findSessionById` read (a *third* session read, after both of the
+gateway's own `assertCurrent` checks) then used whatever
+`sessionVersion` that fresh row currently had as `initiateHandoff`'s CAS
+fence -- which trivially matches itself regardless of whether the row
+had moved since this proposal was admitted. The gateway's own
+`Promise.race` against its cancellation signal only governs what the
+gateway's *caller* awaits; it never actually stops this detached port
+call once started. Two independently reproduced cases: (a) aborting the
+turn while this read was held still let the real `VoiceHandoffService`
+complete its CAS/queue write afterward; (b) advancing the authoritative
+row to a newer `inputEpoch`/`sessionVersion` while this read was held let
+the stale, already-superseded proposal "refresh" onto the newer version
+and complete as if it were still current.
+
+**Fix** (`voice-handoff-tool-ports.ts`): the port now declares the full
+context type and checks `context.signal.throwIfAborted()` before the
+session read, again after it resolves, and once more before calling
+`initiateHandoff` -- checked directly, not inferred from the gateway's
+race outcome. It also rejects (`VOICE_DRAFT_STALE`) if the fresh read's
+`inputEpoch` no longer matches `context.inputEpoch` (the epoch admitted
+when this proposal was created), instead of trusting whatever the row's
+current `sessionVersion` happens to be. Added direct unit coverage for
+both fences (`voice-capability-composition.test.ts`) and updated the
+three pre-existing `VoiceHandoffOnlyToolPorts` tests to pass the full
+context shape a real caller (the gateway) always supplies.
+
+### R4-persist follow-through -- post-CAS cancellation/correlation and identity deadline (`authority_epoch_consent_fences`)
+
+**Root cause.** `createTrustedDialoguePersistPort.persist` re-checked
+`signal?.aborted` after `issueCapability` but never again after
+`resolveInput` itself resolved -- an abort landing while that exact
+response was still outstanding let a subsequently-released, otherwise
+legitimate response still advance the binding's `sessionVersion`. The
+response was also correlated by `inputEpoch` alone, which cannot
+distinguish a misattributed reply for an entirely different session that
+happens to carry a matching epoch; a response with the right epoch but
+`voiceSessionId: "another-session"` and `sessionVersion: 1` was accepted,
+regressing the binding from `4` to `1`. Separately, `VoiceApiClient`
+called `workloadTokenSource.getToken()` with no signal, and
+`GoogleMetadataIdentityTokenSource.getToken` had no cancellation/deadline
+of its own at the metadata-server fetch.
+
+**Fix**: `ResolveInputResult.session` now carries `voiceSessionId` (the
+real `VoiceBookingController#resolveInput` route already returns the
+full `VoiceSessionRecord`, which has this field --
+`voice-api-client.ts`). `createTrustedDialoguePersistPort.persist`
+(`dialogue-persist-port.ts`) now re-checks `signal?.aborted` after
+`resolveInput` resolves, and correlates the response against
+`voiceSessionId`, `inputEpoch`, **and** the CAS's own strict
+`sessionVersion + 1` invariant (`casUpdateSessionControl` always advances
+by exactly 1) before ever mutating the binding.
+`WorkloadIdentityTokenSource.getToken` now accepts an optional `signal`,
+forwarded by `VoiceApiClient.issueCapability` all the way to the
+metadata-server fetch (`workload-identity-token-source.ts`). Added
+regression tests for the post-`resolveInput` abort case, the
+cross-session/version-regression misattribution case, and signal
+forwarding for both `getToken` and `issueCapability`
+(`voice-api-client.test.ts`); updated the pre-existing positive-path
+fixtures in `voice-api-client.test.ts` and `trusted-turn-composition.test.ts`
+to include `voiceSessionId`, since the new correlation check requires it.
+
+### R4 -- partial repair; precise remaining scope (`composed_turn_and_recording_path` + `precise_unimplemented_and_external_boundaries`)
+
+R4 is the fourth consecutive round this exact class of finding has been
+reopened (unbound fixture fallback / missing durability wiring /
+inaccurate "no route" claims). This round repairs a genuinely separable
+slice and corrects two sets of now-stale documentation the reviewer
+named specifically, without attempting the parts that would require
+redesigning already-extensively-tested turn-coordination invariants
+without Supervisor-coordinated scope -- which is what this task's own
+`AI_COLLABORATION_GUIDE.md` §0.7 and this round's own dispatch text ask
+for ("identify precise missing fields/migration files and let Supervisor
+coordinate narrow scope, while completing separable in-scope consumers").
+
+**Repaired this round:**
+
+1. **`recordControlEvent` route + worker client now exist.**
+   `VoiceSessionService.recordControlEvent` (apps/api) already fully
+   implements SD §5.4's ordered-event dedup/gap/bootstrap/speech-start-
+   watermark machinery against the already-migrated
+   `voice.session_event`/`voice.turn` tables (`infra/migrations/V0086`) --
+   it had no route or worker-side client to reach it at all, which is one
+   concrete half of "No worker call to recordControlEvent, ordered
+   control-event API/client ... exists." Added
+   `POST /callcenter/voice/sessions/:sessionId/events`
+   (`voice-booking.controller.ts`, authenticated identically to
+   `resolveInput`/`requestHandoff`, `leaseEpoch` always the capability's
+   own bound value) and `VoiceApiClient.recordControlEvent`
+   (`voice-api-client.ts`), each with direct unit coverage
+   (`voice-capability-composition.test.ts`, `voice-api-client.test.ts`).
+2. **Stale documentation corrected**, per the reviewer's explicit
+   instruction to "correct obsolete server.ts:81-92/coordinator class
+   comments claiming no routes/client": `server.ts`'s startup
+   `console.warn` and `VoiceCallTurnCoordinator`'s class doc both still
+   claimed no guarded HTTP route and no HTTP client existed; both are now
+   corrected to name what actually exists (four routes, one client) and
+   what is actually still missing (call-admission flow, coordinator-side
+   `recordControlEvent` wiring, turn/ASR-final persistence, session
+   restoration).
+3. **`dialogue-persist-port.ts`'s "no SD-approved route" claim corrected.**
+   Investigation during this round found `voice.intent` is in fact keyed
+   `FK session` (this call's own `voiceSessionId`), and
+   `VoiceConfirmationService.replaceDraft` already writes
+   `voice.draft_revision` *during* the active session, not post-call --
+   contradicting round-10's framing, exactly as this round's reopen said.
+   The comment now precisely names what is actually missing instead:
+   `replaceDraft` requires a pre-existing `voice.intent` row (an `UPDATE`,
+   not an `INSERT` -- intent creation happens elsewhere, outside this
+   port and outside this task's `write_scopes`) and a real
+   address/service-area qualification call through an external geocoding
+   provider this worker has no account for. Piping
+   `VoiceDialogueEngine`'s raw, unvalidated ASR-derived slots into
+   `replaceDraft` every turn to manufacture "durability" would itself be
+   exactly the "consent/booking inferred from ASR" / "store unvalidated
+   dialogue blindly as an accepted booking snapshot" failure mode SD §6.1
+   forbids and this round's own dispatch explicitly warns against -- not
+   a fix.
+4. **Mis-targeted test corrected.** The reviewer named this precisely:
+   "Existing fixture-persistence guard test at
+   `call-turn-coordinator.test.ts:507` still uses a fixture provider with
+   `production=true`, so it rejects in `runVoiceDialogue` before reaching
+   the persist guard." Confirmed by reading `voice-dialogue-provider.ts`'s
+   own `production && provider.mode !== "live"` guard: the test's
+   assertion passed, but for the wrong reason. Fixed to use a `mode:
+   "live"` provider double so the persist-port's own
+   `voice_persist_untrusted_for_production` guard is the actual thing
+   under test, matching what the test's own doc comment already claimed
+   (`call-turn-coordinator.test.ts`).
+
+**Deliberately not attempted this round, and why:**
+
+- **Wiring `recordControlEvent` into `VoiceCallTurnCoordinator.handle` on
+  `speech.started`, and reconciling this worker's process-local
+  turn-sequencing counter against the authoritative, speech-start-only
+  remote watermark.** `turnSession.inputEpoch` is currently bumped on
+  *both* `speech.started`/`media.epoch.advanced` *and* every
+  `asr.segment.final` (`call-turn-coordinator.ts#handle`); the
+  authoritative `voice.session.input_epoch` this route/`resolveInput`
+  actually check against only ever advances on a durably-applied
+  `speech_start` control event (`voice-session.service.ts#recordControlEvent`,
+  `patch.inputEpoch = session.inputEpoch + 1` only when
+  `sawSpeechStart`). These are two different counters serving two
+  different purposes today -- local in-process turn supersession
+  fencing vs. a durable, SD-approved admission watermark -- and this
+  task's reopen history already confirms (session-composer-turn-
+  coordinator.test.ts's R1/R2/R3 rounds) that the local counter's
+  current bump-on-every-final behavior is load-bearing for existing,
+  carefully-reasoned turn-cancellation semantics. Splitting these two
+  concerns apart safely requires a per-attachment control-sequence
+  bootstrap scheme (SD §5.4's `sequence` contiguity/gap rules) and a
+  considered decision about exactly which local events (e.g. does
+  `media.epoch.advanced` durably record as a control event too, with no
+  SD-defined event type for it yet?) should be mirrored to apps/api and
+  when -- a design decision, not a bug fix, and exactly the kind of
+  "precisely-scoped cross-service contract that needs coordinated design
+  on both sides" this task's own existing class-doc language already
+  uses for the capability-issuance gap that took rounds 5-11 to close
+  correctly. All of this round's existing/new HTTP-mock-based composed
+  tests (e.g. `trusted-turn-composition.test.ts`) still echo back
+  whatever `inputEpoch` the worker submits, exactly as the reopen's own
+  text warns ("the composed test's HTTP double merely echoes submitted
+  inputEpoch and conceals this absent integration") -- that limitation is
+  unchanged by this round and should be named explicitly to the next
+  owner/reviewer, not silently relied upon as acceptance evidence for
+  this specific gap.
+- **ASR-final/turn persistence** (`POST /sessions/{sessionId}/turns`,
+  SD §10.1; the `voice.turn` table already exists per
+  `infra/migrations/V0086`) has no apps/api service method built at all
+  yet (unlike `recordControlEvent`, which was already fully implemented
+  and only needed a route+client) -- this is new service-layer design
+  (dedup/CAS semantics for ASR revisions), not wiring an existing seam.
+- **Session restoration** (`GET /sessions/{sessionId}`, SD §10.1) does
+  not exist either; combined with the two items above, this is what
+  would let a worker restart/reconnect actually resume a session's
+  real admitted authority instead of starting a fresh in-memory
+  `VoiceDialogueState` at epoch 0 every time -- genuinely unimplemented,
+  not merely unwired.
+- **A new `infra/migrations/V0106__voice_dialogue_snapshot.sql`**, named
+  in this task's `write_scopes`, was *not* created this round: the
+  investigation above found the SD §9.1 schema this live-call content
+  should flow through (`voice.session_event`, `voice.turn`,
+  `voice.intent`, `voice.draft_revision`) already exists and already has
+  at least one live-session write path (`replaceDraft`). Adding a new,
+  parallel "snapshot" table that does not match the already-approved
+  event-sourced/qualified-draft design would risk exactly the kind of
+  unapproved, unilaterally-invented schema this task's own conventions
+  warn against, not close a real gap. Supervisor should confirm whether
+  a snapshot table is still wanted alongside the existing design (e.g.
+  for fast restoration without full event replay) before one is added,
+  or whether completing the `voice.turn` write path + session
+  restoration against the existing tables is the better-aligned next
+  step.
+- **`request_handoff` remains the only tool this coordinator can
+  honestly execute** (`VoiceCallTurnCoordinator`'s class doc,
+  unchanged this round) -- every other proposal still forces the honest
+  `unavailable` outcome; this is unrelated to the durability gaps above
+  and remains correctly gated on the same missing domain-execution
+  channel prior rounds already documented.
+
+**Required evidence table addendum (per `AI_COLLABORATION_GUIDE.md` §0.7):**
+
+| Finding | Source & location | Old -> new result | Command / result | Residual limit |
+| --- | --- | --- | --- | --- |
+| R8: S3 metadata case-folding | `object-store-recorder.ts#decodeSegmentMetadataHeaders` | `recordingMetadata` undefined against real-S3-shaped (lowercase) metadata -> correctly decoded | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/{s3-object-store-client,object-store-recorder}.test.ts`: 16/16 pass | None -- unit-level only, no real AWS S3 bucket exercised |
+| R9: mutable `VersionId='null'` | `s3-object-store-client.ts#putObjectVersion`/`getObjectVersion` | `'null'` accepted as a valid immutable version -> rejected at both put and get | same run above | None -- unit-level only |
+| R2 residual: one authority-transition boundary | `media-session.ts#advanceMediaEpoch`, `call-turn-coordinator.ts#handle` | direct-session call path left `request.signal.aborted===false` -> both call paths now cancel synchronously | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/session-composer-turn-coordinator.test.ts`: 18/18 pass | None found |
+| R6: handoff execution escaped cancellation / epoch relabel | `dialogue-engine.ts#turn`, `call-turn-coordinator.ts#executeTools` | one `/handoffs` request after invalidation in all 3 triggers, `hasSignal:false` -> zero new requests, signal forwarded, admitted `inputEpoch` preserved | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`: 6/6 pass | HTTP/identity doubled; no real apps/api/GCP call |
+| R7: handoff port ignored signal/inputEpoch | `voice-handoff-tool-ports.ts#execute` | abort-during-read and stale-epoch-refresh both completed the CAS/queue write -> both rejected before `initiateHandoff` | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/voice-capability-composition.test.ts`: 19/19 pass | Repository/DB doubled; no real Postgres exercised |
+| R4-persist: post-CAS correlation/cancellation | `dialogue-persist-port.ts#persist`, `voice-api-client.ts`, `workload-identity-token-source.ts` | post-abort success still advanced version; cross-session/regressed response accepted -> both rejected; signal now reaches metadata fetch | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`: 28/28 pass | HTTP/metadata-server doubled |
+| R4: `recordControlEvent` route/client missing | `voice-booking.controller.ts`, `voice-api-client.ts` | no route/client existed at all -> both exist, authenticated, tested | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/voice-capability-composition.test.ts tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`: 19+28 pass | Not yet called from `VoiceCallTurnCoordinator` during a live turn -- see "deliberately not attempted" above |
+| R4: stale "no route/client" doc claims | `server.ts`, `call-turn-coordinator.ts` class doc | obsolete claims preserved uncorrected -> both explicitly superseded, history preserved | text-only; reviewed by reading the diff | None |
+| R4: stale "no SD-approved route" doc claim | `dialogue-persist-port.ts` | claimed `voice.draft_revision` was post-call-only -> corrected with the precise `replaceDraft`/intent-lifecycle/qualification gap | text-only; reviewed by reading the diff | None |
+| R4: mis-targeted persist-guard test | `call-turn-coordinator.test.ts` | asserted the provider guard while claiming to test the persist-port guard -> now exercises the persist-port guard directly | `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/call-turn-coordinator.test.ts`: 14/14 pass | None |
+
+**Full local verification on this round's final candidate SHA** (same
+VM/worktree-sharing environment as every prior round; no symlink-farm
+breakage observed this round):
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm --filter @drts/voice-media-worker lint`: exit 0.
+- `pnpm --filter @drts/api typecheck`: exit 0 (after `pnpm --filter
+  @drts/control-plane-auth build`, needed once per worktree session for
+  this root-tsconfig-independent package's own generated `.d.ts` output --
+  not a product defect, consistent with prior rounds' documented
+  environment notes).
+- `pnpm --filter @drts/api lint`: exit 0.
+- `pnpm exec eslint tests/unit/audit-voice-application-wiring-20261003 --max-warnings=0`: exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/ tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts tests/unit/uv-exec-{008,010,012,026}.test.ts`: 20 files / 332 tests pass, exit 0 (up from 312 at the start of this round's reopen; +20 net new/corrected tests across R8/R9/R2/R6/R7/R4-persist/R4).
+- `pnpm exec vitest run tests/unit/uv-exec-020.test.ts tests/contract/uv-exec-001.test.ts`: 135/135 pass, exit 0 (broader regression check since this round touched the shared `voice-booking.controller.ts`/`voice-tool-gateway.service.ts` files).
+- `pnpm exec vitest run tests/security/idempotency-regression-guard.test.ts`: 5/5 pass, exit 0 (the new `sessions/:sessionId/events` route classifies `entity_crud_or_configuration` via the existing `:sessionId`-path-parameter rule, same as its `input-resolutions`/`handoffs` siblings -- confirmed by reading `classifyRouteCommand`'s own heuristic, not merely trusting the green run).
+- `git diff --check 1994a76ec5fa5a96e37bd0abb81bf1f99cefcd9d HEAD`: exit 0.
+
+### Acceptance on this round's final candidate SHA (see handoff for the exact value)
+
+- `composed_turn_and_recording_path`: R8/R9 fixed and verified; R4's
+  durability gap is now precisely scoped but only partially repaired
+  (route/client for `recordControlEvent` exist; coordinator wiring,
+  turn persistence, and session restoration remain). **Partially met.**
+- `authority_epoch_consent_fences`: R2 residual, R6, R7, and the
+  R4-persist follow-through are all fixed and verified with regression
+  tests covering every reviewer-described reproduction. **Met**, pending
+  reviewer re-confirmation on this exact SHA.
+- `precise_unimplemented_and_external_boundaries`: three sets of stale
+  "no route/client"/"no SD-approved schema" documentation claims
+  explicitly named by this round's reopen are now corrected and
+  superseded, with the precise remaining gap (call-admission flow,
+  turn/ASR-final persistence, session restoration, intent-lifecycle/
+  qualification wiring) named in place of the inaccurate ones. Genuinely
+  external gates (CTI/issuer/model/account, geocoding provider) remain
+  open and are not claimed as closed. **Improved; not fully met** --
+  R4's durability gap is precise now, not closed.
+- `same_sha_review_ci`: pending hosted CI and original reviewer (Codex)
+  re-review on the new SHA this round's commits produce.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider/GCP/apps/api call, package install, or infra/migrations change
+was performed this round.
