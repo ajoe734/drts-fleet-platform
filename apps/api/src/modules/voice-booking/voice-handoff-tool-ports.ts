@@ -26,7 +26,12 @@ export class VoiceHandoffOnlyToolPorts implements VoiceToolDomainPorts {
 
   async execute(
     proposal: VoiceToolProposal,
-    context: { claims: VoiceCapabilityTokenClaims },
+    context: {
+      claims: VoiceCapabilityTokenClaims;
+      inputEpoch: number;
+      boundOrderId: string | null;
+      signal: AbortSignal;
+    },
   ): Promise<unknown> {
     if (proposal.name !== "request_handoff") {
       throw new ApiRequestError(
@@ -36,12 +41,22 @@ export class VoiceHandoffOnlyToolPorts implements VoiceToolDomainPorts {
       );
     }
 
-    // `VoiceToolGatewayService.execute`'s own `assertCurrent` already
-    // re-verified the session is live/current for `context.claims`
-    // immediately before calling here, but it does not forward that row --
-    // the session's current `sessionVersion`/`leaseEpoch` are the exact CAS
+    // Codex reopen round 5/6, R7: `VoiceToolGatewayService.execute`'s own
+    // `assertCurrent` already re-verified the session is live/current for
+    // `context.claims` immediately before calling here (including
+    // `session.inputEpoch === this.turn.inputEpoch`), but its `Promise.race`
+    // against `context.signal` only governs what *that caller* awaits --
+    // it never cancels this detached port call once started, so a turn
+    // aborted while the read below is still outstanding would otherwise
+    // keep running to completion regardless. Checked directly, not
+    // inferred from the race's own outcome.
+    context.signal.throwIfAborted();
+
+    // The session's current `sessionVersion`/`leaseEpoch` are the exact CAS
     // values `initiateHandoff` itself re-checks, so the only trustworthy
-    // source is a fresh read, not anything cached across that boundary.
+    // source is a fresh read, not anything cached across that boundary --
+    // but a fresh read's own `sessionVersion` only means something if it
+    // still corresponds to the turn this proposal was admitted under.
     const session = await this.repository.findSessionById(
       context.claims.voiceSessionId,
     );
@@ -53,6 +68,24 @@ export class VoiceHandoffOnlyToolPorts implements VoiceToolDomainPorts {
       );
     }
 
+    context.signal.throwIfAborted();
+    // Fence against refreshing a stale proposal into eligibility: this
+    // read trivially matches its own `sessionVersion`, which would let a
+    // handoff admitted under an old `inputEpoch` silently adopt whatever
+    // the row has since moved to (a newer customer utterance, a barge-in,
+    // a media-authority change) by just re-reading the current row and
+    // using *that* as the CAS fence. The admitted `context.inputEpoch` --
+    // fixed at proposal time, never the session's current value -- is what
+    // must still hold.
+    if (session.inputEpoch !== context.inputEpoch) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_DRAFT_STALE",
+        "Session input epoch advanced since this handoff was admitted.",
+      );
+    }
+
+    context.signal.throwIfAborted();
     const result = await this.handoffService.initiateHandoff({
       voiceSessionId: context.claims.voiceSessionId,
       expectedSessionVersion: session.sessionVersion,

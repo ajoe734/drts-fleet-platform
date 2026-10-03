@@ -77,6 +77,29 @@ function claims(
   };
 }
 
+/** `VoiceToolDomainPorts.execute`'s real context shape -- matches
+ * `session()`'s default `inputEpoch: 2` so a test can pass this through
+ * unmodified unless it is specifically exercising the inputEpoch/signal
+ * fences added for R7. */
+function toolPortContext(overrides: {
+  claimsOverrides?: Partial<VoiceCapabilityTokenClaims>;
+  inputEpoch?: number;
+  boundOrderId?: string | null;
+  signal?: AbortSignal;
+} = {}): {
+  claims: VoiceCapabilityTokenClaims;
+  inputEpoch: number;
+  boundOrderId: string | null;
+  signal: AbortSignal;
+} {
+  return {
+    claims: claims(overrides.claimsOverrides),
+    inputEpoch: overrides.inputEpoch ?? 2,
+    boundOrderId: overrides.boundOrderId ?? null,
+    signal: overrides.signal ?? new AbortController().signal,
+  };
+}
+
 function buildController(opts: {
   guardAuthenticate: ReturnType<typeof vi.fn>;
   issue?: ReturnType<typeof vi.fn>;
@@ -333,7 +356,7 @@ describe("VoiceHandoffOnlyToolPorts", () => {
     await expect(
       ports.execute(
         { name: "resolve_location", args: { rawText: "x" } } as never,
-        { claims: claims() } as never,
+        toolPortContext(),
       ),
     ).rejects.toMatchObject({ code: "VOICE_TOOL_NOT_IMPLEMENTED" });
     expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
@@ -363,7 +386,7 @@ describe("VoiceHandoffOnlyToolPorts", () => {
       const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
       const result = await ports.execute(
         { name: "request_handoff", args: { reason: "customer_requested" } } as never,
-        { claims: claims() } as never,
+        toolPortContext(),
       );
       expect(result).toEqual({ status: expected, handoffId: "h-1" });
     }
@@ -379,9 +402,64 @@ describe("VoiceHandoffOnlyToolPorts", () => {
     await expect(
       ports.execute(
         { name: "request_handoff", args: { reason: "customer_requested" } } as never,
-        { claims: claims() } as never,
+        toolPortContext(),
       ),
     ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the authoritative session's inputEpoch has advanced since this proposal was admitted, never refreshing a stale proposal onto the newer version (Codex reopen round 5/6, R7)", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => session({ inputEpoch: 3, sessionVersion: 9 })),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext({ inputEpoch: 2 }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_DRAFT_STALE" });
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects without calling initiateHandoff when context.signal is already aborted before the session read even starts", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => session()),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext({ signal: controller.signal }),
+      ),
+    ).rejects.toBeDefined();
+    expect(repository.findSessionById).not.toHaveBeenCalled();
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects without calling initiateHandoff when context.signal aborts while the session read is in flight", async () => {
+    const controller = new AbortController();
+    const repository = {
+      findSessionById: vi.fn(async () => {
+        controller.abort();
+        return session();
+      }),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext({ signal: controller.signal }),
+      ),
+    ).rejects.toBeDefined();
     expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
   });
 });
