@@ -558,4 +558,167 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     expect(row.record.roleCode).toBe(row.role_code);
     expect(row.record.validFrom).toBe(expectedValidFrom);
   });
+
+  it("R2 (real Postgres): two concurrent first-time ensurePrincipalRecord and ensureMembershipRecord calls for the same previously-unseen rows converge on one updated_at", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const dbA = new DatabaseService();
+    const dbB = new DatabaseService();
+    databases.push(dbA, dbB);
+    const repoA = new IdentityRepository(dbA);
+    const repoB = new IdentityRepository(dbB);
+
+    const principalId = `principal_fc_${randomUUID()}`;
+    const sourceRef = `source_fc_${principalId}`;
+    principalIds.add(principalId);
+
+    const tsA = new Date(Date.now() - 60_000).toISOString();
+    const tsB = new Date(Date.now() - 30_000).toISOString();
+    const makePrincipal = (ts: string): CanonicalIdentityPrincipalRecord => ({
+      principalId,
+      sourceRef,
+      issuer: "test_issuer",
+      subject: `sub_${principalId}`,
+      principalType: "human",
+      email: "fc@example.com",
+      emailVerified: true,
+      displayName: "First Create Fixture",
+      status: "active",
+      createdAt: ts,
+      updatedAt: ts,
+    });
+
+    // Two independent repository instances racing to provision the exact
+    // same, previously-unseen principal -- the production shape of two
+    // parallel automation runs both authenticating for the first time.
+    const [principalResultA, principalResultB] = await Promise.all([
+      repoA.ensurePrincipalRecord(makePrincipal(tsA)),
+      repoB.ensurePrincipalRecord(makePrincipal(tsB)),
+    ]);
+    expect(principalResultA.updatedAt).toBe(principalResultB.updatedAt);
+    expect([tsA, tsB]).toContain(principalResultA.updatedAt);
+
+    const principalRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalId],
+    );
+    expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
+      principalResultA.updatedAt,
+    );
+
+    const membershipId = `membership_fc_${randomUUID()}`;
+    const membershipSourceRef = `source_fc_${membershipId}`;
+    membershipIds.add(membershipId);
+
+    const mtsA = new Date(Date.now() - 60_000).toISOString();
+    const mtsB = new Date(Date.now() - 30_000).toISOString();
+    const makeMembership = (
+      ts: string,
+    ): CanonicalIdentityMembershipRecord => ({
+      membershipId,
+      sourceRef: membershipSourceRef,
+      principalId,
+      realm: "tenant",
+      scopeRef: `scope_${membershipId}`,
+      tenantId: "tenant_fixture",
+      partnerId: null,
+      status: "active",
+      invitedByPrincipalId: null,
+      invitationId: null,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+
+    const [membershipResultA, membershipResultB] = await Promise.all([
+      repoA.ensureMembershipRecord(makeMembership(mtsA)),
+      repoB.ensureMembershipRecord(makeMembership(mtsB)),
+    ]);
+    expect(membershipResultA.updatedAt).toBe(membershipResultB.updatedAt);
+    expect([mtsA, mtsB]).toContain(membershipResultA.updatedAt);
+
+    const membershipRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+      [membershipId],
+    );
+    expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
+      membershipResultA.updatedAt,
+    );
+  });
+
+  it("R2/R6 (real Postgres): a stale content-differing ensurePrincipalRecord forced to execute after a genuine newer suspension commits does not revert the suspension or roll back updated_at", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const dbGate = new DatabaseService();
+    const dbA = new DatabaseService();
+    databases.push(dbGate, dbA);
+    const repoA = new IdentityRepository(dbA);
+
+    const principalId = `principal_overlap_${randomUUID()}`;
+    const sourceRef = `source_overlap_${principalId}`;
+    principalIds.add(principalId);
+
+    const t0 = new Date(Date.now() - 120_000).toISOString();
+    const base: CanonicalIdentityPrincipalRecord = {
+      principalId,
+      sourceRef,
+      issuer: "test_issuer",
+      subject: `sub_${principalId}`,
+      principalType: "human",
+      email: "overlap@example.com",
+      emailVerified: true,
+      displayName: "Overlap Fixture",
+      status: "active",
+      createdAt: t0,
+      updatedAt: t0,
+    };
+    const created = await repoA.ensurePrincipalRecord(base);
+    expect(created.status).toBe("active");
+
+    // Connection B holds a real row lock on the principal row inside an
+    // open, uncommitted transaction, genuinely suspending it. This is a
+    // plain UPDATE used purely to gate timing (it does not copy the
+    // product's ON CONFLICT ... WHERE logic): it forces A's concurrent
+    // statement below to physically block at the database level until this
+    // transaction commits, giving a deterministic "A begins, B commits,
+    // then A completes" ordering instead of hoping Promise.all interleaves.
+    const gateClient = await dbGate.connect();
+    const t2 = new Date(Date.now() - 20_000).toISOString();
+    await gateClient.query("BEGIN");
+    await gateClient.query(
+      `UPDATE iam.identity_principals SET account_status = 'suspended', updated_at = $2::timestamptz WHERE principal_id = $1`,
+      [principalId, t2],
+    );
+
+    // A's real ensurePrincipalRecord call still believes the principal is
+    // active as of T0 (e.g. a reauth whose assertion iat predates the
+    // admin's suspension). It is issued concurrently and must block on the
+    // gate's row lock until the suspension commits.
+    const stalePromise = repoA.ensurePrincipalRecord({
+      ...base,
+      updatedAt: t0,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await gateClient.query("COMMIT");
+    gateClient.release();
+
+    const staleResult = await stalePromise;
+
+    // The stale, content-differing write must lose: the suspension must
+    // still be in effect, and updated_at must not regress to T0 -- which
+    // would both resurrect the suspended principal and revive any token
+    // version computed from the pre-suspension state.
+    expect(staleResult.status).toBe("suspended");
+    expect(staleResult.updatedAt).toBe(t2);
+
+    const dbRow = await dbA.query<{
+      account_status: string;
+      updated_at: Date;
+    }>(
+      `SELECT account_status, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalId],
+    );
+    expect(dbRow.rows[0]?.account_status).toBe("suspended");
+    expect(dbRow.rows[0]?.updated_at.toISOString()).toBe(t2);
+  });
 });

@@ -104,38 +104,51 @@ function evaluateSetExpr(
   throw new Error(`FakeConflictAwarePgClient: unsupported SET expr "${expr}"`);
 }
 
-// A single `<colref> IS DISTINCT FROM <colref>` clause, as used in
-// IdentityRepository's `ON CONFLICT ... DO UPDATE ... WHERE` guard that
-// decides -- atomically, against the conflicting row -- whether any tracked
-// field actually changed.
-function evaluateIsDistinctFromClause(
+// A single `<colref> IS DISTINCT FROM <colref>` or `<colref> >= <colref>`
+// clause, as used in IdentityRepository's `ON CONFLICT ... DO UPDATE ...
+// WHERE` guard that decides -- atomically, against the conflicting row --
+// whether any tracked field actually changed, and (SR-AUTH-SESSION-
+// SUPERSEDE-20261003 R2/R6) whether the incoming write is at least as new
+// as what is already persisted.
+function evaluateComparisonClause(
   clause: string,
   excludedRow: FakeRow,
   existingRow: FakeRow,
 ): boolean {
-  const match = clause
-    .trim()
-    .match(/^([\w.]+)\s+IS\s+DISTINCT\s+FROM\s+([\w.]+)$/i);
-  if (!match || !match[1] || !match[2]) {
-    throw new Error(
-      `FakeConflictAwarePgClient: unsupported WHERE clause "${clause}"`,
+  const trimmed = clause.trim();
+  const distinctMatch = trimmed.match(
+    /^([\w.]+)\s+IS\s+DISTINCT\s+FROM\s+([\w.]+)$/i,
+  );
+  if (distinctMatch && distinctMatch[1] && distinctMatch[2]) {
+    const left = resolveColumnRef(distinctMatch[1], excludedRow, existingRow);
+    const right = resolveColumnRef(
+      distinctMatch[2],
+      excludedRow,
+      existingRow,
     );
+    return left !== right;
   }
-  const left = resolveColumnRef(match[1], excludedRow, existingRow);
-  const right = resolveColumnRef(match[2], excludedRow, existingRow);
-  return left !== right;
+  const geMatch = trimmed.match(/^([\w.]+)\s*>=\s*([\w.]+)$/);
+  if (geMatch && geMatch[1] && geMatch[2]) {
+    const left = resolveColumnRef(geMatch[1], excludedRow, existingRow) as
+      | string
+      | number;
+    const right = resolveColumnRef(geMatch[2], excludedRow, existingRow) as
+      | string
+      | number;
+    return left >= right;
+  }
+  throw new Error(
+    `FakeConflictAwarePgClient: unsupported WHERE clause "${clause}"`,
+  );
 }
 
-// Top-level `OR`-joined `IS DISTINCT FROM` clauses, outside any parens.
-function evaluateWhereClause(
-  where: string,
-  excludedRow: FakeRow,
-  existingRow: FakeRow,
-): boolean {
+// Splits `text` on a top-level (paren-depth-0) occurrence of `keyword`.
+function splitTopLevelByKeyword(text: string, keyword: string): string[] {
   let depth = 0;
-  const clauses: string[] = [];
+  const parts: string[] = [];
   let current = "";
-  const tokens = where.trim().split(/(\(|\)|\bOR\b)/i);
+  const tokens = text.split(new RegExp(`(\\(|\\)|\\b${keyword}\\b)`, "i"));
   for (const token of tokens) {
     if (token === "(") {
       depth++;
@@ -143,20 +156,66 @@ function evaluateWhereClause(
     } else if (token === ")") {
       depth--;
       current += token;
-    } else if (depth === 0 && /^OR$/i.test(token.trim())) {
-      clauses.push(current);
+    } else if (depth === 0 && new RegExp(`^${keyword}$`, "i").test(token.trim())) {
+      parts.push(current);
       current = "";
     } else {
       current += token;
     }
   }
-  if (current.trim().length > 0) clauses.push(current);
-  return clauses
-    .map((clause) => clause.trim())
-    .filter(Boolean)
-    .some((clause) =>
-      evaluateIsDistinctFromClause(clause, excludedRow, existingRow),
-    );
+  if (current.trim().length > 0) parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+function stripFullyEnclosingParens(expr: string): string {
+  let trimmed = expr.trim();
+  while (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+    let depth = 0;
+    let fullyWrapped = true;
+    for (let i = 0; i < trimmed.length; i++) {
+      if (trimmed[i] === "(") depth++;
+      if (trimmed[i] === ")") {
+        depth--;
+        if (depth === 0 && i !== trimmed.length - 1) {
+          fullyWrapped = false;
+          break;
+        }
+      }
+    }
+    if (!fullyWrapped) break;
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+// A top-level `OR`-joined group of comparison clauses (optionally wrapped in
+// one layer of parens).
+function evaluateOrGroup(
+  expr: string,
+  excludedRow: FakeRow,
+  existingRow: FakeRow,
+): boolean {
+  const unwrapped = stripFullyEnclosingParens(expr);
+  return splitTopLevelByKeyword(unwrapped, "OR").some((clause) =>
+    evaluateComparisonClause(clause, excludedRow, existingRow),
+  );
+}
+
+// Top-level `AND`-joined groups, each either a parenthesized `OR`-chain of
+// `IS DISTINCT FROM` clauses (did anything tracked change?) or a bare
+// comparison clause (e.g. the R2/R6 monotonic `updated_at` guard).
+function stripLineComments(sql: string): string {
+  return sql.replace(/--[^\n]*/g, "");
+}
+
+function evaluateWhereClause(
+  where: string,
+  excludedRow: FakeRow,
+  existingRow: FakeRow,
+): boolean {
+  return splitTopLevelByKeyword(stripLineComments(where), "AND").every(
+    (part) => evaluateOrGroup(part, excludedRow, existingRow),
+  );
 }
 
 // Splits the text between `DO UPDATE SET` and `RETURNING` into the SET

@@ -2614,13 +2614,23 @@ export class IdentityRepository implements OnModuleInit {
             to_jsonb(iam.identity_principals.created_at)
           )
         WHERE
-          iam.identity_principals.issuer IS DISTINCT FROM EXCLUDED.issuer
-          OR iam.identity_principals.subject IS DISTINCT FROM EXCLUDED.subject
-          OR iam.identity_principals.principal_type IS DISTINCT FROM EXCLUDED.principal_type
-          OR iam.identity_principals.email_normalized IS DISTINCT FROM EXCLUDED.email_normalized
-          OR iam.identity_principals.email_verified IS DISTINCT FROM EXCLUDED.email_verified
-          OR iam.identity_principals.display_name IS DISTINCT FROM EXCLUDED.display_name
-          OR iam.identity_principals.account_status IS DISTINCT FROM EXCLUDED.account_status
+          (
+            iam.identity_principals.issuer IS DISTINCT FROM EXCLUDED.issuer
+            OR iam.identity_principals.subject IS DISTINCT FROM EXCLUDED.subject
+            OR iam.identity_principals.principal_type IS DISTINCT FROM EXCLUDED.principal_type
+            OR iam.identity_principals.email_normalized IS DISTINCT FROM EXCLUDED.email_normalized
+            OR iam.identity_principals.email_verified IS DISTINCT FROM EXCLUDED.email_verified
+            OR iam.identity_principals.display_name IS DISTINCT FROM EXCLUDED.display_name
+            OR iam.identity_principals.account_status IS DISTINCT FROM EXCLUDED.account_status
+          )
+          -- A content-differing but stale-timestamped ensure (e.g. a
+          -- delayed reauth whose updated_at is derived from an assertion's
+          -- iat, not arrival time) must never overwrite a state that a
+          -- genuinely newer write already committed: that would both revert
+          -- the newer change and roll the durable version backward,
+          -- reviving tokens the newer change was meant to invalidate. See
+          -- SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+          AND EXCLUDED.updated_at >= iam.identity_principals.updated_at
         RETURNING record
       `,
       [
@@ -2697,14 +2707,20 @@ export class IdentityRepository implements OnModuleInit {
             to_jsonb(iam.identity_memberships.created_at)
           )
         WHERE
-          iam.identity_memberships.principal_id IS DISTINCT FROM EXCLUDED.principal_id
-          OR iam.identity_memberships.realm IS DISTINCT FROM EXCLUDED.realm
-          OR iam.identity_memberships.scope_ref IS DISTINCT FROM EXCLUDED.scope_ref
-          OR iam.identity_memberships.tenant_id IS DISTINCT FROM EXCLUDED.tenant_id
-          OR iam.identity_memberships.partner_id IS DISTINCT FROM EXCLUDED.partner_id
-          OR iam.identity_memberships.membership_status IS DISTINCT FROM EXCLUDED.membership_status
-          OR iam.identity_memberships.invited_by_principal_id IS DISTINCT FROM EXCLUDED.invited_by_principal_id
-          OR iam.identity_memberships.invitation_id IS DISTINCT FROM EXCLUDED.invitation_id
+          (
+            iam.identity_memberships.principal_id IS DISTINCT FROM EXCLUDED.principal_id
+            OR iam.identity_memberships.realm IS DISTINCT FROM EXCLUDED.realm
+            OR iam.identity_memberships.scope_ref IS DISTINCT FROM EXCLUDED.scope_ref
+            OR iam.identity_memberships.tenant_id IS DISTINCT FROM EXCLUDED.tenant_id
+            OR iam.identity_memberships.partner_id IS DISTINCT FROM EXCLUDED.partner_id
+            OR iam.identity_memberships.membership_status IS DISTINCT FROM EXCLUDED.membership_status
+            OR iam.identity_memberships.invited_by_principal_id IS DISTINCT FROM EXCLUDED.invited_by_principal_id
+            OR iam.identity_memberships.invitation_id IS DISTINCT FROM EXCLUDED.invitation_id
+          )
+          -- See upsertPrincipal: a stale-timestamped content-differing
+          -- ensure must never regress a genuinely newer committed state or
+          -- its updated_at. SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+          AND EXCLUDED.updated_at >= iam.identity_memberships.updated_at
         RETURNING record
       `,
       [
@@ -2790,12 +2806,18 @@ export class IdentityRepository implements OnModuleInit {
             to_jsonb(iam.identity_role_bindings.created_at)
           )
         WHERE
-          iam.identity_role_bindings.membership_id IS DISTINCT FROM EXCLUDED.membership_id
-          OR iam.identity_role_bindings.role_code IS DISTINCT FROM EXCLUDED.role_code
-          OR iam.identity_role_bindings.granted_by_principal_id IS DISTINCT FROM EXCLUDED.granted_by_principal_id
-          OR iam.identity_role_bindings.approval_id IS DISTINCT FROM EXCLUDED.approval_id
-          OR iam.identity_role_bindings.valid_to IS DISTINCT FROM EXCLUDED.valid_to
-          ${allowValidFromMutation ? "OR iam.identity_role_bindings.valid_from IS DISTINCT FROM EXCLUDED.valid_from" : ""}
+          (
+            iam.identity_role_bindings.membership_id IS DISTINCT FROM EXCLUDED.membership_id
+            OR iam.identity_role_bindings.role_code IS DISTINCT FROM EXCLUDED.role_code
+            OR iam.identity_role_bindings.granted_by_principal_id IS DISTINCT FROM EXCLUDED.granted_by_principal_id
+            OR iam.identity_role_bindings.approval_id IS DISTINCT FROM EXCLUDED.approval_id
+            OR iam.identity_role_bindings.valid_to IS DISTINCT FROM EXCLUDED.valid_to
+            ${allowValidFromMutation ? "OR iam.identity_role_bindings.valid_from IS DISTINCT FROM EXCLUDED.valid_from" : ""}
+          )
+          -- See upsertPrincipal: a stale-timestamped content-differing
+          -- ensure must never regress a genuinely newer committed state or
+          -- its updated_at. SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+          AND EXCLUDED.updated_at >= iam.identity_role_bindings.updated_at
         RETURNING record
       `,
       [
@@ -2905,20 +2927,6 @@ export class IdentityRepository implements OnModuleInit {
     );
   }
 
-  // On an unchanged "ensure", keep whichever updatedAt is earlier instead of
-  // unconditionally keeping the already-persisted value: the fallback store
-  // has no single shared source of truth across repository instances, so
-  // "existing" can itself be a bootstrap artifact from this instance's own
-  // onModuleInit (e.g. restoring a principal from a persisted snapshot taken
-  // by another instance, see tests/unit/iam-min-accses-001.test.ts criterion
-  // 8). The earlier timestamp is always the one closer to the record's true
-  // last-genuine-change time, and this is equivalent to "keep existing" in
-  // the real reauthentication case the no-op guard exists for, since a fresh
-  // "now" is never earlier than what is already persisted.
-  private static earlierIso(a: string, b: string): string {
-    return a < b ? a : b;
-  }
-
   private upsertFallbackPrincipal(record: CanonicalIdentityPrincipalRecord) {
     const existingPrincipalId = record.sourceRef
       ? (this.fallbackPrincipalSourceRefs.get(record.sourceRef) ??
@@ -2938,22 +2946,30 @@ export class IdentityRepository implements OnModuleInit {
       existing.emailVerified === record.emailVerified &&
       existing.displayName === record.displayName &&
       existing.status === record.status;
-    const persisted = existing
-      ? {
-          ...existing,
-          sourceRef: record.sourceRef,
-          issuer: record.issuer,
-          subject: record.subject,
-          principalType: record.principalType,
-          email: record.email,
-          emailVerified: record.emailVerified,
-          displayName: record.displayName,
-          status: record.status,
-          updatedAt: unchanged
-            ? IdentityRepository.earlierIso(existing.updatedAt, record.updatedAt)
-            : record.updatedAt,
-        }
-      : { ...record };
+    // A content-differing but stale-timestamped ensure (e.g. a delayed
+    // reauth whose updatedAt is derived from an assertion's iat, not
+    // arrival time) must never overwrite a state a genuinely newer write
+    // already committed: mirrors upsertPrincipal's monotonic WHERE guard.
+    // See SR-AUTH-SESSION-SUPERSEDE-20261003 R2/R6.
+    const stale = existing !== null && record.updatedAt < existing.updatedAt;
+    const applyIncoming = existing === null || (!unchanged && !stale);
+    const persisted =
+      existing === null
+        ? { ...record }
+        : applyIncoming
+          ? {
+              ...existing,
+              sourceRef: record.sourceRef,
+              issuer: record.issuer,
+              subject: record.subject,
+              principalType: record.principalType,
+              email: record.email,
+              emailVerified: record.emailVerified,
+              displayName: record.displayName,
+              status: record.status,
+              updatedAt: record.updatedAt,
+            }
+          : { ...existing };
     this.fallbackPrincipals.set(persisted.principalId, persisted);
     if (record.sourceRef) {
       this.fallbackPrincipalSourceRefs.set(
@@ -2982,23 +2998,28 @@ export class IdentityRepository implements OnModuleInit {
       existing.status === record.status &&
       existing.invitedByPrincipalId === record.invitedByPrincipalId &&
       existing.invitationId === record.invitationId;
-    const persisted = existing
-      ? {
-          ...existing,
-          sourceRef: record.sourceRef,
-          principalId: record.principalId,
-          realm: record.realm,
-          scopeRef: record.scopeRef,
-          tenantId: record.tenantId,
-          partnerId: record.partnerId,
-          status: record.status,
-          invitedByPrincipalId: record.invitedByPrincipalId,
-          invitationId: record.invitationId,
-          updatedAt: unchanged
-            ? IdentityRepository.earlierIso(existing.updatedAt, record.updatedAt)
-            : record.updatedAt,
-        }
-      : { ...record };
+    // See upsertFallbackPrincipal: a stale-timestamped content-differing
+    // ensure must never regress a genuinely newer committed state.
+    const stale = existing !== null && record.updatedAt < existing.updatedAt;
+    const applyIncoming = existing === null || (!unchanged && !stale);
+    const persisted =
+      existing === null
+        ? { ...record }
+        : applyIncoming
+          ? {
+              ...existing,
+              sourceRef: record.sourceRef,
+              principalId: record.principalId,
+              realm: record.realm,
+              scopeRef: record.scopeRef,
+              tenantId: record.tenantId,
+              partnerId: record.partnerId,
+              status: record.status,
+              invitedByPrincipalId: record.invitedByPrincipalId,
+              invitationId: record.invitationId,
+              updatedAt: record.updatedAt,
+            }
+          : { ...existing };
     this.fallbackMemberships.set(persisted.membershipId, persisted);
     if (record.sourceRef) {
       this.fallbackMembershipSourceRefs.set(
@@ -3034,23 +3055,28 @@ export class IdentityRepository implements OnModuleInit {
       existing.approvalId === record.approvalId &&
       existing.validTo === record.validTo &&
       (!allowValidFromMutation || existing.validFrom === record.validFrom);
-    const persisted = existing
-      ? {
-          ...existing,
-          sourceRef: record.sourceRef,
-          membershipId: record.membershipId,
-          roleCode: record.roleCode,
-          grantedByPrincipalId: record.grantedByPrincipalId,
-          approvalId: record.approvalId,
-          validTo: record.validTo,
-          validFrom: allowValidFromMutation
-            ? record.validFrom
-            : existing.validFrom,
-          updatedAt: unchanged
-            ? IdentityRepository.earlierIso(existing.updatedAt, record.updatedAt)
-            : record.updatedAt,
-        }
-      : { ...record };
+    // See upsertFallbackPrincipal: a stale-timestamped content-differing
+    // ensure must never regress a genuinely newer committed state.
+    const stale = existing !== null && record.updatedAt < existing.updatedAt;
+    const applyIncoming = existing === null || (!unchanged && !stale);
+    const persisted =
+      existing === null
+        ? { ...record }
+        : applyIncoming
+          ? {
+              ...existing,
+              sourceRef: record.sourceRef,
+              membershipId: record.membershipId,
+              roleCode: record.roleCode,
+              grantedByPrincipalId: record.grantedByPrincipalId,
+              approvalId: record.approvalId,
+              validTo: record.validTo,
+              validFrom: allowValidFromMutation
+                ? record.validFrom
+                : existing.validFrom,
+              updatedAt: record.updatedAt,
+            }
+          : { ...existing };
     this.fallbackRoleBindings.set(persisted.roleBindingId, persisted);
     if (record.sourceRef) {
       this.fallbackRoleBindingSourceRefs.set(
