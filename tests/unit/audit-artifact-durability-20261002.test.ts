@@ -2983,6 +2983,429 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       );
     });
   });
+
+  describe("R10-A byte-ownership compensation must survive a failed post-write verification read (Codex REOPEN, generation 9f5f14e9954f4ee9bbb2cb629880b777)", () => {
+    const PUBLIC_INFO_R10A_READBACK_FAILURE = {
+      versionId: "public-info-r10a-readback-failure",
+      title: "R10-A Readback Failure Disclosure",
+      callPhone: "0800-040-040",
+      complaintPhone: "0800-040-050",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /**
+     * Holds the FIRST `get()` call for a given subjectId (the baseline
+     * read, same shape as `HeldGetDocumentArtifactStore` above) and, once
+     * armed, makes the very NEXT `get()` call after that (the post-write
+     * verification read, `storedEntry` in
+     * `publishPlacardVersionExclusive`) throw a modeled transport error
+     * instead of reaching the backing store at all -- the real S3 adapter
+     * propagates a `GetObjectCommand` transport failure exactly like this,
+     * not as a handled "missing"/"condition failed" response.
+     */
+    class HeldThenFailingGetDocumentArtifactStore implements DocumentArtifactStore {
+      readonly inner = new InMemoryDocumentArtifactStore();
+      private holdSubjectId: string | null = null;
+      private gate: Promise<void> | undefined;
+      private failSubjectId: string | null = null;
+
+      holdNextGetFor(subjectId: string): () => void {
+        this.holdSubjectId = subjectId;
+        let release!: () => void;
+        this.gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      failNextGetFor(subjectId: string): void {
+        this.failSubjectId = subjectId;
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.inner.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.inner.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.inner.putIfUnchanged(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        const [, subjectId] = args;
+        if (this.holdSubjectId === subjectId && this.gate) {
+          const held = this.gate;
+          this.holdSubjectId = null;
+          this.gate = undefined;
+          await held;
+          // The call that was HELD is the baseline read itself -- once
+          // released, it must resolve normally. The fail-trigger below is
+          // for the NEXT, separate `get()` call (the post-write
+          // verification read), not a second check on this same one.
+          return this.inner.get(...args);
+        }
+        if (this.failSubjectId === subjectId) {
+          this.failSubjectId = null;
+          throw Object.assign(new Error("MODELED_S3_READBACK_UNAVAILABLE"), {
+            name: "ModeledTransportError",
+          });
+        }
+        return this.inner.get(...args);
+      }
+    }
+
+    it("repairs the object back to the real winner's bytes even though this attempt's own post-write verification read fails with a transport error, not a clean finalize rejection", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R10A_READBACK_FAILURE,
+      ]);
+      const store = new HeldThenFailingGetDocumentArtifactStore();
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r10a-readback-failure",
+        publicInfoVersionId: PUBLIC_INFO_R10A_READBACK_FAILURE.versionId,
+        templateName: "seatback-r10a-readback-failure",
+      });
+
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      // A claims and starts its own baseline read -- held before it reaches
+      // the transport, same as the R10 baseline-GET case above.
+      const releaseBaseline = store.holdNextGetFor(draft.placardVersionId);
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const claimedRow = rows.get(draft.placardVersionId);
+      expect(claimedRow?.record.publishedAt).toBeTruthy();
+      expect(claimedRow?.record.__publishClaimToken).toBeTruthy();
+
+      claimedRow!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // C reclaims the now-stale claim, renders, writes and finalizes for
+      // real -- entirely while A's baseline read sits held.
+      const published = await podC.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+
+      // Arm A's NEXT get call (its post-write verification read) to fail
+      // with a transport error, then release A's held baseline. A reads
+      // C's finalized state as its baseline, its own fenced write
+      // legitimately lands on top of it (overwriting C's bytes), and then
+      // its verification read throws instead of returning cleanly -- the
+      // exact trigger this round's reopen reproduced against the locked
+      // candidate.
+      store.failNextGetFor(draft.placardVersionId);
+      releaseBaseline();
+      await expect(publishA).rejects.toThrow("MODELED_S3_READBACK_UNAVAILABLE");
+
+      // The durable row still reflects C's finalize -- A never got far
+      // enough to even attempt `finalizePlacardPublish`.
+      const persisted = rows.get(draft.placardVersionId);
+      expect(persisted?.record.publishedAt).toBe(published.publishedAt);
+      expect(persisted?.record.artifactManifestHash).toBe(
+        published.artifactManifestHash,
+      );
+
+      // The actual stored bytes are C's again, not A's -- the generic
+      // `catch` path's own call to `repairPlacardArtifactAfterLostClaim`
+      // closed the gap a transport failure on the verification read used
+      // to leave open.
+      const stored = await store.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      const controller = new ControlledDownloadController(store, registry);
+      const winnerFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(winnerFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        store,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
+
+  describe("R10-B overlapping compensations from two independently superseded attempts must not durably restore a loser's bytes (Codex REOPEN, generation 9f5f14e9954f4ee9bbb2cb629880b777)", () => {
+    const PUBLIC_INFO_R10B_OVERLAPPING = {
+      versionId: "public-info-r10b-overlapping",
+      title: "R10-B Overlapping Compensation Disclosure",
+      callPhone: "0800-040-040",
+      complaintPhone: "0800-040-050",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /**
+     * One pod's view of a shared backing store: holds its OWN first `get()`
+     * call (the baseline read) and its OWN second `get()` call (the
+     * post-write verification read) independently, each until explicitly
+     * released. Three instances of this class, sharing one
+     * `InMemoryDocumentArtifactStore` backing, model three Cloud Run pods
+     * against one real bucket -- exactly like the three separately
+     * intercepted `store(label)` instances in this reopen's own read-only
+     * production-path probe.
+     */
+    class PerPodArtifactStore implements DocumentArtifactStore {
+      private getCount = 0;
+      private baselineGate: Promise<void> | null = null;
+      private verifyGate: Promise<void> | null = null;
+
+      constructor(private readonly backing: DocumentArtifactStore) {}
+
+      holdBaseline(): () => void {
+        let release!: () => void;
+        this.baselineGate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      holdVerification(): () => void {
+        let release!: () => void;
+        this.verifyGate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.backing.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.backing.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.backing.putIfUnchanged(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        this.getCount += 1;
+        if (this.getCount === 1 && this.baselineGate) {
+          await this.baselineGate;
+        } else if (this.getCount === 2 && this.verifyGate) {
+          await this.verifyGate;
+        }
+        return this.backing.get(...args);
+      }
+    }
+
+    it("two independently superseded attempts (A, then B) overlapping their own compensations still leave the real winner's (C) bytes in place, with zero transport failures", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R10B_OVERLAPPING,
+      ]);
+      const backing = new InMemoryDocumentArtifactStore();
+      const storeA = new PerPodArtifactStore(backing);
+      const storeB = new PerPodArtifactStore(backing);
+      const storeC = new PerPodArtifactStore(backing);
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        storeA,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r10b-overlapping",
+        publicInfoVersionId: PUBLIC_INFO_R10B_OVERLAPPING.versionId,
+        templateName: "seatback-r10b-overlapping",
+      });
+
+      const podB = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        storeB,
+        registry,
+      );
+      await podB.onModuleInit();
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        storeC,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      // A claims; both its baseline read and its post-write verification
+      // read are held before either reaches the transport.
+      const releaseABaseline = storeA.holdBaseline();
+      const releaseAVerify = storeA.holdVerification();
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const afterA = rows.get(draft.placardVersionId);
+      expect(afterA?.record.__publishClaimToken).toBeTruthy();
+      afterA!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // B reclaims A's now-stale claim; both its own reads are held too.
+      const releaseBBaseline = storeB.holdBaseline();
+      const releaseBVerify = storeB.holdVerification();
+      const publishB = podB.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const afterB = rows.get(draft.placardVersionId);
+      expect(afterB?.record.__publishClaimToken).toBeTruthy();
+      expect(afterB?.record.__publishClaimToken).not.toBe(
+        afterA?.record.__publishClaimToken,
+      );
+      afterB!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // C reclaims B's now-stale claim and finalizes for real -- no holds
+      // on C's own store, so this runs to completion normally.
+      const published = await podC.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+      expect(
+        (await backing.get("placard", draft.placardVersionId))?.record.sha256,
+      ).toBe(published.artifactManifestHash);
+
+      // Release A's baseline: A reads C's finalized state, its own fenced
+      // write legitimately lands on top of it (overwriting C's bytes), then
+      // A's verification read sits held in turn.
+      releaseABaseline();
+      await new Promise((r) => setTimeout(r, 10));
+      const afterAWrite = await backing.get("placard", draft.placardVersionId);
+      expect(afterAWrite?.record.sha256).not.toBe(published.artifactManifestHash);
+
+      // Release B's baseline: B reads A's (wrong) bytes as ITS baseline,
+      // and its own fenced write legitimately lands on top of THAT
+      // (overwriting A's bytes with B's), then B's verification read sits
+      // held too. This is the overlap: B's own "what I observed before I
+      // wrote" is already a different loser's corruption, not the real
+      // winner's bytes -- restoring it verbatim (the pre-fix design) would
+      // durably reinstate that corruption.
+      releaseBBaseline();
+      await new Promise((r) => setTimeout(r, 10));
+      const afterBWrite = await backing.get("placard", draft.placardVersionId);
+      expect(afterBWrite?.record.sha256).not.toBe(published.artifactManifestHash);
+      expect(afterBWrite?.record.sha256).not.toBe(afterAWrite?.record.sha256);
+
+      // Deliver A's verification read-back, then B's: both discover they
+      // were superseded and both compensate.
+      releaseAVerify();
+      releaseBVerify();
+      const [resultA, resultB] = await Promise.allSettled([publishA, publishB]);
+      expect(resultA.status).toBe("rejected");
+      expect(resultB.status).toBe("rejected");
+      expect((resultA as PromiseRejectedResult).reason).toMatchObject({
+        code: "PLACARD_PUBLISH_CONFLICT",
+      });
+      expect((resultB as PromiseRejectedResult).reason).toMatchObject({
+        code: "PLACARD_PUBLISH_CONFLICT",
+      });
+
+      // Every publish has settled with zero transport failures. The DB row
+      // still names C, and -- the core regression this fix closes -- the
+      // actual stored bytes are C's too, not A's or B's, despite two
+      // overlapping compensations landing in between.
+      const persisted = rows.get(draft.placardVersionId);
+      expect(persisted?.record.artifactManifestHash).toBe(
+        published.artifactManifestHash,
+      );
+      const stored = await backing.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      const controller = new ControlledDownloadController(backing, registry);
+      const winnerFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(winnerFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
 });
 
 describe("createDocumentArtifactStore provider resolution", () => {

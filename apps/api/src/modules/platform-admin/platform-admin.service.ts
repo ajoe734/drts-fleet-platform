@@ -65,6 +65,7 @@ import {
   DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
+  type DocumentArtifactEntry,
   type DocumentArtifactRebuildRegistry,
   type DocumentArtifactRecord,
   type DocumentArtifactStore,
@@ -1048,11 +1049,23 @@ export class PlatformAdminService implements OnModuleInit {
         baselineArtifact?.record.generation ?? null,
       );
 
-      // The claim above only fences the durable *record*; it cannot see a
-      // sibling instance's unrelated write to the same durable *object* key
-      // landing between this call's own write (just above) and this
-      // read-back. Trust what the store actually has, not only what this
-      // call's own render produced, before committing metadata to it.
+      // The claim above only fences the durable *record*; the fenced write
+      // just above only fences against THIS call's own stale baseline. Both
+      // leave a gap this re-read closes: a generic writer outside this
+      // method's own claim/fence protocol (or a store-level anomaly) that
+      // mutates the same object immediately after this call's write landed,
+      // with no repository involved at all to detect it via `finalize`
+      // below (that path requires a real, configured repository). Trust
+      // what the store actually has now, not only what this call's own
+      // render produced, before committing metadata to it.
+      //
+      // (R10-A, Codex REOPEN generation 9f5f14e9954f4ee9bbb2cb629880b777)
+      // A transport failure on THIS read -- or this check's own mismatch
+      // throw -- used to fall straight through to the generic `catch`
+      // below, which only released the DB claim and never restored the
+      // object. The `catch` now also calls
+      // `repairPlacardArtifactAfterLostClaim`, so either outcome from this
+      // read is covered, not just a clean `finalize` rejection.
       const storedEntry = await this.documentArtifactStore.get(
         "placard",
         placard.placardVersionId,
@@ -1088,38 +1101,17 @@ export class PlatformAdminService implements OnModuleInit {
           claimToken,
         );
         if (!finalized) {
-          // (R10 byte-ownership compensating restore, Codex REOPEN
-          // generation 8b3a794454664b3d858cd10a63e00948) `storedEntry`
-          // just confirmed THIS call's own write landed in the store --
-          // which only happens when `baselineArtifact`'s generation was
-          // captured late enough (its own GET stalled in transit, not the
-          // write) to alias a reclaiming instance's already-finalized
-          // bytes as "unchanged", so `fenceGeneration` legitimately let a
-          // superseded attempt overwrite the real winner's bytes. The DB
-          // CAS above is the actual source of truth on ownership and has
-          // just said this attempt lost it; the object must not keep
-          // reflecting this attempt's bytes. Put `baselineArtifact`'s own
-          // observed bytes straight back, fenced on the generation this
-          // call's write just produced (`storedEntry.record.generation`):
-          // if nothing else has written since, this restores the true
-          // winner's bytes; if yet another writer landed in between, the
-          // fence refuses to clobber that newer, equally legitimate state
-          // instead of blindly reasserting a stale one. `baselineArtifact`
-          // is never null here -- a null baseline means this call's write
-          // used `IfNoneMatch: "*"`, which `renderPlacardArtifact` already
-          // turns into a thrown conflict before this point whenever any
-          // other writer created the object first.
-          if (baselineArtifact) {
-            await this.documentArtifactStore.putIfUnchanged(
-              {
-                kind: "placard",
-                subjectId: placard.placardVersionId,
-                mimeType: baselineArtifact.record.mimeType,
-                bytes: baselineArtifact.bytes,
-              },
-              storedEntry.record.generation,
-            );
-          }
+          // (R10 byte-ownership compensation) The DB CAS above is the
+          // actual source of truth on ownership and has just said this
+          // attempt lost it, which can happen even though this attempt's
+          // own object write above legitimately passed its own fence (its
+          // baseline read stalled long enough to alias a reclaiming
+          // instance's already-finalized bytes as "unchanged" -- R10). The
+          // object must not keep reflecting this attempt's bytes; see
+          // `repairPlacardArtifactAfterLostClaim` for how it is put back.
+          await this.repairPlacardArtifactAfterLostClaim(
+            placard.placardVersionId,
+          );
           throw new ApiRequestError(
             HttpStatus.CONFLICT,
             "PLACARD_PUBLISH_CONFLICT",
@@ -1141,6 +1133,18 @@ export class PlatformAdminService implements OnModuleInit {
           reverted,
           claimToken,
         );
+        // (R10-A byte-ownership compensation on a failed/ambiguous
+        // attempt, Codex REOPEN generation
+        // 9f5f14e9954f4ee9bbb2cb629880b777) An error here is not only "the
+        // DB CAS reported loss" (handled above, before this attempt even
+        // reaches `catch`) -- it can be any failure AFTER this attempt's
+        // own object write already landed, e.g. a transport error on
+        // whatever this attempt did next. Whether or not this attempt's
+        // own write actually clobbered the real winner, repairing is
+        // idempotent and safe (see `repairPlacardArtifactAfterLostClaim`),
+        // so it always runs here too rather than only on the clean
+        // `!finalized` path above.
+        await this.repairPlacardArtifactAfterLostClaim(placardVersionId);
       }
       throw error;
     }
@@ -2778,17 +2782,20 @@ export class PlatformAdminService implements OnModuleInit {
    * object. A fenced-out write throws `PLACARD_PUBLISH_CONFLICT` instead of
    * returning a record for bytes that were never actually stored.
    */
-  private async renderPlacardArtifact(
-    placard: PlacardVersionRecord,
-    options: {
-      recover?: boolean;
-      fenceGeneration?: string | null | undefined;
-    } = {},
-  ): Promise<DocumentArtifactRecord> {
+  /**
+   * The pure rendering step `renderPlacardArtifact` and
+   * `repairPlacardArtifactAfterLostClaim` both build on: a placard's PDF
+   * bytes are solely a function of its own fields and the source
+   * `PublicInfoVersionRecord` currently held in memory -- no store access,
+   * no side effects. Factored out so the repair path can check a
+   * candidate render's hash against the authoritative winner's recorded
+   * hash BEFORE attempting any write, rather than only after.
+   */
+  private renderPlacardBytes(placard: PlacardVersionRecord): Buffer {
     const publicInfoVersion = this.publicInfoVersions.find(
       (v) => v.versionId === placard.publicInfoVersionId,
     );
-    const bytes = publicInfoVersion
+    return publicInfoVersion
       ? buildMinimalPdf(buildPlacardPdfRows(placard, publicInfoVersion))
       : buildMinimalPdf([
           `Vehicle Service Placard ${placard.versionCode}`,
@@ -2796,6 +2803,16 @@ export class PlatformAdminService implements OnModuleInit {
           `Source Version: ${placard.publicInfoVersionId}`,
           `Generated At: ${placard.createdAt}`,
         ]);
+  }
+
+  private async renderPlacardArtifact(
+    placard: PlacardVersionRecord,
+    options: {
+      recover?: boolean;
+      fenceGeneration?: string | null | undefined;
+    } = {},
+  ): Promise<DocumentArtifactRecord> {
+    const bytes = this.renderPlacardBytes(placard);
     const command = {
       kind: "placard" as const,
       subjectId: placard.placardVersionId,
@@ -2829,6 +2846,117 @@ export class PlatformAdminService implements OnModuleInit {
       return result.record;
     }
     return this.documentArtifactStore.put(command);
+  }
+
+  /**
+   * (R10 byte-ownership compensation, Codex REOPEN generation
+   * 9f5f14e9954f4ee9bbb2cb629880b777) Called after a publish attempt has
+   * lost (or cannot prove it won) ownership of `placardVersionId`'s DB row,
+   * from both `publishPlacardVersionExclusive`'s `!finalized` branch and
+   * its generic `catch`. Never trusts "whatever I personally observed
+   * before I wrote" as the thing to restore -- a prior design did exactly
+   * that (restore this attempt's own pre-write baseline), which is only
+   * correct for a single loser overwriting the actual winner. With two or
+   * more overlapping losers, a later loser's baseline can itself already
+   * be an earlier loser's corruption, so "restore my baseline" durably
+   * reinstates THAT corruption instead of the real winner's bytes (R10-B).
+   * Every call here instead re-derives the CURRENT authoritative winner's
+   * bytes fresh, from the durable record, and writes only when the store
+   * does not already reflect that winner's hash:
+   *
+   * - If the repository has no row yet, or the row is unpublished, or it
+   *   still carries a pending `__publishClaimToken` (someone else's claim
+   *   has not finalized yet), there is no authoritative winner to restore
+   *   TO yet -- do nothing. Whichever attempt eventually finalizes that
+   *   row calls this same method on every one of its own losing siblings'
+   *   behalf once IT is the authoritative winner, so the gap closes on the
+   *   next actual finalize, not on a guess made before one exists.
+   * - Otherwise, re-render deterministically from that authoritative row
+   *   (`renderPlacardArtifact` is a pure function of a placard's own
+   *   fields -- including the winner's exact `publishedAt`/`updatedAt` --
+   *   and the source `PublicInfoVersionRecord`; the actual winner's
+   *   original render used the same inputs, so this reproduces
+   *   byte-identical content) and write it with `putIfUnchanged`, fenced
+   *   on a FRESH read of the object's current generation, not any stale
+   *   generation this call captured earlier. If that fence loses to yet
+   *   another concurrent writer or repairer, this attempt simply stops --
+   *   whoever landed is itself subject to the same hash check on its own
+   *   next call, so there is no need to retry here. Because every caller
+   *   that reaches the write step is reproducing the SAME bytes (the one
+   *   authoritative winner's), it does not matter how many losers overlap
+   *   or in what order their repairs land: whichever one writes last still
+   *   leaves the correct bytes in place.
+   */
+  private async repairPlacardArtifactAfterLostClaim(
+    placardVersionId: string,
+  ): Promise<void> {
+    if (!this.platformAdminRepository) {
+      return;
+    }
+
+    let authoritative: PlacardVersionRecord | null;
+    try {
+      authoritative = await this.platformAdminRepository.getPlacardVersionRecord(
+        placardVersionId,
+      );
+    } catch {
+      return;
+    }
+    if (
+      !authoritative ||
+      !authoritative.publishedAt ||
+      !authoritative.artifactManifestHash ||
+      hasPendingPublishClaim(authoritative)
+    ) {
+      return;
+    }
+
+    let current: DocumentArtifactEntry | null;
+    try {
+      current = await this.documentArtifactStore.get(
+        "placard",
+        placardVersionId,
+      );
+    } catch {
+      return;
+    }
+    if (current && current.record.sha256 === authoritative.artifactManifestHash) {
+      return;
+    }
+
+    // Check the candidate render's hash against the authoritative winner's
+    // recorded hash BEFORE attempting any write -- unlike
+    // `renderPlacardArtifact`'s own fenced write, which only detects a
+    // mismatch (against a DIFFERENT baseline: this call's own prior
+    // observation) after already writing. A mismatch here means the
+    // source `PublicInfoVersionRecord` backing the authoritative row has
+    // itself changed since the real winner originally rendered (a
+    // legitimate but separate republish path, owned by
+    // `rebuildPlacardArtifact`) -- this attempt cannot reconstruct
+    // byte-identical content and must not risk storing a mismatched
+    // substitute under the winner's name.
+    const bytes = this.renderPlacardBytes(authoritative);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (sha256 !== authoritative.artifactManifestHash) {
+      return;
+    }
+
+    try {
+      await this.documentArtifactStore.putIfUnchanged(
+        {
+          kind: "placard",
+          subjectId: placardVersionId,
+          mimeType: "application/pdf",
+          bytes,
+        },
+        current?.record.generation ?? null,
+      );
+    } catch {
+      // Lost the fence race to yet another concurrent writer/repairer, or
+      // the store itself failed -- whoever actually landed is subject to
+      // this same hash check on its own next call, so there is nothing to
+      // retry here.
+    }
   }
 
   /**
