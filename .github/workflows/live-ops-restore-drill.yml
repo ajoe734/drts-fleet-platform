@@ -54,15 +54,20 @@ jobs:
           git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
           git merge-base --is-ancestor "$BASE_SHA" "$CANDIDATE_SHA"
           git checkout --detach "$CANDIDATE_SHA"
-      - name: Require resolved IAM isolation design
-        # Intentionally exits 2 today. No cost or credential is acquired until
-        # Supervisor resolves the clone destination IAM finding in the runbook.
-        run: bash infra/gcp/dev/ops-drill/provision-drill-sa.sh --check-ready
+      - name: Offline orchestration regression (no cloud calls)
+        run: python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
+      - name: Require fresh operator-confirmed IAM readiness for this candidate
+        env:
+          OPERATOR_READINESS: ${{ vars.DEV_OPS_DRILL_READY }}
+          EXPECTED_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+        run: python3 infra/gcp/dev/ops-drill/check_readiness.py
       - uses: google-github-actions/auth@v2
+        id: auth
         with:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
           service_account: drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v2
+        id: gcloud
       - name: Install hosted readback clients
         shell: bash
         run: |
@@ -89,12 +94,21 @@ jobs:
           if [[ -f "$EVIDENCE" ]]; then
             bash infra/gcp/dev/ops-drill/run-restore-drill.sh --target "$TARGET" --evidence "$EVIDENCE" --cleanup-only
           fi
+      - name: Always inspect remaining clones and drill-SA create audit records
+        if: always() && steps.gcloud.outcome == 'success'
+        timeout-minutes: 5
+        run: >-
+          python3 infra/gcp/dev/ops-drill/sweep_drill.py
+          --target "$TARGET" --evidence "$EVIDENCE"
+          --output .local/sr-live-ops-001/sweep.json
       - name: Upload only sanitized evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sr-live-ops-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .local/sr-live-ops-001/restore.json
+          path: |
+            .local/sr-live-ops-001/restore.json
+            .local/sr-live-ops-001/sweep.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

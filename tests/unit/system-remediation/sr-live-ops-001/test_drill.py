@@ -18,6 +18,8 @@ drill = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(drill)
 sys.modules["restore_drill"] = drill
 import provision_drill_sa as provision  # noqa: E402
+import sweep_drill as sweep  # noqa: E402
+import check_readiness as readiness  # noqa: E402
 
 
 class Clock:
@@ -187,16 +189,112 @@ class RestoreDrillTest(unittest.TestCase):
 
     def test_plan_checks_actual_provider_trust(self):
         result = provision.plan()
-        self.assertEqual(result["status"], "blocked_not_applied")
-        self.assertFalse(result["proposed_roles"][0]["apply"])
+        self.assertEqual(result["status"], "plan_only")
+        self.assertIn("NOT IAM-enforceable", result["residual_risk"])
         with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "bad_trust"}), self.assertRaises(drill.DrillError):
             provision.plan()
 
-    def test_apply_fails_before_any_iam_write(self):
+    def test_noninteractive_apply_fails_before_any_iam_write(self):
         result = subprocess.run(["bash", str(INFRA / "provision-drill-sa.sh"), "--apply"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("clone_destination_iam_enforcement_unverified", result.stderr)
-        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.iam_writes())
+
+    def iam_writes(self):
+        return [c for c in self.calls() if "create" in c or "add-iam-policy-binding" in c or c[1:3] == ["variable", "set"]]
+
+    def test_apply_real_orchestrator_is_additive_idempotent_and_readiness_is_separate(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        state = provision.inventory(design, complete=True)
+        writes = self.iam_writes()
+        self.assertEqual(len(writes), 11)  # SA, four roles/bindings, secret, WIF
+        provision.apply(design, state)
+        self.assertEqual(self.iam_writes(), writes)
+        self.assertFalse((self.root / "ready.json").exists())
+        iam = json.loads((self.root / "iam.json").read_text())
+        for item in iam["project"]["bindings"]:
+            permissions = iam["roles"][item["role"].split("/")[-1]]["includedPermissions"]
+            if "cloudsql.instances.delete" in permissions:
+                self.assertIn("resource.name.startsWith('projects/drts-dev-devcc-20260825/instances/drts-dev-db-drill-')", item["condition"]["expression"])
+            if "cloudsql.instances.clone" in permissions:
+                self.assertEqual(permissions, ["cloudsql.instances.clone"])
+                self.assertIn("resource.name == 'projects/drts-dev-devcc-20260825/instances/drts-dev-db'", item["condition"]["expression"])
+        self.assertFalse(any(p in json.dumps(iam["roles"]) for p in ("restoreBackup", "instances.update", "users.update", "instances.create")))
+
+    def test_inherited_owner_or_failed_ancestor_read_blocks_before_writes(self):
+        design = provision.plan()
+        for scenario in ("inherited_owner", "ancestor_denied"):
+            with self.subTest(scenario=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaises(drill.DrillError):
+                provision.inventory(design)
+        self.assertFalse(self.iam_writes())
+
+    def test_role_drift_and_extra_sa_grant_are_not_silently_repaired(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        statefile = self.root / "iam.json"
+        original = statefile.read_text()
+        for change in ("role", "grant", "impersonation"):
+            iam = json.loads(original)
+            if change == "role":
+                iam["roles"]["drtsOpsDrillTemporary"]["includedPermissions"].append("cloudsql.instances.update")
+            elif change == "grant":
+                iam["project"]["bindings"].append({"role": "roles/owner", "members": [provision.MEMBER]})
+            else:
+                iam["sa"]["bindings"][0]["members"].append("allAuthenticatedUsers")
+            statefile.write_text(json.dumps(iam))
+            with self.subTest(change=change), self.assertRaises(drill.DrillError):
+                provision.inventory(design, complete=True)
+
+    def test_public_or_group_grant_is_not_assumed_to_exclude_drill_sa(self):
+        for member in ("allAuthenticatedUsers", "group:operators@example.test"):
+            with self.subTest(member=member), self.assertRaises(drill.DrillError):
+                provision.audit_policy({"bindings": [{"role": "roles/owner", "members": [member]}]}, [])
+
+    def test_confirmation_requires_exact_candidate_and_interactive_operator(self):
+        sha = self.env["CANDIDATE_SHA"]
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": ""}), patch.object(sys.stdin, "isatty", return_value=True):
+            with patch("builtins.input", return_value="yes"), self.assertRaises(drill.DrillError):
+                provision.confirm("APPLY", sha)
+            with patch("builtins.input", return_value=f"APPLY {provision.SA} {sha}"):
+                provision.confirm("APPLY", sha)
+        with patch.object(sys.stdin, "isatty", return_value=True), self.assertRaises(drill.DrillError):
+            provision.confirm("APPLY", sha)  # GITHUB_ACTIONS blocks even a TTY
+
+    def test_readiness_rejects_absent_wrong_candidate_provider_and_stale_receipts(self):
+        receipt = {"candidate_sha": self.env["CANDIDATE_SHA"], "service_account": provision.SA,
+                   "provider": "reviewed-provider", "checked_at": drill.iso(drill.utcnow()), "audit_sha256": "a" * 64}
+        readiness.check(json.dumps(receipt), self.env["CANDIDATE_SHA"], "reviewed-provider")
+        for key, value in (("candidate_sha", "0" * 40), ("provider", "other"), ("checked_at", "2020-01-01T00:00:00Z"), ("audit_sha256", "")):
+            with self.subTest(key=key), self.assertRaises(drill.DrillError):
+                readiness.check(json.dumps(dict(receipt, **{key: value})), self.env["CANDIDATE_SHA"], "reviewed-provider")
+        with self.assertRaises(drill.DrillError):
+            readiness.check("", self.env["CANDIDATE_SHA"], "reviewed-provider")
+
+    def test_sweep_clean_inventory_and_audit_pass_without_any_delete(self):
+        prior = drill.context(self.target)
+        prior["clone_operation_id"] = "op1"
+        drill.write(self.output, prior)
+        output = self.root / "sweep.json"
+        sweep.sweep(self.target, self.output, output)
+        self.assertEqual(json.loads(output.read_text())["status"], "sweep_passed")
+        self.assertFalse(self.deleted())
+
+    def test_sweep_rejects_leftovers_foreign_creates_missing_and_truncated_audit(self):
+        prior = drill.context(self.target)
+        prior["clone_operation_id"] = "op1"
+        drill.write(self.output, prior)
+        output = self.root / "sweep.json"
+        for scenario in ("leftover", "audit_foreign", "audit_unknown", "audit_empty", "audit_denied", "audit_truncated"):
+            with self.subTest(scenario=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaises(drill.DrillError):
+                sweep.sweep(self.target, self.output, output)
+            result = json.loads(output.read_text())
+            self.assertEqual(result["status"], "sweep_failed")
+            if scenario == "leftover":
+                self.assertEqual(result["remaining_drill_instances"], ["drts-dev-db-drill-999-1"])
+            if scenario == "audit_foreign":
+                self.assertEqual(result["unexpected_destinations"], ["unexpected-extra-clone"])
+            self.assertNotIn("TOP-SECRET", output.read_text())
+        self.assertFalse(self.deleted())
 
 
 if __name__ == "__main__":

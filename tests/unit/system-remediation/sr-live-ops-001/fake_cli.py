@@ -32,7 +32,13 @@ point = now - dt.timedelta(seconds=120)
 if kind == "proxy":
     signal.pause()  # Dummy process only; no listening socket.
 elif kind == "gh":
-    print("drts-dev-devcc-20260825")
+    if args[:2] == ["variable", "get"]:
+        print({"DEV_GCP_PROJECT_ID": "drts-dev-devcc-20260825", "DEV_GCP_REGION": "us-central1",
+               "DEV_GCP_CLOUDSQL_INSTANCE": "drts-dev-devcc-20260825:us-central1:drts-dev-db"}[args[2]])
+    elif args[:2] == ["variable", "set"]:
+        (root / "ready.json").write_text(args[args.index("--body") + 1])
+    else:
+        fail()
 elif kind == "psql":
     assert "--no-password" in args and "--set=ON_ERROR_STOP=1" in args
     assert os.environ["PGHOST"] == "127.0.0.1"
@@ -59,6 +65,63 @@ elif kind == "gcloud":
         emit({"attributeMapping": {"attribute.repository": "assertion.repository"},
               "attributeCondition": "true" if scenario == "bad_trust" else "assertion.repository=='ajoe734/drts-fleet-platform'",
               "oidc": {"issuerUri": "https://token.actions.githubusercontent.com"}})
+    state_file = root / "iam.json"
+    iam = json.loads(state_file.read_text()) if state_file.exists() else {"accounts": [], "roles": {}, "project": {"bindings": []}, "secret": {"bindings": []}, "sa": {"bindings": []}}
+
+    def save(value):
+        state_file.write_text(json.dumps(iam))
+        emit(value)
+
+    def flag(name):
+        return next(a.split("=", 1)[1] for a in args if a.startswith("--" + name + "="))
+
+    if args[:2] == ["projects", "get-ancestors"]:
+        emit([{"type": "project", "id": "drts-dev-devcc-20260825"}, {"type": "organization", "id": "123"}])
+    if args[:2] == ["organizations", "get-iam-policy"]:
+        if scenario == "ancestor_denied":
+            fail()
+        emit({"bindings": ([{"role": "roles/owner", "members": ["serviceAccount:drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}] if scenario == "inherited_owner" else [])})
+    if args[:3] == ["iam", "service-accounts", "list"]:
+        emit(iam["accounts"])
+    if args[:3] == ["iam", "service-accounts", "create"]:
+        iam["accounts"].append({"email": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"})
+        save({})
+    if args[:3] == ["iam", "roles", "list"]:
+        emit(list(iam["roles"].values()))
+    if args[:3] == ["iam", "roles", "describe"]:
+        if args[3] == "roles/owner":
+            emit({"includedPermissions": ["cloudsql.instances.delete", "resourcemanager.projects.setIamPolicy"]})
+        emit(iam["roles"][args[3]])
+    if args[:3] == ["iam", "roles", "create"]:
+        iam["roles"][args[3]] = {"name": "projects/drts-dev-devcc-20260825/roles/" + args[3], "includedPermissions": flag("permissions").split(","), "stage": "GA"}
+        save({})
+    policy_key = "project" if args[0] == "projects" else "secret" if args[0] == "secrets" else "sa" if args[:2] == ["iam", "service-accounts"] else None
+    if policy_key and "get-iam-policy" in args:
+        emit(iam[policy_key])
+    if policy_key and "add-iam-policy-binding" in args:
+        item = {"role": flag("role"), "members": [flag("member")]}
+        condition = flag("condition")
+        if condition != "None":
+            title, expression = condition.split(",expression=", 1)
+            item["condition"] = {"title": title.removeprefix("title="), "expression": expression}
+        iam[policy_key]["bindings"].append(item)
+        save({})
+    if args[:3] == ["sql", "instances", "list"]:
+        emit([{"name": "drts-dev-db"}] + ([{"name": "drts-dev-db-drill-999-1"}] if scenario == "leftover" else []))
+    if args[:2] == ["logging", "read"]:
+        if scenario == "audit_denied":
+            fail()
+        if scenario == "audit_empty":
+            emit([])
+        record = {"insertId": "audit-1", "timestamp": now.isoformat(),
+                  "protoPayload": {"methodName": "cloudsql.instances.clone", "request": {"body": {"cloneContext": {"destinationInstanceName": "drts-dev-db-drill-123-1"}}}}}
+        if scenario == "audit_unknown":
+            record["protoPayload"]["request"] = {}
+        if scenario == "audit_foreign":
+            other = json.loads(json.dumps(record))
+            other["protoPayload"]["request"]["body"]["cloneContext"]["destinationInstanceName"] = "unexpected-extra-clone"
+            emit([record, other])
+        emit([record] * 1000 if scenario == "audit_truncated" else [record])
     if args[:3] == ["sql", "instances", "describe"]:
         name = args[3]
         if name != "drts-dev-db":
