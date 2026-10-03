@@ -681,7 +681,7 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
    * unresolvable `voice_control_event_gap`, repeating forever for every
    * later turn too.
    */
-  it("R4-control: reconciles the control-sequence counter from a safe no-op response instead of permanently wedging after an ambiguous (response-lost) write", async () => {
+  it("R4-control: reconciles the control-sequence counter from a safe no-op response instead of permanently wedging after an ambiguous (response-lost) write, and retries the exact retained slot before a next final's own fallback write", async () => {
     const binding: VoiceSessionBinding = {
       voiceSessionId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
       resourceScopeId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
@@ -720,25 +720,41 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
       }
       if (path.endsWith("/events")) {
         eventsCallCount += 1;
+        const sequence = body.sequence as number;
         if (eventsCallCount === 1) {
           // The real service durably commits sequence 1 here (modelled by
           // updating this closure's own state) -- but this exact HTTP
           // response never reaches the client, e.g. a network failure
           // right after the server already wrote it.
-          lastAppliedControlSequence = 1;
+          lastAppliedControlSequence = sequence;
           throw new TypeError("simulated network failure after commit");
         }
-        // Retried with a fresh sourceEventId but the SAME (locally
-        // un-advanced) sequence -- the real service's actual "safe
-        // no-op" response for an already-applied sequence (see
-        // `VoiceSessionService.recordControlEvent`'s own
-        // `command.sequence <= session.lastAppliedControlSequence`
-        // branch), never a `gap`.
+        // A tiny, correctly-contiguous watermark server: a retry of an
+        // already-applied sequence is a safe no-op (never a `gap`); the
+        // actual next contiguous sequence genuinely applies and advances
+        // the watermark. AUDIT-VOICE-APPLICATION-WIRING-20261003
+        // R4-control (Codex reopen, canonical 2026-10-03T21:53:56Z): with
+        // the unified retained backlog, the SECOND final's own enqueue
+        // first retries the FIRST final's still-retained entry (same
+        // sourceEventId, same sequence 1) before ever attempting its own
+        // -- that retry must genuinely reconcile sequence 1 so this
+        // attachment's `controlSequence` correctly advances to 2 before
+        // the second final's own entry is attempted at sequence 2.
+        let applied = false;
+        let gap = false;
+        if (sequence <= lastAppliedControlSequence) {
+          // already applied -- safe no-op.
+        } else if (sequence === lastAppliedControlSequence + 1) {
+          lastAppliedControlSequence = sequence;
+          applied = true;
+        } else {
+          gap = true;
+        }
         return jsonResponse(200, {
           data: {
             deduped: false,
-            applied: false,
-            gap: false,
+            applied,
+            gap,
             appliedThroughSequence: lastAppliedControlSequence,
             session: {
               voiceSessionId: binding.voiceSessionId,
@@ -820,22 +836,38 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
     await flush(10);
     expect(sentBinary).toHaveLength(0);
 
-    // Second, independent final: must not keep retrying the same stale
-    // sequence forever. It gets a fresh turnId/sourceEventId, submits the
-    // same (locally un-advanced) sequence 1 again, and must reconcile
-    // from the authoritative response instead of failing closed again.
+    // Second, independent final arrives while the first final's own
+    // fallback speech-start write is still retained, unresolved.
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+    // canonical 2026-10-03T21:53:56Z, "final-only fallback bypasses
+    // retained delivery"): the second final's own enqueue must retry the
+    // FIRST final's exact retained entry (same sourceEventId, same
+    // sequence 1) before the second final's own entry is ever attempted
+    // at the next sequence -- never let the second final submit its own
+    // fresh attempt at the stale sequence directly, skipping over the
+    // first final's still-unresolved slot.
     asr.emitFinal("救命", "seg-2");
     await flush(10);
 
     const eventsCalls = calls.filter((c) => c.path.endsWith("/events"));
-    expect(eventsCalls).toHaveLength(2);
+    expect(eventsCalls).toHaveLength(3);
+    // Call 1: the first final's own entry, first attempt -- fails.
     expect(eventsCalls[0]?.body).toMatchObject({ sequence: 1 });
+    // Call 2: the SAME entry (identical sourceEventId as call 1) retried
+    // -- not the second final's own, different identity -- and this time
+    // reconciles via the safe no-op response.
     expect(eventsCalls[1]?.body).toMatchObject({ sequence: 1 });
     expect(
-      (eventsCalls[0]?.body as { sourceEventId: string }).sourceEventId,
-    ).not.toBe((eventsCalls[1]?.body as { sourceEventId: string }).sourceEventId);
+      (eventsCalls[1]?.body as { sourceEventId: string }).sourceEventId,
+    ).toBe((eventsCalls[0]?.body as { sourceEventId: string }).sourceEventId);
+    // Call 3: only now does the second final's own, distinct entry attempt
+    // its own (now correctly contiguous) sequence 2.
+    expect(eventsCalls[2]?.body).toMatchObject({ sequence: 2 });
+    expect(
+      (eventsCalls[2]?.body as { sourceEventId: string }).sourceEventId,
+    ).not.toBe((eventsCalls[0]?.body as { sourceEventId: string }).sourceEventId);
     // The second turn completed -- spoke normally -- instead of repeating
-    // the first turn's failure.
+    // the first turn's failure or wedging behind it forever.
     expect(sentBinary.length).toBeGreaterThan(0);
     consoleError.mockRestore();
   });

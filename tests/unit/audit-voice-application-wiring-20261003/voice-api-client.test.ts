@@ -14,7 +14,7 @@ import {
   createTrustedDialoguePersistPort,
 } from "../../../apps/voice-media-worker/src/dialogue/dialogue-persist-port";
 import type { VoiceSessionBinding } from "../../../apps/voice-media-worker/src/dialogue/voice-session-binding";
-import type { VoiceDialogueState } from "../../../apps/voice-media-worker/src/dialogue/dialogue-state";
+import { VoiceDialogueState } from "../../../apps/voice-media-worker/src/dialogue/dialogue-state";
 import type { VoiceDialogueRequest } from "../../../apps/voice-media-worker/src/dialogue/voice-dialogue-provider";
 
 /**
@@ -1719,6 +1719,85 @@ describe("createTrustedDialoguePersistPort", () => {
       ),
     ).rejects.toThrow(/voice_trusted_persist_stale_response/);
     expect(binding.sessionVersion).toBe(4);
+  });
+
+  it("[definitive rejection, Codex reopen canonical 2026-10-03T21:53:56Z] a structured, definitively-rejected content-persist response never marks unresolvedCommit -- no reconciliation GET, no permanent poll-blocking for a write that never landed", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    let reconciliationGetCalls = 0;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        reconciliationGetCalls += 1;
+        throw new Error(
+          "test failure: no reconciliation GET should ever be issued for a definitive rejection",
+        );
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
+        // reopen, canonical 2026-10-03T21:53:56Z, "every failed snapshot
+        // write is now made permanently unresolved unless that exact
+        // snapshot actually exists"): a structured `VOICE_DRAFT_STALE`
+        // response means apps/api actually ran, looked at this exact CAS
+        // precondition, and definitively rejected it -- never a transport
+        // failure where no response was received at all. There is no
+        // ambiguity here: the write is KNOWN to have never landed.
+        return jsonResponse(409, {
+          error: { code: "VOICE_DRAFT_STALE", message: "stale session version" },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+
+    await expect(
+      port.persist(
+        { toSnapshotContent: () => ({}) } as unknown as VoiceDialogueState,
+        request,
+        { attachmentState },
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_DRAFT_STALE" });
+
+    // `unresolvedCommit` must never be set for a definitive rejection --
+    // marking it would block every later turn's persist, retrying a
+    // bounded reconciliation GET each time, for a snapshot already known
+    // to not exist. Before this fix, EVERY content-persist catch (ANY
+    // `err`, regardless of whether apps/api ever actually responded) set
+    // this marker unconditionally.
+    expect(attachmentState.unresolvedCommit).toBeNull();
+    // No reconciliation read was ever issued -- there is nothing
+    // ambiguous to reconcile.
+    expect(reconciliationGetCalls).toBe(0);
   });
 
   it("is mode 'trusted', distinct from the fixture port's mode 'fixture'", () => {

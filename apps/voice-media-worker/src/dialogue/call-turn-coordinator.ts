@@ -92,6 +92,33 @@ interface PendingControlEvent {
   occurredAt: string;
   mediaEpoch: number;
   eventType: "speech_start" | "media_epoch_transition";
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+   * canonical 2026-10-03T21:53:56Z, "final-only fallback bypasses
+   * retained delivery"): set the instant `flushControlEventBacklog`
+   * first picks this entry for an attempt, and never cleared again even
+   * once that attempt's HTTP call settles (success removes the entry
+   * from the array entirely; failure leaves it both in the array AND
+   * `attempted`). Distinguishes a genuinely never-tried observation from
+   * one whose outcome is merely unknown (timed out, transport failure) --
+   * `enqueueControlEvent`'s overflow policy must never evict the latter,
+   * since the server MAY already have durably applied it; only a
+   * never-attempted entry's loss is the documented, bounded-backlog
+   * tradeoff. */
+  attempted?: boolean;
+  /** Set only by `recordAuthoritativeSpeechStart`'s fallback path (a
+   * final transcript with no preceding real `speech.started`): lets that
+   * specific caller learn this exact entry's own resolved epoch once
+   * `flushControlEventBacklog` durably applies it, or learn that it was
+   * evicted under backlog pressure -- without the caller needing its own
+   * separate, unretained submission mechanism (R4-control, same reopen,
+   * "fallback events must share the SAME causal delivery/retry/overflow
+   * guarantees a real barge-in's speech-start already gets"). A real
+   * `speech.started`/`media.epoch.advanced` observation has no caller
+   * waiting on its outcome, so this is `undefined` for those. */
+  settle?: {
+    resolve: (epoch: number) => void;
+    reject: (error: unknown) => void;
+  };
 }
 
 /** Bound on `TurnSession.pendingControlEvents` -- see that field's own doc
@@ -609,18 +636,96 @@ export class VoiceCallTurnCoordinator {
    * fail-closed here: it means the authoritative session never actually
    * opened a resolvable input watermark for this turn, so proceeding to
    * `resolveInput` with a stale/unresolved epoch would be worse than
-   * rejecting this turn outright (SD §5.4 "不得跳號處理後面的肯定"). */
+   * rejecting this turn outright (SD §5.4 "不得跳號處理後面的肯定").
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+   * canonical 2026-10-03T21:53:56Z, "final-only fallback bypasses
+   * retained delivery"): previously submitted this observation directly
+   * via a one-shot `chainControlEvent` call, entirely independent of
+   * `pendingControlEvents`/`enqueueControlEvent`/`flushControlEventBacklog`
+   * -- a real `speech.started`/`media.epoch.advanced` observation got the
+   * unified backlog's retry/overflow/ordering guarantees, but a final
+   * transcript's OWN fallback watermark-open (no preceding real
+   * `speech.started`) did not: a lost HTTP acknowledgement for it left no
+   * retained entry at all, so a later `media.epoch.advanced` could be
+   * submitted at the exact sequence slot the fallback's durably-applied
+   * (but unacknowledged) write already consumed, and every such attempt
+   * failed `VOICE_ACTION_PAYLOAD_CONFLICT` forever with no way to ever
+   * resolve it. This now enqueues the SAME kind of entry a real
+   * `speech.started` would (`enqueueControlEvent`), so it shares that
+   * backlog's strict front-to-back ordering (any later observation,
+   * including a `media.epoch.advanced`, queues behind it and can never
+   * attempt a different slot while this one is unresolved), its bounded
+   * retry/no-final outage recovery, and its overflow protection (never
+   * attempted = never durably known, so `attempted`-aware eviction in
+   * `enqueueControlEvent` never silently drops it once a real attempt has
+   * started). The HTTP call itself runs under `boundedControlSignal`
+   * (attachment-scoped, tied to `release()`/`turnTimeoutMs`), never this
+   * turn's own `request.signal` -- the write must still land durably even
+   * if THIS turn is cancelled while waiting on it (same principle as a
+   * real barge-in's speech-start). `raceControlEventSettlement` bounds
+   * only how long THIS turn is willing to wait for the outcome by
+   * `request.signal`; losing that race never cancels or removes the
+   * underlying retained entry. */
   private recordAuthoritativeSpeechStart(
     turnSession: TurnSession,
     binding: VoiceSessionBinding,
     request: VoiceDialogueRequest,
   ): Promise<number> {
-    return this.recordAuthoritativeControlEvent(turnSession, binding, {
+    let resolve!: (epoch: number) => void;
+    let reject!: (error: unknown) => void;
+    const settled = new Promise<number>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    this.enqueueControlEvent(turnSession, binding, {
       sourceEventId: request.turnId,
       occurredAt: new Date().toISOString(),
       mediaEpoch: request.mediaEpoch ?? 0,
       eventType: "speech_start",
-      signal: request.signal,
+      settle: { resolve, reject },
+    });
+    return this.raceControlEventSettlement(settled, request.signal);
+  }
+
+  /** Bounds how long a caller that needs a specific `PendingControlEvent`
+   * entry's resolved value (only `recordAuthoritativeSpeechStart`'s
+   * fallback path today) is willing to wait for it, by `signal` -- never
+   * cancelling or removing the underlying retained entry on loss, which
+   * keeps draining/retrying on `turnSession.pendingControlEvents`
+   * regardless of whether anyone is still waiting on this race (R4-control,
+   * canonical 2026-10-03T21:53:56Z: "preserve turn cancellation without
+   * erasing accepted control evidence"). */
+  private raceControlEventSettlement<T>(
+    settlement: Promise<T>,
+    signal: AbortSignal,
+  ): Promise<T> {
+    if (signal.aborted) {
+      return Promise.reject(
+        new Error(
+          "voice_control_event_aborted: the turn was already aborted before its control-event outcome could be awaited.",
+        ),
+      );
+    }
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        reject(
+          new Error(
+            "voice_control_event_aborted: the turn was superseded while awaiting its control-event outcome; the underlying observation remains retained for delivery.",
+          ),
+        );
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      settlement.then(
+        (value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (error) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(error);
+        },
+      );
     });
   }
 
@@ -879,6 +984,34 @@ export class VoiceCallTurnCoordinator {
    * never silently remove the one entry a flush is actively awaiting an
    * acknowledgement for (R4-control backlog overflow, canonical
    * 2026-10-03T21:09:40Z reopen) -- then kicks off a flush. */
+  /** Overflow eviction may only ever target an entry that is BOTH (a)
+   * never attempted -- its outcome is a plain, known "never sent", not an
+   * ambiguous timeout/transport failure -- and (b) a `speech_start`, never
+   * a `media_epoch_transition`.
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control overflow (Codex
+   * reopen, canonical 2026-10-03T21:53:56Z, two distinct subcases):
+   * (a) the previous policy only protected the literal
+   * `inFlightControlEvent` reference, which `flushControlEventBacklog`
+   * clears the instant its own HTTP call settles -- including a timeout/
+   * transport-failure settlement whose server-side outcome is genuinely
+   * unknown (the write may have landed durably with only the
+   * acknowledgement lost). A burst of new observations arriving in that
+   * window could evict that still-ambiguous entry, losing its identity
+   * forever and letting a later duplicate collide with the server's own
+   * dedup for the original. `attempted` (set once, kept forever, see that
+   * field's own doc) protects an entry for as long as its outcome stays
+   * unknown, independent of whether an HTTP call for it is actively
+   * in-flight right now.
+   * (b) a `media_epoch_transition` is a different authority axis than a
+   * `speech_start` (SD §5.3 vs §5.4) and has no "acceptable loss" case the
+   * way a missed barge-in observation does: losing one permanently blocks
+   * every later event at the new epoch from ever being admitted. It is
+   * therefore never evictable at all, attempted or not. */
+  private isEvictableControlEvent(entry: PendingControlEvent): boolean {
+    return entry.eventType === "speech_start" && entry.attempted !== true;
+  }
+
   private enqueueControlEvent(
     turnSession: TurnSession,
     binding: VoiceSessionBinding,
@@ -886,25 +1019,36 @@ export class VoiceCallTurnCoordinator {
   ): void {
     turnSession.pendingControlEvents.push(entry);
     // Bounded backlog (see `TurnSession.pendingControlEvents`'s own doc):
-    // drop the OLDEST ELIGIBLE entry under sustained outage rather than
-    // grow without bound -- "eligible" excludes whatever entry is
-    // currently in flight (always the array's front while a flush's
-    // `recordAuthoritativeControlEvent` await is outstanding), which the
-    // cap itself must also exclude when counting, not just when choosing
-    // which index to evict. Capping the RAW array length instead (R4-
-    // control backlog, canonical 2026-10-03T21:09:40Z reopen) would keep
-    // evicting the entry right after the in-flight one on every
-    // subsequent overflow, one at a time, forever eroding the eligible
-    // backlog by one extra entry per push past the cap instead of
-    // settling at exactly `MAX_CONTROL_EVENT_BACKLOG` eligible entries
-    // alongside the one (separately protected) in-flight entry.
-    const inFlight = turnSession.inFlightControlEvent;
-    const eligibleCount =
-      turnSession.pendingControlEvents.length - (inFlight ? 1 : 0);
-    if (eligibleCount > MAX_CONTROL_EVENT_BACKLOG) {
-      const evictIndex =
-        turnSession.pendingControlEvents[0] === inFlight ? 1 : 0;
-      turnSession.pendingControlEvents.splice(evictIndex, 1);
+    // drop the OLDEST evictable entry under sustained outage rather than
+    // grow without bound -- "evictable" (see `isEvictableControlEvent`)
+    // excludes every entry whose outcome is not definitively "never
+    // attempted", and every `media_epoch_transition`, not merely the
+    // single literal in-flight reference. The cap itself counts only
+    // evictable entries too (same reasoning the single-exclusion version
+    // of this comment already gave: counting the RAW array length would
+    // keep evicting whatever entry drifts into the evictable set right
+    // after a protected one, one at a time, instead of settling at
+    // exactly `MAX_CONTROL_EVENT_BACKLOG` evictable entries alongside
+    // however many protected (attempted/ambiguous or transition) entries
+    // also happen to be outstanding). If NO entry is currently evictable
+    // (every outstanding entry is either ambiguous or a transition), the
+    // backlog is deliberately allowed to exceed the cap rather than evict
+    // a protected one -- a bounded safety overflow, not an oversight.
+    const evictable = turnSession.pendingControlEvents.filter((candidate) =>
+      this.isEvictableControlEvent(candidate),
+    );
+    if (evictable.length > MAX_CONTROL_EVENT_BACKLOG) {
+      const oldest = evictable[0]!;
+      const evictIndex = turnSession.pendingControlEvents.indexOf(oldest);
+      const [evicted] = turnSession.pendingControlEvents.splice(
+        evictIndex,
+        1,
+      );
+      evicted?.settle?.reject(
+        new Error(
+          "voice_control_event_evicted: backlog capacity exceeded before this never-attempted observation could be delivered.",
+        ),
+      );
     }
     this.flushControlEventBacklog(turnSession, binding);
   }
@@ -941,6 +1085,11 @@ export class VoiceCallTurnCoordinator {
       while (turnSession.pendingControlEvents.length > 0) {
         const next = turnSession.pendingControlEvents[0]!;
         turnSession.inFlightControlEvent = next;
+        // Set once, kept forever (see `PendingControlEvent.attempted`'s
+        // own doc) -- this entry's outcome is no longer definitively
+        // "never sent" even after this specific attempt's HTTP call
+        // settles, whatever the result.
+        next.attempted = true;
         let epoch: number;
         try {
           epoch = await this.recordAuthoritativeControlEvent(
@@ -975,6 +1124,11 @@ export class VoiceCallTurnCoordinator {
           turnSession.authoritativeInputEpoch = epoch;
           turnSession.authoritativeInputEpochConsumed = false;
         }
+        // Tell `recordAuthoritativeSpeechStart`'s fallback caller (if this
+        // entry came from it) this exact observation's resolved epoch --
+        // never erased by a later unrelated failure elsewhere in this same
+        // drain loop, since it was already removed from the array above.
+        next.settle?.resolve(epoch);
       }
     }).then(
       () => {
@@ -1267,12 +1421,10 @@ export class VoiceCallTurnCoordinator {
             turnSession.authoritativeInputEpochConsumed === false &&
             turnSession.authoritativeInputEpoch !== undefined
               ? turnSession.authoritativeInputEpoch
-              : await this.chainControlEvent(turnSession, () =>
-                  this.recordAuthoritativeSpeechStart(
-                    turnSession,
-                    binding,
-                    bounded,
-                  ),
+              : await this.recordAuthoritativeSpeechStart(
+                  turnSession,
+                  binding,
+                  bounded,
                 );
           turnSession.authoritativeInputEpoch = authoritativeInputEpoch;
           turnSession.authoritativeInputEpochConsumed = true;

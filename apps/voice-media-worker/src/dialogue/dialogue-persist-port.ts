@@ -1,12 +1,13 @@
 import type { VoiceDialogueState } from "./dialogue-state";
 import type { VoiceDialogueRequest } from "./voice-dialogue-provider";
 import type { VoiceSessionBinding } from "./voice-session-binding";
-import type {
-  DialogueSnapshotRestorationResult,
-  IssueCapabilityCommand,
-  PersistDialogueSnapshotResult,
-  ResolveInputResult,
-  VoiceApiClient,
+import {
+  VoiceApiError,
+  type DialogueSnapshotRestorationResult,
+  type IssueCapabilityCommand,
+  type PersistDialogueSnapshotResult,
+  type ResolveInputResult,
+  type VoiceApiClient,
 } from "../server/voice-api-client";
 
 /** A signal paired with an explicit `cancel()` to release whatever bounds
@@ -100,19 +101,20 @@ const MAX_UNRESOLVED_COMMIT_RECONCILE_ATTEMPTS = 3;
  * for, never cancels the in-flight call itself) -- so this exact
  * function can genuinely be entered twice concurrently for the same
  * attachment (the abandoned call's own catch block, and a brand new
- * turn's top-of-call gate). `unresolvedCommitRecovery` caches the
- * in-flight attempt so the second caller joins the first's SAME GET(s)
- * instead of issuing a redundant, independent round -- see probe
- * "emergency POST reply held, real speech.started cancels it... recovery
- * GET captures the valid accepted snapshot but delivery remains held.
- * BEFORE releasing GET, send empty next final" in that reopen.
+ * turn's top-of-call gate). `unresolvedCommitRecoveries` (see that
+ * WeakMap's own doc) caches the in-flight attempt so the second caller
+ * joins the first's SAME GET(s) instead of issuing a redundant,
+ * independent round -- see probe "emergency POST reply held, real
+ * speech.started cancels it... recovery GET captures the valid accepted
+ * snapshot but delivery remains held. BEFORE releasing GET, send empty
+ * next final" in that reopen.
  *
  * Returns the correlating snapshot once resolved. When `attachmentState`
  * is supplied, installs the recovered content onto it (and clears
  * `unresolvedCommit`) as a side effect, under the same monotonic
  * `committedSessionVersion` fencing `createTrustedDialoguePersistPort`'s
  * success path already uses, and dedupes concurrent callers via
- * `unresolvedCommitRecovery`. Without `attachmentState` (no cross-turn
+ * `unresolvedCommitRecoveries`. Without `attachmentState` (no cross-turn
  * memory to track this on at all -- a caller with no `recovery`, unchanged
  * from before this fix existed) this is just a bounded-retry version of
  * the single-shot `reconcileAmbiguousCommit` call this replaces, with no
@@ -124,6 +126,24 @@ const MAX_UNRESOLVED_COMMIT_RECONCILE_ATTEMPTS = 3;
  * either entry point) retries it again rather than silently treating
  * "still unknown" as "safe to ignore."
  */
+/** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+ * canonical 2026-10-03T21:53:56Z, "new Promise field crashes cloning
+ * before the advertised join gate"): the in-flight reconciliation promise
+ * used to live as a `Promise`-valued field directly on
+ * `VoiceDialogueState` -- but `VoiceDialogueEngine.turn` builds every
+ * turn's candidate state via `structuredClone(state)`, and a `Promise`
+ * cannot be structured-cloned. A second, concurrent turn starting while a
+ * reconciliation was genuinely in flight crashed with `DataCloneError`
+ * before ever reaching this module's own join gate below -- the join
+ * mechanism was correct, but unreachable. Keyed by the `VoiceDialogueState`
+ * instance itself (never a plain id -- there is exactly one such instance
+ * per attachment, see `TurnSession.state`) so this stays just as joinable
+ * across concurrent callers for that same attachment as the old field was,
+ * without `structuredClone` ever seeing it. */
+const unresolvedCommitRecoveries = new WeakMap<
+  VoiceDialogueState,
+  Promise<PersistDialogueSnapshotResult["snapshot"]>
+>();
 async function reconcileUnresolvedCommit(
   client: VoiceApiClient,
   voiceSessionId: string,
@@ -179,14 +199,14 @@ async function reconcileUnresolvedCommit(
     );
   };
   if (!attachmentState) return attempt();
-  if (!attachmentState.unresolvedCommitRecovery) {
-    attachmentState.unresolvedCommitRecovery = attempt().finally(() => {
-      attachmentState.unresolvedCommitRecovery = null;
+  let inFlight = unresolvedCommitRecoveries.get(attachmentState);
+  if (!inFlight) {
+    inFlight = attempt().finally(() => {
+      unresolvedCommitRecoveries.delete(attachmentState);
     });
+    unresolvedCommitRecoveries.set(attachmentState, inFlight);
   }
-  return attachmentState.unresolvedCommitRecovery as Promise<
-    PersistDialogueSnapshotResult["snapshot"]
-  >;
+  return inFlight;
 }
 
 /**
@@ -574,8 +594,11 @@ export function createTrustedDialoguePersistPort(
         // (the server accepted the write) but its own HTTP acknowledgement
         // is lost, EITHER from a transport failure or because this exact
         // turn was just cancelled (barge-in) while the write was still in
-        // flight. Neither case may short-circuit past reconciliation:
-        // without it, the engine's in-memory `state` never learns this
+        // flight. Neither of THOSE two cases may short-circuit past
+        // reconciliation (a definitively-rejected write, handled by the
+        // `isDefinitiveRejection` check below, is a third, different case
+        // that always DOES short-circuit -- see its own doc): without
+        // reconciliation, the engine's in-memory `state` never learns this
         // turn's content was actually durably recorded (see
         // `VoiceDialogueEngine.turn`'s `Object.assign(state, next)`, which
         // only runs once `persist()` resolves -- never for a cancelled
@@ -595,6 +618,30 @@ export function createTrustedDialoguePersistPort(
         // in-flight attempt instead of racing it. Without `recovery` there
         // is no cross-call attachment state to track this on at all --
         // still bounded-retried, just with no promise-sharing of its own.
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+        // canonical 2026-10-03T21:53:56Z, "every failed snapshot write is
+        // now made permanently unresolved unless that exact snapshot
+        // actually exists"): a structured `VoiceApiError` whose `code` is
+        // anything OTHER than `VOICE_API_UNREACHABLE` means `VoiceApiClient`
+        // actually received a response FROM apps/api -- the server ran,
+        // looked at this exact request, and explicitly rejected it (a stale
+        // CAS precondition, a validation failure, ...). That is not
+        // ambiguous: the write definitively never landed, so there is
+        // nothing for `reconcileUnresolvedCommit` to ever find, and marking
+        // `unresolvedCommit` here would block every later turn's persist,
+        // polling forever, for a snapshot that is already known to not
+        // exist. Only `VOICE_API_UNREACHABLE` (no response was ever
+        // received at all -- transport failure, timeout, proxy reset,
+        // dropped connection) is genuinely ambiguous: the request may have
+        // been durably applied server-side with only its own
+        // acknowledgement lost. Fail this call closed immediately,
+        // unchanged from before this fix, without ever touching
+        // `unresolvedCommit` for a definitive rejection.
+        const isDefinitiveRejection =
+          err instanceof VoiceApiError && err.code !== "VOICE_API_UNREACHABLE";
+        if (isDefinitiveRejection) {
+          throw err;
+        }
         const pending = {
           expectedSessionVersion: expectedSnapshotSessionVersion,
           inputEpoch: request.inputEpoch,

@@ -76,14 +76,23 @@ export class VoiceDialogueState {
     mediaEpoch: number;
     turnId: string;
   } | null = null;
-  /** The in-flight bounded reconciliation attempting to resolve
-   * `unresolvedCommit`, if one is already running -- a concurrent second
-   * caller (e.g. a barge-in-abandoned turn's own still-running background
-   * persist racing a brand new turn's foreground one, see
-   * `reconcileUnresolvedCommit`'s own doc) joins this SAME attempt
-   * instead of starting a redundant, independent one. Cleared together
-   * with `unresolvedCommit` once the attempt settles. */
-  unresolvedCommitRecovery: Promise<unknown> | null = null;
+  // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+  // canonical 2026-10-03T21:53:56Z, "new Promise field crashes cloning
+  // before the advertised join gate"): the in-flight bounded
+  // reconciliation attempting to resolve `unresolvedCommit` used to live
+  // right here as a `Promise`-valued instance field -- but
+  // `VoiceDialogueEngine.turn` builds every turn's own candidate state via
+  // `structuredClone(state)` (see that method's doc), and a `Promise`
+  // cannot be structured-cloned: any turn starting while a reconciliation
+  // was genuinely in flight crashed with `DataCloneError` before ever
+  // reaching `persist()`'s own join gate, silently dropping that turn
+  // instead of either joining the recovery or failing it closed on
+  // purpose. This asynchronous attachment-lifecycle bookkeeping is kept
+  // OFF this cloneable dialogue-content class entirely now -- see
+  // `dialogue-persist-port.ts`'s own `unresolvedCommitRecoveries` WeakMap,
+  // keyed by the `VoiceDialogueState` instance itself, which is exactly as
+  // joinable across concurrent callers without being a property
+  // `structuredClone` ever has to look at.
 
   apply(output: VoiceDialogueOutput, turnId: string): void {
     if (this.handoff) return;

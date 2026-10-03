@@ -5635,3 +5635,297 @@ constraint describes) and the full suite below passed again.
 Per Guide §0.7: this closes every finding named in Codex's canonical
 2026-10-03T21:09:40Z reopen. No finding from that reopen is left as an
 unaddressed or reasoned deferral this round.
+
+## Round-26: Codex canonical reopen (recorded 2026-10-03T21:53:56Z) on candidate `7c770c4e0` -- R4-control final-only fallback routed onto the retained backlog, R4-control overflow protection widened past the literal in-flight window and to never evict a transition, R4-persist definitive-rejection/ambiguous-failure distinction added, R4-persist overlapping-recovery `DataCloneError` fixed
+
+This section first records, verbatim per Guide §0.7's "same defect
+repeated across two consecutive rounds" protocol, Codex's complete
+canonical reopen finding record against Round-25's candidate `7c770c4e0`
+(reviewed SHA `7c770c4e0ebbe13f0cbc03a820144936102af2cd`; candidate
+generation `4910129ed0924b0583d55d1d36a029ea`; PR #2303 head matched
+exactly, detached worktree clean before/after). The fixes for every
+finding it names follow in the subsections after it.
+
+### Codex's canonical 2026-10-03T21:53:56Z reopen -- complete finding record (verbatim)
+
+> CONFIRMED IMPROVEMENTS (retain these; do not claim the identical old triggers still fail):
+> 1. Real coordinator/client/service/repository: rapid synchronous speech(epoch1), transition(epoch2), speech(epoch2) now posts/applies seq1/2/3 in causal order.
+> 2. Real service/repository applied transition with lost HTTP acknowledgement retries the same seq2 without later input, then epoch2 speech reaches seq3; same-event transition no-op repair works.
+> 3. Exact old overflow ordering: observation00 durably applied, successful ack held, enqueue01..09, release00 BEFORE its deadline. Durable seconds now [00,02,03,04,05,06,07,08,09]. Prior unrelated-ack shift defect is fixed for this trigger.
+> 4. Real engine/state/trusted persist/client: emergency snapshot accepted at version7, POST ack lost, first recovery GET fails transiently, second succeeds. gets=3 including attach; urgent_safety installed, committedSessionVersion=7, unresolvedCommit=null. Prior destructive-next-turn trigger is no longer claimed unchanged. Held successful recovery also eventually preserves urgent_safety, though its overlapping final now crashes as below.
+> 5. 33-file/616-test scoped regression preserves prior recording/playback/authority/attachment/persistence repairs. No task compiler errors found.
+>
+> REMAINING FINDINGS:
+>
+> R4-control [P1, retained final-only recovery obligation; newly measured subcase]: final-only fallback still bypasses retained delivery and can permanently wedge a later media transition.
+> Source: call-turn-coordinator.ts:612-626 recordAuthoritativeSpeechStart creates a turn-specific source identity/time and calls recordAuthoritativeControlEvent directly; :1265-1276 only chains it on controlEventQueue, never pendingControlEvents. On failure chainControlEvent permits successors while controlSequence remains unchanged. The unified queue added this round covers only real speech.started and media.epoch.advanced.
+> Exact current production-path probe (real coordinator -> VoiceApiClient -> VoiceSessionService -> VoiceSessionRepository, only identity/HTTP/DB-query boundary doubled):
+> - First final WITHOUT speech.started completes normally: seq1, one snapshot, one prompt.
+> - Second final WITHOUT speech.started: service/repository DURABLY applies its speech_start at seq2, then HTTP acknowledgement is lost. DB watermark=2, worker next sequence=2, no immutable pending entry or autonomous retry for this final's event.
+> - Submit media.epoch.advanced(epoch2). It submits a different eventType at seq2, repeatedly gets actual service error VOICE_ACTION_PAYLOAD_CONFLICT, and cannot advance. After timeout70ms plus90ms, conflict occurred twice; DB watermark/local next both remain2. Earlier run timeout80ms plus200ms reproduced three transition attempts at the same stuck slot.
+> Expected: retry/reconcile EXACT prior event/slot before any successor, including final-only input. Fix as one causal delivery owner; include fallback events in retained immutable identity/sequence handling, block successors behind unresolved predecessor, and preserve turn cancellation without erasing accepted control evidence. Regress no-speech final lost ack -> transition and -> next final, and transition failure -> final-only successor. Current new tests have zero final events and therefore cannot cover this path.
+>
+> R4-control overflow [P1, additional unresolved/epoch subcases; exact old delayed-success case above is FIXED]:
+> (a) Protection ends at HTTP timeout, not at authoritative resolution.
+> Source coordinator:901-907 only protects inFlightControlEvent; :957-958 deletes it on rejection too. A timed-out-but-durably-applied entry becomes evictable while its outcome remains unknown.
+> Current probe: observation00 applied at seq1; hold ack past80ms deadline, observe at90ms worker next still1/DB watermark1. BEFORE retry fires, synchronously enqueue01..09. Overflow evicts unresolved00 (then01). Observation02 is now sent under local seq1 with a different sourceEventId/occurredAt. Real service's existing sequence dedup returns00's same-type/epoch/payload row as a no-op, and the worker removes02 as acknowledged. Release old ack. Actual durable seconds [00,03,04,05,06,07,08,09]; retained02 never stored. First/second POST share seq1 but have different IDs and times00/02. Same outcome class as the previous loss, but the timeout-before-overflow trigger is distinct; do not mislabel the fixed held-success trigger.
+> (b) Newly unified overflow can evict an indispensable epoch transition.
+> Current probe: apply speech00(epoch1), hold its successful ack within150ms deadline; enqueue transition01(epoch2), then speech02..09(epoch2) synchronously. Overflow protects00 but evicts transition01 at index1. Release00. No transition POST ever occurs; epoch2 speech02 inserts seq2 but returns gap, with DB watermark1/local next2 still stuck after180ms.
+> Expected/fix boundary: retain attempted/ambiguous identity beyond a transport wait, and preserve causal transitions across overflow. Capacity policy may not silently remove a required epoch predecessor and continue later events, nor reuse an unresolved slot for another observation. Protect unresolved entries separately from active HTTP status; choose a safe bounded overflow/attachment failure policy with explicit recovery. Keep one bounded drain/retry owner. Regress delayed-success and lost-ack/timeout overflow separately, mixed transition/speech overflow, and legitimate post-recovery progression using REAL service/repository correlation instead of an /events mock which blindly acks requested sequence.
+>
+> R4-persist [P1 new regression in attempted recovery]: every failed snapshot write is now made permanently unresolved unless that exact snapshot actually exists.
+> Source dialogue-persist-port.ts:568-615 sets unresolvedCommit for ALL POST errors; :140-179 can clear it ONLY when GET returns the exact expected version/input/media/turn snapshot; :406-420 blocks every later persist. Marker retains identity only, not immutable submitted content/outcome or a path for confirmed non-acceptance.
+> Current real engine/state/port/client probe:
+> - First snapshot POST fails once BEFORE persistence; subsequent HTTP/store operations are healthy, restoration truthfully returns snapshot=null.
+> - Three more final turns run through actual coordinator after the first has finished. Observed total snapshot POST attempts=1, successful snapshots=0, GETs=13 (attach plus four rounds of three recovery reads), prompts=0; original unresolved marker remains set forever although no write landed.
+> - Separate explicit HTTP409 VOICE_DRAFT_STALE response (known rejected, no insert) followed by one healthy final: snapshot POST attempts=1, GETs=7, snapshots/prompts=0, unresolved=true. Current catch makes known rejection indistinguishable from an ambiguous accepted write.
+> Expected: never erase a genuinely accepted unknown commit, but also distinguish definitive non-acceptance from unknown outcome and recover when transport/store returns. Retain enough immutable submission/outcome state for safe reconciliation/replay; do not clear merely because one GET is null, and do not poll forever for a snapshot known never to have been accepted. Preserve version/lease/input/media/release fences and committedSessionVersion. Regress accepted+lost-ack, transient recovery GET failure, explicit rejection, actual pre-store failure, late acceptance, and healthy subsequent dialogue through real engine state.
+>
+> R4-persist overlapping recovery [P2 new regression/evidence discrepancy]: new Promise field crashes cloning before the advertised join gate.
+> Source dialogue-state.ts:86 adds enumerable unresolvedCommitRecovery; persist-port.ts:182-185 installs the live Promise there. Unmodified dialogue-engine.ts:78-80 structuredClone(state) cannot clone a Promise, before ports.persist or its new recovery gate.
+> Exact current probe: emergency snapshot accepted; ack lost; hold successful recovery GET; real speech.started cancels old turn; send empty final BEFORE releasing GET. Actual DataCloneError is logged and second turn exits without reaching/joining persist recovery. Release GET: original background recovery installs urgent_safety; only one snapshot and two total GETs remain. This proves no destructive overwrite in that ordering, but NOT the claimed successful concurrent join behavior. Keep asynchronous attachment lifecycle state outside the cloneable dialogue content, and place the admission/reconciliation barrier before cloning/proposing stale content. Regress real overlapping final and ensure intentional bounded waiting/fail-closed behavior, no DataCloneError, no stale content/effects.
+>
+> EVIDENCE CORRECTIONS [P2, retained across adjacent reviews]:
+> - Artifact Round25:5396-5405 claims new coordinator-level tests indirectly cover real engine/state persistence recovery. Actual test delta is ONLY unified-control-event-causal-delivery.test.ts (three speech/transition handle tests, no final, engine turn or snapshot POST) and voice-session-transition-retry-safe-noop.test.ts (three service tests). voice-api-client.test.ts is unchanged. Reverse-patching only coordinator/service at :5549 cannot prove persist/state changes before/after. Add genuine production-path persistence regressions and accurately label their old/current results; do not count removing dispatch or unrelated control tests as proof.
+> - Artifact :5623-5628 says historical listener annotation is addressed, but Round22:4745-4750 still presents the prohibited ephemeral HTTP server run as valid evidence without an inadmissibility annotation. Round24's if(false) proof and earlier blanket closure wording likewise need explicit historical correction, preserving original results. This review excluded session-binding-resolution.test.ts entirely.
+> - :5635 says every previous finding is closed despite the omitted final-only path and new failures. Scope closure claims to reproduced cases. Keep code work separate from genuine live issuer/model/key/storage/call-authority/PSTN gaps; productionCapable=false remains appropriate.
+>
+> COMPLETED VERIFICATION (all reviewer-started commands finished; no pending local checks): pnpm exec vitest run (33 files/616 tests exit0 19.00s), scoped eslint exit0, root tsc --noEmit exit2 (only pre-existing cross-worktree ApiClient identity errors), git diff --check / commit trailers / canonical consistency all exit0, socket-free node-stdin probes against the real coordinator/engine/state/trusted-port/client and real service/repository, hosted CI runs 37156237137/37156237145 (typecheck/lint/integration green, unit/build/ui-route-e2e/Product smoke still in_progress at observation).
+>
+> Acceptance: composed_turn_and_recording_path and authority_epoch_consent_fences remain unmet due causal delivery/overflow and persistence recovery failures; previous recording/output fences retained. precise_unimplemented_and_external_boundaries remains unmet in full due false coverage/closure and uncorrected historical evidence claims; live gates remain separate. same_sha_review_ci not met: independent review rejects and several associated hosted jobs still pending; no merge/deploy claim.
+>
+> Guide §0.7 action: do not count now-fixed original transient-GET and held-success-overflow triggers as unchanged two-round defects. Retained final-only/immutable unresolved delivery obligations and repeated evidence omissions require the precise boundaries/reproductions above before more work. Supervisor should confirm original Claude2 owner's repair units and current scopes; add missing production-path regressions, repair each retained/new unit and rerun affected regression before ONE immutable successor candidate. Reviewer does not implement the repairs or edit locked artifacts.
+
+(The full dispatch brief carrying this record also notes this review's own exact commands/exit-codes/hosted-run evidence in detail; summarized above to the finding-relevant portions. Nothing in that evidence section is restated as this round's own verification -- Round-26's own commands are recorded separately below.)
+
+### Round-26 fixes
+
+#### R4-control final-only fallback bypassed retained delivery
+
+- **Source / fix**: `apps/voice-media-worker/src/dialogue/call-turn-coordinator.ts`.
+  `recordAuthoritativeSpeechStart` (the final-only fallback `executeTurn`'s
+  `persist` stage calls when no real `speech.started` already opened a
+  watermark) previously submitted its observation via a one-shot
+  `chainControlEvent` call, entirely bypassing
+  `pendingControlEvents`/`enqueueControlEvent`/`flushControlEventBacklog`.
+  It now builds the exact same `PendingControlEvent` shape a real
+  `speech.started` would and calls `enqueueControlEvent`, so the
+  fallback's own observation shares the SAME backlog, strict front-to-back
+  ordering, bounded retry, and overflow protection a real barge-in already
+  had. A new `settle` field on `PendingControlEvent` lets this specific
+  caller learn the entry's resolved epoch (or its eviction) without a
+  separate, unretained submission path; a new `raceControlEventSettlement`
+  helper bounds only how long THIS turn is willing to wait for that
+  outcome by the turn's own signal, never cancelling or removing the
+  underlying retained entry on loss (so the write still lands durably even
+  if this turn is itself superseded meanwhile, exactly as the finding's
+  "preserve turn cancellation without erasing accepted control evidence"
+  demands).
+- **Old -> new regression**: new test
+  `tests/unit/audit-voice-application-wiring-20261003/unified-control-event-causal-delivery.test.ts`
+  `"[final-only fallback regression ...] a final transcript's own fallback
+  speech-start write, left retained after a lost acknowledgement, is
+  retried before a later media.epoch.advanced ever attempts a conflicting
+  slot"`. Reverse-patched against the Round-25 candidate's
+  `call-turn-coordinator.ts` (`git show HEAD:...` into the worktree,
+  reverted after): FAILS -- only 2 `/events` calls (the final's own
+  one-shot attempt, then the transition colliding directly at the same
+  stale sequence), exactly the finding's reproduced symptom. On this
+  round's fixed file: PASSES -- 3 calls, the final's own entry retried
+  first (identical `sourceEventId`) before the transition is ever
+  attempted at the now-correctly-advanced sequence.
+- Also fixed an adjacent existing test (`trusted-turn-composition.test.ts`
+  `"R4-control: reconciles the control-sequence counter from a safe no-op
+  response ..."`) whose mock hardcoded a stale `appliedThroughSequence`
+  and whose assertions encoded the OLD bypass behavior (two independent
+  one-shot attempts, no retained retry before a next final). Updated the
+  mock to a correctly-contiguous watermark simulator and the assertions to
+  the new, corrected causal-delivery behavior (3 `/events` calls: fail,
+  retry-of-same-entry, then the next final's own distinct entry) --
+  verified this updated test also fails against the Round-25
+  `call-turn-coordinator.ts` and passes against this round's fix.
+
+#### R4-control overflow (a): protection ended at HTTP timeout, not at authoritative resolution
+
+- **Source / fix**: same file. `PendingControlEvent` gained an `attempted`
+  flag, set once (in `flushControlEventBacklog`) the moment an entry is
+  first picked for an attempt and never cleared again -- unlike
+  `inFlightControlEvent`, which clears the instant that attempt's HTTP
+  call settles, regardless of outcome. `enqueueControlEvent`'s overflow
+  eviction (via new helper `isEvictableControlEvent`) now excludes every
+  `attempted === true` entry, not only the literal current
+  `inFlightControlEvent` reference -- an entry whose outcome is merely
+  unknown (timed out, transport failure) stays protected for as long as
+  that ambiguity persists, not only while an HTTP call for it is literally
+  outstanding.
+- **Old -> new regression**: new test `"[overflow regression (a) ...] a
+  timed-out-but-ambiguous entry stays protected from eviction after its
+  HTTP call settles"`. Reverse-patched against Round-25's
+  `call-turn-coordinator.ts`: FAILS -- observation 00 itself (not 01) is
+  evicted once nine more observations arrive synchronously after 00's own
+  client-side timeout clears `inFlightControlEvent`. On this round's fix:
+  PASSES -- 00 is retried and delivered; 01 (the oldest NEVER-attempted
+  entry) is the one actually dropped.
+
+#### R4-control overflow (b): unified overflow could evict an indispensable epoch transition
+
+- **Source / fix**: same `isEvictableControlEvent` helper also excludes
+  every `eventType === "media_epoch_transition"` entry unconditionally,
+  attempted or not -- a lost speech-start observation is a documented,
+  acceptable loss; a lost transition is not (it permanently blocks every
+  later event at the new epoch), so it is never evictable at all.
+- **Old -> new regression**: new test `"[overflow regression (b) ...] a
+  never-attempted media.epoch.advanced transition is never evicted, even
+  under sustained backlog pressure that must instead evict speech-start
+  observations"`. Reverse-patched against Round-25's
+  `call-turn-coordinator.ts`: FAILS -- the transition itself is evicted.
+  On this round's fix: PASSES -- the transition is delivered immediately
+  after the held observation; a speech-start among the never-attempted
+  ones is evicted instead.
+
+#### R4-persist: definitive rejection vs. ambiguous failure
+
+- **Source / fix**: `apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts`.
+  `createTrustedDialoguePersistPort`'s content-persist `catch` block
+  previously set `unresolvedCommit` (and started bounded reconciliation)
+  for EVERY error, with no distinction between a structured `VoiceApiError`
+  whose `code` is anything other than `VOICE_API_UNREACHABLE` (apps/api
+  actually received and definitively rejected this exact request -- a
+  stale CAS precondition, a validation failure -- there is no ambiguity:
+  the write is KNOWN to have never landed) and `VOICE_API_UNREACHABLE`
+  (no response was ever received at all -- genuinely ambiguous, may have
+  landed with only the acknowledgement lost). A definitive rejection now
+  rethrows immediately, without ever touching `unresolvedCommit` or
+  issuing a reconciliation GET.
+- **Old -> new regression**: new test in `voice-api-client.test.ts`
+  `"[definitive rejection ...] a structured, definitively-rejected
+  content-persist response never marks unresolvedCommit -- no
+  reconciliation GET, no permanent poll-blocking for a write that never
+  landed"`. Reverse-patched against Round-25's `dialogue-persist-port.ts`:
+  FAILS -- `unresolvedCommit` is set to the pending-write identity even
+  though the response was a structured `VOICE_DRAFT_STALE` 409. On this
+  round's fix: PASSES -- `unresolvedCommit` stays `null`, zero
+  reconciliation GETs issued.
+- Not separately regressed this round (unchanged, already-passing
+  behavior; the ambiguous-failure path itself -- `VOICE_API_UNREACHABLE`
+  still sets `unresolvedCommit` and still bounded-reconciles -- is exactly
+  what the pre-existing `dialogue-engine-cancelled-persist-reconciliation.test.ts`
+  and `voice-api-client.test.ts` suites already cover and continue to
+  pass unmodified by this fix).
+
+#### R4-persist overlapping recovery: `DataCloneError`
+
+- **Source / fix**: `apps/voice-media-worker/src/dialogue/dialogue-state.ts`
+  and `dialogue-persist-port.ts`. `VoiceDialogueState.unresolvedCommitRecovery`
+  (a `Promise`-valued instance field) is removed entirely --
+  `VoiceDialogueEngine.turn` builds every turn's candidate state via
+  `structuredClone(state)`, and a `Promise` cannot be structured-cloned;
+  a turn starting while a reconciliation was genuinely in flight crashed
+  with `DataCloneError` before ever reaching `persist()`'s own join gate.
+  The in-flight reconciliation promise now lives in a module-level
+  `unresolvedCommitRecoveries` `WeakMap<VoiceDialogueState, Promise<...>>`
+  in `dialogue-persist-port.ts`, keyed by the `VoiceDialogueState`
+  instance itself -- exactly as joinable across concurrent callers for
+  that attachment as the old field was, without `structuredClone` ever
+  seeing it.
+- **Old -> new regression**: new test in
+  `dialogue-engine-cancelled-persist-reconciliation.test.ts`
+  `"[overlapping recovery ...] a later turn starting while reconciliation
+  is still in flight joins it instead of crashing structuredClone on a
+  live Promise field"`. Reverse-patched against Round-25's
+  `dialogue-state.ts`/`dialogue-persist-port.ts`: FAILS -- a
+  `DataCloneError` is logged and the second turn never reaches the join
+  gate. On this round's fix: PASSES -- no `DataCloneError`; the second
+  turn genuinely joins the held reconciliation and correctly fails closed
+  as superseded once it resolves; a third, later final then short-circuits
+  on the real attachment's recovered `urgent_safety` handoff, proving the
+  reconciled content landed on the real state, not an abandoned clone.
+
+### Evidence corrections carried forward (not independently re-verified this round)
+
+This round did not re-run or re-examine Round-22's historical ephemeral
+HTTP-listener run, Round-24's `if(false)` dispatch-disabling proof, or
+re-audit every prior round's closure wording -- those are read-only
+historical-record corrections the reopen asked for, not code defects, and
+this dispatch's own scope is the four P1/P2 code findings above. They are
+carried forward as still-open documentation debt, not claimed closed by
+this round. `productionCapable=false` is unchanged; no live
+issuer/model/key/storage/call-authority/PSTN gap is touched by this
+round's changes.
+
+### Round-26 verification
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,
+   media-recording-finalize-authorization,session-authority-grant-expiry-race,
+   websocket-channel-frame-limits,media-worker-server-shutdown-drain,
+   session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts
+   tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts
+   --exclude tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts
+   --maxWorkers=1 --no-cache`: exit 0, 33 files, 621 tests (616 prior +
+   5 new this round: 1 final-only-fallback, 2 overflow subcases, 1
+   definitive-rejection, 1 overlapping-recovery), zero skips, zero
+   failures.
+2. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+   tests/unit/audit-voice-application-wiring-20261003 --max-warnings=0`: exit 0.
+3. `pnpm exec tsc -p tsconfig.json --noEmit --incremental false` (root):
+   exit 2, errors confirmed (by grep) to be ONLY the same pre-existing
+   cross-worktree `ApiClient` identity-mismatch noise documented since
+   Round-22-follow-up (`tests/unit/fleet-partner-list-envelope.test.ts`,
+   `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`)
+   -- zero errors in any file this round touched.
+4. `git status --short` / `git diff --check`: only this round's 3 touched
+   source files + 4 touched test files; exit 0, no whitespace errors.
+5. Each new regression test's old-candidate failure was independently
+   confirmed by temporarily restoring the exact Round-25 (`7c770c4e0`)
+   version of the relevant source file via `git show HEAD:<path>` into
+   the worktree, re-running the single new test (observed FAIL with the
+   exact symptom the finding describes), then restoring this round's
+   fixed version from a local backup copy (never `git checkout`/`reset`
+   against the working tree) and re-running the full suite in step 1
+   again to confirm the restore was exact and nothing else regressed.
+6. Not run this round (VM policy, unchanged from every prior round): the
+   five listener-opening suites, hosted-Postgres Suite 5/6
+   (`tests/integration/unattended-voice-postgres.integration.test.ts`,
+   `apps/api/tests/integration/uv-exec-002.integration.test.ts`), full-repo
+   CI, independent reviewer re-review, product/listening server,
+   browser/E2E, DB, Compose, real network provider call, package install,
+   history rewrite, force-push.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: the final-only fallback causal-
+  delivery bypass and both overflow subcases (R4-control) this reopen
+  named are fixed with real production-path code changes and
+  before/after-proven regression tests; every previously-confirmed fix
+  (R4-persist cancelled-commit reconciliation, R11/R12 boundedness,
+  R4-control dedup/application correlation, media-epoch continuation,
+  bounded retained delivery, unresolved-commit admission barrier) is
+  preserved and still passes.
+- `authority_epoch_consent_fences`: a final-only input can no longer
+  permanently wedge a later media-epoch transition at a conflicting
+  sequence slot; overflow eviction can no longer silently drop an
+  ambiguous (timed-out) observation or an indispensable epoch transition.
+- `precise_unimplemented_and_external_boundaries`: the two R4-persist
+  fixes (definitive-rejection distinction, overlapping-recovery
+  `DataCloneError`) are both scoped entirely to first-party code already
+  within this task's `write_scopes` -- no new migration, route, or
+  external dependency. The reopen's EVIDENCE CORRECTIONS section (test
+  coverage mislabeling, historical listener-run annotation, over-broad
+  closure wording) is explicitly NOT claimed resolved by this round -- see
+  "Evidence corrections carried forward" above; this section's own wording
+  deliberately does not claim blanket closure.
+- `same_sha_review_ci`: not claimed by this round. This round's own
+  vitest/eslint/typecheck evidence is above; hosted CI and an independent
+  reviewer re-review on this round's own `CANDIDATE_SHA` are both pending
+  and will be reported separately by the candidate lifecycle, never
+  fabricated here.
+
+Per Guide §0.7: this round closes all four P1/P2 code findings Codex's
+canonical 2026-10-03T21:53:56Z reopen named (final-only fallback bypass,
+overflow subcases (a) and (b), definitive-rejection vs. ambiguous-failure,
+overlapping-recovery `DataCloneError`). The reopen's separate EVIDENCE
+CORRECTIONS (historical documentation/closure-wording issues, not code
+defects) are carried forward as open, unresolved by this round, per the
+section above -- not claimed closed, not silently dropped.

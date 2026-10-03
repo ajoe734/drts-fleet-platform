@@ -594,4 +594,253 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist: a cancelled turn's
     expect(laterSnapshotBodies).toHaveLength(0);
     expect(sentBinary).toHaveLength(0);
   });
+
+  it("[overlapping recovery, Codex reopen canonical 2026-10-03T21:53:56Z] a later turn starting while reconciliation is still in flight joins it instead of crashing structuredClone on a live Promise field", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "88888888-8888-4888-8888-888888888888",
+      resourceScopeId: "99999999-9999-4999-8999-999999999999",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+
+    let getDialogueSnapshotCalls = 0;
+    let contentPostCount = 0;
+    type Turn1SnapshotBody = {
+      expectedSessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      content: unknown;
+    };
+    const turn1Snapshot: { body: Turn1SnapshotBody | null } = { body: null };
+
+    // Held open deliberately: models the exact reopened probe -- "emergency
+    // snapshot accepted; ack lost; hold successful recovery GET; real
+    // speech.started cancels old turn; send empty next final BEFORE
+    // releasing GET". `VoiceDialogueEngine.turn` builds the SECOND final's
+    // own candidate state via `structuredClone(state)` while this
+    // attachment's `persist-port.ts` reconciliation (triggered by turn 1's
+    // own lost acknowledgement) is still genuinely in flight, awaiting this
+    // exact gate.
+    let releaseReconciliationGet: () => void = () => {};
+    const reconciliationGetGate = new Promise<void>((resolve) => {
+      releaseReconciliationGet = resolve;
+    });
+
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: {
+            token: `capability-for-${(body as { scopes: string[] }).scopes.join(",")}`,
+            tokenType: "Bearer",
+            expiresIn: 120,
+          },
+        });
+      }
+
+      if (method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        getDialogueSnapshotCalls += 1;
+        if (getDialogueSnapshotCalls === 1) {
+          // attach()-time restoration read: brand-new session, nothing yet.
+          return jsonResponse(200, {
+            data: {
+              session: {
+                voiceSessionId: binding.voiceSessionId,
+                sessionVersion: binding.sessionVersion,
+                resourceScopeId: binding.resourceScopeId,
+                routeProfileVersion: binding.routeProfileVersion,
+                leaseEpoch: binding.leaseEpoch,
+                inputEpoch: 0,
+                pendingInput: false,
+                lastAppliedControlSequence: 0,
+              },
+              snapshot: null,
+            },
+          });
+        }
+        // Turn 1's own ambiguous-commit reconciliation read -- held open
+        // until `releaseReconciliationGet()` below, regardless of how many
+        // later turns join it while it waits.
+        await reconciliationGetGate;
+        if (!turn1Snapshot.body) {
+          throw new Error("test setup error: reconciliation GET before turn 1's own POST body was captured");
+        }
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: turn1Snapshot.body.expectedSessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: turn1Snapshot.body.inputEpoch,
+              pendingInput: false,
+              lastAppliedControlSequence: 1,
+            },
+            snapshot: {
+              snapshotId: "snapshot-turn-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: turn1Snapshot.body.expectedSessionVersion,
+              inputEpoch: turn1Snapshot.body.inputEpoch,
+              mediaEpoch: turn1Snapshot.body.mediaEpoch,
+              turnId: turn1Snapshot.body.turnId,
+              content: turn1Snapshot.body.content,
+              createdAt: "2026-10-03T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+
+      if (path.endsWith("/events")) {
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: (body as { sequence: number }).sequence,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+
+      if (path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion:
+                (body as { expectedSessionVersion: number }).expectedSessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+
+      if (method !== "GET" && path.endsWith("/dialogue-snapshot")) {
+        contentPostCount += 1;
+        turn1Snapshot.body = body as Turn1SnapshotBody;
+        // Turn 1's content commit lands durably server-side (modelled by
+        // capturing its body above, exactly like the sibling probes in
+        // this file), but its own HTTP acknowledgement never comes back --
+        // a plain transport failure, never an abort -- triggering
+        // `createTrustedDialoguePersistPort`'s ambiguous-commit catch block
+        // immediately rather than waiting on this turn's own deadline.
+        throw new TypeError("simulated network failure after commit");
+      }
+
+      throw new Error(`unexpected path ${method} ${path}`);
+    });
+
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    await flush(5);
+
+    // Turn 1: an emergency final opens handoff with reason "urgent_safety".
+    // Its content POST's own acknowledgement is lost immediately, starting
+    // a reconciliation read that is held open (gated above).
+    asr.emitFinal("救命", "seg-1");
+    await flush(10);
+    expect(contentPostCount).toBe(1);
+    expect(turn1Snapshot.body).not.toBeNull();
+    expect(sentBinary).toHaveLength(0);
+
+    // A real speech.started barge-in cancels turn 1's own (already-settled)
+    // engine stage -- this exact event is what the reopened probe used to
+    // supersede the old turn before the next final arrives.
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({ type: "speech.started" }),
+      false,
+    );
+    await flush(10);
+
+    // Turn 2 (an unrelated next final) arrives BEFORE the reconciliation
+    // GET above is released -- `VoiceDialogueEngine.turn` must build this
+    // turn's own candidate state via `structuredClone(state)` while
+    // `state`'s own reconciliation is still genuinely in flight.
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+    // canonical 2026-10-03T21:53:56Z, "new Promise field crashes cloning
+    // before the advertised join gate"): before this fix, the in-flight
+    // reconciliation promise lived as a `Promise`-valued
+    // `unresolvedCommitRecovery` field directly on this same
+    // `VoiceDialogueState` instance, and `structuredClone` cannot clone a
+    // `Promise` -- this exact call crashed with `DataCloneError`, and turn
+    // 2 exited having never reached `persist()`'s own join gate at all.
+    asr.emitFinal("我要訂車", "seg-2");
+    await flush(10);
+
+    const dataCloneErrors = consoleError.mock.calls.filter(
+      ([, err]) => err instanceof Error && err.name === "DataCloneError",
+    );
+    expect(dataCloneErrors).toHaveLength(0);
+    // Turn 2 is still genuinely waiting on the SAME held reconciliation --
+    // it must not have raced ahead and issued its own, second content
+    // commit while turn 1's own outcome is still unknown.
+    expect(contentPostCount).toBe(1);
+    expect(sentBinary).toHaveLength(0);
+
+    // Release the reconciliation -- both turn 1's own background catch and
+    // turn 2's join now resolve.
+    releaseReconciliationGet();
+    await flush(10);
+
+    // Turn 2 correctly fails closed as superseded by the just-recovered
+    // commit (never silently proceeds with stale/pre-reconciliation
+    // content), reached via the join gate -- not from a DataCloneError.
+    const supersededErrors = consoleError.mock.calls.filter(
+      ([, err]) =>
+        err instanceof Error &&
+        err.message.includes(
+          "voice_trusted_persist_superseded_by_recovered_commit",
+        ),
+    );
+    expect(supersededErrors.length).toBeGreaterThan(0);
+    expect(contentPostCount).toBe(1);
+    expect(sentBinary).toHaveLength(0);
+
+    // Turn 3: a later final now short-circuits at `VoiceDialogueEngine.
+    // turn`'s very first line (`if (state.handoff) return ...`) -- proof
+    // turn 1's reconciled "urgent_safety" commit landed on the REAL
+    // attachment state (never the abandoned clone), exactly like the
+    // sibling probes in this file confirm.
+    asr.emitFinal("我要訂車", "seg-3");
+    await flush(10);
+    expect(contentPostCount).toBe(1);
+    expect(sentBinary).toHaveLength(0);
+    consoleError.mockRestore();
+  });
 });
