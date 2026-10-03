@@ -129,6 +129,27 @@ export class VoiceMediaWorkerSession {
   }
 
   /**
+   * Whether a registered playback is still eligible to have its audio
+   * published or its completion honored (Codex reopen round 5/6, R1
+   * residual): `handleSpeechStarted`, `advanceMediaEpoch`, and
+   * `cancelPlayback` all clear a `TrackedPlayback` entry *directly*, with
+   * no event of their own reaching whichever outbound sink is holding this
+   * playback's `handle` -- only `startPlayback`'s own `cancelOn` listener
+   * re-invokes `cancelPlayback` for an abort, and that is a path only the
+   * turn-coordinator-driven `speak` call wires up at all (`cancelOn` is
+   * never passed for the raw `tts.synthesize` control frame). A sink must
+   * call this immediately before publishing audio for `handle.playbackId`
+   * (atomically with any other staleness check it already does), not rely
+   * solely on its own signal/epoch snapshot: that snapshot cannot see a
+   * barge-in, epoch advance, or explicit `tts.cancel` that cleared this
+   * specific registration through one of those direct paths instead.
+   */
+  isPlaybackActive(playbackId: string): boolean {
+    const playback = this.playbacksById.get(playbackId);
+    return playback !== undefined && !playback.cleared;
+  }
+
+  /**
    * SD §5.4 "建立唯一 media output owner／epoch": used on handoff/reconnect
    * to invalidate any in-flight playback generation before a new owner may
    * play audio.

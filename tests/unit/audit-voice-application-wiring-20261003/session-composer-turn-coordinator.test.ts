@@ -898,4 +898,261 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       false,
     );
   });
+
+  /**
+   * Codex reopen round 5/6, R1 residual: the raw `tts.synthesize` entry
+   * has no turn/signal of its own, and (unlike the barge-in case above,
+   * which goes through the turn coordinator) `handleSpeechStarted` clears
+   * a registered playback *directly* in the session's own map with no
+   * event reaching this entry's `closeAbort`. Only re-checking the
+   * playback's own liveness right before publishing catches this.
+   */
+  it("fences the raw tts.synthesize entry's outbound audio once a speech.started barge-in clears its registered playback", async () => {
+    const tts = new DeterministicTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({
+        asrAdapter: new StreamingAsrAdapter(),
+        ttsAdapter: tts,
+      }),
+    });
+    const { channel, sentBinary } = makeChannel();
+    const playbackId = "pb-sess-raw-speech-started-1";
+    composer.on("session.event", (payload) => {
+      const event = (payload as { event?: { type?: string } }).event;
+      if (event?.type === "tts.playback.started") {
+        queueMicrotask(() => {
+          (channel as unknown as EventEmitter).emit(
+            "message",
+            JSON.stringify({ type: "speech.started" }),
+            false,
+          );
+        });
+      }
+    });
+    composer.attach("sess-raw-speech-started", channel);
+    const session = composer.get("sess-raw-speech-started")!;
+
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({
+        type: "tts.synthesize",
+        text: "hello",
+        languageCode: "cmn-TW",
+      }),
+      false,
+    );
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(
+      session.completePlayback(playbackId, new Date().toISOString()),
+    ).toBe(false);
+  });
+
+  /**
+   * Codex reopen round 5/6, R1 residual: same gap, triggered through a
+   * retained `advanceMediaEpoch()` call (the handoff/reconnect case)
+   * instead of a barge-in control frame -- `advanceMediaEpoch` also clears
+   * a matching-generation playback directly, with no event of its own.
+   */
+  it("fences the raw tts.synthesize entry's outbound audio once a retained advanceMediaEpoch call clears its registered playback", async () => {
+    const tts = new DeterministicTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({
+        asrAdapter: new StreamingAsrAdapter(),
+        ttsAdapter: tts,
+      }),
+    });
+    const { channel, sentBinary } = makeChannel();
+    const playbackId = "pb-sess-raw-epoch-advance-1";
+    let session: ReturnType<VoiceSessionComposer["get"]>;
+    composer.on("session.event", (payload) => {
+      const event = (payload as { event?: { type?: string } }).event;
+      if (event?.type === "tts.playback.started") {
+        queueMicrotask(() => {
+          session!.advanceMediaEpoch();
+        });
+      }
+    });
+    composer.attach("sess-raw-epoch-advance", channel);
+    session = composer.get("sess-raw-epoch-advance")!;
+
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({
+        type: "tts.synthesize",
+        text: "hello",
+        languageCode: "cmn-TW",
+      }),
+      false,
+    );
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(
+      session!.completePlayback(playbackId, new Date().toISOString()),
+    ).toBe(false);
+  });
+
+  /**
+   * Codex reopen round 5/6, R1 residual: an explicit `tts.cancel` control
+   * frame for the raw entry's own playback id clears it directly too --
+   * `cancelPlayback` has no relationship to this entry's `closeAbort`
+   * signal at all.
+   */
+  it("fences the raw tts.synthesize entry's outbound audio once an explicit tts.cancel clears its registered playback", async () => {
+    const tts = new DeterministicTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({
+        asrAdapter: new StreamingAsrAdapter(),
+        ttsAdapter: tts,
+      }),
+    });
+    const { channel, sentBinary } = makeChannel();
+    const playbackId = "pb-sess-raw-explicit-cancel-1";
+    composer.on("session.event", (payload) => {
+      const event = (payload as { event?: { type?: string } }).event;
+      if (event?.type === "tts.playback.started") {
+        queueMicrotask(() => {
+          (channel as unknown as EventEmitter).emit(
+            "message",
+            JSON.stringify({
+              type: "tts.cancel",
+              playbackId,
+              reason: "interrupt",
+            }),
+            false,
+          );
+        });
+      }
+    });
+    composer.attach("sess-raw-explicit-cancel", channel);
+
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({
+        type: "tts.synthesize",
+        text: "hello",
+        languageCode: "cmn-TW",
+      }),
+      false,
+    );
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+  });
+
+  /**
+   * Codex reopen round 5/6, R1 residual: the coordinator-driven `speak`
+   * path has the same gap for an explicit `tts.cancel` as the raw entry
+   * does -- `signal`/`mediaEpoch` are turn-level concepts that `tts.cancel`
+   * never touches, since it clears the playback directly in the session's
+   * own map instead.
+   */
+  it("fences outbound audio published after an explicit tts.cancel reacts to this same playback's own started event (coordinator path)", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    const events: unknown[] = [];
+    const playbackId = "pb-sess-coord-cancel-race-1";
+    composer.on("session.event", (payload) => {
+      events.push(payload);
+      const event = (payload as { event?: { type?: string } }).event;
+      if (event?.type === "tts.playback.started") {
+        queueMicrotask(() => {
+          (channel as unknown as EventEmitter).emit(
+            "message",
+            JSON.stringify({
+              type: "tts.cancel",
+              playbackId,
+              reason: "interrupt",
+            }),
+            false,
+          );
+        });
+      }
+    });
+    composer.attach("sess-coord-cancel-race", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", playbackId)).toBe(
+      true,
+    );
+    expect(
+      hasPlaybackEvent(events, "tts.playback.completed", playbackId),
+    ).toBe(false);
+    sendTtsComplete(channel, playbackId);
+    await flush();
+    expect(
+      hasPlaybackEvent(events, "tts.playback.completed", playbackId),
+    ).toBe(false);
+  });
+
+  /**
+   * Codex reopen round 5/6, R2: the media-authority transition itself
+   * (handoff/reconnect, modeled here through the composer's own
+   * `advanceMediaEpoch`) must synchronously cancel whatever turn is
+   * currently blocked on provider work for that attachment -- not merely
+   * let it keep running until its own next epoch re-check. The provider's
+   * own `request.signal` (captured on its first, held `propose` call) must
+   * already be aborted immediately after `advanceMediaEpoch` returns, with
+   * no further `await` needed to observe it.
+   */
+  it("synchronously cancels a turn's pending provider call when the media-authority epoch advances through the composer", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    let capturedSignal: AbortSignal | undefined;
+    let proposeCalls = 0;
+    const provider: VoiceDialogueProvider = {
+      mode: "fixture",
+      profileVersion: "r2-epoch-cancel-probe:1",
+      propose(request) {
+        proposeCalls += 1;
+        if (proposeCalls === 1) {
+          capturedSignal = request.signal;
+          return new Promise(() => {
+            // Never resolves on its own -- only cancellation (observed via
+            // `capturedSignal`) or the test ending settles this turn.
+          });
+        }
+        return Promise.resolve(EMPTY_FINAL_OUTPUT);
+      },
+    };
+    const coordinator = new VoiceCallTurnCoordinator(() => provider);
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-r2-epoch-cancel", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(proposeCalls).toBe(1);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    expect(composer.advanceMediaEpoch("sess-r2-epoch-cancel")).toBe(2);
+
+    // No `await` between the call above and this assertion: the
+    // cancellation must already have reached the provider's own signal
+    // synchronously.
+    expect(capturedSignal?.aborted).toBe(true);
+
+    // The attachment itself stays live: a fresh final at the new epoch
+    // still produces a legitimate turn.
+    asr.emitFinal("救命", "seg-2");
+    await flush(5);
+    expect(proposeCalls).toBe(2);
+    expect(sentBinary.length).toBeGreaterThan(0);
+  });
 });
