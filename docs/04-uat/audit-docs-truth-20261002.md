@@ -385,7 +385,7 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
 |---|---|---|
 | `truthful_scope_and_deployment_instructions` | met | README Status section now distinguishes implementation/CI/dev-deployment/live-acceptance and names the open F01–F08 gaps instead of a bare "closed"; `docs/03-runbooks/smarttransport-tw-custom-domains.md` carries a historical-scope banner naming the suspended project and pointing at `DEV_GCP_*`/`deploy-dev.yml`; `docs/03-runbooks/local-development.md` now states the shared orchestrator machine is a different machine under `AGENTS.md`'s VM restriction, not the "VM dev" this runbook describes; `docs/ops/branch-strategy.md` disambiguates "dev VM" from the agent working machine. |
 | `cited_path_findings_classified_without_fake_evidence` | met | all 237 findings (128 unique paths) classified above into machine-local / resolved-elsewhere / archived-history / genuinely-missing, with the method and evidence for each; no file was fabricated or deleted to change the checker's output; the 19 genuinely-missing findings are named explicitly rather than hidden. |
-| `same_sha_review_ci` | met | candidate SHA `cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f` (`git rev-parse HEAD` and `gh pr view 2280 --json headRefOid` both return this SHA; it is the exact PR #2280 head). Local: `python3 tools/ci/git/check_canonical_consistency.py --ci --base 2b4b6b96aed1c41ae4b252681e0466ee808cbd0e --head HEAD` → exit 0, 0 findings across all four sub-checks. Hosted: `gh api repos/ajoe734/drts-fleet-platform/commits/cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f/check-runs` → "Canonical consistency" job `111085986290` in run `37082544300` is `conclusion: success` for this exact `head_sha`; the paired `ci-integ` run `37082544302` is also completed/success; every required (non-skipped) check on both runs is `success`. (An earlier evidence-only commit, `73f60713938114ae4cb6b39c977216b84f849d1f`, was independently CI-validated at run `37080508933`/job `111079759178` and is preserved as historical validation of the fixes it introduced, but it is no longer the candidate HEAD and is not cited here as this commit's own review/CI.) R2's commit:path evidence spot-checked directly against git objects (`git show <sha>:<path>`) for the three files Codex named (b1707c55a → forwarder-adapter-proof-spec-20260519.md and FWD-LIVE-SANDBOX-EVIDENCE.md; 0ab277dd2 → cti-recording-filing-uat-20260519.md; 0bca939f0 → PROD-LIVE-EXEC-EVIDENCE.md), all four confirmed present at the cited commits. |
+| `same_sha_review_ci` | met (procedure; see R3) | This row no longer names a single commit as "this is the current candidate SHA with current hosted CI" — see Review round 3 below for why that pattern is a structural error, not a fact that can be fixed by substituting a newer SHA. Verification procedure applied at every handoff: owner confirms `git rev-parse HEAD` equals the pushed branch head and equals `gh pr view 2280 --json headRefOid` (PR #2280) before locking the candidate; the resulting hosted CI for that exact `head_sha` is recorded by the existing candidate lifecycle / GitHub bus after handoff, not asserted inside this file. Historical validation points, each independently CI-green at the SHA listed, each explicitly superseded and none of them this candidate's HEAD: `73f60713938114ae4cb6b39c977216b84f849d1f` (local evidence-only commit; "Canonical consistency" job `111079759178`, run `37080508933`, success); `cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f` (R2 candidate; job `111085986290`, run `37082544300`, success; paired `ci-integ` run `37082544302`, success); `a1fbbef62dacc96da9d4d8a9d00053194f40f115` (R3 candidate; job `111090023121`, run `37083873570`, success; paired `ci-integ` run `37083873580`, success — both API responses' `head_sha` matched `a1fbbef62`). Local, reran against the current working tree before this handoff: `python3 tools/ci/git/check_canonical_consistency.py --ci --base 2b4b6b96aed1c41ae4b252681e0466ee808cbd0e --head HEAD` → exit 0, 0 findings across all four sub-checks; `git diff --check 2b4b6b96aed1c41ae4b252681e0466ee808cbd0e HEAD` → exit 0; `git diff --name-only 2b4b6b96aed1c41ae4b252681e0466ee808cbd0e HEAD` → exactly the five `write_scopes` files. The commit produced by this handoff is the actual final candidate; its own review/CI is pending lifecycle/bus evidence and is intentionally not asserted here. R2's commit:path evidence spot-checked directly against git objects (`git show <sha>:<path>`) for the three files Codex named (b1707c55a → forwarder-adapter-proof-spec-20260519.md and FWD-LIVE-SANDBOX-EVIDENCE.md; 0ab277dd2 → cti-recording-filing-uat-20260519.md; 0bca939f0 → PROD-LIVE-EXEC-EVIDENCE.md), all four confirmed present at the cited commits. |
 
 ## What was explicitly not done
 
@@ -531,3 +531,63 @@ evidence-identity finding. Both are fixed in this candidate:
   `write_scopes`, so the blanket "none edited / all outside write_scopes"
   phrasing was corrected to name that exception explicitly instead of
   contradicting the R1 record.
+
+## Review round 3 fixes (Codex, candidate `a1fbbef62`)
+
+Codex reopened the third candidate (PR #2280, `a1fbbef62`) with one finding,
+independently reproduced in two consecutive reviews — once here, once on an
+adjacent candidate task that hit the identical pattern:
+
+- **R3 residual (`same_sha_review_ci` evidence identity, P2):** the R2 fix
+  above corrected the acceptance-mapping row to name `cf3e9e772` as "candidate
+  SHA," asserting that `git rev-parse HEAD` and `gh pr view 2280 --json
+  headRefOid` both return it and that it is the exact PR #2280 head, with its
+  own hosted CI cited as this commit's current evidence. That assertion
+  became false the instant the R2 fix was committed: committing it produced
+  `a1fbbef62`, which is what `git rev-parse HEAD` and `gh pr view 2280 --json
+  headRefOid` actually return now, not `cf3e9e772`. This is the exact
+  structural error R3 already named once — a commit's own file content
+  cannot truthfully assert which SHA it will be, because that SHA is a hash
+  of the content doing the asserting — now reproduced on the very fix meant
+  to close it. Minimal read-only reproduction (no runtime needed): `git show
+  cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f:docs/04-uat/audit-docs-truth-20261002.md`
+  (exit 0) shows line 386 of that blob naming `73f60713938114ae4cb6b39c977216b84f849d1f`
+  current/met; `git show
+  a1fbbef62dacc96da9d4d8a9d00053194f40f115:docs/04-uat/audit-docs-truth-20261002.md`
+  (exit 0) shows line 388 of that blob naming `cf3e9e772` current/met — each
+  edit moved `HEAD` forward while the acceptance claim kept citing the
+  previous SHA as current.
+
+  Bounded fix: the `same_sha_review_ci` row above no longer names any single
+  commit as "this is the current candidate with current hosted CI." It
+  instead (a) states the verification procedure the owner actually runs at
+  handoff — `git rev-parse HEAD` equals the pushed branch head equals `gh pr
+  view 2280 --json headRefOid` — (b) lists every commit independently
+  CI-validated so far (`73f6071`, `cf3e9e772`, and `a1fbbef62`, the last with
+  "Canonical consistency" job `111090023121` in run `37083873570` and paired
+  `ci-integ` run `37083873580`, both `success` and both matching `head_sha`
+  `a1fbbef62`) explicitly as historical and explicitly superseded, and (c)
+  states that the commit produced by *this* handoff — whatever SHA that
+  turns out to be — has review/CI pending, to be recorded by the existing
+  candidate lifecycle / GitHub bus after handoff rather than asserted inside
+  this file. This is a structural fix, not a SHA swap: simply replacing
+  `cf3e9e772` with `a1fbbef62` and committing would reproduce the identical
+  error a third time, since that new SHA would also go stale the moment it
+  was written down as "current."
+
+  Required regression (read-only, rerun against this candidate before
+  handoff): `python3 tools/ci/git/check_canonical_consistency.py --ci --base
+  2b4b6b96aed1c41ae4b252681e0466ee808cbd0e --head HEAD` → exit 0, 0 findings
+  across all four sub-checks; `git diff --check
+  2b4b6b96aed1c41ae4b252681e0466ee808cbd0e HEAD` → exit 0; `git diff
+  --name-only 2b4b6b96aed1c41ae4b252681e0466ee808cbd0e HEAD` → exactly the
+  five authorized `write_scopes` files (`README.md`,
+  `docs/ops/branch-strategy.md`,
+  `docs/03-runbooks/smarttransport-tw-custom-domains.md`,
+  `docs/03-runbooks/local-development.md`,
+  `docs/04-uat/audit-docs-truth-20261002.md`); `git status --porcelain=v1` →
+  clean. Pushed branch head and PR #2280 head are confirmed equal at handoff
+  via `CANDIDATE_SHA=$(git rev-parse HEAD)` and `gh pr view 2280 --json
+  headRefOid`. Hosted CI for this exact handoff SHA is left pending for the
+  lifecycle/GitHub bus to record; it is intentionally not asserted here, to
+  avoid reproducing the same error a fourth time.
