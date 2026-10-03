@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   Optional,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
@@ -26,6 +27,10 @@ import { JwtAuthService } from "./jwt-auth.service";
 import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
+import {
+  GOOGLE_WORKLOAD_IDENTITY_HEADER,
+  GoogleWorkloadIdentityAdapter,
+} from "../../modules/auth/google-workload-identity.adapter";
 
 function asHeaderRecord(
   headers: unknown,
@@ -152,8 +157,31 @@ function isStrictAuthEnvironment(): boolean {
   return environment === "production" || environment === "staging";
 }
 
+// Cloud Scheduler (like the Cloud Run metadata server InternalKeyMiddleware
+// already tolerates) caches and reuses the identical OIDC ID token across
+// every trigger firing for most of its validity window, not just concurrent
+// requests on one firing. These two scheduled-task routes are safe to accept
+// that same token repeatedly: both are idempotent sweeps with no side effect
+// tied to "this exact assertion has never been seen before", unlike
+// `POST /api/auth/token` (session issuance, must stay one-time-use) or the
+// identity privileged-role-grant expiry sweep (kept strict pending its own
+// idempotency review). Route-scope/audience/issuer/email checks below still
+// run unchanged; only the one-time-use ledger write is skipped for these.
+const REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS = new Set([
+  "internal:scheduled-tasks:mail-outbox:drain",
+  "internal:scheduled-tasks:approval-timeout-reminders:run",
+]);
+
+interface ResolvedBootstrapAuthPolicy {
+  requiredScopes: string[];
+  allowedRealms: string[];
+  routeKey?: string;
+}
+
 @Injectable()
 export class BootstrapAuthGuard implements CanActivate {
+  private readonly logger = new Logger(BootstrapAuthGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     @Optional() private readonly jwtAuthService?: JwtAuthService,
@@ -166,6 +194,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional() private readonly securityEventsService?: SecurityEventsService,
     @Optional()
     private readonly stepUpProofService?: StepUpProofService,
+    @Optional()
+    private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -347,7 +377,7 @@ export class BootstrapAuthGuard implements CanActivate {
     request: AuthenticatedRequestLike,
     baseHeaders: Record<string, string | string[] | undefined>,
     requestUrl: string,
-    policy: { requiredScopes: string[]; allowedRealms: string[] } | null,
+    policy: ResolvedBootstrapAuthPolicy | null,
   ): boolean | Promise<boolean> {
     const strictEnvironment = isStrictAuthEnvironment();
     // JWT fast-path: verify Bearer token if present
@@ -359,17 +389,53 @@ export class BootstrapAuthGuard implements CanActivate {
             allowControlPlaneProxyToken:
               hasControlPlaneInnerBearer(baseHeaders),
           })
-          .then((payload) => {
+          .then(async (payload) => {
             if (!payload) {
-              throw new ApiRequestError(
-                401,
-                "JWT_INVALID",
-                "Bearer token is invalid or expired.",
-                { route: requestUrl },
-              );
+              const workloadIdentity = policy
+                ? await this.tryGoogleWorkloadIdentityFallback(
+                    token,
+                    requestUrl,
+                    request.method ?? "GET",
+                    policy,
+                  )
+                : null;
+              if (!workloadIdentity || !policy) {
+                throw new ApiRequestError(
+                  401,
+                  "JWT_INVALID",
+                  "Bearer token is invalid or expired.",
+                  { route: requestUrl },
+                );
+              }
+              request.identity = workloadIdentity;
+              try {
+                this.assertRealmAllowed(
+                  workloadIdentity,
+                  policy.allowedRealms,
+                  request,
+                );
+                this.assertScopesAllowed(
+                  workloadIdentity,
+                  policy.requiredScopes,
+                  request,
+                );
+                this.stepUpProofService?.assertRequestSatisfied(
+                  workloadIdentity,
+                  request,
+                );
+              } catch (error) {
+                this.recordAuthorizationDenialAudit(
+                  workloadIdentity,
+                  request,
+                  error,
+                );
+                throw error;
+              }
+              return true;
             }
 
             const identity = this.jwtAuthService!.toRequestIdentity(payload);
+            this.assertDriverProvisioningRoute(identity, request);
             request.identity = identity;
             if (identity.breakGlassGrantId) {
               this.securityEventsService?.recordEvent({
@@ -515,7 +581,9 @@ export class BootstrapAuthGuard implements CanActivate {
                 { route: requestUrl },
               );
             }
-            request.identity = this.jwtAuthService!.toRequestIdentity(payload);
+            const identity = this.jwtAuthService!.toRequestIdentity(payload);
+            this.assertDriverProvisioningRoute(identity, request);
+            request.identity = identity;
           });
       }
     }
@@ -604,6 +672,81 @@ export class BootstrapAuthGuard implements CanActivate {
       });
     } catch {
       // never let audit recording mask the original authorization error
+    }
+  }
+
+  // Cloud Scheduler's native OIDC auth always presents its token as
+  // `Authorization: Bearer <token>` (there is no way to redirect it to the
+  // custom x-drts-google-id-token header GoogleWorkloadIdentityAdapter was
+  // originally built for). A Google-signed token never verifies as this
+  // app's own JWT, so the fast path above always resolves `payload` to null
+  // for it; this fallback re-offers that same bearer token to the adapter
+  // before giving up. It is deliberately gated to routes whose resolved
+  // policy allows *only* the "system" realm (e.g. the scheduled-task
+  // triggers below) so a Google-verified service principal can never reach a
+  // user-facing tenant/ops/platform/driver/partner route this way, and any
+  // adapter failure (bad signature, wrong audience, unregistered principal,
+  // replay) falls through to the caller's original JWT_INVALID rejection
+  // rather than a different or looser error.
+  private async tryGoogleWorkloadIdentityFallback(
+    token: string,
+    requestUrl: string,
+    requestMethod: string,
+    policy: ResolvedBootstrapAuthPolicy,
+  ): Promise<BootstrapRequestIdentity | null> {
+    if (
+      !this.googleWorkloadIdentityAdapter ||
+      policy.allowedRealms.length !== 1 ||
+      policy.allowedRealms[0] !== "system"
+    ) {
+      return null;
+    }
+
+    const enforceReplayProtection = policy.routeKey
+      ? !REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS.has(policy.routeKey)
+      : true;
+
+    try {
+      const resolved =
+        await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
+          { [GOOGLE_WORKLOAD_IDENTITY_HEADER]: token },
+          { requestPath: requestUrl, requestMethod, enforceReplayProtection },
+        );
+      return {
+        authMode: "jwt_bearer",
+        actorType: "system",
+        actorId: resolved.actorId,
+        principalId: resolved.principalId,
+        subject: resolved.subject,
+        realm: "system",
+        tenantId: null,
+        roleFamilies: [],
+        roles: resolved.roles,
+        scopes: resolved.scopes,
+        requestId: null,
+        issuer: "https://accounts.google.com",
+        authTime: resolved.authTime,
+      };
+    } catch (error) {
+      // Never log the token itself; the reason code is enough to diagnose a
+      // rejected scheduler/service trigger without leaking bearer material.
+      const reasonCode =
+        error instanceof ApiRequestError ? error.code : "UNKNOWN_ERROR";
+      this.logger.warn(
+        `[AUTH_GOOGLE_WORKLOAD_IDENTITY_FALLBACK_DENIED] reason=${reasonCode} route=${requestMethod} ${requestUrl}`,
+      );
+      return null;
+    }
+  }
+
+  private assertDriverProvisioningRoute(identity: BootstrapRequestIdentity, request: AuthenticatedRequestLike) {
+    if (identity.driverProvisioningDriverId === undefined) return;
+    const path = normalizeRoutePath(request.originalUrl ?? request.url ?? "").replace(/^api\/+/, "");
+    const route = `${(request.method ?? "GET").toUpperCase()} ${path}`;
+    const allowed = ["GET auth/session", "POST auth/driver/device/invite", "POST auth/driver/device/invite/revoke"];
+    if (identity.actorType !== "system" || identity.realm !== "system" ||
+        !identity.driverProvisioningDriverId || !allowed.includes(route)) {
+      throw new ApiRequestError(403, "AUTH_SCOPE_DENIED", "Driver provisioning sessions cannot access this route.");
     }
   }
 

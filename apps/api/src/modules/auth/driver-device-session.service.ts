@@ -123,6 +123,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
 
   async revokeInvitation(
     command: { registrationCode: string },
+    allowedDriverId?: string,
   ): Promise<{ revoked: boolean }> {
     const code = command.registrationCode.trim();
     if (!code) return { revoked: false };
@@ -133,20 +134,39 @@ export class DriverDeviceSessionService implements OnModuleInit {
       invitation = (await this.repository.findInvitationByCodeHash(hash)) ?? undefined;
     }
     
-    if (!invitation || invitation.status !== "pending") {
+    if (allowedDriverId && invitation && invitation.driverId !== allowedDriverId) {
+      throw new ApiRequestError(403, "WORKLOAD_DRIVER_TARGET_DENIED", "Driver provisioning grant does not allow this invitation.");
+    }
+
+    if (!invitation || (invitation.status !== "pending" && invitation.status !== "used" && invitation.status !== "revoked")) {
       return { revoked: false };
     }
     
-    invitation.status = "revoked";
-    invitation.revokedAt = new Date().toISOString();
-    invitation.updatedAt = invitation.revokedAt;
-    
-    if (this.repository) {
-      await this.repository.saveInvitation(invitation);
+    let newlyRevoked = false;
+    if (invitation.status !== "revoked") {
+      invitation.status = "revoked";
+      invitation.revokedAt = new Date().toISOString();
+      invitation.updatedAt = invitation.revokedAt;
+      
+      if (this.repository) {
+        await this.repository.saveInvitation(invitation);
+      }
+      this.invitationsByHash.set(hash, invitation);
+      newlyRevoked = true;
     }
-    this.invitationsByHash.set(hash, invitation);
+
+    if (invitation.boundBindingId) {
+      const binding = (await this.repository?.findBindingById?.(invitation.boundBindingId)) ?? this.bindingsById.get(invitation.boundBindingId);
+      if (binding) {
+        await this.revokeBindingAndFamily(
+          invitation.boundBindingId,
+          invitation.revokedAt ?? new Date().toISOString(),
+          "INVITATION_REVOKED",
+        );
+      }
+    }
     
-    return { revoked: true };
+    return { revoked: newlyRevoked || invitation.status === "revoked" };
   }
 
   async register(
@@ -242,15 +262,6 @@ export class DriverDeviceSessionService implements OnModuleInit {
     const driverId = invitation.driverId;
     this.assertDriverAuthEligible(driverId);
 
-    // Single-use: Mark invitation as used
-    invitation.status = "used";
-    invitation.acceptedAt = nowIso;
-    invitation.updatedAt = nowIso;
-    if (this.repository) {
-      await this.repository.saveInvitation(invitation);
-    }
-    this.invitationsByHash.set(invitation.registrationCodeHash, invitation);
-
     const oldBindingId = await this.revokeActiveBindingForDevice(
       deviceId,
       requestId,
@@ -274,6 +285,16 @@ export class DriverDeviceSessionService implements OnModuleInit {
     const savedBinding = this.repository
       ? await this.repository.saveBinding(binding)
       : binding;
+
+    // Single-use: Mark invitation as used
+    invitation.status = "used";
+    invitation.acceptedAt = nowIso;
+    invitation.updatedAt = nowIso;
+    invitation.boundBindingId = savedBinding.bindingId;
+    if (this.repository) {
+      await this.repository.saveInvitation(invitation);
+    }
+    this.invitationsByHash.set(invitation.registrationCodeHash, invitation);
 
     this.bindingsById.set(savedBinding.bindingId, savedBinding);
     this.activeBindingIdsByDeviceId.set(deviceId, savedBinding.bindingId);
@@ -334,7 +355,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       targetType: "driver_device_binding",
       targetId: savedBinding.bindingId,
       sessionId: savedBinding.bindingId,
-      tokenId: session.accessToken,
+      tokenId: null,
       authMethods: ["driver_device_registration"],
       sourceIp: null,
       userAgent: null,
@@ -548,7 +569,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       targetType: "driver_device_binding",
       targetId: binding.bindingId,
       sessionId: binding.bindingId,
-      tokenId: session.accessToken,
+      tokenId: null,
       authMethods: ["driver_refresh_token"],
       sourceIp: null,
       userAgent: null,
@@ -779,7 +800,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
       (await this.repository?.findBindingById?.(bindingId)) ??
       this.bindingsById.get(bindingId);
 
-    if (binding) {
+    if (binding && binding.status !== "revoked") {
       binding.status = "revoked";
       binding.revokedAt = revokedAt;
       binding.updatedAt = revokedAt;

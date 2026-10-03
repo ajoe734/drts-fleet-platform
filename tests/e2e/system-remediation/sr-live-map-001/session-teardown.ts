@@ -1,85 +1,85 @@
-import { validateCoverageTargets } from "./live-map-config";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  required,
+  validateCoverageTargets,
+  writeEvidence,
+  type LiveEnv,
+} from "./live-map-config";
+import { verifyLiveDeployment } from "./deployment-check";
+import {
+  createMapSessionRequest,
+  issueMapProvisioningSession,
+  readMapGoogleIdToken,
+  verifyMapProvisioningSession,
+  type BootstrapDeps,
+} from "./session-bootstrap";
 
-async function main() {
-  const config = validateCoverageTargets(process.env);
-  const deviceId = process.env.DRTS_LIVE_MAP_DRIVER_DEVICE_ID;
-  const driverToken = process.env.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN;
-  
-  if (deviceId && driverToken) {
-    console.log("Revoking driver device session...");
-    const url = `${config.apiOrigin}/api/auth/driver/device/revoke`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${driverToken}`
-      },
-      body: JSON.stringify({ deviceId }),
-    });
-    if (!response.ok) {
-      console.error(`Failed to revoke session: ${response.status} ${await response.text()}`);
-      process.exitCode = 1;
-    } else {
-      console.log("Driver session revoked successfully.");
-    }
-  } else {
-    console.log("No driver device ID or session token to revoke.");
-  }
+import { revokeMapInvitation } from "./session-cleanup";
 
-  const inviteCode = process.env.DRTS_LIVE_MAP_INVITE_CODE;
-  if (inviteCode) {
-    console.log("Revoking driver device invite...");
-    const { execFileSync } = await import("node:child_process");
-    const internalKey = execFileSync(
-      "gcloud",
-      [
-        "secrets",
-        "versions",
-        "access",
-        "latest",
-        "--secret=drts-dev-jwt-secret",
-        `--project=${process.env.DEV_GCP_PROJECT_ID}`,
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
-    ).trim();
+type TeardownDeps = Pick<
+  BootstrapDeps,
+  "fetch" | "readGoogleIdToken" | "mask"
+> & {
+  save: (evidence: unknown) => void;
+};
 
-    const tokenUrl = `${config.apiOrigin}/api/auth/token`;
-    const tokenResponse = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-drts-internal-key": internalKey,
-        "x-actor-type": "platform_admin",
-        "x-actor-id": "principal_platform_admin_default",
-        "x-realm": "platform",
-        "x-scopes": "driver:provision",
-      },
-      body: "{}",
-    });
-    
-    if (tokenResponse.ok) {
-      const { token } = await tokenResponse.json();
-      const revokeUrl = `${config.apiOrigin}/api/auth/driver/device/invite/revoke`;
-      const revokeResponse = await fetch(revokeUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ registrationCode: inviteCode }),
-      });
-      if (revokeResponse.ok) {
-        console.log("Invite revoked successfully.");
-      } else {
-        console.error(`Failed to revoke invite: ${revokeResponse.status} ${await revokeResponse.text()}`);
+export async function teardownMapSessions(env: LiveEnv, deps: TeardownDeps) {
+  const config = validateCoverageTargets(env);
+  const evidence = {
+    candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
+    status: "failed",
+    driver_id: config.driverId,
+    recovery: "consumed-invitation",
+    revoked: false,
+  };
+  try {
+    const registrationCode = required(env, "DRTS_LIVE_MAP_INVITE_CODE");
+    await verifyLiveDeployment(env, deps.fetch, () => {});
+    const request = createMapSessionRequest(config, deps.fetch);
+    let token = env.DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN;
+    if (token) {
+      try {
+        await verifyMapProvisioningSession(config.driverId, request, token);
+      } catch {
+        token = undefined;
       }
-    } else {
-      console.error(`Failed to mint temp token for invite revocation: ${tokenResponse.status}`);
     }
+    // If acceptance ran longer than 15m, exchange a fresh Google assertion.
+    token ??= (
+      await issueMapProvisioningSession(config.driverId, request, deps)
+    ).token;
+    await revokeMapInvitation(env, deps.fetch, token, registrationCode);
+    evidence.revoked = true;
+    evidence.status = "passed";
+  } catch {
+    throw new Error(
+      "Map session cleanup failed; no credential details retained",
+    );
+  } finally {
+    deps.save(evidence);
   }
 }
 
-main().catch(err => {
-  console.error("Error during teardown:", err);
-  process.exitCode = 1;
-});
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  teardownMapSessions(process.env, {
+    fetch,
+    save: (evidence) =>
+      writeEvidence(
+        ".artifacts/live-map-acceptance/evidence-cleanup.json",
+        evidence,
+      ),
+    readGoogleIdToken: (purpose) => readMapGoogleIdToken(process.env, purpose),
+    mask: (value) =>
+      console.log(
+        `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
+      ),
+  }).catch(() => {
+    console.error("Map session cleanup failed; no credential details retained");
+    process.exitCode = 1;
+  });
+}

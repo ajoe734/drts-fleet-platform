@@ -1,0 +1,144 @@
+name: Live Mail Acceptance (SR-LIVE-MAIL-001)
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Full deployed source SHA; must include this runner"
+        required: true
+      approval_request_id:
+        description: "Optional real approval request to observe (authorized +approve recipient only)"
+        required: false
+        default: ""
+      expiry_user_id:
+        description: "User ID from prior invitation_expiry_checkpoint (both expiry inputs or neither)"
+        required: false
+        default: ""
+      expiry_delivery_id:
+        description: "Delivery ID from that checkpoint, after its real 24-hour expiry"
+        required: false
+        default: ""
+      retry_delivery_id:
+        description: "Optional actual queued retryable invitation delivery; observer never induces provider failure"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# The two fixed aliases are shared across runs, so serialize all candidates.
+concurrency:
+  group: live-mail-authorized-aliases
+  cancel-in-progress: false
+
+jobs:
+  mail-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CI: true
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      DRTS_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      DISPATCH_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      DRTS_LIVE_MAIL_TEST_AUTHORIZED: ${{ vars.DRTS_LIVE_MAIL_TEST_AUTHORIZED }}
+      DRTS_LIVE_MAIL_API_ORIGIN: ${{ vars.DRTS_LIVE_MAIL_API_ORIGIN }}
+      DRTS_LIVE_MAIL_ALLOWED_TARGETS: ${{ vars.DRTS_LIVE_MAIL_ALLOWED_TARGETS }}
+      DRTS_LIVE_MAIL_TEST_TENANT_ID: ${{ vars.DRTS_LIVE_MAIL_TEST_TENANT_ID }}
+      DRTS_LIVE_MAIL_TENANT_ACTOR_ID: ${{ vars.DRTS_LIVE_MAIL_TENANT_ACTOR_ID }}
+      DRTS_LIVE_MAIL_INVITATION_ROLE_CODE: ${{ vars.DRTS_LIVE_MAIL_INVITATION_ROLE_CODE }}
+      DRTS_LIVE_MAIL_APPROVAL_REQUEST_ID: ${{ inputs.approval_request_id }}
+      DRTS_LIVE_MAIL_EXPIRY_USER_ID: ${{ inputs.expiry_user_id }}
+      DRTS_LIVE_MAIL_EXPIRY_DELIVERY_ID: ${{ inputs.expiry_delivery_id }}
+      DRTS_LIVE_MAIL_RETRY_DELIVERY_ID: ${{ inputs.retry_delivery_id }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+      DRTS_LIVE_MAIL_EVIDENCE_PATH: .artifacts/live-mail-acceptance/evidence-mail.json
+    steps:
+      - name: Validate immutable candidate
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]] || exit 1
+          [[ "$DEV_GCP_REGION" == us-central1 ]] || exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+
+      - name: Bind checkout and base SHAs
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          mkdir -p .artifacts/live-mail-acceptance
+          echo "WORKFLOW_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BASE_SHA=$(git merge-base HEAD origin/dev)" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify authorization and deployed SHA before cloud authentication
+        id: preflight
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-mail-001/session-bootstrap.ts --preflight
+
+      - name: Authenticate with existing dev WIF
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+
+      - name: Record configured provider metadata and alias revision freshness
+        id: resources
+        run: python3 tests/e2e/system-remediation/sr-live-mail-001/provider-metadata.py
+
+      - name: Mint a fresh single-use assertion and verified tenant session
+        id: sessions
+        env:
+          DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          # Use the original federated identity (same as auth@v2's IAM call),
+          # not an impersonated SA access token requiring a new self-grant.
+          DRTS_LIVE_MAIL_WIF_FEDERATED_TOKEN: ${{ steps.auth.outputs.auth_token }}
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-mail-001/session-bootstrap.ts
+
+      - name: Run invitation and optional approval observations
+        id: runner
+        run: pnpm exec playwright test -c tests/e2e/system-remediation/sr-live-mail-001/playwright.config.ts
+
+      - name: Revoke this run's session even after partial bootstrap failure
+        if: always() && steps.install.outcome == 'success'
+        id: teardown
+        run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-mail-001/session-teardown.ts
+
+      - name: Record fail-closed acceptance status
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
+          RESOURCES_OUTCOME: ${{ steps.resources.outcome }}
+          SESSIONS_OUTCOME: ${{ steps.sessions.outcome }}
+          RUNNER_OUTCOME: ${{ steps.runner.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
+        run: python3 tests/e2e/system-remediation/sr-live-mail-001/gate-evidence.py
+
+      - name: Upload redacted observations even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-mail-acceptance-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/live-mail-acceptance/evidence-mail.json
+            .artifacts/live-mail-acceptance/evidence-provider.json
+            .artifacts/live-mail-acceptance/run-status.json
+          if-no-files-found: error
+          retention-days: 30

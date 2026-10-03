@@ -20,13 +20,41 @@ Phase 1 focuses on fleet management and dispatch compliance core. Phase 2 may ad
 
 The repo is in `supervisor_managed_execution` mode.
 
-The broader blueprint-completion and master-closeout execution waves are now
-materially closed on the current remote baseline. The repo truth currently
-says:
+A completion claim in this repo means one of four distinct things, and none
+of them implies the others:
 
-- core Phase 1 operator surfaces are implemented in code
-- rollout evidence, tenant boundary, finance/reporting completeness, and
-  integration hardening are closed
+1. **Implementation** — code is merged to `dev`/`main`.
+2. **CI** — the trunk's automated build/lint/typecheck/unit/integration
+   suite is green for that SHA.
+3. **Dev deployment** — that same SHA is live on the shared GCP Cloud Run
+   dev environment, driven by `.github/workflows/deploy-dev.yml` and the
+   `DEV_GCP_*` repository variables (see `docs/ops/branch-strategy.md`).
+   This is the authoritative shared dev target; docs citing GCP project
+   `nodal-alloy-503700-s3` describe a now-suspended predecessor (see
+   `AGENTS.md`, `docs/03-runbooks/smarttransport-tw-custom-domains.md`).
+4. **Live acceptance** — the `SR-LIVE-*` / `UV-EXEC-*` / `SR-ACCEPT-001`
+   gates in `ai-status.json`, each needing externally authorized
+   credentials, real provider/partner sandboxes, native device builds, or
+   production-like rollout evidence bound to one release-candidate SHA.
+
+The broader blueprint-completion and master-closeout execution waves closed
+layers 1-2 on the current remote baseline: core Phase 1 operator surfaces are
+implemented and the trunk CI graph is green. That is not the same as layers
+3-4 being closed. A 2026-10-02 code-backed audit
+(`docs/04-uat/audit-docs-truth-20261002.md`) found concrete gaps still open
+against the live/production bar: a legacy payment endpoint that bypasses real
+remittance-proof validation, proof/document storage that is not durable
+across instances, an unaddressed production dependency-security backlog with
+no CI gate, a voice "live" evaluation mode that still only computes fixture
+metrics, and stub/unavailable payment-recovery, fare-quote-recovery, and
+forwarder adapters. Read the bullets below as implementation/CI-layer
+statements, not as live-acceptance claims:
+
+- core Phase 1 operator surfaces are implemented in code and pass trunk CI
+- rollout evidence, tenant boundary, and finance/reporting *implementation*
+  waves are closed; full *live* rollout/finance/integration acceptance is
+  not — see `docs/04-uat/audit-docs-truth-20261002.md` and the open
+  `SR-LIVE-*` gates in `ai-status.json`
 - the protected control-plane auth cutover (`GAP-P2S3-001`) is closed on
   protected staging and the remaining visible delta is limited to
   external-gated integrations plus consciously deferred families
@@ -60,8 +88,10 @@ documentation.
 
 - Use `./tools/local-development/init-local-workspace.sh` to create the local-only workspace
   scaffolding.
-- Use `docs/03-runbooks/local-development.local.md` for VM dev endpoint and
-  review access notes.
+- Bootstrap from `docs/03-runbooks/local-development.local.example.md` and
+  fill in the generated gitignored local-development.local.md for VM dev
+  endpoint and review access notes (that generated file is deliberately
+  untracked, so it never appears as a path in this repo).
 - Use `.local/` for personal scratch files, temporary URLs, ad hoc commands,
   and other local-only artifacts.
 - Use `.env` / `.env.local` for environment overrides instead of editing

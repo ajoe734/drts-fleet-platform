@@ -28,7 +28,9 @@ function driverIdentity(driverId: string): BootstrapRequestIdentity {
   };
 }
 
-function platformFinanceIdentity(actorId = "fin-admin-qa"): BootstrapRequestIdentity {
+function platformFinanceIdentity(
+  actorId = "fin-admin-qa",
+): BootstrapRequestIdentity {
   return {
     authMode: "bootstrap_headers",
     actorType: "platform_admin",
@@ -109,11 +111,16 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
       const batch = service.listReimbursementBatches()[0]!;
       expect(batch.approvedAt).toBeNull();
 
-      expect(() =>
-        service.markReimbursementPaid(batch.batchId, {
-          remittanceProofId: "proof-test-01",
-        }),
-      ).toThrowError();
+      await expect(
+        service.markReimbursementPaid(
+          batch.batchId,
+          {
+            remittanceProofId: "proof-test-01",
+          },
+          undefined,
+          "unapproved-payment",
+        ),
+      ).rejects.toMatchObject({ code: "REMITTANCE_PROOF_BATCH_NOT_APPROVED" });
     });
   });
 
@@ -223,7 +230,9 @@ describe("SR-QA-FINANCE-001 - C080 & C081: 代墊批次、核准、匯款證明�
         statementId: batch.statementId,
       });
 
-      const fileBytes = Buffer.from("bank remittance transaction proof 123456789");
+      const fileBytes = Buffer.from(
+        "bank remittance transaction proof 123456789",
+      );
       const staged = await service.stageRemittanceProofContent(
         fileBytes,
         "image/png",

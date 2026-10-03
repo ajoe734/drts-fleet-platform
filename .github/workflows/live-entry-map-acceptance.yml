@@ -12,12 +12,12 @@ name: Live Entry & Map Acceptance (SR-LIVE-ENTRY-MAP-RUNNER-001)
 #                       Geocoding/Routes/Maps JS checks), plus V0049 service
 #                       areas, isolated driver tracking and hosted Chromium.
 #
-# This workflow never deploys anything: both jobs only verify a candidate
-# that a separate deploy workflow already published. Each job independently
-# verifies (a) the checked-out git SHA matches the requested candidate_sha
-# and (b) the deployed target itself reports that
-# same candidate SHA via its x-drts-candidate-sha response header, so a
-# stale/rolled-back deployment cannot silently pass. All inputs are
+# This workflow never deploys anything. Both jobs verify that the checkout
+# matches candidate_sha. Entry requires that candidate to be deployed; map
+# permits an explicitly pinned deployed_sha for test-only harness revisions.
+# Map health and every API/ops response must report that deployment SHA;
+# evidence retains both the harness candidate and observed runtime version.
+# A stale/rolled-back deployment cannot silently pass. All inputs are
 # explicit, fail-closed allowlists; there is no historical staging default
 # fallback. Neither job runs on this project's VM (no product dev/preview/
 # HTTP/browser server permitted there); both run entirely on GitHub-hosted
@@ -28,6 +28,10 @@ on:
     inputs:
       candidate_sha:
         description: "Immutable candidate commit SHA to verify (full 40-char SHA); leave blank to use the dispatch ref's HEAD"
+        required: false
+        default: ""
+      deployed_sha:
+        description: "Map only: immutable shared-dev deployment SHA (40 lowercase hex); blank requires candidate_sha to be deployed"
         required: false
         default: ""
       run_entry_profile:
@@ -198,6 +202,7 @@ jobs:
       CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
       WORKFLOW_SHA: ${{ github.workflow_sha }}
       DRTS_CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || github.sha }}
+      DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: ${{ github.event.inputs.deployed_sha || github.event.inputs.candidate_sha || github.sha }}
       DRTS_LIVE_MAP_EVIDENCE_PATH: ${{ github.workspace }}/.artifacts/live-map-acceptance/evidence-map.json
       DRTS_LIVE_MAP_TEST_AUTHORIZED: ${{ vars.DRTS_LIVE_MAP_TEST_AUTHORIZED }}
       DRTS_LIVE_MAP_ALLOWED_TARGETS: ${{ vars.DRTS_LIVE_MAP_ALLOWED_TARGETS }}
@@ -258,19 +263,31 @@ jobs:
         id: targets
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts --preflight
 
-      - name: Authenticate to shared dev using existing WIF
+      - name: Mint observer assertion through existing WIF provider
+        id: observer-wif
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
-          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
-          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          service_account: drts-dev-live-map-observer@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}
+          id_token_include_email: true
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Mint driver provisioning assertion through existing WIF provider
+        id: provisioning-wif
+        uses: google-github-actions/auth@v2
         with:
-          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: drts-dev-live-map@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}/driver-provisioning
+          id_token_include_email: true
 
       - name: Verify runtime health SHA and issue per-run least-scope sessions
         id: sessions
+        env:
+          DRTS_LIVE_MAP_GOOGLE_OBSERVER_ID_TOKEN: ${{ steps.observer-wif.outputs.id_token }}
+          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.provisioning-wif.outputs.id_token }}
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-bootstrap.ts
 
       - name: Fail closed before billed calls or browser startup
@@ -296,9 +313,22 @@ jobs:
         id: browser
         run: pnpm exec playwright test -c playwright.google-map-live.config.ts
 
-      - name: Revoke sessions
+      - name: Refresh WIF assertion for cleanup if provisioning session expired
+        if: always() && env.DRTS_LIVE_MAP_INVITE_CODE != ''
+        id: cleanup-wif
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: drts-dev-live-map@${{ vars.DEV_GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          token_format: id_token
+          id_token_audience: ${{ env.DRTS_LIVE_MAP_API_ORIGIN }}/driver-provisioning
+          id_token_include_email: true
+
+      - name: Revoke per-run invitation and bound driver session
         if: always()
         id: teardown
+        env:
+          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.cleanup-wif.outputs.id_token }}
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-map-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-map-001/session-teardown.ts
 
       - name: Record run status
@@ -309,6 +339,7 @@ jobs:
           RUNNER_OUTCOME: ${{ steps.runner.outcome }}
           COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
           BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
         run: |
           python3 tests/e2e/system-remediation/sr-live-map-001/gate-evidence.py
 
@@ -323,6 +354,7 @@ jobs:
             .artifacts/live-map-acceptance/run-status.json
             .artifacts/live-map-acceptance/evidence-deployment.json
             .artifacts/live-map-acceptance/evidence-sessions.json
+            .artifacts/live-map-acceptance/evidence-cleanup.json
             .artifacts/live-map-acceptance/evidence-coverage.json
             .artifacts/live-map-acceptance/evidence-browser.json
             .artifacts/live-map-acceptance/map-*.png

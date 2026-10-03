@@ -2,6 +2,13 @@
 
 **Status:** Adopted 2026-05-17  
 **Owner:** Release engineering  
+**Terminology:** "dev VM" below means the shared GCP Cloud Run dev
+deployment target that `deploy-dev.yml` rolls — see the workflow table's
+entry for `deploy-dev.yml` ("deploy to dev GCP — this is what makes dev VM
+roll"). It is not the local/orchestrator working machine agents operate on;
+that machine has its own, stricter VM restriction (no product dev servers,
+no Docker Compose infra, no browser/E2E runners — see `AGENTS.md`) that this
+document does not override.
 **Supersedes:** v3 (per-merge prod-\* tags). v3 tagged every dev merge → tag pollution + dev VM thrashing. v4 cuts an **immutable nightly publish snapshot** that dev VM deploys to, then **hourly auto-promotes** to master with a `prod/v<date>` tag.
 
 ---

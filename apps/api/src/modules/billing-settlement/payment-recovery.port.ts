@@ -49,4 +49,32 @@ export class UnavailablePaymentRecoveryPort implements PaymentRecoveryPort {
   }
 }
 
+/**
+ * `retry_capture` would re-present a failed charge to a real card/PSP
+ * processor; no such processor is integrated anywhere in this repository
+ * (confirmed by inventory in docs/04-uat/audit-recovery-providers-20261002.md),
+ * so it stays unavailable pending SR-LIVE-FINANCE-001's authorized sandbox.
+ *
+ * `begin_manual_recovery` has no external side effect: it only records that
+ * an operator is taking the failed payment outside the automated system for
+ * manual reconciliation. `BillingSettlementRepository
+ * .completeMultiTaxiPaymentRecoveryCommand` already persists that as
+ * `multi_taxi_passenger_payments.status = 'manual_recovery'` regardless of
+ * which port is wired, so accepting it here does not fabricate a provider
+ * outcome -- it only confirms the handoff the caller asked for.
+ */
+@Injectable()
+export class PlatformManualPaymentRecoveryPort implements PaymentRecoveryPort {
+  isAvailable(action: PaymentRecoveryAction): boolean {
+    return action === "begin_manual_recovery";
+  }
+
+  async recover(action: PaymentRecoveryAction): Promise<PaymentRecoveryResult> {
+    if (action !== "begin_manual_recovery") {
+      throw new Error("Payment recovery adapter is not provisioned.");
+    }
+    return { status: "accepted" };
+  }
+}
+
 export const InjectPaymentRecoveryPort = () => Inject(PAYMENT_RECOVERY_PORT);

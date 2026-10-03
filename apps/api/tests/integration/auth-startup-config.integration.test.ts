@@ -30,8 +30,25 @@ function getValidProdEnv(): Record<string, string> {
     AUTH_ALLOWED_ORIGINS: "https://app.drts.internal",
     SESSION_STORE_URL: "redis://redis.internal:6379/0",
     AUDIT_STORE_URL: "postgres://db.internal:5432/drts_audit",
-    DRTS_INTERNAL_KEY: VALID_PROD_SECRET,
+    // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 is
+    // retired, so a valid production env no longer configures
+    // DRTS_INTERNAL_KEY as a credential -- it would fail startup with
+    // MISSING_CONTROL (no matching INTERNAL_KEY_EXCEPTION_REGISTRY entry).
+    // The complete workload-identity validation set satisfies
+    // validateAuthStartupConfig's `!internalKey && !workloadIdentityConfigured`
+    // check instead.
     DRTS_INTERNAL_KEY_ENFORCED: "true",
+    WORKLOAD_IDENTITY_ISSUER: "https://workload.drts.internal",
+    WORKLOAD_IDENTITY_AUDIENCE: "https://api.drts.internal",
+    WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY: VALID_PROD_SECRET,
+    WORKLOAD_IDENTITY_SERVICE_PRINCIPALS: JSON.stringify([
+      {
+        principalId: "prod-web-runtime",
+        subject: "prod-web-runtime@drts-prod.iam.gserviceaccount.com",
+        issuer: "https://workload.drts.internal",
+        allowedTokenAudiences: ["https://api.drts.internal"],
+      },
+    ]),
     PASSENGER_SUBJECT_PEPPER: VALID_PROD_SECRET,
     PASSENGER_RIDE_TOKEN_PEPPER: VALID_PROD_SECRET,
   };

@@ -33,50 +33,19 @@ export interface InternalKeyExceptionMetadata {
 }
 
 export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
-  {
-    exceptionId: "INTERNAL_KEY_EXCP_001",
-    owner: "referral-team",
-    purpose:
-      "Scoped server-to-server referral embed handoff artifact issuance and consumption",
-    scope: [
-      "POST partner/ingress/referral-embed-handoff",
-      "POST partner/ingress/referral-embed-handoff/consume",
-      "POST partner/ingress/referral-embed-handoff/consent",
-    ],
-    ttl: "2026-10-31T23:59:59Z",
-    expiresAt: "2026-10-31T23:59:59Z",
-    networkBoundary: "internal-vpc-to-api-ingress",
-    rotationCadence: "30d",
-    usageSignal: "AUTH_SCOPED_INTERNAL_KEY_USED",
-    removalDate: "2026-10-31",
-    removalPlan:
-      "Migrate referral-embed-web BFF caller to IAM-SVC-001 WIF token exchange",
-    header: "x-drts-referral-handoff-key",
-    envVar: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-    rotationEnvVar: "DRTS_REFERRAL_EMBED_HANDOFF_KEY_PREVIOUS",
-    revokedKeysEnvVar: "DRTS_REFERRAL_EMBED_HANDOFF_KEY_REVOKED_KEYS",
-    status: "active",
-  },
-  {
-    exceptionId: "INTERNAL_KEY_EXCP_002",
-    owner: "control-plane-ops",
-    purpose:
-      "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
-    scope: ["* *", "POST partner/ingress/handoff", "POST auth/token"],
-    ttl: "2026-10-31T23:59:59Z",
-    expiresAt: "2026-10-31T23:59:59Z",
-    networkBoundary: "control-plane-proxy-to-api",
-    rotationCadence: "14d",
-    usageSignal: "AUTH_LEGACY_INTERNAL_KEY_USED",
-    removalDate: "2026-10-31",
-    removalPlan:
-      "Full deprecation of DRTS_INTERNAL_KEY fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. Temporarily extended per user decision on 2026-09-30 to keep dev deployments green pending WIF migration SEC-INTERNAL-KEY-WIF-MIGRATION-20260930, accepting the delay of scheduled security retirement",
-    header: "x-drts-internal-key",
-    envVar: "DRTS_INTERNAL_KEY",
-    rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
-    revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
-    status: "active",
-  },
+  // INTERNAL_KEY_EXCP_001 (referral-team, x-drts-referral-handoff-key)
+  // retired 2026-10-02 by SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002:
+  // the three referral embed handoff routes (issue / consume / consent) now
+  // require a verified Google workload identity assertion
+  // (x-drts-google-id-token) via GoogleWorkloadIdentityAdapter. See
+  // docs/02-architecture/internal-key-exceptions.md section 2 ("Retired
+  // exceptions") and section 10 for the removal evidence.
+  // INTERNAL_KEY_EXCP_002 (control-plane-ops, x-drts-internal-key) retired
+  // 2026-10-02 by SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: all callers
+  // migrated to the Google workload identity assertion (x-drts-google-id-token)
+  // verified by GoogleWorkloadIdentityAdapter. See
+  // docs/02-architecture/internal-key-exceptions.md section 2 ("Retired
+  // exceptions") and section 12 for the removal evidence.
 ];
 
 export function validateExceptionMetadata(

@@ -5,23 +5,35 @@ from pathlib import Path
 
 
 def verify(root, sha, outcomes, deployed_sha):
-    if deployed_sha != sha:
-        raise ValueError("Runtime deployment must equal the candidate SHA")
-    if not all(value == "success" for value in outcomes.values()):
+    if len(deployed_sha) != 40 or any(c not in "0123456789abcdef" for c in deployed_sha):
+        raise ValueError("Expected deployment must be a full lowercase commit SHA")
+    required_steps = {"INSTALL_OUTCOME", "SESSIONS_OUTCOME", "RUNNER_OUTCOME", "COVERAGE_OUTCOME", "BROWSER_OUTCOME", "TEARDOWN_OUTCOME"}
+    if not required_steps.issubset(outcomes) or not all(value == "success" for value in outcomes.values()):
         raise ValueError("All map steps must finish successfully; skip is not pass")
     deployment = json.loads((root / "evidence-deployment.json").read_text())
     sessions = json.loads((root / "evidence-sessions.json").read_text())
-    if (deployment.get("candidate_sha") != sha or deployment.get("deployed_sha") != sha
+    if (deployment.get("candidate_sha") != sha or deployment.get("deployed_sha") != deployed_sha
             or deployment.get("effective_backend") != "google" or deployment.get("status") != "passed"):
-        raise ValueError("Runtime health must prove candidate SHA and Google backend")
-    if sessions.get("candidate_sha") != sha or sessions.get("status") != "passed":
+        raise ValueError("Runtime health must prove the requested deployment SHA and Google backend")
+    if (sessions.get("candidate_sha") != sha or sessions.get("status") != "passed"
+            or sessions.get("deployed_sha") != deployed_sha):
         raise ValueError("Both per-run sessions must be verified on this candidate")
     identities = sessions.get("sessions", [])
-    if [(item.get("realm"), item.get("actor_type"), item.get("actor_id"), item.get("scopes")) for item in identities] != [
-        ("driver", "driver_user", "drv-demo-002", ["driver:read"]),
-        ("ops", "ops_user", "live-map-observer", ["regulatory:read"]),
-    ]:
-        raise ValueError("Missing least-scope driver/observer session evidence")
+    # Identity, scope and cardinality are strict; producer order is immaterial.
+    actual = sorted((item.get("realm", ""), item.get("actor_type", ""), item.get("actor_id", ""),
+                     sorted(item.get("scopes", []))) for item in identities)
+    expected = sorted([
+        ("driver", "driver_user", "drv-demo-002", ["dispatch:read", "driver:read", "driver:write"]),
+        ("ops", "ops_observer", "live-map-observer", ["regulatory:read"]),
+    ])
+    if actual != expected:
+        raise ValueError("Missing exact driver/observer session evidence")
+    cleanup = json.loads((root / "evidence-cleanup.json").read_text())
+    if (cleanup.get("candidate_sha") != sha or cleanup.get("status") != "passed"
+            or cleanup.get("deployed_sha") != deployed_sha
+            or cleanup.get("driver_id") != "drv-demo-002"
+            or cleanup.get("recovery") != "consumed-invitation" or cleanup.get("revoked") is not True):
+        raise ValueError("Candidate must have confirmed invitation/binding cleanup")
     provider = json.loads((root / "evidence-map.json").read_text())
     coverage = json.loads((root / "evidence-coverage.json").read_text())
     browser = json.loads((root / "evidence-browser.json").read_text())
@@ -59,7 +71,7 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     sha = os.environ.get("CANDIDATE_SHA", "")
     outcomes = {name: os.environ.get(name, "unknown") for name in [
-        "INSTALL_OUTCOME", "SESSIONS_OUTCOME", "RUNNER_OUTCOME", "COVERAGE_OUTCOME", "BROWSER_OUTCOME"
+        "INSTALL_OUTCOME", "SESSIONS_OUTCOME", "RUNNER_OUTCOME", "COVERAGE_OUTCOME", "BROWSER_OUTCOME", "TEARDOWN_OUTCOME"
     ]}
     status = {"candidate_sha": sha, "workflow_sha": os.environ.get("WORKFLOW_SHA"), "status": "failed", "outcomes": outcomes}
     try:
@@ -68,7 +80,10 @@ def main():
         deployment = json.loads((root / "evidence-deployment.json").read_text())
         deployed_sha = deployment.get("deployed_sha", "")
         status["deployed_sha"] = deployed_sha
-        verify(root, sha, outcomes, deployed_sha)
+        # The expected SHA comes from dispatch, not self-asserted artifact data.
+        expected_deployed_sha = os.environ.get("DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA", sha)
+        status["expected_deployed_sha"] = expected_deployed_sha
+        verify(root, sha, outcomes, expected_deployed_sha)
         status["status"] = "passed"
     except (ValueError, KeyError, TypeError, OSError) as error:
         status["reason"] = str(error)

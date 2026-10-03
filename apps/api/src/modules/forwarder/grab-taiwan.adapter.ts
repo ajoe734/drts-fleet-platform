@@ -9,9 +9,7 @@ import type {
   ForwarderAdapterActionResult,
   ForwarderAdapterCompleteInput,
   ForwarderAdapterEarningsResult,
-  ForwarderAdapterFetchEarningsInput,
   ForwarderAdapterHealthSnapshot,
-  ForwarderAdapterHeartbeatInput,
   ForwarderAdapterHeartbeatResult,
   ForwarderAdapterInterface,
   ForwarderAdapterRejectInput,
@@ -24,8 +22,8 @@ export const GRAB_TAIWAN_PLATFORM_CODE = PLATFORM_CODE_GRAB_TAIWAN;
 export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
   readonly platformCode = GRAB_TAIWAN_PLATFORM_CODE;
   readonly capabilitySummary: ForwarderAdapterCapabilitySummary = {
-    mode: "stub",
-    productionStatus: "stub",
+    mode: "api",
+    productionStatus: "configuration_required",
     supportsInboundWebhook: true,
     supportsOutboundActions: true,
     supportedWebhookEvents: [
@@ -35,7 +33,7 @@ export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
       "forwarder.order.sync_failed",
     ],
     notes: [
-      "Stub-only adapter for local integration scaffolding.",
+      "Honest unavailable posture: this adapter lacks real upstream contracts.",
       "Not approved for production auth, webhook verification, or rate-limit governance.",
     ],
   };
@@ -45,89 +43,83 @@ export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
   async accept(
     input: ForwarderAdapterAcceptInput,
   ): Promise<ForwarderAdapterActionResult> {
-    this.logger.log(
-      `Stub accept for ${input.externalOrderId} by driver ${input.driverId}.`,
+    this.logger.error(
+      `Rejecting accept for ${input.externalOrderId}: MISSING_PROVIDER_CONTRACT`,
     );
     return {
-      acknowledged: true,
+      acknowledged: false,
       platformCode: this.platformCode,
       externalOrderId: input.externalOrderId,
-      detail: "grab_taiwan_accept_stub",
+      detail: "MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.",
     };
   }
 
   async reject(
     input: ForwarderAdapterRejectInput,
   ): Promise<ForwarderAdapterActionResult> {
-    this.logger.log(
-      `Stub reject for ${input.externalOrderId} with reason ${input.reason}.`,
+    this.logger.error(
+      `Rejecting reject for ${input.externalOrderId}: MISSING_PROVIDER_CONTRACT`,
     );
     return {
-      acknowledged: true,
+      acknowledged: false,
       platformCode: this.platformCode,
       externalOrderId: input.externalOrderId,
-      detail: "grab_taiwan_reject_stub",
+      detail: "MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.",
     };
   }
 
   async complete(
     input: ForwarderAdapterCompleteInput,
   ): Promise<ForwarderAdapterActionResult> {
-    this.logger.log(`Stub complete for ${input.externalOrderId}.`);
+    this.logger.error(`Rejecting complete for ${input.externalOrderId}: MISSING_PROVIDER_CONTRACT`);
     return {
-      acknowledged: true,
+      acknowledged: false,
       platformCode: this.platformCode,
       externalOrderId: input.externalOrderId,
-      detail: "grab_taiwan_complete_stub",
+      detail: "MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.",
     };
   }
 
-  async heartbeat(
-    input?: ForwarderAdapterHeartbeatInput,
-  ): Promise<ForwarderAdapterHeartbeatResult> {
-    this.logger.log(
-      `Stub heartbeat for ${this.platformCode}${input ? " with payload" : ""}.`,
+  async heartbeat(): Promise<ForwarderAdapterHeartbeatResult> {
+    this.logger.error(
+      `Rejecting heartbeat for ${this.platformCode}: MISSING_PROVIDER_CONTRACT`,
     );
     return {
-      acknowledged: true,
+      acknowledged: false,
       platformCode: this.platformCode,
       checkedAt: new Date().toISOString(),
     };
   }
 
-  async fetchEarnings(
-    input?: ForwarderAdapterFetchEarningsInput,
-  ): Promise<ForwarderAdapterEarningsResult> {
-    this.logger.log(
-      `Stub fetchEarnings for ${this.platformCode}${input?.driverId ? ` driver ${input.driverId}` : ""}.`,
+  async fetchEarnings(): Promise<ForwarderAdapterEarningsResult> {
+    this.logger.error(
+      `Rejecting fetchEarnings for ${this.platformCode}: MISSING_PROVIDER_CONTRACT`,
     );
-    return {
-      platformCode: this.platformCode,
-      currency: "TWD",
-      totalAmount: 0,
-      asOf: new Date().toISOString(),
-    };
+    throw new Error("MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.");
   }
 
   async verifyWebhook(): Promise<ForwarderAdapterWebhookVerificationResult> {
+    this.logger.error(
+      `Rejecting verifyWebhook for ${this.platformCode}: MISSING_PROVIDER_CONTRACT`,
+    );
     return {
-      accepted: true,
-      detail: "grab_taiwan_webhook_stub",
-      credentialStatus: "stub",
-      authStatus: "stub",
-      webhookStatus: "stub",
+      accepted: false,
+      detail: "MISSING_PROVIDER_CONTRACT: Real Grab Taiwan transport is not wired.",
+      credentialStatus: "not_configured",
+      authStatus: "unknown",
+      webhookStatus: "not_configured",
     };
   }
 
   async getHealthSnapshot(): Promise<ForwarderAdapterHealthSnapshot> {
     return {
-      status: "healthy",
-      reason: "stub",
-      credentialStatus: "stub",
-      authStatus: "stub",
-      webhookStatus: "stub",
-      rateLimitStatus: "stub",
-      message: "Grab Taiwan adapter is stub-only and not production approved.",
+      status: "degraded",
+      reason: "credential",
+      credentialStatus: "not_configured",
+      authStatus: "unknown",
+      webhookStatus: "not_configured",
+      rateLimitStatus: "unknown",
+      message: "Grab Taiwan adapter is unavailable (missing real upstream contracts).",
       checkedAt: new Date().toISOString(),
     };
   }

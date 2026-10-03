@@ -23,7 +23,17 @@ E2E_REQUEST_BEARER_TOKEN="${E2E_REQUEST_BEARER_TOKEN:-}"
 # default because workforce bootstrap tokens without durable memberships fail
 # platform/ops JWT validation in the generic hermetic suites.
 E2E_ENABLE_RUNTIME_STEP_UP="${E2E_ENABLE_RUNTIME_STEP_UP:-}"
+# SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: INTERNAL_KEY_EXCP_002 (the
+# x-drts-internal-key header this suite used to attach when set) is retired.
+# No registry entry accepts that header anymore, so sending it now gets a
+# generic 401 rather than the staging/internal-env access it once granted.
+# Fail fast with a clear reason instead of silently sending a header the API
+# will reject.
 E2E_INTERNAL_KEY="${E2E_INTERNAL_KEY:-${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}}"
+if [[ -n "${E2E_INTERNAL_KEY:-}" ]]; then
+  echo "E2E_INTERNAL_KEY/SMOKE_INTERNAL_KEY/DRTS_INTERNAL_KEY is set, but INTERNAL_KEY_EXCP_002 was retired on 2026-10-02 (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930): the x-drts-internal-key header is no longer accepted by any environment. Unset this variable; if you need staging/internal access, use a Google workload identity assertion (x-drts-google-id-token) instead." >&2
+  exit 1
+fi
 
 # ── Bootstrap auth (overridden per surface leg via switch_actor) ───────────────
 # Defaults: platform_admin covers all routes; tests call switch_actor for
@@ -133,9 +143,6 @@ mint_runtime_bearer_token() {
 
   if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
-  fi
-  if [[ -n "${E2E_INTERNAL_KEY:-}" ]]; then
-    curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
   fi
   if [[ -n "${E2E_TENANT_ID:-}" ]]; then
     curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
@@ -343,10 +350,6 @@ http_call() {
   fi
   if [[ -n "$step_up_reference" ]]; then
     curl_args+=(-H "x-drts-step-up-reference: ${step_up_reference}")
-  fi
-
-  if [[ -n "$E2E_INTERNAL_KEY" ]]; then
-    curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
   fi
 
   if [[ -n "${E2E_ACTOR_TYPE:-}" && -z "$application_bearer" ]]; then

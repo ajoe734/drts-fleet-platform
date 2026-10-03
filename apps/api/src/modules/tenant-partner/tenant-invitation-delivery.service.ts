@@ -1,7 +1,10 @@
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
-import type { DeliveryStatus } from "../notification-delivery/notification-delivery.types";
+import type {
+  DeliveryReceipt,
+  DeliveryStatus,
+} from "../notification-delivery/notification-delivery.types";
 
 export type TenantInvitationDeliveryRequest = {
   invitationId: string;
@@ -20,6 +23,10 @@ export type TenantInvitationDeliveryRecord = Omit<
   "rawToken"
 > & {
   deliveryId: string;
+  /** True only when deliveryId is a real NotificationDeliveryService id retrievable
+   * via the mail delivery readback endpoint; false for the synthetic
+   * unavailable-/error- sentinel ids below, which never resolve to a stored record. */
+  queryable: boolean;
   messageId: string | null;
   status: TenantInvitationDeliveryStatus;
   sentAt: string | null;
@@ -100,6 +107,7 @@ export class TenantInvitationDeliveryService {
     base: Omit<
       TenantInvitationDeliveryRecord,
       | "deliveryId"
+      | "queryable"
       | "messageId"
       | "status"
       | "sentAt"
@@ -115,6 +123,7 @@ export class TenantInvitationDeliveryService {
       return {
         ...base,
         deliveryId: `unavailable-${toInvitationIdempotencyKey(request.invitationId)}`,
+        queryable: false,
         messageId: null,
         status: "unavailable",
         sentAt: null,
@@ -124,9 +133,10 @@ export class TenantInvitationDeliveryService {
       };
     }
 
+    let queued: DeliveryReceipt;
     try {
       const idempotencyKey = toInvitationIdempotencyKey(request.invitationId);
-      const queued = await this.deliveryService.enqueue({
+      queued = await this.deliveryService.enqueue({
         tenantId: request.tenantId,
         idempotencyKey,
         recipientEmail: request.recipientEmail,
@@ -135,7 +145,27 @@ export class TenantInvitationDeliveryService {
         subject: "You're invited to join your DRTS tenant workspace",
         body: buildInvitationEmailBody(request),
       });
+    } catch (error) {
+      // Nothing was durably recorded; the synthetic id is correct here --
+      // there is no outbox row for the readback endpoint to ever find.
+      const errorCode = toSafeErrorCode(error);
+      this.logger.warn(
+        `Tenant invitation email delivery failed for invitation ${request.invitationId}: ${errorCode}`,
+      );
+      return {
+        ...base,
+        deliveryId: `error-${toInvitationIdempotencyKey(request.invitationId)}`,
+        queryable: false,
+        messageId: null,
+        status: "failed",
+        sentAt: null,
+        providerMessageId: null,
+        errorCode,
+        retryable: true,
+      };
+    }
 
+    try {
       // An already "sent" receipt (a same-key retry) must never be re-dispatched.
       const receipt =
         queued.status === "sent"
@@ -149,6 +179,7 @@ export class TenantInvitationDeliveryService {
       return {
         ...base,
         deliveryId: receipt.deliveryId,
+        queryable: true,
         messageId: receipt.messageId,
         status: receipt.status,
         sentAt: receipt.sentAt,
@@ -160,16 +191,23 @@ export class TenantInvitationDeliveryService {
           receipt.status === "sent" ? false : (lastAttempt?.retryable ?? true),
       };
     } catch (error) {
+      // The enqueue above already created a durable, queryable outbox
+      // record -- dispatch failing past that point must not discard it.
+      // Report the real deliveryId and the last status enqueue committed
+      // (never a guessed "sent"/provider acknowledgement) so ops can look
+      // up whatever the outbox actually recorded via the mail-delivery
+      // readback endpoint instead of losing track of a real delivery.
       const errorCode = toSafeErrorCode(error);
       this.logger.warn(
-        `Tenant invitation email delivery failed for invitation ${request.invitationId}: ${errorCode}`,
+        `Tenant invitation email dispatch did not complete for invitation ${request.invitationId} (deliveryId ${queued.deliveryId}): ${errorCode}`,
       );
       return {
         ...base,
-        deliveryId: `error-${toInvitationIdempotencyKey(request.invitationId)}`,
-        messageId: null,
-        status: "failed",
-        sentAt: null,
+        deliveryId: queued.deliveryId,
+        queryable: true,
+        messageId: queued.messageId,
+        status: queued.status,
+        sentAt: queued.sentAt,
         providerMessageId: null,
         errorCode,
         retryable: true,

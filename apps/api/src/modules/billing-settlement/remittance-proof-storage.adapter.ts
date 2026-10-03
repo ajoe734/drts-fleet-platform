@@ -15,22 +15,14 @@ interface StagedEntry {
 }
 
 /**
- * The default, always-available adapter for `RemittanceProofStorageProvider`:
- * an in-process map, the same durability posture as
- * `InMemoryDocumentArtifactStore` (`../../common/document-artifacts`) --
- * real bytes, real sha256 identity, but not durable across process
- * restarts. A production deployment wanting durable object storage would
- * implement this same interface against a real backend (following
- * `S3DriverSosAttachmentStorageAdapter`'s precedent in
- * `../driver-sos/s3-driver-sos-attachment-storage.adapter.ts`); that
- * adapter is out of this task's write_scopes.
+ * Test-only in-process adapter: real bytes and SHA-256 identity, NOT durable
+ * across process restarts. Runtime wiring in remittance-proof-runtime.config
+ * never selects this outside NODE_ENV=test; configured environments use S3.
  *
  * Every read copies its buffer, so a caller mutating a returned buffer can
  * never reach in and rewrite what is "on disk".
  */
-export class InMemoryRemittanceProofStorageAdapter
-  implements RemittanceProofStorageProvider
-{
+export class InMemoryRemittanceProofStorageAdapter implements RemittanceProofStorageProvider {
   readonly providerName = "in-memory-remittance-proof-storage";
 
   private readonly staged = new Map<string, StagedEntry>();

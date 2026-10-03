@@ -14,10 +14,10 @@
   "dependencies": {
     "@drts/api-client": "workspace:*",
     "@drts/contracts": "workspace:*",
-    "@drts/ui-web": "workspace:*",
     "@drts/ui-tokens": "workspace:*",
-    "next": "^16.2.3",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "@drts/ui-web": "workspace:*",
+    "next": "^16.3.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   }
 }

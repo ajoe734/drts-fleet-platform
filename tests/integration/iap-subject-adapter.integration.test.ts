@@ -321,7 +321,10 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
   });
 
   it("verifies AuthController /auth/token uses IAPSubjectAdapter runtime resolution and ignores spoofed headers", async () => {
-    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    // No DRTS_INTERNAL_KEY configured and no strict env set: validateInternalKey's
+    // dev-lenient bypass (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: the old
+    // INTERNAL_KEY_EXCP_002-backed internal key would no longer validate at
+    // all) lets this request through to the IAP-specific logic under test.
     process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
     process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
 
@@ -381,7 +384,10 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
   });
 
   it("verifies AuthController /auth/token rejects bootstrap headers in strict environments", async () => {
-    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    // No DRTS_INTERNAL_KEY configured: validateInternalKey's dev-lenient
+    // bypass lets this through to the STRICT_IAP_MODE check under test
+    // (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: the old internal key would
+    // no longer validate at all).
     process.env.STRICT_IAP_MODE = "true";
 
     const identityRepo = new IdentityRepository();
@@ -570,7 +576,10 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
   });
 
   it("verifies AuthController /auth/token rejects system bootstrap headers in strict environments", async () => {
-    process.env.DRTS_INTERNAL_KEY = "test_internal_key_123";
+    // No DRTS_INTERNAL_KEY configured: validateInternalKey's dev-lenient
+    // bypass lets this through to the STRICT_IAP_MODE check under test
+    // (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: the old internal key would
+    // no longer validate at all).
     process.env.JWT_SECRET = INTEGRATION_TEST_SECRET;
     process.env.STRICT_IAP_MODE = "true";
 

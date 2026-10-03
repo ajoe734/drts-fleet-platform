@@ -292,7 +292,7 @@ export class IdentityRepository implements OnModuleInit {
       createdAt: existingMembership?.createdAt ?? now,
       updatedAt: existingMembership?.updatedAt ?? now,
     };
-    
+
     const roleBindingDraft: CanonicalIdentityRoleBindingRecord = {
       roleBindingId: `role_binding_ops_${randomUUID()}`,
       sourceRef: "live_map_observer:role_binding:ops_observer",
@@ -406,6 +406,7 @@ export class IdentityRepository implements OnModuleInit {
       roleCode: userRole.roleCode,
       tokenHash: this.hashLegacyInvitationSource(userRole.userId),
       deliveryStatus: "legacy_backfill",
+      deliveryId: null,
       expiresAt: invitationExpiresAt,
       acceptedAt: null,
       revokedAt: userRole.status === "invited" ? null : userRole.updatedAt,
@@ -2884,6 +2885,7 @@ export class IdentityRepository implements OnModuleInit {
           roleCode: record.roleCode,
           tokenHash: record.tokenHash,
           deliveryStatus: record.deliveryStatus,
+          deliveryId: record.deliveryId,
           expiresAt: record.expiresAt,
           acceptedAt: record.acceptedAt,
           revokedAt: record.revokedAt,

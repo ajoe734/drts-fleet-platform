@@ -372,6 +372,13 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
 
       expect(first.data.batchId).toBe(second.data.batchId);
       expect(mockBillingService.markReimbursementPaid).toHaveBeenCalledTimes(1);
+      expect(mockBillingService.markReimbursementPaid).toHaveBeenCalledWith(
+        "BATCH-001",
+        body,
+        "req-1",
+        intentKey,
+        null,
+      );
     });
   });
 
