@@ -614,6 +614,36 @@ export class PlatformAdminRepository {
   }
 
   /**
+   * Reads a single public-info-version row fresh from the durable store,
+   * bypassing any calling service instance's own in-memory
+   * `publicInfoVersions` cache. `publishPublicInfoVersion` mutates that
+   * cache and fire-and-forget `persistChanges`es it on whichever instance
+   * handled the request; a sibling instance's cache never observes that
+   * mutation until its own `loadState()` rehydration, which may never
+   * happen for the lifetime of a given process. Repair/recovery paths that
+   * must reproduce the SAME bytes an authoritative winner already produced
+   * (R10-D) need this instance's own cache to leave the loop entirely, not
+   * just its newest snapshot.
+   */
+  async getPublicInfoVersionRecord(
+    versionId: string,
+  ): Promise<PublicInfoVersionRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const current = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_public_info_versions WHERE version_id = $1`,
+      [versionId],
+    );
+    return current.rows[0]
+      ? this.parseRecord<PublicInfoVersionRecord>(
+          current.rows[0].record,
+          "admin.phase1_public_info_versions",
+        )
+      : null;
+  }
+
+  /**
    * Commits the fully-rendered publish result over a claim already won by
    * `claimPlacardPublish`, dropping the `__publishClaimToken` so readers can
    * tell this row is actually finalized (R9). Guarded by `expectedClaimToken`

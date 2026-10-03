@@ -1812,6 +1812,15 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
    */
   function createRealPlacardRepository(publicInfoVersions: unknown[] = []) {
     const rows = new Map<string, { updatedAt: string; record: any }>();
+    // (R10-D) A mutable durable view of public-info versions, seeded from
+    // the fixture array but upserted for real by `publishPublicInfoVersion`'s
+    // `persistChanges` -- unlike `rows` above (placards), the fixture array
+    // alone used to be the only source these tests ever read back, which
+    // could never expose a caller reading STALE public info relative to a
+    // sibling instance's real publish.
+    const publicInfoRows = new Map<string, unknown>(
+      publicInfoVersions.map((record: any) => [record.versionId, record]),
+    );
     let armedInsertFailure: { error: Error; commits: boolean } | null = null;
 
     async function query(text: string, values: readonly unknown[] = []) {
@@ -1821,11 +1830,21 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         q.startsWith("SELECT record") &&
         q.includes("phase1_public_info_versions")
       ) {
+        if (q.includes("WHERE version_id")) {
+          const match = publicInfoRows.get(values[0] as string);
+          return { rows: match ? [{ record: structuredClone(match) }] : [] };
+        }
         return {
-          rows: publicInfoVersions.map((record) => ({
+          rows: [...publicInfoRows.values()].map((record) => ({
             record: structuredClone(record),
           })),
         };
+      }
+      if (q.startsWith("INSERT INTO admin.phase1_public_info_versions")) {
+        const id = values[0] as string;
+        const proposed = JSON.parse(values[4] as string);
+        publicInfoRows.set(id, proposed);
+        return { rows: [], rowCount: 1 };
       }
       if (
         q.startsWith("SELECT record") &&
@@ -3371,6 +3390,402 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       );
       const stored = await backing.get("placard", draft.placardVersionId);
       expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      const controller = new ControlledDownloadController(backing, registry);
+      const winnerFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(winnerFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
+
+  describe("R10-C a still-pending successor's own eventual successful finalize must repair a stale loser's intervening overwrite (Codex REOPEN, generation ac45f6a18eb347a397a7f5faf84f00d7)", () => {
+    const PUBLIC_INFO_R10C = {
+      versionId: "public-info-r10c-pending-successor",
+      title: "R10-C Pending Successor Disclosure",
+      callPhone: "0800-040-040",
+      complaintPhone: "0800-040-050",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /**
+     * One pod's view of a shared backing store whose hold points are
+     * addressable independently as BEFORE or AFTER the real backing call
+     * for a given `get()` ordinal. Unlike R10-B's `PerPodArtifactStore`
+     * (which only holds BEFORE each call), R10-C needs C's own
+     * verification read to actually execute against the backing store --
+     * snapshotting C's own just-written bytes -- before delivery of that
+     * response is held, exactly like this reopen's own read-only
+     * production-path probe's `intercept(... , 'after')` hook.
+     */
+    class OrdinalHoldArtifactStore implements DocumentArtifactStore {
+      private getCount = 0;
+      private readonly beforeGates = new Map<number, Promise<void>>();
+      private readonly afterGates = new Map<number, Promise<void>>();
+
+      constructor(private readonly backing: DocumentArtifactStore) {}
+
+      holdBefore(callOrdinal: number): () => void {
+        let release!: () => void;
+        this.beforeGates.set(
+          callOrdinal,
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+        );
+        return () => release();
+      }
+
+      holdAfter(callOrdinal: number): () => void {
+        let release!: () => void;
+        this.afterGates.set(
+          callOrdinal,
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+        );
+        return () => release();
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.backing.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.backing.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.backing.putIfUnchanged(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        this.getCount += 1;
+        const ordinal = this.getCount;
+        const before = this.beforeGates.get(ordinal);
+        if (before) await before;
+        const result = await this.backing.get(...args);
+        const after = this.afterGates.get(ordinal);
+        if (after) await after;
+        return result;
+      }
+    }
+
+    it("repairs a stale loser's intervening overwrite once the ACTUAL winner's own delayed finalize finally commits", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R10C,
+      ]);
+      const backing = new InMemoryDocumentArtifactStore();
+      const storeA = new OrdinalHoldArtifactStore(backing);
+      const storeC = new OrdinalHoldArtifactStore(backing);
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        storeA,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r10c-pending-successor",
+        publicInfoVersionId: PUBLIC_INFO_R10C.versionId,
+        templateName: "seatback-r10c-pending-successor",
+      });
+
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        storeC,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      // A claims and stalls its own baseline read (call #1) before it even
+      // reaches the backing store.
+      const releaseABaseline = storeA.holdBefore(1);
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const afterA = rows.get(draft.placardVersionId);
+      expect(afterA?.record.__publishClaimToken).toBeTruthy();
+      afterA!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // C reclaims A's now-stale claim, writes its own PDF for real, and
+      // its own post-write verification read (call #2) genuinely executes
+      // against the backing store -- snapshotting C's own just-written
+      // bytes -- but delivery of that response is held before C can reach
+      // its own finalize.
+      const releaseCVerify = storeC.holdAfter(2);
+      const publishC = podC.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const afterC = rows.get(draft.placardVersionId);
+      expect(afterC?.record.__publishClaimToken).toBeTruthy();
+      expect(afterC?.record.__publishClaimToken).not.toBe(
+        afterA?.record.__publishClaimToken,
+      );
+      const cBytesWhileHeld = await backing.get(
+        "placard",
+        draft.placardVersionId,
+      );
+      const cHash = cBytesWhileHeld!.record.sha256;
+
+      // Release A's baseline: it reads C's current (just-written) state, so
+      // its own fenced write legitimately lands on top of it, overwriting
+      // C's bytes with A's. A's own (unheld) verification read sees its own
+      // write and passes, but A's finalize then loses the DB race -- C's
+      // reclaim already moved the row's claim token -- and A's own repair
+      // sees C's still-pending claim token and correctly no-ops.
+      releaseABaseline();
+      await expect(publishA).rejects.toMatchObject({
+        code: "PLACARD_PUBLISH_CONFLICT",
+      });
+      const afterAOverwrite = await backing.get(
+        "placard",
+        draft.placardVersionId,
+      );
+      expect(afterAOverwrite?.record.sha256).not.toBe(cHash);
+
+      // Deliver C's already-captured verification response: its hash check
+      // passes against what it actually captured, its real DB finalize
+      // succeeds (the claim token it holds was never touched), and -- the
+      // exact fix under test -- its own success path now repairs the
+      // object A overwrote in the interim.
+      releaseCVerify();
+      const published = await publishC;
+      expect(published.artifactManifestHash).toBe(cHash);
+
+      const persisted = rows.get(draft.placardVersionId);
+      expect(persisted?.record.artifactManifestHash).toBe(cHash);
+      expect(persisted?.record.__publishClaimToken).toBeFalsy();
+
+      const stored = await backing.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(cHash);
+
+      const controller = new ControlledDownloadController(backing, registry);
+      const winnerFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(winnerFile.getStream()))).toBe(cHash);
+
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(cHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(cHash);
+    });
+  });
+
+  describe("R10-D a loser's own stale in-memory public-info cache must not corrupt its compensating repair (Codex REOPEN, generation ac45f6a18eb347a397a7f5faf84f00d7)", () => {
+    const PUBLIC_INFO_R10D_DRAFT = {
+      versionId: "public-info-r10d-source-drift",
+      title: "R10-D Draft Disclosure",
+      callPhone: "0800-050-050",
+      complaintPhone: "0800-050-060",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    class HeldBaselineArtifactStore implements DocumentArtifactStore {
+      private getCount = 0;
+      private gate: Promise<void> | null = null;
+
+      constructor(private readonly backing: DocumentArtifactStore) {}
+
+      holdBaseline(): () => void {
+        let release!: () => void;
+        this.gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return () => release();
+      }
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.backing.put(...args);
+      }
+
+      putIfAbsent(...args: Parameters<DocumentArtifactStore["putIfAbsent"]>) {
+        return this.backing.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.backing.putIfUnchanged(...args);
+      }
+
+      async get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        this.getCount += 1;
+        if (this.getCount === 1 && this.gate) {
+          await this.gate;
+        }
+        return this.backing.get(...args);
+      }
+    }
+
+    it("repairs the real winner's bytes from the durable public-info row, not a stale loser's own in-memory cache", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R10D_DRAFT,
+      ]);
+      const backing = new InMemoryDocumentArtifactStore();
+      const storeA = new HeldBaselineArtifactStore(backing);
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        storeA,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r10d-source-drift",
+        publicInfoVersionId: PUBLIC_INFO_R10D_DRAFT.versionId,
+        templateName: "seatback-r10d-source-drift",
+      });
+
+      // A claims and stalls its own baseline read before it reaches the
+      // transport.
+      const releaseABaseline = storeA.holdBaseline();
+      const publishA = podA.publishPlacardVersion(draft.placardVersionId);
+      await new Promise((r) => setTimeout(r, 10));
+      const afterA = rows.get(draft.placardVersionId);
+      expect(afterA?.record.__publishClaimToken).toBeTruthy();
+      afterA!.updatedAt = new Date(Date.now() - 3 * 60_000).toISOString();
+
+      // C boots a SEPARATE instance (its own in-memory caches hydrated
+      // fresh from the durable repository/store, same as A's were), then
+      // publishes the SOURCE public-info version through the real service
+      // API -- not a direct mutation of any cache -- which persists the
+      // published status for real. A's own in-memory `publicInfoVersions`
+      // cache never observes this: it was hydrated at its own
+      // `onModuleInit()`, before C's publish.
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await podC.onModuleInit();
+      podC.publishPublicInfoVersion(
+        PUBLIC_INFO_R10D_DRAFT.versionId,
+        {},
+        "req-r10d",
+        "platform-admin-r10d-actor",
+      );
+      // `publishPublicInfoVersion`'s own `persistChanges` call is
+      // fire-and-forget; give its real (modeled) SQL write a tick to land
+      // before relying on it being durably visible.
+      await new Promise((r) => setTimeout(r, 10));
+      const publishedSource = await repository.getPublicInfoVersionRecord(
+        PUBLIC_INFO_R10D_DRAFT.versionId,
+      );
+      expect(publishedSource?.status).toBe("published");
+
+      // C reclaims A's now-stale claim and finalizes normally, using its
+      // own (correct, just-published) source.
+      const published = await podC.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+      expect(
+        (await backing.get("placard", draft.placardVersionId))?.record
+          .sha256,
+      ).toBe(published.artifactManifestHash);
+
+      // Release A's baseline: it reads C's current (published) state as
+      // its baseline, so its own fenced write legitimately lands on top of
+      // it -- overwriting C's bytes -- using A's OWN stale draft-based
+      // render, which is self-consistent with A's own claimed hash and so
+      // passes A's own verification; A's finalize then loses the DB race
+      // to C's already-finalized claim, and A's OWN `!finalized` repair
+      // branch runs -- and must complete -- before this attempt's promise
+      // ever settles, so by the time `publishA` rejects the repair (fixed
+      // or not) has already run to completion. A fixed repair reconstructs
+      // C's bytes from the FRESH, durable public-info row -- not A's stale
+      // local cache, which still thinks the source is a draft -- and
+      // restores them before this rejection is even observable; the
+      // pre-fix repair fails its own hash check against that same stale
+      // cache and leaves A's corrupting bytes in place instead (the exact
+      // R10-D defect: a no-fault repair declining to restore a winner
+      // whose inputs the repairer's own cache has not seen).
+      releaseABaseline();
+      await expect(publishA).rejects.toMatchObject({
+        code: "PLACARD_PUBLISH_CONFLICT",
+      });
+      const stored = await backing.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      const persisted = rows.get(draft.placardVersionId);
+      expect(persisted?.record.artifactManifestHash).toBe(
+        published.artifactManifestHash,
+      );
 
       const controller = new ControlledDownloadController(backing, registry);
       const winnerFile = (await resolve(

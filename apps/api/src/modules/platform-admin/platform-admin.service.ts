@@ -1119,6 +1119,24 @@ export class PlatformAdminService implements OnModuleInit {
             { placardVersionId },
           );
         }
+
+        // (R10-C byte-ownership compensation, Codex REOPEN generation
+        // ac45f6a18eb347a397a7f5faf84f00d7) This call just won the DB race,
+        // but that does not prove the object still holds the bytes this
+        // call verified above: a losing sibling can read the object AFTER
+        // this call's own write (passing ITS fence legitimately, since it
+        // is reading current state, not a stale baseline), overwrite it,
+        // then lose the DB race and call `repairPlacardArtifactAfterLostClaim`
+        // itself -- but at that moment this row still carries THIS call's
+        // now-dropped claim token as "pending" from the loser's point of
+        // view, so the loser's own repair correctly no-ops and defers to
+        // "whichever attempt eventually finalizes", i.e. here. Calling it
+        // unconditionally closes that loop; it is a cheap no-op on the
+        // overwhelmingly common case where the store already matches
+        // `wonClaim.artifactManifestHash`.
+        await this.repairPlacardArtifactAfterLostClaim(
+          placard.placardVersionId,
+        );
       }
     } catch (error) {
       if (this.platformAdminRepository) {
@@ -2791,10 +2809,21 @@ export class PlatformAdminService implements OnModuleInit {
    * candidate render's hash against the authoritative winner's recorded
    * hash BEFORE attempting any write, rather than only after.
    */
-  private renderPlacardBytes(placard: PlacardVersionRecord): Buffer {
-    const publicInfoVersion = this.publicInfoVersions.find(
-      (v) => v.versionId === placard.publicInfoVersionId,
-    );
+  private renderPlacardBytes(
+    placard: PlacardVersionRecord,
+    explicitPublicInfoVersion?: PublicInfoVersionRecord | null,
+  ): Buffer {
+    // `repairPlacardArtifactAfterLostClaim` (R10-D) passes a FRESH,
+    // repository-sourced record explicitly rather than letting this fall
+    // through to `this.publicInfoVersions`: that in-memory cache belongs to
+    // THIS service instance and can be stale relative to the durable
+    // `authoritative` placard row it is reconstructing bytes for.
+    const publicInfoVersion =
+      explicitPublicInfoVersion !== undefined
+        ? explicitPublicInfoVersion
+        : this.publicInfoVersions.find(
+            (v) => v.versionId === placard.publicInfoVersionId,
+          ) ?? null;
     return publicInfoVersion
       ? buildMinimalPdf(buildPlacardPdfRows(placard, publicInfoVersion))
       : buildMinimalPdf([
@@ -2871,6 +2900,13 @@ export class PlatformAdminService implements OnModuleInit {
    *   row calls this same method on every one of its own losing siblings'
    *   behalf once IT is the authoritative winner, so the gap closes on the
    *   next actual finalize, not on a guess made before one exists.
+   *   (R10-C, Codex REOPEN generation ac45f6a18eb347a397a7f5faf84f00d7)
+   *   That last sentence was only a design intent until this generation:
+   *   `publishPlacardVersionExclusive`'s success path did not actually call
+   *   this method, so a loser whose repair deferred to "the eventual
+   *   winner's own finalize" was deferring to a call that never happened,
+   *   permanently stranding its own corrupting write. The winner's success
+   *   path now calls this unconditionally after its own finalize commits.
    * - Otherwise, re-render deterministically from that authoritative row
    *   (`renderPlacardArtifact` is a pure function of a placard's own
    *   fields -- including the winner's exact `publishedAt`/`updatedAt` --
@@ -2886,6 +2922,17 @@ export class PlatformAdminService implements OnModuleInit {
    *   authoritative winner's), it does not matter how many losers overlap
    *   or in what order their repairs land: whichever one writes last still
    *   leaves the correct bytes in place.
+   *   (R10-D, Codex REOPEN generation ac45f6a18eb347a397a7f5faf84f00d7) "The
+   *   source `PublicInfoVersionRecord`" above means the one fetched FRESH
+   *   from the repository below, not whatever this CALLING instance's own
+   *   `this.publicInfoVersions` happens to hold. `publishPublicInfoVersion`
+   *   mutates that cache in-process and persists it to the durable store
+   *   separately; a different instance's cache (e.g. a stale loser that
+   *   never observed the winner's own public-info publish) can disagree
+   *   with the durable row the winner actually rendered from. Rendering
+   *   from this instance's own stale cache instead of the durable one would
+   *   reproduce the WRONG bytes, fail the hash check below, and leave the
+   *   winner's actual bytes un-repaired.
    */
   private async repairPlacardArtifactAfterLostClaim(
     placardVersionId: string,
@@ -2924,6 +2971,23 @@ export class PlatformAdminService implements OnModuleInit {
       return;
     }
 
+    // (R10-D, Codex REOPEN generation ac45f6a18eb347a397a7f5faf84f00d7) Fetch
+    // the source public-info version FRESH from the durable store rather
+    // than trusting this instance's own `this.publicInfoVersions` cache --
+    // see the class comment above for why the cache can disagree with what
+    // the actual winner rendered from. A failed fetch gets the same
+    // treatment as the other durable reads in this method: abort rather
+    // than silently falling back to a cache that might not match.
+    let freshPublicInfoVersion: PublicInfoVersionRecord | null;
+    try {
+      freshPublicInfoVersion =
+        await this.platformAdminRepository.getPublicInfoVersionRecord(
+          authoritative.publicInfoVersionId,
+        );
+    } catch {
+      return;
+    }
+
     // Check the candidate render's hash against the authoritative winner's
     // recorded hash BEFORE attempting any write -- unlike
     // `renderPlacardArtifact`'s own fenced write, which only detects a
@@ -2935,7 +2999,7 @@ export class PlatformAdminService implements OnModuleInit {
     // `rebuildPlacardArtifact`) -- this attempt cannot reconstruct
     // byte-identical content and must not risk storing a mismatched
     // substitute under the winner's name.
-    const bytes = this.renderPlacardBytes(authoritative);
+    const bytes = this.renderPlacardBytes(authoritative, freshPublicInfoVersion);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (sha256 !== authoritative.artifactManifestHash) {
       return;
