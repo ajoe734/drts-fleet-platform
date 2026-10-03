@@ -1351,7 +1351,16 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
       const countHits = (queries: string[], prefix: string) =>
         queries.filter((sql) => sql.startsWith(prefix)).length;
 
-      const MAX_ATTEMPTS = 60;
+      // 60 attempts was not enough: hosted "Product smoke acceptance" runs
+      // this file serially after 1500+ other tests in one process, and has
+      // twice (2026-10-03) completed all 60 non-hitting attempts in well
+      // under a second without ever landing in the real race window, while
+      // the dedicated "integration" job reliably hits it almost
+      // immediately. Raised with matching headroom on the test timeout
+      // below: 60 non-hitting attempts measured ~5ms/attempt even on the
+      // busy runner, so even a generous multiple of that per-attempt cost
+      // leaves comfortable margin under the new 60s budget.
+      const MAX_ATTEMPTS = 3000;
       let recovered = false;
 
       for (let attempt = 0; attempt < MAX_ATTEMPTS && !recovered; attempt++) {
@@ -1512,7 +1521,7 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
         );
       }
     },
-    30_000,
+    60_000,
   );
 
   // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-NEWER (third reopen of
@@ -1567,7 +1576,11 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
       const countHits = (queries: string[], prefix: string) =>
         queries.filter((sql) => sql.startsWith(prefix)).length;
 
-      const MAX_ATTEMPTS = 60;
+      // See R9-TX-DET's comment above: 60 attempts is not reliably enough
+      // on the busy, serialized "Product smoke acceptance" job (observed
+      // 2026-10-03, same symptom DET already had three precedent rounds
+      // of). Raised with matching headroom on the test timeout below.
+      const MAX_ATTEMPTS = 3000;
       let recovered = false;
 
       for (let attempt = 0; attempt < MAX_ATTEMPTS && !recovered; attempt++) {
@@ -1728,7 +1741,7 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
         );
       }
     },
-    30_000,
+    60_000,
   );
 
   // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): the real
