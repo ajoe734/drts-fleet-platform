@@ -35,6 +35,25 @@ function invalidConfiguration(): never {
   throw new DeliveryTransportError("SMTP_CONFIGURATION_INVALID", false);
 }
 
+const QUEUED_AS_PATTERN = /\bqueued (?:as|id[=:]?)\s*<?([A-Za-z0-9._@-]+)>?/i;
+/** Gmail's SMTP relay final reply carries no "queued as" token, e.g.
+ * "250 2.0.0 OK  1696150000 d9-...si1234567plh.100 - gsmtp". */
+const GSMTP_OK_PATTERN = /\bOK\s+\d+\s+([A-Za-z0-9._-]+)\s+-\s+gsmtp\b/i;
+
+/** Recognizes the classic "queued as <id>" reply and Gmail's SMTP relay reply.
+ * An unrecognized reply format (or a candidate that echoes a redacted secret)
+ * keeps providerMessageId null rather than guessing. Exported standalone so
+ * both formats are directly unit-testable without a transport/network fixture. */
+export function extractProviderMessageId(
+  response: string,
+  isSafe: (candidate: string) => boolean,
+): string | null {
+  const candidate =
+    QUEUED_AS_PATTERN.exec(response)?.[1] ??
+    GSMTP_OK_PATTERN.exec(response)?.[1];
+  return candidate && isSafe(candidate) ? candidate : null;
+}
+
 /** Credentials are read only from the runtime environment (Secret Manager in dev).
  * No URL, provider preset, logger, TLS override or arbitrary mail options are accepted.
  */
@@ -124,6 +143,13 @@ export class RemoteSmtpMailTransport implements MailTransport {
       .slice(0, 2048);
   }
 
+  #extractProviderMessageId(response: string): string | null {
+    return extractProviderMessageId(
+      response,
+      (candidate) => this.#redact(candidate) === candidate,
+    );
+  }
+
   async send(message: TransportMessage): Promise<ProviderAcknowledgement> {
     if (
       !mailbox(message.recipientEmail) ||
@@ -172,14 +198,10 @@ export class RemoteSmtpMailTransport implements MailTransport {
       // Only the final DATA acknowledgement is evidence. messageId is our
       // RFC Message-ID and must never masquerade as a provider queue ID.
       const response = this.#redact(info.response);
-      const queuedId = /\bqueued (?:as|id[=:]?)\s*<?([A-Za-z0-9._@-]+)>?/i.exec(
-        info.response,
-      )?.[1];
       return {
         provider: this.provider,
         response,
-        providerMessageId:
-          queuedId && this.#redact(queuedId) === queuedId ? queuedId : null,
+        providerMessageId: this.#extractProviderMessageId(info.response),
         acceptedAt: new Date().toISOString(),
       };
     } catch (error) {

@@ -1,10 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
+
+import * as jwt from "jsonwebtoken";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
+import { GoogleWorkloadIdentityAdapter } from "../../src/modules/auth/google-workload-identity.adapter";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import type { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
 import type { ReferralStatementRecord } from "../../src/modules/billing-settlement/referral-statement.types";
+import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import type { IdentityContext } from "@drts/contracts";
 import {
@@ -13,7 +18,16 @@ import {
 } from "../../src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
-function createController(jwtAuthService = new JwtAuthService()) {
+function createController(
+  jwtAuthService = new JwtAuthService(),
+  adapterOrOptions?:
+    | GoogleWorkloadIdentityAdapter
+    | { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
+) {
+  const googleWorkloadIdentityAdapter =
+    adapterOrOptions && "verifyServicePrincipal" in adapterOrOptions
+      ? adapterOrOptions
+      : adapterOrOptions?.googleWorkloadIdentityAdapter;
   const tenantPartnerService = new TenantPartnerService(
     new AuditNotificationService(),
   );
@@ -27,8 +41,93 @@ function createController(jwtAuthService = new JwtAuthService()) {
       {} as OwnedMobilityService,
       jwtAuthService,
       {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      googleWorkloadIdentityAdapter,
     ),
   };
+}
+
+/** Stub satisfying only the single method verifyGoogleAssertionOrInternalKey calls. */
+function stubGoogleWorkloadIdentityAdapter(
+  verify: () => Promise<void>,
+): GoogleWorkloadIdentityAdapter {
+  return {
+    verifyServicePrincipal: verify,
+  } as unknown as GoogleWorkloadIdentityAdapter;
+}
+
+const REFERRAL_WIF_AUDIENCE = "https://drts-dev-api.example.run.app";
+const REFERRAL_WIF_SERVICE_ACCOUNT_EMAIL =
+  "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com";
+const REFERRAL_WIF_PRINCIPAL_ID = "dev-web-runtime";
+
+const { publicKey: referralWifPublicKey, privateKey: referralWifPrivateKey } =
+  generateKeyPairSync("rsa", { modulusLength: 2048 });
+const referralWifJwk = referralWifPublicKey.export({ format: "jwk" }) as {
+  kty: string;
+  n: string;
+  e: string;
+};
+const REFERRAL_WIF_KID = "referral-handoff-test-key";
+
+function signReferralWifToken(overrides?: Record<string, unknown>): string {
+  const now = Math.floor(Date.now() / 1000);
+  return jwt.sign(
+    {
+      iss: "https://accounts.google.com",
+      sub: "referral-wif-subject",
+      email: REFERRAL_WIF_SERVICE_ACCOUNT_EMAIL,
+      email_verified: true,
+      aud: REFERRAL_WIF_AUDIENCE,
+      iat: now,
+      exp: now + 300,
+      ...overrides,
+    },
+    referralWifPrivateKey,
+    { algorithm: "RS256", keyid: REFERRAL_WIF_KID },
+  );
+}
+
+function mockReferralWifJwks() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          keys: [
+            {
+              kty: referralWifJwk.kty,
+              kid: REFERRAL_WIF_KID,
+              n: referralWifJwk.n,
+              e: referralWifJwk.e,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+}
+
+function wifHeaders(token: string) {
+  return { "x-drts-google-id-token": token };
+}
+
+function configureReferralWifRegistry(
+  overrides?: Partial<{ routeScopes: string[] }>,
+) {
+  process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS = JSON.stringify([
+    {
+      serviceAccountEmail: REFERRAL_WIF_SERVICE_ACCOUNT_EMAIL,
+      principalId: REFERRAL_WIF_PRINCIPAL_ID,
+      allowedTokenAudiences: [REFERRAL_WIF_AUDIENCE],
+      routeScopes: overrides?.routeScopes ?? ["* *"],
+    },
+  ]);
 }
 
 describe("tenant partner ingress handoff controller", () => {
@@ -40,6 +139,8 @@ describe("tenant partner ingress handoff controller", () => {
     delete process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
     delete process.env.PARTNER_INGRESS_KEY_YUHE_RESIDENCE;
+    delete process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS;
+    vi.unstubAllGlobals();
   });
 
   it("issues a short-lived passenger bearer session and reuses the binding on reopen", async () => {
@@ -128,7 +229,7 @@ describe("tenant partner ingress handoff controller", () => {
     ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("allows internal callers to resolve the credential server-side", async () => {
+  it("rejects internal bootstrap via the legacy internal key now that INTERNAL_KEY_EXCP_002 is retired (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930)", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
@@ -138,6 +239,34 @@ describe("tenant partner ingress handoff controller", () => {
 
     const { controller } = createController();
 
+    await expect(
+      controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-002",
+        },
+        {
+          headers: {
+            "x-drts-internal-key": "internal-dev-key",
+          },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-004",
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+  });
+
+  it("allows internal callers to resolve the credential server-side via a verified Google workload identity assertion", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const adapter = stubGoogleWorkloadIdentityAdapter(async () => {});
+    const { controller } = createController(new JwtAuthService(), adapter);
+
     const response = await controller.issuePartnerIngressHandoff(
       {
         entrySlug: "bank-demo-alpha-airport",
@@ -145,7 +274,7 @@ describe("tenant partner ingress handoff controller", () => {
       },
       {
         headers: {
-          "x-drts-internal-key": "internal-dev-key",
+          "x-drts-google-id-token": "fake-but-verified-assertion",
         },
         method: "POST",
         originalUrl: "/api/partner/ingress/handoff",
@@ -161,6 +290,41 @@ describe("tenant partner ingress handoff controller", () => {
         partnerEntrySlug: "bank-demo-alpha-airport",
       },
     });
+  });
+
+  it("rejects internal bootstrap when the Google workload identity assertion fails verification, even with DRTS_INTERNAL_KEY configured", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.DRTS_INTERNAL_KEY = "internal-dev-key";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const adapter = stubGoogleWorkloadIdentityAdapter(async () => {
+      const err = new ApiRequestError(
+        403,
+        "WORKLOAD_AUDIENCE_MISMATCH",
+        "wrong audience",
+      );
+      throw err;
+    });
+    const { controller } = createController(new JwtAuthService(), adapter);
+
+    await expect(
+      controller.issuePartnerIngressHandoff(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          partnerUserRef: "partner-user-002b",
+        },
+        {
+          headers: {
+            "x-drts-google-id-token": "forged-assertion",
+            "x-drts-internal-key": "internal-dev-key",
+          },
+          method: "POST",
+          originalUrl: "/api/partner/ingress/handoff",
+        },
+        "req-partner-handoff-004b",
+      ),
+    ).rejects.toThrowError(ApiRequestError);
   });
 
   it("rejects internal bootstrap when the internal key header is missing", async () => {
@@ -263,87 +427,221 @@ describe("tenant partner ingress handoff controller", () => {
     }
   });
 
-  it("requires a dedicated key for referral embed handoff issuance and consume", async () => {
-    process.env.JWT_SECRET = "test-secret";
-    process.env.DRTS_INTERNAL_KEY = "general-internal-key";
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "referral-handoff-key";
-    process.env.PARTNER_INGRESS_KEY_YUHE_RESIDENCE = "yuhe-partner-key";
-
-    const { controller } = createController();
-    const command = {
-      entrySlug: "yuhe-residence",
-      entryHost: "app.fabrikam-living.example",
-      partnerUserRef: "resident-001",
-    };
-
-    await expect(
-      controller.issueReferralEmbedHandoffArtifact(
-        command,
-        {
-          headers: { "x-drts-internal-key": "general-internal-key" },
-          method: "POST",
-          originalUrl: "/api/partner/ingress/referral-embed-handoff",
-        },
-        "req-referral-handoff-wrong-key",
-      ),
-    ).rejects.toMatchObject({ code: "INTERNAL_KEY_REQUIRED" });
-
-    await expect(
-      controller.issueReferralEmbedHandoffArtifact(
-        command,
-        {
-          headers: { "x-drts-referral-handoff-key": "forged-key" },
-          method: "POST",
-          originalUrl: "/api/partner/ingress/referral-embed-handoff",
-        },
-        "req-referral-handoff-forged-key",
-      ),
-    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
-
-    const issued = await controller.issueReferralEmbedHandoffArtifact(
-      command,
-      {
-        headers: {
-          "x-drts-referral-handoff-key": "referral-handoff-key",
-        },
-        method: "POST",
-        originalUrl: "/api/partner/ingress/referral-embed-handoff",
-      },
-      "req-referral-handoff-authorized",
-    );
-
-    const scopedRequest = {
-      headers: { "x-drts-referral-handoff-key": "referral-handoff-key" },
-      method: "POST",
-      originalUrl: "/api/partner/ingress/referral-embed-handoff/consume",
-    };
-    const consumed = await controller.consumeReferralEmbedHandoffArtifact(
-      {
-        artifact: issued.data.artifact,
-        entrySlug: command.entrySlug,
-        entryHost: command.entryHost,
-      },
-      scopedRequest,
-      "req-referral-handoff-consume",
-    );
-
-    expect(consumed.data).toMatchObject({
-      handoffId: issued.data.handoffId,
-      partnerEntrySlug: command.entrySlug,
-      entryHost: command.entryHost,
+  describe("referral embed handoff: Google workload identity (INTERNAL_KEY_EXCP_001 retired)", () => {
+    beforeEach(() => {
+      mockReferralWifJwks();
     });
 
-    await expect(
-      controller.consumeReferralEmbedHandoffArtifact(
+    it("hands off and consumes a referral embed artifact for a registered Google workload identity", async () => {
+      process.env.JWT_SECRET = "test-secret";
+      process.env.PARTNER_INGRESS_KEY_YUHE_RESIDENCE = "yuhe-partner-key";
+      configureReferralWifRegistry();
+
+      const { controller } = createController(undefined, {
+        googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
+          new IdentityRepository(),
+        ),
+      });
+      const command = {
+        entrySlug: "yuhe-residence",
+        entryHost: "app.fabrikam-living.example",
+        partnerUserRef: "resident-001",
+      };
+
+      const issued = await controller.issueReferralEmbedHandoffArtifact(
+        command,
+        {
+          headers: wifHeaders(signReferralWifToken()),
+          method: "POST",
+          originalUrl: "/api/partner/ingress/referral-embed-handoff",
+        },
+        "req-referral-handoff-wif-authorized",
+      );
+
+      const scopedRequest = {
+        headers: wifHeaders(signReferralWifToken()),
+        method: "POST",
+        originalUrl: "/api/partner/ingress/referral-embed-handoff/consume",
+      };
+      const consumed = await controller.consumeReferralEmbedHandoffArtifact(
         {
           artifact: issued.data.artifact,
           entrySlug: command.entrySlug,
           entryHost: command.entryHost,
         },
         scopedRequest,
-        "req-referral-handoff-replay",
-      ),
-    ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REPLAYED" });
+        "req-referral-handoff-wif-consume",
+      );
+
+      expect(consumed.data).toMatchObject({
+        handoffId: issued.data.handoffId,
+        partnerEntrySlug: command.entrySlug,
+        entryHost: command.entryHost,
+      });
+
+      await expect(
+        controller.consumeReferralEmbedHandoffArtifact(
+          {
+            artifact: issued.data.artifact,
+            entrySlug: command.entrySlug,
+            entryHost: command.entryHost,
+          },
+          {
+            headers: wifHeaders(signReferralWifToken()),
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff/consume",
+          },
+          "req-referral-handoff-wif-replay",
+        ),
+      ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REPLAYED" });
+    });
+
+    it("rejects referral embed handoff issuance for an unregistered Google workload identity", async () => {
+      process.env.JWT_SECRET = "test-secret";
+      configureReferralWifRegistry();
+
+      const { controller } = createController(undefined, {
+        googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
+          new IdentityRepository(),
+        ),
+      });
+
+      await expect(
+        controller.issueReferralEmbedHandoffArtifact(
+          {
+            entrySlug: "yuhe-residence",
+            entryHost: "app.fabrikam-living.example",
+            partnerUserRef: "resident-002",
+          },
+          {
+            headers: wifHeaders(
+              signReferralWifToken({
+                email: "someone-else@dev-project.iam.gserviceaccount.com",
+              }),
+            ),
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff",
+          },
+          "req-referral-handoff-wif-unregistered",
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_PRINCIPAL_NOT_REGISTERED" });
+    });
+
+    it("rejects referral embed handoff issuance for a registered identity outside its route scope", async () => {
+      process.env.JWT_SECRET = "test-secret";
+      configureReferralWifRegistry({
+        routeScopes: ["POST auth/token"],
+      });
+
+      const { controller } = createController(undefined, {
+        googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
+          new IdentityRepository(),
+        ),
+      });
+
+      await expect(
+        controller.issueReferralEmbedHandoffArtifact(
+          {
+            entrySlug: "yuhe-residence",
+            entryHost: "app.fabrikam-living.example",
+            partnerUserRef: "resident-003",
+          },
+          {
+            headers: wifHeaders(signReferralWifToken()),
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff",
+          },
+          "req-referral-handoff-wif-out-of-scope",
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
+    });
+
+    it("rejects referral embed handoff routes when no workload identity assertion and no legacy key are presented", async () => {
+      process.env.JWT_SECRET = "test-secret";
+      configureReferralWifRegistry();
+
+      const { controller } = createController(undefined, {
+        googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
+          new IdentityRepository(),
+        ),
+      });
+      const command = {
+        entrySlug: "yuhe-residence",
+        entryHost: "app.fabrikam-living.example",
+        partnerUserRef: "resident-004",
+      };
+
+      await expect(
+        controller.issueReferralEmbedHandoffArtifact(
+          command,
+          {
+            headers: {},
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff",
+          },
+          "req-referral-handoff-no-assertion-issue",
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_MISSING" });
+
+      await expect(
+        controller.recordReferralEmbedConsent(
+          {
+            handoffId: "handoff-irrelevant",
+            entrySlug: command.entrySlug,
+            entryHost: command.entryHost,
+            currentDrtsPassengerId: "passenger-irrelevant",
+            currentPartnerEntrySlug: command.entrySlug,
+            consentBundle: {
+              bundleVersion: "irrelevant",
+              grantedScopes: [],
+              grantedAt: new Date().toISOString(),
+            },
+          },
+          {
+            headers: {},
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
+          },
+          "req-referral-handoff-no-assertion-consent",
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_MISSING" });
+
+      // The legacy x-drts-referral-handoff-key header no longer authorises
+      // any route: INTERNAL_KEY_EXCP_001 was removed from
+      // INTERNAL_KEY_EXCEPTION_REGISTRY, so this credential has no effect.
+      await expect(
+        controller.issueReferralEmbedHandoffArtifact(
+          command,
+          {
+            headers: { "x-drts-referral-handoff-key": "any-legacy-value" },
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff",
+          },
+          "req-referral-handoff-legacy-key-ignored",
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_MISSING" });
+    });
+
+    it("fails closed when Google workload identity verification is unavailable (adapter not wired)", async () => {
+      process.env.JWT_SECRET = "test-secret";
+      const { controller } = createController();
+
+      await expect(
+        controller.issueReferralEmbedHandoffArtifact(
+          {
+            entrySlug: "yuhe-residence",
+            entryHost: "app.fabrikam-living.example",
+            partnerUserRef: "resident-005",
+          },
+          {
+            headers: wifHeaders(signReferralWifToken()),
+            method: "POST",
+            originalUrl: "/api/partner/ingress/referral-embed-handoff",
+          },
+          "req-referral-handoff-no-adapter",
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+    });
   });
 
   it("renders the authorised referral statement as a safe downloadable artifact", async () => {
@@ -672,11 +970,16 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
     });
   });
 
-  it("records referral embed consent successfully via dedicated internal key endpoint", async () => {
+  it("records referral embed consent successfully via Google workload identity", async () => {
     process.env.JWT_SECRET = "test-secret";
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "referral-handoff-key";
+    mockReferralWifJwks();
+    configureReferralWifRegistry();
 
-    const { controller, tenantPartnerService } = createController();
+    const { controller, tenantPartnerService } = createController(undefined, {
+      googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
+        new IdentityRepository(),
+      ),
+    });
 
     // Mock the service method
     const mockRecord = vi.fn().mockResolvedValue({
@@ -723,7 +1026,7 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
     const response = await controller.recordReferralEmbedConsent(
       command,
       {
-        headers: { "x-drts-referral-handoff-key": "referral-handoff-key" },
+        headers: wifHeaders(signReferralWifToken()),
         method: "POST",
         originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
       } as any,
@@ -734,11 +1037,16 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
     expect(mockRecord).toHaveBeenCalledWith(command);
   });
 
-  it("rejects referral embed consent when internal key is missing or invalid", async () => {
+  it("rejects referral embed consent when no workload identity assertion is presented", async () => {
     process.env.JWT_SECRET = "test-secret";
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "referral-handoff-key";
+    mockReferralWifJwks();
+    configureReferralWifRegistry();
 
-    const { controller } = createController();
+    const { controller } = createController(undefined, {
+      googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
+        new IdentityRepository(),
+      ),
+    });
     const command = {
       handoffId: "handoff-123",
       entrySlug: "demo-slug",
@@ -754,24 +1062,55 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
       controller.recordReferralEmbedConsent(
         command,
         {
-          headers: {}, // Missing key
+          headers: {}, // Missing assertion
           method: "POST",
           originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
         } as any,
         "req-record-consent-missing-key",
       ),
-    ).rejects.toMatchObject({ code: "INTERNAL_KEY_REQUIRED" });
+    ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_MISSING" });
 
     await expect(
       controller.recordReferralEmbedConsent(
         command,
         {
-          headers: { "x-drts-referral-handoff-key": "invalid-key" },
+          headers: wifHeaders(
+            signReferralWifToken({
+              email: "someone-else@dev-project.iam.gserviceaccount.com",
+            }),
+          ),
           method: "POST",
           originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
         } as any,
         "req-record-consent-invalid-key",
       ),
-    ).rejects.toMatchObject({ code: "INTERNAL_KEY_INVALID" });
+    ).rejects.toMatchObject({ code: "WORKLOAD_PRINCIPAL_NOT_REGISTERED" });
+  });
+
+  it("returns 404 MAIL_DELIVERY_NOT_FOUND for an unknown mail delivery id", async () => {
+    const { controller } = createController();
+    const identity: IdentityContext = {
+      actorType: "tenant_admin",
+      actorId: "admin-a",
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["tenant:read"],
+      tenantId: "tenant-a",
+      supportedExecutionModes: ["supervisor_managed_execution"],
+    };
+
+    await expect(
+      controller.getMailDelivery(
+        "00000000-0000-0000-0000-000000000000",
+        identity,
+        "tenant-a",
+        "req-mail-delivery-not-found",
+      ),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "MAIL_DELIVERY_NOT_FOUND",
+    });
   });
 });

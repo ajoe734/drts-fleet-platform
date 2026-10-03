@@ -1,5 +1,21 @@
 # VM Development and Staging
 
+> ⚠️ **Scope note (2026-10-02):** `VM dev` below describes a dedicated
+> per-project engineer development machine — one VM per project, running the
+> product's own servers and infra for that engineer/reviewer. It is not the
+> shared orchestrator-managed canonical-root machine that AI agents operate
+> on today. That machine is a different machine, governed by `AGENTS.md`'s
+> VM restriction: no product dev servers, no Docker Compose infrastructure,
+> no browser/E2E runners — only the orchestrator/control-plane process and
+> repository-level checks (typecheck, lint, unit tests) are allowed there.
+> Per `AGENTS.md`, older local-development documents — including this one —
+> do not override that restriction. The authoritative shared surface for
+> review and acceptance today is the GCP Cloud Run dev deployment driven by
+> `.github/workflows/deploy-dev.yml` and the `DEV_GCP_*` repository
+> variables (see `docs/ops/branch-strategy.md`), not a literal SSH-reachable
+> dev VM running the commands below. The bootstrap steps in this runbook
+> remain accurate for whichever dedicated project VM they were written for.
+
 ## Purpose
 
 This runbook defines the only two active runtime environments for this repo:
@@ -129,11 +145,12 @@ Machine-specific notes do not belong in this tracked runbook. Put transient
 port mappings, current container names, temporary firewall commands, and other
 per-VM review details in:
 
-- `docs/03-runbooks/local-development.local.md`
+- the generated local-development.local.md overlay (bootstrapped below)
 - `.local/` for broader machine-only scratch files that are not part of the
   canonical runbook
 
-That file is intentionally gitignored. Bootstrap it from:
+That generated overlay file is intentionally gitignored and never appears as
+a tracked path in this repo. Bootstrap it from:
 
 - `docs/03-runbooks/local-development.local.example.md`
 - `./tools/local-development/init-local-workspace.sh`

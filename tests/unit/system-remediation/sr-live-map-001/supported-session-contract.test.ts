@@ -206,7 +206,8 @@ it.each([
   "checks real WIF %s durable verification across a %dms issuance boundary",
   async (actorType, issuanceDelayMs) => {
     // Unit-only time boundary: issuance and verification code remain real.
-    // The 1ms cases reproduce the unresolved controller/JWT tokenVersion race.
+    // Exercises both same-tick and cross-tick issuance to prove the
+    // controller/JWT tokenVersion race (SR-AUTH-WORKFORCE-VERSION-RACE) stays fixed.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-01T10:00:00.000Z"));
     // Only Google's JWKS/network boundary is replaced. A disposable signing key
@@ -286,19 +287,16 @@ it.each([
       realm: "ops",
       sub: "live-map-observer",
     });
-    if (issuanceDelayMs === 0) {
-      expect(verified).not.toBeNull();
-      if (actorType === "ops_observer")
-        expect(verified?.scopes).toEqual(["regulatory:read"]);
-    } else {
-      // Signed token and active durable session are real; the stale version
-      // alone makes the subsequent auth/session verification reject it.
-      expect(await identities.getSession(payload.sid!)).toMatchObject({
-        status: "active",
-      });
-      expect(Date.parse(principal!.updatedAt) - payload.tokenVersion!).toBe(1);
-      expect(verified).toBeNull();
-    }
+    // Same-tick and crossed-tick issuance both durably verify: the signed
+    // tokenVersion is derived from the actually-persisted principal state,
+    // not a timestamp guessed before that write lands.
+    expect(await identities.getSession(payload.sid!)).toMatchObject({
+      status: "active",
+    });
+    expect(payload.tokenVersion).toBe(Date.parse(principal!.updatedAt));
+    expect(verified).not.toBeNull();
+    if (actorType === "ops_observer")
+      expect(verified?.scopes).toEqual(["regulatory:read"]);
     // The real verifier persists principal, membership and role bindings.
     expect(
       await identities.findPrincipalById("unit-map-observer"),
@@ -369,9 +367,28 @@ it.each(["success", "lost-response", "invalid-session", "cleanup-retry"])(
             ],
           },
         });
-      if (url.pathname === "/api/auth/token")
-        return reply({ token: "unit-boundary-token", expiresIn: "8h" });
+      if (url.pathname === "/api/auth/token") {
+        expect(headers.has("x-drts-internal-key")).toBe(false);
+        return reply(
+          headers.get("x-actor-type") === "system"
+            ? { token: "unit-provisioner-token", expiresIn: "15m" }
+            : { token: "unit-boundary-token", expiresIn: "8h" },
+        );
+      }
       if (url.pathname === "/api/auth/session") {
+        if (headers.get("authorization") === "Bearer unit-provisioner-token")
+          return reply({
+            data: {
+              active: true,
+              identity: {
+                realm: "system",
+                actorType: "system",
+                actorId: "dev-live-map",
+                scopes: ["driver:provision"],
+                driverProvisioningDriverId: "drv-demo-002",
+              },
+            },
+          });
         if (headers.get("authorization") === "Bearer unit-boundary-token")
           return reply({
             data: {
@@ -402,8 +419,8 @@ it.each(["success", "lost-response", "invalid-session", "cleanup-retry"])(
       if (url.pathname === "/api/auth/driver/device/register") {
         // Recovery state is already available to always() teardown before mutation.
         expect(env.DRTS_LIVE_MAP_INVITE_CODE).toBe(command.registrationCode);
-        expect(env.DRTS_LIVE_MAP_CLEANUP_SESSION_TOKEN).toBe(
-          "unit-boundary-token",
+        expect(env.DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN).toBe(
+          "unit-provisioner-token",
         );
         const result = await f.controller.issueDriverDeviceSession(command);
         registered = result.data;
@@ -426,7 +443,6 @@ it.each(["success", "lost-response", "invalid-session", "cleanup-retry"])(
     const run = bootstrapMapSessions(env, {
       fetch,
       readGoogleIdToken: () => "unit-google-boundary",
-      readInternalKey: () => "unit-internal-boundary",
       mask,
       exportSession,
       save,
@@ -447,11 +463,15 @@ it.each(["success", "lost-response", "invalid-session", "cleanup-retry"])(
       );
     await teardownMapSessions(env, {
       fetch,
+      mask,
+      readGoogleIdToken: () => "unit-google-boundary",
       save: (value) => save("cleanup", value),
     });
     // Repeat teardown proves consumed-invite cleanup is idempotent in the product.
     await teardownMapSessions(env, {
       fetch,
+      mask,
+      readGoogleIdToken: () => "unit-google-boundary",
       save: (value) => save("cleanup", value),
     });
     expect(

@@ -1018,15 +1018,23 @@ export class ForwarderService implements OnModuleInit {
     const seededHealth: AdapterHealthRecord[] = [];
 
     for (const adapter of this.adapters) {
-      if (
-        this.adapterHealth.some(
-          (record) => record.platformCode === adapter.platformCode,
-        )
-      ) {
+      const existing = this.adapterHealth.find(
+        (record) => record.platformCode === adapter.platformCode,
+      );
+      const snapshot = await this.safeGetHealthSnapshot(adapter);
+
+      if (existing) {
+        if (snapshot) {
+          seededHealth.push(
+            this.updateAdapterHealth(
+              adapter.platformCode,
+              this.buildHealthSnapshotPatch(snapshot),
+            ),
+          );
+        }
         continue;
       }
 
-      const snapshot = await this.safeGetHealthSnapshot(adapter);
       seededHealth.push(
         this.updateAdapterHealth(adapter.platformCode, {
           ...this.buildAdapterHealthBaseline(adapter.platformCode, adapter),
@@ -1284,17 +1292,38 @@ export class ForwarderService implements OnModuleInit {
   }
 
   private normalizeAdapterHealthRecord(record: Partial<AdapterHealthRecord>) {
+    const adapter = this.findAdapter(record.platformCode as PlatformCode);
     const baseline = this.buildAdapterHealthBaseline(
       record.platformCode as PlatformCode,
-      this.findAdapter(record.platformCode as PlatformCode),
+      adapter,
     );
+
+    if (baseline.status !== "healthy") {
+      return {
+        ...baseline,
+        ...record,
+        status: baseline.status,
+        reason: baseline.reason,
+        credentialStatus: baseline.credentialStatus,
+        authStatus: baseline.authStatus,
+        webhookStatus: baseline.webhookStatus,
+        rateLimitStatus: baseline.rateLimitStatus,
+        platformCode: record.platformCode ?? baseline.platformCode,
+        capabilitySummary: this.cloneCapabilitySummary(
+          adapter?.capabilitySummary ?? record.capabilitySummary ?? baseline.capabilitySummary,
+        ),
+        lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
+        lastRateLimitAt: record.lastRateLimitAt ?? null,
+        lastAuthFailureAt: record.lastAuthFailureAt ?? null,
+      };
+    }
 
     return {
       ...baseline,
       ...record,
       platformCode: record.platformCode ?? baseline.platformCode,
       capabilitySummary: this.cloneCapabilitySummary(
-        record.capabilitySummary ?? baseline.capabilitySummary,
+        adapter?.capabilitySummary ?? record.capabilitySummary ?? baseline.capabilitySummary,
       ),
       lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
       lastRateLimitAt: record.lastRateLimitAt ?? null,
@@ -1353,6 +1382,24 @@ export class ForwarderService implements OnModuleInit {
       this.findAdapter(platformCode),
     );
 
+    const existing = this.adapterHealth.find(
+      (record) => record.platformCode === platformCode,
+    );
+
+    if (baseline.status !== "healthy") {
+      return {
+        status: baseline.status,
+        reason: baseline.reason,
+        credentialStatus: baseline.credentialStatus,
+        authStatus: baseline.authStatus,
+        webhookStatus: baseline.webhookStatus,
+        rateLimitStatus: baseline.rateLimitStatus,
+        lastCheckedAt: new Date().toISOString(),
+        lastError: existing?.lastError ?? null,
+        ...patch,
+      };
+    }
+
     return {
       status: "healthy",
       reason: baseline.reason,
@@ -1373,6 +1420,20 @@ export class ForwarderService implements OnModuleInit {
     );
     const signals =
       `${command.errorCode} ${command.errorMessage} ${command.nativeStatus ?? ""}`.toLowerCase();
+      
+    if (baseline.status !== "healthy") {
+      return {
+        status: baseline.status,
+        reason: baseline.reason,
+        credentialStatus: baseline.credentialStatus,
+        authStatus: baseline.authStatus,
+        webhookStatus: baseline.webhookStatus,
+        rateLimitStatus: baseline.rateLimitStatus,
+        lastCheckedAt: failedAt,
+        lastError: `${command.errorCode}: ${command.errorMessage}`,
+      };
+    }
+    
     const patch: Partial<AdapterHealthRecord> = {
       status: command.retryable ? "degraded" : "down",
       reason: "platform",
@@ -1471,18 +1532,15 @@ export class ForwarderService implements OnModuleInit {
         payload,
       });
       if (!verification.accepted) {
+        const baseline = this.buildAdapterHealthBaseline(adapter.platformCode, adapter);
         const adapterHealth = this.updateAdapterHealth(adapter.platformCode, {
-          status: "degraded",
-          reason: "webhook",
+          status: baseline.status !== "healthy" ? baseline.status : "degraded",
+          reason: baseline.status !== "healthy" ? baseline.reason : "webhook",
           credentialStatus:
-            verification.credentialStatus ??
-            this.buildAdapterHealthBaseline(adapter.platformCode, adapter)
-              .credentialStatus,
+            verification.credentialStatus ?? baseline.credentialStatus,
           authStatus:
-            verification.authStatus ??
-            this.buildAdapterHealthBaseline(adapter.platformCode, adapter)
-              .authStatus,
-          webhookStatus: verification.webhookStatus ?? "failing",
+            verification.authStatus ?? baseline.authStatus,
+          webhookStatus: verification.webhookStatus ?? (baseline.status !== "healthy" ? baseline.webhookStatus : "failing"),
           lastCheckedAt: verifiedAt,
           lastError:
             verification.detail ?? "Webhook signature verification failed.",

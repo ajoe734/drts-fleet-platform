@@ -478,6 +478,16 @@ export function resolveRouteAuthPolicy(
       };
     }
 
+    if (routePath.startsWith("tenant/mail-deliveries")) {
+      return {
+        routeKey: `tenant:mail-deliveries:${upperMethod}`,
+        requiredScopes: ["audit:read"],
+        allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
+        description:
+          "Mail delivery receipt lookup. `audit:read` is held by platform_admin, ops_user, and tenant_admin alike; the tenant-vs-cross-tenant boundary is enforced by the mail_delivery evidence-governance scope at the service layer, not by this route gate.",
+      };
+    }
+
     return {
       routeKey: `tenant:${upperMethod}`,
       requiredScopes: methodScope("tenant:read", "tenant:write", upperMethod),
@@ -915,6 +925,36 @@ export function resolveRouteAuthPolicy(
       requiredScopes: ["identity:write"],
       allowedRealms: ["system"],
       description: "Internal scheduler execution of privileged role expiries",
+    };
+  }
+
+  // SR-MAIL-RETRY-SCHEDULE-20261001: scale-to-zero-safe triggers for the
+  // retryable mail outbox and the approval-timeout reminder sweep. Both must
+  // stay "system"-only -- no tenant/ops/platform JWT may call them -- because
+  // they are meant for an external scheduler, not an interactive session.
+  if (
+    routePath === "internal/scheduled-tasks/mail-outbox/drain" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "internal:scheduled-tasks:mail-outbox:drain",
+      requiredScopes: ["notification-delivery:drain"],
+      allowedRealms: ["system"],
+      description:
+        "Internal scheduler execution of retryable mail outbox drain",
+    };
+  }
+
+  if (
+    routePath === "internal/scheduled-tasks/approval-timeout-reminders/run" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "internal:scheduled-tasks:approval-timeout-reminders:run",
+      requiredScopes: ["tenant-partner:approval-timeout-reminders:run"],
+      allowedRealms: ["system"],
+      description:
+        "Internal scheduler execution of the approval-timeout reminder sweep",
     };
   }
 

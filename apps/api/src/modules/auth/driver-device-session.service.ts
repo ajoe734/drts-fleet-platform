@@ -123,6 +123,7 @@ export class DriverDeviceSessionService implements OnModuleInit {
 
   async revokeInvitation(
     command: { registrationCode: string },
+    allowedDriverId?: string,
   ): Promise<{ revoked: boolean }> {
     const code = command.registrationCode.trim();
     if (!code) return { revoked: false };
@@ -133,6 +134,10 @@ export class DriverDeviceSessionService implements OnModuleInit {
       invitation = (await this.repository.findInvitationByCodeHash(hash)) ?? undefined;
     }
     
+    if (allowedDriverId && invitation && invitation.driverId !== allowedDriverId) {
+      throw new ApiRequestError(403, "WORKLOAD_DRIVER_TARGET_DENIED", "Driver provisioning grant does not allow this invitation.");
+    }
+
     if (!invitation || (invitation.status !== "pending" && invitation.status !== "used" && invitation.status !== "revoked")) {
       return { revoked: false };
     }

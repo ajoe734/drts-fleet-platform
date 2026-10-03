@@ -104,20 +104,19 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IdempotencyService } from "../../common/idempotency";
 import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { GoogleWorkloadIdentityAdapter } from "../auth/google-workload-identity.adapter";
 import { IdentityRepository } from "../identity/identity.repository";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
 } from "../../common/auth/jwt-auth.service";
-import {
-  REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-  requireInternalKey,
-  requireScopedInternalKey,
-} from "../../common/auth/internal-key.middleware";
+import { verifyGoogleAssertionOrInternalKey } from "../../common/auth/internal-key.middleware";
 import {
   OPEN_ROUTE_RATE_LIMIT,
   READ_HEAVY_RATE_LIMIT,
@@ -218,7 +217,125 @@ export class TenantPartnerController {
     @Optional()
     @Inject(PartnerNotificationNavigationRepository)
     private readonly partnerNotificationNavigationRepository?: PartnerNotificationNavigationRepository,
+    @Optional()
+    @Inject(NotificationDeliveryService)
+    private readonly notificationDeliveryService?: NotificationDeliveryService,
+    @Optional()
+    @Inject(GoogleWorkloadIdentityAdapter)
+    private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
   ) {}
+
+  /**
+   * INTERNAL_KEY_EXCP_001 retired (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002):
+   * the three referral embed handoff routes no longer accept
+   * `x-drts-referral-handoff-key`. `requestAuthority` in
+   * `apps/referral-embed-web/lib/embed-api.ts` already dual-sends a Google
+   * workload identity assertion (`x-drts-google-id-token`) on every
+   * authority call, verified here against the same
+   * `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS` registry and
+   * `GoogleWorkloadIdentityAdapter` every other proxied route uses.
+   * `enforceReplayProtection: false` matches `validateInternalKey`'s general
+   * proxy path: a Cloud Run metadata server returns the same cached token for
+   * every concurrent request within its validity window, so these are not
+   * one-time-use session issuance like `POST /api/auth/token`.
+   */
+  private async requireReferralEmbedWorkloadIdentity(request?: {
+    headers?: Record<string, string | string[] | undefined>;
+    method?: string;
+    originalUrl?: string;
+    url?: string;
+  }): Promise<void> {
+    if (!this.googleWorkloadIdentityAdapter) {
+      throw new ApiRequestError(
+        503,
+        "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+        "Google workload identity verification is not available for referral embed handoff routes.",
+        { requiredEnv: ["WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS"] },
+      );
+    }
+    const req = request ?? {};
+    await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
+      req.headers ?? {},
+      {
+        requestPath: req.originalUrl ?? req.url,
+        requestMethod: req.method,
+        enforceReplayProtection: false,
+      },
+    );
+  }
+
+  /**
+   * SR-MAIL-RETRY-SCHEDULE-20261001: scale-to-zero-safe trigger for the
+   * retryable mail outbox. `NotificationDeliveryService.drain()` already had
+   * correct retry/backoff/lease logic (SR-NOTIFY-001) -- nothing in the repo
+   * called it. All three NotificationDeliveryService instances in this app
+   * (this one, audit-notification's, regulatory-registry's) share the same
+   * `ops.phase1_notification_mail_deliveries` Postgres table and the same
+   * env-derived SMTP transport, so draining through any one of them drains
+   * every tenant's pending mail, including invitation/approval/audit/registry
+   * sends enqueued by the other two modules.
+   */
+  @Post("internal/scheduled-tasks/mail-outbox/drain")
+  async drainMailOutbox(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      !identity ||
+      (identity.realm !== "system" && identity.actorType !== "system")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Only internal system/scheduler authority can trigger the mail outbox drain.",
+      );
+    }
+    if (!this.notificationDeliveryService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SERVICE_UNAVAILABLE",
+        "Notification delivery outbox is not configured.",
+      );
+    }
+    const receipts = await this.notificationDeliveryService.drain();
+    return toApiSuccessEnvelope(
+      {
+        drained: receipts.length,
+        sent: receipts.filter((receipt) => receipt.status === "sent").length,
+        failed: receipts.filter((receipt) => receipt.status === "failed")
+          .length,
+      },
+      requestId,
+    );
+  }
+
+  /**
+   * SR-MAIL-RETRY-SCHEDULE-20261001: scale-to-zero-safe trigger for the
+   * approval-timeout reminder sweep (previously only an in-process 60s
+   * setInterval, inert while this Cloud Run instance is scaled to zero). See
+   * `TenantPartnerService.runApprovalTimeoutNotificationSweep` for why a
+   * concurrent interval tick or a repeated/overlapping scheduler trigger
+   * cannot double-send.
+   */
+  @Post("internal/scheduled-tasks/approval-timeout-reminders/run")
+  async runApprovalTimeoutReminders(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      !identity ||
+      (identity.realm !== "system" && identity.actorType !== "system")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Only internal system/scheduler authority can trigger the approval-timeout reminder sweep.",
+      );
+    }
+    const result =
+      await this.tenantPartnerService.runApprovalTimeoutNotificationSweep();
+    return toApiSuccessEnvelope(result, requestId);
+  }
 
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
@@ -343,7 +460,27 @@ export class TenantPartnerController {
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
     if (allowInternalBootstrap) {
-      requireInternalKey(request ?? {}, process.env.DRTS_INTERNAL_KEY);
+      // SEC-INTERNAL-KEY-WIF-MIGRATION-20260930: this bootstrap gate used to
+      // require only `x-drts-internal-key` (INTERNAL_KEY_EXCP_002, retired
+      // -- see docs/02-architecture/internal-key-exceptions.md section 12).
+      // It now also accepts a verified `x-drts-google-id-token` assertion,
+      // which is what partner-booking-web and referral-embed-web already
+      // send for every call to this route. This route is `@OpenRoute()`
+      // with no downstream Bearer-token guard, so it uses
+      // verifyGoogleAssertionOrInternalKey directly rather than
+      // validateInternalKey -- an arbitrary Authorization: Bearer header
+      // must not bypass this check the way it safely can for the general
+      // proxy middleware.
+      await verifyGoogleAssertionOrInternalKey(
+        request ?? {},
+        process.env.DRTS_INTERNAL_KEY,
+        {
+          ...(this.googleWorkloadIdentityAdapter
+            ? { googleWorkloadIdentityAdapter: this.googleWorkloadIdentityAdapter }
+            : {}),
+          requireCredential: true,
+        },
+      );
     }
     const resolved = await this.tenantPartnerService.issuePartnerIngressHandoff(
       command,
@@ -420,14 +557,7 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    await this.requireReferralEmbedWorkloadIdentity(request);
     const artifact: ReferralEmbedHandoffArtifact =
       await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
         command,
@@ -458,14 +588,7 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    await this.requireReferralEmbedWorkloadIdentity(request);
     const session: ReferralEmbedSession =
       await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
         command,
@@ -487,14 +610,7 @@ export class TenantPartnerController {
     },
     @Headers("x-request-id") requestId?: string,
   ) {
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    await this.requireReferralEmbedWorkloadIdentity(request);
     const session =
       await this.tenantPartnerService.recordReferralEmbedConsent(command);
     return toApiSuccessEnvelope(session, requestId);
@@ -2252,6 +2368,31 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/mail-deliveries/:deliveryId")
+  @RequireRealms("tenant", "platform", "ops")
+  async getMailDelivery(
+    @Param("deliveryId") deliveryId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const item = await this.tenantPartnerService.getMailDeliveryReceipt(
+      this.requireTenantId(tenantId),
+      deliveryId,
+      requestId,
+      identity,
+    );
+    if (!item) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MAIL_DELIVERY_NOT_FOUND",
+        "The mail delivery could not be found.",
+        { deliveryId },
+      );
+    }
+    return toApiSuccessEnvelope(item, requestId);
+  }
+
   @Get("tenant/sla")
   getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,
@@ -2353,13 +2494,16 @@ export class TenantPartnerController {
 
     try {
       if (allowInternalBootstrap) {
-        requireScopedInternalKey(
-          request ?? {},
-          process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-          {
-            header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-            requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-          },
+        // INTERNAL_KEY_EXCP_001 retired (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002):
+        // this bootstrap branch never matched EXCP_001's registered scope
+        // (see docs/02-architecture/internal-key-exceptions.md §10.1 row 4),
+        // so it always rejected before the retired key existed and must keep
+        // rejecting explicitly now that the key is gone -- no caller may
+        // reach this route without a valid partner `x-api-key`/`x-tenant-api-key`.
+        throw new ApiRequestError(
+          401,
+          "INTERNAL_KEY_UNDOCUMENTED",
+          "No documented exception metadata found for this route.",
         );
       } else {
         const partnerEntry =
@@ -2425,11 +2569,11 @@ export class TenantPartnerController {
         route.status === "completed"
           ? "receipt"
           : route.status === "cancelled" ||
-            route.status === "dispatch_failed" ||
-            route.status === "dispatch_timeout" ||
-            route.status === "no_supply"
-          ? "cancelled"
-          : "trip";
+              route.status === "dispatch_failed" ||
+              route.status === "dispatch_timeout" ||
+              route.status === "no_supply"
+            ? "cancelled"
+            : "trip";
 
       const artifactCommand = {
         entrySlug,

@@ -800,3 +800,30 @@ Evidence hashes under the local log directory above:
 - `old-runner.log`: SHA256 `9fdd25bf5af0b2cf74f8afc8428162b09db11dc4dbcddf95bb522686616687dd`.
 - `old-python-gate.log`: SHA256 `adb8fed5faee13068c7b9874405633e4b6d979b8f050778fc7329a8f6c55ddeb`.
 - `old-cleanup-gate.log`: SHA256 `b98722ea22e45dda373b1d4e59e16cfb72e8d9d48f0be26424e13175052953a4`.
+
+## WIF migration composition (2026-10-02)
+
+`SEC-INTERNAL-KEY-LIVE-MAP-PLATFORM-SESSION-WIF-20261002` merged this draft's
+published `5d23550587b1bbb6ce33be0d8948cc50a6dbd07f` into its own task branch
+at `8405c7040`. Both published histories remain intact; PR #2247 and the parent's
+blocked lifecycle are unchanged. The receiving candidate owns the WIF issuance
+slice and retains F-CONSUMER-DRIFT/F-CLEANUP-GATE repairs, offline isolation,
+mandatory candidate-bound cleanup evidence, and all real device recovery probes.
+
+The earlier internal-key provisioner and illustrative observer registry steps
+above are historical. The current operator instructions are
+[`internal-key-exceptions.md` §11](../../../../docs/02-architecture/internal-key-exceptions.md#11-sec-internal-key-live-map-platform-session-wif-20261002).
+They define separate observer and provisioning accounts/principals; the latter
+has no workforce roles and only a fixed-driver provisioning grant. Recovery now
+uses masked `DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN` plus
+`DRTS_LIVE_MAP_INVITE_CODE`; after expiry teardown exchanges a fresh WIF proof.
+These remain per-job values, never uploaded or repository secrets.
+
+The new task also reproduced a separate composition defect: exchanging another
+Google assertion on a shared observer/provisioner principal changes its durable
+version and invalidates the observer. Its 1-second production-path probe failed
+on `8405c7040` and passes with independent principals at `88b5bc275`. This does
+**not** repair F-WORKFORCE-VERSION: the original two crossed-tick observer/ops-user
+probes still demonstrate that outstanding product defect. All four C114 hosted
+acceptance keys remain pending; no service, browser, deployment, live API call,
+or cloud/variable/secret mutation was performed by this composition task.
