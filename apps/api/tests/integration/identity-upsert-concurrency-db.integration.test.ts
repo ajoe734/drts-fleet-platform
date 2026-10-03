@@ -1273,12 +1273,41 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
   it("R9-TX-DET (real Postgres): a genuine concurrent first-time collision on the exact same not-yet-committed identity forces the real SAVEPOINT recovery branch inside upsertWorkforceIdentity, observed via the actual SQL trace, and the bundle still commits with converged content", async () => {
     expect(DATABASE_URL).toBeTruthy();
 
-    const dbGate = new DatabaseService();
+    // This deliberately does NOT sequence one writer's commit before the
+    // other starts (e.g. an explicit gate transaction held open until a
+    // second connection reports itself blocked via pg_blocking_pids, then
+    // committed). An INSERT ... ON CONFLICT statement confirms its own
+    // speculatively-inserted tuple -- resolving whether it is a fresh
+    // INSERT or a DO UPDATE -- entirely within that one statement's own
+    // execution, before its surrounding transaction ever commits. A second
+    // writer that only *waits on the row lock* and resumes after the first
+    // transaction commits therefore resolves cleanly through the arbiter's
+    // ordinary ON CONFLICT DO UPDATE path: Postgres updates the
+    // already-committed row in place and never re-validates the
+    // non-arbiter primary key for an UPDATE that doesn't touch it, so the
+    // recovery branch this test exists to force is never reached (this was
+    // verified against real Postgres: a gate-commits-first version of this
+    // test reliably produced zero ROLLBACK TO SAVEPOINT statements).
+    //
+    // Two insert attempts that are *actually* concurrent -- neither one's
+    // statement having resolved before the other's own conflict check runs
+    // -- is what the production race (two parallel first-time
+    // authentications for the same account) looks like, and what reaches
+    // the non-arbiter conflict: both racers' speculative tuples are live
+    // at once, so the loser's non-arbiter primary-key index entry collides
+    // with the winner's, raising a hard 23505 that only the SAVEPOINT
+    // recovery in runUpsertWithConflictRecovery absorbs (see R9-TX above,
+    // which proved this mechanism is necessary on real Postgres: without
+    // it, the losing transaction's follow-up SELECT itself fails with
+    // 25P02 and the whole bundle is lost instead of converging). This test
+    // adds the explicit SQL-trace evidence that R9-TX alone cannot supply:
+    // a passing outcome there could equally be explained by a lucky,
+    // error-free ON CONFLICT resolution on both sides.
     const dbA = new DatabaseService();
-    const dbMonitor = new DatabaseService();
-    databases.push(dbGate, dbA, dbMonitor);
-    const repoGate = new IdentityRepository(dbGate);
+    const dbB = new DatabaseService();
+    databases.push(dbA, dbB);
     const repoA = new IdentityRepository(dbA);
+    const repoB = new IdentityRepository(dbB);
 
     const principalId = `principal_wfi_det_${randomUUID()}`;
     const principalSourceRef = `source_wfi_det_${principalId}`;
@@ -1290,152 +1319,138 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     const roleBindingSourceRef = `source_wfi_det_${roleBindingId}`;
     roleBindingIds.add(roleBindingId);
 
-    const tsA = new Date(Date.now() - 60_000).toISOString();
-    const tsGate = new Date(Date.now() - 30_000).toISOString();
-
-    const trace = traceClientQueries(dbA);
-    const gateClient = await dbGate.connect();
-    let gateCommitted = false;
-    try {
-      await gateClient.query("BEGIN");
-      const gatePidResult = await gateClient.query<{ pid: number }>(
-        "SELECT pg_backend_pid() AS pid",
-      );
-      const gatePid = gatePidResult.rows[0]!.pid;
-
-      // Gate holds the exact same, previously-unseen principal row
-      // uncommitted -- the production shape of two parallel first-time
-      // authentications racing for the identical identity.
-      await (
-        repoGate as unknown as {
-          upsertPrincipal(
-            client: PoolClient,
-            record: CanonicalIdentityPrincipalRecord,
-            insideTransaction: boolean,
-          ): Promise<CanonicalIdentityPrincipalRecord>;
-        }
-      ).upsertPrincipal(
-        gateClient,
+    const makeBundle = (ts: string) => ({
+      principal: {
+        principalId,
+        sourceRef: principalSourceRef,
+        issuer: "test_issuer",
+        subject: `sub_${principalId}`,
+        principalType: "human",
+        email: "wfi-det@example.com",
+        emailVerified: true,
+        displayName: "WFI Det Fixture",
+        status: "active",
+        createdAt: ts,
+        updatedAt: ts,
+      } satisfies CanonicalIdentityPrincipalRecord,
+      membership: {
+        membershipId,
+        sourceRef: membershipSourceRef,
+        principalId,
+        realm: "tenant",
+        scopeRef: `scope_${membershipId}`,
+        tenantId: "tenant_fixture",
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: ts,
+        updatedAt: ts,
+      } satisfies CanonicalIdentityMembershipRecord,
+      roleBindings: [
         {
-          principalId,
-          sourceRef: principalSourceRef,
-          issuer: "test_issuer",
-          subject: `sub_${principalId}`,
-          principalType: "human",
-          email: "wfi-det@example.com",
-          emailVerified: true,
-          displayName: "WFI Det Fixture",
-          status: "active",
-          createdAt: tsGate,
-          updatedAt: tsGate,
-        },
-        false,
-      );
-
-      // A's real, public, transaction-owning entry point racing for the
-      // identical principal/membership/role-binding identity. Not yet
-      // awaited: it must block on gate's still-open row.
-      const aPromise = repoA.upsertWorkforceIdentity(
-        {
-          principalId,
-          sourceRef: principalSourceRef,
-          issuer: "test_issuer",
-          subject: `sub_${principalId}`,
-          principalType: "human",
-          email: "wfi-det@example.com",
-          emailVerified: true,
-          displayName: "WFI Det Fixture",
-          status: "active",
-          createdAt: tsA,
-          updatedAt: tsA,
-        },
-        {
+          roleBindingId,
+          sourceRef: roleBindingSourceRef,
           membershipId,
-          sourceRef: membershipSourceRef,
-          principalId,
-          realm: "tenant",
-          scopeRef: `scope_${membershipId}`,
-          tenantId: "tenant_fixture",
-          partnerId: null,
-          status: "active",
-          invitedByPrincipalId: null,
-          invitationId: null,
-          createdAt: tsA,
-          updatedAt: tsA,
-        },
-        [
-          {
-            roleBindingId,
-            sourceRef: roleBindingSourceRef,
-            membershipId,
-            roleCode: "ops_user",
-            grantedByPrincipalId: null,
-            approvalId: null,
-            validFrom: tsA,
-            validTo: null,
-            createdAt: tsA,
-            updatedAt: tsA,
-          },
-        ],
-      );
+          roleCode: "ops_user",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: ts,
+          validTo: null,
+          createdAt: ts,
+          updatedAt: ts,
+        } satisfies CanonicalIdentityRoleBindingRecord,
+      ],
+    });
 
-      await waitUntilBlockedOn(dbMonitor, gatePid);
+    const tsA = new Date(Date.now() - 60_000).toISOString();
+    const tsB = new Date(Date.now() - 30_000).toISOString();
+    const bundleA = makeBundle(tsA);
+    const bundleB = makeBundle(tsB);
 
-      await gateClient.query("COMMIT");
-      gateCommitted = true;
+    const traceA = traceClientQueries(dbA);
+    const traceB = traceClientQueries(dbB);
 
-      const result = await aPromise;
+    // Both racers' real, public, transaction-owning entry points fired
+    // together with no await between them, so neither's statement can
+    // have resolved before the other's own conflict check runs.
+    const [resultA, resultB] = await Promise.all([
+      repoA.upsertWorkforceIdentity(
+        bundleA.principal,
+        bundleA.membership,
+        bundleA.roleBindings,
+      ),
+      repoB.upsertWorkforceIdentity(
+        bundleB.principal,
+        bundleB.membership,
+        bundleB.roleBindings,
+      ),
+    ]);
 
-      // Convergence: both racers' content for this source_ref must agree
-      // on exactly one of the two writers' timestamps -- never a torn mix.
-      expect([tsA, tsGate]).toContain(result.principal.updatedAt);
+    // Convergence: both racers' content for this source_ref must agree on
+    // exactly one of the two writers' timestamps -- never a torn mix.
+    expect(resultA.principal.updatedAt).toBe(resultB.principal.updatedAt);
+    expect([tsA, tsB]).toContain(resultA.principal.updatedAt);
+    expect(resultA.membership.updatedAt).toBe(resultB.membership.updatedAt);
+    expect(resultA.roleBindings[0]?.updatedAt).toBe(
+      resultB.roleBindings[0]?.updatedAt,
+    );
 
-      const principalRow = await dbMonitor.query<{ updated_at: Date }>(
-        `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
-        [principalId],
-      );
-      expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
-        result.principal.updatedAt,
-      );
-      const membershipRow = await dbMonitor.query<{ updated_at: Date }>(
-        `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
-        [membershipId],
-      );
-      expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
-        result.membership.updatedAt,
-      );
+    const principalRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalId],
+    );
+    expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
+      resultA.principal.updatedAt,
+    );
+    const membershipRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+      [membershipId],
+    );
+    expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
+      resultA.membership.updatedAt,
+    );
 
-      // The real recovery branch -- not an injected double -- actually
-      // fired against real Postgres on A's connection: SAVEPOINT before
-      // the attempt, a genuine unique-violation, ROLLBACK TO SAVEPOINT,
-      // then a successful retry, and the whole bundle still reached
-      // COMMIT rather than being lost to an aborted transaction.
-      //
-      // repoA's constructor also fires an unawaited, best-effort
-      // ensureDefaultPlatformAccount() seed call that runs on a separate
-      // connection from this same traced DatabaseService; isolate A's own
-      // connection (the one that actually inserted this test's
-      // `principalId`) before counting SAVEPOINT/ROLLBACK traffic, so that
-      // unrelated background seeding never pollutes this assertion.
-      const aQueries = findConnectionByBoundParam(trace, principalId).map(
-        (q) => q.sql,
-      );
-      const savepointHits = aQueries.filter((sql) =>
-        sql.startsWith("SAVEPOINT upsert_principal_sp"),
-      );
-      const rollbackToHits = aQueries.filter((sql) =>
-        sql.startsWith("ROLLBACK TO SAVEPOINT upsert_principal_sp"),
-      );
-      expect(savepointHits).toHaveLength(1);
-      expect(rollbackToHits).toHaveLength(1);
-      expect(aQueries).toContain("COMMIT");
-      expect(aQueries).not.toContain("ROLLBACK");
-    } finally {
-      if (!gateCommitted) {
-        await gateClient.query("ROLLBACK").catch(() => undefined);
-      }
-      gateClient.release();
-    }
+    // The real recovery branch -- not an injected double -- actually fired
+    // against real Postgres on at least one racer's connection: SAVEPOINT
+    // before the attempt, a genuine unique violation, ROLLBACK TO
+    // SAVEPOINT, then a successful retry, and that racer's bundle still
+    // reached COMMIT rather than being lost to an aborted transaction.
+    //
+    // Both repos' constructors also fire an unawaited, best-effort
+    // ensureDefaultPlatformAccount()/ensureLiveMapObserverAccount() seed
+    // call on a separate connection from this same traced DatabaseService;
+    // isolate each racer's own connection (the one that actually inserted
+    // this test's `principalId`) before counting SAVEPOINT/ROLLBACK
+    // traffic, so unrelated background seeding never pollutes this
+    // assertion.
+    const aQueries = findConnectionByBoundParam(traceA, principalId).map(
+      (q) => q.sql,
+    );
+    const bQueries = findConnectionByBoundParam(traceB, principalId).map(
+      (q) => q.sql,
+    );
+    const countHits = (queries: string[], prefix: string) =>
+      queries.filter((sql) => sql.startsWith(prefix)).length;
+
+    // runUpsertWithConflictRecovery always takes a SAVEPOINT before its
+    // first attempt, win or lose, so each racer's own connection shows
+    // exactly one.
+    expect(countHits(aQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+    expect(countHits(bQueries, "SAVEPOINT upsert_principal_sp")).toBe(1);
+
+    // Exactly one of the two genuinely-concurrent first-time inserts must
+    // lose the race on the non-arbiter primary key and recover via
+    // ROLLBACK TO SAVEPOINT + retry; which one loses is not deterministic,
+    // only that the recovery branch fired on at least one of them.
+    const rollbackToHits =
+      countHits(aQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") +
+      countHits(bQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp");
+    expect(rollbackToHits).toBeGreaterThanOrEqual(1);
+    expect(aQueries).toContain("COMMIT");
+    expect(bQueries).toContain("COMMIT");
+    expect(aQueries).not.toContain("ROLLBACK");
+    expect(bQueries).not.toContain("ROLLBACK");
   });
 
   // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX-V (second reopen): the real
