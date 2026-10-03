@@ -55,7 +55,13 @@ Other completed checks (all exit 0):
 - Strict standalone TypeScript check of the three newly added unit files with ES2022, ESNext/Bundler resolution, decorators/metadata and skipLibCheck.
 - ESLint with max-warnings=0 over the billing module, changed API-client/UI sources, new tests and updated legacy/finance/idempotency tests.
 
-Full repository unit results and final-candidate hosted review/CI are recorded separately when available; the focused result above does not assert that all repository checks or hosted acceptance passed.
+The broader `tests/unit` run with only db-apply.test.ts excluded completed on the same implementation tree: **365 files passed, 3 files skipped, 3981 tests passed, 43 tests skipped**. Overall exit **1**, not green: the following three unchanged suites explicitly fail their suite setup without an isolated real PostgreSQL URL (22 of the skipped tests belong to these failed suite setups):
+
+- `tests/unit/system-remediation/sr-qa-concurrency-001/dispatch-reservation-concurrency.test.ts`
+- `tests/unit/system-remediation/sr-qa-concurrency-001/idempotency-concurrency.test.ts`
+- `tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-db-persistence.test.ts`
+
+These concrete VM/resource blockers are preserved, not suppressed or labeled passing. All executed test assertions passed; the three required SQL suite setups did not. The machine-only result is proof-repository-unit.log (239.19 seconds, exit 1). A map unit test regenerated two provenance fields in a historical tracked fixture; that generated output was preserved machine-locally and only this task-created fixture diff was restored, rather than committing synthetic evidence as a new live closeout. Final-candidate hosted review/CI remains required; neither the focused result nor this broader run asserts every repository/live gate passed.
 
 **Local check-scope correction:** the first broad `vitest run tests/unit` was stopped (exit 143) after its worker was observed invoking the existing `tests/unit/db-apply.test.ts`. Despite its directory, that file unconditionally uses psql / Docker Compose exec and creates synthetic databases on an existing container; unsetting DATABASE_URL does not disable it. Its subprocesses were terminated, not treated as a passed unit check. No server/container was started and no existing database/volume was removed as cleanup. The task did not subsequently query or manipulate the existing database. This run must not be cited as proof that no DB operation was attempted or that the DB gate passed. Owners of other broad checks were notified. The corrected local selection explicitly excludes this file; real migration/concurrency acceptance belongs in hosted CI. No committed test or hosted CI gate was disabled. Early local setup failures (shared dependency symlinks; inherited NODE_ENV=production) were resolved by a private frozen offline install and explicit test environment, not by changing production guards.
 
