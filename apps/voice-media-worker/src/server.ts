@@ -63,11 +63,14 @@ async function main() {
     "[voice-media-worker] Dialogue turns run against the real VoiceDialogueEngine/VoiceDialogueState " +
       "machinery but every tool proposal other than request_handoff forces an honest 'unavailable' " +
       "handoff, and persist() is an in-process-only no-op: apps/api's VoiceToolGatewayService/" +
-      "VoiceSessionService already exist and are DB-backed, but apps/api exposes no authenticated " +
-      "HTTP route for a live turn to reach them, and this worker has no capability-token issuance " +
-      "path to call one if it existed -- that reviewed cross-service contract (route + token " +
-      "issuance), not a missing 'apps/api/src/modules/cti-ivr' folder, is the exact unresolved " +
-      "decision. See docs/04-uat/audit-voice-application-wiring-20261003.md.",
+      "VoiceSessionService, and the VoiceCapabilityService/VoiceCapabilityGuard token exchange SD " +
+      "§4.2 specifies, already exist and are DB-backed/wired on the verification side. The precise " +
+      "gaps are narrower: VoiceCapabilityService.issue is never called from any route or job (no " +
+      "issuance call site/trust context for a specific live call), voice-booking.controller.ts " +
+      "exposes no HTTP route guarded by VoiceCapabilityGuard at all, and this worker has no HTTP " +
+      "client to call apps/api with -- not a missing 'apps/api/src/modules/cti-ivr' folder and not " +
+      "an undesigned verification contract. See " +
+      "docs/04-uat/audit-voice-application-wiring-20261003.md.",
   );
 
   let draining = false;

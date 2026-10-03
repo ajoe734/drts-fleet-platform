@@ -13,9 +13,29 @@ import type { VoiceMediaWorkerEvent } from "../media-session";
 
 /** Speaks a completed turn's own verified prompt text back on a session's
  * real TTS pipeline. Never invoked with empty text (see
- * `VoiceCallTurnCoordinator.runTurn`). */
+ * `VoiceCallTurnCoordinator.runTurn`).
+ *
+ * `signal` and `mediaEpoch` let the implementation fence output that was
+ * still valid when `speak` was *called* but has since been superseded by
+ * the time its own internal synthesis settles (Codex reopen round 2, R2/R3):
+ * release, barge-in, a newer final, and a turn timeout all abort the same
+ * `signal`; a mismatch between `mediaEpoch` (the session's media epoch when
+ * the triggering transcript was captured) and the session's *current* epoch
+ * at publish time means the media output owner changed mid-turn (e.g.
+ * handoff/reconnect) and this turn's audio must never be attributed to that
+ * new owner. The coordinator itself only checks `signal`/`released` once,
+ * immediately before calling `speak` (see `executeTurn`'s `isCurrent`); it
+ * cannot re-check after `speak`'s own internal await without the
+ * implementation telling it when that await happens, so the implementation
+ * must re-check both values itself after any such await, before publishing
+ * audio. */
 export interface VoiceCallTurnSpeaker {
-  speak(text: string, languageCode: string): Promise<void>;
+  speak(
+    text: string,
+    languageCode: string,
+    signal: AbortSignal,
+    mediaEpoch: number,
+  ): Promise<void>;
 }
 
 /**
@@ -64,15 +84,30 @@ const DEFAULT_TURN_TIMEOUT_MS = 8_000;
  * "CTI/IVR dialogue orchestration layer" referenced in
  * `../server/session-composer.ts`). `apps/api/src/modules/voice-booking/`'s
  * `VoiceToolGatewayService`/`VoiceSessionService` are real and DB-backed --
- * the gap is not that they are missing. It is that apps/api exposes no
- * authenticated HTTP route for a live call's turn to reach them, and this
- * worker has no capability-token issuance path to call one if it existed;
- * that reviewed cross-service contract (a new route plus a token-issuance
- * flow) is the exact unresolved decision, precisely because it needs
- * coordinated design on both sides, not a speculative endpoint this task
- * invents unilaterally. `voice-media-worker` also carries no database
- * dependency at all (see its package.json) and must not acquire one here
- * just to reach that state.
+ * the gap is not that they are missing. The token-issuance *design* is also
+ * not missing: `apps/api/src/common/auth/voice-capability.service.ts`
+ * (`VoiceCapabilityService.issue`/`.verify`) and
+ * `voice-capability.guard.ts` (`VoiceCapabilityGuard`, re-checking
+ * scope/leaseEpoch against durable `voice.session`/`voice.resource_scope`
+ * state) already implement SD §4.2's two-stage workload-identity-exchanged-
+ * for-session-capability flow end to end on the verification side
+ * (corrected this round -- an earlier version of this comment said this
+ * contract "has never been designed on either side," which `Codex`'s
+ * second reopen correctly called too broad). What is genuinely missing is
+ * narrower: (1) `VoiceCapabilityService.issue` is never called from
+ * anywhere in production code -- no route or job mints a capability token
+ * for a specific live call, so there is no *issuance call site or trust
+ * context* yet, even though verification is ready to consume one; (2)
+ * `voice-booking.controller.ts` exposes no HTTP route guarded by
+ * `VoiceCapabilityGuard` at all (only `metrics/cohort`, `usage/*`, and
+ * `work-items/:workId/repair`), so there is nothing for a minted token to
+ * call even once issued; (3) this worker has no HTTP client to call
+ * apps/api with. Designing who triggers issuance and when, adding the
+ * guarded route, and adding the worker-side client together are the
+ * precisely-scoped cross-service contract that needs coordinated design on
+ * both sides, not a speculative endpoint this task invents unilaterally.
+ * `voice-media-worker` also carries no database dependency at all (see its
+ * package.json) and must not acquire one here just to reach that state.
  *
  * This coordinator therefore runs the real `VoiceDialogueEngine` /
  * `VoiceDialogueState` machinery against every admitted final transcript --
@@ -183,7 +218,14 @@ export class VoiceCallTurnCoordinator {
     };
 
     turnSession.queue = turnSession.queue.then(() =>
-      this.runTurn(turnSession, request, abortController, event.payload.language, speaker),
+      this.runTurn(
+        turnSession,
+        request,
+        abortController,
+        event.payload.language,
+        speaker,
+        event.mediaEpoch,
+      ),
     );
   }
 
@@ -200,6 +242,7 @@ export class VoiceCallTurnCoordinator {
     abortController: AbortController,
     languageCode: string,
     speaker: VoiceCallTurnSpeaker,
+    mediaEpoch: number,
   ): Promise<void> {
     return new Promise<void>((resolveQueueStage) => {
       let settled = false;
@@ -212,15 +255,25 @@ export class VoiceCallTurnCoordinator {
         () => {
           // Supersede: a hung speaker/provider must not keep blocking this
           // attachment's queue past its own turn's deadline. The dangling
-          // operation (if it later settles) is fenced by the `isCurrent`
-          // check in `executeTurn`, never published.
+          // operation (if it later settles) is fenced by `speak`'s own
+          // post-await `signal` re-check (R3, Codex reopen round 2: timeout
+          // must not just stop blocking *later* turns, it must also stop
+          // *this* turn's own output from publishing once the deadline has
+          // passed), never published.
           abortController.abort();
           releaseQueue();
         },
         Math.max(0, request.deadline - Date.now()),
       );
 
-      this.executeTurn(turnSession, request, abortController, languageCode, speaker)
+      this.executeTurn(
+        turnSession,
+        request,
+        abortController,
+        languageCode,
+        speaker,
+        mediaEpoch,
+      )
         .catch((error) => {
           if (!this.isExpectedSupersession(error)) {
             console.error("[voice-call-turn-coordinator] turn failed", error);
@@ -239,6 +292,7 @@ export class VoiceCallTurnCoordinator {
     abortController: AbortController,
     languageCode: string,
     speaker: VoiceCallTurnSpeaker,
+    mediaEpoch: number,
   ): Promise<void> {
     const ports: VoiceDialogueTurnPorts = {
       persist: async () => {
@@ -259,16 +313,25 @@ export class VoiceCallTurnCoordinator {
       ports,
     );
     // Only the turn that is still this attachment's current, non-aborted
-    // one may actually speak -- a barge-in, release, timeout, or newer
-    // final may have superseded it in the time it took `engine.turn` to
-    // resolve (R2/R3): `activeAbort` having moved on (or already having
-    // been aborted in place) both mean this result is stale.
+    // one may even be *offered* to the speaker -- a barge-in, release,
+    // timeout, or newer final may have superseded it in the time it took
+    // `engine.turn` to resolve (R2/R3): `activeAbort` having moved on (or
+    // already having been aborted in place) both mean this result is stale.
+    // This is necessary but not sufficient: `speak` itself does its own
+    // synthesis, which can still be superseded *after* this check passes
+    // and before it publishes -- see the interface doc on
+    // `VoiceCallTurnSpeaker.speak`.
     const isCurrent =
       !turnSession.released &&
       turnSession.activeAbort === abortController &&
       !abortController.signal.aborted;
     if (result.prompt && isCurrent) {
-      await speaker.speak(result.prompt, languageCode);
+      await speaker.speak(
+        result.prompt,
+        languageCode,
+        abortController.signal,
+        mediaEpoch,
+      );
     }
   }
 

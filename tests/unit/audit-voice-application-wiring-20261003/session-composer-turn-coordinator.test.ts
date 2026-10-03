@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { VoiceSessionComposer } from "../../../apps/voice-media-worker/src/server/session-composer";
 import { VoiceCallTurnCoordinator } from "../../../apps/voice-media-worker/src/dialogue/call-turn-coordinator";
 import { OpenAiRealtimeFixtureAdapter } from "../../../apps/voice-media-worker/src/providers/native-voice/native-voice-adapter";
+import type { VoiceDialogueProvider } from "../../../apps/voice-media-worker/src/dialogue/voice-dialogue-provider";
 import type {
   VoiceAsrSegmentResult,
   VoiceSpeechToTextAdapter,
@@ -141,6 +142,49 @@ class DeferredTtsAdapter implements VoiceTextToSpeechAdapter {
   }
 }
 
+const EMPTY_FINAL_OUTPUT = {
+  intent: "unknown",
+  text: "",
+  terminal: "turn_complete",
+  slots: [],
+  tools: [],
+  usage: { inputTokens: null, outputTokens: null },
+};
+
+/** A dialogue provider whose *first* `propose` call only resolves once the
+ * test explicitly releases it -- used to hold a turn inside the engine's
+ * own propose stage, *before* `startPlayback`/`synthesize` is even reached,
+ * which is what lets a media-epoch advance land somewhere `startPlayback`'s
+ * own post-synthesize generation check cannot see it (Codex reopen round
+ * 2, R2's second sub-case). Every later call resolves immediately with the
+ * same empty-collection-prompt output, so a later, legitimate turn on the
+ * same attachment is never stuck behind a probe this test has already
+ * observed. */
+function deferredProvider(): {
+  provider: VoiceDialogueProvider;
+  resolve(output: unknown): void;
+  proposeCalls: () => number;
+} {
+  let release: ((output: unknown) => void) | undefined;
+  let proposeCalls = 0;
+  const provider: VoiceDialogueProvider = {
+    mode: "fixture",
+    profileVersion: "deferred-composer:1",
+    propose() {
+      proposeCalls += 1;
+      if (proposeCalls > 1) return Promise.resolve(EMPTY_FINAL_OUTPUT);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+  };
+  return {
+    provider,
+    resolve: (output: unknown) => release?.(output),
+    proposeCalls: () => proposeCalls,
+  };
+}
+
 describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceCallTurnCoordinator composed", () => {
   /**
    * R1: a late final delivered by an old, already-released attachment's
@@ -250,5 +294,227 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     expect(
       sentBinary.some((chunk) => chunk.toString("utf8").includes("stale-audio")),
     ).toBe(false);
+  });
+
+  /**
+   * R1, Codex reopen round 2 (second reopen, `codex-20261003T065856Z-cf25c3e3`):
+   * `drain()` -> `beginClose()` -> `closeAsr()` can synchronously trigger a
+   * drain final through the ASR adapter's `onResult` callback, *before* the
+   * channel itself ever emits "close". That final must still be observable
+   * (forwarded to `session.event`), but must never be admitted as new
+   * conversational input or produce TTS output -- `beginClose` must release
+   * the turn attachment before calling `closeAsr`, not only on the
+   * channel's own "close" event.
+   */
+  it("retains a drain final as observable evidence only, never admitting it as a new turn", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
+
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-drain", channel);
+
+    // Drain begins teardown (closeAsr -> asr.close(), held) without the
+    // channel itself closing.
+    const draining = composer.drain();
+
+    // A final delivered while that teardown is still in flight -- the real
+    // "drain final" scenario.
+    asr.emitFinal("救命", "seg-drain-final");
+    await flush();
+
+    expect(sentBinary).toHaveLength(0);
+    expect(
+      events.some(
+        (event) =>
+          (event as { event: { payload?: { segmentId?: string } } }).event
+            .payload?.segmentId === "seg-drain-final",
+      ),
+    ).toBe(true);
+
+    asr.settleClose();
+    await draining;
+  });
+
+  /**
+   * R1, same reopen: a turn already blocked inside a held TTS synthesis
+   * when the channel closes must never publish once it resolves -- closing
+   * must abort it the same way release always has, through the common
+   * `beginClose` boundary.
+   */
+  it("discards output from a turn whose synthesis is still outstanding when the channel closes", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeferredTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-close-pending", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(tts.calls).toBe(1);
+
+    (channel as unknown as EventEmitter).emit("close", 1000, "Normal closure");
+
+    tts.settle();
+    await flush();
+
+    expect(sentBinary).toHaveLength(0);
+
+    // A duplicate close emission (defensive guard) must not throw or
+    // double-release.
+    expect(() =>
+      (channel as unknown as EventEmitter).emit("close", 1000, "Normal closure"),
+    ).not.toThrow();
+  });
+
+  /**
+   * R2, same reopen: a *newer final* (no barge-in control frame at all)
+   * must fence a turn whose synthesis is still outstanding, exactly like
+   * barge-in does -- `VoiceCallTurnSpeaker.speak`'s `signal` parameter is
+   * what carries that, since neither `startPlayback`'s nor the session's
+   * own generation bookkeeping changes for a plain newer-final
+   * supersession.
+   */
+  it("discards synthesized audio for a turn superseded by a newer final, with no barge-in involved", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeferredTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-newer-final", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(tts.calls).toBe(1);
+
+    // A second final while the first turn's synthesis is still held --
+    // queued behind it, not yet running.
+    asr.emitFinal("救命", "seg-2");
+    await flush(3);
+    expect(tts.calls).toBe(1);
+
+    // Resolve the first (now-superseded) turn's synthesis: must never
+    // publish.
+    tts.settle();
+    await flush(5);
+    expect(sentBinary).toHaveLength(0);
+
+    // The second turn can now run and reaches its own synthesis call.
+    expect(tts.calls).toBe(2);
+    tts.settle();
+    await flush();
+
+    expect(sentBinary.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * R2, same reopen, second sub-case: a media-epoch advance (handoff/
+   * reconnect) that happens *before* `startPlayback` is even called --
+   * while the engine's own `propose` stage is still outstanding -- must
+   * not let that turn's eventual output be laundered under the new epoch.
+   * `startPlayback`'s own post-synthesize generation check cannot catch
+   * this: it only captures `activeGeneration` at the moment it is called,
+   * which by then is already the *new* value. Only comparing against the
+   * epoch captured when the triggering transcript actually arrived (R2's
+   * `mediaEpoch` parameter) catches it.
+   */
+  it("discards synthesized audio laundered across a media-epoch advance that happened during the engine's propose stage", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const deferred = deferredProvider();
+    const coordinator = new VoiceCallTurnCoordinator(() => deferred.provider);
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-epoch-launder", channel);
+    const session = composer.get("sess-epoch-launder")!;
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(deferred.proposeCalls()).toBe(1);
+
+    // The media owner changes (e.g. handoff/reconnect) while this turn's
+    // propose is still outstanding -- before it has even reached
+    // `startPlayback`.
+    expect(session.advanceMediaEpoch()).toBe(2);
+
+    deferred.resolve(EMPTY_FINAL_OUTPUT);
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+
+    // A legitimate later turn, captured at the new epoch, still produces
+    // output normally -- the epoch fence only discards the laundered
+    // turn, it doesn't wedge the attachment.
+    asr.emitFinal("救命", "seg-2");
+    await flush(5);
+
+    expect(sentBinary.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * R3, same reopen: a turn whose own queue-stage timeout has already
+   * fired must never publish once its still-outstanding synthesis
+   * eventually resolves -- the timeout must fence *this* turn's own
+   * output, not just stop blocking later turns.
+   */
+  it("fences output from a turn whose synthesis is still outstanding when its own timeout fires", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeferredTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      40,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-timeout-fence", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(tts.calls).toBe(1);
+
+    // Past the 40ms deadline, with the synthesis still held.
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    await flush();
+
+    tts.settle();
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+
+    // A later final on the same attachment still reaches its own
+    // synthesis and speaks normally -- the timeout only fences output, it
+    // does not wedge the attachment.
+    asr.emitFinal("", "seg-2");
+    await flush(3);
+    expect(tts.calls).toBe(2);
+    tts.settle();
+    await flush();
+
+    expect(sentBinary.length).toBeGreaterThan(0);
   });
 });

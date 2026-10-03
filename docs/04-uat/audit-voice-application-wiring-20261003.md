@@ -421,5 +421,226 @@ per the reviewer's explicit round-2 instruction not to repeat this
 silently; the command actually relied on for this round's evidence is the
 filtered 12-file/129-test run above.
 
+`same_sha_review_ci`: hosted CI passed on `cda836b7b` (PR #2293); handed off,
+but Codex had already independently reopened the prior candidate
+(`6fbb7f31b`) a second time before this commit landed -- see "Round-4"
+below, which is what this handoff actually carries.
+
+## Round-4: Codex's second reopen (`codex-20261003T065856Z-cf25c3e3`) -- addressed on this candidate
+
+Codex reviewed `6fbb7f31bd41e03789d43e655191effa20f650ef` a second time
+(worker outcome `codex-20261003T065856Z-cf25c3e3` in `ai-status.json`,
+recorded `2026-10-03T07:06:13Z`) and reopened again. `cda836b7b` (the
+commit immediately before this round) only fixed the unrelated CI
+typecheck failure above and did not yet address these findings -- the
+owner session that pushed it attempted a handoff before this reopen's
+findings had been read against the new candidate; this round corrects
+that and does the actual fix work. Per `AI_COLLABORATION_GUIDE.md` §0.7's
+"same defect, two consecutive rounds reopened" rule (R4 was explicitly
+marked "repeated" by this reopen, having also been raised in round 1's
+reopen), the reviewer had already supplied minimal-repro-level detail in
+the review artifact; this round carries that forward precisely rather than
+resubmitting unfixed work.
+
+### R1 (repeated sub-case) -- drain/close didn't invalidate admission or pending output at the common boundary
+
+**What was still wrong.** `VoiceSessionComposer.drain()` -> `beginClose()`
+-> `session.closeAsr()` never released the turn attachment; only the
+channel's own `"close"` handler did. `closeAsr()`'s `endAudio`/`close` can
+synchronously (or asynchronously, via a streaming adapter's `onResult`)
+deliver a "drain final" through the still-live attachment, which
+`eventSink` forwarded straight into `turnCoordinator.handle()` -- admitting
+it as new conversational input and, if a prompt resulted, actually
+speaking it, during what should be a shutdown-only drain.
+
+**Fix.** `call-turn-coordinator.ts:17-35` (interface doc) and
+`session-composer.ts`: `ComposedSession` now carries its `turnAttachment`;
+`beginClose` (the one boundary both the channel's `"close"` handler and
+`drain()` go through) releases it -- which also aborts any turn still
+active/queued -- *before* calling `closeAsr`, not only on the channel's own
+`"close"` event. A final that still arrives during/after that teardown
+finds an already-released attachment: `handle()` is a no-op for it (never
+admitted, never spoken), while the session-composer's `eventSink` still
+unconditionally forwards every event to `this.emit("session.event", ...)`
+and `sendEvent`, so it remains observable evidence, per
+`EXECUTION.md`/SD §5.3-§5.4's "retain as evidence, never as new input."
+
+**Before -> after.**
+`tests/unit/audit-voice-application-wiring-20261003/session-composer-turn-coordinator.test.ts`:
+- "retains a drain final as observable evidence only, never admitting it as
+  a new turn" -- before the fix, a final delivered while `drain()`'s
+  `closeAsr` teardown was still in flight reached the speaker (TTS output
+  was produced); after the fix, `sentBinary` stays empty while the event is
+  still present in the composer's own `"session.event"` stream.
+- "discards output from a turn whose synthesis is still outstanding when
+  the channel closes" -- before the fix, a close while a turn's TTS
+  synthesis was held still let that synthesis's eventual resolution publish
+  audio; after the fix it is discarded. Also exercises the reviewer's named
+  "duplicate close" case: emitting `"close"` twice does not throw or
+  double-release.
+
+### R2 (repeated sub-case) -- a newer final (no barge-in) and a media-epoch advance mid-propose could still launder stale/foreign audio through
+
+**What was still wrong.** `executeTurn`'s `isCurrent` check (object-identity
+abort/released check) ran only once, immediately before calling
+`speaker.speak`. The old two-parameter `VoiceCallTurnSpeaker.speak(text,
+languageCode)` had no way to re-check validity after its own internal
+`startPlayback`/`synthesize` await -- so a turn that was current at the
+moment `speak` was called, but was superseded (by a newer final, with no
+`speech.started` barge-in frame at all) while synthesis was still in
+flight, still published once that synthesis resolved. Separately,
+`VoiceMediaWorkerSession.startPlayback`'s own post-synthesize generation
+check captures `activeGeneration` *at the moment `startPlayback` is
+called* -- if a media-epoch advance (e.g. handoff/reconnect) happens
+*before* `startPlayback` is even reached (while the engine's own `propose`
+stage is still outstanding), that capture already sees the *new* epoch and
+the check never fires, laundering stale input into the new owner's output.
+
+**Fix.** `VoiceCallTurnSpeaker.speak` now takes two more parameters:
+`signal` (the turn's own `AbortSignal` -- the same one release, barge-in,
+a newer final, and timeout all abort) and `mediaEpoch` (the session's media
+epoch captured from `event.mediaEpoch` when the *triggering transcript*
+was admitted, threaded through `handle` -> `runTurn` -> `executeTurn` ->
+`speak`). `session-composer.ts`'s `speak` implementation re-checks both
+*after* `await session.startPlayback(...)` resolves, immediately before
+sending any chunk: `if (signal.aborted || session.getMediaEpoch() !==
+mediaEpoch) return;`. `signal` catches release/barge-in/newer-final/timeout
+(all four abort the same controller); `mediaEpoch` catches the epoch-advance-
+during-propose case that `signal` alone cannot see (nothing in the
+coordinator aborts for a plain external epoch advance) and that
+`startPlayback`'s own check cannot see either (it captures too late).
+
+**Before -> after.**
+`session-composer-turn-coordinator.test.ts`:
+- "discards synthesized audio for a turn superseded by a newer final, with
+  no barge-in involved" -- before the fix, resolving the first (superseded)
+  turn's held synthesis published its audio; after the fix it is discarded,
+  and the second (current) turn's own synthesis still publishes normally.
+- "discards synthesized audio laundered across a media-epoch advance that
+  happened during the engine's propose stage" -- before the fix, advancing
+  the media epoch while a turn's `propose` was held and then resolving it
+  still published that turn's audio under the new epoch (reproducing the
+  reviewer's exact "laundering" probe); after the fix it is discarded,
+  while a legitimate later turn captured *at* the new epoch still publishes
+  normally.
+`call-turn-coordinator.test.ts`'s pre-existing R1/R2 cases (release-abort,
+barge-in-abort) still pass unchanged -- the new parameters are additive to
+`speak`'s signature, not a behavior change for callers that only consult
+`signal` at the point they are called (the hung-speaker test double does
+not touch the new parameters at all and remains valid, since a function
+with fewer parameters than an interface requires still satisfies it
+structurally).
+
+### R3 (repeated sub-case) -- timeout stopped blocking later turns but did not fence its own turn's late output
+
+**What was still wrong.** `runTurn`'s deadline timer called
+`abortController.abort()` and released the queue stage, but the turn that
+was still inside `speaker.speak` when the deadline fired had already
+passed `executeTurn`'s one-time `isCurrent` check; with the old two-
+parameter `speak`, nothing re-checked the (now-aborted) controller after
+`startPlayback`'s synthesis eventually resolved, so a hung/slow TTS call
+could still publish stale audio well past its own `turnTimeoutMs`.
+
+**Fix.** The same `signal` re-check described under R2 covers this for
+free: the deadline timer aborts the exact controller whose `signal` was
+threaded into `speak`, so a synthesis that resolves after the deadline is
+discarded by the same `if (signal.aborted ...) return;` check, with no
+separate mechanism needed.
+
+**Before -> after.**
+`session-composer-turn-coordinator.test.ts` ("fences output from a turn
+whose synthesis is still outstanding when its own timeout fires") --
+`turnTimeoutMs=40`; before the fix, resolving the held synthesis after a
+90ms wait still published audio; after the fix it is discarded, and a
+later final on the same attachment still reaches its own synthesis and
+speaks normally (the attachment is not wedged by the fence).
+
+### R4 (repeated, P1) -- the round-1/round-2 cti-ivr attribution was too broad; corrected, no new functionality added
+
+**What round 2 got wrong, specifically (per the reopen).** The round-2
+artifact/comments said the tool-execution cross-service contract "has
+never been designed on either side." Re-inspecting
+`apps/api/src/common/auth/` this round found that too broad, exactly as
+the reviewer said: `VoiceCapabilityService` (`issue`/`verify`) and
+`VoiceCapabilityGuard` (re-checking scope/leaseEpoch against durable
+`voice.session`/`voice.resource_scope` state via `VoiceBookingRepository`)
+already implement SD §4.2's two-stage capability-exchange flow in full on
+the *verification* side -- that design and implementation is not missing.
+
+**What is genuinely still missing, named precisely this round.**
+`rg -n "capabilityService.issue|VoiceCapabilityService" apps/api/src`
+confirms `VoiceCapabilityService.issue` is referenced only inside its own
+class and the guard's constructor type -- no route, job, or other call site
+anywhere in `apps/api/src` ever calls it. `voice-booking.controller.ts`
+(read in full this round) exposes exactly four routes --
+`metrics/cohort`, `usage/records`, `usage/rate-cards`,
+`usage/reconcile`, `work-items/:workId/repair` -- none guarded by
+`VoiceCapabilityGuard`, none accepting a tool-execution request shape. So
+the precise, narrower gap is: (1) no issuance call site/trust context (who
+mints a token for *this* live call, under what authority, has never been
+decided); (2) no HTTP route guarded by `VoiceCapabilityGuard` for a tool
+call to reach `VoiceToolGatewayService` through; (3) `voice-media-worker`
+has no HTTP client dependency to call apps/api with at all. None of these
+three are implemented this round -- doing so would still be the
+speculative, unilaterally-designed endpoint `EXECUTION.md` forbids, and
+(1) in particular is a trust/authority design decision, not an API-shape
+one, that needs coordination beyond this task.
+
+**Fix (documentation precision only; no behavior change).**
+`call-turn-coordinator.ts`'s class doc and `server.ts`'s corresponding
+`console.warn` are rewritten to state the three precise gaps above instead
+of the broad "never designed on either side" framing, explicitly crediting
+the reviewer's correction. `persist()`, `executeTools()`, and the recording
+boundary (S3 dependency gate; closure-ledger call-authority gate) are
+unchanged from round 2 -- still correctly blocked, for the same
+previously-stated reasons.
+
+**Before -> after.** Documentation-only; verified by re-reading the
+corrected comments against `apps/api/src/common/auth/voice-capability.service.ts`,
+`voice-capability.guard.ts`, and `apps/api/src/modules/voice-booking/voice-booking.controller.ts`
+(all re-read in full this round) and confirming every claim in the
+corrected text against that source, plus the `rg` search above for the
+issuance call-site claim.
+
+## Round-4 verification
+
+| Finding / acceptance key | Source basis & change location | Before -> after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| R1 (repeated) `authority_epoch_consent_fences` | `session-composer.ts` (`beginClose` releases `turnAttachment` before `closeAsr`; `ComposedSession.turnAttachment`) | Before: a drain/close-time final could still be admitted as a new turn and speak. After: `beginClose` is the one release boundary for both close and drain; a late final is observable-only. | `pnpm --filter @drts/voice-media-worker typecheck`/`lint`: exit 0. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`: 5 files -> see count below; new drain/close-pending/duplicate-close cases pass. | Still proven only against this process's own in-memory attachment/turn state, not apps/api's `voice.session` CAS (unreachable from this process -- see R4). |
+| R2 (repeated) `authority_epoch_consent_fences` | `call-turn-coordinator.ts` (`VoiceCallTurnSpeaker.speak` gains `signal`/`mediaEpoch`; `handle`/`runTurn`/`executeTurn` thread `event.mediaEpoch` through); `session-composer.ts` (`speak` re-checks both after `startPlayback`) | Before: a newer final or a mid-propose epoch advance could still let a superseded/foreign-epoch turn's audio publish. After: both are discarded; a legitimate current/new-epoch turn still publishes. | Same vitest run: "discards synthesized audio for a turn superseded by a newer final, with no barge-in involved" and "discards synthesized audio laundered across a media-epoch advance that happened during the engine's propose stage" both pass. Regression re-run (see below): 210/210 pass, 0 regressions from the signature change. | Barge-in/epoch fencing is local to this worker's own bookkeeping; no live TTS/CTI vendor exists to test the real external boundary against (unchanged limitation from prior rounds). |
+| R3 (repeated) `composed_turn_and_recording_path` | `call-turn-coordinator.ts`/`session-composer.ts` (same `signal` re-check as R2, applied to the deadline-timeout case) | Before: a turn's own already-in-flight `speak` could still publish after its `turnTimeoutMs` deadline passed. After: discarded by the same post-await `signal` check; a later final on the attachment still speaks normally. | Same vitest run: "fences output from a turn whose synthesis is still outstanding when its own timeout fires" passes (`turnTimeoutMs=40`, observed past a 90ms real wait). | The superseded call itself still runs to completion in the background (no abort channel on the speaker/TTS call); only its publication is fenced, same documented limitation as round 2. |
+| R4 (repeated) `precise_unimplemented_and_external_boundaries` | `call-turn-coordinator.ts` (class doc), `server.ts` (`console.warn`) | Before: "has never been designed on either side" (too broad per reviewer). After: three precisely-named gaps (no issuance call site/trust context; no guarded route; no worker HTTP client), with the already-implemented verification side (`VoiceCapabilityService`/`VoiceCapabilityGuard`) explicitly credited instead of denied. | Documentation-only; no test applies. Verified by re-reading `voice-capability.service.ts`, `voice-capability.guard.ts`, `voice-booking.controller.ts` in full and `rg -n "capabilityService.issue\|VoiceCapabilityService" apps/api/src` (confirms zero call sites for `.issue` outside its own class/the guard's constructor type) this round. | Does not implement the route, issuance trigger, or worker HTTP client -- all three remain genuinely blocked on cross-service design/trust-authority decisions this task does not make unilaterally. |
+| `same_sha_review_ci` | N/A (candidate-lifecycle level) | N/A | Pending: this round's `CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff to Codex; hosted CI run on that exact SHA. | Not yet run as of this handoff -- normal pending-until-handoff state. |
+
+**Commands run this round:**
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- exit 0.
+- `pnpm --filter @drts/voice-media-worker lint` -- exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`
+  -- 3 files / 21 tests passed (11 in `call-turn-coordinator.test.ts`
+  unchanged from round 2; 8 in `session-composer-turn-coordinator.test.ts`
+  -- 2 pre-existing + 6 new this round: drain-final-observable-only,
+  close-with-pending-synthesis + duplicate-close, newer-final-supersession,
+  epoch-advance-during-propose, timeout-fences-own-output; 3 in
+  `object-store-recorder.test.ts` unchanged).
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/internal-auth.test.ts
+  tests/unit/audit-voice-runtime-20261002/provider-composition.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts
+  tests/unit/audit-voice-runtime-20261002/websocket-channel-frame-limits.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-composer.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-lifecycle-boundaries.test.ts
+  tests/unit/uv-exec-008.test.ts tests/unit/uv-exec-010.test.ts` -- 14 files
+  / 210 tests passed, zero regressions from this round's
+  `call-turn-coordinator.ts`/`session-composer.ts`/`server.ts` changes
+  (`media-session.ts` was not touched this round).
+- `npx eslint tests/unit/audit-voice-application-wiring-20261003/ --max-warnings=0`
+  -- exit 0, no output.
+- Deliberately excludes the four VM-prohibited `server.start()`/real-`fetch`
+  files named in the task brief, same as every prior round.
+
 `same_sha_review_ci`: pending hosted CI on this round's new commit SHA
 (`CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff to Codex follows).

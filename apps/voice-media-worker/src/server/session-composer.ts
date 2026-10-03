@@ -8,7 +8,10 @@ import type {
   VoiceSpeechToTextAdapter,
   VoiceTextToSpeechAdapter,
 } from "../media-provider";
-import type { VoiceCallTurnCoordinator } from "../dialogue/call-turn-coordinator";
+import type {
+  VoiceCallAttachment,
+  VoiceCallTurnCoordinator,
+} from "../dialogue/call-turn-coordinator";
 
 /** Builds the ASR/TTS adapter pair for one freshly attached session. Called
  * once per session id -- never shared across sessions, since an adapter
@@ -23,6 +26,7 @@ export interface VoiceSessionProviderFactory {
 interface ComposedSession {
   session: VoiceMediaWorkerSession;
   channel: WebSocketServerChannel;
+  turnAttachment: VoiceCallAttachment | undefined;
   closing?: Promise<void>;
 }
 
@@ -104,12 +108,24 @@ export class VoiceSessionComposer extends EventEmitter {
         this.sendEvent(channel, event);
         if (turnAttachment) {
           this.turnCoordinator?.handle(turnAttachment, event, {
-            speak: async (text, languageCode) => {
+            speak: async (text, languageCode, signal, mediaEpoch) => {
               const handle = await session.startPlayback(
                 text,
                 languageCode,
                 new Date().toISOString(),
               );
+              // Re-checked here, not just by the coordinator before calling
+              // `speak` (R2/R3, Codex reopen round 2): `startPlayback`'s own
+              // `synthesize` call is exactly the async gap a release,
+              // barge-in, newer final, or turn timeout can land in. `signal`
+              // catches all four (they all abort the same controller);
+              // `mediaEpoch` catches a handoff/reconnect epoch advance that
+              // happened between this transcript's capture and now, which
+              // `signal` alone would never see since none of those four
+              // abort the controller.
+              if (signal.aborted || session.getMediaEpoch() !== mediaEpoch) {
+                return;
+              }
               for (const chunk of handle.audioChunks) {
                 channel.sendBinary(Buffer.from(chunk));
               }
@@ -118,7 +134,7 @@ export class VoiceSessionComposer extends EventEmitter {
         }
       },
     });
-    const composed: ComposedSession = { session, channel };
+    const composed: ComposedSession = { session, channel, turnAttachment };
     this.sessions.set(sessionId, composed);
 
     channel.on("message", (data: string | Buffer, isBinary: boolean) => {
@@ -130,9 +146,6 @@ export class VoiceSessionComposer extends EventEmitter {
       // own single-emission guarantee (see `./websocket-channel`).
       if (this.sessions.get(sessionId) !== composed) return;
       this.sessions.delete(sessionId);
-      // A session id may be reused by an unrelated later call; its turn
-      // state (collected slots, handoff) must never bleed into that call.
-      if (turnAttachment) this.turnCoordinator?.release(turnAttachment);
       // The ASR provider's connection/waiters/billing resource must not
       // outlive this session -- this fires on every close path (normal
       // close, drain, idle timeout, a frame-limit/failure-driven close),
@@ -140,7 +153,10 @@ export class VoiceSessionComposer extends EventEmitter {
       // `close()`. `closeAsr()` resolves once that teardown has actually
       // finished (R11), not merely once it was requested -- track it so a
       // caller doing an orderly shutdown can await real completion instead
-      // of firing-and-forgetting it.
+      // of firing-and-forgetting it. `beginClose` itself releases the turn
+      // attachment (R1, Codex reopen round 2) -- the common boundary both
+      // this path and `drain()` go through, before `closeAsr` can
+      // synchronously emit a drain final.
       this.beginClose(composed);
     });
   }
@@ -162,8 +178,26 @@ export class VoiceSessionComposer extends EventEmitter {
     await Promise.all(Array.from(this.pendingCloses));
   }
 
+  /** The one boundary every close/drain path goes through (channel "close"
+   * above, and `drain` below). Releases the turn attachment -- which also
+   * aborts any turn still active/queued for it -- *before* calling
+   * `closeAsr` (R1, Codex reopen round 2): `closeAsr`'s own
+   * `endAudio`/`close` can synchronously trigger a drain final through the
+   * ASR adapter's `onResult` callback, and that final must never be
+   * admitted as new conversational input. Releasing first means
+   * `VoiceCallTurnCoordinator.handle` sees an already-released (missing)
+   * attachment for it and is a no-op; the event still reaches
+   * `this.emit("session.event", ...)`/`sendEvent` as observable evidence
+   * via the normal event-sink path, which forwards every event regardless
+   * of attachment state. A turn that was still mid-flight when this runs is
+   * aborted, so its `speak` call (if already past the coordinator's own
+   * pre-check) is fenced by the same `signal` re-check `speak` always
+   * does. */
   private beginClose(composed: ComposedSession): Promise<void> {
     if (composed.closing) return composed.closing;
+    if (composed.turnAttachment) {
+      this.turnCoordinator?.release(composed.turnAttachment);
+    }
     const closing = composed.session.closeAsr();
     composed.closing = closing;
     this.pendingCloses.add(closing);
