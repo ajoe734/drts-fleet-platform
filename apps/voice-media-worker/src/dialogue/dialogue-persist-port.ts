@@ -1,5 +1,10 @@
 import type { VoiceDialogueState } from "./dialogue-state";
 import type { VoiceDialogueRequest } from "./voice-dialogue-provider";
+import type { VoiceSessionBinding } from "./voice-session-binding";
+import type {
+  IssueCapabilityCommand,
+  VoiceApiClient,
+} from "../server/voice-api-client";
 
 /**
  * Explicitly isolates fixture-mode persistence from a trusted, durable
@@ -55,6 +60,66 @@ export function createFixtureDialoguePersistPort(): VoiceDialoguePersistPort {
     mode: "fixture",
     async persist() {
       // Intentionally empty -- see class doc above.
+    },
+  };
+}
+
+const PERSIST_CAPABILITY_SCOPES: IssueCapabilityCommand["scopes"] = [
+  "session_execute",
+];
+
+/**
+ * The `mode: "trusted"` port this class's own doc names as the seam to
+ * implement once the issuance/route/HTTP-client triple exists (Codex
+ * reopen round 5/6, R4) -- `VoiceApiClient` is that triple.
+ * `VoiceSessionService.resolveInput` (apps/api) is the authoritative CAS
+ * this maps onto: every admitted turn that reaches `persist()` already
+ * represents real dialogue content the engine decided to act on, so it is
+ * always submitted as `resolution: "relevant"`, never "irrelevant" (that
+ * value is for an explicitly-unrelated utterance the engine never even
+ * reaches this port for).
+ *
+ * `binding` is a live accessor, not a snapshot: it must always return
+ * `undefined` until a real call-admission flow supplies one for this
+ * attachment (none exists yet, see `../dialogue/voice-session-binding.ts`),
+ * and `persist` rejects rather than silently no-op/succeed in that case --
+ * a `production: true` engine must never be told persistence succeeded
+ * when there was nothing trustworthy to persist through.
+ */
+export function createTrustedDialoguePersistPort(
+  client: VoiceApiClient,
+  binding: () => VoiceSessionBinding | undefined,
+): VoiceDialoguePersistPort {
+  return {
+    mode: "trusted",
+    async persist(_state, request) {
+      const current = binding();
+      if (!current) {
+        throw new Error(
+          "voice_trusted_persist_unbound: no VoiceSessionBinding is attached for this session.",
+        );
+      }
+      const capability = await client.issueCapability({
+        voiceSessionId: current.voiceSessionId,
+        resourceScopeId: current.resourceScopeId,
+        routeProfileVersion: current.routeProfileVersion,
+        leaseEpoch: current.leaseEpoch,
+        scopes: PERSIST_CAPABILITY_SCOPES,
+      });
+      const result = await client.resolveInput(
+        current.voiceSessionId,
+        capability.token,
+        {
+          expectedSessionVersion: current.sessionVersion,
+          inputEpoch: request.inputEpoch,
+          resolution: "relevant",
+        },
+      );
+      // The CAS write just advanced the authoritative revision -- the next
+      // call through this same binding must submit *that* value, never the
+      // one just consumed, or every subsequent call would deterministically
+      // fail as stale.
+      current.sessionVersion = result.session.sessionVersion;
     },
   };
 }

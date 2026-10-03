@@ -11,8 +11,11 @@ import type {
 } from "./voice-dialogue-provider";
 import {
   createFixtureDialoguePersistPort,
+  createTrustedDialoguePersistPort,
   type VoiceDialoguePersistPort,
 } from "./dialogue-persist-port";
+import type { VoiceSessionBinding } from "./voice-session-binding";
+import type { VoiceApiClient } from "../server/voice-api-client";
 import type { VoiceMediaWorkerEvent } from "../media-session";
 
 /** Speaks a completed turn's own verified prompt text back on a session's
@@ -85,9 +88,23 @@ interface TurnSession {
    * never still "current" even if it already held a reference before
    * being replaced. */
   activeAbort: AbortController | null;
+  /** SD §4.2/§10.1 identifiers for this attachment, when a real call-
+   * admission flow has supplied one (none does yet -- see
+   * `../dialogue/voice-session-binding.ts`). `undefined` means this
+   * attachment uses the coordinator-wide default `persistPort`/local
+   * handoff stub exactly as before this binding concept existed. */
+  binding?: VoiceSessionBinding;
+  /** Set once in `attach()` when both `binding` and the coordinator's own
+   * `apiClient` are present; overrides the coordinator-wide default
+   * `persistPort` for this attachment only. */
+  persistPort?: VoiceDialoguePersistPort;
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
+const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"] = [
+  "session_execute",
+  "handoff_request",
+];
 
 /**
  * The real session.event -> bounded-turn composition that
@@ -161,6 +178,16 @@ export class VoiceCallTurnCoordinator {
      * silently treating fixture persistence as durable the moment a live
      * provider is wired. */
     private readonly production = false,
+    /** The first-party worker/API HTTP client (Codex reopen round 5/6,
+     * R4; see `../server/voice-api-client.ts`). `undefined` in this
+     * worker's actual composition today (`../server.ts` never sets it,
+     * same as `production`) -- every attachment then uses the
+     * coordinator-wide default `persistPort`/local handoff stub exactly
+     * as before this client existed. Only ever consulted for an
+     * attachment that was also given a `VoiceSessionBinding` via
+     * `attach()`; a binding with no client (or a client with no binding)
+     * never silently falls back to fabricating trusted behavior. */
+    private readonly apiClient?: VoiceApiClient,
   ) {}
 
   /** Call once per `VoiceSessionComposer.attach()`, before any event for
@@ -168,10 +195,21 @@ export class VoiceCallTurnCoordinator {
    * attachment's only valid key into `handle`/`release`. Always starts
    * fresh state: a reused session id never inherits a prior attachment's
    * engine, slots, or handoff, whatever that prior attachment's own
-   * release/late-event state was. */
-  attach(sessionId: string): VoiceCallAttachment {
+   * release/late-event state was.
+   *
+   * `binding`, when supplied together with the coordinator's own
+   * `apiClient` (Codex reopen round 5/6, R4), switches this *specific*
+   * attachment's persist/tool-execution onto the real apps/api-backed
+   * composition (see `./dialogue-persist-port.ts`'s
+   * `createTrustedDialoguePersistPort` and `executeTools` below) -- every
+   * other attachment on this same coordinator keeps using the
+   * coordinator-wide default. Nothing in this worker's actual composition
+   * supplies one yet (no call-admission flow exists -- see
+   * `../dialogue/voice-session-binding.ts`'s own doc); this is the
+   * composition seam a future one calls through. */
+  attach(sessionId: string, binding?: VoiceSessionBinding): VoiceCallAttachment {
     const attachment: VoiceCallAttachment = { sessionId };
-    this.sessions.set(attachment, {
+    const turnSession: TurnSession = {
       // One engine per attachment: `VoiceDialogueEngine.turn` guards itself
       // with a single instance-scoped `running` flag, so attachments must
       // never share one.
@@ -181,7 +219,15 @@ export class VoiceCallTurnCoordinator {
       queue: Promise.resolve(),
       released: false,
       activeAbort: null,
-    });
+      ...(binding ? { binding } : {}),
+    };
+    if (binding && this.apiClient) {
+      turnSession.persistPort = createTrustedDialoguePersistPort(
+        this.apiClient,
+        () => turnSession.binding,
+      );
+    }
+    this.sessions.set(attachment, turnSession);
     return attachment;
   }
 
@@ -344,6 +390,10 @@ export class VoiceCallTurnCoordinator {
     speaker: VoiceCallTurnSpeaker,
     mediaEpoch: number,
   ): Promise<void> {
+    // This attachment's own trusted port (set in `attach()` when it was
+    // given a `VoiceSessionBinding`) takes priority over the coordinator-
+    // wide default -- see `attach()`'s doc.
+    const persistPort = turnSession.persistPort ?? this.persistPort;
     const ports: VoiceDialogueTurnPorts = {
       persist: async (next, bounded) => {
         // Fail closed by construction (Codex reopen round 2/3, R4): a
@@ -356,13 +406,12 @@ export class VoiceCallTurnCoordinator {
         // this class's constructor doc); this is the seam that keeps that
         // true once a live provider and a trusted port both exist, rather
         // than relying on every future caller remembering to re-check it.
-        if (this.production && this.persistPort.mode === "fixture") {
+        if (this.production && persistPort.mode === "fixture") {
           throw new Error("voice_persist_untrusted_for_production");
         }
-        await this.persistPort.persist(next, bounded);
+        await persistPort.persist(next, bounded);
       },
-      execute: (output) =>
-        Promise.resolve(this.executeTools(output, turnSession.state)),
+      execute: (output) => this.executeTools(output, turnSession),
     };
     const result = await turnSession.engine.turn(
       request,
@@ -424,10 +473,11 @@ export class VoiceCallTurnCoordinator {
     );
   }
 
-  private executeTools(
+  private async executeTools(
     output: VoiceDialogueOutput,
-    state: VoiceDialogueState,
-  ): unknown[] {
+    turnSession: TurnSession,
+  ): Promise<unknown[]> {
+    const { state } = turnSession;
     if (output.tools.length === 0) return [];
     const onlyHandoffRequested = output.tools.every(
       (tool) => tool.name === "request_handoff",
@@ -439,7 +489,41 @@ export class VoiceCallTurnCoordinator {
       // produce, instead of fabricating a location/eligibility/readback/
       // booking-status result this worker has no way to verify.
       state.handoff = { reason: "provider_unavailable", intent: output.intent };
+      return output.tools.map(() => ({
+        status: "unavailable" as const,
+        handoffId: null,
+      }));
     }
+
+    // Codex reopen round 5/6, R4: when this attachment has a real
+    // `VoiceSessionBinding` and the coordinator has a real `apiClient`,
+    // `request_handoff` is executed through the actual
+    // `VoiceToolGatewayService.execute` repair anchor (apps/api) instead of
+    // a local stub -- see `attach()`'s doc. Any other attachment (today,
+    // every one -- no call-admission flow supplies a binding yet) keeps
+    // the existing honest local stub unchanged.
+    if (turnSession.binding && this.apiClient) {
+      const binding = turnSession.binding;
+      const results: unknown[] = [];
+      for (const tool of output.tools) {
+        if (tool.name !== "request_handoff") continue;
+        const capability = await this.apiClient.issueCapability({
+          voiceSessionId: binding.voiceSessionId,
+          resourceScopeId: binding.resourceScopeId,
+          routeProfileVersion: binding.routeProfileVersion,
+          leaseEpoch: binding.leaseEpoch,
+          scopes: HANDOFF_CAPABILITY_SCOPES,
+        });
+        const response = await this.apiClient.requestHandoff(
+          binding.voiceSessionId,
+          capability.token,
+          { inputEpoch: turnSession.inputEpoch, output },
+        );
+        results.push(...response.results);
+      }
+      return results;
+    }
+
     return output.tools.map(() => ({
       status: "unavailable" as const,
       handoffId: null,

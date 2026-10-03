@@ -12,6 +12,7 @@ import type {
   VoiceCallAttachment,
   VoiceCallTurnCoordinator,
 } from "../dialogue/call-turn-coordinator";
+import type { VoiceSessionBinding } from "../dialogue/voice-session-binding";
 
 /** Builds the ASR/TTS adapter pair for one freshly attached session. Called
  * once per session id -- never shared across sessions, since an adapter
@@ -95,8 +96,16 @@ export class VoiceSessionComposer extends EventEmitter {
   }
 
   /** Call once a session's WebSocket channel is established (the only
-   * `session.connected` consumer this worker has). */
-  attach(sessionId: string, channel: WebSocketServerChannel): void {
+   * `session.connected` consumer this worker has). `binding`, when
+   * supplied, is forwarded to `VoiceCallTurnCoordinator.attach` to switch
+   * this specific attachment onto real apps/api-backed persist/tool
+   * composition (Codex reopen round 5/6, R4) -- see that method's own
+   * doc. Nothing in this worker's actual composition supplies one yet. */
+  attach(
+    sessionId: string,
+    channel: WebSocketServerChannel,
+    binding?: VoiceSessionBinding,
+  ): void {
     const { asrAdapter, ttsAdapter } =
       this.providerFactory.createAdapters(sessionId);
     // Created synchronously, before the channel's own "message"/"close"
@@ -104,7 +113,7 @@ export class VoiceSessionComposer extends EventEmitter {
     // any event for it can possibly be delivered (R1: a late event from a
     // *prior*, already-released attachment of the same session id must
     // never be confused with this one; see `VoiceCallTurnCoordinator`).
-    const turnAttachment = this.turnCoordinator?.attach(sessionId);
+    const turnAttachment = this.turnCoordinator?.attach(sessionId, binding);
     const session = new VoiceMediaWorkerSession({
       sessionId,
       asrAdapter,

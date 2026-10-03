@@ -5,9 +5,19 @@ import { VoiceSessionComposer } from "./server/session-composer";
 import { VoiceCallTurnCoordinator } from "./dialogue/call-turn-coordinator";
 import { OpenAiRealtimeFixtureAdapter } from "./providers/native-voice/native-voice-adapter";
 import { createVoiceRecordingAdapter } from "./recording/recording-adapter-factory";
+import { createVoiceApiClient } from "./server/voice-api-client-factory";
 
 async function main() {
   const composition = composeVoiceMediaProviders();
+  // Opt-in, fail-closed-when-absent (see
+  // ./server/voice-api-client-factory.ts) -- `undefined` in every
+  // environment this worker runs in today. Even when configured, it has
+  // no observable effect yet: nothing below supplies any attachment a
+  // `VoiceSessionBinding` (no call-admission flow exists -- see
+  // ./dialogue/voice-session-binding.ts), which `VoiceCallTurnCoordinator`
+  // requires before it will use this client for a given attachment at
+  // all (see its own `attach()` doc).
+  const voiceApiClient = createVoiceApiClient();
   // The dialogue *provider* always stays fixture-mode here regardless of
   // `composition.productionCapable`: no live VoiceDialogueProvider
   // implementation exists at all yet (see
@@ -16,6 +26,10 @@ async function main() {
   // rather than ever actually speaking to a caller.
   const turnCoordinator = new VoiceCallTurnCoordinator(
     () => new OpenAiRealtimeFixtureAdapter(),
+    undefined,
+    undefined,
+    false,
+    voiceApiClient,
   );
   const sessionComposer = new VoiceSessionComposer(
     composition.providerFactory,
