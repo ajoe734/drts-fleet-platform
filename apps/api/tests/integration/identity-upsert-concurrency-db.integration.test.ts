@@ -1543,25 +1543,24 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
   // actually differs (principal.displayName, roleBindings[0].roleCode) on
   // top of distinct timestamps.
   //
-  // Which physical racer is the one forced through recovery is still not
-  // deterministic (it depends on real lock-wait timing, not on which
-  // bundle carries the newer timestamp -- see DET's comment on why this
-  // cannot be choreographed without collapsing the race). So this does not
-  // assert a specific side wins; it asserts the guard's actual contract:
-  // bundleB (the later timestamp, differing content) is the only content
-  // ever durably persisted, and whichever racer's own connection is the
-  // one observed retrying must itself report bundleB -- that racer's retry
-  // necessarily resolves its guard against whatever the other side had
-  // already committed. The racer that never conflicted returns the
-  // content it itself wrote, read at the moment its own transaction
-  // committed; if that commit happened to land before the other racer's
-  // later, guard-correct overwrite, its return value legitimately reflects
-  // its own (by-then-superseded) write rather than a fresh global read --
-  // correct concurrent-call semantics, not a defect -- so this does not
-  // assert anything about the non-retried side's return value. The durable
-  // row is the actual authority either way and is checked directly below.
+  // Which physical racer is the one forced through recovery depends on real
+  // lock-wait timing, not on which bundle carries the newer timestamp -- see
+  // DET's comment on why this cannot be choreographed without collapsing the
+  // race. But the requirement this case exists to prove is specifically that
+  // a *genuinely newer, differing* writer survives being the one forced
+  // through recovery (i.e. B, carrying bundleB, is the one that hits the
+  // real 23505 against an already-committed older row and must still win on
+  // retry) -- that is the only direction that actually exercises "retry
+  // applies a compatible newer mutation over already-durable older content."
+  // The opposite direction (A retries against an already-committed bundleB)
+  // only proves a *stale* write is correctly discarded on retry, which is a
+  // real and useful recovery-branch-health signal but does not establish the
+  // newer-mutation guarantee this case is named for. So the attempt loop
+  // keeps retrying real, uncontrolled races until it genuinely observes B's
+  // own connection going through SAVEPOINT recovery; an A-only recovery is
+  // recorded and sanity-checked but does not end the loop.
   it(
-    "R9-TX-NEWER (real Postgres): when the real SAVEPOINT recovery branch fires on a genuine non-arbiter collision, a writer carrying genuinely newer differing content always ends up persisted and returned, whichever racer is the one observed retrying",
+    "R9-TX-NEWER (real Postgres): when the real SAVEPOINT recovery branch fires on a genuine non-arbiter collision and the writer carrying genuinely newer differing content is itself the one forced through recovery, its newer content ends up durably persisted, FK/JSON-coherent, and invalidates a pre-change token",
     async () => {
       expect(DATABASE_URL).toBeTruthy();
 
@@ -1576,12 +1575,34 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
       const countHits = (queries: string[], prefix: string) =>
         queries.filter((sql) => sql.startsWith(prefix)).length;
 
+      const jwtAuthService = new JwtAuthService(repoA);
+      const testKeyPair = generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: "spki", format: "pem" },
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      });
+      const originalKeyRing = process.env.JWT_KEY_RING_JSON;
+      process.env.JWT_KEY_RING_JSON = JSON.stringify([
+        {
+          kid: "key-r9tx-newer",
+          status: "active",
+          algorithm: "RS256",
+          privateKey: testKeyPair.privateKey,
+          publicKey: testKeyPair.publicKey,
+        },
+      ]);
+
+      try {
       // See R9-TX-DET's comment above: 60 attempts is not reliably enough
       // on the busy, serialized "Product smoke acceptance" job (observed
       // 2026-10-03, same symptom DET already had three precedent rounds
-      // of). Raised with matching headroom on the test timeout below.
+      // of). Raised with matching headroom on the test timeout below. The
+      // ceiling here must additionally absorb retrying past any attempt
+      // where only the older writer (A) recovers, since only a B-side
+      // recovery satisfies this case.
       const MAX_ATTEMPTS = 3000;
       let recovered = false;
+      let observedOlderOnlyRecovery = false;
 
       for (let attempt = 0; attempt < MAX_ATTEMPTS && !recovered; attempt++) {
         const principalId = `principal_wfi_newer_${attempt}_${randomUUID()}`;
@@ -1615,9 +1636,9 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
             membershipId,
             sourceRef: membershipSourceRef,
             principalId,
-            realm: "tenant",
-            scopeRef: `scope_${membershipId}`,
-            tenantId: "tenant_fixture",
+            realm: "ops",
+            scopeRef: "platform:control_plane",
+            tenantId: null,
             partnerId: null,
             status: "active",
             invitedByPrincipalId: null,
@@ -1630,7 +1651,15 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
               roleBindingId,
               sourceRef: roleBindingSourceRef,
               membershipId,
-              roleCode: variant === "A" ? "ops_user" : "ops_admin",
+              // realm "ops" (not the earlier "tenant") and both role codes
+              // real AuthActorType values so the token assertions below can
+              // exercise JwtAuthService.verifyAccessToken's actual
+              // identityRepository-backed ops/platform durable-state check
+              // (computeWorkforceTokenVersion over principal/membership/
+              // role-binding updatedAt) instead of the tenant realm's
+              // in-memory tenantPartnerService path, which this bare
+              // DatabaseService-only test never wires up.
+              roleCode: variant === "A" ? "ops_observer" : "ops_user",
               grantedByPrincipalId: null,
               approvalId: null,
               validFrom: ts,
@@ -1678,49 +1707,77 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
           continue;
         }
 
-        // The real recovery branch actually fired against real Postgres for
-        // this attempt's identity. Only the racer whose own connection
-        // actually went through SAVEPOINT recovery is checked against
-        // bundleB's content here: that racer's retry necessarily resolves
-        // its guard against whatever the other side had already committed,
-        // so its return value is a reliable read of the real outcome. The
-        // racer that never conflicted returns the content it itself wrote,
-        // captured at the moment its own transaction committed -- if that
-        // commit happened before the other racer's later, guard-correct
-        // overwrite, its return value legitimately reflects its own
-        // (by-then-superseded) write, not a global post-hoc read. That is
-        // correct concurrent-call semantics (each call reports what it did,
-        // not a fresh re-read after the fact), not something this test can
-        // assert on without adding an extra read this test doesn't need:
-        // the durable row checked below is the actual authority either way.
-        if (aRolledBack) {
+        if (!bRolledBack) {
+          // Only A (the older, narrower-role writer) went through real
+          // SAVEPOINT recovery this attempt. That proves recovery discarded
+          // a now-stale write in favor of the already-committed bundleB --
+          // real and worth a light sanity check -- but it is NOT the
+          // direction this case requires (see the comment above the `it`):
+          // it never exercises the newer writer itself surviving recovery.
+          // Record it and keep racing for a genuine B-side recovery.
+          expect(aRolledBack).toBe(true);
           expect(resultA.principal.displayName).toBe("WFI Newer Fixture B");
           expect(resultA.principal.updatedAt).toBe(tsB);
-          expect(resultA.roleBindings[0]?.roleCode).toBe("ops_admin");
-        }
-        if (bRolledBack) {
-          expect(resultB.principal.displayName).toBe("WFI Newer Fixture B");
-          expect(resultB.principal.updatedAt).toBe(tsB);
-          expect(resultB.roleBindings[0]?.roleCode).toBe("ops_admin");
+          expect(resultA.roleBindings[0]?.roleCode).toBe("ops_user");
+          observedOlderOnlyRecovery = true;
+          continue;
         }
 
+        // B -- the writer carrying the genuinely newer timestamp and
+        // differing content -- is the one whose own connection actually
+        // went through real SAVEPOINT recovery this attempt. Its retry
+        // necessarily resolved its guard against whatever A had already
+        // committed, so its return value is a reliable read of the real
+        // outcome: the required direction has been observed.
+        expect(resultB.principal.displayName).toBe("WFI Newer Fixture B");
+        expect(resultB.principal.updatedAt).toBe(tsB);
+        expect(resultB.roleBindings[0]?.roleCode).toBe("ops_user");
+        expect(resultB.membership.principalId).toBe(principalId);
+        expect(resultB.roleBindings[0]?.membershipId).toBe(membershipId);
+
         const principalRow = await dbA.query<{
+          principal_id: string;
           display_name: string;
           updated_at: Date;
+          record: { principalId?: string };
         }>(
-          `SELECT display_name, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+          `SELECT principal_id, display_name, updated_at, record FROM iam.identity_principals WHERE principal_id = $1`,
           [principalId],
         );
         expect(principalRow.rows[0]?.display_name).toBe(
           "WFI Newer Fixture B",
         );
         expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(tsB);
+        // canonical ID/record-JSON agreement: the row's own primary key and
+        // its denormalized `record` JSON blob must agree with each other
+        // and with what the retried call returned, not just with each
+        // other's column values in isolation.
+        expect(principalRow.rows[0]?.principal_id).toBe(principalId);
+        expect(principalRow.rows[0]?.record?.principalId).toBe(principalId);
 
-        const roleBindingRow = await dbA.query<{ role_code: string }>(
-          `SELECT role_code FROM iam.identity_role_bindings WHERE role_binding_id = $1`,
+        const membershipRow = await dbA.query<{
+          principal_id: string;
+          updated_at: Date;
+        }>(
+          `SELECT principal_id, updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+          [membershipId],
+        );
+        // FK coherence: the durable membership row still points at this
+        // same canonical principal_id and reflects bundleB's timestamp too
+        // -- the retry's guard applied the newer mutation across the whole
+        // bundle, not only the principal statement.
+        expect(membershipRow.rows[0]?.principal_id).toBe(principalId);
+        expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(tsB);
+
+        const roleBindingRow = await dbA.query<{
+          membership_id: string;
+          role_code: string;
+        }>(
+          `SELECT membership_id, role_code FROM iam.identity_role_bindings WHERE role_binding_id = $1`,
           [roleBindingId],
         );
-        expect(roleBindingRow.rows[0]?.role_code).toBe("ops_admin");
+        expect(roleBindingRow.rows[0]?.membership_id).toBe(membershipId);
+        expect(roleBindingRow.rows[0]?.role_code).toBe("ops_user");
 
         // Same recovery-branch-health contract as R9-TX-DET: the branch
         // fired cleanly (exactly one SAVEPOINT per racer's own connection)
@@ -1732,13 +1789,66 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
         expect(aQueries).not.toContain("ROLLBACK");
         expect(bQueries).not.toContain("ROLLBACK");
 
+        // The acceptance requirement this task exists for, exercised on
+        // exactly the path just observed: a token whose version reflects
+        // the pre-recovery (older, bundleA) state must be rejected once
+        // B's genuinely newer, differing content has landed through real
+        // SAVEPOINT retry -- a real role/content change invalidates a
+        // stale session even when it arrived via the recovery branch, not
+        // only via a direct, non-racing mutation (R9-TX-DRAFT already
+        // covers that simpler shape). A token whose version reflects the
+        // actual persisted (bundleB) state must still verify, proving the
+        // new session that itself caused the recovery does not spuriously
+        // invalidate itself.
+        const identity = {
+          authMode: "jwt_bearer" as const,
+          actorType: "ops_user" as const,
+          actorId: principalId,
+          principalId,
+          realm: "ops" as const,
+          tenantId: null,
+          roles: ["ops_user"],
+          roleFamilies: ["ops" as const],
+          scopes: [] as string[],
+          membershipId,
+        };
+
+        const staleToken = await jwtAuthService.issueSessionToken(identity, {
+          tokenVersion: Date.parse(tsA),
+          authTime: tsA,
+        });
+        sessionIds.add(staleToken.sessionId);
+        expect(
+          await jwtAuthService.verifyAccessToken(staleToken.token),
+        ).toBeNull();
+
+        const freshToken = await jwtAuthService.issueSessionToken(identity, {
+          tokenVersion: Date.parse(tsB),
+          authTime: tsB,
+        });
+        sessionIds.add(freshToken.sessionId);
+        expect(
+          await jwtAuthService.verifyAccessToken(freshToken.token),
+        ).not.toBeNull();
+
         recovered = true;
       }
 
       if (!recovered) {
         throw new Error(
-          `Never observed a real non-arbiter unique-violation + ROLLBACK TO SAVEPOINT recovery after ${MAX_ATTEMPTS} genuinely concurrent attempts with genuinely differing content against real Postgres; either the recovery branch has regressed, or this environment cannot produce the required race window at all.`,
+          `Never observed the real newer-writer-recovers direction (B, carrying genuinely newer differing content, forced through ROLLBACK TO SAVEPOINT recovery) after ${MAX_ATTEMPTS} genuinely concurrent attempts against real Postgres -- ${
+            observedOlderOnlyRecovery
+              ? "only the older-writer-recovers direction was observed, which does not satisfy this case"
+              : "no real non-arbiter unique-violation + recovery was observed at all"
+          }; either the recovery branch's newer-mutation guarantee has regressed, or this environment cannot produce the required race window at all.`,
         );
+      }
+      } finally {
+        if (originalKeyRing === undefined) {
+          delete process.env.JWT_KEY_RING_JSON;
+        } else {
+          process.env.JWT_KEY_RING_JSON = originalKeyRing;
+        }
       }
     },
     60_000,
