@@ -49,7 +49,7 @@ The following findings from the review have been addressed:
 - **R1 [P1] Missing CI test wiring / broken CI**:
   - **Fix/Result**: Retained repair. Test coverage and discovery pass.
 - **R2 [P1] Audit operational errors pass**:
-  - **Fix/Result**: Completed report schema validation and 24-case real-main regressions. The script now strictly validates `metadata.vulnerabilities` and ensures findings have nonempty `version` and `paths` arrays. Adjacent candidate SHA `1ae89472e38a56433fe43d192b84d5922257209f` and `a6581c9958e65c74512834af32d2ec47f139f82c` regressions were added, confirming that previously accepted invalid empty schemas (e.g. empty findings, empty paths) are correctly rejected with exit code 1. The script preserves valid clean and valid exit-1 fully excepted reports.
+  - **Fix/Result**: Implemented strict schema validation for all 5 supported vulnerability counters (`info`, `low`, `moderate`, `high`, `critical`), ensuring they are present and are non-negative integers (rejecting booleans, fractions, negatives, or missing counters). The checked-in suite of 17 tests in `tools/ci/test_dependency_security.py` now enforces this, fixing the regression where missing or empty schema counters previously failed open and allowed incomplete reports. The script preserves valid clean and valid exit-1 fully excepted reports.
 - **R3 [P1] Permanent blanket path suppression bypasses runtime findings**:
   - **Fix/Result**: Retained repair. All exceptions, including those for build tools and mobile paths, are now explicitly managed via the `dependency-security-exceptions.json` file.
 - **R4 [P1] Package-wide exceptions suppress future unrelated vulnerabilities**:
@@ -59,7 +59,7 @@ The following findings from the review have been addressed:
 - **R6 [P2] Acceptance evidence missing/inaccurate**:
   - **Fix/Result**: Updated this document to capture the 19 remaining findings with specific dispositions (not just generic wait-for-upstream), accurate versions, and removed unverified CI acceptance claims.
 - **R7 [P1] Retained rollback of deliberate runtime upgrades**:
-  - **Fix/Result**: Restored deliberate upgrades for `apps/api/package.json` (`@nestjs/*` 11.2.7, `openclaw` 2026.9.2, `express` 4.21.2) and regenerated `pnpm-lock.yaml`.
+  - **Fix/Result**: Restored deliberate upgrades for `apps/api/package.json` (`@nestjs/*` 11.2.7, `openclaw` 2026.9.2, `express` 5.2.1) and regenerated `pnpm-lock.yaml`.
 - **R8 [P2] NextRequest conflict**:
   - **Fix/Result**: Retained repair. Root package.json matches apps at next 16.3.8.
 
@@ -71,12 +71,15 @@ The following findings from the review have been addressed:
 
 ### R2 Regression Evidence (Guide 0.7)
 
-| Condition | Return Code | Input / Finding Evidence | Expected Result | Actual Validation Outcome |
-| :--- | :---: | :--- | :--- | :--- |
-| `rc=0`, missing advisories/vulnerabilities | 0 | `{"metadata":{}}` | REJECT (Missing metadata.vulnerabilities) | `exit 1` (Malformed audit report) |
-| `rc=0`, non-zero vulnerabilities | 0 | `{"metadata":{"vulnerabilities":{"high":1}}}` | REJECT (Mismatch) | `exit 1` (exited 0 but metadata indicates vulnerabilities) |
-| `rc=0`, empty advisories | 0 | `{"advisories":{},"metadata":{"vulnerabilities":{"high":1}}}` | REJECT (Mismatch) | `exit 1` (exited 0 but metadata indicates vulnerabilities) |
-| `rc=1`, empty findings array | 1 | `uuid` advisory `1119441` with `findings=[]` | REJECT (Fail-open prevention) | `exit 1` (Missing or empty findings) |
-| `rc=1`, empty paths array | 1 | `uuid` 8.3.2 with `paths=[]` | REJECT (Fail-open prevention) | `exit 1` (Missing or empty paths in finding) |
-| `rc=1`, string path instead of array | 1 | `uuid` 8.3.2 with `paths=""` | REJECT (Type mismatch) | `exit 1` (Missing or empty paths in finding) |
+| Condition | Command / Test | Execution Version | Old Result (Parent 1ae89472e) | New Result (Current) |
+| :--- | :--- | :--- | :--- | :--- |
+| `rc=0`, missing advisories/vulnerabilities | `test_rc0_metadata_empty` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Malformed report) |
+| `rc=0`, non-zero vulnerabilities | `test_rc0_metadata_vulnerabilities` | Python 3.12.3 | `exit 1` (Reject) | `exit 1` (Reject) |
+| `rc=0`, empty advisories | `test_rc0_advisories_empty_vulnerabilities` | Python 3.12.3 | `exit 1` (Reject) | `exit 1` (Reject) |
+| `rc=1`, empty findings array | `test_rc1_known_advisory_empty_findings` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Reject) |
+| `rc=1`, empty paths array | `test_rc1_known_advisory_empty_paths` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Reject) |
+| `rc=1`, string path instead of array | `test_rc1_known_advisory_string_paths` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Reject) |
+| `rc=0`, empty counter object `{}` | `test_rc0_metadata_vulnerabilities_empty` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Malformed report) |
+| `rc=0`, missing info counter | `test_rc0_metadata_vulnerabilities_missing_counter` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Malformed report) |
+| `rc=0`, invalid numeric counts | `test_rc0_metadata_vulnerabilities_invalid_numeric` | Python 3.12.3 | `exit 0` (False Accept) | `exit 1` (Malformed report) |
 
