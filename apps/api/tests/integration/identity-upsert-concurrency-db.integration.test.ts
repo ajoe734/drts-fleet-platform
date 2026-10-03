@@ -1637,7 +1637,19 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
             sourceRef: membershipSourceRef,
             principalId,
             realm: "ops",
-            scopeRef: "platform:control_plane",
+            // Differs by variant (like displayName/roleCode above) so the
+            // membership row's own ON CONFLICT ... WHERE content-diff guard
+            // (identity.repository.ts upsertMembership) has something of
+            // its own to react to. scopeRef identical across A/B would make
+            // bundleB's membership write a legitimate no-op under that
+            // guard -- membership_status etc. all unchanged too -- so the
+            // row's updated_at would correctly stay at tsA regardless of
+            // which racer recovers, which is not a bug but would make the
+            // FK-coherence assertions below assert a false requirement.
+            scopeRef:
+              variant === "A"
+                ? "platform:control_plane"
+                : "platform:control_plane_b",
             tenantId: null,
             partnerId: null,
             status: "active",
