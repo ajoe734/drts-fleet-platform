@@ -6,18 +6,41 @@ import { VoiceCallTurnCoordinator } from "./dialogue/call-turn-coordinator";
 import { composeVoiceDialogueProvider } from "./dialogue/dialogue-provider-composition";
 import { createVoiceRecordingAdapter } from "./recording/recording-adapter-factory";
 import { createVoiceApiClient } from "./server/voice-api-client-factory";
+import type { VoiceSessionBindingResolver } from "./dialogue/voice-session-binding";
 
 async function main() {
   const composition = composeVoiceMediaProviders();
   // Opt-in, fail-closed-when-absent (see
   // ./server/voice-api-client-factory.ts) -- `undefined` in every
-  // environment this worker runs in today. Even when configured, it has
-  // no observable effect yet: nothing below supplies any attachment a
-  // `VoiceSessionBinding` (no call-admission flow exists -- see
-  // ./dialogue/voice-session-binding.ts), which `VoiceCallTurnCoordinator`
-  // requires before it will use this client for a given attachment at
-  // all (see its own `attach()` doc).
+  // environment this worker runs in today.
   const voiceApiClient = createVoiceApiClient();
+  // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry: the real consumer
+  // `MediaWorkerServer.admitSession`'s `POST /sessions` handler now calls
+  // to resolve a `VoiceSessionBinding` for a call-authority-admitted
+  // session, before `sessionComposer.attach()` ever runs for it. Still
+  // `undefined` in every environment this worker runs in today (no
+  // `voiceApiClient`), and even when configured, resolution genuinely
+  // fails until apps/api has a durable `voice.session` row for the admitted
+  // id -- the real, still-missing SD §4.1 provider webhook is the actual
+  // remaining external gate, not this wiring.
+  const sessionBindingResolver: VoiceSessionBindingResolver | undefined =
+    voiceApiClient
+      ? {
+          resolve: async (voiceSessionId, signal) => {
+            const { session } = await voiceApiClient.getSession(
+              voiceSessionId,
+              signal,
+            );
+            return {
+              voiceSessionId: session.voiceSessionId,
+              resourceScopeId: session.resourceScopeId,
+              routeProfileVersion: session.routeProfileVersion,
+              leaseEpoch: session.leaseEpoch,
+              sessionVersion: session.sessionVersion,
+            };
+          },
+        }
+      : undefined;
   // The dialogue *provider* always stays fixture-mode here regardless of
   // `composition.productionCapable`: no live VoiceDialogueProvider
   // implementation exists at all yet (see
@@ -51,6 +74,7 @@ async function main() {
 
   const server = new MediaWorkerServer({
     sessionComposer,
+    sessionBindingResolver,
     voiceRuntimeProductionCapable: composition.productionCapable,
     voiceRuntimeNotCapableReason: composition.notCapableReason,
     // `recordingAdapter` is now constructed whenever this worker's own
@@ -109,11 +133,14 @@ async function main() {
       "5/6 (R4) built the issuance route, the VoiceCapabilityGuard-guarded sessions/:id/input-resolutions " +
       "and sessions/:id/handoffs routes, and this worker's own VoiceApiClient to call them -- an earlier " +
       "version of this message claiming none of that existed is now obsolete and explicitly superseded. " +
-      "persist() uses that client for any attachment a real VoiceSessionBinding is supplied to (none is, " +
-      "today -- no call-admission flow exists yet) and otherwise remains the original in-process-only " +
-      "no-op. A further route/client (sessions/:id/events, backing VoiceSessionService.recordControlEvent's " +
-      "durable speech-start watermark) exists but this coordinator does not yet call it during a live " +
-      "turn. See docs/04-uat/audit-voice-application-wiring-20261003.md.",
+      "persist() uses that client for any attachment resolveSessionBinding (MediaWorkerServer's own " +
+      "POST /sessions admission, R4-entry) actually resolves a real VoiceSessionBinding for -- which " +
+      "still genuinely fails today, since apps/api has no durable voice.session row for any admitted id " +
+      "until the real, still-missing SD §4.1 provider webhook creates one -- and otherwise remains the " +
+      "original in-process-only no-op. recordAuthoritativeSpeechStart calls sessions/:id/events on a real " +
+      "speech-start, but Codex reopen round 15 (R4-control) found that is not yet the ordered, gap-" +
+      "recoverable control-event ingestion SD §5.4 requires. See " +
+      "docs/04-uat/audit-voice-application-wiring-20261003.md.",
   );
 
   let draining = false;

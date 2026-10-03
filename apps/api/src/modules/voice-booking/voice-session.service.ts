@@ -212,6 +212,22 @@ export class VoiceSessionService {
     }
   }
 
+  /**
+   * SD §10.1 `GET /sessions/{sessionId}`: the stage-1-workload-authenticated
+   * read a media-worker attachment uses to resolve this session's
+   * `resourceScopeId`/`routeProfileVersion`/`leaseEpoch`/`sessionVersion`
+   * -- the coordinates a `VoiceSessionBinding` needs -- BEFORE it holds
+   * any `voice:capability:issue`-minted token for this session (minting
+   * one already requires the caller to supply those same coordinates, so
+   * it cannot be how a worker first learns them; AUDIT-VOICE-APPLICATION-
+   * WIRING-20261003 R4-entry). Read-only; grants no mutating authority.
+   * Same not-found semantics as every other session lookup here -- never
+   * leak session existence to a caller that does not actually know it.
+   */
+  async getSession(voiceSessionId: string): Promise<VoiceSessionRecord> {
+    return this.requireSession(voiceSessionId);
+  }
+
   private async requireSession(
     voiceSessionId: string,
     executor?: VoiceQueryExecutor,

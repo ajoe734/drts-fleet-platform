@@ -278,6 +278,41 @@ export class VoiceBookingController {
   }
 
   /**
+   * SD §10.1 `GET /sessions/{sessionId}`: the stage-1-workload-
+   * authenticated read `MediaWorkerServer`'s own admission path
+   * (`resolveSessionBinding`, apps/voice-media-worker) uses to resolve a
+   * `VoiceSessionBinding` for a call-authority-admitted session, BEFORE it
+   * holds any `voice:capability:issue` token for it -- minting one via
+   * `issueCapability` above already requires the caller to supply
+   * `resourceScopeId`/`routeProfileVersion`/`leaseEpoch`, so it cannot be
+   * how a worker first discovers them (AUDIT-VOICE-APPLICATION-WIRING-
+   * 20261003 R4-entry). Authenticated exactly like `issueCapability`
+   * (stage-1 workload identity via the standard JWT/realm/scope guards,
+   * reusing its `voice:capability:issue` scope rather than minting a new
+   * scope definition this task's write_scopes does not cover) -- never the
+   * `VoiceCapabilityGuard` used by the routes below, since an attachment
+   * that has not minted any capability yet is exactly the caller this
+   * route exists for. A session id with no durable row (e.g. the real,
+   * still-missing SD §4.1 provider webhook never created one) is reported
+   * the same way every other session route here already does -- never a
+   * fabricated binding.
+   */
+  @Get("sessions/:sessionId")
+  @RequireRealms("system")
+  @RequireScopes("voice:capability:issue")
+  async getSession(
+    @Param("sessionId") sessionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const voiceSessionService = this.requireVoiceApplicationDependency(
+      this.voiceSessionService,
+      "voiceSessionService",
+    );
+    const session = await voiceSessionService.getSession(sessionId);
+    return toApiSuccessEnvelope({ session }, requestId);
+  }
+
+  /**
    * Backs `VoiceDialoguePersistPort`'s `mode: "trusted"` seam
    * (apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts): a
    * turn's CAS-bound input resolution, authenticated by the SD §4.2

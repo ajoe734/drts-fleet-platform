@@ -103,6 +103,7 @@ function toolPortContext(overrides: {
 function buildController(opts: {
   guardAuthenticate: ReturnType<typeof vi.fn>;
   issue?: ReturnType<typeof vi.fn>;
+  getSession?: ReturnType<typeof vi.fn>;
   resolveInput?: ReturnType<typeof vi.fn>;
   recordControlEvent?: ReturnType<typeof vi.fn>;
   findSessionById?: ReturnType<typeof vi.fn>;
@@ -113,6 +114,7 @@ function buildController(opts: {
     issue: opts.issue ?? vi.fn(),
   } as unknown as VoiceCapabilityService;
   const sessionService = {
+    getSession: opts.getSession ?? vi.fn(async () => session()),
     resolveInput: opts.resolveInput ?? vi.fn(),
     recordControlEvent: opts.recordControlEvent ?? vi.fn(),
   } as unknown as VoiceSessionService;
@@ -215,6 +217,44 @@ describe("VoiceBookingController.issueCapability (SD §4.2 stage 2 issuance rout
       }),
     ).rejects.toThrow();
     expect(issue).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry (Codex reopen round
+ * 15/16): `MediaWorkerServer`'s real admission path needs to resolve this
+ * session's resourceScopeId/routeProfileVersion/leaseEpoch/sessionVersion
+ * BEFORE it holds any `voice:capability:issue`-minted token for it --
+ * `issueCapability` above already requires the caller to supply those
+ * same coordinates, so it cannot be how a worker first discovers them.
+ * This is the real, previously-missing `GET /sessions/{sessionId}` route
+ * (SD §10.1) that breaks that circularity, authenticated the same way as
+ * `issueCapability` -- stage-1 workload identity, never the
+ * `VoiceCapabilityGuard` used by every session-mutating route below.
+ */
+describe("VoiceBookingController.getSession (SD §10.1 GET /sessions/{sessionId}, R4-entry)", () => {
+  it("returns the real VoiceSessionService.getSession record for this exact session id", async () => {
+    const getSession = vi.fn(async (voiceSessionId: string) => {
+      expect(voiceSessionId).toBe(session().voiceSessionId);
+      return session();
+    });
+    const { controller } = buildController({ guardAuthenticate: vi.fn(), getSession });
+
+    const result = await controller.getSession(session().voiceSessionId);
+
+    expect(getSession).toHaveBeenCalledWith(session().voiceSessionId);
+    expect(result.data).toEqual({ session: session() });
+  });
+
+  it("propagates VoiceSessionService's not-found rejection -- never fabricates a session/binding", async () => {
+    const getSession = vi.fn(async () => {
+      throw new ApiRequestError(403, "VOICE_SESSION_NOT_OWNER", "Voice session not found.");
+    });
+    const { controller } = buildController({ guardAuthenticate: vi.fn(), getSession });
+
+    await expect(controller.getSession("unknown-session")).rejects.toMatchObject({
+      code: "VOICE_SESSION_NOT_OWNER",
+    });
   });
 });
 

@@ -100,7 +100,13 @@ export class VoiceSessionComposer extends EventEmitter {
    * supplied, is forwarded to `VoiceCallTurnCoordinator.attach` to switch
    * this specific attachment onto real apps/api-backed persist/tool
    * composition (Codex reopen round 5/6, R4) -- see that method's own
-   * doc. Nothing in this worker's actual composition supplies one yet. */
+   * doc. `MediaWorkerServer`'s real `POST /sessions` admission now
+   * attempts to resolve one for every attachment (Codex reopen round
+   * 15/16, R4-entry); it still legitimately resolves `undefined` in
+   * every environment today because apps/api has no durable
+   * `voice.session` row to resolve until the real, still-missing
+   * provider-webhook/call-authority gates exist (see
+   * `../dialogue/voice-session-binding.ts`). */
   attach(
     sessionId: string,
     channel: WebSocketServerChannel,

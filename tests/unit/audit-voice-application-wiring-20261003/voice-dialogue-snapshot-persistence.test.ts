@@ -589,3 +589,30 @@ describe("VoiceSessionService.purgeExpiredDialogueSnapshots", () => {
     expect(repository.deleteDialogueSnapshot).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry (Codex reopen round
+ * 15/16): the real `GET /sessions/{sessionId}` read (SD §10.1)
+ * `MediaWorkerServer`'s admission path uses to resolve a
+ * `VoiceSessionBinding` -- `issueCapability` already requires the caller
+ * to supply resourceScopeId/routeProfileVersion/leaseEpoch, so it cannot
+ * be how a worker first discovers them. Only the repository boundary is
+ * doubled; `VoiceSessionService.getSession` runs for real.
+ */
+describe("VoiceSessionService.getSession (R4-entry)", () => {
+  it("returns the real, current session record for an admitted id", async () => {
+    const { service, session } = buildHarness();
+
+    const result = await service.getSession(VOICE_SESSION_ID);
+
+    expect(result).toEqual(session);
+  });
+
+  it("rejects, never fabricating a session, for an id with no durable row (e.g. the real SD §4.1 provider webhook never created one)", async () => {
+    const { service } = buildHarness();
+
+    await expect(service.getSession("no-such-session")).rejects.toMatchObject({
+      code: "VOICE_SESSION_NOT_OWNER",
+    });
+  });
+});

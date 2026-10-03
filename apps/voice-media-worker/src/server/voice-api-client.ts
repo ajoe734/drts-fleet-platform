@@ -49,6 +49,16 @@ export interface IssueCapabilityCommand {
   ttlSeconds?: number;
 }
 
+export interface GetSessionResult {
+  session: {
+    voiceSessionId: string;
+    resourceScopeId: string;
+    routeProfileVersion: number;
+    leaseEpoch: number;
+    sessionVersion: number;
+  };
+}
+
 export interface ResolveInputCommand {
   expectedSessionVersion: number;
   inputEpoch: number;
@@ -197,6 +207,34 @@ export class VoiceApiClient {
       "/callcenter/voice/capabilities",
       workloadToken,
       command,
+      signal,
+    );
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry: resolves this
+   * session's `resourceScopeId`/`routeProfileVersion`/`leaseEpoch`/
+   * `sessionVersion` using ONLY this worker's own stage-1 workload
+   * identity token -- never a capability token, since minting one
+   * (`issueCapability` above) already requires the caller to supply
+   * those same coordinates, and this is how a real `MediaWorkerServer`
+   * admission (`resolveSessionBinding`) discovers them in the first
+   * place to construct a `VoiceSessionBinding`. Rejects (never returns a
+   * fabricated/default binding) when apps/api has no durable `voice.session`
+   * row for this id -- e.g. the real, still-missing SD §4.1 provider
+   * webhook never created one; the caller must treat that as "stay on
+   * the fixture-only path for this attachment," not an admission failure.
+   */
+  async getSession(
+    voiceSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<GetSessionResult> {
+    const workloadToken = await this.workloadTokenSource.getToken(signal);
+    return this.request<GetSessionResult>(
+      "GET",
+      `/callcenter/voice/sessions/${encodeURIComponent(voiceSessionId)}`,
+      workloadToken,
+      undefined,
       signal,
     );
   }

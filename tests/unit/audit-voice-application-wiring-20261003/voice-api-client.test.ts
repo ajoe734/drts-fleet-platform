@@ -291,6 +291,57 @@ describe("VoiceApiClient", () => {
     });
   });
 
+  it("resolves a session using the WORKLOAD token (never a capability token), scoped to the session path (R4-entry)", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe(
+        `https://api.example.test/callcenter/voice/sessions/${binding.voiceSessionId}`,
+      );
+      expect(init?.method).toBe("GET");
+      expect(init?.headers).toMatchObject({ authorization: "Bearer workload-token" });
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            sessionVersion: binding.sessionVersion,
+          },
+        },
+      });
+    });
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      fakeTokenSource(),
+    );
+
+    const result = await client.getSession(binding.voiceSessionId);
+
+    expect(result.session).toEqual({
+      voiceSessionId: binding.voiceSessionId,
+      resourceScopeId: binding.resourceScopeId,
+      routeProfileVersion: binding.routeProfileVersion,
+      leaseEpoch: binding.leaseEpoch,
+      sessionVersion: binding.sessionVersion,
+    });
+  });
+
+  it("surfaces apps/api's structured error code/message from getSession too, e.g. when no voice.session row exists yet for this id", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(403, {
+        error: { code: "VOICE_SESSION_NOT_OWNER", message: "Voice session not found." },
+      }),
+    );
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      fakeTokenSource(),
+    );
+
+    await expect(client.getSession(binding.voiceSessionId)).rejects.toMatchObject({
+      code: "VOICE_SESSION_NOT_OWNER",
+    });
+  });
+
   it("surfaces apps/api's structured error code/message, never swallowing a rejection as success", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(409, { error: { code: "VOICE_DRAFT_STALE", message: "stale" } }),

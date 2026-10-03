@@ -3012,3 +3012,125 @@ or `precise_unimplemented_and_external_boundaries` from Round-15 -- this
 round is a hosted-CI-failure fix to test setup code only, touching no
 application source. `same_sha_review_ci`: pending hosted CI on this new
 SHA and independent reviewer re-review; not claimed.
+
+## Round-17: R4-entry -- the real consumer that resolves a `VoiceSessionBinding` at admission
+
+Codex reopen `codex-20261003T160720Z-bb49c249` on `2061c0520` (R4-entry,
+repeated across the round-9/10/11 "unconsumed entry" findings on
+`1994a76ec`/`770516318` too): `VoiceSessionComposer.attach`'s `binding`
+parameter, and `VoiceCallTurnCoordinator`'s trusted-vs-fixture persistence
+selection it gates, had existed since Round-7 with **no production call
+site that ever tried to supply one** -- `MediaWorkerServer`'s real
+`POST /sessions` admission (`media-worker-server.ts`, now ~line 665) and
+its WebSocket-upgrade `attach()` call (now ~line 1072) always called
+`attach(sessionId, channel)` with no third argument, so every real
+attachment stayed on the fixture-only path regardless of how much trusted
+plumbing existed behind it. The reviewer's own framing: "A missing live
+CTI issuer is a real external gate; lack of a new bare session-create
+endpoint does not establish that passing/restoring ALREADY admitted
+trusted session authority is out of scope."
+
+**Root-cause analysis done this round** (not in any prior round's
+evidence): `VoiceCapabilityService.issue` (`apps/api/src/common/auth/
+voice-capability.service.ts`) does **not** look up
+`resourceScopeId`/`routeProfileVersion`/`leaseEpoch` from durable state --
+its `IssueCapabilityCommand` requires the *caller* to already supply all
+three. So a capability token can never be how a worker first discovers a
+session's coordinates; something else, authenticated only by this
+worker's own stage-1 workload identity (never a capability token, since it
+doesn't have one yet), has to answer "what are this admitted session's
+resourceScopeId/routeProfileVersion/leaseEpoch/sessionVersion?" SD §10.1
+already specifies exactly this route -- `GET /api/voice/sessions/{sessionId}`,
+caller "scoped worker／ops", "恢復 session snapshot" -- but
+`voice-booking.controller.ts` had never implemented it; every other
+session route there (`resolveInput`, `events`, `handoffs`,
+`dialogue-snapshot`) is gated by `VoiceCapabilityGuard`, which is exactly
+the circular dependency above. Separately, `grep -rn "INSERT INTO
+voice.session"` across `apps/api` confirms there is still no production
+writer for the `voice.session` row at all -- only
+`apps/api/tests/integration/{uv-exec-002,uv-exec-005}.integration.test.ts`
+insert one directly. That writer is the SD §4.1 provider webhook
+(`POST /api/voice/providers/{provider}/events`), the same genuinely
+external, still-missing CTI/IVR gate every prior round already documented
+-- **not** something this round invents or fabricates a substitute for.
+
+**Fix, scoped to exactly the consumer wiring the reviewer asked for:**
+
+1. `apps/api/src/modules/voice-booking/voice-session.service.ts`: new
+   `getSession(voiceSessionId)` -- a thin public wrapper around the
+   existing private `requireSession` (same not-found semantics as every
+   other session lookup here: a caller that doesn't already know a real
+   session id is told nothing more than every other route already tells
+   it).
+2. `apps/api/src/modules/voice-booking/voice-booking.controller.ts`: new
+   `GET sessions/:sessionId` route, `@RequireRealms("system")
+   @RequireScopes("voice:capability:issue")` -- authenticated exactly like
+   `issueCapability` (stage-1 workload identity via the standard
+   realm/scope guard pipeline), deliberately reusing that existing IAM
+   scope rather than defining a new one in
+   `packages/contracts/src/iam-policy-catalog.ts`, which this task's
+   `write_scopes` does not include (only `packages/contracts/src/voice*`
+   is in scope; `iam-policy-catalog.ts` is not).
+3. `apps/voice-media-worker/src/server/voice-api-client.ts`: new
+   `VoiceApiClient.getSession(voiceSessionId, signal)` -- mints a
+   workload token (never a capability token) and calls the route above.
+4. `apps/voice-media-worker/src/dialogue/voice-session-binding.ts`: new
+   `VoiceSessionBindingResolver` interface (`resolve(voiceSessionId,
+   signal): Promise<VoiceSessionBinding>`) -- the real seam
+   `MediaWorkerServer` depends on, kept narrow (no `VoiceApiClient` import
+   in `media-worker-server.ts`) the same way `VoiceCallAuthorityVerifier`
+   already is.
+5. `apps/voice-media-worker/src/server/media-worker-server.ts`: new
+   `MediaWorkerServerConfig.sessionBindingResolver`; new private
+   `resolveSessionBinding(voiceSessionId)` that calls it and **never
+   throws** -- a rejection (today, always: no resolver configured in any
+   real environment, and even when one is, no durable `voice.session` row
+   exists yet) just means this attachment stays on the pre-existing
+   fixture-only path, logged precisely, never an admission failure.
+   `POST /sessions`'s handler now awaits this resolution (after the
+   response JSON is already serialized, so the wire response shape is
+   unchanged) and stores the result as `MediaSessionRecord.binding`,
+   *before* responding -- so the WebSocket upgrade that follows (same
+   caller, same admitted session id) never races it. The WS-upgrade
+   handler's `sessionComposer?.attach(sessionId, channel)` call now reads
+   `this.sessionComposer?.attach(sessionId, channel, session.binding)`.
+6. `apps/voice-media-worker/src/server.ts`: constructs the real
+   `sessionBindingResolver` wrapping `voiceApiClient.getSession` (when
+   `voiceApiClient` itself is configured -- still `undefined` in every
+   environment this worker runs in today) and passes it into
+   `MediaWorkerServer`'s config. Updated three stale inline comments that
+   previously asserted "nothing supplies a binding" / "no call-admission
+   flow exists" -- both now precisely describe the real, still-failing
+   remaining gate (no `voice.session` row exists until the SD §4.1
+   provider webhook creates one) instead of a blanket "doesn't exist"
+   claim.
+
+This is real, exercised production wiring -- not another documentation
+correction. It is **still functionally inert** in this VM and in hosted CI
+today, honestly: `VOICE_API_BASE_URL` is unset everywhere this worker
+runs, so `createVoiceApiClient()` returns `undefined`,
+`sessionBindingResolver` is `undefined`, and every attachment still takes
+the pre-existing `resolveSessionBinding` short-circuit (no resolver
+configured). Even in an environment where `VOICE_API_BASE_URL` were set,
+resolution would still genuinely fail for every real session id, because
+no SD §4.1 provider webhook exists yet to create the `voice.session` row
+`getSession` would need to find. Both of those are the same, already
+twice-reviewed, genuinely external CTI/IVR gate -- not a new or different
+blocker, and not weakened by this round's wiring.
+
+### Evidence table
+
+| Finding / acceptance key | Source & fix location | Old → new behavior | Commands, exit codes, evidence | Residual |
+| --- | --- | --- | --- | --- |
+| R4-entry (`composed_turn_and_recording_path`, `precise_unimplemented_and_external_boundaries`) | `media-worker-server.ts` admission handler + new `resolveSessionBinding`; `session.ts` wiring; new `GET /sessions/:sessionId` (`voice-booking.controller.ts` + `voice-session.service.ts`); new `VoiceApiClient.getSession` | Old: `attach()` never called with a `binding` from any production path -- dead code outside tests. New: the real `POST /sessions` admission attempts real resolution via a real HTTP route, and forwards whatever it resolves (including `undefined`, fail-closed) into the real `attach()` call. | `pnpm --filter @drts/voice-media-worker typecheck`: exit 0. `pnpm --filter @drts/api typecheck`: exit 0 (both only after `pnpm --filter @drts/contracts build` / `pnpm --filter @drts/control-plane-auth build` refreshed this worktree's own stale `dist/` -- a local build-order artifact, not a product defect; not needed in hosted CI, which always builds from clean). `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003 tests/integration/unattended-voice-postgres.integration.test.ts --max-warnings=0`: exit 0. New tests (all real production code, only the named external boundary doubled): `tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts` (new file, 3 tests: no-resolver default, real resolver success, resolver-rejection fail-closed -- only `VoiceSessionBindingResolver` doubled, `MediaWorkerServer` constructed but never `.start()`ed); `voice-api-client.test.ts` (+2: `getSession` uses the workload token on the real session path; surfaces apps/api's structured rejection); `voice-capability-composition.test.ts` (+2: controller `getSession` forwards to the service and propagates not-found, only `VoiceSessionService`/`VoiceCapabilityGuard` doubled); `voice-dialogue-snapshot-persistence.test.ts` (+2: `VoiceSessionService.getSession` against a real repository double, found + not-found). `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`: 11 files / 165 tests pass (was 10 files / 156 before this round -- +9 new, 0 regressions). Full named regression set (`tests/unit/audit-voice-application-wiring-20261003/` + `audit-voice-runtime-20261002` subset + `uv-exec-{008,010,012,017,020,026}` + `uv-exec-001` contract + idempotency guard): 28 files / 553 tests pass (was 544 before Round-15; +9, 0 regressions). | Functionally inert everywhere this worker runs today: `VOICE_API_BASE_URL` unset (no `voiceApiClient`, so no `sessionBindingResolver`); and even if configured, `getSession` would genuinely reject for every real session id until the SD §4.1 provider webhook exists to create a `voice.session` row -- the same already-documented external CTI/IVR gate, unchanged by this round. R4-control (ordered speech-start ingestion, response-loss recovery) and R4-persist (late-response reconciliation race, `pendingInput`/snapshot-identity correlation) and R11 (restoration-failure admission barrier for already-queued finals) from the same `codex-20261003T160720Z-bb49c249` reopen are **not** addressed this round -- next repair units, unattempted here, carried forward unchanged. |
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: still **NOT met**. R4-entry's unconsumed-production-caller defect is fixed; R11 (restoration-failure admission barrier) is untouched this round.
+- `authority_epoch_consent_fences`: still **NOT met**. R4-control and R4-persist's late-response reconciliation race from the same reopen are untouched this round.
+- `precise_unimplemented_and_external_boundaries`: improved for R4-entry specifically (the real remaining gap -- no SD §4.1 provider webhook, hence no durable `voice.session` row -- is now precisely wired-around and tested rather than left as an unreachable interface), but not fully met: R4-control/R4-persist's own boundary claims are untouched.
+- `same_sha_review_ci`: not claimed. Local typecheck/lint/targeted-vitest evidence above is this round's own; hosted CI and independent reviewer re-review on this exact SHA are pending, same as every prior round.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider call, package install, history rewrite, or force-push was
+performed this round.

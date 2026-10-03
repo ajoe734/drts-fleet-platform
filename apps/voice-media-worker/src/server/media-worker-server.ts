@@ -25,6 +25,10 @@ import {
   type VoiceCallAuthorityVerifier,
 } from "./call-authority";
 import type { VoiceSessionComposer } from "./session-composer";
+import type {
+  VoiceSessionBinding,
+  VoiceSessionBindingResolver,
+} from "../dialogue/voice-session-binding";
 
 /** Default cap on a single HTTP control-plane request body (`/sessions`,
  * `/recording/finalize`). These carry JSON metadata, never raw audio, so this
@@ -74,6 +78,11 @@ export interface MediaWorkerServerConfig {
    * admits sessions and negotiates the WebSocket, but nothing ever
    * transcribes or synthesizes anything for them. */
   sessionComposer?: VoiceSessionComposer | undefined;
+  /** Resolves this admitted session's trusted `VoiceSessionBinding`
+   * (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry) -- without one,
+   * `POST /sessions` admission behaves exactly as before: every attached
+   * session stays on the fixture-only persistence path. */
+  sessionBindingResolver?: VoiceSessionBindingResolver | undefined;
 }
 
 export interface MediaSessionRecord {
@@ -81,6 +90,12 @@ export interface MediaSessionRecord {
   connectedAt: string;
   channel?: WebSocketServerChannel | undefined;
   metadata?: Record<string, unknown> | undefined;
+  /** Resolved during `POST /sessions` admission, before the WebSocket
+   * upgrade ever reaches `sessionComposer.attach` -- `undefined` whenever
+   * no `sessionBindingResolver` is configured, or it rejected for this
+   * session id (see that resolver's own doc for why that must never fail
+   * admission itself). */
+  binding?: VoiceSessionBinding | undefined;
 }
 
 export class MediaWorkerServer extends EventEmitter {
@@ -109,12 +124,16 @@ export class MediaWorkerServer extends EventEmitter {
     | VoiceCallAuthorityVerifier
     | undefined;
   private readonly sessionComposer: VoiceSessionComposer | undefined;
+  private readonly sessionBindingResolver:
+    | VoiceSessionBindingResolver
+    | undefined;
 
   constructor(config?: MediaWorkerServerConfig) {
     super();
     this.recordingAdapter = config?.recordingAdapter;
     this.callAuthorityVerifier = config?.callAuthorityVerifier;
     this.sessionComposer = config?.sessionComposer;
+    this.sessionBindingResolver = config?.sessionBindingResolver;
     this.sessionComposer?.on("session.event", (event: unknown) => {
       this.emit("session.event", event);
     });
@@ -368,6 +387,34 @@ export class MediaWorkerServer extends EventEmitter {
     this.totalAdmitted++;
     this.emit("session.admitted", session);
     return session;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry: the real production
+   * attempt to resolve this admitted session's `VoiceSessionBinding` --
+   * `sessionComposer.attach()`'s `binding` parameter previously had no
+   * caller at all outside tests. Never throws: a rejection (most likely,
+   * today, no `sessionBindingResolver` configured at all, or apps/api has
+   * no durable `voice.session` row yet for this id -- the real, still-
+   * missing SD §4.1 provider webhook is the genuine external gate, not a
+   * defect in this method) just means this attachment stays on the
+   * existing fixture-only persistence path, exactly as before this
+   * resolver existed.
+   */
+  private async resolveSessionBinding(
+    voiceSessionId: string,
+  ): Promise<VoiceSessionBinding | undefined> {
+    if (!this.sessionBindingResolver) return undefined;
+    try {
+      return await this.sessionBindingResolver.resolve(voiceSessionId);
+    } catch (err) {
+      console.warn(
+        `[voice-media-worker] Could not resolve a trusted VoiceSessionBinding for session ` +
+          `'${voiceSessionId}': ${err instanceof Error ? err.message : String(err)}. ` +
+          `Attaching without one (fixture-only persistence).`,
+      );
+      return undefined;
+    }
   }
 
   closeSession(
@@ -659,18 +706,31 @@ export class MediaWorkerServer extends EventEmitter {
               this.activeSessions.delete(claims.sessionId);
               throw err;
             }
-            res.statusCode = 201;
-            res.end(
-              JSON.stringify({
-                status: "admitted",
-                session,
-                grant: {
-                  token: grant.token,
-                  epoch: grant.epoch,
-                  expiresAt: grant.expiresAt,
-                },
-              }),
+            // Computed from `session` before `resolveSessionBinding` below
+            // can attach a `binding` to that same record -- this response's
+            // wire shape is unrelated to, and must not change because of,
+            // this worker's own internal admission bookkeeping.
+            const responseBody = JSON.stringify({
+              status: "admitted",
+              session,
+              grant: {
+                token: grant.token,
+                epoch: grant.epoch,
+                expiresAt: grant.expiresAt,
+              },
+            });
+            // Awaited here, before responding, so the WebSocket upgrade
+            // this response's caller sends next (which reads
+            // `session.binding` synchronously, see `handleUpgrade`) never
+            // races an admission that is still resolving it (AUDIT-VOICE-
+            // APPLICATION-WIRING-20261003 R4-entry). A rejection (e.g. no
+            // `voice.session` row exists yet for this id) never fails
+            // admission itself -- see `resolveSessionBinding`'s own doc.
+            session.binding = await this.resolveSessionBinding(
+              claims.sessionId,
             );
+            res.statusCode = 201;
+            res.end(responseBody);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             res.statusCode =
@@ -1009,7 +1069,7 @@ export class MediaWorkerServer extends EventEmitter {
     // reporting not-ready) -- that must close the channel, never crash the
     // worker or leave the socket silently unattended.
     try {
-      this.sessionComposer?.attach(sessionId, channel);
+      this.sessionComposer?.attach(sessionId, channel, session.binding);
     } catch (err) {
       // The channel's own "close" listener (registered above) performs the
       // actual activeSessions/session.closed cleanup once this reaches the
