@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Inject, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import {
   AdapterType,
@@ -87,7 +93,10 @@ function toPdfAsciiText(value: string): string {
 }
 
 function escapePdfLiteralText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
 }
 
 function chunkPdfLines(lines: string[], size: number): string[][] {
@@ -162,7 +171,11 @@ function buildMinimalPdf(lines: string[]): Buffer {
 function buildPlacardPdfRows(
   placard: Pick<
     PlacardVersionRecord,
-    "placardVersionId" | "versionCode" | "templateName" | "publishedAt" | "createdAt"
+    | "placardVersionId"
+    | "versionCode"
+    | "templateName"
+    | "publishedAt"
+    | "createdAt"
   >,
   source: PublicInfoVersionRecord,
 ): string[] {
@@ -508,9 +521,12 @@ export class PlatformAdminService implements OnModuleInit {
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
   ) {
-    this.placardVersions = PLACARD_SEED.map((placard) =>
-      this.clonePlacardVersion(placard),
-    );
+    // Materialising real PDF bytes requires awaiting `documentArtifactStore`,
+    // which a constructor cannot do; seed placards start as plain clones here
+    // and are actually rendered (via `clonePlacardVersion`) in `onModuleInit`,
+    // which already runs -- and is already awaited -- before the app accepts
+    // any request.
+    this.placardVersions = PLACARD_SEED.map((placard) => ({ ...placard }));
   }
 
   async onModuleInit() {
@@ -523,14 +539,22 @@ export class PlatformAdminService implements OnModuleInit {
           persistedState.placardVersions.length > 0;
 
         if (!hasPersistedState) {
+          this.placardVersions = await Promise.all(
+            this.placardVersions.map((placard) =>
+              this.clonePlacardVersion(placard),
+            ),
+          );
           this.persistChanges(
             {
               publicInfoVersions: this.publicInfoVersions.map((version) =>
                 this.clonePublicInfoVersion(version),
               ),
-              placardVersions: this.placardVersions.map((placard) =>
-                this.clonePlacardVersion(placard),
-              ),
+              placardVersions: this.placardVersions.map((placard) => ({
+                ...placard,
+                downloadMetadata: placard.downloadMetadata
+                  ? { ...placard.downloadMetadata }
+                  : null,
+              })),
             },
             "module init bootstrap",
           );
@@ -538,8 +562,10 @@ export class PlatformAdminService implements OnModuleInit {
           this.publicInfoVersions = persistedState.publicInfoVersions.map(
             (version) => this.clonePublicInfoVersion(version),
           );
-          this.placardVersions = persistedState.placardVersions.map((placard) =>
-            this.clonePlacardVersion(placard),
+          this.placardVersions = await Promise.all(
+            persistedState.placardVersions.map((placard) =>
+              this.clonePlacardVersion(placard),
+            ),
           );
         }
 
@@ -564,8 +590,10 @@ export class PlatformAdminService implements OnModuleInit {
         );
       }
     } else {
-      this.placardVersions = this.placardVersions.map((placard) =>
-        this.clonePlacardVersion(placard),
+      this.placardVersions = await Promise.all(
+        this.placardVersions.map((placard) =>
+          this.clonePlacardVersion(placard),
+        ),
       );
     }
 
@@ -673,8 +701,7 @@ export class PlatformAdminService implements OnModuleInit {
       this.normalizeNullableText(command.effectiveFrom) ??
       version.effectiveFrom;
     version.effectiveTo =
-      this.normalizeNullableText(command.effectiveTo) ??
-      version.effectiveTo;
+      this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
     version.updatedAt = publishedAt;
 
     const changedVersions = previousPublished
@@ -768,13 +795,15 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePublicInfoVersion(version);
   }
 
-  listPlacardVersions() {
-    return this.placardVersions.map((placard) =>
-      this.clonePlacardVersion(placard),
+  async listPlacardVersions() {
+    return Promise.all(
+      this.placardVersions.map((placard) => this.clonePlacardVersion(placard)),
     );
   }
 
-  getPlacardVersion(placardVersionId: string): PlacardVersionRecord {
+  async getPlacardVersion(
+    placardVersionId: string,
+  ): Promise<PlacardVersionRecord> {
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );
@@ -789,7 +818,7 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePlacardVersion(placard);
   }
 
-  publishPlacardVersion(
+  async publishPlacardVersion(
     placardVersionId: string,
     command: PublishPlacardVersionCommand = {},
     requestId?: string,
@@ -821,10 +850,10 @@ export class PlatformAdminService implements OnModuleInit {
     placard.updatedAt = now;
 
     // Force re-render so PDF reflects the actual publishedAt timestamp
-    this.ensurePlacardArtifact(placard, true);
+    await this.ensurePlacardArtifact(placard, true);
 
     this.persistChanges(
-      { placardVersions: [this.clonePlacardVersion(placard)] },
+      { placardVersions: [await this.clonePlacardVersion(placard)] },
       "publish_placard_version",
     );
     this.recordAudit(
@@ -848,7 +877,7 @@ export class PlatformAdminService implements OnModuleInit {
     return this.clonePlacardVersion(placard);
   }
 
-  generatePlacardVersion(
+  async generatePlacardVersion(
     command: GeneratePlacardVersionCommand,
     requestId?: string,
   ) {
@@ -913,15 +942,15 @@ export class PlatformAdminService implements OnModuleInit {
     };
 
     // Materialise real PDF bytes and sign the URL
-    this.ensurePlacardArtifact(placard);
+    await this.ensurePlacardArtifact(placard);
 
     this.placardVersions = [
-      this.clonePlacardVersion(placard),
+      await this.clonePlacardVersion(placard),
       ...this.placardVersions,
     ];
     this.persistChanges(
       {
-        placardVersions: [this.clonePlacardVersion(placard)],
+        placardVersions: [await this.clonePlacardVersion(placard)],
       },
       "generate_placard_version",
     );
@@ -935,7 +964,7 @@ export class PlatformAdminService implements OnModuleInit {
         resourceType: "placard_version",
         resourceId: placard.placardVersionId,
         newValuesSummary: {
-          ...this.clonePlacardVersion(placard),
+          ...(await this.clonePlacardVersion(placard)),
           sourcePublicInfoStatus: publicInfoVersion.status,
         },
       },
@@ -2356,19 +2385,21 @@ export class PlatformAdminService implements OnModuleInit {
     }
   }
 
-  private ensurePlacardArtifact(
+  /**
+   * `DOCUMENT_ARTIFACT_STORE` is now a durable, shared backend (see
+   * `document-artifact-runtime.config.ts`): the exact bytes `put` there at
+   * render time survive a restart and are visible from every instance, so
+   * once `placard.artifactManifestHash` is set it is permanent proof the
+   * bytes exist -- there is no need to re-check the store on every read.
+   * Only an explicit `forceRerender` (the placard's own mutable fields, e.g.
+   * `publishedAt`, are deliberately baked into its PDF) or a
+   * never-before-materialised placard actually renders and calls `put`.
+   */
+  private async ensurePlacardArtifact(
     placard: PlacardVersionRecord,
     forceRerender = false,
-  ): PlacardVersionRecord {
-    const stored = this.documentArtifactStore.get(
-      "placard",
-      placard.placardVersionId,
-    );
-    const materialised =
-      !forceRerender &&
-      stored != null &&
-      placard.artifactManifestHash != null &&
-      stored.record.sha256 === placard.artifactManifestHash;
+  ): Promise<PlacardVersionRecord> {
+    const materialised = !forceRerender && placard.artifactManifestHash != null;
     const expired = this.isPlacardArtifactExpired(
       placard.artifactDownloadUrl,
       placard.artifactExpiresAt,
@@ -2378,18 +2409,30 @@ export class PlatformAdminService implements OnModuleInit {
       return placard;
     }
 
+    if (materialised) {
+      // Only the signed link's window has lapsed; the durable store already
+      // holds the exact bytes behind `artifactManifestHash` -- reissue the
+      // signature over that same unchanged hash, never re-render.
+      const downloadMetadata = this.createPlacardDownloadMetadata(
+        placard.placardVersionId,
+        placard.artifactManifestHash!,
+      );
+      placard.artifactDownloadUrl = downloadMetadata.downloadUrl;
+      placard.artifactExpiresAt = downloadMetadata.expiresAt;
+      placard.downloadMetadata = downloadMetadata;
+      return placard;
+    }
+
     const publicInfoVersion = this.publicInfoVersions.find(
       (v) => v.versionId === placard.publicInfoVersionId,
     );
 
     let record: DocumentArtifactRecord;
-    if (materialised) {
-      record = stored!.record;
-    } else if (publicInfoVersion) {
+    if (publicInfoVersion) {
       const pdfBytes = buildMinimalPdf(
         buildPlacardPdfRows(placard, publicInfoVersion),
       );
-      record = this.documentArtifactStore.put({
+      record = await this.documentArtifactStore.put({
         kind: "placard",
         subjectId: placard.placardVersionId,
         mimeType: "application/pdf",
@@ -2402,7 +2445,7 @@ export class PlatformAdminService implements OnModuleInit {
         `Source Version: ${placard.publicInfoVersionId}`,
         `Generated At: ${placard.createdAt}`,
       ]);
-      record = this.documentArtifactStore.put({
+      record = await this.documentArtifactStore.put({
         kind: "placard",
         subjectId: placard.placardVersionId,
         mimeType: "application/pdf",
@@ -2426,10 +2469,10 @@ export class PlatformAdminService implements OnModuleInit {
     return placard;
   }
 
-  private clonePlacardVersion(
+  private async clonePlacardVersion(
     placard: PlacardVersionRecord,
-  ): PlacardVersionRecord {
-    const ensured = this.ensurePlacardArtifact(placard);
+  ): Promise<PlacardVersionRecord> {
+    const ensured = await this.ensurePlacardArtifact(placard);
 
     return {
       ...ensured,

@@ -31,15 +31,19 @@ export interface PutDocumentArtifactCommand {
 
 /**
  * The read/write seam producers (tenant invoice, placard, report generation)
- * and `ControlledDownloadController` share. Both methods are synchronous by
- * design: the only adapter this task ships is the in-process local one, so a
- * durable/shared backing (S3, a filesystem volume, ...) is deliberately left
- * for whichever task wires a real producer -- swapping the adapter only
- * requires implementing this same interface.
+ * and `ControlledDownloadController` share. Both methods are async: the
+ * durable adapter (`S3DocumentArtifactStoreAdapter`) talks to real object
+ * storage over the network, and the in-process adapter
+ * (`InMemoryDocumentArtifactStore`) implements the same async signature so
+ * every caller goes through one seam regardless of which backend is wired in
+ * via `DOCUMENT_ARTIFACT_STORE`.
  */
 export interface DocumentArtifactStore {
-  put(command: PutDocumentArtifactCommand): DocumentArtifactRecord;
-  get(kind: DocumentArtifactKind, subjectId: string): DocumentArtifactEntry | null;
+  put(command: PutDocumentArtifactCommand): Promise<DocumentArtifactRecord>;
+  get(
+    kind: DocumentArtifactKind,
+    subjectId: string,
+  ): Promise<DocumentArtifactEntry | null>;
 }
 
 export const DOCUMENT_ARTIFACT_STORE = Symbol("DOCUMENT_ARTIFACT_STORE");

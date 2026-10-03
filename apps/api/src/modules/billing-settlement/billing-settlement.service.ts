@@ -67,6 +67,7 @@ import {
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
   type DocumentArtifactRebuildRegistry,
+  type DocumentArtifactRecord,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -1386,7 +1387,7 @@ export class BillingSettlementService implements OnModuleInit {
     const now = new Date().toISOString();
     const invoiceId = `invoice-${randomUUID()}`;
     const billingProfile = this.requireTenantBillingProfile(command.tenantId);
-    const artifactRecord = this.documentArtifactStore.put({
+    const artifactRecord = await this.documentArtifactStore.put({
       kind: "tenant-invoice",
       subjectId: invoiceId,
       mimeType: "application/pdf",
@@ -1628,40 +1629,39 @@ export class BillingSettlementService implements OnModuleInit {
   /**
    * Makes a stored invoice's download link trustworthy before it is handed
    * back to a caller: reissues the signed link if its time window has
-   * lapsed, and re-renders + re-stores the PDF from this invoice's own
-   * persisted snapshot if `DocumentArtifactStore` no longer has bytes
-   * matching the link's manifest hash (the store is in-memory only per
-   * SR-ARTIFACT-001, so a process restart empties it while the invoice
-   * record itself survives via the repository).
+   * lapsed. `DOCUMENT_ARTIFACT_STORE` is now a durable, shared backend (see
+   * `document-artifact-runtime.config.ts`): the exact bytes `put` there at
+   * issuance survive a restart and are visible from every instance, so
+   * there is no need to re-check the store on every read, and -- critically
+   * -- no need to ever re-render from this tenant's *current* billing
+   * profile just to answer a list/get call. `invoice.artifactDownloadMetadata
+   * .manifestHash` is the permanent proof of what was actually stored; only
+   * the signature/expiry window is ever recomputed here, over that same
+   * unchanged hash.
    *
-   * Only the link is ever recomputed here -- `createdAt` (the invoice's
-   * actual issuance date), `lines`, and `amount` are read, never
-   * recalculated, so viewing this invoice on a later date can never change
-   * what it says was issued or owed.
+   * If the durable store genuinely lost the bytes behind this hash (not a
+   * restart -- an actual deletion), `ControlledDownloadController`'s own
+   * registered rebuilder (`rebuildTenantInvoiceArtifact`) is the fallback,
+   * and it re-renders from the CURRENT billing profile on purpose: a
+   * mismatch against this invoice's immutable manifest hash is then reported
+   * as a genuine content mismatch, not silently served.
+   *
+   * `createdAt` (the invoice's actual issuance date), `lines`, and `amount`
+   * are read, never recalculated, so viewing this invoice on a later date
+   * can never change what it says was issued or owed.
    */
   private ensureTenantInvoiceArtifact(
     invoice: StoredTenantInvoice,
   ): StoredTenantInvoice {
-    const stored = this.documentArtifactStore.get(
-      "tenant-invoice",
-      invoice.invoiceId,
-    );
-    const materialised =
-      stored?.record.sha256 === invoice.artifactDownloadMetadata.manifestHash;
     const expired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
-
-    if (materialised && !expired) {
+    if (!expired) {
       return invoice;
     }
-
-    const record = materialised
-      ? stored!.record
-      : this.renderTenantInvoiceArtifact(invoice);
 
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "tenant-invoice",
       subjectId: invoice.invoiceId,
-      manifestHash: record.sha256,
+      manifestHash: invoice.artifactDownloadMetadata.manifestHash,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
       signingSecret: this.downloadSigningSecret,
@@ -1686,11 +1686,13 @@ export class BillingSettlementService implements OnModuleInit {
     return refreshed;
   }
 
-  /** The actual render step `ensureTenantInvoiceArtifact` runs when the store has
-   * nothing matching this invoice's bytes, factored out so a controlled-download
-   * rebuild (see `rebuildTenantInvoiceArtifact`) re-derives the identical file
-   * instead of maintaining a second copy of this rendering logic. */
-  private renderTenantInvoiceArtifact(invoice: StoredTenantInvoice) {
+  /** The render step `generateTenantInvoice` runs at issuance, and the sole
+   * fallback (see `rebuildTenantInvoiceArtifact`) a controlled-download
+   * rebuild re-derives the identical file from, instead of maintaining a
+   * second copy of this rendering logic. */
+  private renderTenantInvoiceArtifact(
+    invoice: StoredTenantInvoice,
+  ): Promise<DocumentArtifactRecord> {
     return this.documentArtifactStore.put({
       kind: "tenant-invoice",
       subjectId: invoice.invoiceId,
@@ -1713,15 +1715,17 @@ export class BillingSettlementService implements OnModuleInit {
   /**
    * Registered with `DocumentArtifactRebuildRegistry` for kind
    * "tenant-invoice": lets `ControlledDownloadController` recover a
-   * verified, unexpired link whose bytes never landed in its own
-   * process-local store (a sibling Cloud Run instance rendered them, or
-   * this instance restarted) by re-deriving the identical file from this
-   * invoice's own durably persisted record. Returns null -- not a thrown
-   * error -- when this instance's own invoice list genuinely has no such
-   * id, which the registry contract treats as "nothing to rebuild", not a
-   * rebuild failure.
+   * verified, unexpired link whose bytes are genuinely missing from the
+   * durable store (not the common case -- that is served directly from the
+   * shared store without ever reaching this fallback) by re-deriving a file
+   * from this invoice's own durably persisted record. Returns null -- not a
+   * thrown error -- when this instance's own invoice list genuinely has no
+   * such id, which the registry contract treats as "nothing to rebuild", not
+   * a rebuild failure.
    */
-  private rebuildTenantInvoiceArtifact(invoiceId: string) {
+  private async rebuildTenantInvoiceArtifact(
+    invoiceId: string,
+  ): Promise<DocumentArtifactRecord | null> {
     const invoice = this.tenantInvoices.find(
       (candidate) => candidate.invoiceId === invoiceId,
     );
@@ -1729,7 +1733,7 @@ export class BillingSettlementService implements OnModuleInit {
       return null;
     }
     try {
-      return this.renderTenantInvoiceArtifact(invoice);
+      return await this.renderTenantInvoiceArtifact(invoice);
     } catch {
       // A billing profile or other precondition `requireTenantBillingProfile`
       // enforces could have been removed since this invoice was issued; the
@@ -2115,7 +2119,7 @@ export class BillingSettlementService implements OnModuleInit {
         updatedAt: now,
       };
 
-      const artifactRecord = this.documentArtifactStore.put({
+      const artifactRecord = await this.documentArtifactStore.put({
         kind: "report",
         subjectId: statementId,
         mimeType: "application/pdf",
@@ -2235,32 +2239,29 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
+  /**
+   * Same rationale as `ensureTenantInvoiceArtifact`: `DOCUMENT_ARTIFACT_STORE`
+   * is now durable and shared, so the only thing that can legitimately make
+   * an already-issued statement's link stale is the signature/expiry
+   * window, not the bytes behind it. Only the link is ever recomputed here,
+   * over the unchanged `artifactDownloadMetadata.manifestHash`.
+   */
   private ensureDriverStatementArtifact(
     statement: DriverStatementRecord,
   ): DriverStatementRecord {
-    const stored = this.documentArtifactStore.get(
-      "report",
-      statement.statementId,
-    );
-    const materialised =
-      Boolean(statement.artifactDownloadMetadata) &&
-      stored?.record.sha256 ===
-        statement.artifactDownloadMetadata?.manifestHash;
-    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
-
-    if (materialised && !expired) {
+    if (!statement.artifactDownloadMetadata) {
       return statement;
     }
-
-    const record = materialised
-      ? stored!.record
-      : this.renderDriverStatementArtifact(statement);
+    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
+    if (!expired) {
+      return statement;
+    }
 
     const now = new Date().toISOString();
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "report",
       subjectId: statement.statementId,
-      manifestHash: record.sha256,
+      manifestHash: statement.artifactDownloadMetadata.manifestHash,
       createdAt: now,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
@@ -2286,12 +2287,13 @@ export class BillingSettlementService implements OnModuleInit {
     return refreshed;
   }
 
-  /** The actual render step `ensureDriverStatementArtifact` runs when the store
-   * has nothing matching this statement's bytes, factored out so a
-   * controlled-download rebuild (see `rebuildDriverStatementArtifact`)
-   * re-derives the identical file instead of maintaining a second copy of
-   * this rendering logic. */
-  private renderDriverStatementArtifact(statement: DriverStatementRecord) {
+  /** The render step `generateDriverStatements` runs at issuance, and the
+   * sole fallback (see `rebuildDriverStatementArtifact`) a controlled-download
+   * rebuild re-derives the identical file from, instead of maintaining a
+   * second copy of this rendering logic. */
+  private renderDriverStatementArtifact(
+    statement: DriverStatementRecord,
+  ): Promise<DocumentArtifactRecord> {
     return this.documentArtifactStore.put({
       kind: "report",
       subjectId: statement.statementId,
@@ -2303,14 +2305,17 @@ export class BillingSettlementService implements OnModuleInit {
   /**
    * Registered with `DocumentArtifactRebuildRegistry` for kind "report": lets
    * `ControlledDownloadController` recover a verified, unexpired link whose
-   * bytes never landed in its own process-local store (a sibling Cloud Run
-   * instance rendered them, or this instance restarted) by re-deriving the
-   * identical file from this driver statement's own durably persisted
-   * record. Returns null -- not a thrown error -- when this instance's own
-   * statement list genuinely has no such id, which the registry contract
-   * treats as "nothing to rebuild", not a rebuild failure.
+   * bytes are genuinely missing from the durable store (not the common
+   * case -- that is served directly from the shared store without ever
+   * reaching this fallback) by re-deriving a file from this driver
+   * statement's own durably persisted record. Returns null -- not a thrown
+   * error -- when this instance's own statement list genuinely has no such
+   * id, which the registry contract treats as "nothing to rebuild", not a
+   * rebuild failure.
    */
-  private rebuildDriverStatementArtifact(statementId: string) {
+  private async rebuildDriverStatementArtifact(
+    statementId: string,
+  ): Promise<DocumentArtifactRecord | null> {
     const statement = this.driverStatements.find(
       (candidate) => candidate.statementId === statementId,
     );
@@ -2318,7 +2323,7 @@ export class BillingSettlementService implements OnModuleInit {
       return null;
     }
     try {
-      return this.renderDriverStatementArtifact(statement);
+      return await this.renderDriverStatementArtifact(statement);
     } catch {
       return null;
     }

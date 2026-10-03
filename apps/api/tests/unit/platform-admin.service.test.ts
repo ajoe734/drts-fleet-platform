@@ -83,7 +83,7 @@ describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
 });
 
 describe("PlatformAdminService.publishPlacardVersion", () => {
-  it("records the verified publisher actorId in placard publish audit logs", () => {
+  it("records the verified publisher actorId in placard publish audit logs", async () => {
     const { service, auditNotificationService, platformAdminRepository } =
       createService();
     const draftPublicInfo = service.createPublicInfoVersion({
@@ -96,7 +96,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
       effectiveFrom: null,
       effectiveTo: null,
     });
-    const placard = service.generatePlacardVersion(
+    const placard = await service.generatePlacardVersion(
       {
         versionCode: "placard-2026-q4",
         publicInfoVersionId: draftPublicInfo.versionId,
@@ -106,7 +106,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
       "req-generate-placard",
     );
 
-    const published = service.publishPlacardVersion(
+    const published = await service.publishPlacardVersion(
       placard.placardVersionId,
       {},
       "req-publish-placard",

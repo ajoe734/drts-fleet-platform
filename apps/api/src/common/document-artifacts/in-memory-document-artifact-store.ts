@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { isDocumentArtifactKind } from "./document-artifact-kinds";
 import type { DocumentArtifactKind } from "./document-artifact-kinds";
 import type {
   DocumentArtifactEntry,
@@ -8,16 +7,20 @@ import type {
   DocumentArtifactStore,
   PutDocumentArtifactCommand,
 } from "./document-artifact.types";
+import { validatePutDocumentArtifactCommand } from "./document-artifact-validation";
 
 function storageKey(kind: string, subjectId: string): string {
   return `${kind}::${subjectId}`;
 }
 
 /**
- * The local adapter for `DocumentArtifactStore`: an in-process map, keyed by
- * the exact (kind, subjectId) pair. It is the default wherever the platform
- * runs -- app boot and isolated tests alike -- until a task that produces
- * real files wires a durable backing behind the same interface.
+ * The local, process-private adapter for `DocumentArtifactStore`: an
+ * in-process map, keyed by the exact (kind, subjectId) pair. It is the
+ * default for isolated unit tests and (via `DOCUMENT_ARTIFACT_STORAGE_PROVIDER
+ * = "memory"`) `NODE_ENV=test` runs; a production boot wires
+ * `S3DocumentArtifactStoreAdapter` instead (see
+ * `document-artifact-runtime.config.ts`) so bytes survive a restart and are
+ * visible to every Cloud Run instance, not just the one that rendered them.
  *
  * Every read and write copies its buffer. Nothing handed to `put` or
  * returned from `get` aliases the store's internal bytes, so a caller
@@ -27,26 +30,12 @@ function storageKey(kind: string, subjectId: string): string {
 export class InMemoryDocumentArtifactStore implements DocumentArtifactStore {
   private readonly entries = new Map<string, DocumentArtifactEntry>();
 
-  put(command: PutDocumentArtifactCommand): DocumentArtifactRecord {
-    if (!isDocumentArtifactKind(command.kind)) {
-      throw new Error(
-        `DocumentArtifactStore does not accept kind "${command.kind}". ` +
-          "Only tenant-invoice, placard, and report are in scope this period.",
-      );
-    }
-    const subjectId = command.subjectId?.trim();
-    if (!subjectId) {
-      throw new Error("DocumentArtifactStore.put requires a non-empty subjectId.");
-    }
-    const mimeType = command.mimeType?.trim();
-    if (!mimeType) {
-      throw new Error("DocumentArtifactStore.put requires a non-empty mimeType.");
-    }
-    if (!Buffer.isBuffer(command.bytes) || command.bytes.length === 0) {
-      throw new Error("DocumentArtifactStore.put requires non-empty bytes.");
-    }
+  async put(
+    command: PutDocumentArtifactCommand,
+  ): Promise<DocumentArtifactRecord> {
+    const { subjectId, mimeType, bytes } =
+      validatePutDocumentArtifactCommand(command);
 
-    const bytes = Buffer.from(command.bytes);
     const record: DocumentArtifactRecord = {
       kind: command.kind,
       subjectId,
@@ -64,10 +53,10 @@ export class InMemoryDocumentArtifactStore implements DocumentArtifactStore {
     return { ...record };
   }
 
-  get(
+  async get(
     kind: DocumentArtifactKind,
     subjectId: string,
-  ): DocumentArtifactEntry | null {
+  ): Promise<DocumentArtifactEntry | null> {
     const entry = this.entries.get(storageKey(kind, subjectId));
     if (!entry) {
       return null;

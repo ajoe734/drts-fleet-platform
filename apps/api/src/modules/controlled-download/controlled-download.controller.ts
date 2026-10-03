@@ -68,7 +68,7 @@ export class ControlledDownloadController {
   // returned -- see `resolveDocumentArtifact`.
   @OpenRoute()
   @Get(":kind/:subjectId")
-  resolve(
+  async resolve(
     @Param("kind") kind: string,
     @Param("subjectId") subjectId: string,
     @Query("signed_at") signedAt?: string,
@@ -133,7 +133,7 @@ export class ControlledDownloadController {
     // The link is genuine and unexpired. Whether there is actually a file
     // behind it -- and whether it is still the same file the link named --
     // is a separate question the store answers.
-    let resolution = resolveDocumentArtifact(this.artifactStore, {
+    let resolution = await resolveDocumentArtifact(this.artifactStore, {
       kind,
       subjectId,
       manifestHash: manifestHash!,
@@ -151,9 +151,10 @@ export class ControlledDownloadController {
       // authorization to serve whatever a rebuild happens to produce. A
       // kind with no registered rebuilder -- or one whose own source data
       // has no such subjectId either -- answers exactly as before.
-      const rebuilt = this.rebuildRegistry?.rebuild(kind, subjectId) ?? null;
+      const rebuilt =
+        (await this.rebuildRegistry?.rebuild(kind, subjectId)) ?? null;
       if (rebuilt) {
-        resolution = resolveDocumentArtifact(this.artifactStore, {
+        resolution = await resolveDocumentArtifact(this.artifactStore, {
           kind,
           subjectId,
           manifestHash: manifestHash!,

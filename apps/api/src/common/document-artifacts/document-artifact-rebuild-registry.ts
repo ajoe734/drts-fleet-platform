@@ -11,24 +11,23 @@ import type { DocumentArtifactRecord } from "./document-artifact.types";
  */
 export type DocumentArtifactRebuilder = (
   subjectId: string,
-) => DocumentArtifactRecord | null;
+) => Promise<DocumentArtifactRecord | null>;
 
 export const DOCUMENT_ARTIFACT_REBUILD_REGISTRY = Symbol(
   "DOCUMENT_ARTIFACT_REBUILD_REGISTRY",
 );
 
 /**
- * `DocumentArtifactStore` is process-local: a Cloud Run instance that never
- * rendered a given (kind, subjectId) -- a sibling instance produced it, or
- * this instance restarted -- has nothing for it, even though the link
- * pointing at it already carries a verified signature and an unexpired
- * window. Replicating bytes across instances is one way to close that gap;
- * this registry takes the other one, already used by the producers
- * themselves to reissue a stale link (`ensureTenantInvoiceArtifact` and
- * friends): ask the producer to re-render the same bytes from the source
- * record it already persists durably and reads on every instance, then let
- * the caller re-check the result against the link's manifest hash before
- * trusting it.
+ * `DocumentArtifactStore` is now a durable, shared backend (see
+ * `document-artifact-runtime.config.ts`), so this registry is no longer the
+ * primary way a sibling Cloud Run instance or a post-restart instance serves
+ * a verified, unexpired link -- the shared store itself does that directly.
+ * This remains the last-resort fallback for the genuine data-gap case: the
+ * durable store has actually lost the object behind a (kind, subjectId) that
+ * a verified, unexpired link still names. It asks the producer to re-render
+ * the same bytes from the source record it already persists durably and
+ * reads on every instance, then lets the caller re-check the result against
+ * the link's manifest hash before trusting it.
  *
  * A kind with no registered rebuilder (or a rebuilder that returns null)
  * behaves exactly as it did before this registry existed: "not found" is
@@ -44,7 +43,10 @@ export class DocumentArtifactRebuildRegistry {
     this.rebuilders.set(kind, rebuilder);
   }
 
-  rebuild(kind: string, subjectId: string): DocumentArtifactRecord | null {
+  async rebuild(
+    kind: string,
+    subjectId: string,
+  ): Promise<DocumentArtifactRecord | null> {
     const rebuilder = this.rebuilders.get(kind);
     if (!rebuilder) {
       return null;

@@ -4,7 +4,7 @@ import {
   DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   DocumentArtifactRebuildRegistry,
-  InMemoryDocumentArtifactStore,
+  createDocumentArtifactStore,
 } from "../../common/document-artifacts";
 import { ControlledDownloadController } from "./controlled-download.controller";
 
@@ -19,6 +19,15 @@ import { ControlledDownloadController } from "./controlled-download.controller";
  * module explicitly (as `billing-settlement.module.ts` already does) still
  * works and is harmless; `@Global()` just means a producer is no longer
  * one missing import away from writing into a store nobody reads from.
+ *
+ * The provider itself is `createDocumentArtifactStore()`
+ * (`document-artifact-runtime.config.ts`): a durable S3-backed adapter when
+ * `DOCUMENT_ARTIFACT_STORAGE_PROVIDER=s3` is configured, an in-process map
+ * only for `NODE_ENV=test`, and a fail-closed adapter that throws on every
+ * call otherwise -- the same convention `BillingSettlementModule` already
+ * uses for remittance proof storage, so a production boot can never silently
+ * fall back to a process-local store that a sibling Cloud Run instance (or
+ * this instance after a restart) cannot read from.
  */
 @Global()
 @Module({
@@ -26,7 +35,7 @@ import { ControlledDownloadController } from "./controlled-download.controller";
   providers: [
     {
       provide: DOCUMENT_ARTIFACT_STORE,
-      useClass: InMemoryDocumentArtifactStore,
+      useFactory: () => createDocumentArtifactStore(),
     },
     DocumentArtifactRebuildRegistry,
     {
