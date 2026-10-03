@@ -110,7 +110,8 @@ def discover_all_mailbox(client):
             elif re.fullmatch(quoted, wire_name):
                 name = re.sub(rb'\\(["\\])', rb'\1', wire_name[1:-1])
             else:
-                require(re.fullmatch(rb'[^\x00-\x20\x7f(){}%*"\\\]]+', wire_name), "Invalid LIST atom")
+                # mailbox is an astring: unlike atom, ']' is legal unquoted.
+                require(re.fullmatch(rb'[^\x00-\x20\x7f(){%*"\\]+', wire_name), "Invalid LIST astring")
                 name = wire_name
             require(name and not re.search(rb'[\x00\r\n]', name), "Invalid mailbox name")
             candidates.add(name)
@@ -259,12 +260,22 @@ def main():
         print("::add-mask::" + recipient.replace("%", "%25"), file=sys.stderr, flush=True)
     expected_id = "<" + delivery_id + "@notification.drts.invalid>"
     with observation_stage("imap_connection_failed"):
-        with imaplib.IMAP4_SSL("imap.gmail.com", 993, ssl_context=ssl.create_default_context(), timeout=20) as client:
-            with observation_stage("imap_login_failed"):
-                status, _ = client.login(username, password)
-                require(status == "OK", "IMAP login rejected")
-            consume = (lambda body: accept_invitation(body, request)) if request.get("acceptance") else None
-            evidence = observe(client, expected_id, recipient, sender, request["subject"], request["required_text"], consume=consume)
+        client = imaplib.IMAP4_SSL("imap.gmail.com", 993, ssl_context=ssl.create_default_context(), timeout=20)
+    try:
+        with observation_stage("imap_login_failed"):
+            status, _ = client.login(username, password)
+            require(status == "OK", "IMAP login rejected")
+        consume = (lambda body: accept_invitation(body, request)) if request.get("acceptance") else None
+        evidence = observe(client, expected_id, recipient, sender, request["subject"], request["required_text"], consume=consume)
+    finally:
+        failed = sys.exc_info()[0] is not None
+        try:
+            client.logout()
+        except Exception:
+            # A secondary logout error must not hide the original login/select
+            # stage. Failure to close an otherwise successful session is fatal.
+            if not failed:
+                raise MailboxObservationError("imap_connection_failed") from None
     print(json.dumps({**evidence, "candidate_sha": sha, "delivery_id": delivery_id}))
 
 

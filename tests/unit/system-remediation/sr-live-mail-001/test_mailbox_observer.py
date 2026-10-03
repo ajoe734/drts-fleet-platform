@@ -192,6 +192,7 @@ class MailboxDiscoveryAndDiagnosticsTest(unittest.TestCase):
     def test_atoms_literals_escaped_quoted_and_case_insensitive_all_flags(self):
         cases = [
             ([b'(\\aLl \\HasNoChildren) NIL Archiv'], b'Archiv', b'"Archiv"'),
+            ([b'(\\All) "/" [Gmail]/&YkBnCZg1TvY-'], b'[Gmail]/&YkBnCZg1TvY-', b'"[Gmail]/&YkBnCZg1TvY-"'),
             ([b'(\\All) "/" "[Gmail]/Tous les messages"'], b'[Gmail]/Tous les messages', b'"[Gmail]/Tous les messages"'),
             ([b'(\\All) "/" "private\\"quote\\\\slash"'], b'private"quote\\slash', b'"private\\"quote\\\\slash"'),
             ([(b'(\\All) "/" {18}', b'private All Folder'), b''], b'private All Folder', b'"private All Folder"'),
@@ -269,6 +270,18 @@ class MailboxDiscoveryAndDiagnosticsTest(unittest.TestCase):
                     get_secret.assert_not_called()
                 if stage != 'imap_connection_failed':
                     connect.assert_not_called()
+
+    def test_logout_cannot_hide_login_failure_or_turn_a_failed_close_into_success(self):
+        for login_fails in (False, True):
+            with self.subTest(login_fails=login_fails):
+                client = self.client()
+                client.logout.side_effect = observer.imaplib.IMAP4.error('private-logout')
+                if login_fails:
+                    client.login.side_effect = observer.imaplib.IMAP4.error('private-login')
+                code, payload, _, _, _ = self.cli(client)
+                stage = 'imap_login_failed' if login_fails else 'imap_connection_failed'
+                self.assertEqual((code, payload), (1, {'error': {'stage': stage}}))
+                client.logout.assert_called_once_with()
 
     def test_search_fetch_and_uidvalidity_fail_closed(self):
         for case, stage in [('validity', 'imap_select_failed'), ('search', 'imap_search_failed'),
