@@ -6,6 +6,7 @@ import { VoiceBookingDraftService } from "./voice-booking-draft.service";
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { IdempotencyModule } from "../../common/idempotency";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
@@ -42,7 +43,7 @@ import {
  * (SD §7.4/§7.5).
  */
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule, IdempotencyModule],
   controllers: [VoiceBookingController],
   providers: [
     VoiceCapabilityService,

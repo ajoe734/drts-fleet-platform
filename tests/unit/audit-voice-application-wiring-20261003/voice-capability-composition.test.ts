@@ -16,6 +16,7 @@ import type {
 import type { VoiceHandoffService } from "../../../apps/api/src/modules/voice-booking/voice-handoff.service";
 import { VoiceHandoffOnlyToolPorts } from "../../../apps/api/src/modules/voice-booking/voice-handoff-tool-ports";
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import { IdempotencyService } from "../../../apps/api/src/common/idempotency";
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4 (Codex reopen round 5/6):
@@ -112,6 +113,13 @@ function buildController(opts: {
       })),
   } as unknown as VoiceHandoffService;
 
+  // Real `IdempotencyService` (not a mock): none of this file's tests send
+  // an `idempotency-key` header, so `execute()`'s `required: false` path
+  // calls through to `issue()` directly without ever touching the
+  // repository -- see IdempotencyService.execute's own documented
+  // key-omitted/not-required branch.
+  const idempotencyService = new IdempotencyService({} as never);
+
   const controller = new VoiceBookingController(
     { deriveCohortFromDurableEvidence: vi.fn() } as never,
     { listUsageRecords: vi.fn(), listRateCards: vi.fn(), reconcileInvoice: vi.fn() } as never,
@@ -122,12 +130,13 @@ function buildController(opts: {
     repository,
     authorization,
     handoffService,
+    idempotencyService,
   );
   return { controller, repository, guard, capabilityService, sessionService, handoffService };
 }
 
 describe("VoiceBookingController.issueCapability (SD §4.2 stage 2 issuance route)", () => {
-  it("forwards the authenticated identity and body to VoiceCapabilityService.issue", () => {
+  it("forwards the authenticated identity and body to VoiceCapabilityService.issue", async () => {
     const envelope = {
       token: "jwt",
       tokenType: "Bearer",
@@ -149,7 +158,7 @@ describe("VoiceBookingController.issueCapability (SD §4.2 stage 2 issuance rout
       requestId: null,
     };
 
-    const result = controller.issueCapability(identity, {
+    const result = await controller.issueCapability(identity, {
       voiceSessionId: session().voiceSessionId,
       resourceScopeId: session().resourceScopeId,
       routeProfileVersion: 1,
@@ -167,11 +176,11 @@ describe("VoiceBookingController.issueCapability (SD §4.2 stage 2 issuance rout
     expect(result.data).toEqual(envelope);
   });
 
-  it("rejects an unknown scope value before ever reaching VoiceCapabilityService", () => {
+  it("rejects an unknown scope value before ever reaching VoiceCapabilityService", async () => {
     const issue = vi.fn();
     const { controller } = buildController({ guardAuthenticate: vi.fn(), issue });
 
-    expect(() =>
+    await expect(
       controller.issueCapability(null, {
         voiceSessionId: session().voiceSessionId,
         resourceScopeId: session().resourceScopeId,
@@ -179,7 +188,7 @@ describe("VoiceBookingController.issueCapability (SD §4.2 stage 2 issuance rout
         leaseEpoch: 1,
         scopes: ["not_a_real_scope" as never],
       }),
-    ).toThrow();
+    ).rejects.toThrow();
     expect(issue).not.toHaveBeenCalled();
   });
 });

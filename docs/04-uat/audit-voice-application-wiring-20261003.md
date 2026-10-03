@@ -1499,3 +1499,122 @@ commit:**
 No product/listening server, browser/E2E, DB, Compose, real network
 provider/GCP/apps/api call was performed. `same_sha_review_ci` pending
 hosted CI on the new SHA produced by this round's commit.
+
+## Round-9: hosted CI `unit` failure on candidate `eca2dcd4c` -- `issueCapability` was a genuine unprotected create-type command (CONF-VERIFY-001), not a false positive
+
+After `eca2dcd4c` passed `typecheck`/`lint`/`integration`/`build`/
+`cross-surface-e2e`/`iam-negative-matrix`/`i18n-guard`/`ui-route-e2e`,
+hosted CI's `unit` job (run 37114234076, PR #2293) failed one test:
+`tests/security/idempotency-regression-guard.test.ts` > "reports ZERO
+unexpected unprotected create-type commands across the entire platform".
+This is `tests/security/`, outside this task's `write_scopes` -- correctly
+so, since it is a platform-wide regression guard, not a voice-specific
+test, and this task must not edit it or its
+`KNOWN_PRE_EXISTING_OUT_OF_SCOPE_UNPROTECTED_ROUTES` allowlist to make a
+real finding disappear.
+
+**Root cause.** `voice-booking.controller.ts#issueCapability` (added
+round-7, SD §4.2 stage 2 issuance route) is a `POST` with a `@Body()`
+param whose method name starts with `issue` --
+`classifyRouteCommand`'s `TRANSACTIONAL_COMMAND_VERBS` regex matches
+`issue` as a create-type command verb, same bucket as `createX`/`bookX`/
+`registerX`. Neither of this round's other two new routes tripped it:
+`resolveInput` matches the test's own `SEARCH_QUERY_METHOD_OR_PATH_REGEX`
+(`resolve` is explicitly listed) -> classified `search_query_computation`;
+`requestHandoff`'s path segment `handoffs` matches
+`AUTH_METHOD_OR_PATH_REGEX` (`handoff` is explicitly listed) ->
+classified `auth_session_exchange`. Neither is exempted by a
+controller-name/path allowlist (the test file's own header comment
+forbids that); both are exempted by the same generic verb/path heuristic
+every other controller in the codebase is already subject to.
+`issueCapability` had no equivalent exemption and no `Idempotency-Key`
+header param / `IdempotencyService` usage, so it was correctly flagged
+`unprotected_mutation` -- a real gap this round introduced, not a guard
+false positive. (The failure output's `{ …(11) }` is one flagged route
+object with 11 properties, not 11 routes; `unexpectedUnprotected` had
+exactly one element.)
+
+**Fix (bounded to `apps/api/src/modules/voice-booking/`, per
+`write_scopes`).** Wired the same `IdempotencyService` every other
+create-type command in this codebase already uses (pattern taken
+directly from `modules/complaint/complaint.controller.ts`'s
+`createComplaintCase`): `voice-booking.module.ts` now imports
+`IdempotencyModule`; `VoiceBookingController` takes an `@Optional()
+idempotencyService?: IdempotencyService` (same fail-closed-via-
+`requireVoiceApplicationDependency` posture as the other R4 dependencies);
+`issueCapability` adds an `@Headers("idempotency-key") idempotencyKey?`
+param and wraps the existing `voiceCapabilityService.issue(identity,
+command)` call in `idempotencyService.execute({ scope:
+"voice:capability:issue", idempotencyKey, required: false, ... })`.
+`required: false` is a deliberate, documented choice (see the route's own
+updated doc comment): `issue()` is a stateless JWT mint with no
+repository write, so a retried call with no key has always been harmless
+on its own, and this worker's own `VoiceApiClient` (this round's only
+real caller) does not send a key today -- making the key mandatory would
+newly reject every real call this task's own R4 composition makes.
+`required: false` still satisfies CONF-VERIFY-001 honestly (the route
+genuinely goes through `IdempotencyService` and will durably replay a
+response if a future caller does supply a key), rather than gaming the
+regex with a cosmetic unused header declaration.
+
+**Test-file fallout from the new async signature (bounded to
+`tests/unit/audit-voice-application-wiring-20261003/`, per
+`write_scopes`).** `issueCapability` is now `async` (the idempotency
+service's `execute` is always a `Promise`, matching every other
+`IdempotencyService`-wrapped route in the codebase).
+`voice-capability-composition.test.ts`'s `buildController` now
+constructs a real `IdempotencyService` (not a mock) with a `{} as never`
+repository -- safe specifically because none of this file's tests send
+an `idempotency-key` header, so `execute()`'s own documented
+key-omitted/`required:false` branch returns straight from
+`options.execute()` without ever calling the repository (verified by
+reading `idempotency.service.ts`'s `execute` method itself, lines 48-60).
+The two call sites that previously called `controller.issueCapability(...)`
+synchronously now `await` it; the scope-rejection test
+(`"rejects an unknown scope value..."`) changed from
+`expect(() => ...).toThrow()` to `await expect(...).rejects.toThrow()`,
+since a synchronous throw inside an `async` function body surfaces as a
+rejected `Promise`, not a synchronous exception.
+
+**Required evidence table addendum (per `AI_COLLABORATION_GUIDE.md`
+§0.7):**
+
+| Finding | Source & location | Old -> new result | Command / result | Residual limit |
+| --- | --- | --- | --- | --- |
+| `issueCapability` was an unprotected create-type command | `voice-booking.controller.ts#issueCapability`; `tests/security/idempotency-regression-guard.test.ts:497` | Flagged `unprotected_mutation` (1 unexpected entry, 50 total unprotected) -> real `IdempotencyService.execute` usage, classified `idempotent_command` (0 unexpected, 49 total unprotected, matching the pre-existing `dev` baseline exactly) | Hosted CI `unit` job, run 37114234076 (fail, read) -> hosted CI on this round's new SHA (pending at commit time, see below) | Local re-run of this exact spec file was not possible this round -- see environment note below; static analysis against the guard's own published regex/heuristic source (reproduced above) is the evidence this round relies on |
+
+**Environment note, not a code defect.** This worktree's `node_modules`
+(and `apps/api/node_modules`) `typescript`/`vitest` top-level entries are
+symlinks into a *different* task's worktree
+(`claude2-audit-artifact-durability-20261002`'s own `.pnpm` store) --
+this VM's shared-worktree symlink-farm pattern already documented in
+Round-7/8's local-verification notes. Between this round's CI-wait and
+starting this fix, that sibling worktree was removed (consistent with
+this VM's supervisor worktree-reaper running independently of this
+task), which broke those symlinks platform-wide in this worktree: `pnpm
+--filter @drts/api typecheck`, `pnpm exec vitest run ...`, and even
+directly invoking `tsc`/`vitest` from this worktree's own `.pnpm` store
+all now fail with `MODULE_NOT_FOUND` / `Cannot find module 'vitest/config'`
+before reaching any of this round's actual code. `pnpm install` (the
+normal repair) is a deferred/blocked command in this dispatched worker
+session, as already noted in Round-7; repointing the broken top-level
+symlinks by hand (`ln -sfn` to this worktree's own, already-present
+`.pnpm` entries) was attempted and is also deferred/blocked in this
+session. This is identical in kind to Round-7/8's documented symlink-farm
+noise, just total instead of partial, and -- like those rounds -- is not
+reproducible in hosted CI, which runs `pnpm install --frozen-lockfile`
+from the committed lockfile in its own isolated runner independent of
+this VM's worktree-sharing setup. This round's fix is therefore verified
+by: (a) re-reading `idempotency.service.ts`'s `execute` method directly
+to confirm the `required: false` + no-key branch never touches the
+repository (quoted above), (b) matching the exact established
+`IdempotencyService` wiring pattern already used by
+`complaint.controller.ts` (`createComplaintCase`), and (c) the hosted CI
+run this round's commit triggers, which this task is waiting on and will
+read before any `handoff`, per the same rule Round-3/8 already followed
+for CI-only fixes.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider/GCP/apps/api call, or git mutation beyond the commit/push
+itself was performed. `same_sha_review_ci` pending hosted CI on the new
+SHA produced by this round's commit.

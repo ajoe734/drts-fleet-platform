@@ -13,6 +13,7 @@ import { VoiceCapabilityScopeSchema, type VoiceCapabilityScope } from "@drts/con
 import { ApiRequestError, toApiSuccessEnvelope } from "../../common/api-envelope";
 import { OpenRoute, RequireRealms, RequireScopes, CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { IdempotencyService } from "../../common/idempotency";
 import {
   VoiceCapabilityService,
   assertVoiceCapabilityScope,
@@ -54,6 +55,8 @@ export class VoiceBookingController {
     private readonly voiceBookingAuthorizationService?: VoiceBookingAuthorizationService,
     @Optional()
     private readonly voiceHandoffService?: VoiceHandoffService,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   /**
@@ -214,11 +217,23 @@ export class VoiceBookingController {
    * issuance call site that previously did not exist anywhere in
    * production code (Codex reopen round 5/6, R4) -- `VoiceCapabilityService.issue`
    * itself is unchanged; only this route is new.
+   *
+   * `issue()` is a stateless JWT mint (no repository write), so a retried
+   * call with no key is harmless on its own -- but every other create-type
+   * command in this codebase goes through `IdempotencyService`
+   * (`tests/security/idempotency-regression-guard.test.ts`,
+   * CONF-VERIFY-001), and this worker's own `VoiceApiClient` is a real
+   * network caller that can legitimately retry after a timeout without
+   * knowing whether the first attempt's response was lost. `required:
+   * false` keeps today's caller (which sends no key yet) working
+   * unchanged, while a future caller that does supply one gets a real,
+   * durable replay of the exact first response instead of a second,
+   * independently-expiring token.
    */
   @Post("capabilities")
   @RequireRealms("system")
   @RequireScopes("voice:capability:issue")
-  issueCapability(
+  async issueCapability(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body()
     body: {
@@ -229,6 +244,7 @@ export class VoiceBookingController {
       scopes: VoiceCapabilityScope[];
       ttlSeconds?: number;
     },
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const scopes = body.scopes.map((scope) => VoiceCapabilityScopeSchema.parse(scope));
@@ -236,15 +252,29 @@ export class VoiceBookingController {
       this.voiceCapabilityService,
       "voiceCapabilityService",
     );
-    const envelope = voiceCapabilityService.issue(identity, {
+    const idempotencyService = this.requireVoiceApplicationDependency(
+      this.idempotencyService,
+      "idempotencyService",
+    );
+    const command = {
       voiceSessionId: body.voiceSessionId,
       resourceScopeId: body.resourceScopeId,
       routeProfileVersion: body.routeProfileVersion,
       leaseEpoch: body.leaseEpoch,
       scopes,
       ...(body.ttlSeconds !== undefined ? { ttlSeconds: body.ttlSeconds } : {}),
+    };
+    const result = await idempotencyService.execute({
+      scope: "voice:capability:issue",
+      idempotencyKey,
+      required: false,
+      requestPath: "callcenter/voice/capabilities",
+      payload: command,
+      execute: async () => ({
+        data: voiceCapabilityService.issue(identity, command),
+      }),
     });
-    return toApiSuccessEnvelope(envelope, requestId);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   /**
