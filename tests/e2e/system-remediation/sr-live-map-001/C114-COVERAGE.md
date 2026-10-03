@@ -928,3 +928,38 @@ This worker does not dispatch it. Inspect artifact
 `live-map-acceptance-<CANDIDATE_SHA>` and all six evidence JSON files, run status,
 and both map PNGs. A green deployment or unit suite is not these four acceptance
 gates. Owner hands off to Claude2 and never calls `done`.
+
+### Final repository checks (completed and read)
+
+Executed on checkpoint `df4b0294460937f25132c73f9b195933ad13a319`; the
+closeout commit adds only this verification record. Node 22.23.2, pnpm 10.33.0,
+Vitest 4.1.4. Every started local check has completed:
+
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/ --maxWorkers=2`:
+  **9 files / 129 tests passed, zero skips**, exit 0; includes the 26-case
+  Python evidence gate and real controller/verifier/device-path regressions.
+- `pnpm exec tsc -p tsconfig.json --noEmit`: pass, exit 0.
+- Scoped ESLint over both map directories, live spec and Playwright config with
+  `--max-warnings=0`: pass, exit 0.
+- Changed-code/workflow Prettier, parsed YAML dispatch/preflight/browser/cleanup
+  wiring, and `git diff origin/dev...HEAD --check`: pass, exit 0.
+- Same-final-SHA hosted CI results will be read and referenced in machine-truth
+  handoff/PR evidence. No prior candidate's green checks are reused.
+
+The initial Vitest attempt could not resolve dependencies because the worker's
+`node_modules` links pointed at a removed sibling through the canonical tree.
+An attempted install aborted before removal (no TTY). Only this worktree's 22
+`node_modules` symlinks were detached, then isolated offline frozen installation
+with `--ignore-scripts` succeeded. No shared target, package manifest or lockfile
+changed. That initial setup error is not counted as defect reproduction.
+No product server, browser, E2E server, Docker, live API call, workflow dispatch,
+or cloud/secret/variable mutation was performed on this VM.
+
+Local evidence SHA256 (logs are machine-specific and not committed):
+
+- `deployed-pin-before.log`: `bd2d736feb84f8cac1aed8fd1048e9312a0ebb83dfba76621f6a5fcd15af690e`.
+- `evidence-before.log`: `4fe46d45de4a4da9be0fa0c80140cfe867fb5aaf9138d6eeedd3b27fd7c949e6`.
+- `deployed-pin-after.log`: `e184ba11df6f900d726472dac84184e8f1d60631e0d617d6d6ebdd9f7aca98ac`.
+- `unit-final.log`: `d953ad6644640aa0345f66b7c304f6d784ab71e85129d276b464f067cb05fdd3`.
+- `typecheck-final.log`: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- `lint-final.log`: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
