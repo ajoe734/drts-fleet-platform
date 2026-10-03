@@ -1005,3 +1005,52 @@ remain read nowhere in `TwmAsrNetworkAdapter` and are not enforced once a
 session is ready -- that was outside R12's setup/readiness repair
 boundary as stated in the round-6 reopen, and is recorded here precisely
 so it is not mistaken for in scope or already closed.
+
+## 15. Interactive completion follow-up: strict recording evidence and lifecycle failure boundaries
+
+User requested completion on 2026-10-03. Companion PR #2290 preserves and merges owner commits `7dd52c0e3` and `23cf0ead0` without rewriting published history. Its final immutable SHA is bound by the PR head and the canonical integration note. Earlier sections remain historical evidence; their claims that fabricated recording readback or transport cancellation are still unaddressed are superseded by this section, not silently retroactively certified.
+
+### Repairs and observed before/after evidence
+
+| Boundary | Repair / regression | Observed result |
+| --- | --- | --- |
+| Recording test fidelity | Replaced the existing finalize suite's synthetic fallback with actual `SealedRecorder.seal` writes to a strict scope/version store. Real request/upgrade listeners and manifest sealing run; `net.Server.listen` throws if called. | 20 cases pass: valid bytes, seal/retry, trusted closure, operation/session/principal/epoch/resource/revocation/expiry denials, absent object/version/scope/metadata/bytes failures. No readback of a missing object can succeed. |
+| R11 final drain | Retain owner's pending-final tracking and awaitable cleanup; make repeated adapter close return the same completion and clear early-drain timers. | Non-replaying socket tests cover partial before close, partial during drain, final arrival, no final timeout, and repeated close. |
+| R11 shutdown result path | Composer stops new ingress and drains providers **before** server closes live peer channels. A `session.event` emitter is also forwarded by `MediaWorkerServer`, so results remain observable by a control-plane consumer after peer disconnect. Pending closes use a set, not a session-ID-keyed entry that a new epoch could overwrite. | Real configured TWM factory → composer → unstarted server tests observe final results during orderly shutdown and peer disconnect; orderly shutdown also delivers final on the still-open media channel. This is an event delivery seam, not a durable dialogue/booking consumer implementation. |
+| R12 late setup/transport cancellation | Retain owner's generation fence; additionally fail the adapter terminally and abort its HTTP transport. Actual configured fetch receives AbortSignal. A new session-owned adapter is required after terminal failure; ordinary repeated audio cannot resurrect it. | Stuck login/access-info, late response after timeout, never-open handshake and configured-fetch cancellation pass. The owner's fresh-retry test now separately asserts failed-instance denial and successful new-adapter setup. |
+| R12 retained ingress and provider errors | Reserve queue capacity before awaiting login, cap setup plus pre-ready audio at 64 chunks, and fail/settle the whole queue on overflow. Handle provider errors after OPEN and send failures through the same terminal cleanup path. | 65 simultaneous chunks during stalled login reject without creating a later socket; no-ready queue clears on deadline; post-open error settles pending work and closes the socket. Existing no-ready test uses 64 chunks to test timeout separately from overflow. |
+
+The original seven `twm-lifecycle-boundaries.test.ts` probes against source `25c2dae622568f3becab1396e0ce5665883ad064` all failed (7/7), reproducing missing behavior rather than asserting green. A read-only snapshot of the owner's in-progress network file at 04:15 UTC passed 3/7 and failed four cases (late login, late access-info, setup overflow, post-open error). That snapshot is **not** attributed to the later `23cf0ead0` commit, which independently added generation fencing. The combined repair passes all 12 lifecycle/composition cases, including the subsequently added handshake, idempotent close, shutdown and configured-fetch tests. No tests were disabled to obtain these results.
+
+### Completed local validation
+
+Private frozen offline install (`--ignore-scripts`), not shared node_modules modification. Node 22 / pnpm 10.33.0 / TypeScript 5.9.3 / Vitest 4.1.4. Evidence logs are machine-local under `.local/voice-runtime-evidence/`; they are not claimed as portable attachments or live evidence.
+
+- `pnpm run typecheck:root`: exit 0.
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm --filter @drts/voice-media-worker lint`: exit 0.
+- ESLint on modified/new unit tests, max-warnings=0: exit 0.
+- Explicit offline selection: **9 files / 91 tests passed, zero skips**, exit 0:
+
+```bash
+NODE_ENV=test env -u DATABASE_URL -u API_DATABASE_URL pnpm exec vitest run \
+  tests/unit/audit-voice-runtime-20261002/internal-auth.test.ts \
+  tests/unit/audit-voice-runtime-20261002/websocket-channel-frame-limits.test.ts \
+  tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts \
+  tests/unit/audit-voice-runtime-20261002/provider-composition.test.ts \
+  tests/unit/audit-voice-runtime-20261002/twm-lifecycle-boundaries.test.ts \
+  tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts \
+  tests/unit/audit-voice-runtime-20261002/session-composer.test.ts \
+  tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts \
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts \
+  --maxWorkers=1
+```
+
+The remaining HTTP-listening suites were not run here. Root/full suites, browser tests, product servers, DB/Compose infrastructure and external vendor calls were not started. Baseline failing probes and intermediate test failures are retained separately from the final passing logs.
+
+### Acceptance disposition
+
+- `caller_session_authorization`: strict persisted-object offline evidence repaired; production issuer/audience and deployed identity paths remain external gates.
+- `approved_runtime_provider_paths`: deterministic R11/R12 repairs and configured-composition offline regressions supplied for independent review; no TWM/PSTN production attestation.
+- `remaining_external_blockers_precise`: CTI/procurement, provisioned account/model/voice matrix, durable production recording backend, call authority, dialogue/booking orchestration and shared-dev/PSTN acceptance remain open. `productionCapable` stays false. Ready-state idle/max-duration policy remains the explicitly documented separate remainder above.
+- `same_sha_review_ci`: new combined candidate requires fresh independent review and hosted CI. Local success is not merge, deployment, or live acceptance.
