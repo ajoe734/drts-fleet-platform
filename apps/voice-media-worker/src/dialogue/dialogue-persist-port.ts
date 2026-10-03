@@ -89,19 +89,56 @@ const PERSIST_CAPABILITY_SCOPES: IssueCapabilityCommand["scopes"] = [
  * `_state` stays unused: `VoiceSessionService.resolveInput` (SD §10.1) is
  * a CAS *admission* seam over `sessionVersion`/`inputEpoch` only -- it has
  * no field for the dialogue content itself (slot evidence, address
- * history, handoff reason). No SD-approved route or schema exists yet to
- * carry `VoiceDialogueState` to apps/api (the closest table,
- * `voice.draft_revision`, belongs to the separate post-call booking-intent
- * domain, keyed by `intent_id`, not this live call's `voiceSessionId`),
- * and `infra/migrations/` is outside this task's write scope, so a durable
- * per-turn state store cannot be added here. Appending unused fields to
- * this request body would not make persistence real, only look real; do
- * not do that to make request payloads differ across calls. Until that
- * route/schema is designed, `VoiceDialogueEngine`'s in-memory
+ * history, handoff reason).
+ *
+ * Correction (Codex reopen round 5/6, R4, second reopen): an earlier
+ * version of this comment claimed "no SD-approved route or schema exists"
+ * and that `voice.draft_revision` "belongs to the separate post-call
+ * booking-intent domain ... not this live call's `voiceSessionId`" --
+ * Codex's reopen correctly called this too broad, the same way an earlier
+ * round's "never designed on either side" claim about capability issuance
+ * was. `voice.intent` (SD §9.1) *is* keyed `FK session` (i.e. by this
+ * call's own `voiceSessionId`), and `VoiceConfirmationService.replaceDraft`
+ * (`apps/api/.../voice-confirmation.service.ts:576-629`) *does* write
+ * `voice.draft_revision` during the active session, not post-call --
+ * SD §10.1's `POST /sessions/{sessionId}/drafts` is exactly this live-call
+ * seam, already implemented, not merely designed.
+ *
+ * What is genuinely still missing, precisely: `replaceDraft` is not a
+ * generic "persist this state snapshot" call -- it requires an existing
+ * `voice.intent` row for this session (an `UPDATE`, not an `INSERT`, so
+ * the intent must already exist from some prior step this worker's turn
+ * loop never performs), a `QualifyVoiceBookingCommand` that runs real
+ * address/service-area qualification through `this.drafts.qualify` (an
+ * external geocoding/eligibility provider this worker has no account for
+ * either, same category as the CTI/issuer/model gaps already documented
+ * elsewhere), and a `ConfirmationFence`/credential shape distinct from
+ * this port's own `request`. Piping `VoiceDialogueState`'s raw,
+ * unvalidated ASR-derived slots into that call every turn would be
+ * exactly the "consent/booking inferred from ASR" / "store unvalidated
+ * dialogue blindly as an accepted booking snapshot" failure mode SD §6.1
+ * forbids, not a fix -- the qualification step exists specifically to
+ * keep a model-proposed candidate address from ever being written as a
+ * server-trusted normalized one. Wiring this worker's slot state into the
+ * real qualify-and-replace-draft flow (intent creation, qualification
+ * provider, fence shape) is a precisely-scoped integration this task's own
+ * `write_scopes` do not reach (it needs `voice-booking-command.service.ts`
+ * / intent-creation call sites, not just this persist port), not a missing
+ * schema this task can migrate its way out of. `infra/migrations/` stays
+ * outside this task's write scope for this reason: the schema this live-
+ * call content would flow through already exists; what is missing is the
+ * qualification/intent-lifecycle wiring around it, which needs the same
+ * kind of coordinated, cross-service scoping the capability-issuance gap
+ * (resolved over rounds 5-11) did.
+ *
+ * Until that integration is scoped, `VoiceDialogueEngine`'s in-memory
  * `Object.assign(state, next)` remains the only state store even in
  * `mode: "trusted"` -- the one new guarantee this mode adds is that the
  * *admission* (the turn's revision/epoch) is checked against apps/api's
  * real authority before that in-memory commit, tools, or playback run.
+ * Appending unused fields to this request body would not make persistence
+ * real, only look real; do not do that to make request payloads differ
+ * across calls.
  */
 export function createTrustedDialoguePersistPort(
   client: VoiceApiClient,
