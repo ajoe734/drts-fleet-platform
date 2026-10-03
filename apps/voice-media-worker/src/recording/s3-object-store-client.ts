@@ -111,9 +111,16 @@ export class S3ObjectStoreClient implements ObjectStoreClient {
       }),
     );
     const versionId = response.VersionId;
-    if (!versionId) {
+    // A versioning-suspended (or never-enabled) bucket returns the literal
+    // string `"null"` as `VersionId` for every write to a given key -- a
+    // truthy value that still means "no distinct version was created", and
+    // a same-key overwrite replaces that one mutable object in place (see
+    // https://docs.aws.amazon.com/AmazonS3/latest/userguide/AddingObjectstoVersionSuspendedBuckets.html).
+    // Treat it the same as a missing `VersionId`: fail closed rather than
+    // hand the caller a version identity that is not actually immutable.
+    if (!versionId || versionId === "null") {
       throw new Error(
-        "S3 object store put did not return a VersionId -- the target bucket must have versioning enabled.",
+        "S3 object store put did not return a versioned VersionId -- the target bucket must have versioning enabled (not suspended).",
       );
     }
 
@@ -137,6 +144,15 @@ export class S3ObjectStoreClient implements ObjectStoreClient {
     key: string,
     versionId: string,
   ): Promise<ObjectStoreGetResult> {
+    // Defense in depth: `putObjectVersion` never hands back the literal
+    // `"null"` version id (see its own fail-closed check above), so a
+    // request for it here can only come from a stale/forged reference, not
+    // this adapter's own immutable identity.
+    if (versionId === "null") {
+      throw new Error(
+        `S3 object store get rejected unversioned identity 'null' for key '${key}'.`,
+      );
+    }
     const response = await this.client.send(
       new GetObjectCommand({
         Bucket: this.config.bucket,

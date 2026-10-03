@@ -122,7 +122,7 @@ describe("S3ObjectStoreClient", () => {
     );
   });
 
-  it("round-trips real recorder segments through ObjectStoreRecorderObjectStore on top of the S3 client", async () => {
+  it("round-trips real recorder segments through ObjectStoreRecorderObjectStore on top of the S3 client, with real S3 lowercase-metadata-key transport", async () => {
     const store = new Map<
       string,
       { body: Uint8Array; metadata: Record<string, string>; storedAt: Date }
@@ -137,9 +137,19 @@ describe("S3ObjectStoreClient", () => {
           versionCounter += 1;
           const versionId = `v${versionCounter}`;
           const bytes = command.input.Body as Buffer;
+          // Real S3 lowercases user-defined metadata keys on write (see
+          // https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html).
+          // Reproduce that here instead of echoing the camelCase keys
+          // this adapter sent, which would hide R8's defect.
+          const sentMetadata =
+            (command.input.Metadata as Record<string, string>) ?? {};
+          const lowercasedMetadata: Record<string, string> = {};
+          for (const [key, value] of Object.entries(sentMetadata)) {
+            lowercasedMetadata[key.toLowerCase()] = value;
+          }
           store.set(`${command.input.Key as string}#${versionId}`, {
             body: new Uint8Array(bytes),
-            metadata: (command.input.Metadata as Record<string, string>) ?? {},
+            metadata: lowercasedMetadata,
             storedAt: new Date(),
           });
           return { VersionId: versionId };
@@ -189,8 +199,66 @@ describe("S3ObjectStoreClient", () => {
     );
 
     expect(Buffer.from(read.bytes)).toEqual(Buffer.from(bytes));
-    expect(read.recordingMetadata?.checksum).toBe(
-      createHash("sha256").update(bytes).digest("hex"),
+    // R8 regression: with real S3 lowercase-key transport, the camelCase
+    // headers this adapter wrote (brandId, callId, startMs, ...) must still
+    // be recognized on read -- not silently dropped into `undefined`.
+    expect(read.recordingMetadata).toEqual({
+      ...scope,
+      channel: "inbound",
+      startMs: 0,
+      endMs: 1000,
+      utcStart: "2026-07-24T09:00:00.000Z",
+      utcEnd: "2026-07-24T09:00:01.000Z",
+      checksum: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.length,
+      source: "recording_fork",
+      objectKey: written.objectKey,
+      objectVersion: written.objectVersion,
+      durableAt: written.durableAt,
+    });
+  });
+
+  it("rejects a mutable VersionId='null' write as not actually versioned (versioning-suspended bucket)", async () => {
+    const send = vi.fn(async (command: { constructor: { name: string } }) => {
+      if (command.constructor.name === "PutObjectCommand") {
+        // A versioning-suspended (or never-enabled) bucket returns the
+        // literal string "null" for every put to a given key -- truthy,
+        // but not a distinct immutable version.
+        return { VersionId: "null" };
+      }
+      return {
+        VersionId: "null",
+        LastModified: new Date(),
+        Metadata: {},
+        Body: bodyStream(new Uint8Array([1])),
+      };
+    });
+    const client = new S3ObjectStoreClient(config, {
+      client: { send } as unknown as MockedS3Client,
+    });
+
+    await expect(
+      client.putObjectVersion("voice-recording/key", new Uint8Array([1]), {}),
+    ).rejects.toThrow(/versioned VersionId/);
+  });
+
+  it("rejects a same-key overwrite under versioning-suspended semantics: the first write's (key, 'null') identity must not be readable as immutable evidence", async () => {
+    // Simulates a bucket where versioning was suspended (or never enabled)
+    // AFTER some code path already captured a 'null' version id from an
+    // earlier, pre-fix build -- a stale/forged reference, not something
+    // this adapter's own (now fail-closed) putObjectVersion can produce.
+    const send = vi.fn(async () => ({
+      VersionId: "null",
+      LastModified: new Date(),
+      Metadata: {},
+      Body: bodyStream(new Uint8Array([1])),
+    }));
+    const client = new S3ObjectStoreClient(config, {
+      client: { send } as unknown as MockedS3Client,
+    });
+
+    await expect(client.getObjectVersion("key", "null")).rejects.toThrow(
+      /unversioned identity 'null'/,
     );
   });
 

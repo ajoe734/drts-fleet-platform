@@ -25,7 +25,8 @@ export type VoiceMediaWorkerEvent =
   | VoiceDtmfReceivedMediaEvent
   | VoiceTtsPlaybackStartedEvent
   | VoiceTtsPlaybackCompletedEvent
-  | VoiceTtsPlaybackCancelledEvent;
+  | VoiceTtsPlaybackCancelledEvent
+  | VoiceMediaEpochAdvancedEvent;
 
 interface VoiceMediaWorkerEventBase {
   sessionId: string;
@@ -65,6 +66,18 @@ export interface VoiceTtsPlaybackCompletedEvent extends VoiceMediaWorkerEventBas
 export interface VoiceTtsPlaybackCancelledEvent extends VoiceMediaWorkerEventBase {
   type: "tts.playback.cancelled";
   payload: { playbackId: string; generation: number; reason: string };
+}
+
+/** Codex reopen round 5/6, R2 residual: published by `advanceMediaEpoch`
+ * itself (not by a separate caller-side wrapper) so that a media-authority
+ * transition has exactly one boundary that always reaches whatever is
+ * consuming this session's event stream -- whether `advanceMediaEpoch` was
+ * invoked through `VoiceSessionComposer`'s own composed method or directly
+ * on a retained `VoiceMediaWorkerSession` reference (e.g.
+ * `composer.get(id).advanceMediaEpoch()`, as unit tests driving the session
+ * alone still do). `mediaEpoch` on the base event stamp is the *new* epoch. */
+export interface VoiceMediaEpochAdvancedEvent extends VoiceMediaWorkerEventBase {
+  type: "media.epoch.advanced";
 }
 
 export type VoiceMediaWorkerEventSink = (event: VoiceMediaWorkerEvent) => void;
@@ -152,7 +165,15 @@ export class VoiceMediaWorkerSession {
   /**
    * SD §5.4 "建立唯一 media output owner／epoch": used on handoff/reconnect
    * to invalidate any in-flight playback generation before a new owner may
-   * play audio.
+   * play audio. Also publishes a `media.epoch.advanced` event (Codex
+   * reopen round 5/6, R2 residual) through the same `eventSink` every other
+   * session event flows through -- this is the one authority-transition
+   * boundary a turn coordinator downstream needs to react to, regardless of
+   * which caller (composed wrapper or a directly retained session
+   * reference) triggered this method. Emitted synchronously, after the
+   * local epoch/generation bookkeeping above but before returning, so a
+   * caller observing no cancellation immediately after this call returns
+   * would be a real regression, not a timing artifact.
    */
   advanceMediaEpoch(): number {
     const previousGeneration = this.activeGeneration;
@@ -168,6 +189,10 @@ export class VoiceMediaWorkerSession {
         playback.cleared = true;
       }
     }
+    this.emit({
+      type: "media.epoch.advanced",
+      ...this.eventStamp(new Date().toISOString()),
+    });
     return this.mediaEpoch;
   }
 

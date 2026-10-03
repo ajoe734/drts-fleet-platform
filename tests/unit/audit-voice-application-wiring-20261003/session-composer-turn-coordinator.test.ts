@@ -1154,4 +1154,63 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     expect(proposeCalls).toBe(2);
     expect(sentBinary.length).toBeGreaterThan(0);
   });
+
+  /**
+   * Codex reopen round 5/6, R2 residual: the exact previously-reported
+   * reproduction -- `composer.get(id).advanceMediaEpoch()`, the raw
+   * session reference, instead of `composer.advanceMediaEpoch(id)` --
+   * must now reach the identical cancellation boundary. Before this fix,
+   * only the composed wrapper called `turnCoordinator.invalidateCurrentTurn`;
+   * calling `advanceMediaEpoch` directly on the retained session skipped it
+   * entirely, leaving the provider's own `request.signal.aborted` `false`.
+   * `advanceMediaEpoch` now publishes `media.epoch.advanced` through the
+   * session's own `eventSink`, so both call paths converge on the same
+   * single boundary.
+   */
+  it("synchronously cancels a turn's pending provider call when advanceMediaEpoch is called directly on the retained session (not through the composer)", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    let capturedSignal: AbortSignal | undefined;
+    let proposeCalls = 0;
+    const provider: VoiceDialogueProvider = {
+      mode: "fixture",
+      profileVersion: "r2-epoch-cancel-direct-session-probe:1",
+      propose(request) {
+        proposeCalls += 1;
+        if (proposeCalls === 1) {
+          capturedSignal = request.signal;
+          return new Promise(() => {
+            // Never resolves on its own.
+          });
+        }
+        return Promise.resolve(EMPTY_FINAL_OUTPUT);
+      },
+    };
+    const coordinator = new VoiceCallTurnCoordinator(() => provider);
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-r2-epoch-cancel-direct", channel);
+    const session = composer.get("sess-r2-epoch-cancel-direct")!;
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(proposeCalls).toBe(1);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // The retained session's own method, not the composer's wrapper.
+    expect(session.advanceMediaEpoch()).toBe(2);
+
+    // No `await` between the call above and this assertion: the
+    // cancellation must already have reached the provider's own signal
+    // synchronously, exactly like the composed-call case above.
+    expect(capturedSignal?.aborted).toBe(true);
+
+    asr.emitFinal("救命", "seg-2");
+    await flush(5);
+    expect(proposeCalls).toBe(2);
+    expect(sentBinary.length).toBeGreaterThan(0);
+  });
 });

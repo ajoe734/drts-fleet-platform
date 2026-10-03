@@ -224,29 +224,28 @@ export class VoiceSessionComposer extends EventEmitter {
   }
 
   /** The production entry point for a media-authority transition
-   * (handoff/reconnect, SD §5.4) on an attached session -- Codex reopen
-   * round 5/6, R2: `VoiceMediaWorkerSession.advanceMediaEpoch` on its own
-   * only updates local epoch/playback bookkeeping and has no reference to
-   * this attachment's turn coordinator, so calling it directly (as a unit
-   * test driving the session alone still may, for the lower-level
-   * epoch/generation fencing that already covers) never cancels a turn
-   * that is currently blocked on persist/execute/provider work under the
-   * *old* epoch. This composed call does both, in order, synchronously: a
-   * pending provider/persist call for this attachment is cancelled before
-   * this method returns, not merely fenced the next time that turn
-   * happens to re-check its own staleness. Returns the new epoch, or
-   * `undefined` if no session is attached under this id. The actual
-   * handoff/reconnect driver that will call this in production does not
-   * exist yet (see `../dialogue/call-turn-coordinator.ts`'s class doc) --
-   * this is the composition seam it must call through once it does. */
+   * (handoff/reconnect, SD §5.4) on an attached session. `VoiceMediaWorkerSession.
+   * advanceMediaEpoch` itself publishes a `media.epoch.advanced` event
+   * through this session's `eventSink` (Codex reopen round 5/6, R2
+   * residual), which the `attach()` closure above forwards to
+   * `turnCoordinator.handle` exactly like every other session event --
+   * that single, session-owned boundary is what cancels a turn currently
+   * blocked on persist/execute/provider work under the *old* epoch,
+   * synchronously, before this method returns. There is deliberately no
+   * second, composer-side call to `invalidateCurrentTurn` here: calling
+   * `advanceMediaEpoch` directly on a retained session reference (e.g.
+   * `composer.get(id).advanceMediaEpoch()`, as a unit test driving the
+   * session alone still may) now reaches the exact same boundary, instead
+   * of a second, divergent path that only this composed method used to
+   * take. Returns the new epoch, or `undefined` if no session is attached
+   * under this id. The actual handoff/reconnect driver that will call this
+   * in production does not exist yet (see
+   * `../dialogue/call-turn-coordinator.ts`'s class doc) -- this is the
+   * composition seam it must call through once it does. */
   advanceMediaEpoch(sessionId: string): number | undefined {
     const composed = this.sessions.get(sessionId);
     if (!composed) return undefined;
-    const newEpoch = composed.session.advanceMediaEpoch();
-    if (composed.turnAttachment) {
-      this.turnCoordinator?.invalidateCurrentTurn(composed.turnAttachment);
-    }
-    return newEpoch;
+    return composed.session.advanceMediaEpoch();
   }
 
   /** The composed session harness for a currently attached session id, if

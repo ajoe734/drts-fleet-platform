@@ -245,29 +245,17 @@ export class VoiceCallTurnCoordinator {
     this.sessions.delete(attachment);
   }
 
-  /** Call synchronously, from the same integration boundary that advances
-   * the attachment's own media-authority epoch (handoff/reconnect, Codex
-   * reopen round 5/6, R2) -- *before* any dependent persist/execute/speak
-   * work for the turn that was active under the superseded epoch is
-   * allowed to proceed. Unlike `release`, the attachment itself stays
-   * live: a later final still starts a fresh turn against it. Aborting
-   * `activeAbort` here reaches the exact same `request.signal` the engine
-   * stage threads through `runVoiceDialogue`/`boundedStage` into the
-   * provider's own in-flight request (see `executeTurn`'s `ports`), so a
-   * pending `propose`/`persist` call is cancelled immediately, not only
-   * discovered stale at its own next `isStale()`/epoch check. */
-  invalidateCurrentTurn(attachment: VoiceCallAttachment): void {
-    const turnSession = this.sessions.get(attachment);
-    if (!turnSession) return;
-    turnSession.inputEpoch += 1;
-    turnSession.activeAbort?.abort();
-  }
-
   /** Call for every `session.event` an attachment emits. `asr.segment.final`
-   * drives a turn; `speech.started` (barge-in) invalidates whatever turn is
-   * currently active/queued (R2) so late provider/TTS work is fenced before
-   * any audio reaches the caller. Every other event (TTS marks, DTMF) has
-   * no reason to touch a turn here. */
+   * drives a turn; `speech.started` (barge-in) and `media.epoch.advanced`
+   * (handoff/reconnect, Codex reopen round 5/6, R2 residual) both
+   * invalidate whatever turn is currently active/queued so late
+   * provider/TTS work is fenced before any audio reaches the caller.
+   * `media.epoch.advanced` is published by `VoiceMediaWorkerSession.
+   * advanceMediaEpoch` itself (not by a separate caller-side wrapper) --
+   * this is the single boundary that reaches here regardless of whether
+   * `advanceMediaEpoch` was called through `VoiceSessionComposer`'s own
+   * composed method or directly on a retained session reference. Every
+   * other event (TTS marks, DTMF) has no reason to touch a turn here. */
   handle(
     attachment: VoiceCallAttachment,
     event: VoiceMediaWorkerEvent,
@@ -280,7 +268,7 @@ export class VoiceCallTurnCoordinator {
     // create new turn state under this (possibly stale) handle.
     if (!turnSession) return;
 
-    if (event.type === "speech.started") {
+    if (event.type === "speech.started" || event.type === "media.epoch.advanced") {
       turnSession.inputEpoch += 1;
       turnSession.activeAbort?.abort();
       return;

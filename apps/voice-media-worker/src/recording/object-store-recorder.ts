@@ -46,6 +46,22 @@ function encodeSegmentMetadataHeaders(
   };
 }
 
+/** S3 (and S3-compatible backends) normalize user-defined object metadata
+ * keys to lowercase on both write and read -- see
+ * https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html.
+ * The backend, not this adapter, owns that casing; headers are looked up
+ * case-insensitively rather than assuming the camelCase keys this adapter
+ * wrote are echoed back unchanged. */
+function lowercaseHeaderKeys(
+  headers: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    normalized[key.toLowerCase()] = value;
+  }
+  return normalized;
+}
+
 /** Reconstructs a segment's full recorder metadata purely from the
  * backend's own stored headers plus the caller's requested/confirmed
  * object identity -- never from anything the caller merely claims about
@@ -54,17 +70,24 @@ function encodeSegmentMetadataHeaders(
  * which stores no segment headers at all), matching `readVersion`'s
  * optional `recordingMetadata` contract. */
 function decodeSegmentMetadataHeaders(
-  headers: Readonly<Record<string, string>>,
+  rawHeaders: Readonly<Record<string, string>>,
   resolved: { objectKey: string; objectVersion: string; durableAt: string },
 ): RecorderObjectMetadata | undefined {
-  if (!SEGMENT_METADATA_KEYS.every((key) => typeof headers[key] === "string"))
+  const headers = lowercaseHeaderKeys(rawHeaders);
+  if (
+    !SEGMENT_METADATA_KEYS.every(
+      (key) => typeof headers[key.toLowerCase()] === "string",
+    )
+  )
     return undefined;
-  if (headers.source !== "recording_fork") return undefined;
-  if (headers.channel !== "inbound" && headers.channel !== "outbound")
-    return undefined;
-  const startMs = Number(headers.startMs);
-  const endMs = Number(headers.endMs);
-  const byteLength = Number(headers.byteLength);
+  const get = (key: (typeof SEGMENT_METADATA_KEYS)[number]): string =>
+    headers[key.toLowerCase()]!;
+  if (get("source") !== "recording_fork") return undefined;
+  const channel = get("channel");
+  if (channel !== "inbound" && channel !== "outbound") return undefined;
+  const startMs = Number(get("startMs"));
+  const endMs = Number(get("endMs"));
+  const byteLength = Number(get("byteLength"));
   if (
     !Number.isSafeInteger(startMs) ||
     !Number.isSafeInteger(endMs) ||
@@ -72,16 +95,16 @@ function decodeSegmentMetadataHeaders(
   )
     return undefined;
   return {
-    brandId: headers.brandId!,
-    callId: headers.callId!,
-    recordingId: headers.recordingId!,
-    legId: headers.legId!,
-    channel: headers.channel as RecordingChannel,
+    brandId: get("brandId"),
+    callId: get("callId"),
+    recordingId: get("recordingId"),
+    legId: get("legId"),
+    channel: channel as RecordingChannel,
     startMs,
     endMs,
-    utcStart: headers.utcStart!,
-    utcEnd: headers.utcEnd!,
-    checksum: headers.checksum!,
+    utcStart: get("utcStart"),
+    utcEnd: get("utcEnd"),
+    checksum: get("checksum"),
     byteLength,
     source: "recording_fork",
     ...resolved,
