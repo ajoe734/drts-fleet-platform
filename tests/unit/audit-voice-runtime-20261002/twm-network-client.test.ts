@@ -42,10 +42,9 @@ function audioResponse(status: number, bytes: Uint8Array): TwmHttpResponse {
       return undefined;
     },
     async arrayBuffer() {
-      return bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength,
-      );
+      const buffer = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(buffer).set(bytes);
+      return buffer;
     },
   };
 }
