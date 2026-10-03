@@ -93,6 +93,13 @@ class EvidenceGateTests(unittest.TestCase):
                 self.write("evidence-cleanup.json", {"candidate_sha": SHA, "deployed_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True, **change})
                 self.reject()
 
+    def test_clean_noop_is_not_full_acceptance(self):
+        self.change("evidence-cleanup.json", lambda value: value.update(
+            status="passed", recovery="not-required", revoked=False))
+        # Even otherwise complete/green evidence must prove a real invitation
+        # and confirmed revocation. No-op teardown only avoids a false error.
+        self.reject()
+
     def test_skip_cannot_pass(self):
         with self.assertRaises(ValueError):
             gate.verify(self.root, SHA, {**OUTCOMES, "browser": "skipped"}, SHA)
