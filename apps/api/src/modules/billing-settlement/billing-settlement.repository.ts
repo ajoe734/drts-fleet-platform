@@ -1579,14 +1579,19 @@ export class BillingSettlementRepository {
     try {
       await client.query("BEGIN");
 
-      const existing =
-        await client.query<RemittanceProofPaymentReceiptRow>(
-          `
+      // Serialise the *batch*, not just one proof/key. Two instances using
+      // different clean proofs/intent keys cannot create conflicting receipts.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`remittance-proof-payment:${input.batchId}`],
+      );
+      const existing = await client.query<RemittanceProofPaymentReceiptRow>(
+        `
             SELECT * FROM billing.phase1_remittance_proof_payment_receipts
-            WHERE batch_id = $1 AND idempotency_key = $2
+            WHERE batch_id = $1 ORDER BY created_at, receipt_id LIMIT 1
           `,
-          [input.batchId, input.idempotencyKey],
-        );
+        [input.batchId],
+      );
       if (existing.rows[0]) {
         await client.query("COMMIT");
         return {
@@ -1605,7 +1610,10 @@ export class BillingSettlementRepository {
         await client.query("ROLLBACK");
         return { outcome: "proof_not_found" };
       }
-      if (proof.batch_id !== input.batchId) {
+      if (
+        proof.batch_id !== input.batchId ||
+        proof.driver_id !== input.driverId
+      ) {
         await client.query("ROLLBACK");
         return { outcome: "proof_batch_mismatch" };
       }
@@ -1614,9 +1622,8 @@ export class BillingSettlementRepository {
         return { outcome: "proof_not_clean" };
       }
 
-      const inserted =
-        await client.query<RemittanceProofPaymentReceiptRow>(
-          `
+      const inserted = await client.query<RemittanceProofPaymentReceiptRow>(
+        `
             INSERT INTO billing.phase1_remittance_proof_payment_receipts (
               batch_id, proof_id, idempotency_key, driver_id,
               amount_minor, currency, paid_at
@@ -1624,16 +1631,16 @@ export class BillingSettlementRepository {
             ON CONFLICT (batch_id, idempotency_key) DO NOTHING
             RETURNING *
           `,
-          [
-            input.batchId,
-            input.proofId,
-            input.idempotencyKey,
-            input.driverId,
-            input.amount.amountMinor,
-            input.amount.currency,
-            input.paidAt,
-          ],
-        );
+        [
+          input.batchId,
+          input.proofId,
+          input.idempotencyKey,
+          input.driverId,
+          input.amount.amountMinor,
+          input.amount.currency,
+          input.paidAt,
+        ],
+      );
       if (inserted.rows[0]) {
         await client.query("COMMIT");
         return {

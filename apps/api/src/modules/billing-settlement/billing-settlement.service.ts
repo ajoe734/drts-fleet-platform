@@ -2713,104 +2713,28 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReimbursementBatch(batch);
   }
 
-  markReimbursementPaid(
+  /** Compatibility response shape, NOT a separate payment-validation path. */
+  async markReimbursementPaid(
     batchId: string,
     command: MarkReimbursementPaidCommand,
     requestId?: string,
+    idempotencyKey?: string,
+    identity: BootstrapRequestIdentity | null = null,
   ) {
-    const batch = this.requireReimbursementBatch(batchId);
-    if (!batch.approvedAt) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "REIMBURSEMENT_NOT_APPROVED",
-        "Reimbursement batch must be approved before it can be marked as paid.",
-        {
-          batchId,
-        },
-      );
-    }
-
-    if (batch.status === "paid") {
-      return this.cloneReimbursementBatch(batch);
-    }
-
-    const remittanceProofId =
-      command.remittanceProofId?.trim() || batch.remittanceProofId;
-    if (!remittanceProofId) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "remittanceProofId is required to mark reimbursement paid.",
-        {
-          batchId,
-        },
-      );
-    }
-
-    const paidAt = command.paidAt?.trim() || new Date().toISOString();
-    if (Number.isNaN(new Date(paidAt).getTime())) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "paidAt must be a valid ISO timestamp.",
-        {
-          batchId,
-          paidAt,
-        },
-      );
-    }
-
-    batch.status = "paid";
-    batch.paidAt = paidAt;
-    batch.remittanceProofId = remittanceProofId;
-
-    const relatedStatement = this.driverStatements.find(
-      (statement) => statement.statementId === batch.statementId,
-    );
-    if (relatedStatement) {
-      relatedStatement.payoutStatus = "paid";
-      relatedStatement.updatedAt = paidAt;
-    }
-
-    this.persistChanges(
+    await this.markReimbursementPaidWithProof(
+      batchId,
       {
-        reimbursementBatches: [this.cloneReimbursementBatch(batch)],
-        ...(relatedStatement
-          ? {
-              driverStatements: [this.cloneStatement(relatedStatement)],
-            }
-          : {}),
+        batchId,
+        proofId: command.remittanceProofId ?? "",
+        idempotencyKey: idempotencyKey ?? "",
+        ...(command.paidAt ? { paidAt: command.paidAt } : {}),
       },
-      "mark_reimbursement_paid",
-    );
-    this.auditNotificationService.recordNotification({
-      tenantId: null,
-      channel: "ops_notice",
-      title: "Reimbursement batch paid",
-      message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${remittanceProofId}.`,
-      status: "unread",
-    });
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "billing-settlement",
-        actionName: "mark_reimbursement_paid",
-        resourceType: "driver_reimbursement_batch",
-        resourceId: batch.batchId,
-        newValuesSummary: {
-          driverId: batch.driverId,
-          statementId: batch.statementId,
-          remittanceProofId,
-          paidAt,
-          status: batch.status,
-        },
-      },
+      identity,
       requestId,
     );
-
-    return this.cloneReimbursementBatch(batch);
+    return this.cloneReimbursementBatch(
+      this.requireReimbursementBatch(batchId),
+    );
   }
 
   getReimbursementBatch(batchId: string) {
@@ -2818,25 +2742,9 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReimbursementBatch(batch);
   }
 
-  // ── Remittance Proof (SR-PROOF-001) ──
-  //
-  // `markReimbursementPaid` above stays untouched: it is exercised by an
-  // existing regression (`tests/unit/billing-settlement.test.ts`, outside
-  // this task's write_scopes) that marks a batch paid with a bare,
-  // never-uploaded `remittanceProofId` string, so gating it on a real proof
-  // record here would break out-of-scope, already-passing coverage. The
-  // proof-backed gate this task delivers is the new
-  // `markReimbursementPaidWithProof` method/`/pay-with-proof` route below --
-  // see `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` for the
-  // explicit boundary this records.
+  // ── Remittance Proof: both payment routes share the gate below. ──
 
-  /**
-   * Test-only escape hatch onto the underlying `RemittanceProofService` --
-   * used to drive `attemptScan`/`markPaidWithProof` directly in unit tests,
-   * since neither is reachable over HTTP (no scan-completion callback route
-   * exists in this task's locked OpenAPI paths; see
-   * `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`).
-   */
+  /** Test seam for scripted scan outcomes; HTTP callers cannot submit verdicts. */
   get remittanceProofServiceForTest(): RemittanceProofService {
     return this.remittanceProofService;
   }
@@ -2903,6 +2811,50 @@ export class BillingSettlementService implements OnModuleInit {
     return proof;
   }
 
+  async scanRemittanceProof(
+    proofId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+    bestEffort = false,
+  ): Promise<RemittanceProofRecord> {
+    let proof: RemittanceProofRecord;
+    let scanUnavailable = false;
+    try {
+      proof = await this.remittanceProofService.attemptScan(proofId);
+    } catch {
+      scanUnavailable = true;
+      proof = await this.remittanceProofService.getProof(proofId);
+    }
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "scan_remittance_proof",
+        resourceType: "remittance_proof",
+        resourceId: proofId,
+        newValuesSummary: {
+          scanState: proof.scanState,
+          scanCompletedAt: proof.scanCompletedAt,
+          scanUnavailable,
+        },
+      },
+      requestId,
+    );
+    if (!bestEffort && proof.scanState === "pending_scan") {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "REMITTANCE_PROOF_SCANNER_UNAVAILABLE",
+        "No definitive scan verdict is available; retry scanning later.",
+      );
+    }
+    return proof;
+  }
+
   async getRemittanceProof(proofId: string): Promise<RemittanceProofRecord> {
     return this.remittanceProofService.getProof(proofId);
   }
@@ -2960,6 +2912,18 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
+    if (
+      batch.status === "paid" &&
+      batch.remittanceProofId !== command.proofId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_PAYMENT_CONFLICT",
+        "An already-paid batch cannot be rebound to another proof.",
+        { batchId },
+      );
+    }
+
     const receipt = await this.remittanceProofService.markPaidWithProof({
       batchId: batch.batchId,
       proofId: command.proofId,
@@ -2970,27 +2934,35 @@ export class BillingSettlementService implements OnModuleInit {
     });
 
     if (batch.status !== "paid") {
-      batch.status = "paid";
-      batch.paidAt = receipt.paidAt;
-      batch.remittanceProofId = receipt.proofId;
-
+      const updatedBatch = this.cloneReimbursementBatch(batch);
+      updatedBatch.status = "paid";
+      updatedBatch.paidAt = receipt.paidAt;
+      updatedBatch.remittanceProofId = receipt.proofId;
       const relatedStatement = this.driverStatements.find(
         (statement) => statement.statementId === batch.statementId,
       );
-      if (relatedStatement) {
-        relatedStatement.payoutStatus = "paid";
-        relatedStatement.updatedAt = receipt.paidAt;
+      const updatedStatement = relatedStatement
+        ? this.cloneStatement(relatedStatement)
+        : null;
+      if (updatedStatement) {
+        updatedStatement.payoutStatus = "paid";
+        updatedStatement.updatedAt = receipt.paidAt;
       }
 
+      // Publish in-memory state only after persistence succeeds. A durable
+      // receipt can then recover a failed batch write on an idempotent retry.
       await this.persistChanges(
         {
-          reimbursementBatches: [this.cloneReimbursementBatch(batch)],
-          ...(relatedStatement
-            ? { driverStatements: [this.cloneStatement(relatedStatement)] }
-            : {}),
+          reimbursementBatches: [updatedBatch],
+          ...(updatedStatement ? { driverStatements: [updatedStatement] } : {}),
         },
         "mark_reimbursement_paid_with_proof",
       );
+      if (this.requireReimbursementBatch(batchId).status === "paid")
+        return receipt;
+      Object.assign(batch, updatedBatch);
+      if (relatedStatement && updatedStatement)
+        Object.assign(relatedStatement, updatedStatement);
       this.auditNotificationService.recordNotification({
         tenantId: null,
         channel: "ops_notice",
