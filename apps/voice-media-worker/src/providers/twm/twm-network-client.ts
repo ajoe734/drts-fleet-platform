@@ -331,6 +331,19 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * a bounded result instead of leaving them pending until that unrelated
    * call eventually resolves. */
   private setupAbort: ((err: Error) => void) | undefined;
+  /** Identifies the current connect attempt (R12). `failSetup()` abandons
+   * the in-flight attempt without setting the permanent `terminated` flag
+   * (a setup timeout is recoverable; a later `transcribe()` may start a
+   * fresh attempt) -- but the real upstream login/access-info call that
+   * attempt was chained from is never actually cancelled and may still
+   * resolve afterward. Without a per-attempt marker, that late resolution
+   * would sail past every `assertNotTerminated()` check (`terminated` is
+   * still `false`) and go on to acquire access-info and a brand-new
+   * provider socket for an attempt nothing is waiting on anymore --
+   * exactly as happens, independently, if the caller `close()`s and later
+   * starts a fresh `connect()` while the old attempt's HTTP call is still
+   * pending. Bumped on every fresh attempt and on `failSetup()`. */
+  private connectGeneration = 0;
 
   constructor(
     private readonly transport: TwmHttpTransport,
@@ -420,8 +433,9 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     }
     if (this.connectPromise) return this.connectPromise;
     if (this.socket && this.socketOpen) return;
+    this.connectGeneration += 1;
     this.armSetupDeadline();
-    this.connectPromise = this.performConnect()
+    this.connectPromise = this.performConnect(this.connectGeneration)
       .catch((error: unknown) => {
         this.failSession(
           error instanceof Error ? error : new Error(String(error)),
@@ -437,6 +451,21 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   private assertNotTerminated(reason: string): void {
     if (this.terminated) {
       throw new TwmNetworkError("TWM_ASR_TERMINATED", reason);
+    }
+  }
+
+  /** Throws once this is no longer the live connect attempt: either the
+   * session was permanently closed (`terminated`), or this specific
+   * attempt was abandoned by the setup deadline and a newer attempt (or
+   * none) has since taken its place (R12). Distinguishing the two matters
+   * only for the error code surfaced; both must equally refuse to let a
+   * stale continuation proceed. */
+  private assertCurrentAttempt(generation: number, reason: string): void {
+    if (this.terminated) {
+      throw new TwmNetworkError("TWM_ASR_TERMINATED", reason);
+    }
+    if (generation !== this.connectGeneration) {
+      throw new TwmNetworkError("TWM_ASR_SETUP_TIMEOUT", reason);
     }
   }
 
@@ -477,6 +506,9 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   private failSession(err: Error): void {
     this.terminated = true;
     this.clearSetupDeadline();
+    // Retain the owner's generation fence as well as aborting transports:
+    // external boundaries are permitted to ignore an AbortSignal.
+    this.connectGeneration += 1;
     this.setupAbort?.(err);
     this.setupController.abort();
     this.failPendingWork(err);
@@ -496,7 +528,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * reject this attempt immediately (`setupAbort`) without waiting for the
    * real, possibly-never-settling upstream login/access-info/handshake
    * call it is chained from (R11 scenario (c), R12). */
-  private performConnect(): Promise<void> {
+  private performConnect(generation: number): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       this.setupAbort = (err) => {
@@ -505,7 +537,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         this.setupAbort = undefined;
         reject(err);
       };
-      this.runConnectSteps().then(
+      this.runConnectSteps(generation).then(
         () => {
           if (settled) return;
           settled = true;
@@ -522,13 +554,15 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     });
   }
 
-  private async runConnectSteps(): Promise<void> {
+  private async runConnectSteps(generation: number): Promise<void> {
     const token = await this.login();
-    this.assertNotTerminated(
+    this.assertCurrentAttempt(
+      generation,
       "ASR session was closed before access-info could be requested.",
     );
     const access = await this.getAccessInfo(token);
-    this.assertNotTerminated(
+    this.assertCurrentAttempt(
+      generation,
       "ASR session was closed before the provider socket could be opened.",
     );
     if (
@@ -561,18 +595,19 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
 
     this.hasAccess = true;
     const socket = this.wsFactory(url.toString());
-    if (this.terminated) {
-      // Closed in the gap between the ticket being minted and the socket
-      // being constructed -- never adopt it as `this.socket`, and release
-      // it immediately rather than leaking a live provider connection that
+    if (this.terminated || generation !== this.connectGeneration) {
+      // Closed, or this specific attempt abandoned by the setup deadline,
+      // in the gap between the ticket being minted and the socket being
+      // constructed -- never adopt it as `this.socket`, and release it
+      // immediately rather than leaking a live provider connection that
       // nothing will ever read from.
       try {
         socket.close(1000, "closed");
       } catch {
         // Best effort -- the socket may not even be past CONNECTING yet.
       }
-      throw new TwmNetworkError(
-        "TWM_ASR_TERMINATED",
+      this.assertCurrentAttempt(
+        generation,
         "ASR session was closed before the provider socket could be opened.",
       );
     }
@@ -628,7 +663,8 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         );
       });
     });
-    this.assertNotTerminated(
+    this.assertCurrentAttempt(
+      generation,
       "ASR session was closed during the provider handshake.",
     );
   }
