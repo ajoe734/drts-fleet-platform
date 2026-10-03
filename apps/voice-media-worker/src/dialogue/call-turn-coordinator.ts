@@ -115,18 +115,47 @@ interface TurnSession {
    * attachment already durably applied. `undefined` for an unbound
    * attachment, which never calls `recordControlEvent` at all. */
   controlSequence?: number;
-  /** The authoritative, server-durable `inputEpoch` this turn's own
-   * `recordAuthoritativeSpeechStart` call resolved -- distinct from
+  /** The authoritative, server-durable `inputEpoch` the most recent
+   * `recordAuthoritativeControlEvent` call resolved -- distinct from
    * `inputEpoch` above (this class's process-local turn-sequencing
    * counter, used only for local supersession/cancellation fencing, see
    * `handle`). `resolveInput`'s CAS and `request_handoff`'s submission
    * must both use THIS value, never the local counter, or they fence
    * against a watermark the authoritative session never actually opened
-   * for this turn. Set once per turn (in the `persist` stage) and read
-   * once more later in the SAME turn's `execute` stage; never read across
-   * turns -- `VoiceDialogueEngine`'s own single-instance `running` guard
-   * is what makes that safe (see class doc). */
+   * for this turn. Read once by the SAME (or a later) turn's `persist`
+   * stage -- see `authoritativeInputEpochConsumed` and `executeTurn`'s
+   * doc (Codex reopen round 16/17, R4-control). */
   authoritativeInputEpoch?: number;
+  /** `false` exactly when `authoritativeInputEpoch` was opened by a real
+   * `speech.started` control event (see `recordSpeechStartControlEvent`)
+   * that no turn's `persist` stage has consumed yet -- `true` once a turn
+   * has used it, or once a turn opened it itself (the fallback path, see
+   * `executeTurn`), or seeded from a restored session with no open
+   * watermark (R4-control). A turn's `persist` stage only needs to open a
+   * NEW watermark of its own when this is `true` (or `undefined`); a
+   * `false` value means a real barge-in already durably opened one this
+   * turn must reuse, never duplicate. */
+  authoritativeInputEpochConsumed?: boolean;
+  /** Serializes every `recordAuthoritativeControlEvent` call for this
+   * attachment -- both the real `speech.started`-triggered write
+   * (`recordSpeechStartControlEvent`) and a turn's own fallback write
+   * (`executeTurn`'s `persist` stage, when no real one already opened a
+   * watermark) -- so the two paths that share this attachment's single
+   * `controlSequence` counter can never issue concurrently and race each
+   * other onto the same sequence number (Codex reopen round 16/17,
+   * R4-control). Distinct from `queue`, which only serializes turns: a
+   * `speech.started` signal has no turn of its own, and must still be
+   * able to durably open a watermark even if no final ever follows it.
+   * Chained via `chainControlEvent`, which never lets a rejection
+   * permanently wedge this chain the way an unhandled `queue` rejection
+   * would (see `restoreBoundAttachment`'s doc on that same hazard). */
+  controlEventQueue: Promise<void>;
+  /** Aborts only on `release` -- never on a barge-in, newer final, or
+   * turn timeout the way `activeAbort` does. A real `speech.started`
+   * control event must still land durably even though the turn it
+   * (possibly) precedes gets cancelled by that same signal; only the
+   * attachment going away entirely should stop it (R4-control). */
+  releaseAbort: AbortController;
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
@@ -167,28 +196,51 @@ const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"]
  * package.json) and still must not acquire one here. What remains
  * genuinely unavailable is the call-admission flow that would supply any
  * attachment a real `VoiceSessionBinding` in the first place (see
- * `attach()`'s own doc and `../server/voice-session-binding.ts`), and the
- * ordered control-event watermark (R4 residual): `executeTurn`'s `persist`
- * stage now calls `recordAuthoritativeSpeechStart`, which durably records
- * a `recordControlEvent("speech_start")` for this turn's own admitted
- * final (deduped by `turnId`, sequenced from `restoreBoundAttachment`'s
- * restored watermark) and resolves the authoritative `inputEpoch`
- * `resolveInput`/`persistDialogueSnapshot`/`request_handoff` must all use
- * instead of this attachment's process-local turn-sequencing counter
+ * `attach()`'s own doc and `../server/voice-session-binding.ts`).
+ *
+ * The ordered control-event watermark (R4 residual, repaired Codex reopen
+ * round 16/17, R4-control): `handle()` now calls
+ * `recordSpeechStartControlEvent` for every REAL `speech.started` barge-in
+ * frame, which durably records a `recordControlEvent("speech_start")`
+ * immediately -- independent of whether any `asr.segment.final` ever
+ * follows it, and without waiting for `executeTurn`'s own provider/LLM
+ * call. A delayed, failed, or absent next final therefore still leaves the
+ * authoritative session aware that new speech was observed, instead of a
+ * stale `controlCutoff` built against the OLD watermark continuing to pass
+ * `assertControlCutoffStillValid`. `executeTurn`'s `persist` stage reuses
+ * that already-open watermark (`turnSession.authoritativeInputEpoch`/
+ * `authoritativeInputEpochConsumed`) for the turn it belongs to, and only
+ * falls back to opening one itself (via `recordAuthoritativeSpeechStart`)
+ * when no real `speech.started` already did -- e.g. a final that arrives
+ * with no preceding barge-in frame at all, which every existing fixture-
+ * driven test exercises. Both paths serialize through the SAME
+ * `controlEventQueue` (never `queue`, which only serializes turns) so they
+ * can never race this attachment's shared `controlSequence` counter, and
+ * both resolve the authoritative `inputEpoch` `resolveInput`/
+ * `persistDialogueSnapshot`/`request_handoff` must all use instead of this
+ * attachment's process-local turn-sequencing counter
  * (`turnSession.inputEpoch`). That local counter is NOT replaced or
  * removed -- it still fences local supersession/cancellation exactly as
- * R1-R3 above describe (a stale turn's `recordAuthoritativeSpeechStart`
- * call still durably opens a watermark even if the turn using it is
- * itself superseded moments later; the SAME `isCurrent`/`isStale`/
- * `abortController` checks that already gate every other effect gate this
- * one too, via the engine's own `boundedStage`/`persist` fail-closed
- * path). The two epoch spaces are therefore reconciled per turn, inside
- * the existing cancellation-fenced stage, rather than by merging the two
- * counters into one. Restoration on attach/reconnect (session + latest
- * dialogue snapshot, plus this attachment's next control-event sequence)
- * is implemented below (`restoreBoundAttachment`) for any attachment that
- * IS given a real binding; restart-time re-attachment of an in-flight call
- * is still gated on the same genuinely-unavailable call-admission flow.
+ * R1-R3 above describe (a stale turn's authoritative watermark still opens
+ * durably even if the turn using it is itself superseded moments later;
+ * the SAME `isCurrent`/`isStale`/`abortController` checks that already
+ * gate every other effect gate this one too, via the engine's own
+ * `boundedStage`/`persist` fail-closed path). The two epoch spaces are
+ * therefore reconciled per turn, inside the existing cancellation-fenced
+ * stage, rather than by merging the two counters into one.
+ * `recordAuthoritativeControlEvent` also reconciles
+ * `turnSession.controlSequence` from the authoritative response on every
+ * non-`gap` result, not only one where this exact call was the one
+ * applied/deduped -- the other half of R4-control's "response-loss
+ * recovery is also absent" finding: a prior attempt for the same sequence
+ * that durably landed while only its own HTTP response was lost no longer
+ * permanently desynchronizes this attachment's local counter from the
+ * authoritative one. Restoration on attach/reconnect (session + latest
+ * dialogue snapshot, plus this attachment's next control-event sequence
+ * AND whether its restored watermark is still open) is implemented below
+ * (`restoreBoundAttachment`) for any attachment that IS given a real
+ * binding; restart-time re-attachment of an in-flight call is still gated
+ * on the same genuinely-unavailable call-admission flow.
  *
  * This coordinator therefore runs the real `VoiceDialogueEngine` /
  * `VoiceDialogueState` machinery against every admitted final transcript --
@@ -270,6 +322,8 @@ export class VoiceCallTurnCoordinator {
       state: new VoiceDialogueState(),
       inputEpoch: 0,
       queue: Promise.resolve(),
+      controlEventQueue: Promise.resolve(),
+      releaseAbort: new AbortController(),
       released: false,
       activeAbort: null,
       ...(binding ? { binding } : {}),
@@ -285,14 +339,18 @@ export class VoiceCallTurnCoordinator {
       // starting fresh/blank -- see `restoreBoundAttachment`'s own doc.
       // `attach()` stays synchronous (unchanged signature, no blast radius
       // on existing callers): the restoration promise is installed as this
-      // attachment's initial `queue` so the FIRST turn naturally waits for
-      // it, exactly the same mechanism that already serializes turns
-      // against each other.
-      turnSession.queue = this.restoreBoundAttachment(
+      // attachment's initial `queue` AND initial `controlEventQueue` so
+      // both the first turn and a `speech.started` arriving before
+      // restoration settles (R4-control) naturally wait for it, exactly
+      // the same mechanism that already serializes turns against each
+      // other.
+      const restoration = this.restoreBoundAttachment(
         turnSession,
         this.apiClient,
         binding,
       );
+      turnSession.queue = restoration;
+      turnSession.controlEventQueue = restoration;
     }
     this.sessions.set(attachment, turnSession);
     return attachment;
@@ -347,6 +405,18 @@ export class VoiceCallTurnCoordinator {
       // attachment's events would be rejected as a gap (SD §5.4).
       turnSession.controlSequence =
         restoration.session.lastAppliedControlSequence + 1;
+      // R4-control: a restored session's own `pendingInput` tells this
+      // attachment whether the authoritative watermark it is restoring is
+      // still open (a prior attachment's `speech.started` was durably
+      // recorded but never reached a completed turn -- worker restart,
+      // reconnect) or already resolved. `false` (open) lets the very
+      // first turn on this attachment reuse it directly instead of
+      // opening a redundant second one; `true` (resolved) means the next
+      // turn must open its own, exactly like a brand-new attachment with
+      // no restored watermark at all.
+      turnSession.authoritativeInputEpoch = restoration.session.inputEpoch;
+      turnSession.authoritativeInputEpochConsumed =
+        !restoration.session.pendingInput;
       if (restoration.snapshot) {
         turnSession.state.restoreFromSnapshotContent(
           restoration.snapshot.content,
@@ -387,10 +457,67 @@ export class VoiceCallTurnCoordinator {
    * opened a resolvable input watermark for this turn, so proceeding to
    * `resolveInput` with a stale/unresolved epoch would be worse than
    * rejecting this turn outright (SD §5.4 "不得跳號處理後面的肯定"). */
-  private async recordAuthoritativeSpeechStart(
+  private recordAuthoritativeSpeechStart(
     turnSession: TurnSession,
     binding: VoiceSessionBinding,
     request: VoiceDialogueRequest,
+  ): Promise<number> {
+    return this.recordAuthoritativeControlEvent(turnSession, binding, {
+      sourceEventId: request.turnId,
+      occurredAt: new Date().toISOString(),
+      mediaEpoch: request.mediaEpoch ?? 0,
+      signal: request.signal,
+    });
+  }
+
+  /** Durably opens (or confirms already-open) the authoritative
+   * speech-start watermark for ONE observed real input -- either a real
+   * `speech.started` control frame (`recordSpeechStartControlEvent`) or,
+   * when no such frame preceded it, the turn that an admitted
+   * `asr.segment.final` itself starts (`executeTurn`'s fallback, R4
+   * residual). Both callers always go through `chainControlEvent` first
+   * (never call this directly), which is what keeps this attachment's
+   * single `controlSequence` counter safe to read/advance here without
+   * its own locking.
+   *
+   * `sourceEventId` makes this call idempotent per observed input (a
+   * retried call for the SAME one dedupes server-side instead of
+   * consuming a second sequence number); `sequence` is this attachment's
+   * own monotonic control-stream position, tracked in
+   * `turnSession.controlSequence` and only advanced from the
+   * authoritative response, never optimistically -- so a failed attempt
+   * safely retries the same sequence next time instead of permanently
+   * skipping it.
+   *
+   * Codex reopen round 16/17, R4-control ("response-loss recovery is
+   * also absent"): every non-`gap` response reconciles
+   * `turnSession.controlSequence` from `result.appliedThroughSequence`,
+   * not only one where `applied`/`deduped` is true for THIS call. A
+   * `sequence <= lastAppliedControlSequence` "safe no-op" response (see
+   * `VoiceSessionService.recordControlEvent`) means a PRIOR attempt for
+   * this exact sequence already landed durably and only its own response
+   * was lost (network failure, worker restart) -- this attachment is the
+   * sole producer of its own sequence space, so that can only be its own
+   * earlier write, never a legitimately different event. Treating that
+   * case as an unresolvable `voice_control_event_gap` (the previous
+   * behaviour) would permanently desynchronize this attachment's local
+   * counter from the authoritative one: every later observed input would
+   * keep retrying the same already-consumed sequence number and keep
+   * failing the exact same way, forever losing every later authoritative
+   * write while the local counter never catches up. Only an actual
+   * `gap: true` response (non-contiguous sequence, or a cross-media-epoch
+   * arrival) means the authoritative session never actually opened a
+   * resolvable input watermark for this call -- that one is still fail-
+   * closed, exactly as before (SD §5.4 "不得跳號處理後面的肯定"). */
+  private async recordAuthoritativeControlEvent(
+    turnSession: TurnSession,
+    binding: VoiceSessionBinding,
+    event: {
+      sourceEventId: string;
+      occurredAt: string;
+      mediaEpoch: number;
+      signal: AbortSignal;
+    },
   ): Promise<number> {
     const apiClient = this.apiClient;
     if (!apiClient) {
@@ -398,7 +525,7 @@ export class VoiceCallTurnCoordinator {
         "voice_control_event_unbound: no VoiceApiClient is configured.",
       );
     }
-    const { signal } = request;
+    const { signal } = event;
     if (signal.aborted) {
       throw new Error(
         "voice_control_event_aborted: request was already aborted before the control event was recorded.",
@@ -425,17 +552,25 @@ export class VoiceCallTurnCoordinator {
       capability.token,
       {
         source: "voice_media_worker",
-        sourceEventId: request.turnId,
-        occurredAt: new Date().toISOString(),
+        sourceEventId: event.sourceEventId,
+        occurredAt: event.occurredAt,
         sequence,
-        mediaEpoch: request.mediaEpoch ?? 0,
+        mediaEpoch: event.mediaEpoch,
         eventType: "speech_start",
       },
       signal,
     );
-    if (result.applied || result.deduped) {
-      turnSession.controlSequence = sequence + 1;
+    if (signal.aborted) {
+      throw new Error(
+        "voice_control_event_aborted: request was aborted while awaiting the control-event response.",
+      );
     }
+    if (result.gap) {
+      throw new Error(
+        "voice_control_event_gap: the authoritative session did not durably open a new input watermark for this event.",
+      );
+    }
+    turnSession.controlSequence = result.appliedThroughSequence + 1;
     // Codex reopen round 15/16, R4-persist ("audit the same mutable update
     // at recordAuthoritativeSpeechStart"): same monotonic guard as
     // `dialogue-persist-port.ts`'s `persist()` -- a genuinely correlated
@@ -447,17 +582,80 @@ export class VoiceCallTurnCoordinator {
     ) {
       binding.sessionVersion = result.session.sessionVersion;
     }
-    if (signal.aborted) {
-      throw new Error(
-        "voice_control_event_aborted: request was aborted while awaiting the control-event response.",
-      );
-    }
-    if (!result.applied && !result.deduped) {
-      throw new Error(
-        "voice_control_event_gap: the authoritative session did not durably open a new input watermark for this turn.",
-      );
-    }
     return result.session.inputEpoch;
+  }
+
+  /** Never lets a rejection from `task` permanently wedge this
+   * attachment's `controlEventQueue` the way an unhandled `queue`
+   * rejection would (R4-control; see `TurnSession.controlEventQueue`'s
+   * doc) -- the returned promise still rejects for THIS caller so a
+   * turn's own fallback write can fail its turn closed, but the queue
+   * itself always continues to the next chained write regardless of how
+   * this one settles. */
+  private chainControlEvent<T>(
+    turnSession: TurnSession,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const settled = turnSession.controlEventQueue.then(task);
+    turnSession.controlEventQueue = settled.then(
+      () => undefined,
+      () => undefined,
+    );
+    return settled;
+  }
+
+  /** R4-control: durably records a REAL `speech.started` barge-in
+   * signal's own speech-start control event immediately, independent of
+   * whether any `asr.segment.final` ever follows it -- a delayed, failed,
+   * or absent final must never leave the authoritative session unaware
+   * that new speech was observed (Codex reopen round 16/17's exact
+   * probe: a completed turn followed by a `speech.started` with no next
+   * final left `/events` count and `pendingInput` both unchanged, so a
+   * stale `controlCutoff` built against the OLD watermark still passed
+   * `assertControlCutoffStillValid`).
+   *
+   * Called directly from `handle()`, which is synchronous and must not
+   * await this; chained onto `controlEventQueue` (never `queue`, which
+   * only serializes turns and does not exist yet for a `speech.started`
+   * with no turn) so this write and `executeTurn`'s own fallback below
+   * can never race the shared `controlSequence` counter. Never throws
+   * into `handle()` and never rejects into the queue -- same reasoning as
+   * `runTurn`: a long-lived worker must not let one failed write wedge
+   * every later one for this attachment. A failure here (including a
+   * genuine `gap`) simply leaves `authoritativeInputEpoch`/
+   * `authoritativeInputEpochConsumed` exactly as they were -- the next
+   * turn's `executeTurn` fallback then opens its own watermark exactly as
+   * it would have before this method existed, so a failed real-time
+   * write still eventually self-heals instead of permanently losing the
+   * attempt. */
+  private recordSpeechStartControlEvent(
+    turnSession: TurnSession,
+    event: VoiceMediaWorkerEvent,
+  ): void {
+    const binding = turnSession.binding;
+    const persistPort = turnSession.persistPort ?? this.persistPort;
+    if (!binding || !this.apiClient || persistPort.mode !== "trusted") return;
+    this.chainControlEvent(turnSession, () =>
+      this.recordAuthoritativeControlEvent(turnSession, binding, {
+        sourceEventId: randomUUID(),
+        occurredAt: event.occurredAt,
+        mediaEpoch: event.mediaEpoch,
+        signal: turnSession.releaseAbort.signal,
+      }),
+    ).then(
+      (epoch) => {
+        turnSession.authoritativeInputEpoch = epoch;
+        turnSession.authoritativeInputEpochConsumed = false;
+      },
+      (error) => {
+        if (!turnSession.releaseAbort.signal.aborted) {
+          console.error(
+            "[voice-call-turn-coordinator] speech-start control event failed",
+            error,
+          );
+        }
+      },
+    );
   }
 
   /** Call once an attachment's channel/session is gone (close, drain).
@@ -471,6 +669,7 @@ export class VoiceCallTurnCoordinator {
     if (!turnSession) return;
     turnSession.released = true;
     turnSession.activeAbort?.abort();
+    turnSession.releaseAbort.abort();
     this.sessions.delete(attachment);
   }
 
@@ -504,6 +703,15 @@ export class VoiceCallTurnCoordinator {
     if (event.type === "speech.started" || event.type === "media.epoch.advanced") {
       turnSession.inputEpoch += 1;
       turnSession.activeAbort?.abort();
+      // R4-control (Codex reopen round 16/17): a real `speech.started`
+      // barge-in must durably open its own authoritative watermark right
+      // now, independent of whatever turn it just cancelled -- a
+      // `media.epoch.advanced` is a different authority-transition
+      // concern (handoff/reconnect, already fenced by `leaseEpoch` at the
+      // service layer) and is not one, see `recordSpeechStartControlEvent`.
+      if (event.type === "speech.started") {
+        this.recordSpeechStartControlEvent(turnSession, event);
+      }
       return;
     }
     if (event.type !== "asr.segment.final") return;
@@ -659,13 +867,27 @@ export class VoiceCallTurnCoordinator {
         // fixture-guard test above) is unaffected and keeps submitting
         // `bounded` unchanged, exactly as before this residual existed.
         if (persistPort.mode === "trusted" && turnSession.binding) {
+          const binding = turnSession.binding;
+          // R4-control (Codex reopen round 16/17): wait for any
+          // `speech.started`-triggered write already enqueued for this
+          // attachment to settle (see `recordSpeechStartControlEvent`)
+          // before deciding whether THIS turn needs to open its own --
+          // both share the same `controlSequence` counter and must never
+          // be issued concurrently.
+          await turnSession.controlEventQueue;
           const authoritativeInputEpoch =
-            await this.recordAuthoritativeSpeechStart(
-              turnSession,
-              turnSession.binding,
-              bounded,
-            );
+            turnSession.authoritativeInputEpochConsumed === false &&
+            turnSession.authoritativeInputEpoch !== undefined
+              ? turnSession.authoritativeInputEpoch
+              : await this.chainControlEvent(turnSession, () =>
+                  this.recordAuthoritativeSpeechStart(
+                    turnSession,
+                    binding,
+                    bounded,
+                  ),
+                );
           turnSession.authoritativeInputEpoch = authoritativeInputEpoch;
+          turnSession.authoritativeInputEpochConsumed = true;
           await persistPort.persist(next, {
             ...bounded,
             inputEpoch: authoritativeInputEpoch,

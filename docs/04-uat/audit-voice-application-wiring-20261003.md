@@ -3280,3 +3280,197 @@ unchanged.
 No product/listening server, browser/E2E, DB, Compose, real network
 provider call, package install, history rewrite, or force-push was
 performed this round.
+
+## Round-18: R4-control -- real speech.started ingestion + control-event response-loss recovery
+
+Same `codex-20261003T160720Z-bb49c249` reopen on `2061c0520`, R4-control
+(carried forward unaddressed through Round-17): "Adding
+`recordAuthoritativeSpeechStart` after model completion is not ordered
+speech-start ingestion." Two sub-findings, both repaired this round:
+
+1. **Ordered speech-start ingestion decoupled from the final/turn
+   pipeline.** `call-turn-coordinator.ts`'s `handle()` only ever called
+   the control-event write from `executeTurn`'s `persist` stage -- i.e.
+   only once an `asr.segment.final` arrived AND the engine's own
+   provider/LLM `propose` stage had already completed. The real
+   `speech.started` control frame (barge-in; `handleSpeechStarted`/
+   `session-composer.ts`'s own distinct WS control-frame path, entirely
+   independent of ASR) only ever did local bookkeeping (`inputEpoch += 1`,
+   `activeAbort?.abort()`) -- zero interaction with apps/api. Reviewer's
+   exact-SHA probe: complete one legitimate final (opens `inputEpoch` 1,
+   `pendingInput` false once the turn resolves it), then deliver a bare
+   `speech.started` with no following final -- `/events` count stays at
+   1, `pendingInput` stays `false`, and
+   `service.assertControlCutoffStillValid` against the OLD watermark
+   still succeeds, even though the caller has already started talking
+   again. A delayed/failed/absent next final left the authoritative
+   session permanently unaware that new speech was observed.
+2. **Response-loss recovery absent.** `recordAuthoritativeSpeechStart`
+   only advanced `turnSession.controlSequence` when `result.applied ||
+   result.deduped`; it ignored `RecordControlEventResult.gap` entirely and
+   threw `voice_control_event_gap` for ANY other outcome -- including the
+   real service's own "safe no-op" response (`gap: false`, `applied:
+   false`, `deduped: false`, returned when `command.sequence <=
+   session.lastAppliedControlSequence`; see
+   `VoiceSessionService.recordControlEvent`). That exact response is what
+   the server returns when a PRIOR attempt for this same sequence already
+   landed durably but only its own HTTP response was lost (network
+   failure, worker restart) -- this attachment is the sole producer of
+   its own `(voiceSessionId, sequence)` space, so it can only ever be its
+   own earlier write. Treating it as an unresolvable gap permanently
+   desynchronized the local counter from the authoritative one: every
+   later final kept retrying the exact same already-consumed sequence
+   number and kept failing the identical way, losing every later
+   authoritative write forever (reviewer's probe: "total sequences
+   [1,1,1], three distinct IDs, ... zero speech").
+
+**Fix (`apps/voice-media-worker/src/dialogue/call-turn-coordinator.ts`):**
+
+1. New `TurnSession.controlEventQueue` (serializes every control-event
+   write for an attachment -- both the new `speech.started`-triggered
+   write and a turn's own fallback write below -- distinct from `queue`,
+   which only serializes turns and does not exist for a bare
+   `speech.started` with no turn) and `TurnSession.releaseAbort` (a
+   dedicated `AbortController` for this ambient channel, aborted only on
+   `release()`, never by a barge-in/newer-final/timeout the way
+   `activeAbort` is -- a real `speech.started` must still land durably
+   even though the turn it precedes gets cancelled by that same signal).
+2. New `chainControlEvent` helper: chains a task onto
+   `controlEventQueue`, returning the task's own settlement to its caller
+   (so a turn's fallback write can still fail its turn closed) while
+   always replacing `controlEventQueue` with a non-rejecting continuation
+   (so one failed write never permanently wedges every later one for this
+   attachment -- the same hazard `restoreBoundAttachment`'s own doc
+   already warns about for `queue`).
+3. `recordAuthoritativeSpeechStart` generalized into
+   `recordAuthoritativeControlEvent` (parametrized by
+   `sourceEventId`/`occurredAt`/`mediaEpoch`/`signal` instead of a
+   `VoiceDialogueRequest`), with the response-loss fix: reconcile
+   `turnSession.controlSequence = result.appliedThroughSequence + 1` on
+   EVERY non-`gap` response, not only one where THIS call's own
+   `applied`/`deduped` was true. Only `result.gap === true`
+   (non-contiguous sequence, or cross-media-epoch arrival) still throws
+   `voice_control_event_gap` and leaves `binding.sessionVersion`/
+   `controlSequence` untouched, exactly as before (verified unchanged by
+   the pre-existing "fails closed ... gap" test).
+4. New `recordSpeechStartControlEvent`, called from `handle()`'s
+   `speech.started` branch (not `media.epoch.advanced`, a different,
+   already-fenced authority-transition concern): durably records the
+   control event immediately via `chainControlEvent`, fire-and-forget
+   from `handle()`'s own synchronous perspective, storing the resolved
+   epoch onto `turnSession.authoritativeInputEpoch`/marking
+   `authoritativeInputEpochConsumed = false`. A failure here (including a
+   genuine gap) just leaves those fields unchanged -- the next turn's
+   fallback (below) then opens its own watermark exactly as it always
+   did, so a failed real-time write still self-heals rather than
+   permanently losing the attempt.
+5. `executeTurn`'s `persist` stage now awaits `controlEventQueue` first,
+   then REUSES `turnSession.authoritativeInputEpoch` directly when
+   `authoritativeInputEpochConsumed === false` (a real `speech.started`
+   already opened one for this input) instead of unconditionally opening
+   a brand-new "synthetic per-final" one (the reopen's explicit "do not
+   ... increment from a synthetic per-final speech event"); it only falls
+   back to its own `recordAuthoritativeSpeechStart` call (now also
+   chained through `controlEventQueue`, so it can never race the new
+   path) when no real one is pending -- e.g. every existing
+   fixture-driven test, where a final arrives with no preceding
+   `speech.started` frame at all.
+6. `restoreBoundAttachment` additionally seeds
+   `authoritativeInputEpoch`/`authoritativeInputEpochConsumed` from the
+   restored session's own `inputEpoch`/`pendingInput` -- a restored
+   attachment whose watermark is still open (a prior attachment's
+   `speech.started` landed but no turn ever consumed it, e.g. a worker
+   restart) lets the very first turn reuse it directly instead of opening
+   a redundant second one.
+7. `controlEventQueue` is seeded from the SAME restoration promise as
+   `queue` (not `Promise.resolve()`) so a `speech.started` arriving before
+   restoration settles correctly waits for it too, instead of racing the
+   `controlSequence`/binding validation restoration itself establishes.
+
+**Regressions added** (`trusted-turn-composition.test.ts`, +2 tests, both
+against the real `VoiceSessionComposer` + `VoiceCallTurnCoordinator` +
+`VoiceApiClient`, only the `fetch` transport doubled):
+
+1. Reproduces the reviewer's exact probe: a bare `speech.started` WS
+   control frame with no following final durably opens the watermark
+   (`/events` call with `sequence: 1, eventType: "speech_start"`), with no
+   `/input-resolutions` call at all (no turn ran) and `binding.
+   sessionVersion` advanced by the real CAS write.
+2. Reproduces the response-loss probe: the first final's `/events` call
+   throws (simulating a lost response after the server already
+   committed); a second, independent final retries the same stale
+   `sequence: 1` with a fresh `sourceEventId` and must reconcile from the
+   "safe no-op" response instead of failing closed again -- asserts
+   exactly 2 `/events` calls (distinct `sourceEventId`s, same `sequence`)
+   and that the second turn actually speaks.
+
+Both proven fail-before/pass-after: temporarily replaced
+`call-turn-coordinator.ts` with its pre-fix `git show HEAD:...` content
+(via a local file copy, not `git stash`/`git checkout` on tracked state,
+and restored immediately after) and re-ran just this test file -- both
+new tests fail exactly as described against the pre-fix code (`undefined`
+body for the first test's `/events` call; `sentBinary.length === 0` for
+the second test's second turn), and pass after restoring the fix.
+
+Verification this round:
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm --filter @drts/voice-media-worker lint` (`eslint src
+  --max-warnings=0`): exit 0.
+- `pnpm exec vitest run
+  tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`:
+  14/14 pass (was 12; +2 new).
+- Full named regression set (`tests/unit/audit-voice-application-wiring-20261003/`
+  + `audit-voice-runtime-20261002` subset +
+  `uv-exec-{008,010,012,017,020,026}` + `uv-exec-001` contract +
+  idempotency guard): 28 files / 560 tests pass (was 558 after Round-17;
+  +2, 0 regressions).
+
+### Evidence table
+
+| Finding / acceptance key | Source & fix location | Old → new behavior | Commands, exit codes, evidence | Residual |
+| --- | --- | --- | --- | --- |
+| R4-control, ingestion half (`authority_epoch_consent_fences`, `composed_turn_and_recording_path`) | `call-turn-coordinator.ts`: new `recordSpeechStartControlEvent`, `TurnSession.controlEventQueue`/`releaseAbort`, `handle()`'s `speech.started` branch, `executeTurn`'s `persist` reuse-vs-fallback logic, `restoreBoundAttachment`'s seeding | Old: a real `speech.started` barge-in did only local bookkeeping; the authoritative watermark only ever opened as a side effect of a final completing its engine `propose` stage, and never opened at all if no final followed. New: `speech.started` durably opens the watermark immediately, independent of any later final/LLM call; a final that follows one reuses it rather than opening a duplicate "synthetic" one. | `pnpm --filter @drts/voice-media-worker typecheck`/`lint`: exit 0. New test 1 (see above), fail-before/pass-after proven by temporary pre-fix file substitution. Full named regression set (both halves together, not measured separately): 28 files / 560 tests pass (0 regressions). | The write itself has no deadline/cancellation distinct from `releaseAbort` -- an outstanding capability/control-event call can run indefinitely if apps/api hangs, since no turn/`request.signal`/`turnTimeoutMs` exists yet when a bare `speech.started` fires. `media.epoch.advanced` is not wired to any control event -- out of scope for this reopen's R4-control wording, which is specifically about `speech.started`/barge-in; its existing lease-epoch fencing at the service layer is unchanged. |
+| R4-control, response-loss half (`authority_epoch_consent_fences`) | `call-turn-coordinator.ts`'s `recordAuthoritativeControlEvent` (formerly `recordAuthoritativeSpeechStart`) | Old: only `applied`/`deduped` advanced `controlSequence`; any other outcome (including the real service's own "safe no-op" already-applied response) threw `voice_control_event_gap`, permanently desynchronizing the local counter from the authoritative one once a single response was lost. New: `controlSequence` reconciles from `result.appliedThroughSequence` on every non-`gap` response; only a genuine `gap: true` still fails closed. | `pnpm --filter @drts/voice-media-worker typecheck`/`lint`: exit 0. New test 2 (see above), fail-before/pass-after proven the same way. Pre-existing "fails closed ... gap" test (Round-15/16) re-run unchanged: still 0 calls past `/events`, `binding.sessionVersion` still untouched -- confirms the genuine-gap fail-closed path is not weakened. | Response-loss recovery is added only for `recordControlEvent`; `resolveInput`/`persistDialogueSnapshot` themselves still have no retry/replay for a genuinely dropped response with no later correlated reply at all (same residual Round-17's R4-persist evidence table already named, unchanged by this round). |
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: improved -- the "synthetic per-final
+  speech event" defect this reopen named is fixed, and a real
+  `speech.started` now composes into the authoritative turn pipeline
+  rather than running beside it with no durable effect. Not fully met:
+  the ingestion write's own lack of a bounded deadline (see residual
+  above) and every other finding from earlier rounds already recorded as
+  met stay met; no new regression introduced.
+- `authority_epoch_consent_fences`: improved -- both R4-control
+  sub-findings (ordered ingestion, response-loss recovery) that were the
+  LAST open items under this key are now fixed and regression-tested.
+  Combined with Round-17's R4-entry/R11/R4-persist fixes, no reopened
+  finding against this key remains outstanding from this specific
+  `codex-20261003T160720Z-bb49c249` review as of this round -- a fresh
+  independent review of this exact candidate SHA is still required before
+  this key can be claimed met; this assessment is the owner's own, not a
+  reviewer's.
+- `precise_unimplemented_and_external_boundaries`: unchanged from
+  Round-17 -- this round touches only `apps/voice-media-worker` internals
+  already covered by that assessment, not a new external-boundary claim.
+- `same_sha_review_ci`: not claimed. Local typecheck/lint/targeted-vitest
+  evidence above is this round's own; hosted CI and independent reviewer
+  re-review on this exact SHA are pending, same as every prior round.
+
+### Residual / explicitly NOT addressed this round
+
+- No change to `apps/api`; the genuinely external SD §4.1 provider
+  webhook / `voice.session` row gate from Round-17 is unchanged.
+- The speech-start write's own HTTP calls have no bounded
+  deadline/timeout independent of `releaseAbort` (release-only
+  cancellation, no analog to `turnTimeoutMs` for a signal with no turn).
+- `media.epoch.advanced` still has no control-event write of its own --
+  not requested by this reopen's R4-control wording and not attempted
+  here.
+- Response-loss retry/replay for `resolveInput`/`persistDialogueSnapshot`
+  (as opposed to `recordControlEvent`, fixed this round) remains absent,
+  carried forward from Round-17's R4-persist evidence table.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider call, package install, history rewrite, or force-push was
+performed this round.

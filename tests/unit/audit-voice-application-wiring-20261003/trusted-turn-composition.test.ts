@@ -560,6 +560,287 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
   });
 
   /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen round
+   * 16/17): reproduces the reviewer's exact probe -- a real `speech.started`
+   * barge-in frame must durably open the authoritative watermark
+   * immediately, even when no `asr.segment.final` ever follows it. Before
+   * this fix, `handle()`'s `speech.started` branch only did local
+   * bookkeeping (`inputEpoch`/`activeAbort`) and never called apps/api at
+   * all -- a delayed/failed/absent next final left the authoritative
+   * session's watermark exactly as if nothing had happened, so a stale
+   * `controlCutoff` built against it would still pass
+   * `assertControlCutoffStillValid`.
+   */
+  it("R4-control: a real speech.started barge-in durably opens the authoritative watermark even when no final ever follows it", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      resourceScopeId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 20,
+    };
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ path, body });
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/events")) {
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: (body as { sequence: number }).sequence,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    await flush(5);
+
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({ type: "speech.started" }),
+      false,
+    );
+    await flush(10);
+
+    const controlEventCall = calls.find((c) => c.path.endsWith("/events"));
+    expect(controlEventCall?.body).toMatchObject({
+      sequence: 1,
+      eventType: "speech_start",
+    });
+    // No final ever arrived, so no turn ran at all -- the authoritative
+    // write is not gated behind one, and never waited for a provider/LLM
+    // call that never happened.
+    expect(calls.some((c) => c.path.endsWith("/input-resolutions"))).toBe(false);
+    // The watermark's own CAS write still advanced the binding's
+    // sessionVersion, proving this reached the real apps/api route rather
+    // than only updating local bookkeeping.
+    expect(binding.sessionVersion).toBe(21);
+    expect(sentBinary).toHaveLength(0);
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control, "response-loss
+   * recovery is also absent" (Codex reopen round 16/17): reproduces the
+   * reviewer's exact probe -- a control event that durably commits
+   * server-side while its own HTTP response is lost must not permanently
+   * desynchronize this attachment's local `controlSequence` counter from
+   * the authoritative one. Before this fix, a retried attempt for the
+   * same (locally un-advanced) sequence number with a fresh event id
+   * landed on the real service's "safe no-op" response (`gap: false`,
+   * `applied: false`, `deduped: false`) and was wrongly thrown as an
+   * unresolvable `voice_control_event_gap`, repeating forever for every
+   * later turn too.
+   */
+  it("R4-control: reconciles the control-sequence counter from a safe no-op response instead of permanently wedging after an ambiguous (response-lost) write", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+      resourceScopeId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 30,
+    };
+    let lastAppliedControlSequence = 0;
+    let eventsCallCount = 0;
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      if (path !== "/callcenter/voice/capabilities") calls.push({ path, body });
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/events")) {
+        eventsCallCount += 1;
+        if (eventsCallCount === 1) {
+          // The real service durably commits sequence 1 here (modelled by
+          // updating this closure's own state) -- but this exact HTTP
+          // response never reaches the client, e.g. a network failure
+          // right after the server already wrote it.
+          lastAppliedControlSequence = 1;
+          throw new TypeError("simulated network failure after commit");
+        }
+        // Retried with a fresh sourceEventId but the SAME (locally
+        // un-advanced) sequence -- the real service's actual "safe
+        // no-op" response for an already-applied sequence (see
+        // `VoiceSessionService.recordControlEvent`'s own
+        // `command.sequence <= session.lastAppliedControlSequence`
+        // branch), never a `gap`.
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: false,
+            gap: false,
+            appliedThroughSequence: lastAppliedControlSequence,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion:
+                (body as { expectedSessionVersion: number }).expectedSessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "snapshot-retry",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: (body as { expectedSessionVersion: number })
+                .expectedSessionVersion,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
+              turnId: (body as { turnId: string }).turnId,
+              content: (body as { content: unknown }).content,
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      if (path.endsWith("/handoffs")) {
+        return jsonResponse(200, {
+          data: { results: [{ status: "queued", handoffId: "handoff-retry" }] },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    await flush(5);
+
+    // First final: its own control-event write fails from this client's
+    // point of view (ambiguous -- the server already committed it, but
+    // this client never learns that).
+    asr.emitFinal("救命", "seg-1");
+    await flush(10);
+    expect(sentBinary).toHaveLength(0);
+
+    // Second, independent final: must not keep retrying the same stale
+    // sequence forever. It gets a fresh turnId/sourceEventId, submits the
+    // same (locally un-advanced) sequence 1 again, and must reconcile
+    // from the authoritative response instead of failing closed again.
+    asr.emitFinal("救命", "seg-2");
+    await flush(10);
+
+    const eventsCalls = calls.filter((c) => c.path.endsWith("/events"));
+    expect(eventsCalls).toHaveLength(2);
+    expect(eventsCalls[0]?.body).toMatchObject({ sequence: 1 });
+    expect(eventsCalls[1]?.body).toMatchObject({ sequence: 1 });
+    expect(
+      (eventsCalls[0]?.body as { sourceEventId: string }).sourceEventId,
+    ).not.toBe((eventsCalls[1]?.body as { sourceEventId: string }).sourceEventId);
+    // The second turn completed -- spoke normally -- instead of repeating
+    // the first turn's failure.
+    expect(sentBinary.length).toBeGreaterThan(0);
+    consoleError.mockRestore();
+  });
+
+  /**
    * Codex reopen round 5/6, R6: a turn's handoff tool execution must not
    * escape cancellation and must never submit a newer `inputEpoch` than
    * the one admitted when the triggering transcript arrived. Reproduces
