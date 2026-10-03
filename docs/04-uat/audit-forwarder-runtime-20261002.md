@@ -27,8 +27,8 @@
 | R2 Candidate SHA | `5e3837ca7` (Rejected, failed lint) |
 | R3 Candidate SHA | `641fd949823ea1d0b686251ac7065cd062c5f16e` (Rejected at 2026-10-03T01:01:31Z) |
 | Tested Implementation SHA | `6641844759b0e92a803c1afa4e8928cf2b48f093` |
-| Current Candidate SHA | `ca37a9fe377509e8f39e4024c2725f12122e3da5` |
-| Tested Source SHA | `ca37a9fe377509e8f39e4024c2725f12122e3da5` |
+| Current Candidate SHA | `da2e69215e67f1803ff783bc36cd5bc34cf0e90d` |
+| Tested Source SHA | `da2e69215e67f1803ff783bc36cd5bc34cf0e90d` |
 | CWD | `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-audit-forwarder-runtime-20261002` |
 | Validation Command (API) | `pnpm --filter @drts/api exec vitest run tests/unit/forwarder.service.test.ts tests/unit/forwarder.controller.test.ts` |
 | Validation Exit Code (API) | `0` (Passed) |
