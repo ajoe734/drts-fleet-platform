@@ -503,11 +503,30 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
    * this worker's actual composition (`../server.ts` never sets
    * `production: true`), but exercised directly here to prove the fail-
    * closed guard is real, not merely documented.
+   *
+   * Codex reopen round 5/6, R4 residual: this previously constructed the
+   * coordinator with the real fixture-mode `OpenAiRealtimeFixtureAdapter`
+   * as its *provider*, which `runVoiceDialogue` itself already rejects
+   * with `voice_fixture_forbidden` under `production: true` (see
+   * `voice-dialogue-provider.ts`'s own guard) -- before `executeTurn` ever
+   * reaches `VoiceCallTurnCoordinator`'s own, distinct
+   * `voice_persist_untrusted_for_production` guard on the *persist port*.
+   * The assertion below passed, but for the wrong reason: it exercised the
+   * provider guard, never the persist-port guard its own doc names. Now
+   * uses a `mode: "live"` provider double (still fixture-ish in that it
+   * never calls a real model -- only this file's own boundary -- but
+   * passes the provider check) so the persist-port guard is the actual,
+   * only thing under test.
    */
   it("fails closed instead of running a production engine against the fixture-only persist port", async () => {
+    const liveProvider: VoiceDialogueProvider = {
+      mode: "live",
+      profileVersion: "live-persist-guard-probe:1",
+      propose: async () => EMPTY_FINAL_OUTPUT,
+    };
     const speaker = trackingSpeaker();
     const coordinator = new VoiceCallTurnCoordinator(
-      () => new OpenAiRealtimeFixtureAdapter(),
+      () => liveProvider,
       undefined,
       createFixtureDialoguePersistPort(),
       true,
