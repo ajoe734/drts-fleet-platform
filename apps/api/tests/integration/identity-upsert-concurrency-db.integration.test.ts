@@ -681,11 +681,25 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     // statement below to physically block at the database level until this
     // transaction commits, giving a deterministic "A begins, B commits,
     // then A completes" ordering instead of hoping Promise.all interleaves.
+    // It also writes `record` in the same transaction as account_status/
+    // updated_at so the fixture leaves column and JSON coherent, matching
+    // what the production ON CONFLICT write would have produced -- the
+    // repository's stale-write fallback path reads `record` directly, so a
+    // fixture that only updated the columns would make this assertion fail
+    // on its own inconsistency, not on repository behavior.
     const gateClient = await dbGate.connect();
     const t2 = new Date(Date.now() - 20_000).toISOString();
     await gateClient.query("BEGIN");
     await gateClient.query(
-      `UPDATE iam.identity_principals SET account_status = 'suspended', updated_at = $2::timestamptz WHERE principal_id = $1`,
+      `UPDATE iam.identity_principals
+         SET account_status = 'suspended',
+             updated_at = $2::timestamptz,
+             record = jsonb_set(
+               jsonb_set(record, '{status}', '"suspended"'),
+               '{updatedAt}',
+               to_jsonb($2::timestamptz)
+             )
+       WHERE principal_id = $1`,
       [principalId, t2],
     );
 
