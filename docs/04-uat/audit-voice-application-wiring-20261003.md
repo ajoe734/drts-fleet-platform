@@ -2657,3 +2657,52 @@ this round.
   named precisely above, not conflated with finished code.
 - `same_sha_review_ci`: pending independent review and hosted CI on this
   exact candidate SHA; not claimed.
+
+## V0106 allocation follow-through (2026-10-03, after abd0f1e3a)
+
+The original task's explicitly reserved V0106 migration was not yet registered
+in the shared schema allocation ledger. On immutable
+`abd0f1e3af6b510ff30792c7c082d3fd7b826868`, hosted run37131345451 Product
+smoke acceptance failed the two real allocation guards with
+`expected 106 to be less than or equal to 105`. This is a genuine delivery
+coordination defect, not a flaky smoke test or an external account blocker.
+
+Coordinator checked active scope conflicts and added the exact ledger and
+its two existing guard consumers to this original task's write scopes.
+Pi's contribution adds one `voice_application_allocations` entry using the
+existing wave-group convention, with the actual task ID, filename, schema,
+primary/referenced tables and explicit separation from booking proof. It
+preserves EVERY pre-existing ledger field/reservation and amendment (verified
+by structural comparison against abd0f1e3a). No migration was renamed or
+renumbered. The new provenance amendment does not certify snapshot behavior.
+
+Both existing guard consumers enumerate the new allocation group alongside
+prior groups. The partner guard additionally includes it in global uniqueness
+and exact reserved-filename checks. Existing maximum-version, reservation
+counts and prior V0104/V0105 boundary assertions are unchanged: no skip,
+weakened limit, unconditional pass or automatic reservation inferred from
+whatever happens to exist on disk.
+
+Completed checks, with DB URLs removed and TCP/UDP-denial preload:
+- Actual two failing test files before edits: **2 failed / 56 passed**.
+- Same two files after: **58 passed, zero skips**, exit0.
+- In-memory negative controls rerun the SAME real guards without modifying
+  repository files: remove only the V0106 reservation -> both reject106>105;
+  present a hypothetical UNRESERVED V0107 filename -> both reject107>106.
+  Both controls exit1 as expected; these are intentional guard-denial checks,
+  not normal product-suite failures or successful live migration execution.
+- Root typecheck (after existing control-plane-auth declaration build),
+  changed-test ESLint, JSON parsing and diff-check pass.
+- Private frozen/offline/ignore-scripts dependencies; no shared-link install.
+- Evidence under local audit-followthrough: voice-allocation-before.log,
+  voice-allocation-after.log, voice-allocation-negative-*.log,
+  voice-allocation-typecheck.log and voice-allocation-lint.log.
+
+This fixes the ledger coordination defect only. Actual main/server still
+needs consumed admission/restoration and authoritative event/epoch wiring;
+those are authorized implementation obligations, not permission/account
+blockers. The owner-authored statement that the implementation is correct
+because536 scoped tests pass is not independent review. All original code
+acceptance keys, exact-successor review/hosted CI and merge remain required.
+No DB migration was applied, no product/browser/server was started and no
+shared-dev or live-provider acceptance is claimed.

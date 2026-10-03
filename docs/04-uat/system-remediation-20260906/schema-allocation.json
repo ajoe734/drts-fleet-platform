@@ -102,6 +102,12 @@
   },
   "amendments": [
     {
+      "amended_by_task_id": "AUDIT-VOICE-APPLICATION-WIRING-20261003",
+      "amended_at": "2026-10-03",
+      "scope": "Appended voice_application_allocations only; all existing reservations and boundary rules remain unchanged",
+      "reason": "Registers the already-coordinated V0106__voice_dialogue_snapshot.sql reservation in the shared ledger. At immutable audit head abd0f1e3af6b510ff30792c7c082d3fd7b826868 the migration exists but the ledger ends at V0105, so both global allocation guards correctly fail. No active competing reservation was found. Original task scopes now explicitly include this ledger and the two guard consumers; adding the reservation does not approve the snapshot implementation or weaken their no-unreserved-migration assertions."
+    },
+    {
       "amended_by_task_id": "SR-ACADEMY-BE-001-IDENTITY-CONTRACT",
       "amended_at": "2026-09-10",
       "scope": "SR-ACADEMY-BE-001 allocation entry only",
@@ -125,6 +131,24 @@
       "amended_at": "2026-09-18",
       "scope": "Appended `partner_notification_allocations` only; all prior allocations, amendments, additional_allocations and launch_allocations entries above are unchanged",
       "reason": "SR-PARTNER-NOTIFY-CON-20260917 finalizes the wire contract, entry binding and order-route shapes for routing passenger notifications to the partner app's own native push (docs/02-architecture/partner-notification-20260917/01_system_sa_sd.md §11), and allocates migration numbers for that design's four new tables. At inspected base (origin/dev, fixed baseline 38a68a79959619faa5a10b9782e77dd7ca41f4c2) the highest canonical infra migration is V0103__notification_mail_outbox.sql (infra/migrations/); V0104-V0105 below are reserved by this task and were unclaimed by any other allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 precedent, this task supplies typed contracts (packages/contracts/src/partner-passenger-notification.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement transport, and does not change DI wiring or webhook-dispatch.service.ts. The four tables are grouped into two migration files by which downstream backend task owns their write path: V0104 (binding + route + sequence counter) for SR-PARTNER-NOTIFY-ROUTE-20260917, and V0105 (delivery context) for SR-PARTNER-NOTIFY-TRANSPORT-20260917/SR-PARTNER-NOTIFY-ACK-20260917, mirroring how V0098-V0100 were grouped by consuming task rather than one file per table."
+    }
+  ],
+  "voice_application_allocations": [
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-WIRING-20261003",
+      "version": "V0106",
+      "migration_filename": "V0106__voice_dialogue_snapshot.sql",
+      "domain": "voice_dialogue_snapshot",
+      "target_schema": "voice",
+      "primary_tables": ["voice.dialogue_snapshot"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "snapshot_id uuid PRIMARY KEY DEFAULT gen_random_uuid(); voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id); UNIQUE (voice_session_id, session_version) identifies the stored revision.",
+        "resource_scope_id, route_profile_version, lease_epoch, input_epoch, media_epoch and turn_id are mandatory context fields; this candidate-dialogue record is not a qualified booking draft, confirmation or consent proof.",
+        "content_key_version, content_nonce, content_ciphertext and content_auth_tag store server-encrypted content; retention_expires_at is mandatory. Transactional authority, deduplication, authenticated context, expiry and governed retention behavior remain application/schema verification obligations, not claims certified by this allocation entry."
+      ],
+      "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced.",
+      "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
     }
   ],
   "additional_allocations": [
