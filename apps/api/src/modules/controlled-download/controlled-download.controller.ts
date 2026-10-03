@@ -13,9 +13,11 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { verifyControlledDownloadSignature } from "../../common/controlled-download";
 import { OpenRoute } from "../../common/auth";
 import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
   resolveDocumentArtifact,
+  type DocumentArtifactRebuildRegistry,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
 
@@ -52,6 +54,9 @@ export class ControlledDownloadController {
     @Optional()
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly artifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    private readonly rebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {}
 
   // Declared open on purpose. A signed URL is its own credential, and the IAM
@@ -128,11 +133,33 @@ export class ControlledDownloadController {
     // The link is genuine and unexpired. Whether there is actually a file
     // behind it -- and whether it is still the same file the link named --
     // is a separate question the store answers.
-    const resolution = resolveDocumentArtifact(this.artifactStore, {
+    let resolution = resolveDocumentArtifact(this.artifactStore, {
       kind,
       subjectId,
       manifestHash: manifestHash!,
     });
+
+    if (resolution.status !== "ok") {
+      // This instance's own store may simply never have seen these bytes --
+      // a sibling Cloud Run instance rendered them, or this instance
+      // restarted since. The signature and expiry are already verified
+      // above, so asking this kind's producer to deterministically
+      // re-derive the same file from its own durably persisted source
+      // record (and re-checking the result against the link's manifest
+      // hash before trusting it, exactly as a first-time resolution would)
+      // closes that gap without treating the verified link as blanket
+      // authorization to serve whatever a rebuild happens to produce. A
+      // kind with no registered rebuilder -- or one whose own source data
+      // has no such subjectId either -- answers exactly as before.
+      const rebuilt = this.rebuildRegistry?.rebuild(kind, subjectId) ?? null;
+      if (rebuilt) {
+        resolution = resolveDocumentArtifact(this.artifactStore, {
+          kind,
+          subjectId,
+          manifestHash: manifestHash!,
+        });
+      }
+    }
 
     if (resolution.status === "ok") {
       return new StreamableFile(resolution.bytes, {

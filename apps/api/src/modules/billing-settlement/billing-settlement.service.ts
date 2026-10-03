@@ -63,8 +63,10 @@ import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
+  type DocumentArtifactRebuildRegistry,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -750,7 +752,23 @@ export class BillingSettlementService implements OnModuleInit {
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
     @Optional()
     private readonly remittanceProofService: RemittanceProofService = new RemittanceProofService(),
-  ) {}
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
+  ) {
+    // Registered unconditionally (not gated on a repository being present):
+    // `this.tenantInvoices` / `this.driverStatements` are populated either
+    // way -- from seed data, from a prior `generate*` call in this process,
+    // or (see `onModuleInit`) from the shared repository -- and a rebuilder
+    // must answer "no such subjectId on this instance" rather than throw
+    // when there genuinely is none, which it already does below.
+    documentArtifactRebuildRegistry?.register("tenant-invoice", (subjectId) =>
+      this.rebuildTenantInvoiceArtifact(subjectId),
+    );
+    documentArtifactRebuildRegistry?.register("report", (subjectId) =>
+      this.rebuildDriverStatementArtifact(subjectId),
+    );
+  }
 
   async getMultiTaxiPaymentException(
     orderId: string,
@@ -1638,25 +1656,7 @@ export class BillingSettlementService implements OnModuleInit {
 
     const record = materialised
       ? stored!.record
-      : this.documentArtifactStore.put({
-          kind: "tenant-invoice",
-          subjectId: invoice.invoiceId,
-          mimeType: "application/pdf",
-          bytes: buildMinimalPdf(
-            buildTenantInvoicePdfRows({
-              invoiceId: invoice.invoiceId,
-              tenantId: invoice.tenantId,
-              billingProfile: this.requireTenantBillingProfile(
-                invoice.tenantId,
-              ),
-              periodStart: invoice.periodStart,
-              periodEnd: invoice.periodEnd,
-              amount: invoice.amount,
-              lines: invoice.lines,
-              generatedAt: invoice.createdAt,
-            }),
-          ),
-        });
+      : this.renderTenantInvoiceArtifact(invoice);
 
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "tenant-invoice",
@@ -1684,6 +1684,58 @@ export class BillingSettlementService implements OnModuleInit {
     );
 
     return refreshed;
+  }
+
+  /** The actual render step `ensureTenantInvoiceArtifact` runs when the store has
+   * nothing matching this invoice's bytes, factored out so a controlled-download
+   * rebuild (see `rebuildTenantInvoiceArtifact`) re-derives the identical file
+   * instead of maintaining a second copy of this rendering logic. */
+  private renderTenantInvoiceArtifact(invoice: StoredTenantInvoice) {
+    return this.documentArtifactStore.put({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(
+        buildTenantInvoicePdfRows({
+          invoiceId: invoice.invoiceId,
+          tenantId: invoice.tenantId,
+          billingProfile: this.requireTenantBillingProfile(invoice.tenantId),
+          periodStart: invoice.periodStart,
+          periodEnd: invoice.periodEnd,
+          amount: invoice.amount,
+          lines: invoice.lines,
+          generatedAt: invoice.createdAt,
+        }),
+      ),
+    });
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind
+   * "tenant-invoice": lets `ControlledDownloadController` recover a
+   * verified, unexpired link whose bytes never landed in its own
+   * process-local store (a sibling Cloud Run instance rendered them, or
+   * this instance restarted) by re-deriving the identical file from this
+   * invoice's own durably persisted record. Returns null -- not a thrown
+   * error -- when this instance's own invoice list genuinely has no such
+   * id, which the registry contract treats as "nothing to rebuild", not a
+   * rebuild failure.
+   */
+  private rebuildTenantInvoiceArtifact(invoiceId: string) {
+    const invoice = this.tenantInvoices.find(
+      (candidate) => candidate.invoiceId === invoiceId,
+    );
+    if (!invoice) {
+      return null;
+    }
+    try {
+      return this.renderTenantInvoiceArtifact(invoice);
+    } catch {
+      // A billing profile or other precondition `requireTenantBillingProfile`
+      // enforces could have been removed since this invoice was issued; the
+      // caller treats a null rebuild the same as "nothing to rebuild".
+      return null;
+    }
   }
 
   listTenantInvoices(tenantId: string) {
@@ -2202,12 +2254,7 @@ export class BillingSettlementService implements OnModuleInit {
 
     const record = materialised
       ? stored!.record
-      : this.documentArtifactStore.put({
-          kind: "report",
-          subjectId: statement.statementId,
-          mimeType: "application/pdf",
-          bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
-        });
+      : this.renderDriverStatementArtifact(statement);
 
     const now = new Date().toISOString();
     const artifactDownloadMetadata = createControlledDownloadMetadata({
@@ -2237,6 +2284,44 @@ export class BillingSettlementService implements OnModuleInit {
     );
 
     return refreshed;
+  }
+
+  /** The actual render step `ensureDriverStatementArtifact` runs when the store
+   * has nothing matching this statement's bytes, factored out so a
+   * controlled-download rebuild (see `rebuildDriverStatementArtifact`)
+   * re-derives the identical file instead of maintaining a second copy of
+   * this rendering logic. */
+  private renderDriverStatementArtifact(statement: DriverStatementRecord) {
+    return this.documentArtifactStore.put({
+      kind: "report",
+      subjectId: statement.statementId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+    });
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind "report": lets
+   * `ControlledDownloadController` recover a verified, unexpired link whose
+   * bytes never landed in its own process-local store (a sibling Cloud Run
+   * instance rendered them, or this instance restarted) by re-deriving the
+   * identical file from this driver statement's own durably persisted
+   * record. Returns null -- not a thrown error -- when this instance's own
+   * statement list genuinely has no such id, which the registry contract
+   * treats as "nothing to rebuild", not a rebuild failure.
+   */
+  private rebuildDriverStatementArtifact(statementId: string) {
+    const statement = this.driverStatements.find(
+      (candidate) => candidate.statementId === statementId,
+    );
+    if (!statement) {
+      return null;
+    }
+    try {
+      return this.renderDriverStatementArtifact(statement);
+    } catch {
+      return null;
+    }
   }
 
   listDriverStatements(periodMonth?: string, driverId?: string) {

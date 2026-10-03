@@ -16,3 +16,8 @@ export {
   type DocumentArtifactResolution,
   type ResolveDocumentArtifactInput,
 } from "./document-artifact-reader";
+export {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
+  DocumentArtifactRebuildRegistry,
+  type DocumentArtifactRebuilder,
+} from "./document-artifact-rebuild-registry";
