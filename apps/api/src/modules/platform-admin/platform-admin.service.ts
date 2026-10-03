@@ -65,7 +65,6 @@ import {
   DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
-  type DocumentArtifactEntry,
   type DocumentArtifactRebuildRegistry,
   type DocumentArtifactRecord,
   type DocumentArtifactStore,
@@ -84,6 +83,14 @@ import {
  * expiry.
  */
 const CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS = 14;
+
+/**
+ * Attempts `restorePlacardArtifactWithRetry` makes before giving up on a
+ * transient store failure (R10-F, Codex REOPEN generation
+ * fdc2511b33d844c8b89d74ad71a982c9) -- see that method's own doc for why a
+ * retry here is always safe.
+ */
+const PLACARD_PUBLICATION_RESTORE_ATTEMPTS = 3;
 
 // ── Placard PDF rendering (SR-PLACARD-001) ──────────────────────────────────
 // Dependency-free, minimal PDF-1.4 writer for vehicle placards.
@@ -586,8 +593,10 @@ export class PlatformAdminService implements OnModuleInit {
     // re-deriving the file from this instance's own durably persisted
     // placard + public-info records -- returning null, not throwing, when
     // this instance's own list genuinely has no such id.
-    documentArtifactRebuildRegistry?.register("placard", (subjectId) =>
-      this.rebuildPlacardArtifact(subjectId),
+    documentArtifactRebuildRegistry?.register(
+      "placard",
+      (subjectId, expectedSha256) =>
+        this.rebuildPlacardArtifact(subjectId, expectedSha256),
     );
   }
 
@@ -2801,29 +2810,24 @@ export class PlatformAdminService implements OnModuleInit {
    * returning a record for bytes that were never actually stored.
    */
   /**
-   * The pure rendering step `renderPlacardArtifact` and
-   * `repairPlacardArtifactAfterLostClaim` both build on: a placard's PDF
-   * bytes are solely a function of its own fields and the source
+   * The pure rendering step `renderPlacardArtifact` builds on: a placard's
+   * PDF bytes are solely a function of its own fields and the source
    * `PublicInfoVersionRecord` currently held in memory -- no store access,
-   * no side effects. Factored out so the repair path can check a
-   * candidate render's hash against the authoritative winner's recorded
-   * hash BEFORE attempting any write, rather than only after.
+   * no side effects.
+   *
+   * (R10-E, Codex REOPEN generation fdc2511b33d844c8b89d74ad71a982c9) A
+   * repair/restore no longer re-renders through this at all -- it copies
+   * `preservePlacardPublicationBytes`'s own durable, content-addressed copy
+   * of whatever a winner's render originally produced instead, which stays
+   * correct even after `this.publicInfoVersions` (or the durable source row
+   * itself) has legitimately moved on since. This stays the one rendering
+   * path `renderPlacardArtifact` uses for an actual new issuance.
    */
-  private renderPlacardBytes(
-    placard: PlacardVersionRecord,
-    explicitPublicInfoVersion?: PublicInfoVersionRecord | null,
-  ): Buffer {
-    // `repairPlacardArtifactAfterLostClaim` (R10-D) passes a FRESH,
-    // repository-sourced record explicitly rather than letting this fall
-    // through to `this.publicInfoVersions`: that in-memory cache belongs to
-    // THIS service instance and can be stale relative to the durable
-    // `authoritative` placard row it is reconstructing bytes for.
+  private renderPlacardBytes(placard: PlacardVersionRecord): Buffer {
     const publicInfoVersion =
-      explicitPublicInfoVersion !== undefined
-        ? explicitPublicInfoVersion
-        : this.publicInfoVersions.find(
-            (v) => v.versionId === placard.publicInfoVersionId,
-          ) ?? null;
+      this.publicInfoVersions.find(
+        (v) => v.versionId === placard.publicInfoVersionId,
+      ) ?? null;
     return publicInfoVersion
       ? buildMinimalPdf(buildPlacardPdfRows(placard, publicInfoVersion))
       : buildMinimalPdf([
@@ -2842,10 +2846,23 @@ export class PlatformAdminService implements OnModuleInit {
     } = {},
   ): Promise<DocumentArtifactRecord> {
     const bytes = this.renderPlacardBytes(placard);
+    const mimeType = "application/pdf";
+    // (R10-E/R10-F byte-ownership fix, Codex REOPEN generation
+    // fdc2511b33d844c8b89d74ad71a982c9) Preserve this exact render BEFORE
+    // issuing any of the writes below, regardless of which one actually
+    // runs -- see `preservePlacardPublicationBytes` for why a durable,
+    // content-addressed copy is what lets a later repair restore these
+    // precise bytes even after the source they came from has legitimately
+    // moved on.
+    await this.preservePlacardPublicationBytes(
+      placard.placardVersionId,
+      bytes,
+      mimeType,
+    );
     const command = {
       kind: "placard" as const,
       subjectId: placard.placardVersionId,
-      mimeType: "application/pdf",
+      mimeType,
       bytes,
     };
 
@@ -2889,9 +2906,6 @@ export class PlatformAdminService implements OnModuleInit {
    * more overlapping losers, a later loser's baseline can itself already
    * be an earlier loser's corruption, so "restore my baseline" durably
    * reinstates THAT corruption instead of the real winner's bytes (R10-B).
-   * Every call here instead re-derives the CURRENT authoritative winner's
-   * bytes fresh, from the durable record, and writes only when the store
-   * does not already reflect that winner's hash:
    *
    * - If the repository has no row yet, or the row is unpublished, or it
    *   still carries a pending `__publishClaimToken` (someone else's claim
@@ -2907,32 +2921,18 @@ export class PlatformAdminService implements OnModuleInit {
    *   winner's own finalize" was deferring to a call that never happened,
    *   permanently stranding its own corrupting write. The winner's success
    *   path now calls this unconditionally after its own finalize commits.
-   * - Otherwise, re-render deterministically from that authoritative row
-   *   (`renderPlacardArtifact` is a pure function of a placard's own
-   *   fields -- including the winner's exact `publishedAt`/`updatedAt` --
-   *   and the source `PublicInfoVersionRecord`; the actual winner's
-   *   original render used the same inputs, so this reproduces
-   *   byte-identical content) and write it with `putIfUnchanged`, fenced
-   *   on a FRESH read of the object's current generation, not any stale
-   *   generation this call captured earlier. If that fence loses to yet
-   *   another concurrent writer or repairer, this attempt simply stops --
-   *   whoever landed is itself subject to the same hash check on its own
-   *   next call, so there is no need to retry here. Because every caller
-   *   that reaches the write step is reproducing the SAME bytes (the one
-   *   authoritative winner's), it does not matter how many losers overlap
-   *   or in what order their repairs land: whichever one writes last still
-   *   leaves the correct bytes in place.
-   *   (R10-D, Codex REOPEN generation ac45f6a18eb347a397a7f5faf84f00d7) "The
-   *   source `PublicInfoVersionRecord`" above means the one fetched FRESH
-   *   from the repository below, not whatever this CALLING instance's own
-   *   `this.publicInfoVersions` happens to hold. `publishPublicInfoVersion`
-   *   mutates that cache in-process and persists it to the durable store
-   *   separately; a different instance's cache (e.g. a stale loser that
-   *   never observed the winner's own public-info publish) can disagree
-   *   with the durable row the winner actually rendered from. Rendering
-   *   from this instance's own stale cache instead of the durable one would
-   *   reproduce the WRONG bytes, fail the hash check below, and leave the
-   *   winner's actual bytes un-repaired.
+   * - Otherwise, restore from `restorePlacardArtifactWithRetry` -- see its
+   *   own doc for what changed and why (R10-E/R10-F, Codex REOPEN
+   *   generation fdc2511b33d844c8b89d74ad71a982c9): this used to re-render
+   *   deterministically from the authoritative row and a FRESH read of the
+   *   source `PublicInfoVersionRecord`, which was correct only as long as
+   *   that source had not itself legitimately moved on since the real
+   *   winner's own original render (R10-D fenced the loser's STALE cache,
+   *   but not a legitimate mutation landing between render and repair).
+   *   Copying the winner's own durably preserved bytes instead of
+   *   re-deriving them makes that question moot -- and makes retrying a
+   *   transient store failure here always safe, never a risk of landing on
+   *   different (wrong) content between attempts.
    */
   private async repairPlacardArtifactAfterLostClaim(
     placardVersionId: string,
@@ -2949,78 +2949,155 @@ export class PlatformAdminService implements OnModuleInit {
     } catch {
       return;
     }
+    if (!authoritative) {
+      return;
+    }
+
+    await this.restorePlacardArtifactWithRetry(authoritative);
+  }
+
+  private placardPublicationBackupSubjectId(
+    placardVersionId: string,
+    sha256: string,
+  ): string {
+    return `${placardVersionId}::publication-backup::${sha256}`;
+  }
+
+  /**
+   * (R10-E/R10-F byte-ownership fix, Codex REOPEN generation
+   * fdc2511b33d844c8b89d74ad71a982c9) A durable, content-addressed copy of
+   * this exact render -- `renderPlacardArtifact` calls this before issuing
+   * ANY of its own writes, regardless of which one actually runs -- stored
+   * under a key only this hash can ever name, independent of whatever the
+   * shared (kind, subjectId) public slot holds afterward, and independent
+   * of whatever the source `PublicInfoVersionRecord` looks like later.
+   * `restorePlacardPublicationBackup` reads this back instead of
+   * re-deriving bytes from current state, which is what let a legitimate
+   * source mutation between a render and a later repair make an
+   * already-issued publication's own bytes permanently unrecoverable
+   * (R10-E): the source can move on; this copy never does.
+   *
+   * `putIfAbsent` is the right primitive here, not `put`: two renders that
+   * happen to produce identical bytes (same placard, same source) safely
+   * agree on the same backup key and never re-write it; renders that differ
+   * land at different keys and can never collide or clobber each other.
+   * Best-effort on purpose -- a failure here must not block the render this
+   * call is actually performing; a missing backup just means a later
+   * repair/restore attempt safely declines instead of corrupting anything,
+   * the same abstain-on-uncertainty posture every durable read in this area
+   * already has.
+   */
+  private async preservePlacardPublicationBytes(
+    placardVersionId: string,
+    bytes: Buffer,
+    mimeType: string,
+  ): Promise<void> {
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    try {
+      await this.documentArtifactStore.putIfAbsent({
+        kind: "placard",
+        subjectId: this.placardPublicationBackupSubjectId(
+          placardVersionId,
+          sha256,
+        ),
+        mimeType,
+        bytes,
+      });
+    } catch (error) {
+      this.platformAdminRepository?.reportPersistenceFailure(
+        error,
+        "placard publication backup",
+      );
+    }
+  }
+
+  /**
+   * Restores `authoritative`'s own durably preserved bytes (see
+   * `preservePlacardPublicationBytes`) into the shared public slot, if the
+   * slot does not already hold them. Never re-derives from current state --
+   * only ever copies bytes a winner already successfully rendered under
+   * this EXACT hash, so a legitimate source mutation since that render can
+   * never make them unrecoverable (R10-E). Deliberately lets a store
+   * failure propagate (rather than swallowing it) so
+   * `restorePlacardArtifactWithRetry` can retry; returns null only for a
+   * genuine "nothing to restore" (already correct, row not actually
+   * published/finalized yet, or no backup exists for this hash) -- never
+   * for a transient failure.
+   */
+  private async restorePlacardPublicationBackup(
+    authoritative: PlacardVersionRecord,
+  ): Promise<DocumentArtifactRecord | null> {
     if (
-      !authoritative ||
       !authoritative.publishedAt ||
       !authoritative.artifactManifestHash ||
       hasPendingPublishClaim(authoritative)
     ) {
-      return;
+      return null;
+    }
+    const { placardVersionId, artifactManifestHash } = authoritative;
+
+    const current = await this.documentArtifactStore.get(
+      "placard",
+      placardVersionId,
+    );
+    if (current && current.record.sha256 === artifactManifestHash) {
+      return current.record;
     }
 
-    let current: DocumentArtifactEntry | null;
-    try {
-      current = await this.documentArtifactStore.get(
-        "placard",
+    const backup = await this.documentArtifactStore.get(
+      "placard",
+      this.placardPublicationBackupSubjectId(
         placardVersionId,
-      );
-    } catch {
-      return;
-    }
-    if (current && current.record.sha256 === authoritative.artifactManifestHash) {
-      return;
-    }
-
-    // (R10-D, Codex REOPEN generation ac45f6a18eb347a397a7f5faf84f00d7) Fetch
-    // the source public-info version FRESH from the durable store rather
-    // than trusting this instance's own `this.publicInfoVersions` cache --
-    // see the class comment above for why the cache can disagree with what
-    // the actual winner rendered from. A failed fetch gets the same
-    // treatment as the other durable reads in this method: abort rather
-    // than silently falling back to a cache that might not match.
-    let freshPublicInfoVersion: PublicInfoVersionRecord | null;
-    try {
-      freshPublicInfoVersion =
-        await this.platformAdminRepository.getPublicInfoVersionRecord(
-          authoritative.publicInfoVersionId,
-        );
-    } catch {
-      return;
+        artifactManifestHash,
+      ),
+    );
+    if (!backup || backup.record.sha256 !== artifactManifestHash) {
+      return null;
     }
 
-    // Check the candidate render's hash against the authoritative winner's
-    // recorded hash BEFORE attempting any write -- unlike
-    // `renderPlacardArtifact`'s own fenced write, which only detects a
-    // mismatch (against a DIFFERENT baseline: this call's own prior
-    // observation) after already writing. A mismatch here means the
-    // source `PublicInfoVersionRecord` backing the authoritative row has
-    // itself changed since the real winner originally rendered (a
-    // legitimate but separate republish path, owned by
-    // `rebuildPlacardArtifact`) -- this attempt cannot reconstruct
-    // byte-identical content and must not risk storing a mismatched
-    // substitute under the winner's name.
-    const bytes = this.renderPlacardBytes(authoritative, freshPublicInfoVersion);
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    if (sha256 !== authoritative.artifactManifestHash) {
-      return;
-    }
+    const result = await this.documentArtifactStore.putIfUnchanged(
+      {
+        kind: "placard",
+        subjectId: placardVersionId,
+        mimeType: backup.record.mimeType,
+        bytes: backup.bytes,
+      },
+      current?.record.generation ?? null,
+    );
+    return result.applied ? result.record : null;
+  }
 
-    try {
-      await this.documentArtifactStore.putIfUnchanged(
-        {
-          kind: "placard",
-          subjectId: placardVersionId,
-          mimeType: "application/pdf",
-          bytes,
-        },
-        current?.record.generation ?? null,
-      );
-    } catch {
-      // Lost the fence race to yet another concurrent writer/repairer, or
-      // the store itself failed -- whoever actually landed is subject to
-      // this same hash check on its own next call, so there is nothing to
-      // retry here.
+  /**
+   * (R10-F fix, Codex REOPEN generation fdc2511b33d844c8b89d74ad71a982c9) A
+   * single transient store failure anywhere inside
+   * `restorePlacardPublicationBackup` used to permanently abandon the
+   * fix-up with no retry -- the exact gap this round's reopen reproduced
+   * (one modeled `GetObjectCommand` failure inside the success-path repair
+   * left a winner's finalized row pointing at a stale writer's bytes
+   * forever). Restoring is now a pure copy of immutable, content-addressed
+   * bytes, so unlike the old re-render-from-current-source approach a
+   * retry can never land on different (wrong) content; only a failure that
+   * persists across every attempt is treated as "could not repair this
+   * time", not swallowed on the first blip.
+   */
+  private async restorePlacardArtifactWithRetry(
+    authoritative: PlacardVersionRecord,
+    attempts = PLACARD_PUBLICATION_RESTORE_ATTEMPTS,
+  ): Promise<DocumentArtifactRecord | null> {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await this.restorePlacardPublicationBackup(authoritative);
+      } catch (error) {
+        if (attempt >= attempts) {
+          this.platformAdminRepository?.reportPersistenceFailure(
+            error,
+            "placard publication backup restore",
+          );
+          return null;
+        }
+      }
     }
+    return null;
   }
 
   /**
@@ -3046,10 +3123,51 @@ export class PlatformAdminService implements OnModuleInit {
    * again -- `migratePlacardArtifactAfterSourceDrift` adopts the
    * deterministic current-state render as this placard's new canonical
    * artifact, explicitly and audited, once that drift is detected.
+   *
+   * `expectedSha256` (R10-E/R10-F fix, Codex REOPEN generation
+   * fdc2511b33d844c8b89d74ad71a982c9), when supplied, is
+   * `ControlledDownloadController`'s own "content_mismatch" recovery
+   * attempt -- an object already exists at this (kind, subjectId), just
+   * not matching this one verified link's own manifest hash. That case
+   * must NEVER fall through to the current-state re-render below: doing so
+   * could legitimately disagree with a real object other still-valid links
+   * depend on and overwrite it (see `ControlledDownloadController`'s own
+   * comment). Instead this only ever asks the durable repository whether
+   * `expectedSha256` is STILL the row's own current, finalized hash --
+   * never trusting the caller's claim on its own -- and if so restores that
+   * exact publication's own durably preserved bytes (`preservePlacardPublicationBytes`)
+   * via the same path `repairPlacardArtifactAfterLostClaim` uses. A hash
+   * that is not (or no longer) the row's own returns null here, same as
+   * having nothing registered: it is a genuinely stale or forged link, and
+   * restoring it would resurrect bytes a later, legitimate republish has
+   * already superseded.
    */
   private async rebuildPlacardArtifact(
     placardVersionId: string,
+    expectedSha256?: string,
   ): Promise<DocumentArtifactRecord | null> {
+    if (expectedSha256 !== undefined) {
+      if (!this.platformAdminRepository) {
+        return null;
+      }
+      let authoritative: PlacardVersionRecord | null;
+      try {
+        authoritative =
+          await this.platformAdminRepository.getPlacardVersionRecord(
+            placardVersionId,
+          );
+      } catch {
+        return null;
+      }
+      if (
+        !authoritative ||
+        authoritative.artifactManifestHash !== expectedSha256
+      ) {
+        return null;
+      }
+      return this.restorePlacardArtifactWithRetry(authoritative);
+    }
+
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );

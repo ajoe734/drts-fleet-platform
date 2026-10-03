@@ -152,18 +152,47 @@ export class ControlledDownloadController {
       // kind with no registered rebuilder -- or one whose own source data
       // has no such subjectId either -- answers exactly as before.
       //
-      // Deliberately NOT invoked for "content_mismatch": an object already
-      // exists at this (kind, subjectId) -- it is simply not the one this
-      // link names (a stale, forged, or otherwise mismatched manifest hash
-      // against a genuinely different stored object, possibly one a sibling
-      // instance legitimately restored). Rebuilding there would overwrite
-      // that real object with bytes derived from the *current* source
-      // record, which can sever every other still-valid link pointing at
-      // it. A hash mismatch against an object that does exist is reported
-      // as-is below; only a genuine absence is eligible for recovery.
+      // This hash-less form is deliberately never used for "content_mismatch"
+      // below: an object already exists at this (kind, subjectId), and
+      // asking for a plain current-state re-render here could legitimately
+      // disagree with it for entirely innocent reasons, overwriting a real
+      // object other still-valid links depend on. The separate
+      // "content_mismatch" branch below asks for this link's own EXACT hash
+      // instead, which is a different, narrower, and safe operation -- see
+      // its own comment.
       const rebuilt =
         (await this.rebuildRegistry?.rebuild(kind, subjectId)) ?? null;
       if (rebuilt) {
+        resolution = await resolveDocumentArtifact(this.artifactStore, {
+          kind,
+          subjectId,
+          manifestHash: manifestHash!,
+        });
+      }
+    }
+
+    if (resolution.status === "content_mismatch") {
+      // Unlike the `not_found` rebuild above, this must never ask the
+      // producer to re-derive bytes from CURRENT state: an object already
+      // exists here, and a current-state re-render could legitimately
+      // disagree with it for entirely innocent reasons (a stale link, or a
+      // sibling instance's own already-correct restoration) -- overwriting
+      // it would risk severing other still-valid links (see R4-followthrough
+      // UAT). What IS safe -- and closes a real gap (the retained
+      // cross-instance-restart finding: a rejected stale writer's late
+      // object write landing after a winner finalized, with no live caller
+      // left to run its own in-process repair) -- is asking the producer for
+      // EXACTLY the bytes this link's own verified manifest hash names, from
+      // its own durable, content-addressed record of that one publication,
+      // never a re-derivation. A producer with no such notion (or no durable
+      // row that still agrees this hash is canonical) returns null here,
+      // same as having nothing registered at all; see
+      // `DocumentArtifactRebuilder`'s own doc for why passing the hash is
+      // what makes this different from the `not_found` call above.
+      const restored =
+        (await this.rebuildRegistry?.rebuild(kind, subjectId, manifestHash!)) ??
+        null;
+      if (restored) {
         resolution = await resolveDocumentArtifact(this.artifactStore, {
           kind,
           subjectId,

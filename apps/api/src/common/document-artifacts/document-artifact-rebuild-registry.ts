@@ -8,9 +8,20 @@ import type { DocumentArtifactRecord } from "./document-artifact.types";
  * into `DocumentArtifactStore` before returning it. Returns null when this
  * producer's own source data has no such subjectId -- which is a genuine
  * "never produced" case, not a failure to rebuild.
+ *
+ * `expectedSha256`, when the caller supplies one (a verified link's own
+ * manifest hash), asks the producer for exactly THAT publication's bytes,
+ * never a re-derivation from whatever current state looks like now -- see
+ * `PlatformAdminService`'s own registration for why this distinction
+ * matters (R10-E/R10-F): a producer's own durable, content-addressed
+ * backup of an already-issued publication can restore it unchanged even
+ * after a legitimate later source mutation would make re-deriving it
+ * produce different bytes. A producer that has no such notion simply
+ * ignores the second argument and behaves exactly as before.
  */
 export type DocumentArtifactRebuilder = (
   subjectId: string,
+  expectedSha256?: string,
 ) => Promise<DocumentArtifactRecord | null>;
 
 export const DOCUMENT_ARTIFACT_REBUILD_REGISTRY = Symbol(
@@ -46,11 +57,12 @@ export class DocumentArtifactRebuildRegistry {
   async rebuild(
     kind: string,
     subjectId: string,
+    expectedSha256?: string,
   ): Promise<DocumentArtifactRecord | null> {
     const rebuilder = this.rebuilders.get(kind);
     if (!rebuilder) {
       return null;
     }
-    return rebuilder(subjectId);
+    return rebuilder(subjectId, expectedSha256);
   }
 }
