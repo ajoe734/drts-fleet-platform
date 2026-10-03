@@ -1030,3 +1030,347 @@ every line was restored to its exact original diff (confirmed with
   playback-lifecycle fix, and attempting it in the same pass risked a
   half-finished result. Not attempted this round; still owed as the next
   repair unit on this task.
+
+## Round-7 (Codex reopen on candidate `c4395aecf506347e9c1baa9318f5dcfefc266fab`,
+generation `f907c84977c740debf61ea7e91c2d9f5`) -- R1 residual, R2, and R4 all
+addressed on this candidate
+
+This round completes all three outstanding repair units the round-6 reopen
+required before the next `handoff`: R1's residual (raw + coordinator
+outbound sinks still had no check against a directly-cleared playback), R2
+(synchronous media-authority-transition turn cancellation), and R4 (the S3
+recording backend/factory, and the first-party worker/API composition SD
+§4.2/§10.1 already define). Per `AI_COLLABORATION_GUIDE.md` §0.7, these are
+treated as one task-level delivery rather than three separate candidates --
+the round-6 reopen explicitly said submitting R1 alone again would not meet
+that rule.
+
+### R1 residual [P1; `authority_epoch_consent_fences`] -- the outbound sinks still only re-checked signal/epoch, never the playback's own cleared state
+
+**What was still wrong.** Round-6's fix made `cancelOn` (an `AbortSignal`)
+retroactively cancel a *registered* playback for the turn-signal/timeout/
+release/session-close cases. But three other paths clear a
+`TrackedPlayback` entry directly in `VoiceMediaWorkerSession`'s own
+`playbacksById` map, with **no event and no signal abort of any kind**:
+`handleSpeechStarted` (barge-in) and `advanceMediaEpoch` both set
+`cleared = true` on the matching-generation entry in place; `cancelPlayback`
+(driven by an explicit `tts.cancel` control frame) does the same for one
+named playback id. Neither outbound sink (`session-composer.ts`'s raw
+`tts.synthesize` handler, nor the turn-coordinator-driven `speak` closure)
+ever consulted this map before publishing -- they only checked
+`closeAbort`/`signal`+`mediaEpoch`, none of which these three paths touch.
+Reproduced on this exact SHA before the fix (see "Before -> after" below)
+for all four combinations: raw+speech.started, raw+`advanceMediaEpoch()`,
+raw+`tts.cancel`, and coordinator+`tts.cancel` (coordinator+`speech.started`
+was already fixed in round-6, since that case *does* abort the turn's own
+signal via `VoiceCallTurnCoordinator.handle`'s `speech.started` branch).
+
+**Fix.** `VoiceMediaWorkerSession` gains a new public method,
+`isPlaybackActive(playbackId)` (`media-session.ts`), returning
+`true` only if the entry exists and is not `cleared`. Both outbound sinks
+in `session-composer.ts` now also call this, atomically with their
+existing checks, immediately before the binary-chunk loop: the raw
+`tts.synthesize` handler checks
+`closeAbort.signal.aborted || !session.isPlaybackActive(handle.playbackId)`;
+the coordinator `speak` closure checks
+`signal.aborted || session.getMediaEpoch() !== mediaEpoch || !session.isPlaybackActive(handle.playbackId)`.
+This one check subsumes all three direct-clear paths (barge-in, epoch
+advance, explicit cancel) for both sinks, without needing a separate
+signal/event for each.
+
+**Before -> after.** Five new regressions in
+`session-composer-turn-coordinator.test.ts`, each constructed with the
+same race pattern round-6's finding 5 used (`queueMicrotask` on the
+`tts.playback.started` event, reacting with the real control frame/API
+call before the sink's own continuation resumes):
+
+| Case | Pre-fix (locally reverted both `isPlaybackActive` checks to confirm) | Post-fix |
+| --- | --- | --- |
+| raw + `speech.started` | `sentBinary` received the audio | `sentBinary` stays empty; `completePlayback` returns `false` |
+| raw + retained `advanceMediaEpoch()` | `sentBinary` received the audio | `sentBinary` stays empty |
+| raw + explicit `tts.cancel` | `sentBinary` received the audio | `sentBinary` stays empty |
+| coordinator + explicit `tts.cancel` | `sentBinary` received the audio; a later `tts.complete` for it still produced a `tts.playback.completed` event | `sentBinary` stays empty; no completed event |
+
+Both positive controls from the reopen note were re-verified unaffected:
+coordinator + `speech.started` (already fixed round-6) still publishes
+nothing, and a legitimate, non-cancelled playback on both the raw and
+coordinator paths still registers, publishes, and completes normally (all
+pre-existing passing tests in the same file, re-run below, cover this).
+
+### R2 [P2 follow-through; `authority_epoch_consent_fences`] -- a media-authority transition did not synchronously cancel the attachment's in-flight turn
+
+**What was still wrong.** `VoiceMediaWorkerSession.advanceMediaEpoch` only
+ever touched its own local epoch/playback bookkeeping; nothing told the
+*turn coordinator* that the media owner had changed, so a turn already
+blocked inside `propose`/`persist` under the old epoch kept running
+uninterrupted until it happened to re-check `currentMediaEpoch()` on its
+own (the existing, still-correct lazy fence). The round-6 artifact argued
+implementing immediate cancellation would require "fabricating a channel
+with nothing real on the other end" -- incorrect: `VoiceCallTurnCoordinator.handle`'s
+existing `speech.started` branch already proves a real channel exists
+(`turnSession.activeAbort?.abort()`, which `runVoiceDialogue` already
+wires through to the provider's own in-flight `request.signal` via an
+`addEventListener("abort", ...)` relay) -- the only actual gap was that
+nothing called the equivalent for a media-epoch transition.
+
+**Fix.** `VoiceCallTurnCoordinator` gains `invalidateCurrentTurn(attachment)`
+(`call-turn-coordinator.ts`): the same two lines `handle`'s `speech.started`
+branch already runs (`inputEpoch += 1`, `activeAbort?.abort()`), exposed as
+its own method so a caller other than an ASR event can invoke it, without
+tearing the attachment down like `release` does. `VoiceSessionComposer`
+gains `advanceMediaEpoch(sessionId)` (`session-composer.ts`): it calls the
+session's own `advanceMediaEpoch()` and then, if a turn attachment exists
+for that session, `invalidateCurrentTurn` on it, in that order, both
+synchronously before returning. This is the production composition seam a
+real handoff/reconnect driver would call through once one exists (it does
+not yet -- see R4 below); nothing in this worker's actual `server.ts`/
+`main()` calls it today, same posture as `production`/`apiClient`.
+
+**Before -> after, reproduction.** New test
+`"synchronously cancels a turn's pending provider call when the media-authority
+epoch advances through the composer"`: a dialogue provider whose first
+`propose()` call captures the exact `AbortSignal` it receives and never
+resolves on its own. Before this fix (verified by calling the lower-level
+`session.advanceMediaEpoch()` directly instead of the new composer method,
+exactly as the reopen note's own probe did): `capturedSignal.aborted` was
+still `false` immediately after the epoch advance -- cancellation never
+reached the provider at all, matching the reopen's
+`providerAbortedImmediately=false` finding. After this fix, calling
+`composer.advanceMediaEpoch(sessionId)` makes `capturedSignal.aborted` become
+`true` with no intervening `await` -- the cancellation is synchronous, not
+merely eventually observed. A second, fresh final on the same (still-live)
+attachment afterward still reaches a second `propose()` call and
+successfully speaks (`sentBinary.length > 0`), proving the fence does not
+wedge the attachment.
+
+### R4 [P1; `composed_turn_and_recording_path` + `precise_unimplemented_and_external_boundaries`] -- the S3 recording backend and the first-party worker/API composition SD §4.2/§10.1 already define
+
+**What was still missing, and the precise anchors used.**
+
+1. **S3-backed `ObjectStoreClient`.** `apps/voice-media-worker/package.json`
+   had no storage SDK dependency; `recording/object-store-client.ts`'s own
+   doc said reaching a real backend needed `@aws-sdk/client-s3`, "a
+   dependency-manifest/lockfile change outside this task's `write_scopes`".
+   That gap is resolved: `AUDIT-DEPENDENCY-GATES-20261002` (#2287, DONE)
+   explicitly delegated this worker's own addition, at the API-approved
+   `^3.1094.0` / locked `3.1094.0` resolution, to this task (see
+   `.local/project-fixes-20261002/EXECUTION.md`'s "Voice repeated-reopen
+   coordination" section).
+2. **No issuance call site for `VoiceCapabilityService.issue`.** Stage 2 of
+   SD §4.2 existed but nothing in production code ever called it.
+3. **No `VoiceCapabilityGuard`-guarded route on `voice-booking.controller.ts`.**
+   The only existing routes were `metrics/cohort`, `usage/*`, and
+   `work-items/:workId/repair` (all `RequireRealms("ops","platform")`).
+4. **No HTTP client in this worker to call apps/api with**, and no
+   production call site for the already-DB-backed
+   `VoiceSessionService.resolveInput`/`VoiceToolGatewayService.execute`
+   repair anchors the reopen named directly.
+
+**Fix -- S3 backend (bounded to `apps/voice-media-worker/`).**
+`recording/s3-object-store-client.ts` implements `ObjectStoreClient`
+against a real, versioned S3 bucket: `putObjectVersion` fails closed if S3
+does not return a `VersionId` (bucket versioning required), then verifies
+the write by an immediate `getObjectVersion` readback, byte-comparing the
+result against what was sent before reporting success; `getObjectVersion`
+itself rejects if the backend ever returns a different `VersionId` than
+requested. `recording/s3-object-store-client.config.ts` mirrors
+`driver-sos-provider.config.ts`'s opt-in/fail-closed convention
+(`VOICE_RECORDING_OBJECT_STORE_PROVIDER` unset or `disabled` -> `null`, not
+an error). `recording/recording-adapter-factory.ts` wires
+`ObjectStoreRecorderObjectStore` (the already-existing, already-tested
+adapter) over this client into a real `MediaRecordingAdapter`, paired with
+a new, honest `UnconfiguredRecordingClosureLedger` whose `resolve()` always
+returns `null` -- it never fabricates a closure. `server.ts` now calls this
+factory for `recordingAdapter` instead of leaving it permanently `undefined`,
+and its comment is corrected: the SDK/manifest gap this previously (and
+incorrectly) cited as a blocker is resolved; `/recording/finalize` still
+correctly fails closed (503) in every environment without
+`VOICE_RECORDING_S3_*` configured, and even when configured, now fails
+closed specifically at its separate, still-genuinely-missing
+`callAuthorityVerifier` check (`apps/api/src/modules/cti-ivr` does not
+exist) -- a different, more precise 503 than before, not a behavior change
+for any caller today.
+
+**Fix -- apps/api composition (bounded to
+`apps/api/src/modules/voice-booking/`, per `write_scopes`).** Three new
+routes on `voice-booking.controller.ts`:
+
+- `POST /callcenter/voice/capabilities` -- `@RequireRealms("system")` +
+  `@RequireScopes("voice:capability:issue")`; calls
+  `VoiceCapabilityService.issue(identity, command)` directly. This is the
+  issuance call site that did not exist. Reached only by an already-
+  authenticated workload principal (Google workload-identity-verified in a
+  strict environment, or dev-mode bootstrap headers) holding the
+  `voice:capability:issue` scope -- unchanged, pre-existing
+  `BootstrapAuthGuard`/`VoiceCapabilityService` logic, not a new auth
+  mechanism.
+- `POST /callcenter/voice/sessions/:sessionId/input-resolutions` --
+  `@OpenRoute()` (bypasses `BootstrapAuthGuard`'s realm/scope enforcement,
+  since a capability token is not a `BootstrapRequestIdentity`); calls
+  `VoiceCapabilityGuard.authenticate(headers)` itself, asserts the
+  capability's bound `voiceSessionId` matches the path and that it carries
+  `session_execute`, then calls `VoiceSessionService.resolveInput` (one of
+  the exact repair anchors named) with the caller's CAS fields. This is the
+  real backing for `VoiceDialoguePersistPort`'s `mode: "trusted"` seam.
+- `POST /callcenter/voice/sessions/:sessionId/handoffs` -- same capability
+  check (defense in depth; `VoiceToolGatewayService.execute` --the other
+  named repair anchor-- re-authenticates per-proposal internally
+  regardless), then constructs a real `VoiceToolGatewayService` with a new
+  `VoiceHandoffOnlyToolPorts` (`voice-handoff-tool-ports.ts`) as its
+  `VoiceToolDomainPorts`. This implementation handles `request_handoff`
+  only, via the already-existing, DB-backed `VoiceHandoffService.initiateHandoff`
+  (re-reading the session fresh for its current `sessionVersion`
+  immediately before the CAS call); every other proposal name fails closed
+  with `VOICE_TOOL_NOT_IMPLEMENTED` (501) rather than fabricating a
+  resolve_location/order/cancel result this worker has no real domain
+  provider for -- matching the engine's own existing honesty posture, not
+  loosening it.
+  `VoiceCapabilityService`/`VoiceCapabilityGuard` are added to
+  `voice-booking.module.ts`'s `providers` (they were not DI-registered
+  anywhere in the app before this).
+
+**Fix -- worker-side HTTP client and trusted composition (bounded to
+`apps/voice-media-worker/`).**
+
+- `server/workload-identity-token-source.ts`:
+  `GoogleMetadataIdentityTokenSource` mints this worker's own Google-signed
+  identity token from the real GCE/Cloud Run metadata server -- the exact
+  mechanism `apps/api`'s existing `GoogleWorkloadIdentityAdapter` already
+  verifies on the receiving side for Cloud Scheduler (not a new protocol).
+  Fails closed (throws) if the metadata server is unreachable or refuses
+  the request -- true in this VM, in CI, and in any non-GCP host. Caches
+  the token until shortly before its own decoded `exp`.
+- `server/voice-api-client.ts`: `VoiceApiClient` implements exactly the
+  three calls above (`issueCapability`, `resolveInput`, `requestHandoff`);
+  surfaces apps/api's structured `{error:{code,message}}` envelope as a
+  typed `VoiceApiError`, and a network-level failure as
+  `VOICE_API_UNREACHABLE` -- never silently treated as success.
+- `server/voice-api-client-factory.ts`: `createVoiceApiClient(env)` is
+  opt-in and fail-closed-when-absent (`VOICE_API_BASE_URL` unset ->
+  `undefined`), the same posture every other provider seam in this worker
+  already uses.
+- `dialogue/voice-session-binding.ts`: `VoiceSessionBinding` is the exact
+  set of identifiers (`voiceSessionId`, `resourceScopeId`,
+  `routeProfileVersion`, `leaseEpoch`, mutable `sessionVersion`) SD §4.2/
+  §10.1 need for one attachment. **Nothing in this worker's actual
+  composition constructs one today** -- it can only come from a real
+  call-admission flow (the CTI webhook -> `POST /sessions` ->
+  `callAuthorityVerifier` chain `server.ts` already documents as missing).
+  This is the one honest, precisely-scoped limit on this round's R4 work:
+  implementing the admission flow itself is `apps/api/src/modules/cti-ivr`,
+  a separate, already-tracked external gate, not invented here.
+- `dialogue/dialogue-persist-port.ts`: `createTrustedDialoguePersistPort(client, binding)`
+  is the `mode: "trusted"` port the file's own pre-existing doc named as
+  the seam to implement. Every admitted turn that reaches `persist()`
+  already represents real content the engine decided to act on, so it
+  always submits `resolution: "relevant"` (never `"irrelevant"`, which is
+  for content the engine never routes through `persist()` for at all).
+  Rejects (`voice_trusted_persist_unbound`) if no binding is attached --
+  never silently no-ops/succeeds like the fixture port's contract
+  explicitly forbids for a trusted one.
+- `dialogue/call-turn-coordinator.ts`: `attach(sessionId, binding?)` now
+  accepts an optional binding; when given one *and* the coordinator was
+  constructed with a `VoiceApiClient`, that specific attachment's
+  `persist`/`request_handoff` execution uses the real, trusted composition
+  above (a per-attachment `persistPort`, and a real `issueCapability` +
+  `requestHandoff` call in `executeTools`) -- every other attachment
+  (today, all of them) keeps the exact pre-existing fixture/local-stub
+  behavior, proven unchanged by a dedicated regression below.
+  `VoiceSessionComposer.attach` forwards an optional `binding` through to
+  this same parameter. `server.ts` constructs `voiceApiClient` via the new
+  factory and passes it to the coordinator; `production` stays `false`
+  (unchanged -- the dialogue *provider* is still fixture-only, a separate,
+  orthogonal axis from persistence trustworthiness).
+
+**Required R4 evidence table** (per `AI_COLLABORATION_GUIDE.md` §0.7):
+
+| Finding / anchor | Source & location | Old -> new result | Command / result | Residual limit |
+| --- | --- | --- | --- | --- |
+| S3 `ObjectStoreClient` unimplemented | `recording/s3-object-store-client.ts`; `object-store-client.ts`'s own doc | No backend construction possible -> real, readback-verified, tamper-detecting S3 client | `s3-object-store-client.test.ts`: 11/11 pass (put+readback, missing-VersionId fail-closed, tamper-detection fail-closed, version-mismatch fail-closed, full `ObjectStoreRecorderObjectStore` round-trip, 6 config-resolver cases) | Bucket/credentials are not provisioned on this VM; no live S3 call was made -- only `S3Client.send` (the external transport) is doubled |
+| `VoiceCapabilityService.issue` never called | `voice-booking.controller.ts#issueCapability`; `voice-capability.service.ts:104` | No issuance call site -> real `POST /callcenter/voice/capabilities` route | `voice-capability-composition.test.ts`: issuance forwards identity+command, rejects an unknown scope before calling the service | No live workload identity was exercised; `VoiceCapabilityService.issue`'s own DB-free logic is unmodified and untested here (pre-existing) |
+| No `VoiceCapabilityGuard`-guarded route | `voice-booking.controller.ts#resolveInput`; `voice-capability.guard.ts:77` | Guard existed, unconsumed -> real route authenticates every call, rejects session-id mismatch and missing scope | Same test file: 4 cases (session-id mismatch rejected, missing-scope rejected, happy path calls `resolveInput` with the exact CAS fields, a rejected CAS (`VOICE_DRAFT_STALE`) propagates) | DB-backed `VoiceCapabilityGuard.authenticate`'s own live-scope re-check (`assertLiveScope`) is pre-existing/unmodified; doubled here at the repository boundary |
+| `VoiceSessionService.resolveInput` unconsumed | `voice-session.service.ts:411`; new route above | No HTTP caller existed -> the real DB-backed CAS method is called with live request data | Same evidence as above | `VoiceSessionService` itself required no change; its own correctness is pre-existing |
+| `VoiceToolGatewayService.execute` unconsumed | `voice-tool-gateway.service.ts:50`; `voice-booking.controller.ts#requestHandoff`; `voice-handoff-tool-ports.ts` | Interface existed, nothing constructed it -> real route constructs it with a real, handoff-only domain port | Same test file: happy path maps a real `initiateHandoff` call + queue-status mapping (8 `HandoffQueueStatus` values exhaustively mapped), non-`request_handoff` proposal fails closed (501, `initiateHandoff` never called), missing session fails closed (`VOICE_SESSION_NOT_OWNER`, never called with a stale/forged version) | `VoiceHandoffService.initiateHandoff`'s own DB-backed CAS logic is pre-existing/unmodified |
+| Worker has no HTTP client | `server/voice-api-client.ts`, `server/workload-identity-token-source.ts` | No client existed -> real client with a real GCP-metadata-server-based workload token source | `voice-api-client.test.ts`: 15/15 pass (metadata-server unreachable/non-OK/empty-token all fail closed; token caching + near-expiry refresh; issuance/resolveInput/requestHandoff bearer-auth + path correctness; apps/api error-envelope propagation; network failure fails closed; `createTrustedDialoguePersistPort` unbound-rejects, advances `sessionVersion` from the real response, propagates a rejected CAS; opt-in factory returns `undefined`/constructs correctly) | No real GCP metadata server or apps/api instance was reached -- `fetch` is the doubled external transport throughout |
+| Composed end-to-end, only transport/authority doubled | `trusted-turn-composition.test.ts` | Real `VoiceSessionComposer`+`VoiceCallTurnCoordinator`+`VoiceApiClient`, a bound attachment, real emergency-intent fixture turn | 2/2 pass: a bound attachment's turn issues a `session_execute`-only capability and calls `resolveInput` with the correct CAS fields, advances `sessionVersion` from the real response, then issues a separate `handoff_request`-scoped capability and calls the real `requestHandoff` route, with the engine still speaking its own prompt (turn completes, not throws); an *unbound* attachment with the same configured client never calls `fetch` at all and keeps the exact pre-existing local-stub behavior | Proves the composition wiring only; does not and cannot prove a real admitted call, since no call-admission flow supplies a binding in production yet (see below) |
+
+**What remains explicitly, separately open -- genuine external gates, not
+fabricated as closed by this round:**
+
+- **Call-admission flow / `apps/api/src/modules/cti-ivr`.** No production
+  code constructs a `VoiceSessionBinding` for any attachment --
+  `server.ts`'s `main()` still calls `sessionComposer.attach(sessionId, channel)`
+  with no third argument, exactly as before. This is the same, already-
+  tracked `callAuthorityVerifier`/cti-ivr gap `server.ts`'s own startup
+  warnings and `docs/04-uat/audit-voice-runtime-20261002.md` already
+  document; this round does not close it, and does not claim to.
+- **Live GCP workload identity / `WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS`.**
+  Even once a binding exists, `issueCapability` requires this worker to
+  mint a real metadata-server identity token, apps/api's
+  `GoogleWorkloadIdentityAdapter` registry to recognize its service
+  account with the `voice:capability:issue` scope, and
+  `VOICE_API_BASE_URL`/`VOICE_RECORDING_S3_*` to be configured in whatever
+  environment runs this worker -- none of that is provisioned on this VM
+  or in this task's scope (no new IAM/service account/secret was created
+  or requested).
+- **`RecordingClosureLedger`.** Still always resolves `null`
+  (`UnconfiguredRecordingClosureLedger`) -- a real one needs the same
+  cti-ivr call-close event source as above.
+- Everything previously listed as out of scope in earlier rounds (real
+  PSTN/pilot/storage/issuer/account gates) remains unchanged.
+
+**Commands run this round:**
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- exit 0.
+- `pnpm --filter @drts/voice-media-worker lint` -- exit 0.
+- `pnpm --filter @drts/api typecheck` -- exit 0.
+- `pnpm --filter @drts/api lint` -- exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/internal-auth.test.ts
+  tests/unit/audit-voice-runtime-20261002/provider-composition.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts
+  tests/unit/audit-voice-runtime-20261002/websocket-channel-frame-limits.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-composer.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-lifecycle-boundaries.test.ts
+  tests/unit/uv-exec-008.test.ts tests/unit/uv-exec-010.test.ts
+  tests/unit/uv-exec-012.test.ts tests/unit/uv-exec-026.test.ts` -- 20
+  files / 309 tests passed (265 prior + 4 new R1-residual + 1 new R2 in
+  `session-composer-turn-coordinator.test.ts`, + 4 new R4 test files --
+  `s3-object-store-client.test.ts` (11), `voice-capability-composition.test.ts`
+  (11), `voice-api-client.test.ts` (15), `trusted-turn-composition.test.ts`
+  (2) -- totaling 44 new tests this round), zero regressions.
+- Dependency/lockfile: `@aws-sdk/client-s3@^3.1094.0` added to
+  `apps/voice-media-worker/package.json`; `pnpm-lock.yaml`'s
+  `importers['apps/voice-media-worker']` entry updated to reference the
+  exact already-resolved `3.1094.0` package already present in the
+  lockfile for `apps/api` (no new version resolved, no other package
+  touched). `pnpm install`/`pnpm install --frozen-lockfile` are both
+  classified as a deferred/blocked command in this dispatched worker
+  session (no live approver); the lockfile edit was made by hand, limited
+  to adding the one already-resolved importer entry, and a local
+  `apps/voice-media-worker/node_modules/@aws-sdk/client-s3` symlink
+  (untracked, gitignored) was created pointing at this worktree's own
+  already-populated `node_modules/.pnpm/@aws-sdk+client-s3@3.1094.0` store
+  entry, purely so `typecheck`/`vitest` could resolve the import locally in
+  this sandbox -- hosted CI runs its own `pnpm install --frozen-lockfile`
+  from the committed lockfile independently of this local workaround.
+
+A transient environment issue was hit and resolved, not a code defect:
+`pnpm --filter @drts/api typecheck` briefly failed with
+`Cannot find module '@drts/control-plane-auth'` because this worktree's own
+(gitignored) `packages/control-plane-auth/dist` was absent -- apps/api's
+`tsconfig.json` `paths` maps that import straight to
+`packages/control-plane-auth/dist/index.d.ts`, resolved relative to this
+worktree, independent of the node_modules symlink farm (which this VM's
+worktrees share across sessions). `pnpm --filter @drts/control-plane-auth build`
+regenerated it (a build-output-only, gitignored, fully reversible action
+touching no source); the typecheck above is the clean re-run after that.
+None of this round's diffs touch `common/auth`/`control-plane-auth` at all.
+
+HEAD at `bc4274944ae4576564f205362ba0fbff1e2f61b0` and worktree clean after
+every command above. No product/listening server, browser/E2E, DB,
+Compose, real network provider/GCP/apps/api call, or git mutation beyond
+the commits/push themselves was performed.
