@@ -1,11 +1,12 @@
 # SR-LIVE-MAP-C114-COVERAGE-20260930
 
-Current status (2026-10-01): parent identity consumers and mandatory retryable
-cleanup are repaired after R2 merge `5b0ec5283377ece785b0949245ae7dd6da1b0573`.
-The real WIF probe exposes a new deterministic workforce token-version clock
-boundary defect; see [the current repair ledger](#parent-consumer-and-cleanup-repair-after-r2-2026-10-01).
-Keep the draft checkpoint and historical candidate evidence. Product coordination,
-operator provisioning and all four hosted live acceptance gates remain pending.
+Current status (2026-10-03): WIF and workforce prerequisites are merged and
+Supervisor reports both deployed by successful run `37086000826`, runtime
+`cccd9b1118e2008adccabc117fef94bcebdccfe0`. The harness now pins that runtime
+separately from its test candidate; see [the final delivery ledger](#final-delivery-and-dispatch-2026-10-03).
+All four hosted live acceptance gates remain pending independent review, same-SHA
+CI and Supervisor dispatch. The historical blockers below are preserved for audit;
+they are superseded by this section and the final ledger.
 
 Historical hold (2026-10-01, before R2): the identity prerequisite helper merged as
 `8da27255f3c668af61a7fd28654198d59993f38b`, but the executable readback below
@@ -827,3 +828,138 @@ on `8405c7040` and passes with independent principals at `88b5bc275`. This does
 probes still demonstrate that outstanding product defect. All four C114 hosted
 acceptance keys remain pending; no service, browser, deployment, live API call,
 or cloud/variable/secret mutation was performed by this composition task.
+
+## Final delivery and dispatch (2026-10-03)
+
+This dispatch supersedes the historical hold and same-test-SHA deployment recipe.
+Supervisor explicitly requests the hosted map run against deployed
+`cccd9b1118e2008adccabc117fef94bcebdccfe0`, with the repaired harness candidate
+handed to Claude2 first. The parent preserves all published history: merge
+checkpoint `9f2a7c60a` composes `origin/dev` at
+`a1b84bd336b3e3179abd01a3f753a299275cc423`, including WIF PR #2269 and workforce
+PR #2277. Conflict resolution retains the reviewed WIF composition, all parent
+isolation/recovery cases, and the corrected crossed-tick verification assertions.
+No product source is changed by the final parent diff.
+
+### F-DISPATCH-RUNTIME: independently pin the test and deployment
+
+Previously `validateLiveMapGate` unconditionally set `deployedSha=candidateSha`;
+`verifyLiveDeployment`, session requests, cleanup and the Python gate repeated
+that assumption. A new test-only candidate could not exercise Supervisor's
+already-deployed version. Tests added against unchanged checkpoint `9f2a7c60a`
+reproduced seven failures (58 pass) across coverage/bootstrap/teardown: different
+explicit runtime rejected, malformed runtime inputs ignored, and the candidate
+runtime accepted despite a different expected runtime. The old Python gate also
+failed the separate-runtime positive and accepted mismatched session/cleanup
+runtime evidence (26 tests: three failures plus one expected positive error).
+
+Workflow input `deployed_sha` now supplies
+`DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA` to the **map job only**. It must be 40
+lowercase hex characters; blank workflow input defaults to `candidate_sha`.
+There is no repository-variable or response-derived fallback. The historical
+`DRTS_LIVE_MAP_DEPLOYED_SHA` repository variable remains unused. Candidate SHA
+must still match the actual workflow source SHA and checkout. Health body/header,
+every API response, ops configuration/pages and cleanup must match the explicit
+expected runtime. All evidence retains the harness candidate; deployment,
+sessions, cleanup, coverage, browser and run status also record the runtime.
+The final Python gate reads the expectation from dispatch environment, never from
+an artifact. Even mutually consistent foreign-runtime artifacts fail against a
+different requested runtime. Missing/skipped evidence and failed cleanup remain
+nonzero exits.
+
+### Findings and required acceptance
+
+| Finding / acceptance | Source and final change | Previous → current evidence | Command / evidence | Pending limitation |
+| --- | --- | --- | --- | --- |
+| F-DISPATCH-RUNTIME | `live-map-config`, `verifyLiveDeployment`, `createMapSessionRequest`, `revokeMapInvitation`, workflow input and `gate-evidence.py` | Seven TypeScript failures and Python gate failures at `9f2a7c60a` → 67 tests pass in four files, including 26 Python cases | `.local/c114/final-handoff-20261003/deployed-pin-before.log` exit 1, `evidence-before.log` exit 1, `deployed-pin-after.log` exit 0; Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4 | Hosted execution pending; HTTP/time boundaries are simulated |
+| F-WORKFORCE-VERSION | Merged `AuthController.issueToken` / `JwtAuthService` fix; `supported-session-contract` tests | Original crossed-tick rejection is replaced by successful real durable verification for both roles and both time deltas | PR #2277, candidate `ff3d5fc28261768d61c49fb7edb288f36210cfbc`, independent review and CI `37037738953`; rerun with final suite below | Live observer exchange remains part of parent acceptance |
+| F-CONSUMER-DRIFT / F-CLEANUP-GATE / WIF composition | Existing reviewed bootstrap, fixed-driver provisioner, recovery and mandatory cleanup retained | Helper WIF candidate `d635d0d153abc2907cae4b45a6e7b5841dd9dd41` passed CI `36956504350`; final suite rechecks real token/device paths | PR #2269; provisioning scope and same-driver denial tests; final checks below | Interrupted runner without cleanup is an operator recovery event, never acceptance pass |
+| service_area_live_decisions_for_real_taiwan_addresses | `ServiceAreaService.evaluate/evaluateStop`, V0049, `service-area-cases`, `runCoverage` unchanged | Five mandatory decisions over four public Taiwan addresses; actual Google point feeds the production geometry oracle; product response compared and saved | Re-read product symbols and V0049; final coverage tests; hosted `evidence-coverage.json` required | Real geocodes/dev decisions pending; unit coordinates are simulated |
+| location_freshness_live_states | `DriverHeartbeatController`, `classifyDriverLocationFreshness`, observability active-driver filter, `runCoverage` unchanged | Fresh → real hosted 95s wait → stale → 150m low accuracy → restored fresh; offline isolation and no tasks/vehicle required before writes | Final unit suite; hosted timestamps, acknowledgements, snapshots and cleanup evidence required | Driver `drv-demo-002` must stay reserved with no other writer; no runtime eligibility-reason-code claim |
+| browser_map_render_live | Existing Chromium spec/config uses the shared deployment gate; ready + decoded imagery + two screenshots remain mandatory | Actual hosted `/dispatch` and `/callcenter` assertions remain wired; evidence gate rejects script-only/missing/error evidence | Python gate and static config review; hosted `evidence-browser.json`, both PNGs required | No local browser run; actual Google rendering pending |
+| authorization_gate_and_allowed_targets_enforced | Strict `true`, GitHub-hosted check, HTTPS exact-origin allowlist, redirect refusal, candidate/workflow equality and explicit runtime pin | Positive separate-runtime chains and no-request refusal cases pass; old runtime cannot self-authorize through evidence | Final suite, malformed/full-SHA and foreign-runtime negatives | Hosted preflight and allowlisted browser traffic still required |
+
+The selected product paths (`apps/api/src/common/auth`, modules `auth`,
+`regulatory-registry`, `service-area`, `apps/ops-console-web`, V0049) have no diff
+between the deployed `cccd9b11` source and merged checkpoint. The oracle therefore
+uses the same selected source as the requested runtime; observed health/headers
+are still mandatory on the actual hosted run.
+
+### Exact Supervisor dispatch and configuration
+
+Read-only GitHub inspection confirms deploy run
+[37086000826](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37086000826)
+concluded success at `cccd9b1118e2008adccabc117fef94bcebdccfe0`.
+The health SHA itself was reported by Supervisor; this worker made no live API
+call. Live GitHub variables now contain `DRTS_LIVE_MAP_TEST_AUTHORIZED=true`,
+`DRTS_LIVE_MAP_TEST_DRIVER_ID=drv-demo-002`, the API/ops origins and the complete
+Google-origin allowlist listed earlier. Project/region are
+`drts-dev-devcc-20260825` / `us-central1`. Earlier claims that these values are
+absent are historical. Registry D/E rollout is Supervisor-provided evidence;
+actual observer/provisioning exchange must still pass in the hosted job.
+
+No new GitHub secret or repository variable is needed. Existing secret
+`DEV_WIF_PROVIDER` and Google map key secrets are consumed by the workflow.
+The WIF accounts are `drts-dev-live-map-observer@drts-dev-devcc-20260825.iam.gserviceaccount.com`
+and `drts-dev-live-map@drts-dev-devcc-20260825.iam.gserviceaccount.com`, with
+API-origin and API-origin-plus-`/driver-provisioning` audiences respectively.
+Google assertion variables and masked session/recovery variables remain ephemeral
+job values. The worker writes no cloud resources, registry, secrets or variables.
+
+Supervisor runs the following only after checking that PR #2247's head equals
+the reviewed candidate recorded by handoff. Dispatch the **candidate branch**,
+not `dev` or `main`, because map enforces actual workflow SHA = candidate SHA.
+If merge auto-deleted this branch, restore the branch at that exact handoff SHA
+with an ordinary push before dispatch; do not substitute the merge SHA or new
+trunk head. The checked-out candidate must remain unchanged through this run.
+
+```bash
+CANDIDATE_SHA="$(gh pr view 2247 --repo ajoe734/drts-fleet-platform --json headRefOid --jq .headRefOid)"
+gh workflow run live-entry-map-acceptance.yml \
+  --repo ajoe734/drts-fleet-platform \
+  --ref codex/sr-live-map-c114-coverage-20260930 \
+  -f candidate_sha="$CANDIDATE_SHA" \
+  -f deployed_sha=cccd9b1118e2008adccabc117fef94bcebdccfe0 \
+  -f run_entry_profile=false \
+  -f run_map_profile=true
+```
+
+This worker does not dispatch it. Inspect artifact
+`live-map-acceptance-<CANDIDATE_SHA>` and all six evidence JSON files, run status,
+and both map PNGs. A green deployment or unit suite is not these four acceptance
+gates. Owner hands off to Claude2 and never calls `done`.
+
+### Final repository checks (completed and read)
+
+Executed on checkpoint `df4b0294460937f25132c73f9b195933ad13a319`; the
+closeout commit adds only this verification record. Node 22.23.2, pnpm 10.33.0,
+Vitest 4.1.4. Every started local check has completed:
+
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-map-001/ --maxWorkers=2`:
+  **9 files / 129 tests passed, zero skips**, exit 0; includes the 26-case
+  Python evidence gate and real controller/verifier/device-path regressions.
+- `pnpm exec tsc -p tsconfig.json --noEmit`: pass, exit 0.
+- Scoped ESLint over both map directories, live spec and Playwright config with
+  `--max-warnings=0`: pass, exit 0.
+- Changed-code/workflow Prettier, parsed YAML dispatch/preflight/browser/cleanup
+  wiring, and `git diff origin/dev...HEAD --check`: pass, exit 0.
+- Same-final-SHA hosted CI results will be read and referenced in machine-truth
+  handoff/PR evidence. No prior candidate's green checks are reused.
+
+The initial Vitest attempt could not resolve dependencies because the worker's
+`node_modules` links pointed at a removed sibling through the canonical tree.
+An attempted install aborted before removal (no TTY). Only this worktree's 22
+`node_modules` symlinks were detached, then isolated offline frozen installation
+with `--ignore-scripts` succeeded. No shared target, package manifest or lockfile
+changed. That initial setup error is not counted as defect reproduction.
+No product server, browser, E2E server, Docker, live API call, workflow dispatch,
+or cloud/secret/variable mutation was performed on this VM.
+
+Local evidence SHA256 (logs are machine-specific and not committed):
+
+- `deployed-pin-before.log`: `bd2d736feb84f8cac1aed8fd1048e9312a0ebb83dfba76621f6a5fcd15af690e`.
+- `evidence-before.log`: `4fe46d45de4a4da9be0fa0c80140cfe867fb5aaf9138d6eeedd3b27fd7c949e6`.
+- `deployed-pin-after.log`: `e184ba11df6f900d726472dac84184e8f1d60631e0d617d6d6ebdd9f7aca98ac`.
+- `unit-final.log`: `d953ad6644640aa0345f66b7c304f6d784ab71e85129d276b464f067cb05fdd3`.
+- `typecheck-final.log`: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- `lint-final.log`: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.

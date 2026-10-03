@@ -1,5 +1,6 @@
 {
   "name": "@drts/tsconfig",
   "version": "0.1.0",
-  "private": true
+  "private": true,
+  "dependencies": {}
 }

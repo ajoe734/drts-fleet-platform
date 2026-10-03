@@ -1,4 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 
 import * as jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GoogleWorkloadIdentityAdapter,
   resolveCiTenantActorGrant,
+  type RegisteredGooglePrincipal,
 } from "../../src/modules/auth/google-workload-identity.adapter";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 
@@ -52,6 +55,47 @@ function mockGoogleJwks() {
         { status: 200 },
       ),
     ),
+  );
+}
+
+// SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002 (F1): lock the
+// before/after "dev-ci-deployer" registry behavior to the exact JSON the
+// operator rollout doc (docs/02-architecture/internal-key-exceptions.md)
+// delivers, rather than a hand-typed duplicate that could silently drift
+// from what ops is actually told to paste.
+const INTERNAL_KEY_EXCEPTIONS_DOC_PATH = path.join(
+  __dirname,
+  "../../../../docs/02-architecture/internal-key-exceptions.md",
+);
+
+function parseJsonFences(markdown: string): unknown[] {
+  const fences = [...markdown.matchAll(/```json\n([\s\S]*?)```/g)];
+  return fences.map((match) => JSON.parse(match[1]!));
+}
+
+function findDevCiDeployerRegistry(
+  matchesRouteScopes: (routeScopes: string[]) => boolean,
+  description: string,
+): { registry: unknown[]; entry: RegisteredGooglePrincipal } {
+  const doc = readFileSync(INTERNAL_KEY_EXCEPTIONS_DOC_PATH, "utf8");
+  const candidates = parseJsonFences(doc).filter(
+    (parsed): parsed is RegisteredGooglePrincipal[] =>
+      Array.isArray(parsed) &&
+      parsed.some(
+        (entry: RegisteredGooglePrincipal) =>
+          entry.principalId === "dev-ci-deployer",
+      ),
+  );
+  for (const registry of candidates) {
+    const entry = registry.find(
+      (candidate) => candidate.principalId === "dev-ci-deployer",
+    )!;
+    if (matchesRouteScopes(entry.routeScopes ?? [])) {
+      return { registry, entry };
+    }
+  }
+  throw new Error(
+    `No dev-ci-deployer registry fence in ${INTERNAL_KEY_EXCEPTIONS_DOC_PATH} matches: ${description}`,
   );
 }
 
@@ -286,6 +330,67 @@ describe("GoogleWorkloadIdentityAdapter", () => {
         { requestMethod: "GET", requestPath: "/api/tenant/passengers" },
       ),
     ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+  });
+
+  // SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002 (F1 reopen): Codex's
+  // review reproduced, with an ad hoc probe, that the live dev registry's
+  // current `dev-ci-deployer` routeScopes (docs §8.2, unchanged by this
+  // task) reject the referral embed handoff issuance route, and that the
+  // documented §10.3 rollout (adding that one route) accepts it. Lock both
+  // halves of that reproduction into checked-in, doc-content-driven
+  // coverage: each case loads the real fenced JSON straight out of
+  // docs/02-architecture/internal-key-exceptions.md (not a hand-typed
+  // duplicate that could drift from what ops is actually told to paste),
+  // and exercises the real adapter with the exact call shape
+  // `requireReferralEmbedWorkloadIdentity` makes
+  // (apps/api/src/modules/tenant-partner/tenant-partner.controller.ts):
+  // `enforceReplayProtection: false`, method/path of the issuance route.
+  describe("deploy-dev referral embed handoff rollout (docs §8.2/§10.3 registry content)", () => {
+    const ISSUANCE_ROUTE = {
+      requestMethod: "POST",
+      requestPath: "/api/partner/ingress/referral-embed-handoff",
+      enforceReplayProtection: false,
+    } as const;
+
+    it("rejects dev-ci-deployer with WORKLOAD_ROUTE_SCOPE_DENIED under the current (pre-rollout) registry", async () => {
+      const { registry, entry } = findDevCiDeployerRegistry(
+        (routeScopes) =>
+          !routeScopes.includes("POST partner/ingress/referral-embed-handoff"),
+        "current registry (no referral-embed-handoff route scope yet)",
+      );
+      process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS =
+        JSON.stringify(registry);
+      const token = signGoogleToken({
+        email: entry.serviceAccountEmail,
+        aud: entry.allowedTokenAudiences![0],
+      });
+      await expect(
+        adapter.verifyServicePrincipal(
+          { "x-drts-google-id-token": token },
+          ISSUANCE_ROUTE,
+        ),
+      ).rejects.toMatchObject({ code: "WORKLOAD_ROUTE_SCOPE_DENIED" });
+    });
+
+    it("completes the issuance-route authorization lifecycle for dev-ci-deployer under the documented §10.3 rollout", async () => {
+      const { registry, entry } = findDevCiDeployerRegistry(
+        (routeScopes) =>
+          routeScopes.includes("POST partner/ingress/referral-embed-handoff"),
+        "rolled-out registry (§10.3, includes the referral-embed-handoff route scope)",
+      );
+      process.env.WORKLOAD_IDENTITY_GOOGLE_SERVICE_PRINCIPALS =
+        JSON.stringify(registry);
+      const token = signGoogleToken({
+        email: entry.serviceAccountEmail,
+        aud: entry.allowedTokenAudiences![0],
+      });
+      const resolved = await adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        ISSUANCE_ROUTE,
+      );
+      expect(resolved.principalId).toBe("dev-ci-deployer");
+      expect(resolved.email).toBe(entry.serviceAccountEmail);
+    });
   });
 });
 

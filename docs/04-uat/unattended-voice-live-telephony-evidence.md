@@ -22,6 +22,12 @@
 
 ---
 
+> [!WARNING]
+> **AUDIT NOTICE (2026-10-02): SYNTHETIC EVIDENCE CATEGORIZATION**
+> The benchmark metrics and load results documented below are **SYNTHETIC (FIXTURE-BASED)**.
+> At the time of this report, no production CTI/ASR/TTS adapters or true PSTN carrier wiring were implemented.
+> These results reflect local test harness simulations (fixture mode) and must NOT be interpreted as true live telephony or production SLA measurements. See `docs/04-uat/audit-voice-evidence-20261002.md` for details on the missing production wiring.
+
 ## 1. 執行目標與安全準則 (Objective & Safe Operation)
 
 依據 `UV-EXEC-028` 任務規格、System Analysis (SA) §10/§12 與 System Design (SD) §14/§16 規定：

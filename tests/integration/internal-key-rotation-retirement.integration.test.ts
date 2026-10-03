@@ -52,12 +52,13 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
   });
 
   it("verifies every production internal-key exception has complete metadata", () => {
-    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(1);
+    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(0);
 
     const ids = INTERNAL_KEY_EXCEPTION_REGISTRY.map((e) => e.exceptionId);
-    expect(ids).toContain("INTERNAL_KEY_EXCP_001");
-    // EXCP_003 retired 2026-09-01 to IAM-BG-001; EXCP_002 retired 2026-10-02
-    // to WIF assertions; see internal-key-exceptions.md.
+    // EXCP_001 retired 2026-10-02 to WIF (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002);
+    // EXCP_002 retired 2026-10-02 to WIF (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930);
+    // EXCP_003 retired 2026-09-01 to IAM-BG-001; see internal-key-exceptions.md.
+    expect(ids).not.toContain("INTERNAL_KEY_EXCP_001");
     expect(ids).not.toContain("INTERNAL_KEY_EXCP_003");
     expect(ids).not.toContain("INTERNAL_KEY_EXCP_002");
 
@@ -135,70 +136,95 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
     expect(revokedResult.code).toBe("INTERNAL_KEY_REVOKED");
   });
 
+  // INTERNAL_KEY_EXCP_001 (x-drts-referral-handoff-key) was retired and
+  // removed from INTERNAL_KEY_EXCEPTION_REGISTRY
+  // (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002): the referral embed
+  // handoff routes now verify a Google workload identity assertion instead
+  // (apps/api/tests/unit/tenant-partner.controller.test.ts). With EXCP_002
+  // also now retired (SEC-INTERNAL-KEY-WIF-MIGRATION-20260930), the live
+  // registry has no entry for any header at all, and `requireScopedInternalKey`
+  // (unlike `evaluateInternalKey` above) has no parameter to inject a fixture
+  // registry -- it always reads the real, now-empty `INTERNAL_KEY_EXCEPTION_REGISTRY`.
+  // `requireScopedInternalKey`'s only caller, `requireInternalKey`, now has no
+  // production caller of its own either (grep confirms), so this test
+  // temporarily registers a fixture to keep exercising this still-exported
+  // function's rotation/revocation wrapper around `evaluateInternalKey`
+  // (header/path extraction from a request object, env var reads) rather than
+  // deleting coverage of exported, if currently unused, code.
   it("supports rotation overlap and revocation on scoped internal keys", () => {
-    const primaryScopedKey = "referral-primary-key-32-chars-value";
-    const previousScopedKey = "referral-previous-key-32-chars-value";
-    const revokedScopedKey = "referral-revoked-key-32-chars-value";
+    const primaryScopedKey = "general-primary-key-32-chars-value";
+    const previousScopedKey = "general-previous-key-32-chars-value";
+    const revokedScopedKey = "general-revoked-key-32-chars-value";
 
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = primaryScopedKey;
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY_PREVIOUS = previousScopedKey;
-    process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY_REVOKED_KEYS = revokedScopedKey;
+    process.env.DRTS_INTERNAL_KEY = primaryScopedKey;
+    process.env.DRTS_INTERNAL_KEY_PREVIOUS = previousScopedKey;
+    process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS = revokedScopedKey;
 
     const reqOptions = {
-      header: "x-drts-referral-handoff-key",
-      requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+      header: "x-drts-internal-key",
+      requiredEnv: "DRTS_INTERNAL_KEY",
     };
 
-    // Primary succeeds
-    expect(() =>
-      requireScopedInternalKey(
-        {
-          method: "POST",
-          originalUrl: "/api/partner/ingress/referral-embed-handoff",
-          headers: {
-            "x-drts-referral-handoff-key": primaryScopedKey,
-          },
-        },
-        primaryScopedKey,
-        reqOptions,
-      ),
-    ).not.toThrow();
-
-    // Previous succeeds
-    expect(() =>
-      requireScopedInternalKey(
-        {
-          method: "POST",
-          originalUrl: "/api/partner/ingress/referral-embed-handoff",
-          headers: {
-            "x-drts-referral-handoff-key": previousScopedKey,
-          },
-        },
-        primaryScopedKey,
-        reqOptions,
-      ),
-    ).not.toThrow();
-
-    // Revoked fails
-    let caught: ApiRequestError | null = null;
+    INTERNAL_KEY_EXCEPTION_REGISTRY.push(RETIRED_CONTROL_PLANE_PROXY);
     try {
-      requireScopedInternalKey(
-        {
-          method: "POST",
-          originalUrl: "/api/partner/ingress/referral-embed-handoff",
-          headers: {
-            "x-drts-referral-handoff-key": revokedScopedKey,
+      // Primary succeeds
+      expect(() =>
+        requireScopedInternalKey(
+          {
+            method: "POST",
+            originalUrl: "/api/partner/ingress/handoff",
+            headers: {
+              "x-drts-internal-key": primaryScopedKey,
+            },
           },
-        },
-        primaryScopedKey,
-        reqOptions,
-      );
-    } catch (err) {
-      caught = err as ApiRequestError;
-    }
+          primaryScopedKey,
+          reqOptions,
+        ),
+      ).not.toThrow();
 
-    expect(caught?.getStatus()).toBe(401);
-    expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
+      // Previous succeeds
+      expect(() =>
+        requireScopedInternalKey(
+          {
+            method: "POST",
+            originalUrl: "/api/partner/ingress/handoff",
+            headers: {
+              "x-drts-internal-key": previousScopedKey,
+            },
+          },
+          primaryScopedKey,
+          reqOptions,
+        ),
+      ).not.toThrow();
+
+      // Revoked fails
+      let caught: ApiRequestError | null = null;
+      try {
+        requireScopedInternalKey(
+          {
+            method: "POST",
+            originalUrl: "/api/partner/ingress/handoff",
+            headers: {
+              "x-drts-internal-key": revokedScopedKey,
+            },
+          },
+          primaryScopedKey,
+          reqOptions,
+        );
+      } catch (err) {
+        caught = err as ApiRequestError;
+      }
+
+      expect(caught?.getStatus()).toBe(401);
+      expect(caught?.code).toBe("INTERNAL_KEY_INVALID");
+    } finally {
+      const index = INTERNAL_KEY_EXCEPTION_REGISTRY.indexOf(
+        RETIRED_CONTROL_PLANE_PROXY,
+      );
+      if (index >= 0) {
+        INTERNAL_KEY_EXCEPTION_REGISTRY.splice(index, 1);
+      }
+    }
   });
 
   it("fails closed when an internal key exception is expired with generic 401 INTERNAL_KEY_INVALID", () => {

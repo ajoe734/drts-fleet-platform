@@ -9,7 +9,7 @@ import { BillingSettlementController } from "./billing-settlement.controller";
 import { BillingSettlementService } from "./billing-settlement.service";
 import {
   PAYMENT_RECOVERY_PORT,
-  UnavailablePaymentRecoveryPort,
+  PlatformManualPaymentRecoveryPort,
 } from "./payment-recovery.port";
 import { ReferralSettlementScaffoldService } from "./referral-settlement.scaffold.service";
 import { RemittanceProofService } from "./remittance-proof.service";
@@ -17,12 +17,15 @@ import {
   REMITTANCE_PROOF_SCANNER,
   type RemittanceProofScannerPort,
 } from "./remittance-proof-scanner.port";
-import { UnprovisionedRemittanceProofScannerAdapter } from "./remittance-proof-scanner.adapter";
+import {
+  createRemittanceProofScanner,
+  createRemittanceProofStorage,
+} from "./remittance-proof-runtime.config";
+import { RemittanceProofDownloadController } from "./remittance-proof-download.controller";
 import {
   REMITTANCE_PROOF_STORAGE,
   type RemittanceProofStorageProvider,
 } from "./remittance-proof-storage.port";
-import { InMemoryRemittanceProofStorageAdapter } from "./remittance-proof-storage.adapter";
 
 @Module({
   imports: [
@@ -35,32 +38,32 @@ import { InMemoryRemittanceProofStorageAdapter } from "./remittance-proof-storag
     // by the controller that answers the signed link pointing at it.
     ControlledDownloadModule,
   ],
-  controllers: [BillingSettlementController],
+  controllers: [BillingSettlementController, RemittanceProofDownloadController],
   providers: [
     BillingSettlementService,
     BillingSettlementRepository,
-    UnavailablePaymentRecoveryPort,
+    PlatformManualPaymentRecoveryPort,
+    // retry_capture remains unavailable (no PSP/issuer is integrated); see
+    // PlatformManualPaymentRecoveryPort for the exact confirmed boundary.
     {
       provide: PAYMENT_RECOVERY_PORT,
-      useExisting: UnavailablePaymentRecoveryPort,
+      useExisting: PlatformManualPaymentRecoveryPort,
     },
     ReferralSettlementScaffoldService,
     RemittanceProofService,
-    // Always available: an in-process, non-durable default -- the same
-    // durability posture `DOCUMENT_ARTIFACT_STORE` uses elsewhere in this
-    // module graph. See `remittance-proof-storage.adapter.ts`.
+    // Explicit runtime providers; missing configuration cannot pretend durable
+    // storage or a clean malware verdict. Memory storage is test-only.
     {
       provide: REMITTANCE_PROOF_STORAGE,
       useFactory: (): RemittanceProofStorageProvider =>
-        new InMemoryRemittanceProofStorageAdapter(),
+        createRemittanceProofStorage(),
     },
-    // Fail-closed by default: no malware-scanning provider is configured,
-    // so an uploaded proof stays `pending_scan` until a real scanner
-    // integration is provisioned. See `remittance-proof-scanner.adapter.ts`.
     {
       provide: REMITTANCE_PROOF_SCANNER,
-      useFactory: (): RemittanceProofScannerPort =>
-        new UnprovisionedRemittanceProofScannerAdapter(),
+      inject: [REMITTANCE_PROOF_STORAGE],
+      useFactory: (
+        storage: RemittanceProofStorageProvider,
+      ): RemittanceProofScannerPort => createRemittanceProofScanner(storage),
     },
   ],
   exports: [BillingSettlementService, ReferralSettlementScaffoldService],

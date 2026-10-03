@@ -31,7 +31,6 @@ type RequestLike = {
 };
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
-export const REFERRAL_EMBED_HANDOFF_KEY_HEADER = "x-drts-referral-handoff-key";
 const AUTHORIZATION_HEADER = "authorization";
 const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
@@ -88,6 +87,16 @@ function isExplicitPublicRequest(
   );
 }
 
+function isRemittanceProofGrantRequest(method: string, path: string): boolean {
+  // This one GET endpoint authenticates its bearer grant in the controller
+  // (signature, expiry, proof identity and clean scan) before serving bytes.
+  // Durable V0098 rows use raw UUIDs; only the test-memory fallback adds
+  // `remit-proof-`. Both still require the downstream signed-grant checks.
+  // Do not admit uploads, grant issuance, other artifact kinds or child paths.
+  return method.toUpperCase() === "GET" &&
+    /^\/(?:api\/)?reimbursements\/proof-downloads\/remittance-proof\/(?:remit-proof-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(stripQueryString(path));
+}
+
 function hasBearerAuthorization(request: RequestLike): boolean {
   const headerValues = [
     normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]),
@@ -120,6 +129,7 @@ export async function validateInternalKey(
     isHealthRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, rawPath) ||
+    isRemittanceProofGrantRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
   ) {
     return;

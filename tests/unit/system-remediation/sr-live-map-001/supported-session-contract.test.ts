@@ -206,7 +206,8 @@ it.each([
   "checks real WIF %s durable verification across a %dms issuance boundary",
   async (actorType, issuanceDelayMs) => {
     // Unit-only time boundary: issuance and verification code remain real.
-    // The 1ms cases reproduce the unresolved controller/JWT tokenVersion race.
+    // Exercises both same-tick and cross-tick issuance to prove the
+    // controller/JWT tokenVersion race (SR-AUTH-WORKFORCE-VERSION-RACE) stays fixed.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-01T10:00:00.000Z"));
     // Only Google's JWKS/network boundary is replaced. A disposable signing key
@@ -286,19 +287,16 @@ it.each([
       realm: "ops",
       sub: "live-map-observer",
     });
-    if (issuanceDelayMs === 0) {
-      expect(verified).not.toBeNull();
-      if (actorType === "ops_observer")
-        expect(verified?.scopes).toEqual(["regulatory:read"]);
-    } else {
-      // Signed token and active durable session are real; the stale version
-      // alone makes the subsequent auth/session verification reject it.
-      expect(await identities.getSession(payload.sid!)).toMatchObject({
-        status: "active",
-      });
-      expect(Date.parse(principal!.updatedAt) - payload.tokenVersion!).toBe(1);
-      expect(verified).toBeNull();
-    }
+    // Same-tick and crossed-tick issuance both durably verify: the signed
+    // tokenVersion is derived from the actually-persisted principal state,
+    // not a timestamp guessed before that write lands.
+    expect(await identities.getSession(payload.sid!)).toMatchObject({
+      status: "active",
+    });
+    expect(payload.tokenVersion).toBe(Date.parse(principal!.updatedAt));
+    expect(verified).not.toBeNull();
+    if (actorType === "ops_observer")
+      expect(verified?.scopes).toEqual(["regulatory:read"]);
     // The real verifier persists principal, membership and role bindings.
     expect(
       await identities.findPrincipalById("unit-map-observer"),

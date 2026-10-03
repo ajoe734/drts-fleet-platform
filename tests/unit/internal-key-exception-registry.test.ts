@@ -10,11 +10,12 @@ import {
   type InternalKeyExceptionMetadata,
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 
-// The registry entries expire on real dates -- EXCP_003 on 2026-08-31,
-// EXCP_002 (retired 2026-10-02) and EXCP_001 on 2026-10-31. Assertions about
-// which exception matches are about the registry's shape, not about today,
-// so they are evaluated at a fixed instant inside every window. Cases that
-// are about expiry pin their own later `now` and are left alone.
+// The retired fixtures below expire on real dates -- EXCP_003 on
+// 2026-08-31, EXCP_002 and EXCP_001 on 2026-10-31 (both retired early, on
+// 2026-10-02). Assertions about which exception matches are about the
+// registry mechanism's shape, not about today, so they are evaluated at a
+// fixed instant inside every window. Cases that are about expiry pin their
+// own later `now` and are left alone.
 const WITHIN_ALL_EXCEPTION_WINDOWS = new Date("2026-08-15T00:00:00Z");
 
 // EXCP_003 was retired from the registry on 2026-09-01 once its removalDate
@@ -72,9 +73,14 @@ const RETIRED_CONTROL_PLANE_PROXY: InternalKeyExceptionMetadata = {
 
 describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   it("every registered production exception has complete metadata", () => {
-    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBeGreaterThan(0);
+    // Both EXCP_001 and EXCP_002 are now retired (see docs
+    // internal-key-exceptions.md section 2); the live registry is empty.
+    // The metadata-completeness contract itself is still generic, reusable
+    // code, so it keeps coverage via the two retired fixtures below rather
+    // than depending on a live registry entry.
+    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(0);
 
-    for (const exception of INTERNAL_KEY_EXCEPTION_REGISTRY) {
+    for (const exception of [RETIRED_CONTROL_PLANE_PROXY, RETIRED_STAGING_ONLY]) {
       expect(() => validateExceptionMetadata(exception)).not.toThrow();
       expect(exception.exceptionId).toMatch(/^INTERNAL_KEY_EXCP_\d+$/);
       expect(exception.owner).toBeTruthy();
@@ -105,7 +111,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
 
   it("throws metadata incomplete error when required field is missing or empty", () => {
     const incomplete = {
-      ...INTERNAL_KEY_EXCEPTION_REGISTRY[0],
+      ...RETIRED_CONTROL_PLANE_PROXY,
       owner: "",
     } as InternalKeyExceptionMetadata;
 
@@ -123,7 +129,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   });
 
   it("identifies expired exceptions correctly", () => {
-    const activeException = INTERNAL_KEY_EXCEPTION_REGISTRY[0]!;
+    const activeException = RETIRED_CONTROL_PLANE_PROXY;
     expect(
       isExceptionExpired(activeException, new Date("2026-08-01T00:00:00Z")),
     ).toBe(false);
@@ -223,7 +229,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   it("rejects request when exception has expired", () => {
     const expiredRegistry: InternalKeyExceptionMetadata[] = [
       {
-        ...INTERNAL_KEY_EXCEPTION_REGISTRY[0]!,
+        ...RETIRED_CONTROL_PLANE_PROXY,
         expiresAt: "2025-12-31T23:59:59Z",
       },
     ];
@@ -232,7 +238,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "key-value-1234567890123456789012345",
       "key-value-1234567890123456789012345",
       {
-        headerName: "x-drts-referral-handoff-key",
+        headerName: expiredRegistry[0]!.header,
         now: new Date("2026-08-01T00:00:00Z"),
         registry: expiredRegistry,
       },
@@ -416,7 +422,13 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "INTERNAL_KEY_EXCP_002",
     );
 
-    const resultReferralExpired = evaluateInternalKey(
+    // INTERNAL_KEY_EXCP_001 (SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002)
+    // was removed from INTERNAL_KEY_EXCEPTION_REGISTRY ahead of its 2026-10-31
+    // deadline, so x-drts-referral-handoff-key is undocumented for every
+    // route now, not merely expired. The three referral embed handoff routes
+    // verify a Google workload identity assertion instead (see
+    // apps/api/tests/unit/tenant-partner.controller.test.ts).
+    const resultReferralUndocumented = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
@@ -427,11 +439,9 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
         environment: "staging",
       },
     );
-    expect(resultReferralExpired.valid).toBe(false);
-    expect(resultReferralExpired.code).toBe("INTERNAL_KEY_EXPIRED");
-    expect(resultReferralExpired.exception?.exceptionId).toBe(
-      "INTERNAL_KEY_EXCP_001",
-    );
+    expect(resultReferralUndocumented.valid).toBe(false);
+    expect(resultReferralUndocumented.code).toBe("INTERNAL_KEY_UNDOCUMENTED");
+    expect(resultReferralUndocumented.exception).toBeUndefined();
   });
 
   it("enforces expiration on rotation overlap key when previousKeyExpiresAt is passed", () => {
