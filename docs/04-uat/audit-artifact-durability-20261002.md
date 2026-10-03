@@ -2564,3 +2564,264 @@ touched no SQL text and no integration-test file).
 - Real multi-replica Cloud Run acceptance, combining genuine S3 and
   genuine PostgreSQL under real network-level request reordering, remains
   `SR-LIVE-DOC-001` and is not claimed here.
+
+## Codex REOPEN of locked candidate `e5b019d25b440e53b7970670831ec200398169ba`, generation `ac45f6a18eb347a397a7f5faf84f00d7`, PR #2295: R10-C/R10-D byte-ownership compensation gaps
+
+This reopen retained the R10-A/R10-B fixes above as genuine repairs of
+their own exact triggers (single failed post-write verification GET;
+two superseded publishers with captured-and-delayed verification
+responses -- both still pass unchanged on this candidate), and
+reproduced two further, independent byte-ownership gaps against this
+candidate's own unchanged code via a read-only production-path probe
+(real `PlatformAdminService`/`PlatformAdminRepository`/configured S3
+adapter/SDK command shapes/`ControlledDownloadController`, only
+SQL/SDK transport and time modeled; public-info mutation through the
+actual `publishPublicInfoVersion` service/repository path, not a direct
+cache mutation):
+
+- **R10-C**: `repairPlacardArtifactAfterLostClaim`'s own doc comment
+  claimed "whichever attempt eventually finalizes that row calls this
+  same method on every one of its own losing siblings' behalf once IT
+  is the authoritative winner" -- but `publishPlacardVersionExclusive`'s
+  success path (`finalized === true`) never actually called it. The
+  reopen's probe: podA claims and stalls its baseline GET; podC
+  reclaims podA's now-stale claim through the real repository, writes
+  its own bytes for real, and its own post-write verification GET
+  genuinely executes (snapshotting podC's bytes) but delivery of that
+  response is held before podC can reach its own finalize; podA's
+  baseline is released, reads podC's current state, and its own fenced
+  write legitimately lands on top of it (overwriting podC's bytes);
+  podA's finalize then loses the DB race and podA's own repair sees
+  podC's still-pending claim token and correctly no-ops (deferring, per
+  the comment's own promise, to podC's eventual finalize); podC's held
+  verification response is then delivered, its hash check passes
+  against what it actually captured, and its real DB finalize succeeds
+  -- but nothing then repaired the object podA had overwritten in the
+  interim, so both podC's original link and an independently booted
+  fresh reader's freshly issued link denied with
+  `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` despite a cleanly finalized,
+  uncontested winner.
+- **R10-D**: `repairPlacardArtifactAfterLostClaim`'s candidate-render
+  step (`renderPlacardBytes`) read the repairing instance's OWN
+  in-memory `publicInfoVersions` cache, not the durable row the actual
+  winner rendered from. The reopen's probe: podA loads a DRAFT
+  public-info version, generates a placard from it, claims publication,
+  and stalls its baseline GET; podC boots a separate instance, calls
+  the real `publishPublicInfoVersion` (persisting the published status
+  for real through `persistChanges`, not a direct mutation), then
+  reclaims podA's now-stale claim and finalizes the placard normally
+  using its own correct, just-published source; podA's baseline is
+  released, legitimately reads podC's current generation, and writes
+  podA's own bytes over it using podA's STILL-stale draft-based render
+  (self-consistent with podA's own earlier-claimed hash, so podA's own
+  verification passes); podA's finalize then loses the DB race, and
+  podA's own repair re-renders the authoritative (podC's) row but
+  against podA's own stale DRAFT-status public-info cache, producing
+  bytes that do NOT match podC's recorded hash -- the hash check that
+  exists specifically to avoid storing a mismatched substitute then
+  (correctly, given a wrong input) declines to write anything, leaving
+  podA's corrupting bytes in place permanently. Both podC's original
+  link and a fresh reader's freshly issued link denied with
+  `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH`, even though the real winner
+  used entirely current, correct inputs and the rejected stale writer
+  is the one that destroyed the bytes.
+
+### Root cause: the R10-A/B fix closed "which attempt restores", not
+### "when" and "from what source"
+
+Both gaps are in `repairPlacardArtifactAfterLostClaim` itself, not in
+whether it runs on a losing attempt's own failure paths (R10-A/B
+already fixed that). R10-C is a missing CALL: the method's own design
+explicitly relies on the eventual winner repairing its own losing
+siblings' damage, but no code path ever did that. R10-D is a wrong
+SOURCE: the method re-renders "the authoritative winner's bytes" using
+whichever service instance happens to be running the repair, silently
+assuming its in-memory `publicInfoVersions` cache agrees with whatever
+durable state the real winner actually used -- an assumption this
+service already knows does not hold in general (it is the exact reason
+`rebuildPlacardArtifact`/`migratePlacardArtifactAfterSourceDrift`
+exist for READERS), but the repair path never applied the same care.
+
+### Fix: call the repair on a winning finalize too, and read the
+### source record fresh from the repository
+
+`platform-admin.service.ts`:
+
+- `publishPlacardVersionExclusive`: after `finalizePlacardPublish`
+  returns `true` (this attempt won), unconditionally calls
+  `repairPlacardArtifactAfterLostClaim(placard.placardVersionId)`
+  before returning. This keeps the method's own documented promise:
+  the eventual winner now actually does repair its losing siblings'
+  intervening damage on their behalf. It is a cheap no-op on the
+  overwhelming common case (the store already matches the just-written
+  hash) and only does real work when a sibling's write landed after
+  this call's own verification read but before this call's finalize
+  committed (R10-C's exact window).
+- `renderPlacardBytes(placard, explicitPublicInfoVersion?)`: accepts an
+  optional explicit override; when provided (including explicitly
+  `null`), it is used instead of searching
+  `this.publicInfoVersions`. The existing render path (`renderPlacardArtifact`,
+  used by generation/publish/rebuild) is unchanged -- it still omits the
+  argument and falls through to the local cache, which is correct there
+  because that caller IS the instance whose own in-memory state is
+  authoritative for its own in-flight action.
+- `PlatformAdminRepository.getPublicInfoVersionRecord(versionId)`: new
+  method, same shape as the existing `getPlacardVersionRecord`, reading
+  a single `admin.phase1_public_info_versions` row fresh by id.
+- `repairPlacardArtifactAfterLostClaim`: before rendering the
+  authoritative placard row's bytes, fetches that row's source
+  public-info version via the new repository method (a failed fetch is
+  treated the same as the method's other durable-read failures --
+  abort, do not fall back to a potentially-wrong cache) and passes it
+  explicitly into `renderPlacardBytes`. The pre-existing hash check
+  (comparing the re-render against the authoritative row's recorded
+  `artifactManifestHash` before any write) is unchanged in shape; it
+  now has a chance to actually PASS when the repairer's own cache would
+  have failed it for no fault of the real winner's inputs.
+
+### New regression coverage
+
+Both added to `tests/unit/audit-artifact-durability-20261002.test.ts`,
+as siblings of the existing R10/R10-A/R10-B describe blocks (same
+`createRealPlacardRepository` fake-SQL-transport helper, extended with
+a mutable public-info-versions map and handlers for the single-row
+`SELECT ... WHERE version_id` and the upsert `INSERT INTO
+admin.phase1_public_info_versions` statements `getPublicInfoVersionRecord`/`publishPublicInfoVersion`
+actually issue -- the helper previously only ever served the bulk
+`loadState` shape from the static fixture array):
+
+- **R10-C** -- describe "R10-C a still-pending successor's own eventual
+  successful finalize must repair a stale loser's intervening
+  overwrite": a new `OrdinalHoldArtifactStore` holds a given `get()`
+  call's ordinal either BEFORE or AFTER the real backing call --
+  podA's baseline (ordinal 1, held before, same shape as the existing
+  R10/R10-A stores) and podC's own post-write verification read
+  (ordinal 2, held AFTER it has genuinely executed and captured podC's
+  bytes, mirroring the reopen's own probe's `intercept(..., 'after')`
+  hook). Reproduces the exact podA/podC schedule above, asserts
+  `publishA` rejects `PLACARD_PUBLISH_CONFLICT` while podC's bytes are
+  still overwritten, then releases podC's captured verification
+  response and asserts podC's finalize succeeds AND the object, the DB
+  row, podC's original link, and a fresh reader's freshly issued link
+  all converge back to podC's hash.
+- **R10-D** -- describe "R10-D a loser's own stale in-memory
+  public-info cache must not corrupt its compensating repair": a
+  `HeldBaselineArtifactStore` holds only podA's baseline (ordinal 1,
+  before). podC is a separate `PlatformAdminService` instance sharing
+  the same repository and backing store; it calls the real
+  `publishPublicInfoVersion` (asserted, via the new repository method,
+  to have actually persisted `status: "published"`) before reclaiming
+  and finalizing the placard. Because the fixed repair now completes
+  synchronously within the SAME failed attempt before it ever rejects,
+  this test does not (and, given the fix, cannot) observe an
+  intermediate "podA's bytes are in the store" state the way R10-C
+  does -- it asserts the end state directly: once `publishA` has
+  rejected with `PLACARD_PUBLISH_CONFLICT`, the stored bytes, the DB
+  row, podC's original link, and a fresh reader's freshly issued link
+  all already match podC's hash.
+- **Before this fix**, confirmed by stashing only the two product files
+  (`platform-admin.service.ts`, `platform-admin.repository.ts`) via
+  `git stash push -u` (not the new test file), re-running both new
+  tests, then restoring the stash (`git stash pop`) -- no edit to
+  tracked history, no risk to the shared stash stack beyond this
+  session's own named, immediately-popped entry. Both failed exactly as
+  the reopen's own probe predicted: R10-C's
+  `expect(stored?.record.sha256).toBe(cHash)` failed (object still held
+  podA's overwritten bytes, not podC's); R10-D failed with `TypeError:
+  repository.getPublicInfoVersionRecord is not a function` (the method
+  did not exist yet on the unfixed repository).
+- **After this fix**: both pass. Full scoped suite with the fix and
+  both new tests in place: `16 files / 189 tests passed, 0 failed, 0
+  skipped` (two more than the `187` recorded in the R10-A/R10-B round,
+  consistent with exactly two new cases added).
+
+An earlier draft of the R10-D test asserted an intermediate
+`afterAOverwrite.sha256).not.toBe(published.artifactManifestHash)`
+check (copied from R10-C's shape) immediately after awaiting podA's
+rejection. That assertion is actually incompatible with a CORRECT fix,
+not a probe of one: because podA's own `!finalized` repair branch now
+runs (and, when fixed, succeeds) synchronously before
+`publishPlacardVersionExclusive` ever throws, the object is already
+repaired by the time the rejection is observable, on the FIXED code --
+the assertion only "passed" by accident against the unfixed code and
+would have forced a false failure against the real fix. Caught by
+running the new test against this round's OWN fixed service code
+first, seeing it fail, and tracing the failure to the test's own
+incorrect assumption (not re-deriving the fix to make a wrong assertion
+pass); the assertion was removed rather than weakened to a tautology.
+
+### Verification at this repair
+
+```
+cd /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-audit-artifact-durability-20261002-2
+pnpm exec tsc --noEmit -p apps/api/tsconfig.json 2>&1 | grep -i platform-admin
+# => no output (zero errors in touched files; pre-existing, unrelated
+#    @drts/control-plane-auth module-resolution errors elsewhere in the
+#    same tsc run are the same local-dist gap noted in every prior round)
+pnpm exec tsc --noEmit -p tsconfig.json 2>&1 | grep -i "audit-artifact-durability-20261002.test.ts\|platform-admin"
+# => no output (zero errors)
+pnpm exec eslint apps/api/src/modules/platform-admin/platform-admin.service.ts \
+  apps/api/src/modules/platform-admin/platform-admin.repository.ts \
+  tests/unit/audit-artifact-durability-20261002.test.ts \
+  tests/integration/platform-admin-artifact-publication.integration.test.ts  # exit 0, no findings
+git diff --check origin/dev...HEAD                     # exit 0
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts tests/unit/audit-artifact-durability-s3-20261003.test.ts tests/unit/system-remediation/sr-artifact-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-placard-001/ tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts --maxWorkers=1
+# => exit 0, 16 files / 189 tests passed, 0 skipped
+cd apps/api && pnpm exec vitest run tests/unit/platform-admin.service.test.ts --maxWorkers=1
+# => exit 0, 1 file / 3 tests passed
+```
+Run against this repair's committed HEAD,
+`8dc92e5f38133848079592fd75b1e2d9da2f8e28`. Hosted CI for this SHA is
+pending, produced by the handoff/candidate lifecycle, not run locally
+from this VM. No local PostgreSQL/integration collection, browser,
+merge, or deployment is claimed. This round touched no SQL column/table
+shape (only added a new, additive repository method and query against
+an existing table) and no integration-test file; the real-PostgreSQL
+matrix and its hosted CI status are unchanged and not re-verified here
+by a fresh local run -- `same_sha_review_ci` below records the prior,
+unchanged-by-this-round hosted evidence for that matrix specifically,
+not for this commit's own new code.
+
+### Acceptance mapping (this repair, R10-C/R10-D round)
+
+| Finding/acceptance | Source location | Old → new | Evidence | Limitation |
+| --- | --- | --- | --- | --- |
+| R10-C: a still-pending successor's own eventual successful finalize never repaired a stale loser's intervening overwrite | `platform-admin.service.ts` `publishPlacardVersionExclusive`'s success branch (`finalized === true`) | no call to `repairPlacardArtifactAfterLostClaim` on this path at all → called unconditionally after a successful finalize | new `OrdinalHoldArtifactStore` regression (fails before, passes after); reopen's own production-path probe against the locked candidate | adapter/service/repository-level only, against transport mocks that honour real S3/SQL semantics -- not a live S3 bucket, live PostgreSQL connection, or killed Cloud Run process; `SR-LIVE-DOC-001` for that |
+| R10-D: repair's own candidate render used the repairing instance's stale local public-info cache instead of the durable source the real winner used | `platform-admin.service.ts` `repairPlacardArtifactAfterLostClaim`/`renderPlacardBytes`; new `PlatformAdminRepository.getPublicInfoVersionRecord` | render sourced `this.publicInfoVersions` (this instance's own cache) → sourced a FRESH `getPublicInfoVersionRecord` read, passed explicitly | new `HeldBaselineArtifactStore` regression (fails before with `TypeError`, since the method did not exist; passes after); reopen's own production-path probe | same as above |
+| `durable_producer_reader_wiring` | both fixes above | now additionally closed for the pending-successor and stale-repairer-cache cases, on top of the R10/R10-A/R10-B cases already closed | same as above | same as above |
+| `cross_instance_restart_bytes` | both fixes above | same | same as above | same |
+| `signature_hash_denial_regressions` | unchanged fail-closed mismatch checks, plus both repaired paths now correctly reconstructing/re-matching the winner's hash | still passing | scoped suite (189/189) | n/a |
+| `same_sha_review_ci` | this candidate's own SHA (`8dc92e5f38133848079592fd75b1e2d9da2f8e28`) | pending (produced after handoff) | n/a yet | previous SHAs' hosted CI does not cover this repair |
+
+### Remaining limitations (this repair, R10-C/R10-D round)
+
+- Same VM restriction as every prior round: no live S3 bucket, no live
+  PostgreSQL connection, no Cloud Run process kill/restart. Both new
+  regressions and the reopen's own probe model only the S3 SDK
+  transport and the repository's SQL transport, using real production
+  service/repository/controller/adapter code in between.
+- `repairPlacardArtifactAfterLostClaim`, even after this fix, is still
+  a best-effort, synchronous, idempotent repair attempted within a
+  publish call (now from both the losing AND the winning path) -- it
+  still does not run, and nothing else currently runs it, if the
+  process dies between a destructive write and reaching any of its
+  three call sites. That specific gap -- process death, as opposed to a
+  modeled transport failure or overlapping-claim race the process
+  survives -- remains explicitly out of scope here and is tracked as
+  `SR-LIVE-DOC-001`, consistent with every prior round's own framing of
+  that boundary.
+- The fake SQL transport in
+  `tests/unit/audit-artifact-durability-20261002.test.ts`'s
+  `createRealPlacardRepository` was extended with a mutable
+  `publicInfoRows` map and real-shaped handlers for
+  `getPublicInfoVersionRecord`'s single-row `SELECT` and
+  `publishPublicInfoVersion`'s upsert `INSERT`; this is additive
+  coverage of statements the real repository already issued, not a
+  change to any production SQL text, and does not by itself constitute
+  real-PostgreSQL evidence for this new method -- that remains hosted,
+  real-schema evidence via
+  `tests/integration/platform-admin-artifact-publication.integration.test.ts`'s
+  existing matrix and CI, unchanged by this round.
+- Real multi-replica Cloud Run acceptance, combining genuine S3 and
+  genuine PostgreSQL under real network-level request reordering,
+  remains `SR-LIVE-DOC-001` and is not claimed here.
