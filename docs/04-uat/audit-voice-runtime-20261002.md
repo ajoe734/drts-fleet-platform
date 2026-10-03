@@ -853,3 +853,138 @@ separation is enforced entirely by this worker's own verifier contract
 legitimate external gate; only the _distinction_ between admit and
 finalize capabilities was in scope here, and is now enforced at this
 worker-owned port for whichever issuer is eventually wired in).
+
+**Correction (round 6):** the "§12 repairs all three" line above
+overstated R11/R12 coverage. Round 6's review found both findings still
+had an open P2 sub-case each (EOS-drain/shutdown lifecycle for R11; the
+setup/readiness failure path for R12) -- see §13/§14. The three bullets
+under "Required acceptance was assessed" immediately above this note
+should be read as "R11/R12 partially repaired," not fully repaired, as of
+round 5.
+
+## 13. Round-6 review (reopen on `25c2dae62256`, Codex, generation `af0f89db83f24482a64b269699c29b8f`, PR #2282)
+
+Preserved here per Guide §0.7 (the read-only reopen dispatch that produced
+it could not edit this document; owner Claude2 appends it now). Codex's
+round-6 review confirmed R1/R2 RESOURCE+OPERATION/R3/R5/R6/R9/R10 and the
+R12 successful-delayed-`180` path as repaired, and the round-9/12
+provider/session/server startup-order defect as repaired, but found two
+findings still open -- both a persistent P2 sub-case of a round-5 label,
+not a new defect:
+
+- **R11 (P2, EOS-drain and bounded shutdown/setup lifecycle still
+  incomplete)**: the round-5 drain used `this.waiters.length === 0` as
+  proof the recognition stream had finished draining. A partial result
+  also resolves (empties) that same per-audio-chunk waiter queue, so a
+  partial arriving before -- or during -- `close()`'s drain window ended
+  the wait and closed the socket before the segment's real final (already
+  scheduled moments later by the provider) ever arrived; the streaming
+  `onResult` listener then only ever observed the partial. Separately,
+  `TwmAsrNetworkAdapter.close()` discarded its own `terminate()` promise
+  (`close(): void { void this.terminate(...); }`), so nothing in
+  `VoiceMediaWorkerSession.closeAsr()` /
+  `VoiceSessionComposer`/`MediaWorkerServer.stop()`/`drain()` could ever
+  observe when that bounded teardown actually finished -- shutdown
+  returned long before the configured `eosDrainMs` window it had itself
+  started waiting on. A `connect()` stuck awaiting a login HTTP call that
+  never resolves was also not actually settled by `close()`: the
+  post-await `assertNotTerminated()` fencing only runs once that unrelated
+  upstream call eventually resolves on its own, which may be never.
+- **R12 (P2, setup/readiness failure path still absent; the previously
+  flagged successful-180-after-a-delay case is now correctly fixed)**:
+  nothing in `TwmAsrNetworkAdapter` read
+  `noSpeechTimeoutMs`/`idleTimeoutMs`/`maxDurationMs` at all. A provider
+  that opened a socket but never sent `180` left every already-queued
+  chunk pending forever (the `MAX_QUEUED_AUDIO_CHUNKS` bound only ever
+  rejects the _next_ chunk past the cap; it never resolves/rejects the 64
+  already queued) and the socket open indefinitely; a provider stuck
+  before the socket even opens (stuck login/handshake) had no bound of
+  any kind, not even that chunk cap.
+
+Required acceptance was assessed: `approved_runtime_provider_paths` NOT
+fully met (R11/R12 failure/shutdown mechanics); `caller_session_authorization`
+assessed as passing the worker-owned authorization boundary itself (R2
+OPERATION/RESOURCE regressions both held), with production issuer/audience
+integration restated as the separate, already-tracked external gate it
+always was; `remaining_external_blockers_precise` required correcting
+§12's overstated "all three fixed" framing (done in the correction note
+above); `same_sha_review_ci` not met as a completion claim (review
+REJECTED; CI tracked separately per the normal candidate lifecycle, not a
+override for a reproduced failure). §14 repairs R11/R12's sub-cases listed
+above.
+
+## 14. Round-6 repair: bounded EOS-drain decoupled from per-chunk waiters, awaitable adapter/session/composer/server shutdown, and a setup/readiness deadline
+
+| Finding / required_acceptance                                   | Source and fix location                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Round-5 candidate (`25c2dae62256`) -> this round                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Command / evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R11 (P2, EOS-drain gated on the wrong signal)                   | `twm-network-client.ts`: new `pendingFinalSegments: Set<string>` populated in `handleMessage`'s segment branch (added on a non-final revision for a key not yet finalized, removed once that key's final arrives) alongside the pre-existing `finalizedSegments`. New private `isDrainComplete()` (`pendingFinalSegments.size === 0 && waiters.length === 0`) and `maybeSignalDrainComplete()` replace the old inline `if (this.waiters.length === 0)` check after a waiter resolves -- now called unconditionally after every accepted segment message (including the buffered-result branch, not only when a waiter was resolved). `awaitDrain()`'s entry check and `terminate()`'s guard before awaiting it both switched from `this.waiters.length > 0` to `!this.isDrainComplete()`. `failPendingWork()` also clears `pendingFinalSegments` (nothing can finalize once the socket/session is being discarded).                                                                                                                                                                                                                                                                                                                                                                                                                                             | On `25c2dae62256`: a partial result resolved the single pending `transcribe()` waiter, emptying `waiters`; `close()`'s drain then saw `waiters.length === 0` and closed the socket immediately, before the segment's real final (scheduled 5-10ms later in the reproduction) ever arrived -- the `onResult` stream only ever observed the partial. This round: the drain is gated on whether any segment has an unfinalized revision, independent of whether its _per-chunk_ waiter happened to already resolve via a partial; the later final is delivered to `onResult` within the configured `eosDrainMs` window in both "partial before close" and "partial during the drain window" orderings. | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- new "(R11 round-6, scenario a)" and "(R11 round-6, scenario b)" regressions, using the existing `StatefulSocket` double and `vi.useFakeTimers()`/`vi.advanceTimersByTimeAsync` (same pattern as the round-5 scenario-c tests)                                                                                                                                                                                                                                                                                            |
+| R11 (P2, shutdown teardown not awaitable end to end)            | `media-provider.ts`: `VoiceSpeechToTextAdapter.close?()` return type widened to `void \| Promise<void>`. `twm-network-client.ts`: `close()` now `return this.terminate(code, reason)` instead of `void this.terminate(...)`, so its caller receives the real teardown promise. `media-session.ts`: `closeAsr()` is now `async`, `await`s `this.asrAdapter.close?.()` (still isolated in its own `try`/`catch`, same as `endAudio()`) and returns `Promise<void>`. `session-composer.ts`: new private `pendingCloses: Map<string, Promise<void>>`; `attach`'s channel `"close"` handler now deletes the session from `this.sessions` synchronously (unchanged observable timing for `get()`) but also records `session.closeAsr()`'s returned promise in `pendingCloses`, self-pruning via `.finally()` once it settles; new public `awaitPendingCloses(): Promise<void>` awaits every currently-tracked entry. `media-worker-server.ts`: `stop()` now `await this.sessionComposer?.awaitPendingCloses()` after triggering every active channel's `close()` and before resolving -- moved to run unconditionally, ahead of the pre-existing `if (!this.isRunning) return;` guard, so it still applies even when the HTTP listener was never started (this VM may not start one); `drain()`'s pre-existing final `await this.stop()` call inherits this for free. | On `25c2dae62256`: `MediaWorkerServer.stop()`/`drain()` closed every active channel (synchronously starting the composer's ASR teardown in the background) and then resolved immediately -- a provider's bounded EOS drain could easily still be running when the caller believed shutdown had already finished. This round: `stop()`/`drain()` do not resolve until every session's `closeAsr()` teardown has actually settled.                                                                                                                                                                                                                                                                    | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/session-composer.test.ts` -- new "awaitPendingCloses only resolves once the ASR adapter's async close() has actually settled..." regression using a controllable async `close()` double; `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts` (new file) -- `stop()`/`drain()` proven to block on a pending composer teardown, including with no HTTP listener ever started (`server.start()` is never called in this file, per the VM restriction) and with no session composer configured at all |
+| R11 (P2, `close()` during stuck login never settles the caller) | `twm-network-client.ts`: new private `setupAbort: ((err: Error) => void) \| undefined`. `performConnect()` is now a thin wrapper constructing a `Promise` whose `reject` it exposes via `setupAbort` before delegating to the renamed `runConnectSteps()` (the prior `performConnect()` body, unchanged); whichever settles first -- `runConnectSteps()` naturally, or an external `setupAbort(err)` call -- wins (`settled` guard). `terminate()` now calls `this.setupAbort?.(new TwmNetworkError("TWM_ASR_TERMINATED", ...))` immediately after setting `this.terminated = true`, before `sendEosIfPossible()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | On `25c2dae62256`: `close()` while `connect()` was awaiting a still-pending login call relied entirely on the post-await `assertNotTerminated()` fencing already added in round 5 -- so the caller's `transcribe()`/`connect()` promise stayed pending until that unrelated upstream HTTP promise eventually resolved (or forever, if it never did), not from `close()` itself. This round: `close()` rejects that in-flight attempt immediately; the late-arriving real login response (if any) still hits the pre-existing fencing and is discarded, now purely as defense in depth rather than as the only settlement path.                                                                      | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- new "(R11 round-6, scenario c)" regression: login transport returns a `Promise` that deliberately never settles; `close()` alone is asserted to settle the pending `transcribe()`                                                                                                                                                                                                                                                                                                                                        |
+| R12 (P2, no setup/readiness deadline)                           | `twm-network-client.ts`: new private `setupDeadlineTimer: NodeJS.Timeout \| undefined`, `armSetupDeadline()` (arms a timer for `profile.timeouts.noSpeechTimeoutMs`, idempotent/no-op once `180`-ready or terminated), `clearSetupDeadline()`, and `failSetup()` (constructs `TWM_ASR_SETUP_TIMEOUT`, calls `setupAbort`, `failPendingWork`, closes+releases the socket -- not terminal for the adapter: a later `transcribe()` may attempt a fresh `connect()`). `connect()` calls `armSetupDeadline()` before starting a fresh attempt; the `180` handler in `handleMessage` calls `clearSetupDeadline()` the instant readiness is reached; the socket's own `"close"` listener also clears it. Reuses the already-defined, previously-unread `noSpeechTimeoutMs` timer for this bound rather than inventing an undocumented field -- `idleTimeoutMs`/`maxDurationMs` remain unread/unenforced past the setup window, which is outside this finding's repair boundary (see restated remaining blockers below).                                                                                                                                                                                                                                                                                                                                                | On `25c2dae62256`: a provider that opened a socket but never sent `180` left every one of the (bounded-at-64) already-queued chunks pending forever and the socket open indefinitely; a provider stuck before the socket even opened had no bound of any kind. This round: both are rejected, and the socket (if any) is released, once `noSpeechTimeoutMs` elapses with `180` still unreached.                                                                                                                                                                                                                                                                                                     | `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts` -- new "(R12 round-6)" regressions for both the "opens but never reaches 180" (65 chunks, 64 queued + 1 overflow, all eventually settled) and "stuck in a login call that never resolves" cases                                                                                                                                                                                                                                                                                                                             |
+
+Full regression for this round (Node v22.23.2, pnpm 10.33.0, TypeScript
+5.9.3, Vitest 4.1.4, this task's worktree):
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- clean (exit 0).
+- `pnpm --filter @drts/voice-media-worker lint` (`eslint src --max-warnings=0`) -- clean (exit 0).
+- `pnpm exec vitest run tests/unit/audit-voice-runtime-20261002` -- **100
+  passed, 0 failed (12 files)**, run twice consecutively to confirm no
+  flakiness (up from round-5's 91; new cases added to
+  `twm-network-client.test.ts` (R11 round-6 scenarios a/b/c, R12 round-6
+  no-180 and stuck-login), `session-composer.test.ts` (R11
+  `awaitPendingCloses` regression), and a new
+  `media-worker-server-shutdown-drain.test.ts` file (R11 scenario-d
+  `stop()`/`drain()` await regressions)).
+- `pnpm exec vitest run tests/unit/system-remediation/sr-recording-recovery-20260913 tests/integration/uv-exec-023.integration.test.ts tests/integration/system-remediation/sr-recording-recovery-20260913 tests/unit/uv-exec-008.test.ts` -- 40 passed, 0 failed (4 files): confirms this round's `media-provider.ts`/`media-session.ts`/`session-composer.ts`/`media-worker-server.ts`/`twm-network-client.ts` changes stay compatible with these pre-existing, out-of-write-scope callers.
+- `pnpm run typecheck:root` -- clean (exit 0, zero errors anywhere in the repo).
+- `pnpm run lint:root` -- clean (exit 0).
+
+**Environment note (not attributable to this task's code):** this
+worktree's shared `node_modules` was again stale at the start of this
+round -- identical condition and root cause documented in §10/§12's
+environment notes (several top-level symlinks resolving through dangling
+absolute paths into the removed sibling worktree
+`gemini-audit-dependency-gates-20261002`). Repeated the same scoped repair
+via `python3 tools/development-orchestrator/bin/ensure-local-node-modules.py
+repair --root .` (re-materializes this worktree's own local `node_modules`
+backed by its own `.pnpm` virtual store via `CI=true pnpm install
+--frozen-lockfile --prefer-offline`; scoped to this worktree, not the
+canonical root's shared one; not a lockfile change -- "Lockfile is up to
+date, resolution step is skipped"). After the repair, all commands above
+passed normally. No product/browser/DB/Compose server was started; no
+live network call was made; `net.Server.listen` was never called by the
+new `media-worker-server-shutdown-drain.test.ts` file (both `stop()` and
+`drain()` are exercised against an unstarted `MediaWorkerServer`).
+
+`same_sha_review_ci`: candidate SHA and branch are recorded via the task
+lifecycle at handoff; hosted CI and review run against that SHA per the
+normal candidate lifecycle, not asserted here. The locked round-5
+candidate `25c2dae622568f3becab1396e0ce5665883ad064` is superseded by this
+round.
+
+**Still open, not addressed this round (unchanged from §12):**
+`media-recording-finalize-authorization.test.ts`'s
+`MemoryRecorderObjectStore.readVersion` (lines ~95-128) still fabricates
+readback metadata for segments never actually persisted via
+`putRecordingImmutable`. This round's two required findings (R11, R12)
+did not touch that test boundary; it remains exactly as rounds 4/5 left
+it, recorded here precisely so it is not mistaken for closed.
+
+### Remaining blockers, restated precisely for this round
+
+Unchanged from §12's "Remaining blockers, restated precisely for this
+round" (6a/6b, and §3 items 1/3/5). This round's fixes -- EOS-drain
+correctness, awaitable adapter/session/composer/server shutdown, and a
+bounded setup/readiness deadline -- are internal lifecycle/concurrency
+corrections to code already in this worker's write scope; they do not
+depend on, and do not newly require, a real call-authority issuer, a
+provisioned TWM account, or any other external gap.
+
+One narrower item is intentionally _not_ claimed fixed: this round binds
+only the single "connect() started -> 180 reached" setup/readiness window
+to `noSpeechTimeoutMs`. `idleTimeoutMs` (ongoing per-connection idle
+disconnect once ready) and `maxDurationMs` (absolute session-duration cap)
+remain read nowhere in `TwmAsrNetworkAdapter` and are not enforced once a
+session is ready -- that was outside R12's setup/readiness repair
+boundary as stated in the round-6 reopen, and is recorded here precisely
+so it is not mistaken for in scope or already closed.

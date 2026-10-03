@@ -293,14 +293,25 @@ export class MediaWorkerServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    if (!this.isRunning) return;
-
     for (const session of this.activeSessions.values()) {
       if (session.channel && !session.channel.destroyed) {
         session.channel.close(1000, "Server stopping");
       }
     }
     this.activeSessions.clear();
+
+    // Closing each channel above synchronously starts the composer's
+    // `closeAsr()` teardown (bounded by each provider's own drain, e.g.
+    // `TwmAsrNetworkAdapter`'s `eosDrainMs`) for every still-attached
+    // session. Awaiting it here -- unconditionally, independent of whether
+    // the HTTP listener itself was ever started -- is what makes shutdown
+    // actually wait for that teardown instead of returning the instant the
+    // channel's "close" event was *emitted* (R11): a provider resource can
+    // easily outlive "closed the channel" by the whole configured drain
+    // window.
+    await this.sessionComposer?.awaitPendingCloses();
+
+    if (!this.isRunning) return;
 
     return new Promise<void>((resolve, reject) => {
       this.server.close((err) => {

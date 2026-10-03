@@ -204,15 +204,23 @@ export class VoiceMediaWorkerSession {
    * call is isolated: an adapter whose `endAudio`/`close` throws (e.g. a
    * native WebSocket boundary rejecting a send attempted outside the OPEN
    * state) must never prevent the other from running, nor escape to the
-   * composer's own close handler and block its session-map cleanup. */
-  closeAsr(): void {
+   * composer's own close handler and block its session-map cleanup.
+   *
+   * Returns a `Promise` that settles once the adapter's own teardown has
+   * actually finished (e.g. `TwmAsrNetworkAdapter`'s bounded EOS drain),
+   * not merely once it was *requested* -- a caller that discards this
+   * return value (as `close(): void { void this.terminate(...); }`-style
+   * call sites used to) can never observe when cleanup genuinely
+   * completes, which is exactly what left `MediaWorkerServer.stop`/`drain`
+   * unable to await it (R11). Never throws/rejects. */
+  async closeAsr(): Promise<void> {
     try {
       this.asrAdapter.endAudio?.();
     } catch {
       // Best effort -- teardown continues regardless (SD §11.4).
     }
     try {
-      this.asrAdapter.close?.();
+      await this.asrAdapter.close?.();
     } catch {
       // Best effort -- teardown continues regardless (SD §11.4).
     }

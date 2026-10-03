@@ -65,8 +65,14 @@ export interface VoiceSpeechToTextAdapter {
    * call multiple times. */
   endAudio?(): void;
   /** Releases any underlying connection/socket/billing resource this
-   * adapter holds. Safe to call multiple times and must not throw. */
-  close?(): void;
+   * adapter holds. Safe to call multiple times and must not throw. An
+   * adapter whose teardown is itself asynchronous (e.g. a bounded EOS
+   * drain before the socket is released) returns a `Promise` that settles
+   * once that teardown has actually finished -- callers that need shutdown
+   * to be observable (`VoiceMediaWorkerSession.closeAsr`, and ultimately
+   * `MediaWorkerServer.stop`/`drain`) await it instead of firing-and-
+   * forgetting it. */
+  close?(): void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

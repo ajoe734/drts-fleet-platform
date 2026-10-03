@@ -278,6 +278,14 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   private readonly usedTickets = new Set<string>();
   private readonly lastRevisionBySegment = new Map<string, number>();
   private readonly finalizedSegments = new Set<string>();
+  /** Segment keys that have received a non-final revision but not yet a
+   * final one (R11). Distinct from `this.waiters.length`: a per-audio-
+   * chunk result waiter is satisfied by the *next* accepted revision,
+   * partial or final, so a partial can empty `waiters` while the
+   * recognition stream for that segment is still open. Draining on
+   * `waiters.length === 0` alone treated a partial as proof the stream was
+   * done and closed the socket before the real final ever arrived. */
+  private readonly pendingFinalSegments = new Set<string>();
   private readonly bufferedResults: VoiceAsrSegmentResult[] = [];
   private readonly waiters: PendingResultWaiter[] = [];
   private readonly resultListeners: Array<
@@ -292,6 +300,24 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * once every outstanding result waiter has settled, instead of always
    * burning the full configured window. */
   private drainSignal: (() => void) | undefined;
+  /** Bounds the whole login/access-info/handshake/open-to-`180` setup
+   * window (R12): armed the instant `connect()` is first invoked, cleared
+   * once `180` readiness is actually reached. A provider that never opens,
+   * never completes the handshake, or opens but never sends `180` left
+   * every chunk queued forever and the socket open indefinitely -- nothing
+   * in this adapter previously read any of `profile.timeouts` other than
+   * `eosDrainMs`. Reuses the documented `noSpeechTimeoutMs` timer for this:
+   * a session that never reaches send-ready can, by construction, never
+   * have recognized any speech either. */
+  private setupDeadlineTimer: NodeJS.Timeout | undefined;
+  /** Lets `terminate()`/the setup deadline immediately reject an in-flight
+   * `connect()` that is still awaiting login/access-info/the WebSocket
+   * handshake (R11 scenario (c), R12) -- the real upstream HTTP/WS promise
+   * it is chained from has no cancellation of its own and may not settle
+   * for a long time, if ever; this gives every caller awaiting `connect()`
+   * a bounded result instead of leaving them pending until that unrelated
+   * call eventually resolves. */
+  private setupAbort: ((err: Error) => void) | undefined;
 
   constructor(
     private readonly transport: TwmHttpTransport,
@@ -378,6 +404,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     }
     if (this.connectPromise) return this.connectPromise;
     if (this.socket && this.socketOpen) return;
+    this.armSetupDeadline();
     this.connectPromise = this.performConnect().finally(() => {
       this.connectPromise = undefined;
     });
@@ -390,7 +417,81 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     }
   }
 
-  private async performConnect(): Promise<void> {
+  /** Arms the setup/readiness deadline (R12) if nothing has already armed
+   * or resolved it. A no-op once `180` has been reached or the session is
+   * already terminated. */
+  private armSetupDeadline(): void {
+    if (this.setupDeadlineTimer || this.ready || this.terminated) return;
+    const timeoutMs = this.profile.timeouts.noSpeechTimeoutMs;
+    this.setupDeadlineTimer = setTimeout(() => {
+      this.setupDeadlineTimer = undefined;
+      if (this.terminated || this.ready) return;
+      this.failSetup();
+    }, timeoutMs);
+  }
+
+  private clearSetupDeadline(): void {
+    if (this.setupDeadlineTimer) {
+      clearTimeout(this.setupDeadlineTimer);
+      this.setupDeadlineTimer = undefined;
+    }
+  }
+
+  /** Fires when the setup/readiness deadline elapses with `180` still
+   * unreached (R12): rejects whatever `connect()` attempt is still
+   * in-flight, settles every queued chunk/result waiter instead of
+   * leaving them pending forever, and releases the stalled socket (if
+   * any). Not terminal for the adapter itself -- a later `transcribe()`
+   * call may still attempt a fresh `connect()`. */
+  private failSetup(): void {
+    const err = new TwmNetworkError(
+      "TWM_ASR_SETUP_TIMEOUT",
+      `TWM ASR provider did not reach '180' send-ready status within ${this.profile.timeouts.noSpeechTimeoutMs}ms of connecting.`,
+    );
+    this.setupAbort?.(err);
+    this.failPendingWork(err);
+    try {
+      this.socket?.close(1000, "setup timeout");
+    } catch {
+      // Best effort -- the socket may not even be past CONNECTING yet.
+    }
+    this.socket = undefined;
+    this.socketOpen = false;
+    this.ready = false;
+    this.hasAccess = false;
+  }
+
+  /** Wraps `runConnectSteps()` so the setup deadline/`terminate()` can
+   * reject this attempt immediately (`setupAbort`) without waiting for the
+   * real, possibly-never-settling upstream login/access-info/handshake
+   * call it is chained from (R11 scenario (c), R12). */
+  private performConnect(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      this.setupAbort = (err) => {
+        if (settled) return;
+        settled = true;
+        this.setupAbort = undefined;
+        reject(err);
+      };
+      this.runConnectSteps().then(
+        () => {
+          if (settled) return;
+          settled = true;
+          this.setupAbort = undefined;
+          resolve();
+        },
+        (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          this.setupAbort = undefined;
+          reject(err);
+        },
+      );
+    });
+  }
+
+  private async runConnectSteps(): Promise<void> {
     const token = await this.login();
     this.assertNotTerminated(
       "ASR session was closed before access-info could be requested.",
@@ -451,6 +552,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       this.socketOpen = false;
       this.ready = false;
       this.hasAccess = false;
+      this.clearSetupDeadline();
       this.failPendingWork(
         new TwmNetworkError(
           "TWM_ASR_CONNECTION_CLOSED",
@@ -516,12 +618,19 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     if (typeof message.status === "number") {
       // `180`, not `100`, is the documented media-send readiness gate.
       this.ready = this.hasAccess && message.status === 180 && !this.eosSent;
-      // R12: `connect()` resolves on the socket's `open` event, which can
-      // land in an earlier event-loop turn than this `180`. Audio sent in
-      // that gap was queued (never dropped) by `transcribe()`; flush it now
-      // in arrival order instead of waiting for another chunk to "poll"
-      // with.
-      if (this.ready) this.tryFlushQueue();
+      if (this.ready) {
+        // Readiness reached within the setup deadline (R12) -- the window
+        // this adapter bounds is specifically "connect() started" through
+        // "180 reached," so it ends here regardless of how long the call
+        // goes on to run afterward.
+        this.clearSetupDeadline();
+        // R12: `connect()` resolves on the socket's `open` event, which can
+        // land in an earlier event-loop turn than this `180`. Audio sent in
+        // that gap was queued (never dropped) by `transcribe()`; flush it
+        // now in arrival order instead of waiting for another chunk to
+        // "poll" with.
+        this.tryFlushQueue();
+      }
       return;
     }
 
@@ -548,7 +657,12 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       // -- so a later, stale revision for an already-finalized segment was
       // never dropped either.
       const isFinal = message.final === 1;
-      if (isFinal) this.finalizedSegments.add(key);
+      if (isFinal) {
+        this.finalizedSegments.add(key);
+        this.pendingFinalSegments.delete(key);
+      } else {
+        this.pendingFinalSegments.add(key);
+      }
       const result: VoiceAsrSegmentResult = {
         segmentId: message.segmentId,
         revision,
@@ -566,14 +680,30 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       const waiter = this.waiters.shift();
       if (waiter) {
         waiter.resolve(result);
-        // Lets a `terminate()` in-flight drain wait (R11 scenario (c)) end
-        // the instant every outstanding result has actually arrived,
-        // instead of always burning the full configured window.
-        if (this.waiters.length === 0) {
-          this.drainSignal?.();
-          this.drainSignal = undefined;
-        }
-      } else this.bufferedResults.push(result);
+      } else {
+        this.bufferedResults.push(result);
+      }
+      // Lets a `terminate()` in-flight drain wait (R11 scenario (c)) end the
+      // instant every outstanding result has actually arrived, instead of
+      // always burning the full configured window. Gated on
+      // `pendingFinalSegments`, not merely `waiters.length` -- a partial
+      // emptying the waiter queue is not proof the stream is finished.
+      this.maybeSignalDrainComplete();
+    }
+  }
+
+  /** `true` once there is nothing left for an in-flight `terminate()` to
+   * wait for: every segment that has received a non-final revision has
+   * since been finalized, and no `receiveResult()` caller is still waiting
+   * for its first result. */
+  private isDrainComplete(): boolean {
+    return this.pendingFinalSegments.size === 0 && this.waiters.length === 0;
+  }
+
+  private maybeSignalDrainComplete(): void {
+    if (this.isDrainComplete()) {
+      this.drainSignal?.();
+      this.drainSignal = undefined;
     }
   }
 
@@ -658,14 +788,20 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     const pending = this.waiters.splice(0, this.waiters.length);
     for (const waiter of pending) waiter.reject(err);
     this.audioQueue.length = 0;
+    // Nothing will arrive to finalize these once the socket is gone/being
+    // discarded -- leaving them pending would make a later `isDrainComplete`
+    // check (e.g. a subsequent `terminate()` call) wait for a final that
+    // can never come.
+    this.pendingFinalSegments.clear();
     this.drainSignal?.();
     this.drainSignal = undefined;
   }
 
-  /** Resolves once every outstanding result waiter has settled, or after
-   * `timeoutMs`, whichever comes first. */
+  /** Resolves once every outstanding result waiter has settled AND every
+   * segment with an open (non-final) revision has been finalized, or after
+   * `timeoutMs`, whichever comes first (R11). */
   private awaitDrain(timeoutMs: number): Promise<void> {
-    if (this.waiters.length === 0) return Promise.resolve();
+    if (this.isDrainComplete()) return Promise.resolve();
     return new Promise<void>((resolve) => {
       this.drainSignal = resolve;
       setTimeout(() => {
@@ -707,17 +843,39 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * (ending early the instant it does), then settles whatever is still
    * pending and releases the socket. Never throws. Idempotent and safe to
    * call multiple times, from any lifecycle phase (never connected, still
-   * connecting, open-but-not-ready, ready-with-pending-work). */
-  close(code = 1000, reason = ""): void {
-    void this.terminate(code, reason);
+   * connecting, open-but-not-ready, ready-with-pending-work).
+   *
+   * Returns the `Promise` for that bounded teardown so a caller doing an
+   * orderly shutdown (`VoiceMediaWorkerSession.closeAsr`, ultimately
+   * `MediaWorkerServer.stop`/`drain`) can actually wait for it to finish
+   * instead of only for it to have been *requested* -- discarding this
+   * (`void this.terminate(...)`, as this used to do) is exactly what made
+   * server shutdown return long before the EOS drain it configured ever
+   * ran (R11 scenario (d)). */
+  close(code = 1000, reason = ""): Promise<void> {
+    return this.terminate(code, reason);
   }
 
   private async terminate(code: number, reason: string): Promise<void> {
     if (this.terminated) return;
     this.terminated = true;
+    this.clearSetupDeadline();
+    // A `connect()` still awaiting login/access-info/open (R11 scenario
+    // (c)) has no bound of its own -- the real HTTP/WS promise it is
+    // chained from may not settle for a long time, if ever. Reject it
+    // immediately instead of leaving every `transcribe()`/`connect()`
+    // caller pending until that unrelated upstream call eventually
+    // resolves and the post-await `assertNotTerminated` check finally
+    // fires.
+    this.setupAbort?.(
+      new TwmNetworkError(
+        "TWM_ASR_TERMINATED",
+        "ASR session was closed before the provider socket could be opened.",
+      ),
+    );
     this.sendEosIfPossible();
     const drainMs = this.profile.timeouts?.eosDrainMs ?? 0;
-    if (this.waiters.length > 0 && drainMs > 0) {
+    if (!this.isDrainComplete() && drainMs > 0) {
       await this.awaitDrain(drainMs);
     }
     this.failPendingWork(

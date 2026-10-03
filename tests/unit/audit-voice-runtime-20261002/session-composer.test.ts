@@ -429,4 +429,76 @@ describe("AUDIT-VOICE-RUNTIME-20261002: VoiceSessionComposer wires real ASR/TTS 
     expect(composer.get("sess-throwing-endaudio")).toBeUndefined();
     expect(asrAdapter.closeCalls).toBe(1);
   });
+
+  /**
+   * Codex review round 6 (reopen, AUDIT-VOICE-RUNTIME-20261002) R11
+   * scenario (d): `attach`'s close handler removed the session from the
+   * composer's map and called `closeAsr()` -- but `closeAsr()` used to be
+   * fire-and-forget, so nothing ever observed when that teardown actually
+   * finished. `awaitPendingCloses()` is what lets an orderly shutdown
+   * (`MediaWorkerServer.stop`/`drain`) wait for the real completion
+   * instead of treating "removed from the map" as proof of it.
+   */
+  it("awaitPendingCloses only resolves once the ASR adapter's async close() has actually settled, even though the session is already gone from the map", async () => {
+    let resolveClose: (() => void) | undefined;
+    class AsyncClosingAsrAdapter implements VoiceSpeechToTextAdapter {
+      readonly providerName = "async-closing";
+      readonly isProductionCapable = false as const;
+      closeStarted = false;
+      closeSettled = false;
+
+      async transcribe(): Promise<VoiceAsrSegmentResult> {
+        return {
+          segmentId: "seg",
+          revision: 1,
+          text: "",
+          final: true,
+          language: "cmn-TW",
+        };
+      }
+
+      async close(): Promise<void> {
+        this.closeStarted = true;
+        await new Promise<void>((resolve) => {
+          resolveClose = resolve;
+        });
+        this.closeSettled = true;
+      }
+    }
+
+    const asrAdapter = new AsyncClosingAsrAdapter();
+    const ttsAdapter = new DeterministicTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({ asrAdapter, ttsAdapter }),
+    });
+    const channel = new (class extends EventEmitter {
+      destroyed = false;
+      sendText(): void {}
+      sendBinary(): void {}
+    })() as unknown as import("../../../apps/voice-media-worker/src/server/websocket-channel").WebSocketServerChannel;
+
+    composer.attach("sess-async-close", channel);
+    (channel as unknown as EventEmitter).emit("close", 1000, "Normal closure");
+
+    // Removed from the map immediately -- this part of the contract is
+    // unchanged.
+    expect(composer.get("sess-async-close")).toBeUndefined();
+    expect(asrAdapter.closeStarted).toBe(true);
+    expect(asrAdapter.closeSettled).toBe(false);
+
+    let awaited = false;
+    const awaitPromise = composer.awaitPendingCloses().then(() => {
+      awaited = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(awaited).toBe(false);
+    expect(asrAdapter.closeSettled).toBe(false);
+
+    resolveClose!();
+    await awaitPromise;
+    expect(awaited).toBe(true);
+    expect(asrAdapter.closeSettled).toBe(true);
+  });
 });

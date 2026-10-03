@@ -920,6 +920,301 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     await expect(second).resolves.toMatchObject({ text: "two" });
   });
 
+  /**
+   * Codex review round 6 (reopen, AUDIT-VOICE-RUNTIME-20261002) R11
+   * scenario (a): the round-5 drain used `this.waiters.length === 0` as
+   * proof the recognition stream was finished. A partial result also
+   * resolves (empties) that same per-chunk waiter queue, so the drain
+   * ended -- and the socket closed -- the instant a partial arrived, even
+   * though the segment it belongs to was still open and its final was
+   * scheduled moments later.
+   */
+  it("(R11 round-6, scenario a) keeps the bounded drain open after close() even though an earlier partial already emptied the waiter queue", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new StatefulSocket();
+      const shortDrainProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, eosDrainMs: 30 },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transportFor("ticket-r6-scenario-a"),
+        () => socket,
+        { accountId: "a", accountSecret: "s" },
+        shortDrainProfile,
+      );
+      const streamed: VoiceAsrSegmentResult[] = [];
+      adapter.onResult((result) => streamed.push(result));
+
+      const promise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      socket.open();
+      socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+
+      // A partial resolves the single pending `transcribe()` waiter --
+      // emptying `waiters` even though the segment is still open.
+      socket.fire("message", {
+        data: JSON.stringify({
+          providerSessionId: "p1",
+          segmentId: "seg-1",
+          revision: 1,
+          text: "partial",
+          final: 0,
+          language: "cmn-TW",
+        }),
+      });
+      const partialResult = await promise;
+      expect(partialResult.final).toBe(false);
+
+      adapter.close();
+      // The final for the SAME segment is scheduled 5ms after close(),
+      // well within the 30ms drain window. Under the old
+      // `waiters.length === 0` short-circuit this never arrives: the
+      // socket was already closed at close()-time.
+      setTimeout(() => {
+        socket.fire("message", {
+          data: JSON.stringify({
+            providerSessionId: "p1",
+            segmentId: "seg-1",
+            revision: 2,
+            text: "final text",
+            final: 1,
+            language: "cmn-TW",
+          }),
+        });
+      }, 5);
+      await vi.advanceTimersByTimeAsync(5);
+
+      expect(streamed.map((r) => r.revision)).toEqual([1, 2]);
+      expect(streamed[1]?.final).toBe(true);
+      expect(streamed[1]?.text).toBe("final text");
+      expect(socket.readyState).toBe(StatefulSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Codex review round 6 R11 scenario (b): closing before any result at
+   * all, then a partial arriving during the drain window, must not end
+   * the drain early either -- the later final for that same segment must
+   * still be delivered within the configured window.
+   */
+  it("(R11 round-6, scenario b) a partial arriving during the drain window does not end it early; the later final still arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new StatefulSocket();
+      const shortDrainProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, eosDrainMs: 30 },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transportFor("ticket-r6-scenario-b"),
+        () => socket,
+        { accountId: "a", accountSecret: "s" },
+        shortDrainProfile,
+      );
+      const streamed: VoiceAsrSegmentResult[] = [];
+      adapter.onResult((result) => streamed.push(result));
+
+      const promise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      socket.open();
+      socket.fire("message", { data: JSON.stringify({ status: 180 }) });
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(socket.sent).toEqual([new Uint8Array([1])]);
+
+      // Close before any recognition result has arrived at all.
+      adapter.close();
+
+      setTimeout(() => {
+        socket.fire("message", {
+          data: JSON.stringify({
+            providerSessionId: "p1",
+            segmentId: "seg-1",
+            revision: 1,
+            text: "partial",
+            final: 0,
+            language: "cmn-TW",
+          }),
+        });
+      }, 5);
+      setTimeout(() => {
+        socket.fire("message", {
+          data: JSON.stringify({
+            providerSessionId: "p1",
+            segmentId: "seg-1",
+            revision: 2,
+            text: "final text",
+            final: 1,
+            language: "cmn-TW",
+          }),
+        });
+      }, 10);
+      await vi.advanceTimersByTimeAsync(10);
+
+      const result = await promise;
+      expect(result).toMatchObject({ text: "partial", final: false });
+      expect(streamed.map((r) => r.revision)).toEqual([1, 2]);
+      expect(streamed[1]?.final).toBe(true);
+      expect(socket.readyState).toBe(StatefulSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Codex review round 6 R11 scenario (c): `close()` while `connect()` is
+   * still awaiting a login HTTP call that never resolves must reject the
+   * pending `transcribe()` promptly, from the close itself -- not only
+   * once/if that unrelated upstream call eventually settles.
+   */
+  it("(R11 round-6, scenario c) rejects promptly on close() even though the pending login call never resolves", async () => {
+    const loginGate = new Promise<never>(() => {
+      // Deliberately never settles -- proves rejection comes from close(),
+      // not from this upstream call finally resolving.
+    });
+    const wsFactory = vi.fn(() => new StatefulSocket());
+    const transport: TwmHttpTransport = async (_method, path) => {
+      if (path === "/api/v1/login") {
+        return loginGate;
+      }
+      throw new Error(`unexpected path ${path}`);
+    };
+    const adapter = new TwmAsrNetworkAdapter(
+      transport,
+      wsFactory,
+      { accountId: "a", accountSecret: "s" },
+      profile,
+    );
+
+    const transcribePromise = adapter.transcribe({
+      sessionId: "sess",
+      audioChunk: new Uint8Array([1]),
+      sequence: 1,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    adapter.close();
+
+    await expect(transcribePromise).rejects.toThrow(TwmNetworkError);
+    expect(wsFactory).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Codex review round 6 R12: nothing in this adapter previously read
+   * `noSpeechTimeoutMs`/`idleTimeoutMs`/`maxDurationMs` at all -- a
+   * provider that opened a socket but never sent `180` left every queued
+   * chunk pending forever and the socket open indefinitely. The setup
+   * deadline (bound to `noSpeechTimeoutMs`) must fail closed instead.
+   */
+  it("(R12 round-6) fails closed and settles every queued chunk when the provider opens but never reaches 180 within the configured deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new StatefulSocket();
+      const shortSetupProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: {
+          ...profile.timeouts,
+          noSpeechTimeoutMs: 20,
+          idleTimeoutMs: 30,
+          maxDurationMs: 50,
+          eosDrainMs: 30,
+        },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transportFor("ticket-r6-setup-timeout"),
+        () => socket,
+        { accountId: "a", accountSecret: "s" },
+        shortSetupProfile,
+      );
+
+      const settled = Array.from({ length: 65 }, (_, i) =>
+        adapter
+          .transcribe({
+            sessionId: "sess",
+            audioChunk: new Uint8Array([i]),
+            sequence: i + 1,
+          })
+          .then(
+            () => "resolved" as const,
+            () => "rejected" as const,
+          ),
+      );
+
+      socket.open();
+      for (let i = 0; i < 5; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      // 180 never arrives -- no audio was ever actually sent.
+      expect(socket.sent).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      const outcomes = await Promise.all(settled);
+      expect(outcomes.every((outcome) => outcome === "rejected")).toBe(true);
+      expect(socket.readyState).toBe(StatefulSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Codex review round 6 R12 (stuck login/handshake, not merely stuck at
+   * 180): the setup deadline must also bound the case where the socket is
+   * never even constructed because login itself never resolves.
+   */
+  it("(R12 round-6) the setup deadline also rejects a transcribe() stuck in a login call that never resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const neverResolvingTransport: TwmHttpTransport = () =>
+        new Promise<never>(() => {
+          // Never settles -- simulates a stuck login/handshake.
+        });
+      const wsFactory = vi.fn(() => new StatefulSocket());
+      const shortSetupProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, noSpeechTimeoutMs: 20 },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        neverResolvingTransport,
+        wsFactory,
+        { accountId: "a", accountSecret: "s" },
+        shortSetupProfile,
+      );
+
+      const promise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      // Attach the rejection assertion before advancing the fake setup-
+      // deadline timer, so Node never observes `promise` as unhandled in
+      // the gap between the timer firing and this test resuming (same
+      // reasoning as the "(R11 scenario c, timeout)" case above).
+      const rejection = expect(promise).rejects.toThrow(TwmNetworkError);
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      await rejection;
+      expect(wsFactory).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("(R12) rejects without hanging if the provider connection closes while audio is still queued and not yet ready", async () => {
     const socket = new StatefulSocket();
     const adapter = new TwmAsrNetworkAdapter(

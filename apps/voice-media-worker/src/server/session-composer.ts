@@ -54,6 +54,18 @@ function isControlFrame(value: unknown): value is VoiceSessionControlFrame {
  */
 export class VoiceSessionComposer {
   private readonly sessions = new Map<string, ComposedSession>();
+  /** Tracks each session's in-flight `closeAsr()` teardown from the moment
+   * its channel emits "close" until that teardown actually settles (R11).
+   * `attach`'s close handler deletes the session from `this.sessions`
+   * synchronously -- `get()` must stop returning it immediately -- but the
+   * underlying provider's bounded drain/cleanup can still be running; this
+   * map is what lets `awaitPendingCloses` give a caller (ultimately
+   * `MediaWorkerServer.stop`/`drain`) a real signal for "every attached
+   * session's provider resource has actually been released," instead of
+   * treating "removed from the session map" as proof of that. Self-prunes
+   * once each entry settles so long-running normal operation (sessions
+   * that close on their own, not during a drain) never accumulates. */
+  private readonly pendingCloses = new Map<string, Promise<void>>();
 
   constructor(private readonly providerFactory: VoiceSessionProviderFactory) {}
 
@@ -78,13 +90,22 @@ export class VoiceSessionComposer {
       // an already-removed session -- defensive on top of the channel's
       // own single-emission guarantee (see `./websocket-channel`).
       if (!this.sessions.has(sessionId)) return;
+      this.sessions.delete(sessionId);
       // The ASR provider's connection/waiters/billing resource must not
       // outlive this session -- this fires on every close path (normal
       // close, drain, idle timeout, a frame-limit/failure-driven close),
       // since all of them route through the channel's single authoritative
-      // `close()`.
-      session.closeAsr();
-      this.sessions.delete(sessionId);
+      // `close()`. `closeAsr()` resolves once that teardown has actually
+      // finished (R11), not merely once it was requested -- track it so a
+      // caller doing an orderly shutdown can await real completion instead
+      // of firing-and-forgetting it.
+      const closing = session.closeAsr();
+      this.pendingCloses.set(sessionId, closing);
+      void closing.finally(() => {
+        if (this.pendingCloses.get(sessionId) === closing) {
+          this.pendingCloses.delete(sessionId);
+        }
+      });
     });
   }
 
@@ -93,6 +114,16 @@ export class VoiceSessionComposer {
    * only through `attach` and the channel's own message/close events. */
   get(sessionId: string): VoiceMediaWorkerSession | undefined {
     return this.sessions.get(sessionId)?.session;
+  }
+
+  /** Resolves once every session's `closeAsr()` teardown that is currently
+   * in flight has settled (R11). A session whose channel closes *after*
+   * this is called is not included -- callers doing an orderly shutdown
+   * (`MediaWorkerServer.stop`/`drain`) close every channel first, which is
+   * what populates this map, then await this. Never rejects: `closeAsr()`
+   * itself never throws. */
+  async awaitPendingCloses(): Promise<void> {
+    await Promise.all(Array.from(this.pendingCloses.values()));
   }
 
   private async handleMessage(
