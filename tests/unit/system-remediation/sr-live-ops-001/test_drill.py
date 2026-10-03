@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,28 @@ class RestoreDrillTest(unittest.TestCase):
         result = self.execute("clone_failure")
         self.assertTrue(self.deleted())
         self.assertEqual(result["cleanup"]["status"], "deleted")
+
+    def test_sigterm_after_clone_still_cleans_up(self):
+        original = drill.gc
+        def interrupted(*args, **kwargs):
+            response = original(*args, **kwargs)
+            if args[:3] == ("sql", "instances", "clone"):
+                signal.raise_signal(signal.SIGTERM)
+            return response
+        with patch.object(drill, "gc", interrupted):
+            result = self.execute()
+        self.assertEqual(result["failure_code"], "interrupted")
+        self.assertEqual(result["cleanup"]["status"], "deleted")
+
+    def test_shell_entrypoint_nonzero_and_no_secret_in_stdout_stderr(self):
+        with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "clone_failure"}):
+            result = subprocess.run(["bash", str(INFRA / "run-restore-drill.sh"),
+                                     "--target", self.target, "--evidence", str(self.output)],
+                                    capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("TOP-SECRET-PASSWORD", result.stdout + result.stderr)
+        self.assertNotIn("postgresql://", result.stdout + result.stderr)
+        self.assertEqual(json.loads(self.output.read_text())["cleanup"]["status"], "deleted")
 
     def test_missing_operation_is_failure_with_cleanup(self):
         result = self.execute("missing_operation")

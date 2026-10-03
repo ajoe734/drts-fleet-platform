@@ -149,6 +149,7 @@ def validate_snapshot(value):
     require(type(value.get("database_bytes")) is int and value["database_bytes"] > 0, "database_size_missing")
     rows = value.get("tables")
     require(isinstance(rows, list) and len(rows) == len(TABLES), "tables_missing")
+    require(all(isinstance(row, dict) for row in rows), "table_row_not_object")
     require({r.get("table_name") for r in rows} == TABLES, "tables_wrong")
     safe = []
     for row in rows:
@@ -194,7 +195,7 @@ class Readback:
         user = unquote(parsed.username)
         db = unquote(parsed.path.lstrip("/"))
         require(not any(c in password + user + db for c in "\n\r\0"), "invalid_db_secret")
-        # Register masks without printing material into the captured worker output.
+        # Withhold credentials completely rather than echoing them in a mask command.
         # The real secret never leaves this private process or mode-0600 pgpass.
         escape = lambda s: s.replace("\\", "\\\\").replace(":", "\\:")
         pgpass = Path(folder) / "pgpass"
@@ -243,6 +244,7 @@ def run(target, output):
     write(output, evidence)
     clone_attempted = False
     reader = None
+    previous_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
     def interrupted(_signum, _frame):
         raise DrillError("interrupted")
     signal.signal(signal.SIGTERM, interrupted)
@@ -290,6 +292,9 @@ def run(target, output):
                     time.sleep(10)
                 clone = describe(target)
                 require(clone and clone.get("state") == "RUNNABLE", "clone_not_runnable")
+                require(clone.get("region") == REGION and clone.get("databaseVersion") == source["databaseVersion"]
+                        and clone.get("settings", {}).get("tier") == settings["tier"]
+                        and clone.get("settings", {}).get("dataDiskSizeGb") == settings["dataDiskSizeGb"], "clone_profile_mismatch")
                 evidence["rto_runnable_seconds"] = time.monotonic() - started
                 reader.start(target, 15433)
                 restored, query_seconds = reader.readable(15433)
@@ -319,6 +324,8 @@ def run(target, output):
                 evidence["status"] = "failed"
         evidence["finished_at"] = iso(utcnow())
         write(output, evidence)
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
     require(evidence["status"] == "restore_readback_passed" and evidence["cleanup"]["status"] == "deleted", "drill_failed_see_sanitized_evidence")
 
 
