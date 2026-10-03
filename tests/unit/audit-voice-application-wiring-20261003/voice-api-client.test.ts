@@ -257,6 +257,84 @@ describe("VoiceApiClient", () => {
     });
   });
 
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R11 residual (Codex reopen,
+   * canonical 2026-10-03T20:13:00Z): the workload-identity mint
+   * (`workloadTokenSource.getToken`) is the FIRST await in
+   * `issueCapability`/`getSession`, strictly ahead of `request()`'s own
+   * already-bound fetch/body stages -- a prior version awaited it
+   * directly, outside `raceAgainstAbort`, so an uncooperative token
+   * source (the real `GoogleMetadataIdentityTokenSource`'s metadata
+   * fetch/body never settling, or any double that ignores `signal`) left
+   * every caller (`restoreBoundAttachment`, `recordAuthoritativeControlEvent`,
+   * `createTrustedDialoguePersistPort`, ...) pending forever regardless of
+   * `signal` firing. This double is deliberately uncooperative, same shape
+   * as the fetchImpl double above, but at the token-source seam instead.
+   */
+  it("settles bounded even when the workload-identity token source is uncooperative and never itself checks signal (R11)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, {
+        data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+      }),
+    );
+    const getToken = vi.fn(
+      () =>
+        new Promise<string>(() => {
+          // Never settles on its own, and never even reads the `signal`
+          // argument `issueCapability` forwards to it.
+        }),
+    );
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken },
+    );
+    const controller = new AbortController();
+
+    const pending = client.issueCapability(
+      {
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: ["session_execute"],
+      },
+      controller.signal,
+    );
+
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(/aborted/);
+    // The subsequent capability HTTP call must never start once the
+    // identity stage it depends on is already known to have failed.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("settles bounded on getSession too, even when the workload-identity token source is uncooperative (R11)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, { data: { voiceSessionId: binding.voiceSessionId, sessionVersion: 1, inputEpoch: 0, pendingInput: false } }),
+    );
+    const getToken = vi.fn(
+      () =>
+        new Promise<string>(() => {
+          // Never settles on its own.
+        }),
+    );
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken },
+    );
+    const controller = new AbortController();
+
+    const pending = client.getSession(binding.voiceSessionId, controller.signal);
+
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(/aborted/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("calls resolveInput using the capability token as bearer auth, scoped to the session path", async () => {
     const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       expect(String(url)).toBe(

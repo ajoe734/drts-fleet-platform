@@ -493,6 +493,7 @@ export class VoiceCallTurnCoordinator {
           );
         }
         turnSession.state.restoreFromSnapshotContent(snapshot.content);
+        turnSession.state.committedSessionVersion = snapshot.sessionVersion;
       }
     } catch (error) {
       turnSession.restoreFailed = true;

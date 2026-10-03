@@ -455,35 +455,48 @@ export function createTrustedDialoguePersistPort(
           throw err;
         }
         // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
-        // reopen, canonical 2026-10-03T19:24:15Z): this turn's content
-        // commit DID durably land. Writing it onto `state` (the engine's
-        // CANDIDATE clone, `next`) is not enough -- a cancelled turn's
-        // `VoiceDialogueEngine.boundedStage` abort/deadline race has
-        // already resolved and discarded this call's eventual result
+        // reopen, canonical 2026-10-03T19:24:15Z, corrected again per the
+        // canonical 2026-10-03T20:13:00Z reopen below): this turn's
+        // content commit DID durably land. Writing it onto `state` (the
+        // engine's CANDIDATE clone, `next`) is not enough -- a cancelled
+        // turn's `VoiceDialogueEngine.boundedStage` abort/deadline race
+        // has already resolved and discarded this call's eventual result
         // before `Object.assign(state, next)` can ever run, so `next`
         // itself is abandoned the instant this call is observed to be
         // racing a cancellation. The REAL per-attachment state
         // (`recovery.attachmentState`) must receive this commit directly,
         // right now, as a side effect of this call settling -- not
         // contingent on anyone ever awaiting this call to completion.
-        // Fenced monotonically against a newer turn's own admission: if
-        // `current.sessionVersion` has already moved past
-        // `expectedSnapshotSessionVersion` by the time this late
-        // reconciliation resolves, a NEWER turn has already been admitted
-        // (and, via `Object.assign(state, next)`, already installed its
-        // own content into the real attachment state) -- applying this
-        // older commit now would regress that newer turn's content, so it
-        // is skipped, exactly like the admission-CAS reconciliation above
-        // skips a stale `sessionVersion` write.
+        //
+        // Correction (Codex reopen, canonical 2026-10-03T20:13:00Z,
+        // R4-persist "repeated"): the previous fence compared against
+        // `current.sessionVersion` (`binding.sessionVersion`) to detect a
+        // newer turn's already-installed content -- but that counter also
+        // advances on every authoritative CONTROL event
+        // (`recordAuthoritativeControlEvent`, e.g. a barge-in's own
+        // `speech.started`) with no content write at all. A barge-in that
+        // merely cancelled THIS turn therefore looked identical to "a
+        // newer turn already installed content", permanently suppressing
+        // this exact recovery and losing the durably-committed handoff.
+        // Fence against `committedSessionVersion` instead (see
+        // `VoiceDialogueState`'s own doc): it only ever advances where
+        // dialogue CONTENT is actually installed, so it correctly
+        // distinguishes "a newer turn's content already landed here" from
+        // "the session's generic revision moved for an unrelated reason".
         if (
           recovery &&
-          current.sessionVersion === expectedSnapshotSessionVersion
+          (recovery.attachmentState.committedSessionVersion === null ||
+            recovery.attachmentState.committedSessionVersion <
+              expectedSnapshotSessionVersion)
         ) {
           recovery.attachmentState.restoreFromSnapshotContent(
             candidate.content,
           );
+          recovery.attachmentState.committedSessionVersion =
+            expectedSnapshotSessionVersion;
         }
         state.restoreFromSnapshotContent(candidate.content);
+        state.committedSessionVersion = expectedSnapshotSessionVersion;
         snapshot = candidate;
       }
       if (signal?.aborted) {
@@ -510,6 +523,17 @@ export function createTrustedDialoguePersistPort(
           "voice_trusted_persist_snapshot_mismatch: dialogue-snapshot response does not correlate with the exact turn/revision just persisted.",
         );
       }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+      // canonical 2026-10-03T20:13:00Z): stamp the CONTENT-specific
+      // commit marker (see `VoiceDialogueState.committedSessionVersion`'s
+      // own doc) on `state` (the engine's own candidate clone, `next`) so
+      // `VoiceDialogueEngine.turn`'s subsequent `Object.assign(state,
+      // next)` carries it onto the real attachment -- the only thing a
+      // LATER turn's own ambiguous-commit reconciliation may trust to
+      // know whether this exact content has already landed, since
+      // `current.sessionVersion` also advances on control-only events
+      // (barge-in) with no content write at all.
+      state.committedSessionVersion = expectedSnapshotSessionVersion;
     },
   };
 }

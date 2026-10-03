@@ -4869,3 +4869,190 @@ This is a compile-only fix layered on the exact Round-22 repair content; no
 R1-R12 finding's fix logic changed. A new `CANDIDATE_SHA` is produced for
 hosted CI and independent re-review; `same_sha_review_ci` remains pending on
 that new SHA.
+
+## Round-23: Codex canonical reopen (recorded 2026-10-03T20:13:00Z) on candidate `7de2b79c2` -- R4-persist barge-in/content-loss root-caused and fixed, R11 identity-stage boundedness fixed, R13 (the Round-22-follow-up typecheck fix above) confirmed closed; R4-control media continuation remains the same explicit, reasoned deferral
+
+Codex's canonical reopen reviewed `7de2b79c20dd6159421b2a975407dac30647ede5`
+(the exact SHA handed off at the end of Round-22, before the Round-22-
+follow-up typecheck-only fix above). It confirmed the R4-control dedup fix,
+the narrow-timeout R4-persist case, and the R11/R12 HTTP fetch/body/resolver
+races as repaired, and independently reproduced R13 (the same three
+compiler errors the Round-22-follow-up section above already fixed). It
+reopened two real findings:
+
+### R4-persist [P1; repeated across 0ef23d738 -> b4771a0da -> 7de2b79c2] -- root cause identified and fixed
+
+**The actual defect, precisely:** Round-22's fence
+(`dialogue-persist-port.ts`'s late-reconciliation branch) compared
+`current.sessionVersion === expectedSnapshotSessionVersion` to detect
+whether a newer turn had already installed its own content into the real
+attachment state, skipping the write when they differed (assuming any
+difference meant "a newer turn already landed its content here"). But
+`binding.sessionVersion` (`current.sessionVersion`) is the SESSION's
+generic authoritative revision counter -- it advances on every durable
+write, including a purely CONTROL event with no dialogue-content write at
+all (`VoiceCallTurnCoordinator.recordAuthoritativeControlEvent`, called for
+both a real `speech.started` barge-in and, when no explicit barge-in frame
+preceded a turn's own final, `executeTurn`'s "final-only fallback",
+`recordAuthoritativeSpeechStart`). A barge-in that merely CANCELLED the
+turn whose content commit was being reconciled therefore looked, to that
+fence, identical to "a newer turn's content already landed" -- permanently
+suppressing the correctly-reconciled older commit and losing it exactly
+like the original defect, just via a different trigger than the earlier
+rounds' plain-timeout cancellation.
+
+Codex's exact repro (current-SHA, real coordinator/engine/state/trusted
+port/client, only HTTP storage/identity/speaker doubled): an emergency
+final opens a content commit at `expectedSnapshotSessionVersion`; its own
+HTTP acknowledgement is held; a real `speech.started` barge-in cancels that
+turn AND durably records its own control event, advancing
+`binding.sessionVersion` past `expectedSnapshotSessionVersion` for an
+unrelated reason; the held content-commit response is then released and
+its reconciliation GET correlates. Actual (pre-fix): the real attachment's
+`handoff` stays `null` (the reconciled "urgent_safety" commit is skipped by
+the stale fence); a subsequent unrelated final silently starts a NEW
+content commit, overwriting the lost "urgent_safety" with `null` again.
+
+**Fix** (`apps/voice-media-worker/src/dialogue/dialogue-state.ts`,
+`dialogue-persist-port.ts`, `call-turn-coordinator.ts`): added
+`VoiceDialogueState.committedSessionVersion: number | null` --
+deliberately SEPARATE from `VoiceSessionBinding.sessionVersion` -- that
+only ever advances at the exact points dialogue CONTENT is actually
+installed into an attachment's real state:
+
+1. `createTrustedDialoguePersistPort`'s fast (non-exceptional) success
+   path stamps it on `state` (the engine's own candidate clone, `next`) so
+   `VoiceDialogueEngine.turn`'s subsequent `Object.assign(state, next)`
+   carries it onto the real attachment.
+2. The late-reconciliation branch stamps it directly on
+   `recovery.attachmentState` (the REAL per-attachment object) alongside
+   the content it just installed there.
+3. `restoreBoundAttachment` seeds it from a restored snapshot's own
+   `sessionVersion` at attach time, so a reconnect/restart correctly
+   starts from "content committed up through the restored revision", not
+   `null`.
+
+The late-reconciliation fence now compares against
+`recovery.attachmentState.committedSessionVersion` instead of
+`current.sessionVersion`: it only ever skips a write when a GENUINELY
+newer turn's CONTENT has already landed in this exact attachment object,
+never merely because the session's generic revision moved for an unrelated
+(control-only) reason.
+
+**Regression** (`tests/unit/audit-voice-application-wiring-20261003/dialogue-engine-cancelled-persist-reconciliation.test.ts`,
+new case "[barge-in regression, Codex reopen canonical
+2026-10-03T20:13:00Z] ..."): drives the REAL `VoiceSessionComposer` +
+`VoiceCallTurnCoordinator` + engine/state/persist-port/client end to end;
+only `fetch` is a double. Emits an emergency final, lets its content POST
+hang, then emits a real `speech.started` control frame over the test's
+channel double (`channel.emit("message", JSON.stringify({type:
+"speech.started"}), false)`) -- which both cancels turn 1's content commit
+AND durably records its own control event through the SAME `/events`
+double the rest of this suite already uses. Confirmed before/after by
+reverting only the three source files (`git stash`) and rerunning: on the
+pre-fix code the test fails with `contentPostCount` advancing to 2 (turn 2
+silently re-persisted and erased the "urgent_safety" commit, exactly the
+defect); with the fix restored, both this new case and the existing
+"[exact reopen repro]" case in the same file pass.
+
+### R11 bounded restoration [P1; residual never-settling identity stage] -- fixed
+
+**Root cause** (`apps/voice-media-worker/src/server/voice-api-client.ts`):
+`issueCapability` and `getSession` both directly `await
+this.workloadTokenSource.getToken(signal)` as their FIRST step, strictly
+ahead of `request()`'s own already-`raceAgainstAbort`-bound fetch/body
+stages. The real `GoogleMetadataIdentityTokenSource`'s metadata fetch/body
+awaits are not bound to `signal` either, so an uncooperative/hung metadata
+server (or any double that ignores `signal`) left every caller
+(`restoreBoundAttachment`, `recordAuthoritativeControlEvent`,
+`createTrustedDialoguePersistPort`, `MediaWorkerServer.resolveSessionBinding`)
+pending forever regardless of `signal` firing -- the exact "never-settling
+identity stage" class of bug R11/R12's earlier rounds already fixed at the
+transport (fetch/body) layer, just one layer further out.
+
+Codex's exact repro (current source, real `GoogleMetadataIdentityTokenSource`
++ `VoiceApiClient` + coordinator, doubling only metadata transport):
+`turnTimeoutMs`-bounded restoration, hold the metadata fetch/body; at
+100ms the bound's `signal.aborted` is `true` but the restoration itself is
+still pending (`restoreFailed` stays `false`, the queue stays unsettled).
+
+**Fix**: wrapped both `this.workloadTokenSource.getToken(signal)` calls in
+the SAME `raceAgainstAbort` helper `request()`'s own fetch/body stages
+already use. This also means an aborted identity stage now correctly
+prevents the subsequent capability/session HTTP call from ever starting
+(the `await` throws before `return this.request(...)` is ever reached) --
+Codex's repro specifically asked for this ordering ("guard expired/
+released continuations before invoking subsequent transport").
+
+**Regression** (`tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`,
+two new cases, same "uncooperative double that never reads `signal`"
+pattern the existing fetchImpl-level R11/R12 test in this file already
+uses, applied to `getToken` instead): confirmed before/after by reverting
+only `voice-api-client.ts` -- on the pre-fix code both new cases time out
+at vitest's own 5000ms test timeout (the call never settles at all); with
+the fix restored, both resolve/reject promptly and pass. Also asserts the
+subsequent capability `fetchImpl` is never called once the identity stage
+has already failed.
+
+### R4-control media continuation -- unchanged, same reasoned deferral
+
+Not addressed this round either; Round-21/22's own deferral and rationale
+stand unchanged (the authoritative media-epoch-transition write this needs
+is a single coordinated service/repository/controller/client/coordinator
+unit spanning files already in this task's `write_scopes`, not a missing
+external contract -- see Round-22's acceptance-assessment section). Named
+again in Codex's canonical 2026-10-03T20:13:00Z reopen as still repeated;
+carried forward as the next unit once `same_sha_review_ci` is unblocked on
+this round's candidate.
+
+### R13 (hosted CI typecheck) -- confirmed closed by the Round-22-follow-up section above
+
+Codex's canonical 2026-10-03T20:13:00Z reopen independently reproduced the
+same three `tsc` errors the "Round-22 follow-up" section above already
+fixed (that reopen reviewed `7de2b79c2`, before this candidate's own fix
+commit). No further action needed here; see that section for the fix and
+its own verification.
+
+### Verification on this round's candidate
+
+1. `pnpm exec tsc -p tsconfig.json --noEmit` (root): clean of every error
+   this task's own files could produce; the pre-existing cross-worktree
+   `ApiClient`/`VoiceDialogueSnapshotContent` noise documented in the
+   Round-22-follow-up section above is unchanged and not from this task.
+2. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/ tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts --exclude tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts --maxWorkers=1 --no-cache`:
+   30 files, 601 tests, PASS, zero regressions (598 from Round-22 + 3 new:
+   the R4-persist barge-in case and the two R11 identity-stage cases).
+3. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003 tests/integration/unattended-voice-postgres.integration.test.ts --max-warnings=0`
+   and `pnpm --filter @drts/voice-media-worker lint`: both exit 0.
+4. Before/after regression for both fixes, each by `git stash push -u` of
+   only the relevant source file(s), rerunning the new test(s), then
+   restoring via `git stash apply` + `git stash drop`: the R4-persist
+   barge-in case fails on pre-fix code (`contentPostCount` reaches 2,
+   proving the content loss) and passes with the fix restored; both new
+   R11 cases time out (hang) on pre-fix code and pass with the fix
+   restored.
+5. The five VM-prohibited `server.start()`/localhost-`fetch` listener
+   suites were excluded per the standing VM restriction, same as every
+   prior round. No product/listening server, DB, browser/Compose, network
+   provider, package install, or history rewrite was performed.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: improved -- the R4-persist repeated
+  (3-round) cancelled-commit/content-loss defect is now root-caused and
+  closed, with a demonstrated before/after regression distinguishing it
+  from the earlier, narrower timeout-only fix. NOT fully met: the
+  media-epoch continuation half of R4-control remains the same
+  unaddressed, explicitly reasoned deferral.
+- `authority_epoch_consent_fences`: improved -- R11's identity-stage
+  boundedness gap is closed, completing the boundedness work R11/R12's
+  earlier rounds started at the transport layer. NOT fully met: same
+  media-epoch-transition gap.
+- `precise_unimplemented_and_external_boundaries`: the R4-persist root
+  cause (a generic session-revision counter conflated with a
+  content-specific commit marker) and the R11 identity-stage gap are both
+  named precisely, with the exact fix boundary and files.
+- `same_sha_review_ci`: not claimed by this round; this round's own
+  eslint/typecheck/vitest evidence is above. Hosted CI and an independent
+  reviewer re-review on the exact `CANDIDATE_SHA` this round produces are
+  both pending.

@@ -41,6 +41,21 @@ export class VoiceDialogueState {
     candidates: AddressCandidate[];
   }> = [];
   handoff: { reason: string; intent: string } | null = null;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+   * canonical 2026-10-03T20:13:00Z): the `expectedSnapshotSessionVersion`
+   * this attachment's dialogue CONTENT was last durably committed under --
+   * deliberately separate from `VoiceSessionBinding.sessionVersion`, which
+   * also advances on every authoritative CONTROL event (e.g. a barge-in's
+   * `speech.started`, see `VoiceCallTurnCoordinator.
+   * recordAuthoritativeControlEvent`) with no dialogue-content write at
+   * all. A prior version of `createTrustedDialoguePersistPort`'s late
+   * reconciliation fenced against `binding.sessionVersion` itself to avoid
+   * regressing a newer turn's already-installed content -- but a barge-in
+   * alone bumps that same counter without ever installing anything here,
+   * so it incorrectly suppressed recovery of a cancelled turn's genuinely
+   * durable commit. `null` means no content has been committed to this
+   * attachment yet (fresh session, or restored with no prior snapshot). */
+  committedSessionVersion: number | null = null;
 
   apply(output: VoiceDialogueOutput, turnId: string): void {
     if (this.handoff) return;

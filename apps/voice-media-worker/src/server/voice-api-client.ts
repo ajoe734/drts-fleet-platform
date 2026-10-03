@@ -201,7 +201,20 @@ export class VoiceApiClient {
     command: IssueCapabilityCommand,
     signal?: AbortSignal,
   ): Promise<VoiceCapabilityTokenEnvelope> {
-    const workloadToken = await this.workloadTokenSource.getToken(signal);
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R11 residual (Codex reopen,
+    // canonical 2026-10-03T20:13:00Z): this workload-identity mint is the
+    // FIRST await in this method, ahead of `request()`'s own already-bound
+    // fetch/body stages below -- an uncooperative `workloadTokenSource`
+    // (the real `GoogleMetadataIdentityTokenSource`'s metadata fetch/body,
+    // or any double that ignores `signal`) previously left every caller
+    // (`restoreBoundAttachment`, `recordAuthoritativeControlEvent`,
+    // `createTrustedDialoguePersistPort`, ...) pending forever regardless
+    // of `signal` firing, same class of gap `raceAgainstAbort` already
+    // closed for `request()`'s own fetch/body stages.
+    const workloadToken = await this.raceAgainstAbort(
+      signal,
+      this.workloadTokenSource.getToken(signal),
+    );
     return this.request<VoiceCapabilityTokenEnvelope>(
       "POST",
       "/callcenter/voice/capabilities",
@@ -229,7 +242,11 @@ export class VoiceApiClient {
     voiceSessionId: string,
     signal?: AbortSignal,
   ): Promise<GetSessionResult> {
-    const workloadToken = await this.workloadTokenSource.getToken(signal);
+    // R11 residual, same as `issueCapability` above.
+    const workloadToken = await this.raceAgainstAbort(
+      signal,
+      this.workloadTokenSource.getToken(signal),
+    );
     return this.request<GetSessionResult>(
       "GET",
       `/callcenter/voice/sessions/${encodeURIComponent(voiceSessionId)}`,
