@@ -127,10 +127,26 @@ function buildHarness(
       return { snapshot: row, deduped: false };
     }),
     findLatestDialogueSnapshot: vi.fn(async () => {
-      const sorted = [...snapshots].sort(
+      const notExpired = snapshots.filter(
+        (s) => new Date(s.retentionExpiresAt).getTime() > Date.now(),
+      );
+      const sorted = notExpired.sort(
         (a, b) => b.sessionVersion - a.sessionVersion,
       );
       return sorted[0] ?? null;
+    }),
+    findExpiredDialogueSnapshots: vi.fn(async () =>
+      snapshots.filter(
+        (s) => new Date(s.retentionExpiresAt).getTime() <= Date.now(),
+      ),
+    ),
+    deleteDialogueSnapshot: vi.fn(async (id: string, version: number) => {
+      const index = snapshots.findIndex(
+        (s) => s.voiceSessionId === id && s.sessionVersion === version,
+      );
+      if (index === -1) return false;
+      snapshots.splice(index, 1);
+      return true;
     }),
   };
 
@@ -180,26 +196,55 @@ describe("voice-dialogue-snapshot-crypto", () => {
     expect(resolveDialogueSnapshotEncryptionKey()).toBeNull();
   });
 
+  it("fails closed on a non-canonical base64 string even if it happens to decode to 32 bytes (strict round-trip check)", () => {
+    process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+    const real = randomBytes(32).toString("base64");
+    // Flip a padding/length property to make it non-canonical: append an
+    // extra '=' (invalid padding) while keeping the alphabet valid.
+    process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY = `${real}=`;
+    expect(resolveDialogueSnapshotEncryptionKey()).toBeNull();
+  });
+
+  it("fails closed on a base64 string containing characters outside the standard alphabet", () => {
+    process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+    process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+      "!!!not-base64-at-all-but-node-would-silently-strip-these-chars!!!";
+    expect(resolveDialogueSnapshotEncryptionKey()).toBeNull();
+  });
+
+  it("accepts a real, canonical 32-byte base64 key", () => {
+    process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+    process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+      randomBytes(32).toString("base64");
+    const resolved = resolveDialogueSnapshotEncryptionKey();
+    expect(resolved).not.toBeNull();
+    expect(resolved!.key.length).toBe(32);
+  });
+
+  const aad = JSON.stringify(["test-context"]);
+
   it("round-trips real content through AES-256-GCM encrypt/decrypt", () => {
     const key = { version: "v1", key: randomBytes(32) };
-    const encrypted = encryptDialogueSnapshotContent(validContent, key);
-    const decrypted = decryptDialogueSnapshotContent(encrypted, (version) =>
-      version === key.version ? key.key : null,
+    const encrypted = encryptDialogueSnapshotContent(validContent, key, aad);
+    const decrypted = decryptDialogueSnapshotContent(
+      encrypted,
+      (version) => (version === key.version ? key.key : null),
+      aad,
     );
     expect(decrypted).toEqual(validContent);
   });
 
   it("refuses to decrypt under an unrecognized key version instead of using the wrong key", () => {
     const key = { version: "v1", key: randomBytes(32) };
-    const encrypted = encryptDialogueSnapshotContent(validContent, key);
+    const encrypted = encryptDialogueSnapshotContent(validContent, key, aad);
     expect(() =>
-      decryptDialogueSnapshotContent(encrypted, () => null),
+      decryptDialogueSnapshotContent(encrypted, () => null, aad),
     ).toThrow(/voice_dialogue_snapshot_key_unavailable/);
   });
 
   it("GCM auth-tag check rejects tampered ciphertext", () => {
     const key = { version: "v1", key: randomBytes(32) };
-    const encrypted = encryptDialogueSnapshotContent(validContent, key);
+    const encrypted = encryptDialogueSnapshotContent(validContent, key, aad);
     const tampered = {
       ...encrypted,
       ciphertext: Buffer.concat([
@@ -208,8 +253,22 @@ describe("voice-dialogue-snapshot-crypto", () => {
       ]),
     };
     expect(() =>
-      decryptDialogueSnapshotContent(tampered, (v) =>
-        v === key.version ? key.key : null,
+      decryptDialogueSnapshotContent(
+        tampered,
+        (v) => (v === key.version ? key.key : null),
+        aad,
+      ),
+    ).toThrow();
+  });
+
+  it("GCM auth-tag check rejects a ciphertext decrypted under a different associated-data context (row/context substitution)", () => {
+    const key = { version: "v1", key: randomBytes(32) };
+    const encrypted = encryptDialogueSnapshotContent(validContent, key, aad);
+    expect(() =>
+      decryptDialogueSnapshotContent(
+        encrypted,
+        (v) => (v === key.version ? key.key : null),
+        JSON.stringify(["different-context"]),
       ),
     ).toThrow();
   });
@@ -247,16 +306,54 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
     );
   });
 
-  it("is dedup-safe: a retried write for the same (session, version) returns the existing row instead of a duplicate", async () => {
+  it("is dedup-safe: a retried write for the same (session, version) returns the ACTUAL persisted content, not the caller's resubmitted one", async () => {
     const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
 
     const first = await service.persistDialogueSnapshot(validCommand());
+    // Resubmit with the exact same turn/media/content (a legitimate retry,
+    // e.g. after a dropped HTTP response) -- must be a safe no-op that
+    // returns the real persisted row, never a second row.
     const second = await service.persistDialogueSnapshot(validCommand());
 
     expect(first.deduped).toBe(false);
     expect(second.deduped).toBe(true);
     expect(second.snapshot.snapshotId).toBe(first.snapshot.snapshotId);
+    expect(second.snapshot.content).toEqual(validContent);
     expect(repository.insertDialogueSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a conflicting replay: a second call for the same (session, version) with DIFFERENT content is a real conflict, not a silent dedup success echoing the caller's own content", async () => {
+    const { service } = buildHarness({ appliedMediaEpoch: 2 });
+
+    await service.persistDialogueSnapshot(validCommand());
+
+    await expect(
+      service.persistDialogueSnapshot(
+        validCommand({ content: { ...validContent, draftVersion: 99 } }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_ACTION_PAYLOAD_CONFLICT" });
+  });
+
+  it("rejects a conflicting replay with a different turnId for the same (session, version)", async () => {
+    const { service } = buildHarness({ appliedMediaEpoch: 2 });
+
+    await service.persistDialogueSnapshot(validCommand());
+
+    await expect(
+      service.persistDialogueSnapshot(
+        validCommand({ turnId: "a-different-turn" }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_ACTION_PAYLOAD_CONFLICT" });
+  });
+
+  it("checks the session row FOR UPDATE inside the fence-check/insert transaction (or the plain fallback when unavailable), not an unguarded read-then-write", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+    await service.persistDialogueSnapshot(validCommand());
+    expect(repository.findSessionById).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      undefined,
+      true,
+    );
   });
 
   it("rejects a stale sessionVersion (CAS fence)", async () => {
@@ -397,5 +494,98 @@ describe("VoiceSessionService.getDialogueSnapshotRestoration", () => {
     );
     expect(restoration.snapshot!.sessionVersion).toBe(6);
     expect(restoration.snapshot!.content.draftVersion).toBe(2);
+  });
+
+  it("denies restoring a snapshot whose retention window has already expired, treating it as if no snapshot existed", async () => {
+    const { service, snapshots } = buildHarness({ appliedMediaEpoch: 2 });
+    await service.persistDialogueSnapshot(validCommand());
+    // Force the just-written row into the past, as if its retention window
+    // had already elapsed (the real schema/query filters on this exact
+    // column -- see `findLatestDialogueSnapshot`'s own doc).
+    snapshots[0]!.retentionExpiresAt = new Date(
+      Date.now() - 1000,
+    ).toISOString();
+
+    const restoration = await service.getDialogueSnapshotRestoration(
+      VOICE_SESSION_ID,
+    );
+    expect(restoration.snapshot).toBeNull();
+  });
+});
+
+describe("VoiceSessionService.purgeExpiredDialogueSnapshots", () => {
+  beforeEach(() => {
+    process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+    process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+      randomBytes(32).toString("base64");
+  });
+
+  it("dry-run reports eligible-to-purge rows without deleting anything", async () => {
+    const { service, repository, snapshots } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    await service.persistDialogueSnapshot(validCommand());
+    snapshots[0]!.retentionExpiresAt = new Date(
+      Date.now() - 1000,
+    ).toISOString();
+
+    const { report, deletedCount } =
+      await service.purgeExpiredDialogueSnapshots("operator-1", true);
+
+    expect(report.mode).toBe("dry-run");
+    expect(report.results).toHaveLength(1);
+    expect(report.results[0]!.action).toBe("eligible_to_purge");
+    expect(deletedCount).toBe(0);
+    expect(repository.deleteDialogueSnapshot).not.toHaveBeenCalled();
+    expect(snapshots).toHaveLength(1);
+  });
+
+  it("a real (non-dry-run) purge actually deletes the expired row through the repository's privileged append-only bypass", async () => {
+    const { service, repository, snapshots } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    await service.persistDialogueSnapshot(validCommand());
+    snapshots[0]!.retentionExpiresAt = new Date(
+      Date.now() - 1000,
+    ).toISOString();
+
+    const { report, deletedCount } =
+      await service.purgeExpiredDialogueSnapshots("operator-1", false);
+
+    expect(report.mode).toBe("apply");
+    expect(report.purgedCount).toBe(1);
+    expect(deletedCount).toBe(1);
+    expect(repository.deleteDialogueSnapshot).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      5,
+    );
+    expect(snapshots).toHaveLength(0);
+  });
+
+  it("never purges a row not yet past its retention window", async () => {
+    const { service, repository, snapshots } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    await service.persistDialogueSnapshot(validCommand());
+
+    const { deletedCount } = await service.purgeExpiredDialogueSnapshots(
+      "operator-1",
+      false,
+    );
+
+    expect(deletedCount).toBe(0);
+    expect(repository.deleteDialogueSnapshot).not.toHaveBeenCalled();
+    expect(snapshots).toHaveLength(1);
+  });
+
+  it("fails closed when the retention policy service is unavailable -- never deletes without its legal-hold-aware decision", async () => {
+    const { repository } = buildHarness({ appliedMediaEpoch: 2 });
+    const serviceWithoutRetention = new VoiceSessionService(
+      repository as never,
+    );
+    await expect(
+      serviceWithoutRetention.purgeExpiredDialogueSnapshots("operator-1", false),
+    ).rejects.toMatchObject({ code: "VOICE_RETENTION_POLICY_UNAVAILABLE" });
+    expect(repository.deleteDialogueSnapshot).not.toHaveBeenCalled();
   });
 });

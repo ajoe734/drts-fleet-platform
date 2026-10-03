@@ -2542,5 +2542,158 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(restoration.snapshot?.sessionVersion).toBe(advanced!.sessionVersion);
       expect(restoration.snapshot?.content).toEqual(secondContent);
     });
+
+    it("rejects a conflicting replay against the real unique index: a second real write for the same (session, version) with DIFFERENT content is a genuine conflict, never a silent echo", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const base = {
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      };
+
+      await service.persistDialogueSnapshot({ ...base, content: validContent });
+
+      await expect(
+        service.persistDialogueSnapshot({
+          ...base,
+          content: { ...validContent, draftVersion: 99 },
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_ACTION_PAYLOAD_CONFLICT" });
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(1);
+    });
+
+    it("the real FOR UPDATE row lock taken by persistDialogueSnapshot's fence-check blocks a concurrent CAS from changing the session underneath it", async () => {
+      const f = await seedVoiceFixture();
+      const instA = createInstance();
+      const instB = createInstance();
+      const session = await instA.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      // Holds a real `FOR UPDATE` lock on the session row exactly the way
+      // `VoiceSessionService.persistDialogueSnapshot`'s fence-check does
+      // (`findSessionById(..., true)`), inside an open transaction, then
+      // confirms a real concurrent `casUpdateSessionControl` from a second
+      // instance blocks until this transaction commits -- proving the lock
+      // actually serializes against the session's own normal CAS writers,
+      // not just against another `persistDialogueSnapshot` caller.
+      const clientA = await (instA.database as unknown as {
+        connect: () => Promise<PoolClient>;
+      }).connect();
+      await clientA.query("BEGIN");
+      await clientA.query(
+        "SELECT * FROM voice.session WHERE voice_session_id = $1 FOR UPDATE",
+        [f.request.voiceSessionId],
+      );
+
+      let bDone = false;
+      const bPromise = instB.sessionRepository
+        .casUpdateSessionControl(f.request.voiceSessionId, session!.sessionVersion, {
+          pendingInput: false,
+        })
+        .then((result) => {
+          bDone = true;
+          return result;
+        });
+
+      // Give B's query every reasonable chance to (wrongly) complete while
+      // A still holds the row lock.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(bDone).toBe(false);
+
+      await clientA.query("COMMIT");
+      clientA.release();
+
+      const bResult = await bPromise;
+      expect(bResult).not.toBeNull();
+      expect(bDone).toBe(true);
+    });
+
+    it("denies restoring a real expired snapshot and the real governed purge path actually deletes it through the append-only bypass, respecting an active legal hold", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+      await pool.query(
+        "UPDATE voice.dialogue_snapshot SET retention_expires_at = now() - interval '1 day' WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+
+      const restoration = await service.getDialogueSnapshotRestoration(
+        f.request.voiceSessionId,
+      );
+      expect(restoration.snapshot).toBeNull();
+
+      const retention = new VoiceRetentionService();
+      const serviceWithRetention = new VoiceSessionService(
+        inst.sessionRepository,
+        undefined,
+        undefined,
+        retention,
+      );
+      retention.placeLegalHold({
+        caseNumber: "CASE-1",
+        evidenceFamily: "voice_transcript",
+        subjectRef: f.request.voiceSessionId,
+        reasonCode: "regulatory_inquiry",
+        placedBy: "ops-1",
+      });
+      const heldPurge = await serviceWithRetention.purgeExpiredDialogueSnapshots(
+        "operator-1",
+        false,
+      );
+      expect(heldPurge.report.skippedHeldCount).toBe(1);
+      expect(heldPurge.deletedCount).toBe(0);
+      const stillThere = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(stillThere.rows[0].count).toBe(1);
+
+      retention.releaseLegalHold({
+        holdId: retention.listActiveHolds("voice_transcript")[0]!.holdId,
+        releasedBy: "admin-1",
+        releasedByRole: "platform_admin",
+      });
+      const realPurge = await serviceWithRetention.purgeExpiredDialogueSnapshots(
+        "operator-1",
+        false,
+      );
+      expect(realPurge.report.purgedCount).toBe(1);
+      expect(realPurge.deletedCount).toBe(1);
+      const afterPurge = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(afterPurge.rows[0].count).toBe(0);
+    });
   });
 });

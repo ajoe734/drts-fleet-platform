@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -19,7 +20,10 @@ import {
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { voiceAlertMetrics } from "../../observability/voice-alert-metrics";
-import { VoiceRetentionService } from "./voice-retention.service";
+import {
+  VoiceRetentionService,
+  type PurgeExecutionReport,
+} from "./voice-retention.service";
 import {
   decryptDialogueSnapshotContent,
   encryptDialogueSnapshotContent,
@@ -210,8 +214,14 @@ export class VoiceSessionService {
 
   private async requireSession(
     voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+    forUpdate = false,
   ): Promise<VoiceSessionRecord> {
-    const session = await this.repository.findSessionById(voiceSessionId);
+    const session = await this.repository.findSessionById(
+      voiceSessionId,
+      executor,
+      forUpdate,
+    );
     if (!session) {
       throw new ApiRequestError(
         403,
@@ -877,6 +887,39 @@ export class VoiceSessionService {
   }
 
   /**
+   * Reviewer WIP feedback 2026-10-03T14:20Z: binds the GCM authenticated
+   * data to the row's own immutable identity/context -- a ciphertext
+   * decrypted under a DIFFERENT row's (session, scope, route, lease, input,
+   * media, turn) context fails the auth-tag check exactly like a tampered
+   * ciphertext would, closing a context/row-substitution path a bare
+   * ciphertext+nonce+tag triple cannot detect on its own. Order and
+   * exact field set are part of this function's contract: changing either
+   * changes what AAD existing rows were encrypted under.
+   */
+  private dialogueSnapshotAssociatedData(context: {
+    voiceSessionId: string;
+    sessionVersion: number;
+    resourceScopeId: string;
+    routeProfileVersion: number;
+    leaseEpoch: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+  }): string {
+    return JSON.stringify([
+      "voice.dialogue_snapshot.v1",
+      context.voiceSessionId,
+      context.sessionVersion,
+      context.resourceScopeId,
+      context.routeProfileVersion,
+      context.leaseEpoch,
+      context.inputEpoch,
+      context.mediaEpoch,
+      context.turnId,
+    ]);
+  }
+
+  /**
    * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: the versioned, encrypted,
    * retention-bounded dialogue-content persist this domain was missing --
    * distinct from `resolveInput` above (admission-only CAS, no content
@@ -889,50 +932,29 @@ export class VoiceSessionService {
    * applied) the last-applied media epoch. A caller must always submit the
    * session_version a `resolveInput` CAS for the SAME turn just advanced to
    * -- this never itself advances `voice.session`.
+   *
+   * Reviewer WIP feedback 2026-10-03T14:20Z, addressed:
+   * - The fence-check read and the insert now run inside ONE
+   *   `withTransaction` (falling back to plain sequential calls only when
+   *   the repository has no transactional backing, same convention
+   *   `closeSessionWithFinalizeRecording` already uses), with the session
+   *   row read `FOR UPDATE` so a concurrent `casUpdateSessionControl` for
+   *   this same session cannot advance scope/route/lease/epoch state while
+   *   this check-then-insert is in flight.
+   * - A dedup hit (`ON CONFLICT DO NOTHING`, same (session, version) already
+   *   has a row) no longer echoes the CALLER's freshly-submitted content
+   *   back as if it were authenticated: it decrypts the ACTUAL persisted
+   *   row and returns that. If the already-persisted turn/media/content
+   *   differs from what this call submitted, that is a genuine conflicting
+   *   replay, not a safe no-op, and is rejected
+   *   (`VOICE_ACTION_PAYLOAD_CONFLICT`).
+   * - GCM authenticated data now binds the ciphertext to this exact
+   *   (session, scope, route, lease, input, media, turn) context (see
+   *   `dialogueSnapshotAssociatedData`).
    */
   async persistDialogueSnapshot(
     command: PersistDialogueSnapshotCommand,
   ): Promise<PersistDialogueSnapshotResult> {
-    const session = await this.requireSession(command.voiceSessionId);
-    this.assertWriteAuthorized(session, {
-      sessionVersion: command.expectedSessionVersion,
-      leaseEpoch: command.expectedLeaseEpoch,
-    });
-    if (session.resourceScopeId !== command.expectedResourceScopeId) {
-      throw new ApiRequestError(
-        403,
-        "VOICE_SESSION_NOT_OWNER",
-        "Resource scope no longer matches this session.",
-      );
-    }
-    if (session.routeProfileVersion !== command.expectedRouteProfileVersion) {
-      throw new ApiRequestError(
-        409,
-        "VOICE_DRAFT_STALE",
-        "Route profile version has moved on; reload before writing.",
-      );
-    }
-    if (session.inputEpoch !== command.inputEpoch) {
-      throw new ApiRequestError(
-        409,
-        "VOICE_DRAFT_STALE",
-        "inputEpoch does not match the session's current outstanding input.",
-      );
-    }
-    const appliedMediaEpoch = await this.repository.findAppliedMediaEpoch(
-      command.voiceSessionId,
-    );
-    if (
-      appliedMediaEpoch !== null &&
-      command.mediaEpoch !== appliedMediaEpoch
-    ) {
-      throw new ApiRequestError(
-        409,
-        "VOICE_DRAFT_STALE",
-        "mediaEpoch refers to a media epoch that is no longer current.",
-      );
-    }
-
     const content = voiceDialogueSnapshotContentSchema.parse(command.content);
 
     const encryptionKey = resolveDialogueSnapshotEncryptionKey();
@@ -943,7 +965,6 @@ export class VoiceSessionService {
         "Dialogue-snapshot encryption key is not configured; refusing to persist unencrypted dialogue content.",
       );
     }
-    const encrypted = encryptDialogueSnapshotContent(content, encryptionKey);
 
     const retentionPolicy = this.retentionService?.evaluateRecordRetention({
       family: "voice_transcript",
@@ -958,8 +979,10 @@ export class VoiceSessionService {
       );
     }
 
-    const { snapshot, deduped } = await this.repository.insertDialogueSnapshot(
-      {
+    const encrypted = encryptDialogueSnapshotContent(
+      content,
+      encryptionKey,
+      this.dialogueSnapshotAssociatedData({
         voiceSessionId: command.voiceSessionId,
         sessionVersion: command.expectedSessionVersion,
         resourceScopeId: command.expectedResourceScopeId,
@@ -968,28 +991,150 @@ export class VoiceSessionService {
         inputEpoch: command.inputEpoch,
         mediaEpoch: command.mediaEpoch,
         turnId: command.turnId,
-        contentKeyVersion: encrypted.keyVersion,
-        contentNonce: encrypted.nonce,
-        contentCiphertext: encrypted.ciphertext,
-        contentAuthTag: encrypted.authTag,
-        retentionExpiresAt: retentionPolicy.expiresAt,
-      },
+      }),
     );
 
-    return {
-      snapshot: {
-        snapshotId: snapshot.snapshotId,
-        voiceSessionId: snapshot.voiceSessionId,
-        sessionVersion: snapshot.sessionVersion,
-        inputEpoch: snapshot.inputEpoch,
-        mediaEpoch: snapshot.mediaEpoch,
-        turnId: snapshot.turnId,
-        content,
-        createdAt: snapshot.createdAt,
-        retentionExpiresAt: snapshot.retentionExpiresAt,
-      },
-      deduped,
+    const runWork = async (
+      executor?: VoiceQueryExecutor,
+    ): Promise<PersistDialogueSnapshotResult> => {
+      const session = await this.requireSession(
+        command.voiceSessionId,
+        executor,
+        true,
+      );
+      this.assertWriteAuthorized(session, {
+        sessionVersion: command.expectedSessionVersion,
+        leaseEpoch: command.expectedLeaseEpoch,
+      });
+      if (session.resourceScopeId !== command.expectedResourceScopeId) {
+        throw new ApiRequestError(
+          403,
+          "VOICE_SESSION_NOT_OWNER",
+          "Resource scope no longer matches this session.",
+        );
+      }
+      if (
+        session.routeProfileVersion !== command.expectedRouteProfileVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DRAFT_STALE",
+          "Route profile version has moved on; reload before writing.",
+        );
+      }
+      if (session.inputEpoch !== command.inputEpoch) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DRAFT_STALE",
+          "inputEpoch does not match the session's current outstanding input.",
+        );
+      }
+      const appliedMediaEpoch = await this.repository.findAppliedMediaEpoch(
+        command.voiceSessionId,
+        executor,
+      );
+      if (
+        appliedMediaEpoch !== null &&
+        command.mediaEpoch !== appliedMediaEpoch
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DRAFT_STALE",
+          "mediaEpoch refers to a media epoch that is no longer current.",
+        );
+      }
+
+      const { snapshot, deduped } = await this.repository.insertDialogueSnapshot(
+        {
+          voiceSessionId: command.voiceSessionId,
+          sessionVersion: command.expectedSessionVersion,
+          resourceScopeId: command.expectedResourceScopeId,
+          routeProfileVersion: command.expectedRouteProfileVersion,
+          leaseEpoch: command.expectedLeaseEpoch,
+          inputEpoch: command.inputEpoch,
+          mediaEpoch: command.mediaEpoch,
+          turnId: command.turnId,
+          contentKeyVersion: encrypted.keyVersion,
+          contentNonce: encrypted.nonce,
+          contentCiphertext: encrypted.ciphertext,
+          contentAuthTag: encrypted.authTag,
+          retentionExpiresAt: retentionPolicy.expiresAt,
+        },
+        executor,
+      );
+
+      if (!deduped) {
+        return {
+          snapshot: {
+            snapshotId: snapshot.snapshotId,
+            voiceSessionId: snapshot.voiceSessionId,
+            sessionVersion: snapshot.sessionVersion,
+            inputEpoch: snapshot.inputEpoch,
+            mediaEpoch: snapshot.mediaEpoch,
+            turnId: snapshot.turnId,
+            content,
+            createdAt: snapshot.createdAt,
+            retentionExpiresAt: snapshot.retentionExpiresAt,
+          },
+          deduped: false,
+        };
+      }
+
+      // Dedup hit: decrypt and return the row that is ACTUALLY persisted,
+      // never this call's own freshly-submitted content -- the two must
+      // match for this to be a safe retry/no-op.
+      const persistedContent = voiceDialogueSnapshotContentSchema.parse(
+        decryptDialogueSnapshotContent(
+          {
+            keyVersion: snapshot.contentKeyVersion,
+            nonce: snapshot.contentNonce,
+            ciphertext: snapshot.contentCiphertext,
+            authTag: snapshot.contentAuthTag,
+          },
+          (version) =>
+            version === encryptionKey.version ? encryptionKey.key : null,
+          this.dialogueSnapshotAssociatedData({
+            voiceSessionId: snapshot.voiceSessionId,
+            sessionVersion: snapshot.sessionVersion,
+            resourceScopeId: snapshot.resourceScopeId,
+            routeProfileVersion: snapshot.routeProfileVersion,
+            leaseEpoch: snapshot.leaseEpoch,
+            inputEpoch: snapshot.inputEpoch,
+            mediaEpoch: snapshot.mediaEpoch,
+            turnId: snapshot.turnId,
+          }),
+        ),
+      );
+      if (
+        snapshot.turnId !== command.turnId ||
+        snapshot.mediaEpoch !== command.mediaEpoch ||
+        !isDeepStrictEqual(persistedContent, content)
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_ACTION_PAYLOAD_CONFLICT",
+          "A different dialogue snapshot was already persisted for this session revision.",
+        );
+      }
+      return {
+        snapshot: {
+          snapshotId: snapshot.snapshotId,
+          voiceSessionId: snapshot.voiceSessionId,
+          sessionVersion: snapshot.sessionVersion,
+          inputEpoch: snapshot.inputEpoch,
+          mediaEpoch: snapshot.mediaEpoch,
+          turnId: snapshot.turnId,
+          content: persistedContent,
+          createdAt: snapshot.createdAt,
+          retentionExpiresAt: snapshot.retentionExpiresAt,
+        },
+        deduped: true,
+      };
     };
+
+    return typeof this.repository.withTransaction === "function"
+      ? this.repository.withTransaction(runWork)
+      : runWork();
   }
 
   /**
@@ -998,7 +1143,10 @@ export class VoiceSessionService {
    * `VoiceSessionBinding.sessionVersion` from authoritative truth instead
    * of starting fresh/blank, and to detect a binding that no longer matches
    * the session's actual current scope/route/lease before trusting it for
-   * any turn.
+   * any turn. `findLatestDialogueSnapshot` itself already excludes a row
+   * past its own `retention_expires_at` (reviewer WIP feedback
+   * 2026-10-03T14:20Z: "current latest-snapshot read ignores expiry") --
+   * this never resurrects expired content as if it were restorable.
    */
   async getDialogueSnapshotRestoration(
     voiceSessionId: string,
@@ -1023,6 +1171,16 @@ export class VoiceSessionService {
           encryptionKey && encryptionKey.version === version
             ? encryptionKey.key
             : null,
+        this.dialogueSnapshotAssociatedData({
+          voiceSessionId: row.voiceSessionId,
+          sessionVersion: row.sessionVersion,
+          resourceScopeId: row.resourceScopeId,
+          routeProfileVersion: row.routeProfileVersion,
+          leaseEpoch: row.leaseEpoch,
+          inputEpoch: row.inputEpoch,
+          mediaEpoch: row.mediaEpoch,
+          turnId: row.turnId,
+        }),
       ),
     );
     return {
@@ -1039,5 +1197,95 @@ export class VoiceSessionService {
         retentionExpiresAt: row.retentionExpiresAt,
       },
     };
+  }
+
+  /**
+   * Reviewer WIP feedback 2026-10-03T14:20Z: "a retention_expires_at label
+   * alone is not bounded retention ... a governed purge path compatible
+   * with actual schema/legal holds." Real DB deletion (through
+   * `VoiceSessionRepository.deleteDialogueSnapshot`'s privileged
+   * append-only bypass), gated by the SAME `VoiceRetentionService.
+   * isSubjectUnderHold` legal-hold check every other evidence family's
+   * purge already goes through.
+   *
+   * Deliberately does NOT call `VoiceRetentionService.executePurge`
+   * (unlike other evidence families): that method independently
+   * RE-DERIVES expiry from `createdAt` + the family's current default
+   * `hotRetentionDays`, which would silently diverge from THIS row's own
+   * `retention_expires_at` the moment it was computed under a different
+   * custom override or a since-changed policy version -- this repository's
+   * `findExpiredDialogueSnapshots` has already authoritatively decided
+   * expiry from the actual stored column, so only the legal-hold check
+   * (the one part of that engine not already answered) is still needed.
+   */
+  async purgeExpiredDialogueSnapshots(
+    operatorId: string,
+    dryRun = true,
+  ): Promise<{ report: PurgeExecutionReport; deletedCount: number }> {
+    if (!this.retentionService) {
+      throw new ApiRequestError(
+        500,
+        "VOICE_RETENTION_POLICY_UNAVAILABLE",
+        "Voice retention policy service is unavailable; refusing to purge without its legal-hold-aware policy decision.",
+      );
+    }
+    const policy = this.retentionService.assertRetentionDefined(
+      "voice_transcript",
+    );
+    const candidates = await this.repository.findExpiredDialogueSnapshots(
+      new Date().toISOString(),
+    );
+
+    const results: PurgeExecutionReport["results"] = [];
+    let purgedCount = 0;
+    let skippedHeldCount = 0;
+    let deletedCount = 0;
+    for (const row of candidates) {
+      if (this.retentionService.isSubjectUnderHold("voice_transcript", row.voiceSessionId)) {
+        skippedHeldCount++;
+        results.push({
+          subjectRef: row.voiceSessionId,
+          action: "skipped_held",
+          reason: `Record is under active legal hold for voice_transcript:${row.voiceSessionId}`,
+        });
+        continue;
+      }
+      if (dryRun) {
+        results.push({
+          subjectRef: row.voiceSessionId,
+          action: "eligible_to_purge",
+          reason: `Dry run: snapshot past retention_expires_at (${row.retentionExpiresAt}) with no legal hold.`,
+        });
+        continue;
+      }
+      const deleted = await this.repository.deleteDialogueSnapshot(
+        row.voiceSessionId,
+        row.sessionVersion,
+      );
+      if (deleted) {
+        purgedCount++;
+        deletedCount++;
+        results.push({
+          subjectRef: row.voiceSessionId,
+          action: "purged",
+          reason: "Aged dialogue snapshot purged in accordance with retention policy.",
+        });
+      }
+    }
+
+    const report: PurgeExecutionReport = {
+      executionId: randomUUID(),
+      family: "voice_transcript",
+      mode: dryRun ? "dry-run" : "apply",
+      retentionDays: policy.hotRetentionDays,
+      totalExamined: candidates.length,
+      purgedCount,
+      skippedHeldCount,
+      operatorId,
+      executedAt: new Date().toISOString(),
+      policyVersion: this.retentionService.getPolicyCatalog().version,
+      results,
+    };
+    return { report, deletedCount };
   }
 }

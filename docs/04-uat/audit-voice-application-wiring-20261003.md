@@ -2462,6 +2462,94 @@ NEW migration (not `voice.draft_revision` reuse) was the coordinator's own
 decision, with the real anchors (this migration's own doc,
 `VoiceCallTurnCoordinator`'s class doc, EXECUTION.md's coordination note).
 
+### Revision: addressed reviewer WIP implementation feedback (`ai-status.json`'s `next` field, timestamp 2026-10-03T14:20:07Z)
+
+Before this round's candidate was committed/pushed, the reviewer inspected
+the in-progress working tree and left six concrete findings against the
+WIP `persistDialogueSnapshot`/crypto/repository code (retained verbatim in
+canonical `next`; not a completed-candidate review, no SHA attached). All
+six are real defects, not disclosed boundaries, and are fixed in this same
+candidate before handoff -- none were left for a separate round:
+
+1. **No transactional fence-check-then-insert boundary.** `persistDialogueSnapshot`
+   previously read the session, read the applied media epoch, and inserted
+   the snapshot row as three independent, unguarded queries -- authority
+   could change between them. Fixed: the whole fence-check (session read +
+   media-epoch read) and the insert now run inside ONE
+   `VoiceSessionRepository.withTransaction` call (falling back to plain
+   sequential execution only when the repository has no transactional
+   backing, the same convention `closeSessionWithFinalizeRecording`
+   already uses), with the session row read `FOR UPDATE`
+   (`findSessionById`'s new `forUpdate` parameter) so a concurrent
+   `casUpdateSessionControl` cannot advance scope/route/lease state while
+   this check-then-insert is in flight. Proven against REAL Postgres in
+   the new Suite 5 case "the real FOR UPDATE row lock ... blocks a
+   concurrent CAS."
+2. **Dedup echoed the caller's own resubmitted content, not the actual
+   persisted row.** A dedup hit (`ON CONFLICT DO NOTHING`, same
+   `(voice_session_id, session_version)`) returned the CALLER's freshly-
+   submitted `content` as the response, so a genuinely conflicting replay
+   (different turn/media/content for the same already-persisted revision)
+   would silently "succeed" with the caller's own unverified data instead
+   of the authenticated stored one. Fixed: a dedup hit now decrypts the
+   ACTUAL persisted row and compares `turnId`/`mediaEpoch`/content against
+   this call's submission (`isDeepStrictEqual`); a genuine mismatch is
+   rejected as `VOICE_ACTION_PAYLOAD_CONFLICT`, and a true retry (identical
+   submission) returns the real persisted content, never the resubmission.
+3. **Latest-snapshot restoration ignored `retention_expires_at`.**
+   `findLatestDialogueSnapshot` now filters `retention_expires_at > now()`
+   at the SQL level -- a row past its own retention window is treated as
+   "no snapshot," never resurrected for restoration.
+4. **No governed purge path; `retention_expires_at` was a label with no
+   enforcement.** `voice.dialogue_snapshot` is append-only
+   (`voice._make_append_only`, V0106), so an ordinary `DELETE` is rejected.
+   Added `VoiceSessionRepository.findExpiredDialogueSnapshots`/
+   `deleteDialogueSnapshot` (the latter uses the SAME privileged
+   `voice.allow_retention_archival = 'on'` session-setting bypass
+   `V0093__voice_retention_and_legal_hold.sql` already defined for
+   `voice.retention_execution_log`'s lawful purge sweeps) and
+   `VoiceSessionService.purgeExpiredDialogueSnapshots`, which checks each
+   already-expired candidate against the SAME `VoiceRetentionService.
+   isSubjectUnderHold` legal-hold engine every other evidence family's
+   purge already goes through, then actually deletes the ones that are not
+   held. Deliberately does NOT call `VoiceRetentionService.executePurge`
+   itself: that method re-derives expiry from `createdAt` + the family's
+   current default `hotRetentionDays`, which would silently diverge from a
+   row's own already-authoritative stored `retention_expires_at`; only the
+   legal-hold check (the one part of that engine not already answered by
+   this repository's own expiry filter) is still needed. No HTTP route is
+   added for this -- invoking a purge sweep is an operational/scheduler
+   concern outside this task's named scope, the same way
+   `recoverPendingRecordingSessions`/`VoiceRetentionService.executePurge`
+   itself are not routed either; the capability and its tests are the
+   deliverable.
+5. **No GCM associated-data binding.** Encrypting/decrypting with no AAD
+   means a ciphertext+nonce+auth-tag triple would decrypt successfully even
+   if read back against (or substituted into) a DIFFERENT row's context --
+   the auth tag only proves the ciphertext is unmodified, not that it
+   belongs to the context it is being decrypted under. Fixed:
+   `encryptDialogueSnapshotContent`/`decryptDialogueSnapshotContent` now
+   take a mandatory `associatedData` string
+   (`VoiceSessionService#dialogueSnapshotAssociatedData`, a canonical JSON
+   array of `[voiceSessionId, sessionVersion, resourceScopeId,
+   routeProfileVersion, leaseEpoch, inputEpoch, mediaEpoch, turnId]`) bound
+   via `cipher.setAAD`/`decipher.setAAD`; a context mismatch now fails the
+   same auth-tag check a ciphertext tamper already did (regression:
+   "GCM auth-tag check rejects a ciphertext decrypted under a different
+   associated-data context").
+6. **Non-canonical base64 key config could be silently accepted.**
+   `Buffer.from(str, "base64")` skips characters outside the base64
+   alphabet rather than rejecting them, so a malformed config value could
+   still decode to exactly 32 bytes by accident. Fixed:
+   `resolveDialogueSnapshotEncryptionKey` now requires the configured
+   string to match the strict standard-alphabet base64 pattern AND
+   round-trip (`key.toString("base64") === keyBase64`) before accepting
+   it.
+
+All six fixes have unit regression coverage (`voice-dialogue-snapshot-persistence.test.ts`,
+now 32 cases, up from 20) and/or real-Postgres coverage (Suite 5, now 6
+cases, up from 5, hosted-only per this task's own coordination note).
+
 ### Still open, not attempted this round, with reasoning
 
 - **`recordControlEvent` still has no coordinator caller in the live turn
@@ -2490,12 +2578,14 @@ decision, with the real anchors (this migration's own doc,
   path (`VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_UNCONFIGURED`,
   `VOICE_RETENTION_POLICY_UNAVAILABLE`) is real code, exercised by real
   tests; none of it is a claim that a live account exists.
-- **Real PostgreSQL CAS/dedup/append-only evidence for `voice.dialogue_snapshot`
-  is in `tests/integration/unattended-voice-postgres.integration.test.ts`'s
-  new Suite 5 (5 cases), per this task's own coordination note reserving
-  that file for hosted execution only.** Confirmed locally that the suite
-  collects and fails closed exactly as designed
-  (`UV_BOOKING_TEST_DATABASE_URL` unset -> explicit error, 23 tests listed
+- **Real PostgreSQL CAS/dedup/FOR-UPDATE-lock/expiry/append-only-purge
+  evidence for `voice.dialogue_snapshot` is in `tests/integration/
+  unattended-voice-postgres.integration.test.ts`'s new Suite 5 (6 cases,
+  including the transactional-lock and governed-purge/legal-hold cases
+  added in this round's revision), per this task's own coordination note
+  reserving that file for hosted execution only.** Confirmed locally that
+  the suite collects and fails closed exactly as designed
+  (`UV_BOOKING_TEST_DATABASE_URL` unset -> explicit error, 26 tests listed
   up from 18, no syntax/import errors) -- it was NOT run against a real
   Postgres instance in this VM, and no hosted run was triggered by this
   round.
@@ -2528,20 +2618,20 @@ decision, with the real anchors (this migration's own doc,
   session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
   tests/unit/uv-exec-{008,010,012,017,020,026}.test.ts
   tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts
-  --maxWorkers=1`: **26 files / 524 tests pass** (up from 25 files / 496 at
-  Round-13; zero regressions, net +28: 20 new in a new
-  `voice-dialogue-snapshot-persistence.test.ts`, 3 new restoration cases in
-  `trusted-turn-composition.test.ts`, 5 new correlation/reconciliation/
+  --maxWorkers=1`: **26 files / 536 tests pass** (up from 25 files / 496 at
+  Round-13; zero regressions: a new `voice-dialogue-snapshot-persistence.test.ts`
+  (32 cases, including this revision's dedup-conflict/expiry/purge/AAD/
+  strict-base64 regressions), 3 new restoration cases in
+  `trusted-turn-composition.test.ts`, and correlation/reconciliation/
   snapshot-wiring cases in `voice-api-client.test.ts`, net of response-shape
   updates to 2 pre-existing tests that the widened correlation check
   required).
 - `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev
   --head HEAD`: `OK`, 0 findings across all four checks.
 - `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`:
-  `25 commit(s) OK` (confirms this round's new commit and the entire
-  append-only-replacement history from Round-13 all still pass).
+  all commits (including this revision's) pass.
 - `pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.test.ts`:
-  confirmed collects (23 tests) and fails closed with the suite's own
+  confirmed collects (26 tests) and fails closed with the suite's own
   explicit `UV_BOOKING_TEST_DATABASE_URL` error -- not executed against
   real Postgres (VM restriction), not claimed as hosted-PG acceptance.
 

@@ -353,9 +353,22 @@ export class VoiceSessionRepository {
     }
   }
 
+  /**
+   * `forUpdate` (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4, reviewer WIP
+   * feedback 2026-10-03T14:20Z): locks the row for the duration of the
+   * caller's transaction, so a concurrent `casUpdateSessionControl` cannot
+   * advance scope/route/lease/epoch state in between this read and a
+   * later write in the SAME transaction (`VoiceSessionService.
+   * persistDialogueSnapshot`'s own fence-check-then-insert). Only
+   * meaningful when `executor` is itself a transaction-scoped client
+   * (`withTransaction`'s own callback argument) -- `FOR UPDATE` outside an
+   * explicit transaction releases its lock immediately after the
+   * statement, same as any other single-statement implicit transaction.
+   */
   async findSessionById(
     voiceSessionId: string,
     executor?: VoiceQueryExecutor,
+    forUpdate = false,
   ): Promise<VoiceSessionRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -363,7 +376,9 @@ export class VoiceSessionRepository {
     const result = await (
       executor ?? this.requireDatabase()
     ).query<VoiceSessionRow>(
-      `SELECT * FROM voice.session WHERE voice_session_id = $1 LIMIT 1`,
+      `SELECT * FROM voice.session WHERE voice_session_id = $1 LIMIT 1${
+        forUpdate ? " FOR UPDATE" : ""
+      }`,
       [voiceSessionId],
     );
     const row = result.rows[0];
@@ -671,6 +686,13 @@ export class VoiceSessionRepository {
     return { snapshot: mapDialogueSnapshotRow(existingRow), deduped: true };
   }
 
+  /**
+   * Excludes a row whose `retention_expires_at` has already passed
+   * (reviewer WIP feedback 2026-10-03T14:20Z: "current latest-snapshot read
+   * ignores expiry") -- a restoration read must fail closed to "no
+   * snapshot" for content past its own retention window, not resurrect it,
+   * even if the append-only table has not been purged yet.
+   */
   async findLatestDialogueSnapshot(
     voiceSessionId: string,
     executor?: VoiceQueryExecutor,
@@ -683,7 +705,7 @@ export class VoiceSessionRepository {
     ).query<VoiceDialogueSnapshotRow>(
       `
         SELECT * FROM voice.dialogue_snapshot
-        WHERE voice_session_id = $1
+        WHERE voice_session_id = $1 AND retention_expires_at > now()
         ORDER BY session_version DESC
         LIMIT 1
       `,
@@ -691,6 +713,67 @@ export class VoiceSessionRepository {
     );
     const row = result.rows[0];
     return row ? mapDialogueSnapshotRow(row) : null;
+  }
+
+  /**
+   * Governed purge candidate scan (reviewer WIP feedback 2026-10-03T14:20Z:
+   * "a retention_expires_at label alone is not bounded retention ... a
+   * governed purge path"). Returns rows past their own retention window for
+   * `VoiceSessionService.purgeExpiredDialogueSnapshots` to run through the
+   * existing `VoiceRetentionService.executePurge` legal-hold-aware policy
+   * engine before this repository ever deletes anything.
+   */
+  async findExpiredDialogueSnapshots(
+    asOf: string,
+    limit = 200,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotRow[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE retention_expires_at <= $1
+        ORDER BY retention_expires_at ASC
+        LIMIT $2
+      `,
+      [asOf, limit],
+    );
+    return result.rows.map(mapDialogueSnapshotRow);
+  }
+
+  /**
+   * The only caller of this must be `VoiceSessionService.
+   * purgeExpiredDialogueSnapshots`, after `VoiceRetentionService.
+   * executePurge` has already decided (legal-hold-aware) that THIS exact
+   * row is eligible. `voice.dialogue_snapshot` is append-only
+   * (`voice._make_append_only`, V0106) -- `DELETE` is rejected by
+   * `voice.raise_append_only()` unless the SAME privileged session setting
+   * `V0093__voice_retention_and_legal_hold.sql` already defined for
+   * `voice.retention_execution_log`'s own lawful purge sweeps is set in
+   * THIS transaction boundary; `SET LOCAL` requires `executor` to be a
+   * transaction-scoped client, never the bare pool.
+   */
+  async deleteDialogueSnapshot(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<boolean> {
+    const run = async (exec: VoiceQueryExecutor) => {
+      await exec.query(`SET LOCAL voice.allow_retention_archival = 'on'`);
+      const result = await exec.query(
+        `DELETE FROM voice.dialogue_snapshot WHERE voice_session_id = $1 AND session_version = $2`,
+        [voiceSessionId, sessionVersion],
+      );
+      return (result.rowCount ?? 0) > 0;
+    };
+    if (executor) {
+      return run(executor);
+    }
+    return this.withTransaction((tx) => run(tx));
   }
 
   private requireDatabase(): VoiceQueryExecutor {
