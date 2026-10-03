@@ -24,6 +24,20 @@ PR #2285 candidate `32213f32b64e3be4468864056422119ddb45f309` failed hosted root
 
 The follow-up omits absent optional properties and preserves response cases as readonly tuples. It does not weaken tsconfig, remove assertions, or skip gates. Revalidation in an isolated checkout: repository `pnpm run typecheck:root` exit 0; the seven-file focused command below passes 89/89, zero skips; ESLint on both corrected files and `git diff --check` exit 0. Machine-specific logs are under `.local/proof-ci-evidence/`. Fresh same-SHA hosted CI and independent review remain required; this local result does not certify smoke, deployment, or real-service acceptance.
 
+### Independent review R1–R3 follow-up
+
+The independent review of `32213f32b64e3be4468864056422119ddb45f309` returned three findings. The interactive user-requested continuation preserves that review and published history; the final handoff binds the new immutable SHA.
+
+| Review finding | Repair and regression evidence | Remaining boundary |
+| --- | --- | --- |
+| R1: root TypeScript errors | Optional-property and tuple fixes above; actual root `pnpm run typecheck:root` passes. | New-head hosted CI required. |
+| R2: driver creation inherited billing:write | `auth.policy.ts` now classifies only POST `reimbursements/proofs` and `reimbursements/proofs/staged-content` as driver:write / driver realm. `proof-route-auth.test.ts` invokes the real guard, real Reflector and actual controller metadata with only credential verification/identity mocked. Owning-batch upload and foreign-batch rejection remain exercised by the original sr-proof-001 service regressions. Missing scope/foreign realm and adjacent finance routes remain denied. | External credential/session issuance and deployed HTTP path are not certified by these boundary doubles. |
+| R3: middleware rejected bearer download grants | `internal-key.middleware.ts` admits only GET of the exact remittance-proof download route with the generated UUID-shaped proof ID. No broad prefix, internal-key exception registry entry, upload/issuance exemption or cloud ingress change. The existing controller still verifies signed grant, expiry, clean scan and content integrity. `proof-download-auth.test.ts` exercises real middleware → guard → controller: valid exact bytes with/without configured internal key; forged/missing/expired grants denied before storage read; pending content denied; alternate methods/kinds/child and encoded paths denied. Proxy-header requests still require a valid grant. | This is application-layer bearer-grant access, not anonymous Cloud Run/IAP ingress. Proxy credential exchange and deployed browser acceptance remain hosted gates. |
+
+The R2/R3 repair necessarily touches the two named shared auth files, beyond the original billing-only worker scope; this is explicitly disclosed in the handoff for supervisor/reviewer scope reconciliation. No other auth policy or cloud configuration was changed.
+
+Completed local follow-up: root typecheck exit 0; ESLint on both shared auth files and new tests exit 0; the seven-file focused command below plus `tests/unit/internal-key.middleware.test.ts` and `tests/unit/bootstrap-auth-guard-strict-env.test.ts` now selects **11 files / 120 tests, all passed, zero skips** (the two new tests reside under the already-selected sr-proof-001 directory). Machine logs: `.local/proof-ci-evidence/auth-{typecheck,lint,tests}.log`. Initial new-test setup attempts exposed a root-package dependency-resolution issue and an unsupported clean→rejected test transition; the final tests resolve Nest from the API workspace and construct pending content directly. These failed development iterations are not passing evidence. No product/network/browser/DB/Compose runtime was started.
+
 ## Finding-level repair and regressions
 
 | Finding | Previous behavior | Repair | Committed regression / limitation |
