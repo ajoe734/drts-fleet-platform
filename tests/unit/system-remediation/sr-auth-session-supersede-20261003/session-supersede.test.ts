@@ -984,43 +984,56 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R3: concurrent first-time authentic
 // roleCode changes, and that intentional value must persist.
 describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R4: genuine administrator role changes must persist their own grant start", () => {
   it("R4: updatePlatformAdminUserRole's new validFrom survives the shared upsert, while concurrent first-auth validFrom protection (R3) still holds", async () => {
-    const identityRepo = new IdentityRepository();
-    const service = new PlatformAdminService(
-      new AuditNotificationService(),
-      undefined,
-      identityRepo,
-    );
-    await service.onModuleInit();
+    // Use a controlled clock so create/update are guaranteed to land on
+    // distinct instants. Relying on real wall-clock advancement here was
+    // flaky: on a fast CI runner, createPlatformAdminUser and
+    // updatePlatformAdminUserRole can both execute within the same
+    // millisecond, producing identical before/after timestamps even when
+    // the shared upsert correctly persisted the new grant start.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-03T00:00:00.000Z"));
+      const identityRepo = new IdentityRepository();
+      const service = new PlatformAdminService(
+        new AuditNotificationService(),
+        undefined,
+        identityRepo,
+      );
+      await service.onModuleInit();
 
-    const user = await service.createPlatformAdminUser(
-      {
-        email: "r4-regression@platform.drts",
-        displayName: "R4 Regression",
-        roleCode: "admin",
-        reason: "r4 fixture",
-      },
-      "r4-create",
-      "principal_platform_supervisor",
-    );
-    const before = (
-      await identityRepo.findRoleBindingsByMembershipId(user.userId)
-    )[0]!;
+      const user = await service.createPlatformAdminUser(
+        {
+          email: "r4-regression@platform.drts",
+          displayName: "R4 Regression",
+          roleCode: "admin",
+          reason: "r4 fixture",
+        },
+        "r4-create",
+        "principal_platform_supervisor",
+      );
+      const before = (
+        await identityRepo.findRoleBindingsByMembershipId(user.userId)
+      )[0]!;
 
-    await service.updatePlatformAdminUserRole(
-      user.userId,
-      { roleCode: "superadmin", status: "active", reason: "r4 promotion" },
-      "r4-update",
-      "principal_platform_supervisor",
-    );
-    const after = (
-      await identityRepo.findRoleBindingsByMembershipId(user.userId)
-    )[0]!;
+      vi.setSystemTime(new Date("2026-10-03T01:00:00.000Z"));
+      await service.updatePlatformAdminUserRole(
+        user.userId,
+        { roleCode: "superadmin", status: "active", reason: "r4 promotion" },
+        "r4-update",
+        "principal_platform_supervisor",
+      );
+      const after = (
+        await identityRepo.findRoleBindingsByMembershipId(user.userId)
+      )[0]!;
 
-    expect(after.roleCode).toBe("superadmin");
-    // This is the R4 regression: a genuine role change must persist the new
-    // grant start the production service supplied, not the prior grant's.
-    expect(after.validFrom).not.toBe(before.validFrom);
-    expect(after.updatedAt).not.toBe(before.updatedAt);
+      expect(after.roleCode).toBe("superadmin");
+      // This is the R4 regression: a genuine role change must persist the new
+      // grant start the production service supplied, not the prior grant's.
+      expect(after.validFrom).not.toBe(before.validFrom);
+      expect(after.updatedAt).not.toBe(before.updatedAt);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("R4 does not reopen R3: idempotent ensureRoleBindingRecord calls still protect the first writer's validFrom on conflict", async () => {
