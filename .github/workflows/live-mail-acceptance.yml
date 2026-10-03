@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       CI: true
@@ -75,6 +76,12 @@ jobs:
           echo "WORKFLOW_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "BASE_SHA=$(git merge-base HEAD origin/dev)" >> "$GITHUB_ENV"
 
+      - name: Refuse overlap with an active or scheduled dev deployment
+        id: deployment_guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tests/e2e/system-remediation/sr-live-mail-001/deployment-guard.py
+
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
@@ -102,6 +109,14 @@ jobs:
         id: resources
         run: python3 tests/e2e/system-remediation/sr-live-mail-001/provider-metadata.py
 
+      # Installation/metadata checks take time: check again before auth/token.
+      # Operator must not dispatch deploy-dev until this run's teardown ends.
+      - name: Recheck deployment immediately before mail session issuance
+        id: session_guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tests/e2e/system-remediation/sr-live-mail-001/deployment-guard.py
+
       - name: Mint a fresh single-use assertion and verified tenant session
         id: sessions
         env:
@@ -123,6 +138,8 @@ jobs:
       - name: Record fail-closed acceptance status
         if: always()
         env:
+          DEPLOYMENT_GUARD_OUTCOME: ${{ steps.deployment_guard.outcome }}
+          SESSION_GUARD_OUTCOME: ${{ steps.session_guard.outcome }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
           RESOURCES_OUTCOME: ${{ steps.resources.outcome }}

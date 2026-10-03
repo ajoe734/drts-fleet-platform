@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
+import { deriveAliasRecipient } from "./session-bootstrap";
 import { observeInvitationMailbox } from "./mailbox-observer";
 import { observeBackgroundRetry } from "./retry-profile";
 import {
@@ -74,10 +75,20 @@ export function validateMailRunnerInputs(env: MailRunnerEnv): MailRunnerConfig {
     env,
     "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT",
   );
-  if (!/^[a-zA-Z0-9._-]+\+invite@gmail\.com$/.test(authorizedRecipient))
+  try {
+    const [local = "", domain = "", ...extra] = authorizedRecipient.split("@");
+    if (
+      extra.length ||
+      !local.endsWith("+invite") ||
+      deriveAliasRecipient(`${local.slice(0, -7)}@${domain}`, "invite") !==
+        authorizedRecipient
+    )
+      throw new Error();
+  } catch {
     throw new MailRunnerInputError(
-      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT must be the dedicated Gmail sender invite alias; fixture/demo/example or malformed addresses are rejected",
+      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT must be the dedicated sender invite alias; fixture/demo/example or malformed addresses are rejected",
     );
+  }
   const nonAllowlistedRecipient = required(
     env,
     "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT",

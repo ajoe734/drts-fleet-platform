@@ -5,7 +5,7 @@ import io
 import json
 from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock, patch
 
 path = Path(__file__).resolve().parents[3] / 'e2e/system-remediation/sr-live-mail-001/mailbox_observer.py'
 spec = importlib.util.spec_from_file_location('mailbox_observer', path)
@@ -25,6 +25,69 @@ def mime(recipient='unit+invite@gmail.com', body='Invitation code: ti_SUPER_SECR
 
 
 class MailboxObservationTest(unittest.TestCase):
+    def test_placeholder_domains_are_rejected_for_both_flows(self):
+        for domain in ('example.com', 'EXAMPLE.NET', 'sub.example.org', 'fixture-mail.org',
+                       'demo.mail.org', 'mail.invalid', 'mail.test', 'mail.localhost'):
+            for flow in ('invite', 'approve'):
+                with self.subTest(domain=domain, flow=flow), self.assertRaises(ValueError):
+                    observer.derive_alias_recipient('unit@' + domain, flow)
+
+    def test_aliases_preserve_gmail_and_workspace_domains(self):
+        for username in ('unit@gmail.com', 'unit@googlemail.com', 'unit@WORKSPACE-MAIL.ORG',
+                         'unit@sub-domain.workspace-mail.org', 'unit@xn--bcher-kva.org', "o'neil+dev@workspace-mail.org"):
+            for flow in ('invite', 'approve'):
+                with self.subTest(username=username, flow=flow):
+                    local, domain = username.split('@')
+                    self.assertEqual(observer.derive_alias_recipient(username, flow), local + '+' + flow + '@' + domain)
+
+    def test_aliases_reject_injection_malformed_addresses_and_unsupported_tags(self):
+        for username in ('unit@', '@example.com', 'unit@@example.com', 'unit@example.com\n',
+                         'unit\n@example.com', 'unit@example.com\r\nEVIL=value', 'Name <unit@example.com>',
+                         'unit@example.com,other@example.com', 'unit@-example.com', 'unit@example-.com',
+                         'unit@exam_ple.com', 'unit@example..com', '.unit@example.com', 'unit.@example.com',
+                         'unit..test@example.com', 'a' * 58 + '@example.com', 'unit@' + 'a' * 64 + '.com'):
+            with self.subTest(username=username), self.assertRaisesRegex(ValueError, '^Invalid dedicated mailbox$'):
+                observer.derive_alias_recipient(username, 'invite')
+        for flow in ('', 'other', 'invite\nPRIVATE=value', 'approve@elsewhere.example'):
+            with self.subTest(flow=flow), self.assertRaisesRegex(ValueError, '^Unauthorized alias$'):
+                observer.derive_alias_recipient('unit@example.com', flow)
+
+    def test_workspace_sender_reaches_readonly_imap_and_real_mime_inspection(self):
+        request = {'candidate_sha': 'a' * 40, 'api_origin': 'https://drts-dev-api-r6ykdme3wa-uc.a.run.app',
+                   'delivery_id': '11111111-1111-1111-1111-111111111111', 'flow': 'invite',
+                   'subject': 'Invitation', 'required_text': ['Business content']}
+        health = MagicMock()
+        health.__enter__.return_value = health
+        health.status = 200
+        health.headers = {'x-drts-candidate-sha': 'a' * 40}
+        client = MagicMock()
+        client.__enter__.return_value = client
+        client.select.return_value = ('OK', [])
+        client.response.return_value = ('UIDVALIDITY', [b'900'])
+        message = EmailMessage()
+        message['From'] = 'mail.acceptance@workspace-mail.org'
+        message['To'] = 'mail.acceptance+invite@workspace-mail.org'
+        message['Message-ID'] = MESSAGE_ID
+        message['Subject'] = 'Invitation'
+        message.set_content('Business content')
+        client.uid.side_effect = [('OK', [b'45']), ('OK', [(b'data', message.as_bytes())])]
+        secrets = {'drts-dev-smtp-username': 'mail.acceptance@workspace-mail.org',
+                   'drts-dev-smtp-password': 'private-password', 'drts-dev-smtp-from-email': 'mail.acceptance@workspace-mail.org'}
+        output = io.StringIO()
+        with patch.dict(observer.os.environ, {'GITHUB_ACTIONS': 'true', 'DEV_GCP_PROJECT_ID': observer.PROJECT}), \
+             patch.object(observer.sys, 'stdin', io.StringIO(json.dumps(request))), \
+             patch.object(observer.sys, 'stdout', output), patch.object(observer.sys, 'stderr', io.StringIO()), \
+             patch.object(observer, 'secret', side_effect=secrets.__getitem__), \
+             patch.object(observer.urllib.request, 'build_opener') as opener, \
+             patch.object(observer.imaplib, 'IMAP4_SSL', return_value=client):
+            opener.return_value.open.return_value = health
+            observer.main()
+        client.login.assert_called_once_with('mail.acceptance@workspace-mail.org', 'private-password')
+        client.select.assert_called_once_with('"[Gmail]/All Mail"', readonly=True)
+        self.assertTrue(json.loads(output.getvalue())['matched_content'])
+        self.assertNotIn('private-password', output.getvalue())
+        self.assertNotIn('mail.acceptance', output.getvalue())
+
     def inspect(self, raw):
         return observer.inspect_message(raw, MESSAGE_ID, 'unit+invite@gmail.com', 'unit@gmail.com', '邀請測試', ['Business id 123'])
 

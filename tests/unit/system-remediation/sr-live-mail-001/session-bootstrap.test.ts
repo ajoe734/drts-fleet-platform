@@ -1,9 +1,14 @@
 import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
+import { toApiSuccessEnvelope } from "../../../../apps/api/src/common/api-envelope";
+import { StepUpProofService } from "../../../../apps/api/src/common/auth/step-up-proof.service";
+import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth/auth.types";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   MailSessionInputError,
+  MailBootstrapError,
+  bootstrapMailSession,
   deriveAliasRecipient,
   mintTenantAdminSession,
   validateMailSessionInputs,
@@ -66,6 +71,80 @@ describe("validateMailSessionInputs", () => {
 });
 
 describe("deriveAliasRecipient", () => {
+  it.each([
+    "example.com",
+    "EXAMPLE.NET",
+    "sub.example.org",
+    "fixture-mail.org",
+    "demo.mail.org",
+    "mail.invalid",
+    "mail.test",
+    "mail.localhost",
+  ])("rejects placeholder mailbox domain %s for both flows", (domain) => {
+    for (const tag of ["invite", "approve"]) {
+      expect(() => deriveAliasRecipient(`unit@${domain}`, tag)).toThrow();
+    }
+  });
+  it.each(["invite", "approve"])(
+    "accepts the authorized sender's Workspace domain for %s",
+    (tag) => {
+      expect(
+        deriveAliasRecipient("mail.acceptance@workspace-mail.org", tag),
+      ).toBe(`mail.acceptance+${tag}@workspace-mail.org`);
+    },
+  );
+
+  it.each([
+    "unit@googlemail.com",
+    "unit@sub-domain.workspace-mail.org",
+    "unit@WORKSPACE-MAIL.ORG",
+    "unit@xn--bcher-kva.org",
+    "o'neil+dev@workspace-mail.org",
+  ])("preserves the supplied mailbox domain: %s", (mailbox) => {
+    const [local, domain] = mailbox.split("@");
+    expect(deriveAliasRecipient(mailbox, "invite")).toBe(
+      `${local}+invite@${domain}`,
+    );
+  });
+
+  it.each([
+    "unit@",
+    "@example.com",
+    "unit@@example.com",
+    "unit@example.com\n",
+    "unit\n@example.com",
+    "unit@example.com\r\nEVIL=value",
+    "Name <unit@example.com>",
+    "unit@example.com,other@example.com",
+    "unit@-example.com",
+    "unit@example-.com",
+    "unit@exam_ple.com",
+    "unit@example..com",
+    ".unit@example.com",
+    "unit.@example.com",
+    "unit..test@example.com",
+    `${"a".repeat(58)}@example.com`,
+    `unit@${"a".repeat(64)}.com`,
+  ])("rejects malformed/injectable/oversized mailboxes: %j", (mailbox) => {
+    expect(() => deriveAliasRecipient(mailbox, "invite")).toThrow(
+      /malformed base mailbox address/,
+    );
+  });
+
+  it.each(["", "other", "invite\nPRIVATE=value", "approve@elsewhere.example"])(
+    "rejects unsupported alias tags without echoing them",
+    (tag) => {
+      try {
+        deriveAliasRecipient("unit@example.com", tag);
+        throw new Error("unexpected success");
+      } catch (error) {
+        expect(String(error)).toBe(
+          "Error: Cannot derive an authorized alias from a malformed base mailbox address or unsupported tag.",
+        );
+      }
+    },
+  );
+
   it("inserts a plus-addressing tag before the domain", () => {
     expect(deriveAliasRecipient("person@gmail.com", "invite")).toBe(
       "person+invite@gmail.com",
@@ -91,6 +170,196 @@ describe("deriveAliasRecipient", () => {
     expect(() => deriveAliasRecipient("not-an-email", "invite")).toThrow(
       /malformed base mailbox address/,
     );
+  });
+});
+
+describe("hosted bootstrap entry point and safe failure diagnostics", () => {
+  function setup() {
+    const env = baseEnv({
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/unit/github-env",
+    });
+    const identity: BootstrapRequestIdentity = {
+      authMode: "jwt_bearer",
+      actorType: "tenant_admin",
+      actorId: env.DRTS_LIVE_MAIL_TENANT_ACTOR_ID!,
+      tenantId: env.DRTS_LIVE_MAIL_TEST_TENANT_ID!,
+      realm: "tenant",
+      roles: ["tenant_admin"],
+      roleFamilies: [],
+      scopes: [],
+      requestId: null,
+      sessionId: "private-session-id",
+      authTime: new Date().toISOString(),
+      amr: ["mfa"],
+    };
+    // Exercise the formal policy and proof creation, then the real wire serializer.
+    // HTTP, Google IAM, Secret Manager, and filesystem remain unit boundaries.
+    const proofService = new StepUpProofService();
+    const proof = proofService.createProof(identity, {
+      actionId: "tenant:users:create",
+    });
+    const fetcher = vi.fn(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        const path = String(url);
+        if (path.endsWith("/health")) return jsonResponse({ status: "ok" });
+        if (path.endsWith("/auth/token"))
+          return jsonResponse({ token: "private-session-token" });
+        if (path.endsWith("/auth/session"))
+          return jsonResponse(toApiSuccessEnvelope({ active: true, identity }));
+        if (path.endsWith("/step-up-proofs")) {
+          expect(JSON.parse(init!.body as string)).toEqual({
+            actionId: "tenant:users:create",
+          });
+          return jsonResponse(toApiSuccessEnvelope(proof));
+        }
+        throw new Error("Unexpected unit request");
+      },
+    );
+    const next = vi.fn().mockResolvedValue("private-google-assertion");
+    const deps = {
+      fetch: fetcher,
+      mask: vi.fn(),
+      appendEnvironment: vi.fn(),
+      readMailbox: vi.fn(() => "mail.acceptance@workspace-mail.org"),
+      assertions: vi.fn(() => ({ next })),
+    };
+    return { env, deps, identity, proof, next };
+  }
+
+  it("exports a real policy-generated proof and a Workspace alias after identity verification", async () => {
+    const { env, deps, proof } = setup();
+    await bootstrapMailSession(env, deps);
+    expect(proof.required).toBe(true);
+    expect(deps.appendEnvironment.mock.calls.map((call) => call[1])).toEqual([
+      "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=private-session-token\n",
+      `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${proof.stepUpReference}\n`,
+      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT=mail.acceptance+invite@workspace-mail.org\n",
+      "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-mail-001-negative@reserved.invalid\n",
+    ]);
+    expect(deps.mask).toHaveBeenCalledWith(proof.stepUpReference);
+    expect(deps.fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ["candidate-preflight", 0, "Error"],
+    ["token-exchange", 1, "TypeError"],
+    ["session-request", 2, "SyntaxError"],
+    ["step-up-request", 3, "SyntaxError"],
+  ] as const)(
+    "reports %s with a safe class and no upstream data",
+    async (stage, index, errorClass) => {
+      const { env, deps } = setup();
+      const normal = deps.fetch.getMockImplementation()!;
+      let calls = 0;
+      deps.fetch.mockImplementation(async (...args) => {
+        if (calls++ !== index) return normal(...args);
+        if (stage === "candidate-preflight")
+          return jsonResponse({}, { "x-drts-candidate-sha": "private-data" });
+        if (stage === "token-exchange")
+          throw Object.assign(new TypeError("private-password"), {
+            name: "private-name",
+            stderr: "private-stderr",
+          });
+        return new Response("private-body-not-json", {
+          headers: { "x-drts-candidate-sha": VALID_SHA },
+        });
+      });
+      await expect(bootstrapMailSession(env, deps)).rejects.toThrow(
+        `Mail session bootstrap failed; stage=${stage}; error_class=${errorClass}; credential details omitted.`,
+      );
+      expect(deps.readMailbox).not.toHaveBeenCalled();
+      if (index >= 2)
+        expect(deps.appendEnvironment).toHaveBeenCalledWith(
+          env.GITHUB_ENV,
+          "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=private-session-token\n",
+        );
+    },
+  );
+
+  it.each(["wrong-action", "camel-only", "not-required", "invalid-reference"])(
+    "identifies step-up-validation and retains cleanup for %s",
+    async (kind) => {
+      const { env, deps, proof } = setup();
+      const normal = deps.fetch.getMockImplementation()!;
+      deps.fetch.mockImplementation(async (url, init) => {
+        if (!String(url).endsWith("/step-up-proofs")) return normal(url, init);
+        const changed = { ...proof };
+        if (kind === "wrong-action")
+          changed.actionId = "tenant:users:role:update";
+        if (kind === "not-required") changed.required = false;
+        if (kind === "invalid-reference")
+          changed.stepUpReference = "private\nINJECT=value";
+        if (kind === "camel-only")
+          return new Response(JSON.stringify(toApiSuccessEnvelope(changed)), {
+            headers: { "x-drts-candidate-sha": VALID_SHA },
+          });
+        return jsonResponse(toApiSuccessEnvelope(changed));
+      });
+      await expect(bootstrapMailSession(env, deps)).rejects.toThrow(
+        "stage=step-up-validation; error_class=Error;",
+      );
+      expect(deps.appendEnvironment.mock.calls).toEqual([
+        [
+          env.GITHUB_ENV,
+          "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=private-session-token\n",
+        ],
+      ]);
+      expect(deps.readMailbox).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["actorId", "tenantId", "actorType", "roles"] as const)(
+    "still rejects a mismatched session %s",
+    async (key) => {
+      const { env, deps, identity } = setup();
+      Object.assign(identity, { [key]: "private-wrong-grant" });
+      await expect(bootstrapMailSession(env, deps)).rejects.toThrow(
+        "stage=session-validation; error_class=Error;",
+      );
+      expect(deps.readMailbox).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["mailbox-read", "alias-derivation", "recipient-export"] as const)(
+    "identifies %s after successful proof without leaking mailbox or process stderr",
+    async (stage) => {
+      const { env, deps } = setup();
+      if (stage === "mailbox-read")
+        deps.readMailbox.mockImplementation(() => {
+          throw Object.assign(new Error("private-command"), {
+            stderr: "private-password",
+            name: "private-name",
+          });
+        });
+      if (stage === "alias-derivation")
+        deps.readMailbox.mockReturnValue("private@example.com\nEVIL=value");
+      if (stage === "recipient-export")
+        deps.appendEnvironment.mockImplementation((_path, value) => {
+          if (value.includes("AUTHORIZED_RECIPIENT"))
+            throw new Error("private-env-content");
+        });
+      const error = await bootstrapMailSession(env, deps).catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(MailBootstrapError);
+      expect(String(error)).toBe(
+        `Error: Mail session bootstrap failed; stage=${stage}; error_class=${stage === "alias-derivation" ? "MailMailboxInputError" : "Error"}; credential details omitted.`,
+      );
+      expect(deps.appendEnvironment.mock.calls[0]?.[1]).toBe(
+        "DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=private-session-token\n",
+      );
+      expect(JSON.stringify(error)).not.toContain("private");
+    },
+  );
+
+  it("only performs candidate preflight in preflight mode", async () => {
+    const { env, deps } = setup();
+    await bootstrapMailSession(env, deps, true);
+    expect(deps.fetch).toHaveBeenCalledTimes(1);
+    expect(deps.assertions).not.toHaveBeenCalled();
+    expect(deps.readMailbox).not.toHaveBeenCalled();
+    expect(deps.appendEnvironment).not.toHaveBeenCalled();
   });
 });
 
