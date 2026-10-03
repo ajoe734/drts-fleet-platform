@@ -58,6 +58,41 @@ async function flush(times = 20): Promise<void> {
   }
 }
 
+/** Whether a captured `session.event` stream contains a
+ * `tts.playback.started`/`tts.playback.completed` event for a specific
+ * playback id -- used to prove a discarded/superseded playback never
+ * produced *any* valid started/completed evidence (Codex reopen round 3,
+ * R1), not merely that its audio chunks never reached the channel. */
+function hasPlaybackEvent(
+  events: readonly unknown[],
+  type: "tts.playback.started" | "tts.playback.completed",
+  playbackId: string,
+): boolean {
+  return events.some((entry) => {
+    const event = (
+      entry as {
+        event?: { type?: string; payload?: { playbackId?: string } };
+      }
+    ).event;
+    return event?.type === type && event.payload?.playbackId === playbackId;
+  });
+}
+
+/** Delivers a real `tts.complete` control frame on `channel`, exactly as a
+ * provider's playback-mark callback would -- the production path
+ * `VoiceSessionComposer.handleControlFrame` routes to
+ * `VoiceMediaWorkerSession.completePlayback`. */
+function sendTtsComplete(
+  channel: WebSocketServerChannel,
+  playbackId: string,
+): void {
+  (channel as unknown as EventEmitter).emit(
+    "message",
+    JSON.stringify({ type: "tts.complete", playbackId }),
+    false,
+  );
+}
+
 /** Delivers finals only via the streaming `onResult` hook, exactly like a
  * provider whose transport can emit a buffered result independent of the
  * `transcribe()` call that triggered it -- which is what lets a test
@@ -118,27 +153,36 @@ class DeterministicTtsAdapter implements VoiceTextToSpeechAdapter {
 
 /** TTS adapter whose `synthesize` call only resolves once the test
  * explicitly settles it -- used to hold a playback mid-flight so a
- * `speech.started` barge-in can be delivered while it is outstanding. */
+ * `speech.started` barge-in, newer final, or timeout can be delivered
+ * while it is outstanding. Tracks every outstanding call, not just the
+ * latest one (Codex reopen round 3, R3): once a hung TTS call no longer
+ * blocks a later turn's own synthesis call, two calls can be genuinely
+ * concurrent (the superseded one and the current one), and a test needs
+ * to settle each independently, in the order they were made. */
 class DeferredTtsAdapter implements VoiceTextToSpeechAdapter {
   readonly providerName = "deferred-tts";
   readonly isProductionCapable = false as const;
   calls = 0;
-  private resolveSynth?: () => void;
+  private readonly pending: Array<() => void> = [];
 
   synthesize(request: VoiceTtsSynthesizeRequest): Promise<VoiceTtsPlaybackHandle> {
     this.calls += 1;
+    const callIndex = this.calls;
     return new Promise((resolve) => {
-      this.resolveSynth = () =>
+      this.pending.push(() =>
         resolve({
-          playbackId: `pb-${this.calls}`,
+          playbackId: `pb-${callIndex}`,
           generation: request.generation,
           audioChunks: [new TextEncoder().encode("stale-audio")],
-        });
+        }),
+      );
     });
   }
 
+  /** Settles the oldest still-outstanding call (FIFO), matching the order
+   * calls were made in. */
   settle(): void {
-    this.resolveSynth?.();
+    this.pending.shift()?.();
   }
 }
 
@@ -265,6 +309,8 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
       coordinator,
     );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
 
     const { channel, sentBinary } = makeChannel();
     composer.attach("sess-bargein", channel);
@@ -294,6 +340,16 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     expect(
       sentBinary.some((chunk) => chunk.toString("utf8").includes("stale-audio")),
     ).toBe(false);
+    // The discarded playback never produced valid started/completed
+    // evidence, and a real `tts.complete` mark for it is a no-op.
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-1")).toBe(
+      false,
+    );
+    sendTtsComplete(channel, "pb-1");
+    await flush();
+    expect(hasPlaybackEvent(events, "tts.playback.completed", "pb-1")).toBe(
+      false,
+    );
   });
 
   /**
@@ -360,8 +416,15 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
       coordinator,
     );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
     const { channel, sentBinary } = makeChannel();
     composer.attach("sess-close-pending", channel);
+    // Captured before close removes the attachment from the composer's own
+    // map -- `get()` would no longer return it afterwards -- so the test
+    // can still probe the underlying session's own completion defense
+    // directly, not just the (already-torn-down) control-frame route.
+    const session = composer.get("sess-close-pending")!;
 
     asr.emitFinal("", "seg-1");
     await flush(3);
@@ -373,6 +436,21 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     await flush();
 
     expect(sentBinary).toHaveLength(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-1")).toBe(
+      false,
+    );
+    // Neither the real control-frame route (now a no-op channel lookup
+    // miss, since close already removed the attachment) nor the session
+    // itself can be made to report a completion for a playback that was
+    // never validly registered.
+    sendTtsComplete(channel, "pb-1");
+    await flush();
+    expect(hasPlaybackEvent(events, "tts.playback.completed", "pb-1")).toBe(
+      false,
+    );
+    expect(session.completePlayback("pb-1", new Date().toISOString())).toBe(
+      false,
+    );
 
     // A duplicate close emission (defensive guard) must not throw or
     // double-release.
@@ -388,6 +466,13 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
    * what carries that, since neither `startPlayback`'s nor the session's
    * own generation bookkeeping changes for a plain newer-final
    * supersession.
+   *
+   * R3, Codex reopen round 3: the superseded turn's own still-outstanding
+   * synthesis must never keep *blocking* the new turn's synthesis call --
+   * the engine stage (which needs per-attachment serialization) has
+   * already resolved for the first turn by the time its synthesis is
+   * reached, so the second, current turn reaches its own `tts.synthesize`
+   * promptly, well before the first turn's held call is ever settled.
    */
   it("discards synthesized audio for a turn superseded by a newer final, with no barge-in involved", async () => {
     const asr = new StreamingAsrAdapter();
@@ -399,6 +484,8 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
       coordinator,
     );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
     const { channel, sentBinary } = makeChannel();
     composer.attach("sess-newer-final", channel);
 
@@ -406,24 +493,38 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     await flush(3);
     expect(tts.calls).toBe(1);
 
-    // A second final while the first turn's synthesis is still held --
-    // queued behind it, not yet running.
+    // A second final while the first turn's synthesis is still held. The
+    // first turn's own engine stage has already resolved (reaching
+    // `startPlayback` at all proves that), so this does not have to wait
+    // for the held synthesis to settle before reaching its own.
     asr.emitFinal("救命", "seg-2");
-    await flush(3);
-    expect(tts.calls).toBe(1);
+    await flush(5);
+    expect(tts.calls).toBe(2);
+    expect(sentBinary).toHaveLength(0);
 
-    // Resolve the first (now-superseded) turn's synthesis: must never
-    // publish.
+    // Resolve the first (now-superseded) turn's synthesis (FIFO: the
+    // oldest pending call first): must never publish, and must never
+    // produce valid started/completed evidence either.
     tts.settle();
     await flush(5);
     expect(sentBinary).toHaveLength(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-1")).toBe(
+      false,
+    );
+    sendTtsComplete(channel, "pb-1");
+    await flush();
+    expect(hasPlaybackEvent(events, "tts.playback.completed", "pb-1")).toBe(
+      false,
+    );
 
-    // The second turn can now run and reaches its own synthesis call.
-    expect(tts.calls).toBe(2);
+    // The second, current turn's own synthesis resolving does publish.
     tts.settle();
     await flush();
 
     expect(sentBinary.length).toBeGreaterThan(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-2")).toBe(
+      true,
+    );
   });
 
   /**
@@ -446,6 +547,8 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
       coordinator,
     );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
     const { channel, sentBinary } = makeChannel();
     composer.attach("sess-epoch-launder", channel);
     const session = composer.get("sess-epoch-launder")!;
@@ -463,6 +566,24 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     await flush(5);
 
     expect(sentBinary).toHaveLength(0);
+    // The laundered turn never produced valid started/completed evidence
+    // either, even though its own (post-advance) generation matches the
+    // new epoch -- only the pre-advance `mediaEpoch` captured at final
+    // time catches this, which is exactly what distinguishes R2 from the
+    // plain generation check `startPlayback` already had. The legitimate
+    // later turn below computes the same generation-derived playback id
+    // (nothing else has changed `activeGeneration` since), so this id is
+    // not unique to the discarded attempt -- only its *ordering* relative
+    // to the two assertions below is.
+    const playbackId = `pb-sess-epoch-launder-2`;
+    expect(hasPlaybackEvent(events, "tts.playback.started", playbackId)).toBe(
+      false,
+    );
+    sendTtsComplete(channel, playbackId);
+    await flush();
+    expect(
+      hasPlaybackEvent(events, "tts.playback.completed", playbackId),
+    ).toBe(false);
 
     // A legitimate later turn, captured at the new epoch, still produces
     // output normally -- the epoch fence only discards the laundered
@@ -471,6 +592,9 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     await flush(5);
 
     expect(sentBinary.length).toBeGreaterThan(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", playbackId)).toBe(
+      true,
+    );
   });
 
   /**
@@ -490,6 +614,8 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
       coordinator,
     );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
     const { channel, sentBinary } = makeChannel();
     composer.attach("sess-timeout-fence", channel);
 
@@ -505,6 +631,14 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     await flush(5);
 
     expect(sentBinary).toHaveLength(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-1")).toBe(
+      false,
+    );
+    sendTtsComplete(channel, "pb-1");
+    await flush();
+    expect(hasPlaybackEvent(events, "tts.playback.completed", "pb-1")).toBe(
+      false,
+    );
 
     // A later final on the same attachment still reaches its own
     // synthesis and speaks normally -- the timeout only fences output, it
@@ -516,5 +650,8 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
     await flush();
 
     expect(sentBinary.length).toBeGreaterThan(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-2")).toBe(
+      true,
+    );
   });
 });

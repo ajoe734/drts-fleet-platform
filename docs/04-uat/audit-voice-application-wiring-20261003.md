@@ -644,3 +644,260 @@ issuance call-site claim.
 
 `same_sha_review_ci`: pending hosted CI on this round's new commit SHA
 (`CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff to Codex follows).
+
+## Round-5: Codex's third reopen (`codex-20261003T073111Z-52c78915`) -- addressed on this candidate
+
+Codex reviewed `1afa3540e2f6d8795293b211fe4e31c2aeb59436` (the round-4
+candidate) and reopened a third time, recorded
+`2026-10-03T07:38:05Z`. Per `AI_COLLABORATION_GUIDE.md` §0.7's "same
+defect, two consecutive rounds reopened" rule, R1/R2/R3 were explicitly
+marked repeated completion/media-authority/cancellation sub-cases carried
+across all three reopens; the reviewer supplied exact file/line citations
+and four reproducible probes (R1 a-d, R2 a static-execution trace, R3 a
+timed probe) in the review artifact. This round fixes the actual
+behaviors those probes exercise, not just the chunk-dropping each prior
+round already fixed, and extends the regression tests to assert the
+started/completed evidence the reviewer said prior rounds omitted.
+
+### R1 (repeated, three consecutive rounds) -- a discarded playback still registered, announced and could be marked completed
+
+**What was still wrong.** `VoiceMediaWorkerSession.startPlayback` awaited
+`ttsAdapter.synthesize()`, then checked only `generation !==
+this.activeGeneration` before registering the playback into
+`playbacksById` and emitting `tts.playback.started`.
+`session-composer.ts`'s `speak` wrapper re-checked `signal.aborted`/
+`session.getMediaEpoch() !== mediaEpoch` only *after* `startPlayback` had
+already returned -- by then registration and the "started" event had
+already happened. A later `tts.complete` control frame (or the session's
+own `completePlayback` call) for that `playbackId` was therefore accepted
+as a genuine completion (`cleared` was still `false`), producing valid-
+looking `tts.playback.started`/`tts.playback.completed` evidence for work
+that was actually discarded -- exactly the four reopen sub-cases the
+reviewer listed (newer-final, timeout, close/drain, media-epoch advance
+during propose).
+
+**Fix.** `startPlayback` now accepts an optional `isStillValid: () =>
+boolean` callback, checked atomically alongside the existing generation
+comparison, *before* registration/emission -- not after the call returns.
+`session-composer.ts`'s `speak` passes `() => !signal.aborted &&
+session.getMediaEpoch() === mediaEpoch` into `startPlayback` itself
+instead of re-checking afterward. A discarded synthesis result now never
+registers, never emits `tts.playback.started`, and a `tts.complete` for
+its `playbackId` is a plain "unknown playback" no-op
+(`completePlayback` returns `false`, emits nothing) rather than a revived
+completion.
+
+**Before -> after.**
+`session-composer-turn-coordinator.test.ts` -- every stale-synthesis case
+(barge-in, close-pending, newer-final, media-epoch-launder,
+timeout-fence) now additionally asserts, via a captured
+`"session.event"` listener and a real `tts.complete` control frame sent
+on the channel: before the fix, a stale playback's `tts.playback.started`
+event was present and a `tts.complete` for it produced
+`tts.playback.completed`; after the fix neither event ever fires for the
+discarded id, while the *current* turn's own `started`/`completed`
+evidence is unaffected. The close-pending case also calls
+`session.completePlayback(playbackId, ...)` directly (not only through
+the channel route) and confirms `false`.
+
+### R2 (repeated, three consecutive rounds) -- the epoch fence ran after state commit/tool execution, not before, and the existing test masked it with an empty proposal
+
+**What was still wrong.** `VoiceDialogueEngine.turn`'s two commit/
+execution gates (`request.inputEpoch !== currentEpoch()`, before
+`Object.assign(state, next)` and before `ports.execute`) only ever
+checked ASR-input supersession (`inputEpoch`, bumped by a newer final or
+barge-in). A media-authority change (`VoiceMediaWorkerSession.
+advanceMediaEpoch`, SD §5.4 handoff/reconnect) never touches `inputEpoch`
+at all, so a proposal captured under the *old* media owner could still
+commit state and run tools under a *new* owner it was never valid for.
+Worse, `VoiceDialogueState.apply` sets `state.handoff` for handoff-
+triggering intents (e.g. `emergency`), and `turn()` short-circuits with an
+empty prompt for *every later turn* once `state.handoff` is set (line
+39-40) -- so a laundered stale handoff proposal could permanently wedge
+the attachment, not just leak one turn's audio. The existing round-4
+epoch-advance regression used an *empty* old proposal (intent
+`"unknown"`, no handoff), which never exercised this state-commit path at
+all -- only the TTS-publish fence R1 already covered.
+
+**Fix.** `VoiceDialogueRequest` gains an optional `mediaEpoch` field,
+captured from `event.mediaEpoch` at the point a final is admitted
+(`call-turn-coordinator.ts`'s `handle`). `VoiceCallTurnSpeaker` gains a
+`currentMediaEpoch(): number` method (the session's *live* epoch, not a
+snapshot), supplied by `session-composer.ts` as `() =>
+session.getMediaEpoch()`. `VoiceDialogueEngine.turn` takes an optional
+trailing `currentMediaEpoch` callback and folds it into the same `isStale`
+check `boundedStage` and both commit/execution gates already used for
+`inputEpoch` -- `runVoiceDialogue` checks it too, immediately after
+`propose` resolves. All three new parameters are optional/appended-last,
+so every pre-existing direct caller of `engine.turn`/`runVoiceDialogue`
+(`tests/unit/uv-exec-012.test.ts`, `uv-exec-026.test.ts`) is unaffected
+and continues to pass unchanged.
+
+**Before -> after.**
+`call-turn-coordinator.test.ts` -- new test "fences a stale
+handoff-setting proposal laundered across a media-epoch advance, so a
+fresh turn at the new epoch is not poisoned": holds a turn's `propose`,
+advances the media epoch, then resolves it with an `emergency`/`handoff`
+output (not an empty one). Before the fix this would have set
+`state.handoff` and silently wedged every later turn (verified by
+removing the `currentMediaEpoch` argument locally and observing the test
+fail with the menu prompt replaced by the handoff short-circuit's empty
+result); after the fix, the stale turn never reaches the speaker
+(`speaker.calls` stays empty) and a fresh final admitted at the new epoch
+still gets a normal response.
+`session-composer-turn-coordinator.test.ts`'s existing epoch-launder test
+is extended with the same started/completed assertions described under
+R1.
+
+### R3 (repeated, P2, across rounds) -- abort fenced output but never released the hung queue stage itself
+
+**What was still wrong.** `runTurn`'s queue-stage promise resolved only
+when its deadline timer fired or `executeTurn`'s `await
+speaker.speak(...)` settled -- `handle`'s own `abortController.abort()`
+calls (on `speech.started` barge-in or a newer final) never released it.
+Since `speaker.speak` has no abort channel of its own and can hang on an
+uncooperative external TTS call, a newer final's *own* turn could not
+even reach its own `propose`/`synthesize` call until the superseded
+turn's hung `speak` was manually resolved -- up to the full
+`turnTimeoutMs` (8s default) in the worst case, reproduced by the
+reviewer's probe (`speech.started` then a new final, `synthCalls` stuck
+at 1 until the old synthesis was resolved).
+
+**Fix.** `executeTurn` no longer `await`s `speaker.speak(...)`; it fires
+the call and lets it run detached (`void speaker.speak(...).catch(...)`),
+relying on the R1/R2 fencing inside `speak`'s own implementation to keep
+a late, superseded result from ever publishing. This preserves per-
+attachment engine serialization (`VoiceDialogueEngine`'s single-instance
+`running` guard): the queue stage now only bounds the engine stage
+(`propose`/`persist`/`execute`), which is already abort/deadline-bounded
+internally via `request.signal` racing inside `runVoiceDialogue`/
+`boundedStage`, so a later turn's own `engine.turn()` call never races a
+still-running earlier one. `runTurn`'s deadline timer keeps firing
+`abortController.abort()` independently of queue release, since its
+remaining job is fencing a still-detached `speak` call that may outlive
+the (now much shorter) queue stage.
+
+**Before -> after.**
+`session-composer-turn-coordinator.test.ts`'s "discards synthesized audio
+for a turn superseded by a newer final" test is rewritten to assert the
+*fixed* behavior instead of enshrining the defect: before the fix (the
+test's old assertion), the second turn's own `tts.synthesize` call
+(`tts.calls`) stayed at 1 -- blocked -- until the first (stale) turn's
+held synthesis was explicitly resolved; after the fix, `tts.calls`
+reaches 2 promptly, before the stale synthesis is ever touched.
+`call-turn-coordinator.test.ts`'s "bounds the whole turn (including a
+hung speaker)" test continues to pass unchanged (it only asserted the
+second turn eventually speaks, not a specific timing, so it does not
+enshrine the now-fixed over-blocking).
+
+### R4 (repeated, P1, across rounds) -- fixture persistence had no type distinguishing it from a trusted port, so the engine's fail-closed persist gate had nothing to gate on; recording/issuance boundaries re-verified, not re-litigated
+
+**What was still wrong.** `VoiceCallTurnCoordinator`'s `ports.persist` was
+a bare `async () => {}` closure -- always successful, with no type or
+runtime check distinguishing it from a real CAS-backed port.
+`VoiceDialogueTurnPorts.persist`'s own contract doc ("Must CAS against
+the admitted session revision and input/lease epochs. Failure blocks
+every tool and playback") could never actually be exercised: there was
+no way for this coordinator to represent an absent, rejected, or stale
+persistence outcome at all, fixture or otherwise.
+
+**Fix.** New `dialogue-persist-port.ts` defines `VoiceDialoguePersistPort`
+(`mode: "fixture" | "trusted"`) and `createFixtureDialoguePersistPort()`
+-- the only port this worker can honestly provide today, explicitly
+labeled non-durable, process-lifetime-scoped. `VoiceCallTurnCoordinator`
+takes it (defaulting to the fixture port, unchanged behavior) plus a
+`production` constructor flag (defaulting `false`, matching
+`server.ts`'s actual composition unchanged). `executeTurn`'s
+`ports.persist` now fails closed -- throws
+`voice_persist_untrusted_for_production` *before* calling the port at
+all -- if `production` is ever `true` with a `"fixture"` port, and
+otherwise delegates to the port, propagating its rejection (a `"trusted"`
+port's own CAS failure) the same way. This is unreachable in this
+worker's actual composition today (`server.ts` never sets `production:
+true`, since no live `VoiceDialogueProvider` exists either -- unchanged
+from every prior round), but is now a real, independently testable
+fail-closed guard rather than an unenforceable comment, and is the seam a
+future trusted (apps/api-backed) port plugs into without further
+coordinator changes.
+
+**Recording/issuance boundaries: re-verified, left blocked.**
+`object-store-client.ts`'s `ObjectStoreClient` seam and
+`ObjectStoreRecorderObjectStore` (`object-store-recorder.ts`) remain
+fully implemented and unit-tested against that provider-neutral boundary,
+re-read in full this round; no concrete backend is constructed anywhere
+in this worker's production composition, confirmed again by `rg -n
+"ObjectStoreRecorderObjectStore\(" apps/voice-media-worker/src` (zero
+matches outside its own test file). Reaching a real backend needs
+`@aws-sdk/client-s3` added to `apps/voice-media-worker/package.json`,
+which this task's `write_scopes` does not include
+(`apps/voice-media-worker/src/`, not the manifest) and which this round
+did not add -- that is a **coordination action owed to the
+dependency-gates owner (Gemini)**, not evidence the storage protocol
+itself is undecided: the existing `S3DriverSosAttachmentStorageAdapter`
+convention (`apps/api/src/modules/driver-sos/
+s3-driver-sos-attachment-storage.adapter.ts`) is the accepted pattern to
+follow once the dependency lands. Recorded here as the concrete, actionable
+ask rather than relabeling the whole recording path undesigned.
+`call-turn-coordinator.ts`'s class doc and `server.ts`'s `console.warn`
+(the narrower, three-gap issuance/route/HTTP-client framing from round 4)
+were re-read against `voice-capability.service.ts`,
+`voice-capability.guard.ts`, and `voice-booking.controller.ts` again this
+round and found still accurate -- unchanged.
+
+**Before -> after.**
+`call-turn-coordinator.test.ts` -- two new tests: "fails closed instead
+of running a production engine against the fixture-only persist port"
+(before: no such guard existed, a `production: true` coordinator would
+have silently run the fixture no-op persist and spoken normally; after:
+`speaker.calls` stays empty) and "runs a production engine against a
+trusted persist port, and still blocks the speaker if it rejects" (proves
+the guard does not block a genuine `"trusted"` port, and that the port's
+own rejection still propagates to block the speaker, both directions of
+the fail-closed contract).
+
+## Round-5 verification
+
+| Finding / acceptance key | Source basis & change location | Before -> after | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| R1 (repeated x3) `authority_epoch_consent_fences`, `composed_turn_and_recording_path` | `media-session.ts` (`startPlayback` gains `isStillValid`, checked before registration/emission); `session-composer.ts` (`speak` passes it into `startPlayback` instead of re-checking after) | Before: a discarded playback still registered/emitted `tts.playback.started` and could later be marked `tts.playback.completed`. After: neither event ever fires for a discarded playback; a real `tts.complete` frame for it is a no-op. | `pnpm --filter @drts/voice-media-worker typecheck`/`lint`: exit 0. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`: 3 files / 24 tests pass; see per-case started/completed assertions added to barge-in, close-pending, newer-final, media-epoch-launder, and timeout-fence cases. | Still proven only against this process's own in-memory session/playback bookkeeping, not a live TTS vendor (unchanged limitation, every prior round). |
+| R2 (repeated x3) `authority_epoch_consent_fences` | `voice-dialogue-provider.ts` (`VoiceDialogueRequest.mediaEpoch`, `runVoiceDialogue`'s post-propose check); `dialogue-engine.ts` (`turn`'s `currentMediaEpoch` param, `isStale` folds it into both commit/execute gates and `boundedStage`); `call-turn-coordinator.ts` (`VoiceCallTurnSpeaker.currentMediaEpoch`, `handle` captures `request.mediaEpoch`); `session-composer.ts` (`currentMediaEpoch: () => session.getMediaEpoch()`) | Before: a stale handoff-setting proposal laundered across a media-epoch advance could commit `state.handoff` and wedge every later turn. After: the stale commit never lands; a fresh turn at the new epoch runs normally. | Same vitest run: new `call-turn-coordinator.test.ts` case "fences a stale handoff-setting proposal laundered across a media-epoch advance..." passes. Full regression (below): 260/260 pass, including `tests/unit/uv-exec-012.test.ts`/`uv-exec-026.test.ts` (direct `engine.turn`/`runVoiceDialogue` callers, confirming the new parameters are backward-compatible, not just additive in type). | Epoch fencing is local to this worker's own bookkeeping; no live CTI/media-authority vendor exists to test the real external boundary against (unchanged). |
+| R3 (repeated, P2) `composed_turn_and_recording_path` | `call-turn-coordinator.ts` (`executeTurn` no longer awaits `speaker.speak`; `runTurn`'s queue stage now bounds only the engine stage) | Before: a newer final's own turn could not reach its own synthesis call until the superseded turn's hung `speak` was manually resolved. After: it reaches synthesis promptly; engine-stage serialization (the shared per-attachment `VoiceDialogueEngine` instance) is preserved. | Same vitest run: "discards synthesized audio for a turn superseded by a newer final..." (rewritten to assert the fixed timing) and "fences output from a turn whose synthesis is still outstanding when its own timeout fires" both pass. | The superseded `speak` call still runs to completion in the background (no abort channel on the external TTS call); only its scheduling/publication is fenced -- documented limitation, unchanged across every round. |
+| R4 (repeated x3, P1) `composed_turn_and_recording_path`, `precise_unimplemented_and_external_boundaries` | New `dialogue-persist-port.ts` (`VoiceDialoguePersistPort`, `createFixtureDialoguePersistPort`); `call-turn-coordinator.ts` (`persistPort`/`production` constructor params, fail-closed guard in `executeTurn`'s `ports.persist`) | Before: fixture persistence was an untyped always-successful no-op; the engine's fail-closed persist gate was unenforceable. After: fixture vs. trusted persistence is a real, typed distinction; a `production: true` coordinator refuses to run against a `"fixture"` port, and a `"trusted"` port's rejection still blocks the speaker. Recording-backend/issuance boundaries re-read and confirmed unchanged (genuinely blocked on the dependency-gates coordination and cross-service trust-authority decisions named above, not re-litigated as undesigned). | Same vitest run: two new tests, "fails closed instead of running a production engine against the fixture-only persist port" and "runs a production engine against a trusted persist port, and still blocks the speaker if it rejects", both pass. | `production: true` remains unreachable in this worker's actual composition (`server.ts` unchanged, still always `false`); the guard is verified directly against the coordinator, not through the full `server.ts` composition path. Recording S3 backend and capability-issuance HTTP client/route remain unimplemented, blocked on the named cross-task coordination -- not claimed done here. |
+| `same_sha_review_ci` | N/A (candidate-lifecycle level) | N/A | Pending: this round's `CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff to Codex; hosted CI run on that exact SHA. | Not yet run as of this handoff. |
+
+**Commands run this round:**
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- exit 0.
+- `pnpm --filter @drts/voice-media-worker lint` -- exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`
+  -- 3 files / 24 tests passed (14 in `call-turn-coordinator.test.ts` --
+  11 unchanged + 1 new R2 state-poisoning case + 2 new R4 fail-closed-guard
+  cases; 7 in `session-composer-turn-coordinator.test.ts` -- all extended
+  with started/completed assertions per R1, and the newer-final case
+  rewritten per R3 to assert the fixed (not-blocked) timing; 3 in
+  `object-store-recorder.test.ts` unchanged).
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/internal-auth.test.ts
+  tests/unit/audit-voice-runtime-20261002/provider-composition.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts
+  tests/unit/audit-voice-runtime-20261002/websocket-channel-frame-limits.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-composer.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-lifecycle-boundaries.test.ts
+  tests/unit/uv-exec-008.test.ts tests/unit/uv-exec-010.test.ts
+  tests/unit/uv-exec-012.test.ts tests/unit/uv-exec-026.test.ts` -- 16
+  files / 260 tests passed, zero regressions from this round's
+  `media-session.ts`/`session-composer.ts`/`call-turn-coordinator.ts`/
+  `dialogue-engine.ts`/`voice-dialogue-provider.ts` changes and the new
+  `dialogue-persist-port.ts`. `uv-exec-012.test.ts`/`uv-exec-026.test.ts`
+  are outside this task's `write_scopes` and were not modified; they are
+  included specifically to prove the `VoiceDialogueRequest.mediaEpoch`/
+  `VoiceDialogueEngine.turn`'s new trailing parameter are backward-
+  compatible for their existing direct callers.
+- Deliberately excludes the four VM-prohibited `server.start()`/real-`fetch`
+  files named in the task brief, same as every prior round.
+
+`same_sha_review_ci`: pending hosted CI on this round's new commit SHA
+(`CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff to Codex follows).

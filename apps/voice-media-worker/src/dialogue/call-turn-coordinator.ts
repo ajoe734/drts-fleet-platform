@@ -9,6 +9,10 @@ import type {
   VoiceDialogueProvider,
   VoiceDialogueRequest,
 } from "./voice-dialogue-provider";
+import {
+  createFixtureDialoguePersistPort,
+  type VoiceDialoguePersistPort,
+} from "./dialogue-persist-port";
 import type { VoiceMediaWorkerEvent } from "../media-session";
 
 /** Speaks a completed turn's own verified prompt text back on a session's
@@ -36,6 +40,13 @@ export interface VoiceCallTurnSpeaker {
     signal: AbortSignal,
     mediaEpoch: number,
   ): Promise<void>;
+  /** The session's *live* media-authority epoch, read fresh on every call
+   * -- never the snapshot captured when a transcript arrived (Codex
+   * reopen round 2/3, R2). This is what lets `VoiceDialogueEngine.turn`
+   * fence an obsolete proposal's state commit/tool execution against a
+   * media-authority change that happened mid-turn, not only its eventual
+   * `speak` call. */
+  currentMediaEpoch(): number;
 }
 
 /**
@@ -132,6 +143,24 @@ export class VoiceCallTurnCoordinator {
   constructor(
     private readonly createProvider: () => VoiceDialogueProvider,
     private readonly turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
+    /** Codex reopen round 2/3, R4: explicitly isolates fixture-mode
+     * persistence from a trusted, durable runtime port (see
+     * `./dialogue-persist-port.ts`) instead of the engine always running
+     * against an unlabeled, always-successful no-op. Defaults to the only
+     * port this worker can honestly provide today -- see this class's own
+     * doc on why no trusted (apps/api-backed) port is reachable yet. */
+    private readonly persistPort: VoiceDialoguePersistPort = createFixtureDialoguePersistPort(),
+    /** Always `false` in this worker's actual composition (`../server.ts`
+     * never sets it): no live `VoiceDialogueProvider` exists either (see
+     * class doc), so `true` would make every turn fail closed with
+     * `voice_fixture_forbidden` rather than ever actually speaking to a
+     * caller. Kept as a real constructor parameter, not a hardcoded
+     * literal, specifically so a `production: true` configuration is
+     * fail-closed by construction: it refuses to run with a `"fixture"`
+     * `persistPort` (see `executeTurn`'s `ports.persist`) rather than
+     * silently treating fixture persistence as durable the moment a live
+     * provider is wired. */
+    private readonly production = false,
   ) {}
 
   /** Call once per `VoiceSessionComposer.attach()`, before any event for
@@ -146,7 +175,7 @@ export class VoiceCallTurnCoordinator {
       // One engine per attachment: `VoiceDialogueEngine.turn` guards itself
       // with a single instance-scoped `running` flag, so attachments must
       // never share one.
-      engine: new VoiceDialogueEngine(this.createProvider(), false),
+      engine: new VoiceDialogueEngine(this.createProvider(), this.production),
       state: new VoiceDialogueState(),
       inputEpoch: 0,
       queue: Promise.resolve(),
@@ -210,6 +239,7 @@ export class VoiceCallTurnCoordinator {
       sessionId: attachment.sessionId,
       turnId: randomUUID(),
       inputEpoch: turnSession.inputEpoch,
+      mediaEpoch: event.mediaEpoch,
       segmentIds: [event.payload.segmentId],
       transcript: event.payload.text,
       verifiedContext: {},
@@ -229,13 +259,20 @@ export class VoiceCallTurnCoordinator {
     );
   }
 
-  /** Bounds the *entire* queue stage -- including the final `speaker.speak`
-   * call, which has no abort channel of its own (R3) -- so a speaker/
-   * provider call that never settles cannot block every later turn behind
-   * it regardless of `turnTimeoutMs`. Never rejects into `queue`: there is
-   * no caller here to usefully receive it, and a long-lived worker process
-   * must not let one turn's failure break the chain for this attachment's
-   * later turns. */
+  /** Bounds the engine stage (`propose`/`persist`/`execute`, inside
+   * `executeTurn`'s own `await engine.turn(...)`) -- the part that must
+   * serialize per attachment against `VoiceDialogueEngine`'s single-
+   * instance `running` guard -- so a later final's turn never starts on
+   * the same engine while an earlier one is still mid-flight. It does
+   * *not* wait for `executeTurn`'s detached `speaker.speak` call (R3,
+   * Codex reopen round 3): that call has no abort channel of its own and
+   * can hang indefinitely on an uncooperative external TTS call, and
+   * `engine.turn()` itself already settles promptly on abort/deadline via
+   * `request.signal` racing inside `runVoiceDialogue`/`boundedStage`, so
+   * the queue stage is bounded without needing a separate release path
+   * here. Never rejects into `queue`: there is no caller here to usefully
+   * receive it, and a long-lived worker process must not let one turn's
+   * failure break the chain for this attachment's later turns. */
   private runTurn(
     turnSession: TurnSession,
     request: VoiceDialogueRequest,
@@ -251,18 +288,14 @@ export class VoiceCallTurnCoordinator {
         settled = true;
         resolveQueueStage();
       };
-      const timer = setTimeout(
-        () => {
-          // Supersede: a hung speaker/provider must not keep blocking this
-          // attachment's queue past its own turn's deadline. The dangling
-          // operation (if it later settles) is fenced by `speak`'s own
-          // post-await `signal` re-check (R3, Codex reopen round 2: timeout
-          // must not just stop blocking *later* turns, it must also stop
-          // *this* turn's own output from publishing once the deadline has
-          // passed), never published.
-          abortController.abort();
-          releaseQueue();
-        },
+      // Fences this turn's own output once its deadline passes, by
+      // aborting the controller `speak`'s detached call re-checks (see
+      // `executeTurn`) -- independent of the queue stage above, which by
+      // then has normally already released. `AbortController.abort()` is
+      // idempotent, so firing after release/supersession already aborted
+      // it is harmless.
+      setTimeout(
+        () => abortController.abort(),
         Math.max(0, request.deadline - Date.now()),
       );
 
@@ -280,7 +313,6 @@ export class VoiceCallTurnCoordinator {
           }
         })
         .finally(() => {
-          clearTimeout(timer);
           releaseQueue();
         });
     });
@@ -295,13 +327,21 @@ export class VoiceCallTurnCoordinator {
     mediaEpoch: number,
   ): Promise<void> {
     const ports: VoiceDialogueTurnPorts = {
-      persist: async () => {
-        // No durable per-call session store is reachable from this process
-        // (see class doc) -- that is `voice.session` in apps/api's
-        // Postgres. The engine's own in-memory `Object.assign(state, next)`
-        // immediately after this resolves is the only persistence this
-        // coordinator can honestly provide, scoped to this process's own
-        // lifetime (lost on restart, never shared with apps/api).
+      persist: async (next, bounded) => {
+        // Fail closed by construction (Codex reopen round 2/3, R4): a
+        // `production` engine must never run its CAS-dependent commit/
+        // tool-execution/playback stages against a `"fixture"` persist
+        // port that cannot actually honor the durable CAS
+        // `VoiceDialogueTurnPorts.persist`'s own contract requires -- see
+        // `./dialogue-persist-port.ts`. Never reachable in this worker's
+        // actual composition today (`production` is always `false`, see
+        // this class's constructor doc); this is the seam that keeps that
+        // true once a live provider and a trusted port both exist, rather
+        // than relying on every future caller remembering to re-check it.
+        if (this.production && this.persistPort.mode === "fixture") {
+          throw new Error("voice_persist_untrusted_for_production");
+        }
+        await this.persistPort.persist(next, bounded);
       },
       execute: (output) =>
         Promise.resolve(this.executeTools(output, turnSession.state)),
@@ -311,6 +351,7 @@ export class VoiceCallTurnCoordinator {
       turnSession.state,
       () => turnSession.inputEpoch,
       ports,
+      () => speaker.currentMediaEpoch(),
     );
     // Only the turn that is still this attachment's current, non-aborted
     // one may even be *offered* to the speaker -- a barge-in, release,
@@ -326,12 +367,30 @@ export class VoiceCallTurnCoordinator {
       turnSession.activeAbort === abortController &&
       !abortController.signal.aborted;
     if (result.prompt && isCurrent) {
-      await speaker.speak(
-        result.prompt,
-        languageCode,
-        abortController.signal,
-        mediaEpoch,
-      );
+      // Deliberately not awaited (Codex reopen round 3, R3): the engine
+      // stage above (`propose`/`persist`/`execute`) is what needs
+      // per-attachment serialization against `VoiceDialogueEngine`'s own
+      // single-instance `running` guard, and it already settles promptly
+      // on abort via `request.signal` racing inside `runVoiceDialogue`/
+      // `boundedStage`. `speak`'s own synthesis call has no abort channel
+      // of its own and can hang indefinitely on an uncooperative external
+      // TTS call; awaiting it here would keep blocking this attachment's
+      // `queue` for every later turn behind it regardless of
+      // `turnTimeoutMs`. Letting it run detached is safe: `speak`'s
+      // implementation re-checks `signal`/`mediaEpoch` immediately before
+      // publishing (see `VoiceCallTurnSpeaker.speak`'s doc and
+      // `VoiceSessionComposer.attach`), so a superseded result it
+      // eventually produces is still fenced from ever reaching the caller.
+      void speaker
+        .speak(result.prompt, languageCode, abortController.signal, mediaEpoch)
+        .catch((error) => {
+          if (!this.isExpectedSupersession(error)) {
+            console.error(
+              "[voice-call-turn-coordinator] speak failed",
+              error,
+            );
+          }
+        });
     }
   }
 

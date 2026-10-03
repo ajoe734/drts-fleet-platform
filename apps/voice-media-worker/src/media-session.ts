@@ -266,11 +266,23 @@ export class VoiceMediaWorkerSession {
    * actually fences that case: a stale result is discarded (never
    * registered, never emitted, empty audio returned) instead of being
    * played back over the caller's barge-in.
+   *
+   * `isStillValid`, when supplied, is re-checked at the exact same point as
+   * the generation comparison -- atomically, before this playback is ever
+   * registered or its "started" event emitted (Codex reopen round 3, R1):
+   * a caller-level re-check performed only *after* `startPlayback` already
+   * returned is too late, since registration/emission has already
+   * happened by then. This is what lets a turn-level staleness source that
+   * `activeGeneration` alone cannot see (a newer final, a turn timeout, or
+   * a media-epoch advance that happened while this call's own `propose`/
+   * `synthesize` was still in flight) discard the result before it can
+   * ever be marked started, let alone later accepted as completed.
    */
   async startPlayback(
     text: string,
     languageCode: string,
     occurredAt: string,
+    isStillValid?: () => boolean,
   ): Promise<VoiceTtsPlaybackHandle> {
     const generation = this.activeGeneration;
     const handle = await this.ttsAdapter.synthesize({
@@ -279,7 +291,10 @@ export class VoiceMediaWorkerSession {
       languageCode,
       generation,
     });
-    if (generation !== this.activeGeneration) {
+    if (
+      generation !== this.activeGeneration ||
+      (isStillValid && !isStillValid())
+    ) {
       return { ...handle, audioChunks: [] };
     }
     this.playbacksById.set(handle.playbackId, {

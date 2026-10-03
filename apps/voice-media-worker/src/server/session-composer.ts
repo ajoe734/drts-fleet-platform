@@ -109,27 +109,30 @@ export class VoiceSessionComposer extends EventEmitter {
         if (turnAttachment) {
           this.turnCoordinator?.handle(turnAttachment, event, {
             speak: async (text, languageCode, signal, mediaEpoch) => {
+              // Passed into `startPlayback` itself (Codex reopen round 3,
+              // R1), not just re-checked here after it returns:
+              // `startPlayback`'s own `synthesize` call is exactly the
+              // async gap a release, barge-in, newer final, or turn
+              // timeout can land in, and by the time this `await` resumes,
+              // a caller-side check is already too late -- `startPlayback`
+              // has already registered the playback and emitted its
+              // "started" event. `signal` catches release/barge-in/newer-
+              // final/timeout (they all abort the same controller);
+              // `mediaEpoch` catches a handoff/reconnect epoch advance that
+              // happened between this transcript's capture and now, which
+              // `signal` alone would never see since none of those abort
+              // the controller.
               const handle = await session.startPlayback(
                 text,
                 languageCode,
                 new Date().toISOString(),
+                () => !signal.aborted && session.getMediaEpoch() === mediaEpoch,
               );
-              // Re-checked here, not just by the coordinator before calling
-              // `speak` (R2/R3, Codex reopen round 2): `startPlayback`'s own
-              // `synthesize` call is exactly the async gap a release,
-              // barge-in, newer final, or turn timeout can land in. `signal`
-              // catches all four (they all abort the same controller);
-              // `mediaEpoch` catches a handoff/reconnect epoch advance that
-              // happened between this transcript's capture and now, which
-              // `signal` alone would never see since none of those four
-              // abort the controller.
-              if (signal.aborted || session.getMediaEpoch() !== mediaEpoch) {
-                return;
-              }
               for (const chunk of handle.audioChunks) {
                 channel.sendBinary(Buffer.from(chunk));
               }
             },
+            currentMediaEpoch: () => session.getMediaEpoch(),
           });
         }
       },

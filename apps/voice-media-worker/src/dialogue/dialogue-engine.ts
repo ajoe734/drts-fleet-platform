@@ -34,41 +34,52 @@ export class VoiceDialogueEngine {
     state: VoiceDialogueState,
     currentEpoch: () => number,
     ports: VoiceDialogueTurnPorts,
+    /** Codex reopen round 2/3, R2: `inputEpoch` alone only tracks ASR-
+     * input supersession. A media-authority change (handoff/reconnect,
+     * `VoiceMediaWorkerSession.advanceMediaEpoch`) never touches it, so an
+     * obsolete proposal captured under a since-superseded media owner
+     * must be fenced here too, at the exact same points `inputEpoch`
+     * already gates -- before this turn's state commit and before its
+     * tool execution -- not only when the eventual speaker tries to
+     * publish audio for it. Optional, appended last, so an existing
+     * caller with no media-authority concept of its own (a direct unit
+     * test against this engine) is unaffected and simply skips this
+     * check. */
+    currentMediaEpoch?: () => number,
   ) {
     if (this.running) throw new Error("voice_turn_in_progress");
     if (state.handoff)
       return { prompt: "", terminal: "handoff" as const, results: [] };
     this.running = true;
+    const isStale = () =>
+      request.inputEpoch !== currentEpoch() ||
+      (currentMediaEpoch !== undefined &&
+        request.mediaEpoch !== currentMediaEpoch());
     try {
       const output = await runVoiceDialogue(
         this.provider,
         request,
         currentEpoch,
         this.production,
+        currentMediaEpoch,
       );
       const next = Object.assign(
         new VoiceDialogueState(),
         structuredClone(state),
       );
       next.apply(output, request.turnId);
-      await this.boundedStage(request, currentEpoch, (bounded) =>
+      await this.boundedStage(request, isStale, (bounded) =>
         ports.persist(next, bounded),
       );
       request.signal.throwIfAborted();
-      if (
-        request.inputEpoch !== currentEpoch() ||
-        Date.now() >= request.deadline
-      )
+      if (isStale() || Date.now() >= request.deadline)
         throw new Error("voice_stale_epoch");
       Object.assign(state, next);
-      const results = await this.boundedStage(request, currentEpoch, () =>
+      const results = await this.boundedStage(request, isStale, () =>
         ports.execute(output),
       );
       request.signal.throwIfAborted();
-      if (
-        request.inputEpoch !== currentEpoch() ||
-        Date.now() >= request.deadline
-      )
+      if (isStale() || Date.now() >= request.deadline)
         throw new Error("voice_stale_epoch");
       const prompt = state.handoff
         ? output.intent === "emergency"
@@ -91,7 +102,7 @@ export class VoiceDialogueEngine {
    * state, invoke the next stage, or release a newer turn's running guard. */
   private async boundedStage<T>(
     request: VoiceDialogueRequest,
-    currentEpoch: () => number,
+    isStale: () => boolean,
     operation: (bounded: VoiceDialogueRequest) => Promise<T>,
   ): Promise<T> {
     const controller = new AbortController();
@@ -111,8 +122,7 @@ export class VoiceDialogueEngine {
         cancelled,
         Promise.resolve().then(() => {
           if (controller.signal.aborted) throw new Error("voice_aborted");
-          if (request.inputEpoch !== currentEpoch())
-            throw new Error("voice_stale_epoch");
+          if (isStale()) throw new Error("voice_stale_epoch");
           return operation({ ...request, signal: controller.signal });
         }),
       ]);

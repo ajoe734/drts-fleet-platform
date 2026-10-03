@@ -9,6 +9,10 @@ import type {
   VoiceDialogueProvider,
   VoiceDialogueRequest,
 } from "../../../apps/voice-media-worker/src/dialogue/voice-dialogue-provider";
+import {
+  createFixtureDialoguePersistPort,
+  type VoiceDialoguePersistPort,
+} from "../../../apps/voice-media-worker/src/dialogue/dialogue-persist-port";
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003: `VoiceDialogueEngine` and its
@@ -40,11 +44,12 @@ import type {
 function finalSegment(
   text: string,
   segmentId = "seg-1",
+  mediaEpoch = 1,
 ): VoiceAsrSegmentEvent {
   return {
     type: "asr.segment.final",
     sessionId: "sess-1",
-    mediaEpoch: 1,
+    mediaEpoch,
     controlSequence: 1,
     occurredAt: new Date().toISOString(),
     payload: {
@@ -76,6 +81,10 @@ function trackingSpeaker(): VoiceCallTurnSpeaker & {
     async speak(text, languageCode) {
       calls.push({ text, languageCode });
     },
+    // Every event in this file carries `mediaEpoch: 1` (see `finalSegment`)
+    // and never changes it -- epoch-advance fencing has its own coverage
+    // in `session-composer-turn-coordinator.test.ts`.
+    currentMediaEpoch: () => 1,
   };
 }
 
@@ -251,6 +260,64 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     );
   });
 
+  /**
+   * R2, Codex reopen round 2/3: `inputEpoch` alone never fences a media-
+   * authority change (handoff/reconnect). Without the `currentMediaEpoch`
+   * check inside `VoiceDialogueEngine.turn`, a stale proposal captured
+   * under the *old* media owner -- here, one that sets `state.handoff`,
+   * exactly the "stale handoff/slot proposal" case the prior review round
+   * called out as untested -- would still commit via
+   * `Object.assign(state, next)` and poison every later turn on this
+   * attachment, since `turn()` short-circuits with an empty prompt once
+   * `state.handoff` is set (see the "forces an honest handoff" test
+   * above). A fresh, legitimate final captured *after* the epoch advance
+   * must still get the normal collection prompt, proving the stale
+   * commit never landed.
+   */
+  it("fences a stale handoff-setting proposal laundered across a media-epoch advance, so a fresh turn at the new epoch is not poisoned", async () => {
+    const deferred = deferredProvider();
+    const coordinator = new VoiceCallTurnCoordinator(() => deferred.provider);
+    const speaker = trackingSpeaker();
+    let mediaEpoch = 1;
+    speaker.currentMediaEpoch = () => mediaEpoch;
+    const attachment = coordinator.attach("sess-epoch-state");
+
+    coordinator.handle(attachment, finalSegment("救命", "seg-1", 1), speaker);
+    await flush(3);
+    expect(deferred.proposeCalls()).toBe(1);
+
+    // The media owner changes (e.g. handoff/reconnect) while this turn's
+    // propose is still outstanding.
+    mediaEpoch = 2;
+
+    deferred.resolve({
+      intent: "emergency",
+      text: "",
+      terminal: "handoff",
+      slots: [],
+      tools: [],
+      usage: { inputTokens: null, outputTokens: null },
+    });
+    await flush(5);
+
+    expect(speaker.calls).toHaveLength(0);
+
+    // A fresh final captured at the new epoch runs normally -- the epoch
+    // fence only discards the laundered turn, it doesn't wedge the
+    // attachment or leave `state.handoff` set from the discarded commit.
+    // `deferredProvider`'s second-and-later calls always resolve
+    // `EMPTY_FINAL_OUTPUT` (intent "unknown"), which is the menu prompt,
+    // not the handoff short-circuit's empty prompt -- proving the stale
+    // commit never landed.
+    coordinator.handle(attachment, finalSegment("", "seg-2", 2), speaker);
+    await flush(5);
+
+    expect(speaker.calls).toHaveLength(1);
+    expect(speaker.calls[0]!.text).toBe(
+      "請問您需要叫車、查詢訂單，還是聯絡客服？",
+    );
+  });
+
   it("never runs a turn for a non-final session event", async () => {
     const coordinator = new VoiceCallTurnCoordinator(
       () => new OpenAiRealtimeFixtureAdapter(),
@@ -399,6 +466,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
           releaseSpeak = resolve;
         });
       },
+      currentMediaEpoch: () => 1,
     };
     const coordinator = new VoiceCallTurnCoordinator(
       () => new OpenAiRealtimeFixtureAdapter(),
@@ -422,5 +490,80 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
 
     releaseSpeak?.();
     await flush();
+  });
+
+  /**
+   * R4, Codex reopen round 2/3: the engine's own fail-closed persist gate
+   * (`VoiceDialogueTurnPorts.persist`'s doc: "Failure blocks every tool
+   * and playback") had nothing to actually gate on, since the
+   * coordinator's persist was a bare, always-successful no-op with no
+   * type distinguishing it from a real CAS-backed port. Constructing the
+   * coordinator with `production: true` now refuses to run the default
+   * `"fixture"` persist port at all -- never a reachable configuration in
+   * this worker's actual composition (`../server.ts` never sets
+   * `production: true`), but exercised directly here to prove the fail-
+   * closed guard is real, not merely documented.
+   */
+  it("fails closed instead of running a production engine against the fixture-only persist port", async () => {
+    const speaker = trackingSpeaker();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      createFixtureDialoguePersistPort(),
+      true,
+    );
+    const attachment = coordinator.attach("sess-persist-guard");
+
+    coordinator.handle(attachment, finalSegment(""), speaker);
+    await flush();
+
+    expect(speaker.calls).toHaveLength(0);
+  });
+
+  /** A `"trusted"` persist port is accepted for a `production` engine
+   * without the guard firing, and its own rejection (absent/stale CAS)
+   * still blocks the turn from ever reaching the speaker -- the
+   * fail-closed behavior `VoiceDialogueTurnPorts.persist`'s doc requires. */
+  it("runs a production engine against a trusted persist port, and still blocks the speaker if it rejects", async () => {
+    const acceptingPort: VoiceDialoguePersistPort = {
+      mode: "trusted",
+      persist: async () => {},
+    };
+    const rejectingPort: VoiceDialoguePersistPort = {
+      mode: "trusted",
+      persist: async () => {
+        throw new Error("voice_session_cas_rejected");
+      },
+    };
+
+    const liveProvider: VoiceDialogueProvider = {
+      mode: "live",
+      profileVersion: "live-trusted:1",
+      propose: async () => EMPTY_FINAL_OUTPUT,
+    };
+
+    const acceptingSpeaker = trackingSpeaker();
+    const accepting = new VoiceCallTurnCoordinator(
+      () => liveProvider,
+      undefined,
+      acceptingPort,
+      true,
+    );
+    const acceptingAttachment = accepting.attach("sess-trusted-accept");
+    accepting.handle(acceptingAttachment, finalSegment(""), acceptingSpeaker);
+    await flush();
+    expect(acceptingSpeaker.calls).toHaveLength(1);
+
+    const rejectingSpeaker = trackingSpeaker();
+    const rejecting = new VoiceCallTurnCoordinator(
+      () => liveProvider,
+      undefined,
+      rejectingPort,
+      true,
+    );
+    const rejectingAttachment = rejecting.attach("sess-trusted-reject");
+    rejecting.handle(rejectingAttachment, finalSegment(""), rejectingSpeaker);
+    await flush();
+    expect(rejectingSpeaker.calls).toHaveLength(0);
   });
 });
