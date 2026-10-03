@@ -895,4 +895,262 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
       }
     }
   });
+
+  // SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX: every case above exercises the
+  // *standalone* ensurePrincipalRecord/ensureMembershipRecord/
+  // ensureRoleBindingRecord methods, which never issue BEGIN -- each
+  // statement is its own implicit autocommit transaction, so a 23505 never
+  // leaves the connection in Postgres's aborted-transaction state. Real
+  // callers that already wrap these same private upsert helpers in an
+  // explicit transaction (upsertWorkforceIdentity, ensureDefaultPlatformAccount,
+  // ensureLiveMapObserverAccount, syncLegacyTenantUserRole, invitation
+  // activation) do leave the connection aborted once any statement inside
+  // raises 23505: a bare follow-up SELECT on that same client then fails
+  // with 25P02, and the whole bundle is lost. This exercises the real
+  // transactional entry point directly.
+  it("R9-TX (real Postgres): two concurrent first-time upsertWorkforceIdentity calls, each inside its own transaction, converge instead of aborting the bundle", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const dbA = new DatabaseService();
+    const dbB = new DatabaseService();
+    databases.push(dbA, dbB);
+    const repoA = new IdentityRepository(dbA);
+    const repoB = new IdentityRepository(dbB);
+
+    const principalId = `principal_wfi_${randomUUID()}`;
+    const principalSourceRef = `source_wfi_${principalId}`;
+    principalIds.add(principalId);
+
+    const membershipId = `membership_wfi_${randomUUID()}`;
+    const membershipSourceRef = `source_wfi_${membershipId}`;
+    membershipIds.add(membershipId);
+
+    const roleBindingId = `role_binding_wfi_${randomUUID()}`;
+    const roleBindingSourceRef = `source_wfi_${roleBindingId}`;
+    roleBindingIds.add(roleBindingId);
+
+    const makeBundle = (ts: string) => ({
+      principal: {
+        principalId,
+        sourceRef: principalSourceRef,
+        issuer: "test_issuer",
+        subject: `sub_${principalId}`,
+        principalType: "human",
+        email: "wfi@example.com",
+        emailVerified: true,
+        displayName: "Workforce First-Create Fixture",
+        status: "active",
+        createdAt: ts,
+        updatedAt: ts,
+      } satisfies CanonicalIdentityPrincipalRecord,
+      membership: {
+        membershipId,
+        sourceRef: membershipSourceRef,
+        principalId,
+        realm: "tenant",
+        scopeRef: `scope_${membershipId}`,
+        tenantId: "tenant_fixture",
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: ts,
+        updatedAt: ts,
+      } satisfies CanonicalIdentityMembershipRecord,
+      roleBindings: [
+        {
+          roleBindingId,
+          sourceRef: roleBindingSourceRef,
+          membershipId,
+          roleCode: "ops_user",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: ts,
+          validTo: null,
+          createdAt: ts,
+          updatedAt: ts,
+        } satisfies CanonicalIdentityRoleBindingRecord,
+      ],
+    });
+
+    const tsA = new Date(Date.now() - 60_000).toISOString();
+    const tsB = new Date(Date.now() - 30_000).toISOString();
+    const bundleA = makeBundle(tsA);
+    const bundleB = makeBundle(tsB);
+
+    // Two independent repository instances, each issuing its own BEGIN,
+    // racing to provision the exact same, previously-unseen workforce
+    // identity bundle in one call -- the production shape of two parallel
+    // first-time authentications. Before the SAVEPOINT recovery fix, the
+    // losing transaction's follow-up SELECT (issued on the same client used
+    // for the failed INSERT) would itself fail with 25P02, and this
+    // Promise.all would reject instead of converging.
+    const [resultA, resultB] = await Promise.all([
+      repoA.upsertWorkforceIdentity(
+        bundleA.principal,
+        bundleA.membership,
+        bundleA.roleBindings,
+      ),
+      repoB.upsertWorkforceIdentity(
+        bundleB.principal,
+        bundleB.membership,
+        bundleB.roleBindings,
+      ),
+    ]);
+
+    expect(resultA.principal.updatedAt).toBe(resultB.principal.updatedAt);
+    expect([tsA, tsB]).toContain(resultA.principal.updatedAt);
+    expect(resultA.membership.updatedAt).toBe(resultB.membership.updatedAt);
+    expect(resultA.roleBindings[0]?.updatedAt).toBe(
+      resultB.roleBindings[0]?.updatedAt,
+    );
+
+    const principalRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalId],
+    );
+    expect(principalRow.rows[0]?.updated_at.toISOString()).toBe(
+      resultA.principal.updatedAt,
+    );
+    const membershipRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+      [membershipId],
+    );
+    expect(membershipRow.rows[0]?.updated_at.toISOString()).toBe(
+      resultA.membership.updatedAt,
+    );
+    const roleBindingRow = await dbA.query<{ updated_at: Date }>(
+      `SELECT updated_at FROM iam.identity_role_bindings WHERE role_binding_id = $1`,
+      [roleBindingId],
+    );
+    expect(roleBindingRow.rows[0]?.updated_at.toISOString()).toBe(
+      resultA.roleBindings[0]?.updatedAt,
+    );
+  });
+
+  // SR-AUTH-SESSION-SUPERSEDE-20261003 R10: a 23505 is not always the
+  // compatible "two racers for the same not-yet-existing row" case that the
+  // retry-after-SAVEPOINT recovery is meant for. If the incoming write's new
+  // values collide with a *different*, already-persisted row's unique
+  // columns (here: another principal already owns the (issuer, subject)
+  // pair this write is trying to claim), that is a genuine conflict and
+  // must reject -- not resolve by silently handing back the unrelated,
+  // unchanged row for our own source_ref as if nothing was wrong.
+  it("R10 (real Postgres): reassigning a principal's subject to one another principal already owns is rejected, not silently resolved to the stale row", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+
+    const principalIdA = `principal_r10_a_${randomUUID()}`;
+    const principalIdB = `principal_r10_b_${randomUUID()}`;
+    principalIds.add(principalIdA);
+    principalIds.add(principalIdB);
+    const sourceRefA = `source_r10_${principalIdA}`;
+    const sourceRefB = `source_r10_${principalIdB}`;
+
+    await insertPrincipalFixture(db, principalIdA, sourceRefA);
+    await insertPrincipalFixture(db, principalIdB, sourceRefB);
+
+    const beforeRow = await db.query<{ subject: string; updated_at: Date }>(
+      `SELECT subject, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalIdA],
+    );
+
+    // A's own source_ref, but claiming B's subject under the same issuer --
+    // this must hit uq_identity_principals_issuer_subject against B's row,
+    // not the source_ref arbiter.
+    await expect(
+      repo.ensurePrincipalRecord({
+        principalId: principalIdA,
+        sourceRef: sourceRefA,
+        issuer: "test_issuer",
+        subject: `sub_${principalIdB}`,
+        principalType: "human",
+        email: "r10@example.com",
+        emailVerified: true,
+        displayName: "R10 Conflict Fixture",
+        status: "active",
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    ).rejects.toThrow();
+
+    // The rejected write must not have been silently applied, nor must the
+    // row have been left byte-for-byte as before and reported a success --
+    // it has to be an observable failure of the caller's request.
+    const afterRow = await db.query<{ subject: string; updated_at: Date }>(
+      `SELECT subject, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalIdA],
+    );
+    expect(afterRow.rows[0]?.subject).toBe(beforeRow.rows[0]?.subject);
+    expect(afterRow.rows[0]?.updated_at.toISOString()).toBe(
+      beforeRow.rows[0]?.updated_at.toISOString(),
+    );
+  });
+
+  it("R10 (real Postgres): moving a membership into another membership's (principal_id, realm, scope_ref) is rejected, not silently resolved to the stale row", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const db = new DatabaseService();
+    databases.push(db);
+    const repo = new IdentityRepository(db);
+
+    const principalId = `principal_r10_m_${randomUUID()}`;
+    principalIds.add(principalId);
+    await insertPrincipalFixture(db, principalId, `source_${principalId}`);
+
+    const membershipIdA = `membership_r10_a_${randomUUID()}`;
+    const membershipIdB = `membership_r10_b_${randomUUID()}`;
+    membershipIds.add(membershipIdA);
+    membershipIds.add(membershipIdB);
+    const sourceRefA = `source_r10_${membershipIdA}`;
+    const sourceRefB = `source_r10_${membershipIdB}`;
+    const sharedScopeRef = `scope_r10_${randomUUID()}`;
+
+    await db.query(
+      `
+        INSERT INTO iam.identity_memberships (
+          membership_id, source_ref, principal_id, realm, scope_ref, membership_status, created_at, updated_at, record
+        ) VALUES (
+          $1, $2, $3, 'tenant', $4, 'active', NOW(), NOW(), '{}'::jsonb
+        )
+      `,
+      [membershipIdA, sourceRefA, principalId, sharedScopeRef],
+    );
+    await insertMembershipFixture(db, membershipIdB, sourceRefB, principalId);
+
+    const beforeRow = await db.query<{ scope_ref: string; updated_at: Date }>(
+      `SELECT scope_ref, updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+      [membershipIdB],
+    );
+
+    // B's own source_ref, but claiming A's (principal_id, realm, scope_ref)
+    // -- this must hit uq_identity_memberships_context against A's row, not
+    // the source_ref arbiter.
+    await expect(
+      repo.ensureMembershipRecord({
+        membershipId: membershipIdB,
+        sourceRef: sourceRefB,
+        principalId,
+        realm: "tenant",
+        scopeRef: sharedScopeRef,
+        tenantId: "tenant_fixture",
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    ).rejects.toThrow();
+
+    const afterRow = await db.query<{ scope_ref: string; updated_at: Date }>(
+      `SELECT scope_ref, updated_at FROM iam.identity_memberships WHERE membership_id = $1`,
+      [membershipIdB],
+    );
+    expect(afterRow.rows[0]?.scope_ref).toBe(beforeRow.rows[0]?.scope_ref);
+    expect(afterRow.rows[0]?.updated_at.toISOString()).toBe(
+      beforeRow.rows[0]?.updated_at.toISOString(),
+    );
+  });
 });

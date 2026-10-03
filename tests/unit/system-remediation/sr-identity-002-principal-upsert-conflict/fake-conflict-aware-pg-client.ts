@@ -244,7 +244,11 @@ export class FakeConflictAwarePgClient {
     params: unknown[] = [],
   ): Promise<{ rows: T[] }> {
     const trimmedSql = sql.trim();
-    if (/^(BEGIN|COMMIT|ROLLBACK)\b/i.test(trimmedSql)) {
+    if (
+      /^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)\b/i.test(
+        trimmedSql,
+      )
+    ) {
       return { rows: [] as T[] };
     }
 

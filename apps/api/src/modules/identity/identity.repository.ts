@@ -251,15 +251,27 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, {
-        ...membershipDraft,
-        principalId: principal.principalId,
-      });
-      await this.upsertRoleBinding(client, {
-        ...roleBindingDraft,
-        membershipId: membership.membershipId,
-      });
+      const principal = await this.upsertPrincipal(
+        client,
+        principalDraft,
+        true,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...membershipDraft,
+          principalId: principal.principalId,
+        },
+        true,
+      );
+      await this.upsertRoleBinding(
+        client,
+        {
+          ...roleBindingDraft,
+          membershipId: membership.membershipId,
+        },
+        true,
+      );
       await client.query("COMMIT");
       return { principal, membership };
     } catch (error) {
@@ -343,15 +355,27 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, {
-        ...membershipDraft,
-        principalId: principal.principalId,
-      });
-      await this.upsertRoleBinding(client, {
-        ...roleBindingDraft,
-        membershipId: membership.membershipId,
-      });
+      const principal = await this.upsertPrincipal(
+        client,
+        principalDraft,
+        true,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...membershipDraft,
+          principalId: principal.principalId,
+        },
+        true,
+      );
+      await this.upsertRoleBinding(
+        client,
+        {
+          ...roleBindingDraft,
+          membershipId: membership.membershipId,
+        },
+        true,
+      );
       await client.query("COMMIT");
       return { principal, membership };
     } catch (error) {
@@ -481,16 +505,28 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const principal = await this.upsertPrincipal(client, principalDraft);
-      const membership = await this.upsertMembership(client, {
-        ...membershipDraft,
-        principalId: principal.principalId,
-        invitationId: null,
-      });
-      const roleBinding = await this.upsertRoleBinding(client, {
-        ...roleBindingDraft,
-        membershipId: membership.membershipId,
-      });
+      const principal = await this.upsertPrincipal(
+        client,
+        principalDraft,
+        true,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...membershipDraft,
+          principalId: principal.principalId,
+          invitationId: null,
+        },
+        true,
+      );
+      const roleBinding = await this.upsertRoleBinding(
+        client,
+        {
+          ...roleBindingDraft,
+          membershipId: membership.membershipId,
+        },
+        true,
+      );
       const existingInvitationResult = await client.query<JsonRecordRow>(
         `SELECT record FROM iam.identity_invitations WHERE membership_id = $1 ORDER BY updated_at DESC LIMIT 1`,
         [membership.membershipId],
@@ -512,10 +548,14 @@ export class IdentityRepository implements OnModuleInit {
               })
             : null;
       const persistedMembership = persistedInvitation
-        ? await this.upsertMembership(client, {
-            ...membership,
-            invitationId: persistedInvitation.invitationId,
-          })
+        ? await this.upsertMembership(
+            client,
+            {
+              ...membership,
+              invitationId: persistedInvitation.invitationId,
+            },
+            true,
+          )
         : membership;
       await client.query("COMMIT");
       return {
@@ -768,17 +808,25 @@ export class IdentityRepository implements OnModuleInit {
         await client.query("ROLLBACK");
         return null;
       }
-      const activatedPrincipal = await this.upsertPrincipal(client, {
-        ...principal,
-        status: "active",
-        emailVerified: true,
-        updatedAt: activatedAt,
-      });
-      const activatedMembership = await this.upsertMembership(client, {
-        ...membership,
-        status: "active",
-        updatedAt: activatedAt,
-      });
+      const activatedPrincipal = await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          status: "active",
+          emailVerified: true,
+          updatedAt: activatedAt,
+        },
+        true,
+      );
+      const activatedMembership = await this.upsertMembership(
+        client,
+        {
+          ...membership,
+          status: "active",
+          updatedAt: activatedAt,
+        },
+        true,
+      );
       await client.query("COMMIT");
       return {
         principal: activatedPrincipal,
@@ -838,7 +886,7 @@ export class IdentityRepository implements OnModuleInit {
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertPrincipal(client, principal);
+      return await this.upsertPrincipal(client, principal, false);
     } finally {
       client.release();
     }
@@ -853,7 +901,7 @@ export class IdentityRepository implements OnModuleInit {
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertMembership(client, membership);
+      return await this.upsertMembership(client, membership, false);
     } finally {
       client.release();
     }
@@ -869,7 +917,7 @@ export class IdentityRepository implements OnModuleInit {
 
     const client = await this.databaseService!.connect();
     try {
-      return await this.upsertRoleBinding(client, roleBinding, options);
+      return await this.upsertRoleBinding(client, roleBinding, false, options);
     } finally {
       client.release();
     }
@@ -1232,11 +1280,15 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const p = await this.upsertPrincipal(client, principal);
-      const m = await this.upsertMembership(client, {
-        ...membership,
-        principalId: p.principalId,
-      });
+      const p = await this.upsertPrincipal(client, principal, true);
+      const m = await this.upsertMembership(
+        client,
+        {
+          ...membership,
+          principalId: p.principalId,
+        },
+        true,
+      );
       const rbs: CanonicalIdentityRoleBindingRecord[] = [];
       for (const binding of roleBindings) {
         const rb = await this.upsertRoleBinding(
@@ -1245,6 +1297,7 @@ export class IdentityRepository implements OnModuleInit {
             ...binding,
             membershipId: m.membershipId,
           },
+          true,
           options,
         );
         rbs.push(rb);
@@ -2563,17 +2616,66 @@ export class IdentityRepository implements OnModuleInit {
   // parallel automation runs authenticating for the first time) can both
   // pass the arbiter's conflict check and then have the LOSING insert
   // raise a hard, unhandled 23505 on the non-arbiter constraint instead of
-  // being absorbed by DO UPDATE. The caller already falls back to a plain
-  // SELECT by source_ref when the INSERT returns no row; reaching that
-  // same fallback on this specific error code is correct here too, since
-  // source_ref is identical between the racing rows and the loser just
-  // needs to read back whichever one actually committed.
+  // being absorbed by DO UPDATE.
   private isUniqueViolation(error: unknown): boolean {
     return (
       typeof error === "object" &&
       error !== null &&
       (error as { code?: unknown }).code === "23505"
     );
+  }
+
+  // Shared recovery for the 23505 race described above, used by
+  // upsertPrincipal/upsertMembership/upsertRoleBinding
+  // (SR-AUTH-SESSION-SUPERSEDE-20261003 R9-TX/R10).
+  //
+  // R9-TX: every caller of these three helpers that already issued BEGIN
+  // (ensureDefaultPlatformAccount, ensureLiveMapObserverAccount,
+  // syncLegacyTenantUserRole, the invitation-activation path and
+  // upsertWorkforceIdentity) leaves its *entire* transaction aborted
+  // (25P02) once a statement raises 23505 -- a plain follow-up SELECT on
+  // the same client fails too, so the bundle is lost instead of recovered.
+  // A SAVEPOINT taken immediately before the attempt, rolled back on
+  // catch, clears that aborted state before anything else runs on this
+  // connection. The three standalone ensure*Record callers never issue
+  // BEGIN (each statement is its own implicit autocommit transaction), so
+  // SAVEPOINT would itself fail there with "no transaction is in
+  // progress" -- insideTransaction lets each call site say which regime
+  // it is in.
+  //
+  // R10: retrying the *exact same* statement, rather than falling back to
+  // a bare `SELECT ... WHERE source_ref = $1`, is what tells a compatible
+  // race apart from a genuine conflict. If the 23505 came from a
+  // concurrent first-time insert for this same source_ref, the row now
+  // exists after the retry's ON CONFLICT DO UPDATE runs, and the existing
+  // changed/stale WHERE guard decides -- atomically -- whether this
+  // caller's content should still apply. If the 23505 instead came from
+  // this write's new values colliding with a *different*, already-
+  // persisted row (e.g. reassigning a principal's subject to one another
+  // principal already owns), the retry hits the identical conflict again
+  // and throws uncaught here: that is a real, non-transient error and
+  // must propagate so the caller's write is rejected, not silently
+  // discarded in favor of stale data.
+  private async runUpsertWithConflictRecovery<R>(
+    client: PoolClient,
+    savepointName: string,
+    insideTransaction: boolean,
+    attempt: () => Promise<{ rows: R[] }>,
+  ): Promise<{ rows: R[] }> {
+    if (insideTransaction) {
+      await client.query(`SAVEPOINT ${savepointName}`);
+    }
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!this.isUniqueViolation(error)) {
+        throw error;
+      }
+      if (insideTransaction) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+      }
+      return await attempt();
+    }
   }
 
   // The three upserts below decide "did a tracked field actually change"
@@ -2598,11 +2700,15 @@ export class IdentityRepository implements OnModuleInit {
   private async upsertPrincipal(
     client: PoolClient,
     record: CanonicalIdentityPrincipalRecord,
+    insideTransaction: boolean,
   ) {
-    let result: { rows: JsonRecordRow[] };
-    try {
-      result = await client.query<JsonRecordRow>(
-        `
+    const result = await this.runUpsertWithConflictRecovery<JsonRecordRow>(
+      client,
+      "upsert_principal_sp",
+      insideTransaction,
+      () =>
+        client.query<JsonRecordRow>(
+          `
         INSERT INTO iam.identity_principals (
           principal_id,
           source_ref,
@@ -2657,33 +2763,22 @@ export class IdentityRepository implements OnModuleInit {
           AND EXCLUDED.updated_at >= iam.identity_principals.updated_at
         RETURNING record
       `,
-        [
-          record.principalId,
-          record.sourceRef,
-          record.issuer,
-          record.subject,
-          record.principalType,
-          record.email,
-          record.emailVerified,
-          record.displayName,
-          record.status,
-          record.createdAt,
-          record.updatedAt,
-          JSON.stringify(record),
-        ],
-      );
-    } catch (error) {
-      // A genuinely concurrent first-time insert for this exact
-      // (previously-unseen) principal_id/source_ref can lose the race on
-      // the primary key rather than the source_ref arbiter above; Postgres
-      // raises that as a hard, unhandled unique_violation instead of
-      // routing it through ON CONFLICT DO UPDATE. Fall through to the same
-      // read-back-the-winner path used when DO UPDATE is a no-op.
-      if (!this.isUniqueViolation(error)) {
-        throw error;
-      }
-      result = { rows: [] };
-    }
+          [
+            record.principalId,
+            record.sourceRef,
+            record.issuer,
+            record.subject,
+            record.principalType,
+            record.email,
+            record.emailVerified,
+            record.displayName,
+            record.status,
+            record.createdAt,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        ),
+    );
     if (result.rows[0]?.record) {
       return this.parseRecord<CanonicalIdentityPrincipalRecord>(
         result.rows[0].record,
@@ -2703,11 +2798,15 @@ export class IdentityRepository implements OnModuleInit {
   private async upsertMembership(
     client: PoolClient,
     record: CanonicalIdentityMembershipRecord,
+    insideTransaction: boolean,
   ) {
-    let result: { rows: JsonRecordRow[] };
-    try {
-      result = await client.query<JsonRecordRow>(
-        `
+    const result = await this.runUpsertWithConflictRecovery<JsonRecordRow>(
+      client,
+      "upsert_membership_sp",
+      insideTransaction,
+      () =>
+        client.query<JsonRecordRow>(
+          `
         INSERT INTO iam.identity_memberships (
           membership_id,
           source_ref,
@@ -2761,34 +2860,23 @@ export class IdentityRepository implements OnModuleInit {
           AND EXCLUDED.updated_at >= iam.identity_memberships.updated_at
         RETURNING record
       `,
-        [
-          record.membershipId,
-          record.sourceRef,
-          record.principalId,
-          record.realm,
-          record.scopeRef,
-          record.tenantId,
-          record.partnerId,
-          record.status,
-          record.invitedByPrincipalId,
-          record.invitationId,
-          record.createdAt,
-          record.updatedAt,
-          JSON.stringify(record),
-        ],
-      );
-    } catch (error) {
-      // See upsertPrincipal: identity_memberships also carries a
-      // non-arbiter unique constraint (principal_id, realm, scope_ref)
-      // beyond the source_ref arbiter above, so a genuinely concurrent
-      // first-time insert for the same not-yet-existing membership can
-      // raise a hard unique_violation instead of routing through DO
-      // UPDATE. Fall through to the same read-back-the-winner path.
-      if (!this.isUniqueViolation(error)) {
-        throw error;
-      }
-      result = { rows: [] };
-    }
+          [
+            record.membershipId,
+            record.sourceRef,
+            record.principalId,
+            record.realm,
+            record.scopeRef,
+            record.tenantId,
+            record.partnerId,
+            record.status,
+            record.invitedByPrincipalId,
+            record.invitationId,
+            record.createdAt,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        ),
+    );
     if (result.rows[0]?.record) {
       return this.parseRecord<CanonicalIdentityMembershipRecord>(
         result.rows[0].record,
@@ -2808,6 +2896,7 @@ export class IdentityRepository implements OnModuleInit {
   private async upsertRoleBinding(
     client: PoolClient,
     record: CanonicalIdentityRoleBindingRecord,
+    insideTransaction: boolean,
     options: RoleBindingMutationOptions = {},
   ) {
     const allowValidFromMutation = options.allowValidFromMutation ?? false;
@@ -2821,10 +2910,13 @@ export class IdentityRepository implements OnModuleInit {
                 '{validFrom}',
                 to_jsonb(iam.identity_role_bindings.valid_from)
               )`;
-    let result: { rows: JsonRecordRow[] };
-    try {
-      result = await client.query<JsonRecordRow>(
-        `
+    const result = await this.runUpsertWithConflictRecovery<JsonRecordRow>(
+      client,
+      "upsert_role_binding_sp",
+      insideTransaction,
+      () =>
+        client.query<JsonRecordRow>(
+          `
         INSERT INTO iam.identity_role_bindings (
           role_binding_id,
           source_ref,
@@ -2872,31 +2964,21 @@ export class IdentityRepository implements OnModuleInit {
           AND EXCLUDED.updated_at >= iam.identity_role_bindings.updated_at
         RETURNING record
       `,
-        [
-          record.roleBindingId,
-          record.sourceRef,
-          record.membershipId,
-          record.roleCode,
-          record.grantedByPrincipalId,
-          record.approvalId,
-          record.validFrom,
-          record.validTo,
-          record.createdAt,
-          record.updatedAt,
-          JSON.stringify(record),
-        ],
-      );
-    } catch (error) {
-      // See upsertPrincipal: a genuinely concurrent first-time insert for
-      // the same not-yet-existing role binding can lose the race on the
-      // primary key rather than the source_ref arbiter above, raising a
-      // hard unique_violation instead of routing through DO UPDATE. Fall
-      // through to the same read-back-the-winner path.
-      if (!this.isUniqueViolation(error)) {
-        throw error;
-      }
-      result = { rows: [] };
-    }
+          [
+            record.roleBindingId,
+            record.sourceRef,
+            record.membershipId,
+            record.roleCode,
+            record.grantedByPrincipalId,
+            record.approvalId,
+            record.validFrom,
+            record.validTo,
+            record.createdAt,
+            record.updatedAt,
+            JSON.stringify(record),
+          ],
+        ),
+    );
     if (result.rows[0]?.record) {
       return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
         result.rows[0].record,
