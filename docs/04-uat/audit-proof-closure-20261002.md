@@ -8,7 +8,7 @@ Owner: Pi. Independent reviewer: Codex. This is **implementation and offline reg
 - Source baseline: `2b4b6b96aed1c41ae4b252681e0466ee808cbd0e` (origin/dev at task start).
 - Implementation anchors: `3914a177e` and `303a9fb0ed2fc9360781849f5e6c36bc81ade5ca`. The latter is the tested code revision. Subsequent evidence-only commits do not change the tested implementation; the handoff and CI must identify the immutable final candidate.
 - Environment: Node v22.23.2, pnpm 10.33.0, Vitest 4.1.4, TypeScript 5.9.3. Tests explicitly set NODE_ENV=test, unset DATABASE_URL/API_DATABASE_URL, and use an offline-only signer secret. No credentials or provider endpoints were exercised.
-- Source checkout and dependency installation are private to the task. No reset/stash of the canonical dirty tree, product/browser servers, database/Compose infrastructure, deployment, real payment, or real malware-engine operation was performed.
+- Source checkout and dependency installation are private to the task. No reset/stash of the canonical dirty tree, product/browser server startup, database/Compose infrastructure startup, deployment, real payment, or real malware-engine operation was performed. The focused checks do not use a database. An overly broad unit selection exposed an existing DB-dependent test and was stopped as described below.
 
 Machine-only logs are under .local/project-fixes-20261002/ (not tracked deliverables). They include proof-before-fix-gates.log, proof-all-tests.log, proof-typecheck.log, proof-client-typecheck.log, proof-admin-typecheck.log, proof-unit-typecheck.log and proof-lint.log. The committed tests below are the reproducible evidence, rather than an assertion that another machine can retrieve these local logs.
 
@@ -55,7 +55,9 @@ Other completed checks (all exit 0):
 - Strict standalone TypeScript check of the three newly added unit files with ES2022, ESNext/Bundler resolution, decorators/metadata and skipLibCheck.
 - ESLint with max-warnings=0 over the billing module, changed API-client/UI sources, new tests and updated legacy/finance/idempotency tests.
 
-Full repository unit results and final-candidate hosted review/CI are recorded separately when available; the focused result above does not assert that all repository checks or hosted acceptance passed. Early local setup failures (shared dependency symlinks; inherited NODE_ENV=production) were resolved by a private frozen offline install and explicit test environment, not by changing production guards.
+Full repository unit results and final-candidate hosted review/CI are recorded separately when available; the focused result above does not assert that all repository checks or hosted acceptance passed.
+
+**Local check-scope correction:** the first broad `vitest run tests/unit` was stopped (exit 143) after its worker was observed invoking the existing `tests/unit/db-apply.test.ts`. Despite its directory, that file unconditionally uses psql / Docker Compose exec and creates synthetic databases on an existing container; unsetting DATABASE_URL does not disable it. Its subprocesses were terminated, not treated as a passed unit check. No server/container was started and no existing database/volume was removed as cleanup. The task did not subsequently query or manipulate the existing database. This run must not be cited as proof that no DB operation was attempted or that the DB gate passed. Owners of other broad checks were notified. The corrected local selection explicitly excludes this file; real migration/concurrency acceptance belongs in hosted CI. No committed test or hosted CI gate was disabled. Early local setup failures (shared dependency symlinks; inherited NODE_ENV=production) were resolved by a private frozen offline install and explicit test environment, not by changing production guards.
 
 ## Runtime contract and configuration
 
