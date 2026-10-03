@@ -285,6 +285,13 @@ it("HTTP upload invokes the configured scanner, retains pending on failure, and 
     "upload-scan-unit",
   );
   expect(uploaded.data.scanState).toBe("pending_scan");
+  const beforePayment = await controller.getReimbursementProof(
+    batches.reimbursementBatchIds[0]!,
+  );
+  expect(beforePayment.data?.proofId).toBe(uploaded.data.proofId);
+  expect(
+    billing.getReimbursementBatch(batches.reimbursementBatchIds[0]!).status,
+  ).not.toBe("paid");
   expect(exchange).toHaveBeenCalledOnce();
   const retry = await controller.scanRemittanceProof(
     uploaded.data.proofId,

@@ -2855,6 +2855,28 @@ export class BillingSettlementService implements OnModuleInit {
     return proof;
   }
 
+  async getReimbursementProof(
+    batchId: string,
+  ): Promise<RemittanceProofRecord | null> {
+    const batch = this.requireReimbursementBatch(batchId);
+    // Before payment there is no payment foreign reference yet. Resolve the
+    // uploaded proof by its authoritative batch binding, not a guessed ID.
+    if (batch.status === "paid" && batch.remittanceProofId) {
+      const proof = await this.remittanceProofService.getProof(
+        batch.remittanceProofId,
+      );
+      if (proof.batchId !== batchId || proof.driverId !== batch.driverId) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REMITTANCE_PROOF_BATCH_MISMATCH",
+          "Recorded payment proof does not belong to this batch.",
+        );
+      }
+      return proof;
+    }
+    return this.remittanceProofService.getLatestForBatch(batchId);
+  }
+
   async getRemittanceProof(proofId: string): Promise<RemittanceProofRecord> {
     return this.remittanceProofService.getProof(proofId);
   }

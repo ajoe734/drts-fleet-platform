@@ -1504,6 +1504,19 @@ export class BillingSettlementRepository {
     return this.mapRemittanceProof(result.rows[0]!);
   }
 
+  async findLatestRemittanceProofForBatch(
+    batchId: string,
+  ): Promise<RemittanceProofRecord | null> {
+    if (!this.isEnabled())
+      throw new Error("Remittance proof persistence is unavailable.");
+    const result = await this.databaseService!.query<RemittanceProofRow>(
+      `SELECT * FROM billing.phase1_remittance_proofs
+       WHERE batch_id = $1 ORDER BY created_at DESC, proof_id DESC LIMIT 1`,
+      [batchId],
+    );
+    return result.rows[0] ? this.mapRemittanceProof(result.rows[0]) : null;
+  }
+
   async findRemittanceProofById(
     proofId: string,
   ): Promise<RemittanceProofRecord | null> {

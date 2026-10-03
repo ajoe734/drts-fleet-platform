@@ -784,6 +784,19 @@ export class BillingSettlementController {
     return toApiSuccessEnvelope(result.data, requestId);
   }
 
+  @Get("reimbursements/:batchId/proof")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:read")
+  async getReimbursementProof(
+    @Param("batchId") batchId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.getReimbursementProof(batchId),
+      requestId,
+    );
+  }
+
   @Get("reimbursements/proofs/:proofId")
   @RequireRealms("system", "platform", "ops")
   @RequireScopes("billing:read")

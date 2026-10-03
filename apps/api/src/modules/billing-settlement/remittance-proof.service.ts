@@ -164,6 +164,22 @@ export class RemittanceProofService {
     return this.cloneProof(record);
   }
 
+  async getLatestForBatch(
+    batchId: string,
+  ): Promise<RemittanceProofRecord | null> {
+    this.assertPersistenceAvailable();
+    const proof = this.useDurablePersistence()
+      ? await this.repository!.findLatestRemittanceProofForBatch(batchId)
+      : this.proofs
+          .filter((entry) => entry.batchId === batchId)
+          .sort(
+            (a, b) =>
+              b.createdAt.localeCompare(a.createdAt) ||
+              b.proofId.localeCompare(a.proofId),
+          )[0];
+    return proof ? this.cloneProof(proof) : null;
+  }
+
   async getProof(proofId: string): Promise<RemittanceProofRecord> {
     const found = this.useDurablePersistence()
       ? await this.repository!.findRemittanceProofById(proofId)
