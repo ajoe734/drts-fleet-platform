@@ -57,14 +57,12 @@ export interface VoiceTtsPlaybackStartedEvent extends VoiceMediaWorkerEventBase 
   payload: { playbackId: string; generation: number };
 }
 
-export interface VoiceTtsPlaybackCompletedEvent
-  extends VoiceMediaWorkerEventBase {
+export interface VoiceTtsPlaybackCompletedEvent extends VoiceMediaWorkerEventBase {
   type: "tts.playback.completed";
   payload: { playbackId: string; generation: number };
 }
 
-export interface VoiceTtsPlaybackCancelledEvent
-  extends VoiceMediaWorkerEventBase {
+export interface VoiceTtsPlaybackCancelledEvent extends VoiceMediaWorkerEventBase {
   type: "tts.playback.cancelled";
   payload: { playbackId: string; generation: number; reason: string };
 }
@@ -98,6 +96,12 @@ export class VoiceMediaWorkerSession {
   private activeGeneration = 0;
   private readonly playbacksById = new Map<string, TrackedPlayback>();
 
+  /** `true` once the ASR adapter has taken over result delivery via
+   * `onResult` -- `transcribeChunk` must not also emit from its own
+   * returned value in that case, or every streamed result would be
+   * reported twice. */
+  private readonly asrStreamsResults: boolean;
+
   constructor(options: VoiceMediaWorkerSessionOptions) {
     this.sessionId = options.sessionId;
     this.asrAdapter = options.asrAdapter;
@@ -105,6 +109,19 @@ export class VoiceMediaWorkerSession {
     this.eventSink = options.eventSink;
     this.mediaEpoch = options.initialMediaEpoch ?? 1;
     this.activeGeneration = this.mediaEpoch;
+    this.asrStreamsResults = typeof this.asrAdapter.onResult === "function";
+    if (this.asrStreamsResults) {
+      // Deliver every accepted revision as soon as the adapter decodes it,
+      // not gated on another audio chunk arriving to "poll" for it (SD
+      // §11.1; see docs/04-uat/audit-voice-runtime-20261002.md R10).
+      this.asrAdapter.onResult!((result) => {
+        this.emit({
+          type: result.final ? "asr.segment.final" : "asr.segment.partial",
+          ...this.eventStamp(new Date().toISOString()),
+          payload: result,
+        });
+      });
+    }
   }
 
   getMediaEpoch(): number {
@@ -165,12 +182,48 @@ export class VoiceMediaWorkerSession {
       audioChunk,
       sequence: this.controlSequence + 1,
     });
-    this.emit({
-      type: result.final ? "asr.segment.final" : "asr.segment.partial",
-      ...this.eventStamp(occurredAt),
-      payload: result,
-    });
+    // A streaming-capable adapter already delivered this (and possibly
+    // other, later) result(s) via `onResult` as soon as they were decoded
+    // -- emitting it again here from the request/response return value
+    // would report the same revision twice.
+    if (!this.asrStreamsResults) {
+      this.emit({
+        type: result.final ? "asr.segment.final" : "asr.segment.partial",
+        ...this.eventStamp(occurredAt),
+        payload: result,
+      });
+    }
     return result;
+  }
+
+  /** Ends the ASR provider's audio stream and releases its underlying
+   * connection, if the adapter supports it. Idempotent and safe to call on
+   * every session-close path (normal close, drain, idle timeout, provider
+   * failure, attach failure) -- a provider stream, its waiters, and any
+   * billing/session resource it holds must not outlive this session. Each
+   * call is isolated: an adapter whose `endAudio`/`close` throws (e.g. a
+   * native WebSocket boundary rejecting a send attempted outside the OPEN
+   * state) must never prevent the other from running, nor escape to the
+   * composer's own close handler and block its session-map cleanup.
+   *
+   * Returns a `Promise` that settles once the adapter's own teardown has
+   * actually finished (e.g. `TwmAsrNetworkAdapter`'s bounded EOS drain),
+   * not merely once it was *requested* -- a caller that discards this
+   * return value (as `close(): void { void this.terminate(...); }`-style
+   * call sites used to) can never observe when cleanup genuinely
+   * completes, which is exactly what left `MediaWorkerServer.stop`/`drain`
+   * unable to await it (R11). Never throws/rejects. */
+  async closeAsr(): Promise<void> {
+    try {
+      this.asrAdapter.endAudio?.();
+    } catch {
+      // Best effort -- teardown continues regardless (SD §11.4).
+    }
+    try {
+      await this.asrAdapter.close?.();
+    } catch {
+      // Best effort -- teardown continues regardless (SD §11.4).
+    }
   }
 
   handleDtmf(digit: string, occurredAt: string): void {
@@ -235,7 +288,11 @@ export class VoiceMediaWorkerSession {
     return true;
   }
 
-  cancelPlayback(playbackId: string, reason: string, occurredAt: string): boolean {
+  cancelPlayback(
+    playbackId: string,
+    reason: string,
+    occurredAt: string,
+  ): boolean {
     const playback = this.playbacksById.get(playbackId);
     if (!playback || playback.cleared) {
       return false;

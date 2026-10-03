@@ -4,13 +4,21 @@ import type { Duplex } from "node:stream";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/** Default cap on a single WS frame payload. Voice audio frames are small
+ * (TWM's own fixture protocol rejects anything >= 384 KiB per chunk); this is
+ * a generous ceiling against a peer that declares an unbounded frame length
+ * and forces the server to buffer indefinitely while waiting for the rest. */
+export const DEFAULT_WS_MAX_PAYLOAD_BYTES = 1_048_576; // 1 MiB
+
 export interface WebSocketChannelOptions {
   timeoutMs?: number | undefined;
+  maxPayloadBytes?: number | undefined;
 }
 
 export class WebSocketServerChannel extends EventEmitter {
   private readonly socket: Duplex;
   private readonly timeoutMs: number;
+  private readonly maxPayloadBytes: number;
   private timer: NodeJS.Timeout | null = null;
   private buffer: Buffer = Buffer.alloc(0);
   private isClosed = false;
@@ -19,6 +27,8 @@ export class WebSocketServerChannel extends EventEmitter {
     super();
     this.socket = socket;
     this.timeoutMs = options?.timeoutMs ?? 300_000; // default 5 min
+    this.maxPayloadBytes =
+      options?.maxPayloadBytes ?? DEFAULT_WS_MAX_PAYLOAD_BYTES;
 
     this.socket.on("data", (chunk: Buffer) => this.handleData(chunk));
     this.socket.on("close", () => this.handleClose());
@@ -72,6 +82,13 @@ export class WebSocketServerChannel extends EventEmitter {
     this.socket.write(frame);
   }
 
+  /** The single authoritative close/cleanup path for this channel --
+   * size-limit rejection, idle timeout, local shutdown, and the 0x08 close
+   * frame handler all route through here exactly once. `isClosed` is the
+   * guard against double-entry (including against `handleClose`, which
+   * fires on the underlying socket's own "close" event for an abnormal
+   * closure the peer never framed), so this is also the only place that
+   * emits the "close" event callers rely on for session bookkeeping. */
   close(code = 1000, reason = ""): void {
     if (this.isClosed) return;
     this.isClosed = true;
@@ -93,6 +110,8 @@ export class WebSocketServerChannel extends EventEmitter {
     } catch {
       this.socket.destroy();
     }
+
+    this.emit("close", code, reason);
   }
 
   private encodeFrame(opcode: number, payload: Buffer): Buffer {
@@ -121,10 +140,11 @@ export class WebSocketServerChannel extends EventEmitter {
   }
 
   private handleData(chunk: Buffer): void {
+    if (this.isClosed) return;
     this.resetTimeout();
     this.buffer = Buffer.concat([this.buffer, chunk]);
 
-    while (this.buffer.length >= 2) {
+    while (!this.isClosed && this.buffer.length >= 2) {
       const b0 = this.buffer[0];
       const b1 = this.buffer[1];
       if (b0 === undefined || b1 === undefined) return;
@@ -142,6 +162,16 @@ export class WebSocketServerChannel extends EventEmitter {
         if (this.buffer.length < 10) return;
         payloadLength = Number(this.buffer.readBigUInt64BE(2));
         offset = 10;
+      }
+
+      if (payloadLength > this.maxPayloadBytes) {
+        // Drop the buffered bytes before closing so a peer that keeps
+        // streaming after announcing an oversized frame cannot force this
+        // channel to keep growing `this.buffer` while the close frame is
+        // written out.
+        this.buffer = Buffer.alloc(0);
+        this.close(1009, "Frame payload exceeds maximum allowed size");
+        return;
       }
 
       let maskKey: Buffer | null = null;
@@ -180,12 +210,11 @@ export class WebSocketServerChannel extends EventEmitter {
         this.emit("message", payload, true);
         break;
       case 0x08: {
-        // Close
+        // Close -- `close()` itself emits "close" exactly once.
         const code = payload.length >= 2 ? payload.readUInt16BE(0) : 1000;
         const reason =
           payload.length > 2 ? payload.subarray(2).toString("utf8") : "";
         this.close(code, reason);
-        this.emit("close", code, reason);
         break;
       }
       case 0x09: // Ping
