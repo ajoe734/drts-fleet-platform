@@ -6,6 +6,7 @@ import { DriverProfileService } from "../../../../apps/api/src/modules/driver-pr
 import { RegulatoryRegistryController } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { bootstrapMapSessions } from "../../../e2e/system-remediation/sr-live-map-001/session-bootstrap";
+import { teardownMapSessions } from "../../../e2e/system-remediation/sr-live-map-001/session-teardown";
 
 const sha = "a".repeat(40);
 const env = {
@@ -447,6 +448,76 @@ it("retains invitation attempt before a lost issuance response", async () => {
   await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
     "driver:issue-invite",
   );
+  expect(deps.exportSession).toHaveBeenCalledWith(
+    "DRTS_LIVE_MAP_INVITATION_ATTEMPTED",
+    "true",
+  );
   expect(deps.evidence.sessions).toMatchObject({ cleanup: "unconfirmed" });
   expect(JSON.stringify(deps.evidence)).not.toContain("private-secret");
+});
+
+it("rejects ambiguous duplicate reserved drivers before provisioning", async () => {
+  const row = {
+    driverId: env.DRTS_LIVE_MAP_TEST_DRIVER_ID,
+    workState: "offline",
+    dispatchEligible: false,
+  };
+  const deps = harness({ registry: { data: { items: [row, row] } } });
+  await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
+    "driver_duplicate",
+  );
+  expect(deps.exportSession).not.toHaveBeenCalled();
+});
+
+it("keeps a real lifecycle reactivation isolated until the existing work-state command restores offline", async () => {
+  // Actual controller/service/serializer; external HTTP auth and persistence
+  // are memory boundaries. This is not evidence of the current dev DB state.
+  const emit = vi.fn();
+  const audit = new AuditNotificationService();
+  const registry = new RegulatoryRegistryService(
+    new OpsDispatchEventsService({ emit } as never),
+    audit,
+    new DriverProfileService(audit),
+  );
+  const controller = new RegulatoryRegistryController(registry);
+  const driverId = env.DRTS_LIVE_MAP_TEST_DRIVER_ID;
+  controller.updateDriverLifecycle(driverId, { lifecycleStatus: "active" });
+  const deps = harness({ snake: true, registry: controller.listDrivers() });
+  await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
+    "workState=available",
+  );
+  expect(deps.exportSession).not.toHaveBeenCalled();
+
+  // The hosted always() teardown must not mask the real isolation failure with
+  // a fabricated cleanup failure, nor make a new HTTP/auth request.
+  const fetchCount = deps.fetch.mock.calls.length;
+  const teardownEvidence = vi.fn();
+  await teardownMapSessions(env, { ...deps, save: teardownEvidence });
+  expect(deps.fetch).toHaveBeenCalledTimes(fetchCount);
+  expect(deps.readGoogleIdToken).toHaveBeenCalledTimes(1);
+  expect(teardownEvidence).toHaveBeenCalledWith(
+    expect.objectContaining({
+      status: "passed",
+      recovery: "not-required",
+      revoked: false,
+    }),
+  );
+
+  const restored = controller.updateDriverWorkState(driverId, {
+    workState: "offline",
+  });
+  expect(restored.data).toMatchObject({
+    workState: "offline",
+    dispatchEligible: false,
+  });
+  const isolated = harness({ snake: true, registry: controller.listDrivers() });
+  await bootstrapMapSessions(env, isolated);
+  expect(isolated.evidence.sessions).toMatchObject({
+    driver_isolation: {
+      status: "passed",
+      work_state: "offline",
+      dispatch_eligible: false,
+    },
+  });
+  expect(emit).not.toHaveBeenCalled();
 });
