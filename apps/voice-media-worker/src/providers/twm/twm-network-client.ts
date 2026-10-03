@@ -39,7 +39,11 @@ export interface TwmHttpResponse {
 export type TwmHttpTransport = (
   method: "GET" | "POST",
   path: string,
-  init?: { headers?: Record<string, string>; body?: string },
+  init?: {
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+  },
 ) => Promise<TwmHttpResponse>;
 
 export interface TwmWebSocketEvent {
@@ -79,10 +83,12 @@ async function postJson(
   path: string,
   body: Record<string, unknown>,
   headers: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<{ status: number; body: Record<string, unknown> | undefined }> {
   const res = await transport("POST", path, {
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   const parsed =
     res.status === 204
@@ -97,8 +103,12 @@ async function getJson(
   transport: TwmHttpTransport,
   path: string,
   headers: Record<string, string> = {},
+  signal?: AbortSignal,
 ): Promise<{ status: number; body: Record<string, unknown> | undefined }> {
-  const res = await transport("GET", path, { headers });
+  const res = await transport("GET", path, {
+    headers,
+    ...(signal ? { signal } : {}),
+  });
   const parsed =
     res.status === 204
       ? undefined
@@ -263,6 +273,9 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
 
   private socket: TwmWebSocketLike | undefined;
   private connectPromise: Promise<void> | undefined;
+  private closePromise: Promise<void> | undefined;
+  private setupController = new AbortController();
+  private pendingIngress = 0;
   /** `true` only once the provider's WebSocket `open` event has actually
    * fired -- distinct from `this.socket` being assigned, which happens
    * synchronously well before the handshake completes (R12: `connect()`
@@ -296,12 +309,6 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * told its chunk was rejected just because it raced the provider's own
    * asynchronous login/open/180 sequence. */
   private readonly audioQueue: Uint8Array[] = [];
-  /** Count of `transcribe()` calls currently awaiting `connect()` -- i.e.
-   * audio retained in the caller's own suspended stack frame rather than in
-   * `audioQueue` (R12). Added to `audioQueue.length` when enforcing
-   * `MAX_QUEUED_AUDIO_CHUNKS` so the cap bounds total retained/in-flight
-   * audio, not merely what has already reached the post-connect queue. */
-  private pendingConnectChunks = 0;
   /** Resolves the in-flight `terminate()`'s bounded EOS-drain wait early
    * once every outstanding result waiter has settled, instead of always
    * burning the full configured window. */
@@ -316,6 +323,8 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * a session that never reaches send-ready can, by construction, never
    * have recognized any speech either. */
   private setupDeadlineTimer: NodeJS.Timeout | undefined;
+  private idleTimer: NodeJS.Timeout | undefined;
+  private durationTimer: NodeJS.Timeout | undefined;
   /** Lets `terminate()`/the setup deadline immediately reject an in-flight
    * `connect()` that is still awaiting login/access-info/the WebSocket
    * handshake (R11 scenario (c), R12) -- the real upstream HTTP/WS promise
@@ -355,6 +364,15 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         "Invalid TWM ASR route profile.",
       );
     }
+    for (const name of ["idleTimeoutMs", "maxDurationMs"] as const) {
+      const value = profile.timeouts[name];
+      if (!Number.isFinite(value) || value <= 0 || value > 2_147_483_647) {
+        throw new TwmNetworkError(
+          "TWM_ASR_INVALID_PROFILE",
+          `${name} must be a positive timer-safe duration.`,
+        );
+      }
+    }
     this.isProductionCapable = isProductionCapable;
   }
 
@@ -366,6 +384,8 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         accountId: this.credentials.accountId,
         accountSecret: this.credentials.accountSecret,
       },
+      {},
+      this.setupController.signal,
     );
     const token = body?.token;
     if (status !== 200 || typeof token !== "string" || !token) {
@@ -384,6 +404,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       this.transport,
       TWM_PROTOCOL_FIXTURE.asrAccess.path,
       { Authorization: `Bearer ${token}` },
+      this.setupController.signal,
     );
     const websocketUrl = body?.websocketUrl;
     const ticket = body?.ticket;
@@ -423,14 +444,24 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     }
     if (this.connectPromise) return this.connectPromise;
     if (this.socket && this.socketOpen) return;
-    this.connectGeneration += 1;
+    const generation = ++this.connectGeneration;
+    if (this.setupController.signal.aborted)
+      this.setupController = new AbortController();
     this.armSetupDeadline();
-    this.connectPromise = this.performConnect(this.connectGeneration).finally(
-      () => {
-        this.connectPromise = undefined;
-      },
-    );
-    return this.connectPromise;
+    const connecting: Promise<void> = this.performConnect(generation)
+      .catch((error: unknown) => {
+        if (generation === this.connectGeneration) {
+          this.failSession(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (this.connectPromise === connecting) this.connectPromise = undefined;
+      });
+    this.connectPromise = connecting;
+    return connecting;
   }
 
   private assertNotTerminated(reason: string): void {
@@ -478,29 +509,58 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * unreached (R12): rejects whatever `connect()` attempt is still
    * in-flight, settles every queued chunk/result waiter instead of
    * leaving them pending forever, and releases the stalled socket (if
-   * any). Not terminal for the adapter itself -- a later `transcribe()`
-   * call may still attempt a fresh `connect()`. */
+   * any). The failed attempt is fenced and aborted. A fresh attempt may
+   * reconnect, but none of the abandoned socket's events can act on it. */
   private failSetup(): void {
     const err = new TwmNetworkError(
       "TWM_ASR_SETUP_TIMEOUT",
       `TWM ASR provider did not reach '180' send-ready status within ${this.profile.timeouts.noSpeechTimeoutMs}ms of connecting.`,
     );
-    // Abandons this attempt (R12): the real upstream login/access-info call
-    // it is chained from is not cancelled and may still resolve later --
-    // `assertCurrentAttempt` is what stops that late resolution from going
-    // on to acquire a socket nothing is waiting on anymore.
+    this.failSession(err, false);
+  }
+
+  /** Local resource bounds, not claims about the provider's billing timers.
+   * Only successfully sent nonempty audio refreshes idle; status/revision
+   * chatter must not keep an abandoned input stream alive indefinitely. */
+  private refreshIdleDeadline(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.failSession(
+        new TwmNetworkError(
+          "TWM_ASR_IDLE_TIMEOUT",
+          "ASR input stream exceeded its idle deadline.",
+        ),
+      );
+    }, this.profile.timeouts.idleTimeoutMs);
+  }
+
+  private clearRuntimeDeadlines(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.durationTimer) clearTimeout(this.durationTimer);
+    this.idleTimer = undefined;
+    this.durationTimer = undefined;
+  }
+
+  private failSession(err: Error, terminal = true): void {
+    this.terminated ||= terminal;
+    this.clearSetupDeadline();
+    this.clearRuntimeDeadlines();
+    // Retain the owner's generation fence as well as aborting transports:
+    // external boundaries are permitted to ignore an AbortSignal.
     this.connectGeneration += 1;
     this.setupAbort?.(err);
+    this.setupController.abort();
     this.failPendingWork(err);
-    try {
-      this.socket?.close(1000, "setup timeout");
-    } catch {
-      // Best effort -- the socket may not even be past CONNECTING yet.
-    }
+    const socket = this.socket;
     this.socket = undefined;
     this.socketOpen = false;
     this.ready = false;
     this.hasAccess = false;
+    try {
+      socket?.close(1000, "provider failed");
+    } catch {
+      /* best effort */
+    }
   }
 
   /** Wraps `runConnectSteps()` so the setup deadline/`terminate()` can
@@ -591,44 +651,41 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       );
     }
     this.socket = socket;
-    // Fences every listener against this exact socket object (R13): a
-    // platform WebSocket's `close` event is asynchronous, so an attempt
-    // abandoned by `failSetup()`/`terminate()` (which drops `this.socket`
-    // synchronously but only *requests* the real close) can still have its
-    // own stale `close`/`message` fire well after `this.socket` has moved on
-    // to a newer attempt's socket. Without this check, that late event would
-    // tear down the NEW attempt's state -- clearing `this.socket`, rejecting
-    // its pending work -- using nothing but an identity-less closure over
-    // whichever `socket` variable happened to be in scope.
-    const isCurrentSocket = () => this.socket === socket;
+    const isCurrentSocket = () =>
+      this.socket === socket && generation === this.connectGeneration;
     socket.addEventListener("message", (event) => {
-      if (!isCurrentSocket()) return;
-      this.handleMessage(event);
+      if (isCurrentSocket()) this.handleMessage(event);
     });
     socket.addEventListener("close", () => {
       if (!isCurrentSocket()) return;
-      this.socket = undefined;
-      this.socketOpen = false;
-      this.ready = false;
-      this.hasAccess = false;
-      this.clearSetupDeadline();
-      this.failPendingWork(
+      this.failSession(
         new TwmNetworkError(
           "TWM_ASR_CONNECTION_CLOSED",
           "The TWM ASR provider connection closed.",
         ),
       );
     });
+    socket.addEventListener("error", () => {
+      if (!isCurrentSocket()) return;
+      this.failSession(
+        new TwmNetworkError("TWM_ASR_WS_ERROR", "TWM ASR WebSocket failed."),
+      );
+    });
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       socket.addEventListener("open", () => {
-        if (settled) return;
+        if (settled || !isCurrentSocket()) return;
         settled = true;
-        // Resolving unblocks this specific attempt's own awaited promise
-        // regardless of currency; `socketOpen` is shared state and must
-        // only reflect reality for whichever socket is still current (R13).
-        if (isCurrentSocket()) this.socketOpen = true;
+        this.socketOpen = true;
+        this.durationTimer = setTimeout(() => {
+          this.failSession(
+            new TwmNetworkError(
+              "TWM_ASR_MAX_DURATION",
+              "ASR connection exceeded its maximum duration.",
+            ),
+          );
+        }, this.profile.timeouts.maxDurationMs);
         resolve();
       });
       socket.addEventListener("error", () => {
@@ -687,6 +744,7 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
         // "180 reached," so it ends here regardless of how long the call
         // goes on to run afterward.
         this.clearSetupDeadline();
+        if (!this.idleTimer) this.refreshIdleDeadline();
         // R12: `connect()` resolves on the socket's `open` event, which can
         // land in an earlier event-loop turn than this `180`. Audio sent in
         // that gap was queued (never dropped) by `transcribe()`; flush it
@@ -785,45 +843,36 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     request: VoiceAsrTranscribeRequest,
   ): Promise<VoiceAsrSegmentResult> {
     this.assertNotTerminated("ASR session was closed.");
-    if (request.audioChunk.byteLength >= 384 * 1024) {
-      throw new TwmNetworkError(
-        "TWM_ASR_FRAME_TOO_LARGE",
-        "TWM frame must be smaller than 384 KB.",
-      );
-    }
-    // Reserved *before* awaiting `connect()` (R12): a caller's audio is
-    // retained -- in this adapter's own `audioQueue` once connected, or
-    // implicitly in the caller's own suspended stack frame while connect()
-    // is still in flight -- from the moment this method is entered, not
-    // from the moment it reaches the post-connect queue push below. Without
-    // this reservation, an arbitrary number of concurrent callers could
-    // each await the same single-flight `connect()` (e.g. a provider stuck
-    // before login/access-info/180), none of them ever having been counted
-    // against `MAX_QUEUED_AUDIO_CHUNKS`. Released in `finally` on every
-    // outcome -- success, failure, or a setup-deadline/terminate abort of
-    // the `connect()` this call is awaiting.
-    if (
-      this.audioQueue.length + this.pendingConnectChunks >=
-      MAX_QUEUED_AUDIO_CHUNKS
-    ) {
-      throw new TwmNetworkError(
-        "TWM_ASR_QUEUE_OVERFLOW",
-        `TWM audio queue exceeded ${MAX_QUEUED_AUDIO_CHUNKS} chunks awaiting provider '180' readiness.`,
-      );
-    }
-    this.pendingConnectChunks += 1;
-    try {
-      await this.connect();
-    } finally {
-      this.pendingConnectChunks -= 1;
-    }
-    this.assertNotTerminated("ASR session was closed.");
     if (this.eosSent) {
       throw new TwmNetworkError(
         "TWM_ASR_NOT_READY",
         "TWM audio requires an open stream before EOS.",
       );
     }
+    if (request.audioChunk.byteLength >= 384 * 1024) {
+      throw new TwmNetworkError(
+        "TWM_ASR_FRAME_TOO_LARGE",
+        "TWM frame must be smaller than 384 KB.",
+      );
+    }
+    if (
+      this.pendingIngress + this.audioQueue.length >=
+      MAX_QUEUED_AUDIO_CHUNKS
+    ) {
+      const error = new TwmNetworkError(
+        "TWM_ASR_QUEUE_OVERFLOW",
+        `TWM audio queue exceeded ${MAX_QUEUED_AUDIO_CHUNKS} chunks awaiting provider '180' readiness.`,
+      );
+      this.failSession(error);
+      throw error;
+    }
+    this.pendingIngress++;
+    try {
+      await this.connect();
+    } finally {
+      this.pendingIngress--;
+    }
+    this.assertNotTerminated("ASR session was closed.");
     // `connect()` resolving only means the socket reached `open` -- the
     // provider's documented send-ready gate is its own, separately
     // asynchronous `180` status message (R12). Queue rather than reject: a
@@ -843,7 +892,15 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     if (!this.ready || this.eosSent || !this.socket) return;
     while (this.audioQueue.length > 0) {
       const chunk = this.audioQueue.shift()!;
-      this.socket.send(chunk);
+      try {
+        this.socket.send(chunk);
+        if (chunk.byteLength > 0) this.refreshIdleDeadline();
+      } catch (error) {
+        this.failSession(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        return;
+      }
     }
   }
 
@@ -886,11 +943,13 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   private awaitDrain(timeoutMs: number): Promise<void> {
     if (this.isDrainComplete()) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      this.drainSignal = resolve;
-      setTimeout(() => {
-        if (this.drainSignal === resolve) this.drainSignal = undefined;
+      const finish = () => {
+        clearTimeout(timer);
+        if (this.drainSignal === finish) this.drainSignal = undefined;
         resolve();
-      }, timeoutMs);
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      this.drainSignal = finish;
     });
   }
 
@@ -903,6 +962,10 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
     if (this.eosSent) return;
     this.eosSent = true;
     this.ready = false;
+    // EOS intentionally stops input. Keep the absolute bound unless close()
+    // takes ownership with its independently bounded final-result drain.
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
     if (this.socket && this.socketOpen) {
       try {
         this.socket.send("EOS");
@@ -936,13 +999,16 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * server shutdown return long before the EOS drain it configured ever
    * ran (R11 scenario (d)). */
   close(code = 1000, reason = ""): Promise<void> {
-    return this.terminate(code, reason);
+    this.closePromise ??= this.terminate(code, reason);
+    return this.closePromise;
   }
 
   private async terminate(code: number, reason: string): Promise<void> {
     if (this.terminated) return;
     this.terminated = true;
     this.clearSetupDeadline();
+    this.clearRuntimeDeadlines();
+    this.setupController.abort();
     // A `connect()` still awaiting login/access-info/open (R11 scenario
     // (c)) has no bound of its own -- the real HTTP/WS promise it is
     // chained from may not settle for a long time, if ever. Reject it

@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import type { WebSocketServerChannel } from "./websocket-channel";
 import {
   VoiceMediaWorkerSession,
@@ -21,6 +22,7 @@ export interface VoiceSessionProviderFactory {
 interface ComposedSession {
   session: VoiceMediaWorkerSession;
   channel: WebSocketServerChannel;
+  closing?: Promise<void>;
 }
 
 export type VoiceSessionControlFrame =
@@ -52,29 +54,24 @@ function isControlFrame(value: unknown): value is VoiceSessionControlFrame {
  * media/ASR/TTS mechanics for a session id someone else admitted and is
  * driving through the control channel.
  */
-export class VoiceSessionComposer {
+export class VoiceSessionComposer extends EventEmitter {
   private readonly sessions = new Map<string, ComposedSession>();
-  /** Tracks each *attach instance's* in-flight `closeAsr()` teardown from
-   * the moment its channel emits "close" until that teardown actually
-   * settles (R11). Keyed by the `ComposedSession` object created for that
-   * specific `attach()` call -- never by `sessionId` (R14): a session id can
-   * be reissued (closed, then immediately re-admitted/attached at a higher
-   * epoch) while the OLD attach's teardown is still draining, and a
-   * string-keyed map would have the new attach's close overwrite -- and
-   * thereby silently drop from `awaitPendingCloses` -- the old one's
-   * still-pending promise. `attach`'s close handler deletes the session
-   * from `this.sessions` synchronously -- `get()` must stop returning it
-   * immediately -- but the underlying provider's bounded drain/cleanup can
-   * still be running; this map is what lets `awaitPendingCloses` give a
-   * caller (ultimately `MediaWorkerServer.stop`/`drain`) a real signal for
-   * "every attached session's provider resource has actually been
-   * released," instead of treating "removed from the session map" as proof
-   * of that. Self-prunes once each entry settles so long-running normal
-   * operation (sessions that close on their own, not during a drain) never
-   * accumulates. */
-  private readonly pendingCloses = new Map<ComposedSession, Promise<void>>();
+  /** Tracks each session's in-flight `closeAsr()` teardown from the moment
+   * its channel emits "close" until that teardown actually settles (R11).
+   * `attach`'s close handler deletes the session from `this.sessions`
+   * synchronously -- `get()` must stop returning it immediately -- but the
+   * underlying provider's bounded drain/cleanup can still be running; this
+   * map is what lets `awaitPendingCloses` give a caller (ultimately
+   * `MediaWorkerServer.stop`/`drain`) a real signal for "every attached
+   * session's provider resource has actually been released," instead of
+   * treating "removed from the session map" as proof of that. Self-prunes
+   * once each entry settles so long-running normal operation (sessions
+   * that close on their own, not during a drain) never accumulates. */
+  private readonly pendingCloses = new Set<Promise<void>>();
 
-  constructor(private readonly providerFactory: VoiceSessionProviderFactory) {}
+  constructor(private readonly providerFactory: VoiceSessionProviderFactory) {
+    super();
+  }
 
   /** Call once a session's WebSocket channel is established (the only
    * `session.connected` consumer this worker has). */
@@ -85,7 +82,12 @@ export class VoiceSessionComposer {
       sessionId,
       asrAdapter,
       ttsAdapter,
-      eventSink: (event) => this.sendEvent(channel, event),
+      eventSink: (event) => {
+        // A final received during peer disconnect remains observable by the
+        // worker's control-plane consumer, independently of the media socket.
+        this.emit("session.event", { sessionId, event });
+        this.sendEvent(channel, event);
+      },
     });
     const composed: ComposedSession = { session, channel };
     this.sessions.set(sessionId, composed);
@@ -94,11 +96,9 @@ export class VoiceSessionComposer {
       void this.handleMessage(sessionId, data, isBinary);
     });
     channel.on("close", () => {
-      // Guards against both a duplicate "close" emission re-running cleanup
-      // for an already-removed session, and (R14) a *newer* attach for the
-      // same reused `sessionId` having already taken this map entry's
-      // place -- identity, not mere presence, is what proves this is still
-      // the session this specific `attach()` call composed.
+      // Guards against a duplicate "close" emission re-running cleanup for
+      // an already-removed session -- defensive on top of the channel's
+      // own single-emission guarantee (see `./websocket-channel`).
       if (this.sessions.get(sessionId) !== composed) return;
       this.sessions.delete(sessionId);
       // The ASR provider's connection/waiters/billing resource must not
@@ -108,15 +108,8 @@ export class VoiceSessionComposer {
       // `close()`. `closeAsr()` resolves once that teardown has actually
       // finished (R11), not merely once it was requested -- track it so a
       // caller doing an orderly shutdown can await real completion instead
-      // of firing-and-forgetting it. Keyed by `composed` itself (R14), not
-      // `sessionId`, so a reused id's overlapping old/new teardowns are
-      // both retained in `pendingCloses` instead of the newer one
-      // overwriting the still-draining older one.
-      const closing = session.closeAsr();
-      this.pendingCloses.set(composed, closing);
-      void closing.finally(() => {
-        this.pendingCloses.delete(composed);
-      });
+      // of firing-and-forgetting it.
+      this.beginClose(composed);
     });
   }
 
@@ -134,7 +127,23 @@ export class VoiceSessionComposer {
    * what populates this map, then await this. Never rejects: `closeAsr()`
    * itself never throws. */
   async awaitPendingCloses(): Promise<void> {
-    await Promise.all(Array.from(this.pendingCloses.values()));
+    await Promise.all(Array.from(this.pendingCloses));
+  }
+
+  private beginClose(composed: ComposedSession): Promise<void> {
+    if (composed.closing) return composed.closing;
+    const closing = composed.session.closeAsr();
+    composed.closing = closing;
+    this.pendingCloses.add(closing);
+    void closing.then(() => this.pendingCloses.delete(closing));
+    return closing;
+  }
+
+  /** Stop accepting audio, but keep connected clients able to receive the
+   * bounded provider final drain before the server closes their transport. */
+  async drain(): Promise<void> {
+    for (const composed of this.sessions.values()) this.beginClose(composed);
+    await this.awaitPendingCloses();
   }
 
   private async handleMessage(
@@ -143,7 +152,7 @@ export class VoiceSessionComposer {
     isBinary: boolean,
   ): Promise<void> {
     const composed = this.sessions.get(sessionId);
-    if (!composed) return;
+    if (!composed || composed.closing) return;
     const occurredAt = new Date().toISOString();
 
     if (isBinary) {

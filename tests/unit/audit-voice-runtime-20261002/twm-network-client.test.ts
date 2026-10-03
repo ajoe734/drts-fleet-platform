@@ -1194,7 +1194,9 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         shortSetupProfile,
       );
 
-      const settled = Array.from({ length: 65 }, (_, i) =>
+      // Stay within the queue cap to exercise the readiness deadline, not
+      // the now-earlier setup-overflow failure covered by lifecycle-boundaries.
+      const settled = Array.from({ length: 64 }, (_, i) =>
         adapter
           .transcribe({
             sessionId: "sess",
@@ -1336,7 +1338,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
       expect(accessCalls).toBe(0);
       expect(wsFactory).not.toHaveBeenCalled();
 
-      // A genuinely fresh attempt afterward must still work normally.
+      // The old attempt is fenced; a genuinely fresh attempt can recover.
       const freshSocket = new StatefulSocket();
       wsFactory.mockImplementation(() => freshSocket);
       const freshPromise = adapter.transcribe({
@@ -1364,6 +1366,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
       });
       await expect(freshPromise).resolves.toMatchObject({ text: "fresh" });
       expect(wsFactory).toHaveBeenCalledTimes(1);
+      await adapter.close();
     } finally {
       vi.useRealTimers();
     }
@@ -1428,6 +1431,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     );
 
     let overflowRejections = 0;
+    let totalRejections = 0;
     const outcomes = Array.from({ length: 128 }, (_, i) =>
       adapter
         .transcribe({
@@ -1438,6 +1442,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
         .then(
           () => "resolved" as const,
           (err: unknown) => {
+            totalRejections++;
             if (
               err instanceof TwmNetworkError &&
               err.code === "TWM_ASR_QUEUE_OVERFLOW"
@@ -1454,11 +1459,14 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     // cap must already be rejected now, well before setup ever times out.
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(overflowRejections).toBe(128 - 64);
+    // The combined implementation aborts the entire attempt on overflow:
+    // the 64 admitted chunks plus the triggering chunk report overflow;
+    // subsequent ingress reports terminated. None remains pending.
+    expect(overflowRejections).toBe(65);
+    expect(totalRejections).toBe(128);
     expect(wsFactory).not.toHaveBeenCalled();
 
-    // Settle the 64 admitted calls (still awaiting the stuck login) instead
-    // of leaving them pending forever.
+    // Closing after fail-closed overflow is still safe and idempotent.
     await adapter.close();
     const results = await Promise.all(outcomes);
     expect(results.every((outcome) => outcome === "rejected")).toBe(true);

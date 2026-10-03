@@ -1006,6 +1006,56 @@ session is ready -- that was outside R12's setup/readiness repair
 boundary as stated in the round-6 reopen, and is recorded here precisely
 so it is not mistaken for in scope or already closed.
 
+## Interactive completion follow-up: strict recording evidence and lifecycle failure boundaries
+
+This parallel supplement was originally section 15 on the companion branch. It is retained alongside, not in place of, the owner's numbered review history below.
+
+User requested completion on 2026-10-03. Companion PR #2290 preserves and merges owner commits `7dd52c0e3` and `23cf0ead0` without rewriting published history. Its final immutable SHA is bound by the PR head and the canonical integration note. Earlier sections remain historical evidence; their claims that fabricated recording readback or transport cancellation are still unaddressed are superseded by this section, not silently retroactively certified.
+
+### Repairs and observed before/after evidence
+
+| Boundary | Repair / regression | Observed result |
+| --- | --- | --- |
+| Recording test fidelity | Replaced the existing finalize suite's synthetic fallback with actual `SealedRecorder.seal` writes to a strict scope/version store. Real request/upgrade listeners and manifest sealing run; `net.Server.listen` throws if called. | 20 cases pass: valid bytes, seal/retry, trusted closure, operation/session/principal/epoch/resource/revocation/expiry denials, absent object/version/scope/metadata/bytes failures. No readback of a missing object can succeed. |
+| R11 final drain | Retain owner's pending-final tracking and awaitable cleanup; make repeated adapter close return the same completion and clear early-drain timers. | Non-replaying socket tests cover partial before close, partial during drain, final arrival, no final timeout, and repeated close. |
+| R11 shutdown result path | Composer stops new ingress and drains providers **before** server closes live peer channels. A `session.event` emitter is also forwarded by `MediaWorkerServer`, so results remain observable by a control-plane consumer after peer disconnect. Pending closes use a set, not a session-ID-keyed entry that a new epoch could overwrite. | Real configured TWM factory → composer → unstarted server tests observe final results during orderly shutdown and peer disconnect; orderly shutdown also delivers final on the still-open media channel. This is an event delivery seam, not a durable dialogue/booking consumer implementation. |
+| R12 late setup/transport cancellation; R13 stale socket events | Retain owner's generation fence and abort the failed attempt's HTTP transport. Actual configured fetch receives AbortSignal. Timeout remains recoverable on a fresh attempt with a fresh AbortController; overflow/provider failure and explicit shutdown are terminal. Bind state-mutating socket callbacks to both socket and attempt identity, and clear only the matching connect promise. | Stuck login/access-info, late response after timeout, never-open handshake and configured-fetch cancellation pass. The owner's same-instance fresh-retry positive is preserved. Asynchronous old close/open/error/message events cannot affect a new attempt before or after 180. |
+| R12 retained ingress and provider errors | Reserve queue capacity before awaiting login, cap setup plus pre-ready audio at 64 chunks, and fail/settle the whole queue on overflow. Handle provider errors after OPEN and send failures through the same terminal cleanup path. | 65 simultaneous chunks during stalled login, access-info, handshake and open-to-ready reject and release resources; no-ready queue clears on deadline; post-open error settles pending work and closes the socket. Existing no-ready test uses 64 chunks to test timeout separately from overflow. |
+
+The original seven `twm-lifecycle-boundaries.test.ts` probes against source `25c2dae622568f3becab1396e0ce5665883ad064` all failed (7/7), reproducing missing behavior rather than asserting green. A read-only snapshot of the owner's in-progress network file at 04:15 UTC passed 3/7 and failed four cases (late login, late access-info, setup overflow, post-open error). That snapshot is **not** attributed to the later `23cf0ead0` commit, which independently added generation fencing. The combined repair passes all 18 lifecycle/composition cases, including the subsequently added handshake, idempotent close, shutdown, configured-fetch, asynchronous obsolete-socket and reused-session drain tests. The latter directly verifies that an old session instance's pending teardown is not lost when an empty replacement instance closes (R14); authorization/epoch fencing is covered separately by the strict recording suite. No tests were disabled to obtain these results.
+
+### Completed local validation
+
+Private frozen offline install (`--ignore-scripts`), not shared node_modules modification. Node 22 / pnpm 10.33.0 / TypeScript 5.9.3 / Vitest 4.1.4. Evidence logs are machine-local under `.local/voice-runtime-evidence/`; they are not claimed as portable attachments or live evidence.
+
+- `pnpm run typecheck:root`: exit 0.
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm --filter @drts/voice-media-worker lint`: exit 0.
+- ESLint on modified/new unit tests, max-warnings=0: exit 0.
+- Explicit offline selection: **9 files / 97 tests passed, zero skips**, exit 0:
+
+```bash
+NODE_ENV=test env -u DATABASE_URL -u API_DATABASE_URL pnpm exec vitest run \
+  tests/unit/audit-voice-runtime-20261002/internal-auth.test.ts \
+  tests/unit/audit-voice-runtime-20261002/websocket-channel-frame-limits.test.ts \
+  tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts \
+  tests/unit/audit-voice-runtime-20261002/provider-composition.test.ts \
+  tests/unit/audit-voice-runtime-20261002/twm-lifecycle-boundaries.test.ts \
+  tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts \
+  tests/unit/audit-voice-runtime-20261002/session-composer.test.ts \
+  tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts \
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts \
+  --maxWorkers=1
+```
+
+The remaining HTTP-listening suites were not run here. Root/full suites, browser tests, product servers, DB/Compose infrastructure and external vendor calls were not started. Baseline failing probes and intermediate test failures are retained separately from the final passing logs.
+
+### Acceptance disposition
+
+- `caller_session_authorization`: strict persisted-object offline evidence repaired; production issuer/audience and deployed identity paths remain external gates.
+- `approved_runtime_provider_paths`: deterministic R11/R12 repairs and configured-composition offline regressions supplied for independent review; no TWM/PSTN production attestation.
+- `remaining_external_blockers_precise`: CTI/procurement, provisioned account/model/voice matrix, durable production recording backend, call authority, dialogue/booking orchestration and shared-dev/PSTN acceptance remain open. `productionCapable` stays false. Ready-state idle/max-duration policy remains the explicitly documented separate remainder above.
+- `same_sha_review_ci`: new combined candidate requires fresh independent review and hosted CI. Local success is not merge, deployment, or live acceptance.
 ## 15. Round-7 review (reopen on `23cf0ead0849`, Codex, generation `7615f783a51e45a38888312d939799b5`, PR #2282)
 
 Preserved here per Guide §0.7 (the read-only reopen dispatch that produced
@@ -1147,3 +1197,37 @@ round's four fixes are internal lifecycle/concurrency/test-fidelity
 corrections to code and tests already in this task's write scope; none
 of them depend on, or newly require, a real call-authority issuer, a
 provisioned TWM account, or any other external gap.
+
+## 17. Consolidated lifecycle follow-up (AUDIT-VOICE-LIFECYCLE-20261003)
+
+The owner candidate `e91db0db5780aaa52a1d2d5fbc55c68eb558e8a5` was independently approved and merged as PR #2282 (`5bf63636a`). Companion PR #2290 preserves that history through a normal merge (`bbc94d736`), retaining abortable setup, generation/socket fencing, shared close promise, drain-before-channel-close, peer-independent `session.event`, and promise-identity teardown tracking. Recording tests retain real `SealedRecorder.seal` persistence with strict missing-object/scope/version rejection, not fabricated readback. Owner R12/R13/R14 regression cases remain present.
+
+The overflow policies differed: the owner rejected only excess ingress while admitted calls awaited setup timeout; the companion fails the entire setup attempt closed. The owner regression initially failed after consolidation (65 overflow rejections versus its expected 64). The successor assertion is stronger for the selected policy: all 128 calls settle before setup timeout, exactly 65 report overflow (64 admitted plus the triggering call), subsequent calls report termination, and no socket opens. No cases/assertions were skipped.
+
+### Newly implemented local runtime bounds
+
+- `maxDurationMs` starts on the current socket's `open`, including the open-to-readiness interval; repeated readiness, transcripts and audio cannot extend it. Expiry fails the session with `TWM_ASR_MAX_DURATION` and closes its socket.
+- `idleTimeoutMs` starts at first `180` readiness. Only successfully sent **nonempty audio** resets it; status/revision chatter cannot keep abandoned input alive. Expiry rejects pending work with `TWM_ASR_IDLE_TIMEOUT` and closes the socket. These are local resource bounds, **not verified provider billing/no-speech semantics**.
+- EOS disables the input-idle bound but retains the absolute cap. Explicit `close()` clears runtime timers and instead owns the already bounded EOS/final-result drain. Failure, abandoned setup and successful close release timers. Recoverable setup timeout still permits a fresh generation; idle/max-duration failure is terminal.
+- Invalid/nonfinite/nonpositive/Node-overflowing idle/max timer configuration is rejected before network setup. No new provider protocol, credential or paid operation is introduced.
+
+### Verification-scope correction and retained failed evidence
+
+The prior blanket description of all nine selected suites as socket-free was incorrect: the then-current `session-composer.test.ts` had three HTTP-listening cases. A consolidation run at 2026-10-03 05:22Z inadvertently selected them; it completed, their `finally` blocks stopped the servers, and a subsequent process inspection found no remaining voice test/server process. This was a VM-restriction violation, not authorized local runtime acceptance. Local evidence is preserved in `.local/voice-runtime-evidence/consolidated-tests.log`; older owner descriptions of loopback execution above are historical, not permission to repeat them.
+
+The composer helper now invokes the real request/upgrade listeners over an in-memory duplex pair. It still exercises signed session admission, actual WebSocket frame parsing, composer, ASR/TTS session and outbound frames; it never calls `start()`/`listen()`. A `net.Server.prototype.listen` guard throws if a regression tries to listen. All eight composer cases pass, including all three former listener cases. The nine-file selection was inspected again for active start/listen/network calls before rerunning.
+
+Completed offline checks on the consolidated source: **9 files / 113 tests passed, zero skips**; root TypeScript, voice-worker TypeScript, worker lint and changed-test lint all passed. Commands:
+
+```sh
+NODE_ENV=test env -u DATABASE_URL -u API_DATABASE_URL pnpm exec vitest run \
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,websocket-channel-frame-limits,session-authority-grant-expiry-race,provider-composition,twm-lifecycle-boundaries,twm-network-client,session-composer,media-worker-server-shutdown-drain,media-recording-finalize-authorization}.test.ts --maxWorkers=1
+pnpm run typecheck:root
+pnpm --filter @drts/voice-media-worker typecheck
+pnpm --filter @drts/voice-media-worker lint
+pnpm exec eslint tests/unit/audit-voice-runtime-20261002/{twm-lifecycle-boundaries,twm-network-client,session-composer,media-recording-finalize-authorization}.test.ts
+```
+
+Local logs: `.local/voice-runtime-evidence/runtime-deadlines-*.log`. Predecessor companion `5b4d76a13cd981b217c3e4d96f7901a7e9aa7535` passed hosted runs `37098046560` and `37098046701`; they do **not** certify this successor. Independent review and CI must bind the newly pushed full SHA before merging #2290.
+
+`productionCapable` remains false. Real CTI/account/model/voice verification, call-authority issuer/audience, durable recording storage, dialogue/booking orchestration, cloud deployment and real-service acceptance remain open. This section supersedes only the earlier idle/max-duration *implementation* remainder, not any external readiness gate. The emitted `session.event` seam is not a durable dialogue consumer. No deployment was performed.

@@ -115,6 +115,9 @@ export class MediaWorkerServer extends EventEmitter {
     this.recordingAdapter = config?.recordingAdapter;
     this.callAuthorityVerifier = config?.callAuthorityVerifier;
     this.sessionComposer = config?.sessionComposer;
+    this.sessionComposer?.on("session.event", (event: unknown) => {
+      this.emit("session.event", event);
+    });
     this.sessionAuthority = new VoiceMediaSessionAuthority(
       config?.sessionGrantTtlMs ??
         Number(process.env.VOICE_MEDIA_SESSION_GRANT_TTL_MS ?? 30_000),
@@ -263,6 +266,10 @@ export class MediaWorkerServer extends EventEmitter {
       }
     }
 
+    // Receive final ASR events while the peer channel can still carry them.
+    // Provider cleanup has its own bounded EOS window; the subsequent timeout
+    // governs how long to wait for peers to finish/acknowledge shutdown.
+    await this.sessionComposer?.drain();
     let timedOut = false;
     if (this.activeSessions.size > 0) {
       timedOut = await new Promise<boolean>((resolve) => {
@@ -293,6 +300,8 @@ export class MediaWorkerServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.isDraining = true;
+    await this.sessionComposer?.drain();
     for (const session of this.activeSessions.values()) {
       if (session.channel && !session.channel.destroyed) {
         session.channel.close(1000, "Server stopping");

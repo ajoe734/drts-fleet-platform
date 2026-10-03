@@ -80,6 +80,7 @@ function buildTwmHttpTransport(baseUrl: string): TwmHttpTransport {
       method,
       ...(init?.headers !== undefined ? { headers: init.headers } : {}),
       ...(init?.body !== undefined ? { body: init.body } : {}),
+      ...(init?.signal !== undefined ? { signal: init.signal } : {}),
     });
     return response as unknown as TwmHttpResponse;
   };
