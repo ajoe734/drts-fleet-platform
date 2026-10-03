@@ -4,7 +4,8 @@ import { MediaWorkerServer } from "../../../apps/voice-media-worker/src/server/m
 import { MediaRecordingAdapter } from "../../../apps/voice-media-worker/src/recording/media-recording-adapter";
 import { VOICE_MEDIA_INTERNAL_KEY_HEADER } from "../../../apps/voice-media-worker/src/server/internal-auth";
 import {
-  recordingChecksum,
+  SealedRecorder,
+  type RecorderIngress,
   type RecorderObjectMetadata,
   type RecorderObjectStore,
   type RecorderSegment,
@@ -21,32 +22,31 @@ import { FakeCallAuthority } from "./fake-call-authority";
  * listener, the actual MediaRecordingAdapter/SealedRecorder/
  * FinalRecordingManifests chain, and an in-memory RecorderObjectStore
  * (the only mocked boundary -- never the sealing logic itself).
+ *
+ * Round 7 repair: `MemoryRecorderObjectStore.readVersion` previously
+ * fabricated matching bytes/metadata for ANY requested scope/key/version
+ * that was never actually written, so every success-path test here was
+ * exercising `verifyRecordedObject`'s checksum/version/metadata checks
+ * against a boundary that could never fail them. Segments are now produced
+ * exclusively by sealing real audio through the actual `SealedRecorder`
+ * (the only mocked dependency is its external `RecorderIngress`), and the
+ * store itself does strict key+version lookup with no fallback -- a missing
+ * object or a wrong version is a genuine store-level failure, matching a
+ * real immutable object store.
  */
 
 const INTERNAL_KEY = "test-internal-key-finalize";
-const DUMMY_AUDIO_BYTES = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2]);
-const DUMMY_CHECKSUM = recordingChecksum(DUMMY_AUDIO_BYTES);
-
-function bidirectionalSegments(scope: RecordingScope): RecorderSegment[] {
-  return (["inbound", "outbound"] as const).map((channel) => ({
-    ...scope,
-    channel,
-    startMs: 0,
-    endMs: 1000,
-    utcStart: "2026-10-03T00:00:00.000Z",
-    utcEnd: "2026-10-03T00:00:01.000Z",
-    objectKey: `rec/${scope.brandId}/${scope.callId}/${scope.recordingId}/${channel}-0-1000.opus`,
-    objectVersion: "v1",
-    checksum: DUMMY_CHECKSUM,
-    byteLength: DUMMY_AUDIO_BYTES.byteLength,
-    durableAt: "2026-10-03T00:00:01.000Z",
-  }));
-}
+const RECORDED_AUDIO_BYTES = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2]);
+const RECORDING_FORK_CREDENTIAL = "test-recording-fork-credential";
 
 class MemoryRecorderObjectStore implements RecorderObjectStore {
   private readonly objects = new Map<
     string,
-    { metadata: unknown; bytes: Uint8Array }
+    {
+      version: string;
+      bytes: Uint8Array;
+      metadata: RecorderObjectMetadata | undefined;
+    }
   >();
 
   async putRecordingImmutable(
@@ -60,8 +60,14 @@ class MemoryRecorderObjectStore implements RecorderObjectStore {
     const objectVersion = "v1";
     const durableAt = metadata.utcEnd;
     this.objects.set(objectKey, {
-      metadata: { ...metadata, objectKey, objectVersion, durableAt },
-      bytes,
+      version: objectVersion,
+      bytes: Uint8Array.from(bytes),
+      metadata: Object.freeze({
+        ...metadata,
+        objectKey,
+        objectVersion,
+        durableAt,
+      }),
     });
     return { objectKey, objectVersion, durableAt };
   }
@@ -74,14 +80,19 @@ class MemoryRecorderObjectStore implements RecorderObjectStore {
     const objectVersion = "v1";
     const durableAt = "2026-10-03T00:00:02.000Z";
     this.objects.set(objectKey, {
-      metadata: { scope, objectKey, objectVersion, durableAt },
-      bytes,
+      version: objectVersion,
+      bytes: Uint8Array.from(bytes),
+      metadata: undefined,
     });
     return { objectKey, objectVersion, durableAt };
   }
 
+  /** Strict key+version lookup against what was actually written -- no
+   * fabricated fallback. A segment referencing an object that was never
+   * durably stored, or the wrong version of one that was, must fail here
+   * exactly as a real immutable object store would reject it. */
   async readVersion(
-    scope: RecordingScope,
+    _scope: RecordingScope,
     objectKey: string,
     objectVersion: string,
   ): Promise<{
@@ -90,43 +101,55 @@ class MemoryRecorderObjectStore implements RecorderObjectStore {
     recordingMetadata?: RecorderObjectMetadata;
   }> {
     const item = this.objects.get(objectKey);
-    if (item) {
-      return {
-        bytes: item.bytes,
-        objectVersion,
-        recordingMetadata: item.metadata as RecorderObjectMetadata,
-      };
+    if (!item || item.version !== objectVersion) {
+      throw new Error(
+        `VOICE_RECORDING_OBJECT_NOT_FOUND: no stored object for '${objectKey}' at version '${objectVersion}'.`,
+      );
     }
-    // Segments supplied directly to `sealFinalRecording` (as a real caller
-    // would, referencing audio already durably written by the recorder
-    // fork) were never separately persisted via `putRecordingImmutable` in
-    // this test boundary. Mirror their declared metadata back so
-    // `verifyRecordedObject`'s checksum/byteLength/metadata cross-check
-    // still runs against real segment data, not a mocked pass-through.
-    const channel = objectKey.includes("outbound") ? "outbound" : "inbound";
     return {
-      bytes: DUMMY_AUDIO_BYTES,
-      objectVersion,
-      recordingMetadata: {
-        ...scope,
-        channel,
-        startMs: 0,
-        endMs: 1000,
-        utcStart: "2026-10-03T00:00:00.000Z",
-        utcEnd: "2026-10-03T00:00:01.000Z",
-        objectKey,
-        objectVersion,
-        checksum: DUMMY_CHECKSUM,
-        byteLength: DUMMY_AUDIO_BYTES.byteLength,
-        durableAt: "2026-10-03T00:00:01.000Z",
-        source: "recording_fork",
-      },
+      bytes: Uint8Array.from(item.bytes),
+      objectVersion: item.version,
+      ...(item.metadata ? { recordingMetadata: item.metadata } : {}),
     };
   }
 
   async headObject(objectKey: string): Promise<{ exists: boolean }> {
     return { exists: this.objects.has(objectKey) };
   }
+}
+
+function makeRecorderIngress(): RecorderIngress {
+  return {
+    authorize: async () => ({
+      source: "recording_fork",
+      channels: ["inbound", "outbound"],
+    }),
+  };
+}
+
+/** Actually records both channels through `SealedRecorder.seal` -- the only
+ * doubled dependency is the external `RecorderIngress`, never the sealing
+ * logic, the checksum/metadata it writes, or the store's readback. */
+async function sealBidirectionalSegments(
+  store: RecorderObjectStore,
+  scope: RecordingScope,
+): Promise<RecorderSegment[]> {
+  const recorder = new SealedRecorder(makeRecorderIngress(), store);
+  const segments: RecorderSegment[] = [];
+  for (const channel of ["inbound", "outbound"] as const) {
+    segments.push(
+      await recorder.seal(RECORDING_FORK_CREDENTIAL, {
+        ...scope,
+        channel,
+        startMs: 0,
+        endMs: 1000,
+        utcStart: "2026-10-03T00:00:00.000Z",
+        utcEnd: "2026-10-03T00:00:01.000Z",
+        bytes: RECORDED_AUDIO_BYTES,
+      }),
+    );
+  }
+  return segments;
 }
 
 function makeCountingLedger(
@@ -317,10 +340,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     // actually ended) -- this is the state the forged request tries to
     // paper over.
     const ledger = makeCountingLedger(() => null);
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -333,7 +354,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-forged-close",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-forged-close",
@@ -378,10 +399,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -394,7 +413,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-valid-finalize",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-valid-finalize",
@@ -435,10 +454,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -456,14 +473,14 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     );
 
     // Target session A (whose authoritative scope is scopeA) but supply
-    // scope B's segments and claim scope B in the body. The server must
-    // resolve scope from session A regardless of the body, and session A's
-    // actual recording has no coverage under scope B's segments -- this
-    // must fail, not silently seal session B's recording under session A's
-    // request.
+    // scope B's real, durably-recorded segments and claim scope B in the
+    // body. The server must resolve scope from session A regardless of the
+    // body, and session A's actual recording has no coverage under scope
+    // B's segments -- this must fail, not silently seal session B's
+    // recording under session A's request.
     const result = await postFinalize(started.port, {
       sessionId: "sess-cross-a",
-      segments: bidirectionalSegments(scopeB),
+      segments: await sealBidirectionalSegments(store, scopeB),
       scope: scopeB,
       callAuthorityToken: finalizeToken(
         started.callAuthority,
@@ -480,7 +497,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     // cross-session request above.
     const legitimate = await postFinalize(started.port, {
       sessionId: "sess-cross-b",
-      segments: bidirectionalSegments(scopeB),
+      segments: await sealBidirectionalSegments(store, scopeB),
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-cross-b",
@@ -512,10 +529,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -530,7 +545,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-finalize-x",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: unrelatedToken,
     });
 
@@ -562,10 +577,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -584,7 +597,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-op-admit-only",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: admitOnlyToken,
     });
 
@@ -608,10 +621,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -628,7 +639,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-op-finalize-only",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: finalizeOnlyToken,
     });
 
@@ -650,10 +661,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -672,7 +681,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-finalize-revoked",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: revokedToken,
     });
 
@@ -701,10 +710,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -740,7 +747,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     // using the *old* epoch's authority/scope must be denied.
     const staleResult = await postFinalize(started.port, {
       sessionId: "sess-reused-id",
-      segments: bidirectionalSegments(oldScope),
+      segments: await sealBidirectionalSegments(store, oldScope),
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-reused-id",
@@ -775,10 +782,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -793,7 +798,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     // finalize token itself carries no recording scope at all.
     const result = await postFinalize(started.port, {
       sessionId: "sess-r2-no-scope-token",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-r2-no-scope-token",
@@ -825,10 +830,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -841,7 +844,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const result = await postFinalize(started.port, {
       sessionId: "sess-r2-cross-scope-token",
-      segments: bidirectionalSegments(scope),
+      segments: await sealBidirectionalSegments(store, scope),
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-r2-cross-scope-token",
@@ -875,10 +878,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -888,10 +889,11 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       scope,
       started.callAuthority,
     );
+    const segments = await sealBidirectionalSegments(store, scope);
 
     const first = await postFinalize(started.port, {
       sessionId: "sess-retry",
-      segments: bidirectionalSegments(scope),
+      segments,
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-retry",
@@ -904,7 +906,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const retry = await postFinalize(started.port, {
       sessionId: "sess-retry",
-      segments: bidirectionalSegments(scope),
+      segments,
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-retry",
@@ -931,10 +933,8 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       endMs: 1000,
       checkpointRefs: [],
     }));
-    const adapter = new MediaRecordingAdapter(
-      new MemoryRecorderObjectStore(),
-      ledger,
-    );
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
     const started = await startServer(adapter);
     server = started.server;
 
@@ -944,10 +944,11 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
       scope,
       started.callAuthority,
     );
+    const segments = await sealBidirectionalSegments(store, scope);
 
     const sealed = await postFinalize(started.port, {
       sessionId: "sess-stale-retry",
-      segments: bidirectionalSegments(scope),
+      segments,
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-stale-retry",
@@ -986,7 +987,7 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
 
     const retryAfterReissue = await postFinalize(started.port, {
       sessionId: "sess-stale-retry",
-      segments: bidirectionalSegments(scope),
+      segments,
       callAuthorityToken: finalizeToken(
         started.callAuthority,
         "sess-stale-retry",
@@ -999,5 +1000,110 @@ describe("AUDIT-VOICE-RUNTIME-20261002: /recording/finalize session-authoritativ
     // No additional ledger consultation beyond the first, already-sealed
     // call -- the denial happens before the adapter is ever reached.
     expect(ledger.calls).toBe(ledgerCallsAfterSeal);
+  });
+
+  /**
+   * Round 7 repair-boundary regression: with `MemoryRecorderObjectStore`
+   * now doing strict key+version lookup (no fabricated fallback), a segment
+   * that claims an object that was never actually durably stored must make
+   * the whole finalization fail, not silently "verify" against invented
+   * bytes.
+   */
+  it("rejects finalization when a segment references an object that was never durably stored", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-missing-object",
+      callId: "call-missing-object",
+      recordingId: "rec-missing-object",
+      legId: "leg-1",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-missing-object",
+      scope,
+      started.callAuthority,
+    );
+
+    // Genuinely sealed segments, then point one of them at an object key
+    // that was never written through `putRecordingImmutable` -- the store
+    // must reject the readback instead of fabricating matching bytes.
+    const segments = await sealBidirectionalSegments(store, scope);
+    const tampered = segments.map((segment, index) =>
+      index === 0
+        ? {
+            ...segment,
+            objectKey: `${segment.objectKey}-never-stored`,
+          }
+        : segment,
+    );
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-missing-object",
+      segments: tampered,
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-missing-object",
+        epoch,
+        scope,
+      ),
+    });
+
+    expect(result.status).not.toBe(200);
+    expect(result.body).not.toMatchObject({ status: "sealed" });
+  });
+
+  it("rejects finalization when a segment claims a different stored object version", async () => {
+    const scope: RecordingScope = {
+      brandId: "brand-wrong-version",
+      callId: "call-wrong-version",
+      recordingId: "rec-wrong-version",
+      legId: "leg-1",
+    };
+    const ledger = makeCountingLedger((resolvedScope) => ({
+      closedEventId: `evt-${resolvedScope.callId}`,
+      endedAt: "2026-10-03T00:00:01.000Z",
+      endMs: 1000,
+      checkpointRefs: [],
+    }));
+    const store = new MemoryRecorderObjectStore();
+    const adapter = new MediaRecordingAdapter(store, ledger);
+    const started = await startServer(adapter);
+    server = started.server;
+
+    const { epoch } = await admitAndAttach(
+      started.port,
+      "sess-wrong-version",
+      scope,
+      started.callAuthority,
+    );
+
+    const segments = await sealBidirectionalSegments(store, scope);
+    const tampered = segments.map((segment, index) =>
+      index === 0 ? { ...segment, objectVersion: "v2-never-stored" } : segment,
+    );
+
+    const result = await postFinalize(started.port, {
+      sessionId: "sess-wrong-version",
+      segments: tampered,
+      callAuthorityToken: finalizeToken(
+        started.callAuthority,
+        "sess-wrong-version",
+        epoch,
+        scope,
+      ),
+    });
+
+    expect(result.status).not.toBe(200);
+    expect(result.body).not.toMatchObject({ status: "sealed" });
   });
 });

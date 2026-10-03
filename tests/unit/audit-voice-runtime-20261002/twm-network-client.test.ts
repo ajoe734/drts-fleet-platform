@@ -286,6 +286,59 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     }
   }
 
+  /** A `StatefulSocket` whose `close()` only transitions to CLOSING --
+   * mirroring a real WebSocket, whose `close` *event* fires asynchronously,
+   * strictly after the synchronous `close()` call that requests it. Call
+   * `deliverClose()` separately to simulate that event finally arriving,
+   * independently of when `close()` was requested (R13). */
+  class DelayedCloseSocket implements TwmWebSocketLike {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+
+    readyState: number = DelayedCloseSocket.CONNECTING;
+    readonly sent: Array<Uint8Array | string> = [];
+    private readonly listeners: Record<string, Array<(event: any) => void>> =
+      {};
+
+    send(data: Uint8Array | string): void {
+      if (this.readyState !== DelayedCloseSocket.OPEN) {
+        const err = new Error(
+          `Cannot send: WebSocket is not OPEN (readyState=${this.readyState}).`,
+        );
+        err.name = "InvalidStateError";
+        throw err;
+      }
+      this.sent.push(data);
+    }
+
+    open(): void {
+      this.readyState = DelayedCloseSocket.OPEN;
+      this.fire("open", {});
+    }
+
+    close(): void {
+      if (this.readyState === DelayedCloseSocket.CLOSED) return;
+      this.readyState = DelayedCloseSocket.CLOSING;
+    }
+
+    /** Simulates the platform's asynchronous `close` event finally
+     * arriving, independent of (and after) the `close()` call above. */
+    deliverClose(): void {
+      this.readyState = DelayedCloseSocket.CLOSED;
+      this.fire("close", {});
+    }
+
+    addEventListener(type: string, listener: (event: any) => void): void {
+      (this.listeners[type] ??= []).push(listener);
+    }
+
+    fire(type: string, event: unknown): void {
+      for (const listener of this.listeners[type] ?? []) listener(event);
+    }
+  }
+
   function transportFor(
     accessTicket: string,
     expiresAt = "2099-01-01T00:00:00.000Z",
@@ -1341,5 +1394,171 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
 
     await expect(promise).rejects.toThrow(TwmNetworkError);
     expect(socket.sent).toEqual([]);
+  });
+
+  /**
+   * Codex review round 7 R12: `MAX_QUEUED_AUDIO_CHUNKS` was only enforced
+   * against `audioQueue.length`, which is never populated until *after*
+   * `transcribe()` has awaited `connect()` -- so an arbitrary number of
+   * concurrent callers could each retain their own audio chunk in their own
+   * suspended stack frame while all awaiting the same stuck single-flight
+   * `connect()`, none of them ever counted against the cap. The excess
+   * above `MAX_QUEUED_AUDIO_CHUNKS` (64) must be rejected synchronously,
+   * before ever awaiting setup -- not merely once/if the setup deadline
+   * later fires.
+   */
+  it("(R12 round-7) bounds concurrent setup-phase transcribe() calls at MAX_QUEUED_AUDIO_CHUNKS instead of letting them pile up unbounded behind a stuck login", async () => {
+    const loginGate = new Promise<never>(() => {
+      // Deliberately never settles -- simulates a stuck login call.
+    });
+    const wsFactory = vi.fn(() => new StatefulSocket());
+    const transport: TwmHttpTransport = async (_method, path) => {
+      if (path === "/api/v1/login") return loginGate;
+      throw new Error(`unexpected path ${path}`);
+    };
+    const shortSetupProfile: TwmAsrRouteProfile = {
+      ...profile,
+      timeouts: { ...profile.timeouts, noSpeechTimeoutMs: 70 },
+    };
+    const adapter = new TwmAsrNetworkAdapter(
+      transport,
+      wsFactory,
+      { accountId: "a", accountSecret: "s" },
+      shortSetupProfile,
+    );
+
+    let overflowRejections = 0;
+    const outcomes = Array.from({ length: 128 }, (_, i) =>
+      adapter
+        .transcribe({
+          sessionId: "sess",
+          audioChunk: new Uint8Array([i]),
+          sequence: i + 1,
+        })
+        .then(
+          () => "resolved" as const,
+          (err: unknown) => {
+            if (
+              err instanceof TwmNetworkError &&
+              err.code === "TWM_ASR_QUEUE_OVERFLOW"
+            ) {
+              overflowRejections++;
+            }
+            return "rejected" as const;
+          },
+        ),
+    );
+
+    // Give every synchronously-rejecting call a chance to settle without
+    // advancing anywhere near the setup deadline -- the excess above the
+    // cap must already be rejected now, well before setup ever times out.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(overflowRejections).toBe(128 - 64);
+    expect(wsFactory).not.toHaveBeenCalled();
+
+    // Settle the 64 admitted calls (still awaiting the stuck login) instead
+    // of leaving them pending forever.
+    await adapter.close();
+    const results = await Promise.all(outcomes);
+    expect(results.every((outcome) => outcome === "rejected")).toBe(true);
+  });
+
+  /**
+   * Codex review round 7 R13: `failSetup()`/`terminate()` abandon a stale
+   * attempt and *request* its socket's close, but a real WebSocket's close
+   * *event* is asynchronous and can still arrive after a newer attempt has
+   * replaced `this.socket`. The close/message/open handlers installed for
+   * the old attempt were unfenced against socket identity, so that late
+   * event tore down the newer attempt's live state (clearing `this.socket`,
+   * rejecting its pending work) using nothing but an identity-less closure.
+   */
+  it("(R13 round-7) a stale attempt's delayed close event does not tear down a newer attempt's state", async () => {
+    vi.useFakeTimers();
+    try {
+      const socketA = new DelayedCloseSocket();
+      const socketB = new StatefulSocket();
+      const sockets: TwmWebSocketLike[] = [socketA, socketB];
+      let nextSocket = 0;
+      const wsFactory = vi.fn(() => sockets[nextSocket++]!);
+      const shortSetupProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, noSpeechTimeoutMs: 25 },
+      };
+      // Each connect attempt consumes a fresh single-use ticket (SD §11,
+      // enforced by this adapter itself) -- attempt B must not be handed
+      // the same ticket attempt A already consumed.
+      let ticketCounter = 0;
+      const transport: TwmHttpTransport = async (_method, path) => {
+        if (path === "/api/v1/login")
+          return jsonResponse(200, { token: "asr-tok" });
+        if (path === "/api/v1/streaming/transcript/access-info") {
+          ticketCounter += 1;
+          return jsonResponse(200, {
+            websocketUrl: "wss://twm.example/stream",
+            ticket: `ticket-r13-${ticketCounter}`,
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          });
+        }
+        throw new Error(`unexpected path ${path}`);
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transport,
+        wsFactory,
+        { accountId: "a", accountSecret: "s" },
+        shortSetupProfile,
+      );
+
+      // Attempt A: opens but never reaches 180.
+      const firstAttempt = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      const firstRejection =
+        expect(firstAttempt).rejects.toThrow(TwmNetworkError);
+      for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+      socketA.open();
+      for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+
+      // The setup deadline fires: failSetup() requests socketA.close(), but
+      // (per DelayedCloseSocket) the close EVENT has not fired yet -- A is
+      // still CLOSING, exactly like a real pending WebSocket close.
+      await vi.advanceTimersByTimeAsync(25);
+      await firstRejection;
+      expect(socketA.readyState).toBe(DelayedCloseSocket.CLOSING);
+
+      // A fresh attempt (B) connects normally and reaches 180.
+      const secondAttempt = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([2]),
+        sequence: 2,
+      });
+      for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+      socketB.open();
+      socketB.fire("message", { data: JSON.stringify({ status: 180 }) });
+      for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+      expect(socketB.sent).toEqual([new Uint8Array([2])]);
+
+      // Attempt A's delayed close event finally arrives -- it must not
+      // affect B's live state at all.
+      socketA.deliverClose();
+
+      expect(socketB.readyState).toBe(StatefulSocket.OPEN);
+
+      socketB.fire("message", {
+        data: JSON.stringify({
+          providerSessionId: "p1",
+          segmentId: "seg-b",
+          revision: 1,
+          text: "from-b",
+          final: 1,
+          language: "cmn-TW",
+        }),
+      });
+      await expect(secondAttempt).resolves.toMatchObject({ text: "from-b" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

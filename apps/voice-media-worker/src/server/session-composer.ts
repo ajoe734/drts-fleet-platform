@@ -54,18 +54,25 @@ function isControlFrame(value: unknown): value is VoiceSessionControlFrame {
  */
 export class VoiceSessionComposer {
   private readonly sessions = new Map<string, ComposedSession>();
-  /** Tracks each session's in-flight `closeAsr()` teardown from the moment
-   * its channel emits "close" until that teardown actually settles (R11).
-   * `attach`'s close handler deletes the session from `this.sessions`
-   * synchronously -- `get()` must stop returning it immediately -- but the
-   * underlying provider's bounded drain/cleanup can still be running; this
-   * map is what lets `awaitPendingCloses` give a caller (ultimately
-   * `MediaWorkerServer.stop`/`drain`) a real signal for "every attached
-   * session's provider resource has actually been released," instead of
-   * treating "removed from the session map" as proof of that. Self-prunes
-   * once each entry settles so long-running normal operation (sessions
-   * that close on their own, not during a drain) never accumulates. */
-  private readonly pendingCloses = new Map<string, Promise<void>>();
+  /** Tracks each *attach instance's* in-flight `closeAsr()` teardown from
+   * the moment its channel emits "close" until that teardown actually
+   * settles (R11). Keyed by the `ComposedSession` object created for that
+   * specific `attach()` call -- never by `sessionId` (R14): a session id can
+   * be reissued (closed, then immediately re-admitted/attached at a higher
+   * epoch) while the OLD attach's teardown is still draining, and a
+   * string-keyed map would have the new attach's close overwrite -- and
+   * thereby silently drop from `awaitPendingCloses` -- the old one's
+   * still-pending promise. `attach`'s close handler deletes the session
+   * from `this.sessions` synchronously -- `get()` must stop returning it
+   * immediately -- but the underlying provider's bounded drain/cleanup can
+   * still be running; this map is what lets `awaitPendingCloses` give a
+   * caller (ultimately `MediaWorkerServer.stop`/`drain`) a real signal for
+   * "every attached session's provider resource has actually been
+   * released," instead of treating "removed from the session map" as proof
+   * of that. Self-prunes once each entry settles so long-running normal
+   * operation (sessions that close on their own, not during a drain) never
+   * accumulates. */
+  private readonly pendingCloses = new Map<ComposedSession, Promise<void>>();
 
   constructor(private readonly providerFactory: VoiceSessionProviderFactory) {}
 
@@ -80,16 +87,19 @@ export class VoiceSessionComposer {
       ttsAdapter,
       eventSink: (event) => this.sendEvent(channel, event),
     });
-    this.sessions.set(sessionId, { session, channel });
+    const composed: ComposedSession = { session, channel };
+    this.sessions.set(sessionId, composed);
 
     channel.on("message", (data: string | Buffer, isBinary: boolean) => {
       void this.handleMessage(sessionId, data, isBinary);
     });
     channel.on("close", () => {
-      // Guards against a duplicate "close" emission re-running cleanup for
-      // an already-removed session -- defensive on top of the channel's
-      // own single-emission guarantee (see `./websocket-channel`).
-      if (!this.sessions.has(sessionId)) return;
+      // Guards against both a duplicate "close" emission re-running cleanup
+      // for an already-removed session, and (R14) a *newer* attach for the
+      // same reused `sessionId` having already taken this map entry's
+      // place -- identity, not mere presence, is what proves this is still
+      // the session this specific `attach()` call composed.
+      if (this.sessions.get(sessionId) !== composed) return;
       this.sessions.delete(sessionId);
       // The ASR provider's connection/waiters/billing resource must not
       // outlive this session -- this fires on every close path (normal
@@ -98,13 +108,14 @@ export class VoiceSessionComposer {
       // `close()`. `closeAsr()` resolves once that teardown has actually
       // finished (R11), not merely once it was requested -- track it so a
       // caller doing an orderly shutdown can await real completion instead
-      // of firing-and-forgetting it.
+      // of firing-and-forgetting it. Keyed by `composed` itself (R14), not
+      // `sessionId`, so a reused id's overlapping old/new teardowns are
+      // both retained in `pendingCloses` instead of the newer one
+      // overwriting the still-draining older one.
       const closing = session.closeAsr();
-      this.pendingCloses.set(sessionId, closing);
+      this.pendingCloses.set(composed, closing);
       void closing.finally(() => {
-        if (this.pendingCloses.get(sessionId) === closing) {
-          this.pendingCloses.delete(sessionId);
-        }
+        this.pendingCloses.delete(composed);
       });
     });
   }

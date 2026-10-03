@@ -296,6 +296,12 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
    * told its chunk was rejected just because it raced the provider's own
    * asynchronous login/open/180 sequence. */
   private readonly audioQueue: Uint8Array[] = [];
+  /** Count of `transcribe()` calls currently awaiting `connect()` -- i.e.
+   * audio retained in the caller's own suspended stack frame rather than in
+   * `audioQueue` (R12). Added to `audioQueue.length` when enforcing
+   * `MAX_QUEUED_AUDIO_CHUNKS` so the cap bounds total retained/in-flight
+   * audio, not merely what has already reached the post-connect queue. */
+  private pendingConnectChunks = 0;
   /** Resolves the in-flight `terminate()`'s bounded EOS-drain wait early
    * once every outstanding result waiter has settled, instead of always
    * burning the full configured window. */
@@ -585,8 +591,22 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       );
     }
     this.socket = socket;
-    socket.addEventListener("message", (event) => this.handleMessage(event));
+    // Fences every listener against this exact socket object (R13): a
+    // platform WebSocket's `close` event is asynchronous, so an attempt
+    // abandoned by `failSetup()`/`terminate()` (which drops `this.socket`
+    // synchronously but only *requests* the real close) can still have its
+    // own stale `close`/`message` fire well after `this.socket` has moved on
+    // to a newer attempt's socket. Without this check, that late event would
+    // tear down the NEW attempt's state -- clearing `this.socket`, rejecting
+    // its pending work -- using nothing but an identity-less closure over
+    // whichever `socket` variable happened to be in scope.
+    const isCurrentSocket = () => this.socket === socket;
+    socket.addEventListener("message", (event) => {
+      if (!isCurrentSocket()) return;
+      this.handleMessage(event);
+    });
     socket.addEventListener("close", () => {
+      if (!isCurrentSocket()) return;
       this.socket = undefined;
       this.socketOpen = false;
       this.ready = false;
@@ -605,7 +625,10 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
       socket.addEventListener("open", () => {
         if (settled) return;
         settled = true;
-        this.socketOpen = true;
+        // Resolving unblocks this specific attempt's own awaited promise
+        // regardless of currency; `socketOpen` is shared state and must
+        // only reflect reality for whichever socket is still current (R13).
+        if (isCurrentSocket()) this.socketOpen = true;
         resolve();
       });
       socket.addEventListener("error", () => {
@@ -761,24 +784,44 @@ export class TwmAsrNetworkAdapter implements VoiceSpeechToTextAdapter {
   async transcribe(
     request: VoiceAsrTranscribeRequest,
   ): Promise<VoiceAsrSegmentResult> {
-    await this.connect();
     this.assertNotTerminated("ASR session was closed.");
-    if (this.eosSent) {
-      throw new TwmNetworkError(
-        "TWM_ASR_NOT_READY",
-        "TWM audio requires an open stream before EOS.",
-      );
-    }
     if (request.audioChunk.byteLength >= 384 * 1024) {
       throw new TwmNetworkError(
         "TWM_ASR_FRAME_TOO_LARGE",
         "TWM frame must be smaller than 384 KB.",
       );
     }
-    if (this.audioQueue.length >= MAX_QUEUED_AUDIO_CHUNKS) {
+    // Reserved *before* awaiting `connect()` (R12): a caller's audio is
+    // retained -- in this adapter's own `audioQueue` once connected, or
+    // implicitly in the caller's own suspended stack frame while connect()
+    // is still in flight -- from the moment this method is entered, not
+    // from the moment it reaches the post-connect queue push below. Without
+    // this reservation, an arbitrary number of concurrent callers could
+    // each await the same single-flight `connect()` (e.g. a provider stuck
+    // before login/access-info/180), none of them ever having been counted
+    // against `MAX_QUEUED_AUDIO_CHUNKS`. Released in `finally` on every
+    // outcome -- success, failure, or a setup-deadline/terminate abort of
+    // the `connect()` this call is awaiting.
+    if (
+      this.audioQueue.length + this.pendingConnectChunks >=
+      MAX_QUEUED_AUDIO_CHUNKS
+    ) {
       throw new TwmNetworkError(
         "TWM_ASR_QUEUE_OVERFLOW",
         `TWM audio queue exceeded ${MAX_QUEUED_AUDIO_CHUNKS} chunks awaiting provider '180' readiness.`,
+      );
+    }
+    this.pendingConnectChunks += 1;
+    try {
+      await this.connect();
+    } finally {
+      this.pendingConnectChunks -= 1;
+    }
+    this.assertNotTerminated("ASR session was closed.");
+    if (this.eosSent) {
+      throw new TwmNetworkError(
+        "TWM_ASR_NOT_READY",
+        "TWM audio requires an open stream before EOS.",
       );
     }
     // `connect()` resolving only means the socket reached `open` -- the
