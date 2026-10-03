@@ -45,12 +45,12 @@ access to these policies across project/ancestors; absence is a blocker, not an
 empty policy. The audit is conservative for group membership and does not claim
 IAM Policy Troubleshooter or a live permission probe has been performed.
 
-| Custom role | Permissions | Binding / purpose |
-| --- | --- | --- |
-| `drtsOpsDrillSourceClone` | `cloudsql.instances.clone` only | Exact source name + SQL service; never automatically falls back to unconditional |
-| `drtsOpsDrillTemporary` | `cloudsql.instances.get`, `.connect`, `.delete` | SQL service and `drts-dev-db-drill-` resource prefix; get also supports operation polling |
-| `drtsOpsDrillSourceRead` | `cloudsql.instances.get`, `.connect` | Exact source name + SQL service for profile, recovery-window and readback |
-| `drtsOpsDrillInventory` | `cloudsql.instances.list`, `logging.logEntries.list` | Project read-only inventory and Admin Activity sweep |
+| Custom role               | Permissions                                          | Binding / purpose                                                                         |
+| ------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `drtsOpsDrillSourceClone` | `cloudsql.instances.clone` only                      | Exact source name + SQL service; never automatically falls back to unconditional          |
+| `drtsOpsDrillTemporary`   | `cloudsql.instances.get`, `.connect`, `.delete`      | SQL service and `drts-dev-db-drill-` resource prefix; get also supports operation polling |
+| `drtsOpsDrillSourceRead`  | `cloudsql.instances.get`, `.connect`                 | Exact source name + SQL service for profile, recovery-window and readback                 |
+| `drtsOpsDrillInventory`   | `cloudsql.instances.list`, `logging.logEntries.list` | Project read-only inventory and Admin Activity sweep                                      |
 
 `roles/secretmanager.secretAccessor` is bound on `drts-dev-db-url` only.
 `roles/iam.workloadIdentityUser` is bound on the dedicated SA only, to the existing
@@ -129,20 +129,59 @@ pnpm exec playwright test -c playwright.system-remediation.config.ts sr-live-ops
 
 ### Current finding / validation ledger
 
-| Finding / acceptance | Source / change | Previous → current result | Commands / evidence | Remaining |
-| --- | --- | --- | --- | --- |
-| F6: no operator apply | `provision_drill_sa.main/apply/inventory/confirm` | `54b56c63 --apply` exits 2 without CLI access → fake-boundary apply makes 11 intended mutations; rerun makes zero; partial failure safely resumes | `.local/sr-live-ops-001/old-apply-reproduction.txt`; unit + Vitest commands below | Actual operator apply/readiness not run |
-| Accepted destination risk | Exact clone source; conditioned temporary-role delete; `sweep_drill.sweep` | Previous unconditional readiness blocker removed after explicit Supervisor decision; non-prefix creation and leftovers now fail sweep | Unit scenarios cover leftovers, unknown/empty/denied/truncated audit and correlated LRO completion | Real conditioned clone/poll/recovery permissions and audit shape unverified |
-| F1–F5 + credential/cleanup regressions | Existing real `restore_drill.run` preserved | All earlier name/profile/PITR/readback/cleanup/signal/secret cases retained | Real shell/Python orchestration, fake external CLI only | No live clone or PG acceptance |
-| `authorized_isolated_ops_target` | Approved project/profile; dedicated IAM/operator receipt implementation | Real variables/provider re-read; plan only exits 0 | `.local/sr-live-ops-001/iam-plan-current.json` | Operator provisioning and hosted readiness evidence |
-| `backup_restore_readback` | Runner + GitHub artifact retrieval + shared readback validator | Offline orchestration/comparison checks pass | Unit results below | Supervisor hosted drill after main; real artifact |
-| `rpo_rto_capacity_baseline` | Existing observed timings; validator explicitly leaves capacity unevaluated | No fabricated capacity/SLO result | Offline tests only | Approved representative workload/SLO; actual measurements |
-| `scheduled_job_restart_proof` | Historical read-only Scheduler/revision observations below | HTTP 500 remains unresolved; no controlled restart inferred | Existing query/resource/insert IDs below | Independent assessment and candidate/deployment mapping |
-| `live_candidate_sha` | Full SHA checkout guards; receipt and artifact validator | Wrong candidate/provider/stale receipt rejected | Unit regression; canonical candidate handoff | Hosted run + deployed API revision/source mapping |
-| CI Python coverage registration | `tools/ci/check_test_coverage.py` reads only `ci.yml`/`ci-integ.yml` | Previous #2286 Change scope failed; dispatch-only workflow entry alone cannot repair it | Run `37086894984`, job `111098965308`; current checker to be recorded below | Supervisor scope/dependency update for shared CI entry; not modified outside scope |
+| Finding / acceptance                   | Source / change                                                             | Previous → current result                                                                                                                         | Commands / evidence                                                                                | Remaining                                                                          |
+| -------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| F6: no operator apply                  | `provision_drill_sa.main/apply/inventory/confirm`                           | `54b56c63 --apply` exits 2 without CLI access → fake-boundary apply makes 11 intended mutations; rerun makes zero; partial failure safely resumes | `.local/sr-live-ops-001/old-apply-reproduction.txt`; unit + Vitest commands below                  | Actual operator apply/readiness not run                                            |
+| Accepted destination risk              | Exact clone source; conditioned temporary-role delete; `sweep_drill.sweep`  | Previous unconditional readiness blocker removed after explicit Supervisor decision; non-prefix creation and leftovers now fail sweep             | Unit scenarios cover leftovers, unknown/empty/denied/truncated audit and correlated LRO completion | Real conditioned clone/poll/recovery permissions and audit shape unverified        |
+| F1–F5 + credential/cleanup regressions | Existing real `restore_drill.run` preserved                                 | All earlier name/profile/PITR/readback/cleanup/signal/secret cases retained                                                                       | Real shell/Python orchestration, fake external CLI only                                            | No live clone or PG acceptance                                                     |
+| `authorized_isolated_ops_target`       | Approved project/profile; dedicated IAM/operator receipt implementation     | Real variables/provider re-read; plan only exits 0                                                                                                | `.local/sr-live-ops-001/iam-plan-current.json`                                                     | Operator provisioning and hosted readiness evidence                                |
+| `backup_restore_readback`              | Runner + GitHub artifact retrieval + shared readback validator              | Offline orchestration/comparison checks pass                                                                                                      | Unit results below                                                                                 | Supervisor hosted drill after main; real artifact                                  |
+| `rpo_rto_capacity_baseline`            | Existing observed timings; validator explicitly leaves capacity unevaluated | No fabricated capacity/SLO result                                                                                                                 | Offline tests only                                                                                 | Approved representative workload/SLO; actual measurements                          |
+| `scheduled_job_restart_proof`          | Historical read-only Scheduler/revision observations below                  | HTTP 500 remains unresolved; no controlled restart inferred                                                                                       | Existing query/resource/insert IDs below                                                           | Independent assessment and candidate/deployment mapping                            |
+| `live_candidate_sha`                   | Full SHA checkout guards; receipt and artifact validator                    | Wrong candidate/provider/stale receipt rejected                                                                                                   | Unit regression; canonical candidate handoff                                                       | Hosted run + deployed API revision/source mapping                                  |
+| CI Python coverage registration        | `tools/ci/check_test_coverage.py` reads only `ci.yml`/`ci-integ.yml`        | Previous #2286 Change scope failed; dispatch-only workflow entry alone cannot repair it                                                           | Run `37086894984`, job `111098965308`; current checker to be recorded below                        | Supervisor scope/dependency update for shared CI entry; not modified outside scope |
 
-Current local checks and exit codes will be recorded here before final handoff.
-All tests below fake external CLI boundaries; none substitute for real IAM, PG,
+Current local checks at implementation anchor `2686475b78060cb0131c87bafaff375fa56c349e`
+(the final follow-up changes this evidence document only):
+
+- `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v`:
+  **exit 0, 32/32**, 25.888 seconds; `.local/sr-live-ops-001/unit-final.txt`.
+  It includes partial-apply retry, inherited/resource-level grants, operator
+  confirmation/readiness, audit LRO correlation, real runner cleanup/readback,
+  and artifact comparison checks.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts`:
+  **exit 0** at the preceding 31-test version, Vitest 4.1.4, one wrapper passed
+  in 23.14 seconds (`vitest-current.txt`). Final 32-test rerun **exit 1 before
+  loading tests** (`vitest-final.txt`): the shared `node_modules/vitest` link into
+  `gemini-audit-dependency-gates-20261002` became unavailable again. Final native
+  Python results above are independent of that dependency failure.
+- `pnpm exec eslint tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts tests/e2e/system-remediation/sr-live-ops-001/restore-artifact.spec.ts --max-warnings=0`:
+  initial **exit 0**; final rerun **exit 1 before loading ESLint**, same shared
+  dependency tree disappeared. Only formatting changed in the TS spec between
+  those runs; no dependency, symlink or lockfile was modified by this task.
+- `python3 -m py_compile infra/gcp/dev/ops-drill/*.py`, `bash -n` on both shell
+  entrypoints, YAML dispatch-only check and `bash -n` on all **seven** workflow
+  run bodies: **exit 0**. Parsing/syntax checks do not execute a hosted workflow.
+- `pnpm dlx prettier@3.6.2 --check` for the workflow, this document and both TS
+  files: **exit 0**. `git diff --check`: **exit 0**.
+- `python3 tools/ci/check_test_coverage.py`: **exit 1**, exclusively the missing
+  shared-CI registration described above (`ci-test-coverage.txt`). A canonical
+  progress request asks Supervisor to extend scope/dependencies for
+  `.github/workflows/ci-integ.yml`; no shared file was edited without that scope.
+  Existing PR checks also show this failure; the green aggregation alone does
+  not prove CI acceptance.
+- Baseline reproduction extracted `54b56c63:infra/gcp/dev/ops-drill/provision_drill_sa.py`
+  into `.local/sr-live-ops-001/old-provisioner.py`, ran `--apply` with an empty CLI
+  search path and the Python executable explicitly selected: **exit 2** with
+  `clone_destination_iam_enforcement_unverified`, no external command possible.
+  Evidence: `old-apply-reproduction.txt`. This did not run the new live apply path.
+- The default read-only provisioner plan rereads live `DEV_GCP_*` and the provider;
+  initial and final **exit 0**, `iam-plan-current.json` / `iam-plan-final.json`.
+  The latter records implementation anchor `2686475b7`; script hashes are in
+  `.local/sr-live-ops-001/source-hashes-final.txt`. No worker has run live `--apply`,
+  live `--check-ready`, dispatch, database/proxy runtime, load or Playwright/E2E.
+
+All tests above fake external CLI boundaries; none substitute for real IAM, PG,
 restore, capacity or scheduler acceptance. Prior evidence sections are retained
 for traceability and are explicitly historical where superseded.
 
