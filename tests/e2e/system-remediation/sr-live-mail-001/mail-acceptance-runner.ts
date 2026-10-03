@@ -8,7 +8,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
 import { deriveAliasRecipient } from "./session-bootstrap";
-import { observeInvitationMailbox } from "./mailbox-observer";
+import {
+  MailboxObservationError,
+  observeInvitationMailbox,
+} from "./mailbox-observer";
 import { observeBackgroundRetry } from "./retry-profile";
 import {
   prepareTaskInvitation,
@@ -438,6 +441,13 @@ export async function realPollDeliveryReceipt(
   }
   throw new Error("Delivery readback timed out without a terminal receipt");
 }
+export function mailExecutionErrorMessage(error: unknown): string {
+  if (error instanceof MailRunnerInputError) return error.message;
+  if (error instanceof MailboxObservationError)
+    return new MailboxObservationError(error.stage).message;
+  return "Live mail execution failed; see recorded HTTP status and pending prerequisites.";
+}
+
 async function main(): Promise<void> {
   const outputPath = resolve(
     process.env.DRTS_LIVE_MAIL_EVIDENCE_PATH?.trim() ||
@@ -492,11 +502,7 @@ async function main(): Promise<void> {
   } catch (error) {
     // Network/server errors may contain credentials; HTTP status is separately
     // recorded, but arbitrary error strings and response bodies are not retained.
-    recorder.recordError(
-      error instanceof MailRunnerInputError
-        ? error.message
-        : "Live mail execution failed; see recorded HTTP status and pending prerequisites.",
-    );
+    recorder.recordError(mailExecutionErrorMessage(error));
     evidence = recorder.finalize("failed");
   }
   mkdirSync(dirname(outputPath), { recursive: true });
