@@ -11,11 +11,26 @@
 ## Review Reopen R1
 * **F1**: Invalid health/auth contract literals prevented compilation (TS2322/TS2820). Fixed by using valid enums (`credential`, `not_configured`, `unknown`).
 * **F2**: Unused input parameters in `grab-taiwan.adapter.ts` caused lint failures. Fixed by dropping the unused optional parameters entirely.
-* **F3**: `ForwarderService` incorrectly rehydrated the stub adapter to `healthy` when loading from the DB, obscuring the degraded state. Fixed by applying snapshots during `seedRegisteredAdapters` and updating `buildHealthyAdapterHealthPatch` to respect static `credential` degraded state.
-* **F4**: Added durable regression tests for explicitly rejected operations, preserved `sync_failed` fail-closed driver outcomes, missing credentials in webhooks, and correct rehydration. Tests available at `tests/unit/audit-forwarder-runtime-20261002.test.ts`.
+
+## Review Reopen R2
+* **F3**: `ForwarderService` incorrectly cleared degraded health state after failures (e.g. rejected webhooks, relay failure) when receiving successful ingest events. Fixed by ensuring `buildHealthyAdapterHealthPatch`, `buildFailureAdapterHealthPatch`, and webhook verifications all preserve the baseline `configuration_required` unavailable contract, instead of pinning mutable transient labels.
+* **F5**: Fixed `prefer-const` lint error in unit test.
+* **F6**: Updated `apps/api/tests/unit/forwarder.service.test.ts` to expect `GrabTaiwanAdapter` to be `configuration_required` instead of `stub`.
+* **F4**: Added durable regression tests for rejected webhooks (`FORWARDER_WEBHOOK_VERIFICATION_FAILED`), preserved `sync_failed` driver outcomes, missing credentials in webhooks, rejected webhook replay creating zero orders, and invariant preservation for unavailable `GrabTaiwanAdapter` in `tests/unit/audit-forwarder-runtime-20261002.test.ts`.
+
+## §0.7 Candidate Evidence Table
+
+| Property | Value |
+| --- | --- |
+| Old Candidate SHA | `6ce5abe3ddee55950c2a2a26f13c256f77c6b381` |
+| New Candidate SHA | `408beb5c8a88d106faead298c0aabc398082d082` |
+| Validation Command | `pnpm exec vitest run tests/unit/audit-forwarder-runtime-20261002.test.ts tests/unit/forwarder.test.ts apps/api/tests/unit/forwarder.service.test.ts apps/api/tests/unit/forwarder.controller.test.ts` |
+| Validation Exit Code | `0` |
+| Evidence Location | Log task `task-135` / Task Artifacts |
+| Unverified Limits | Live signed provider verification and real callback lifecycle are blocked pending EXT-002-BLK-001/007 upstream account readiness. Do not run hosted integration endpoints. |
 
 ## Acceptance Evidence
-* **no_fake_provider_ack**: Confirmed by `GrabTaiwanAdapter` regressions verifying `accept`, `reject`, `complete`, `heartbeat` return `acknowledged: false`, and `verifyWebhook` returns `accepted: false`.
-* **confirmed_transport_or_explicit_blocker**: Confirmed by the blockers and missing prerequisites listed above (reusing EXT-002-FORWARDER-ADAPTER-GATE.md blockers context) and explicit `MISSING_PROVIDER_CONTRACT` return messages.
-* **callback_auth_and_idempotency**: Verified in `tests/unit/audit-forwarder-runtime-20261002.test.ts`, showing ingest with same external order ID produces the exact same mirror order ID, preserving idempotency without relying on real signature verification since transport is unavailable.
-* **same_sha_review_ci**: All typecheck, lint, and unit test suites exit 0 natively on the final candidate SHA.
+* **no_fake_provider_ack**: Confirmed by `GrabTaiwanAdapter` regressions verifying `accept`, `reject`, `complete`, `heartbeat` return `acknowledged: false`, and `verifyWebhook` returns `accepted: false`. Confirmed driver sync outcomes evaluate to `sync_failed`.
+* **confirmed_transport_or_explicit_blocker**: Confirmed by the blockers and missing prerequisites listed above (reusing EXT-002-FORWARDER-ADAPTER-GATE.md blockers context) and explicit `MISSING_PROVIDER_CONTRACT` return messages. Health readiness correctly defaults to `degraded/credential/not_configured` from the unavailable capabilities.
+* **callback_auth_and_idempotency**: Verified in `tests/unit/audit-forwarder-runtime-20261002.test.ts`, showing repeated rejected callbacks return `FORWARDER_WEBHOOK_VERIFICATION_FAILED` and create zero orders. The direct ingest test verifies that repeated calls with same external order ID produce the exact same mirror order ID.
+* **same_sha_review_ci**: Local unit, typecheck, and lint pass natively on the final candidate SHA. Hosted checks are pending on CI integration bus.
