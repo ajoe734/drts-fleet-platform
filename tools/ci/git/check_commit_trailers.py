@@ -61,7 +61,9 @@ def commits_in_range(base: str, head: str) -> list[str]:
         # If base doesn't exist locally (CI runs sometimes don't fetch it),
         # silently treat as empty rather than fail.
         return []
-    return [sha for sha in out.stdout.splitlines() if sha.strip()]
+    
+    shas = [sha for sha in out.stdout.splitlines() if sha.strip()]
+    return shas
 
 
 def commit_message(sha: str) -> str:

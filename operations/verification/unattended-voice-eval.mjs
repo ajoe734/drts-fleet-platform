@@ -96,6 +96,12 @@ async function runEvaluation() {
   console.log(`Authorization Ref: ${options.authorizationRef || '(none)'}`);
   console.log('----------------------------------------------------------------------');
 
+  if (options.mode !== 'fixture' && options.mode !== 'live') {
+    console.error(`\n[FAIL_CLOSED] INVALID MODE REJECTED: '${options.mode}'`);
+    console.error('Supported modes are strictly: fixture, live (lowercase).');
+    process.exit(1);
+  }
+
   // SAFETY GATE: Fail closed for live mode without authorization or credentials
   if (options.mode === 'live') {
     const authPattern = /^AUTH-UV-LIVE-[A-Z0-9_-]+$/;
@@ -117,7 +123,13 @@ async function runEvaluation() {
       process.exit(1);
     }
 
-    console.log('[LIVE_GATE_PASSED] Authorization and credentials verified. Executing live mode...');
+    console.error('\n[FAIL_CLOSED] LIVE MODE ABORTED:');
+    console.error('Production telephony (CTI/ASR/TTS/recorder) adapter is not yet implemented.');
+    console.error('Fixture metrics must not be fabricated for live evaluation.');
+    console.error('Halting to prevent overwrite of historical evidence and fake success.\n');
+    process.exit(1);
+
+    // console.log('[LIVE_GATE_PASSED] Authorization and credentials verified. Executing live mode...');
   }
 
   // Load datasets, models, and rate cards
