@@ -16,7 +16,14 @@
  * unavailable, fall back to fixture success"; it must propagate.
  */
 export interface WorkloadIdentityTokenSource {
-  getToken(): Promise<string>;
+  /** `signal` (Codex reopen round 5/6, R4-persist residual), when supplied,
+   * is forwarded to the metadata-server `fetch` so a turn that is aborted
+   * or past its deadline while this call is still outstanding actually
+   * cancels it, instead of leaving an unbounded identity-token fetch
+   * running regardless of the caller's own cancellation. Never consulted
+   * for an already-cached, still-fresh token -- that path never awaits
+   * anything. */
+  getToken(signal?: AbortSignal): Promise<string>;
 }
 
 const DEFAULT_METADATA_IDENTITY_URL =
@@ -60,11 +67,12 @@ export class GoogleMetadataIdentityTokenSource
 
   constructor(private readonly config: GoogleMetadataTokenSourceConfig) {}
 
-  async getToken(): Promise<string> {
+  async getToken(signal?: AbortSignal): Promise<string> {
     const now = Date.now();
     if (this.cached && this.cached.expiresAtMs - TOKEN_REFRESH_SKEW_MS > now) {
       return this.cached.token;
     }
+    signal?.throwIfAborted();
 
     const fetchImpl = this.config.fetchImpl ?? fetch;
     const base =
@@ -75,6 +83,7 @@ export class GoogleMetadataIdentityTokenSource
     try {
       response = await fetchImpl(url, {
         headers: { "Metadata-Flavor": "Google" },
+        signal: signal ?? null,
       });
     } catch (err) {
       throw new Error(

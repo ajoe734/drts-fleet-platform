@@ -47,7 +47,19 @@ export interface ResolveInputCommand {
 }
 
 export interface ResolveInputResult {
-  session: { sessionVersion: number; inputEpoch: number; pendingInput: boolean };
+  /** `voiceSessionId` (Codex reopen round 5/6, R4-persist residual): the
+   * real backend route (`VoiceBookingController#resolveInput`) already
+   * returns the full `VoiceSessionRecord`, which carries this field --
+   * `createTrustedDialoguePersistPort` needs it to correlate a response
+   * against the exact binding it issued the request for, not only the
+   * `inputEpoch`, which alone cannot distinguish a misattributed response
+   * for a *different* session that happens to carry the same epoch. */
+  session: {
+    voiceSessionId: string;
+    sessionVersion: number;
+    inputEpoch: number;
+    pendingInput: boolean;
+  };
 }
 
 export interface RequestHandoffCommand {
@@ -80,7 +92,7 @@ export class VoiceApiClient {
     command: IssueCapabilityCommand,
     signal?: AbortSignal,
   ): Promise<VoiceCapabilityTokenEnvelope> {
-    const workloadToken = await this.workloadTokenSource.getToken();
+    const workloadToken = await this.workloadTokenSource.getToken(signal);
     return this.request<VoiceCapabilityTokenEnvelope>(
       "POST",
       "/callcenter/voice/capabilities",

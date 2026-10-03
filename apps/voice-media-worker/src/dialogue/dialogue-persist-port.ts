@@ -141,26 +141,47 @@ export function createTrustedDialoguePersistPort(
           "voice_trusted_persist_aborted: request was aborted while awaiting capability issuance.",
         );
       }
+      const expectedSessionVersion = current.sessionVersion;
       const result = await client.resolveInput(
         current.voiceSessionId,
         capability.token,
         {
-          expectedSessionVersion: current.sessionVersion,
+          expectedSessionVersion,
           inputEpoch: request.inputEpoch,
           resolution: "relevant",
         },
         signal,
       );
-      // Defense in depth against a misattributed response (proxy/transport
-      // bug, replay): only trust a response that actually correlates with
-      // the input epoch this call just resolved. The real backend already
-      // guarantees this on success (`resolveInput` rejects on a mismatched
-      // `inputEpoch` before responding), so this never fires against a
-      // genuine apps/api reply -- it exists to reject a corrupted one
-      // instead of silently advancing the binding's revision off it.
-      if (result.session.inputEpoch !== request.inputEpoch) {
+      // `resolveInput` can settle after `signal` already fired, same as
+      // `issueCapability` above (Codex reopen round 5/6, R4-persist
+      // residual): re-check before trusting this response for anything,
+      // or an abort that lands while this exact await is outstanding would
+      // still let the binding's revision advance.
+      if (signal?.aborted) {
         throw new Error(
-          "voice_trusted_persist_stale_response: resolveInput response does not correlate with the resolved inputEpoch.",
+          "voice_trusted_persist_aborted: request was aborted while awaiting the resolveInput response.",
+        );
+      }
+      // Defense in depth against a misattributed response (proxy/transport
+      // bug, replay, response-stream confusion): a matching `inputEpoch`
+      // alone cannot distinguish a reply for a *different* session that
+      // happens to carry the same epoch value, and `casUpdateSessionControl`
+      // (apps/api) always advances `session_version` by exactly 1 per
+      // successful write -- any other value is not a legitimate response to
+      // *this* CAS attempt, whatever its `inputEpoch` says. The real backend
+      // already guarantees both on success (`resolveInput`'s own route
+      // returns the full session row for the path's `voiceSessionId`, and
+      // its CAS update is a strict `+1`), so neither check ever fires
+      // against a genuine apps/api reply -- they exist to reject a
+      // corrupted/misattributed one instead of silently advancing (or
+      // regressing) the binding's revision off it.
+      if (
+        result.session.voiceSessionId !== current.voiceSessionId ||
+        result.session.inputEpoch !== request.inputEpoch ||
+        result.session.sessionVersion !== expectedSessionVersion + 1
+      ) {
+        throw new Error(
+          "voice_trusted_persist_stale_response: resolveInput response does not correlate with the resolved session/revision.",
         );
       }
       // The CAS write just advanced the authoritative revision -- the next

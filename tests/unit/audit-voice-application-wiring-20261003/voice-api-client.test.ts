@@ -116,6 +116,36 @@ describe("GoogleMetadataIdentityTokenSource", () => {
     expect(second).toBe(freshToken);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  /**
+   * Codex reopen round 5/6, R4-persist residual: the metadata-server fetch
+   * previously had no cancellation/deadline of its own -- a turn aborted
+   * while this call was outstanding left it running regardless.
+   */
+  it("forwards a caller-supplied signal to the metadata-server fetch, and rejects immediately on an already-aborted one without fetching at all", async () => {
+    let observedSignal: AbortSignal | null | undefined;
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      observedSignal = init?.signal;
+      return new Response(tokenWithExp(600));
+    });
+    const source = new GoogleMetadataIdentityTokenSource({
+      audience: "https://api.example.test",
+      fetchImpl,
+    });
+    const controller = new AbortController();
+
+    await source.getToken(controller.signal);
+    expect(observedSignal).toBe(controller.signal);
+
+    const abortedController = new AbortController();
+    abortedController.abort();
+    const freshSource = new GoogleMetadataIdentityTokenSource({
+      audience: "https://api.example.test",
+      fetchImpl,
+    });
+    await expect(freshSource.getToken(abortedController.signal)).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("VoiceApiClient", () => {
@@ -153,6 +183,33 @@ describe("VoiceApiClient", () => {
     });
 
     expect(envelope.token).toBe("capability-token");
+  });
+
+  it("forwards its own signal into the workload token source's getToken call", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(200, {
+        data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+      }),
+    );
+    const getToken = vi.fn(async () => "workload-token");
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken },
+    );
+    const controller = new AbortController();
+
+    await client.issueCapability(
+      {
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: ["session_execute"],
+      },
+      controller.signal,
+    );
+
+    expect(getToken).toHaveBeenCalledWith(controller.signal);
   });
 
   it("calls resolveInput using the capability token as bearer auth, scoped to the session path", async () => {
@@ -248,7 +305,14 @@ describe("createTrustedDialoguePersistPort", () => {
       }
       resolveInputBody = JSON.parse(init!.body as string);
       return jsonResponse(200, {
-        data: { session: { sessionVersion: 6, inputEpoch: 3, pendingInput: false } },
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            inputEpoch: 3,
+            pendingInput: false,
+          },
+        },
       });
     });
     const client_ = new VoiceApiClient(
@@ -344,7 +408,14 @@ describe("createTrustedDialoguePersistPort", () => {
         });
       }
       return jsonResponse(200, {
-        data: { session: { sessionVersion: 6, inputEpoch: 3, pendingInput: false } },
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            inputEpoch: 3,
+            pendingInput: false,
+          },
+        },
       });
     });
     const client_ = new VoiceApiClient(
@@ -383,7 +454,14 @@ describe("createTrustedDialoguePersistPort", () => {
         });
       }
       return jsonResponse(200, {
-        data: { session: { sessionVersion: 6, inputEpoch: 999, pendingInput: false } },
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            inputEpoch: 999,
+            pendingInput: false,
+          },
+        },
       });
     });
     const client_ = new VoiceApiClient(
@@ -396,6 +474,115 @@ describe("createTrustedDialoguePersistPort", () => {
       /voice_trusted_persist_stale_response/,
     );
     expect(binding.sessionVersion).toBe(5);
+  });
+
+  /**
+   * Codex reopen round 5/6, R4-persist residual, first independent case:
+   * `persist` previously re-checked `signal?.aborted` only after
+   * `issueCapability`, never after `resolveInput` itself -- an abort that
+   * lands while *that* response is still outstanding let the CAS write
+   * commit anyway.
+   */
+  it("rejects and leaves sessionVersion untouched when the request is aborted while the resolveInput response is still outstanding", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 4,
+    };
+    let releaseResolveInput!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseResolveInput = resolve;
+    });
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      await gate;
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 5,
+            inputEpoch: 3,
+            pendingInput: false,
+          },
+        },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const controller = new AbortController();
+
+    const pending = port.persist(
+      {} as VoiceDialogueState,
+      { ...request, signal: controller.signal } as VoiceDialogueRequest,
+    );
+    // Let the capability call settle and the resolveInput call start (its
+    // fetch is now held on `gate`), then abort before releasing it -- the
+    // response, once released, is otherwise a perfectly successful one.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    controller.abort();
+    releaseResolveInput();
+
+    await expect(pending).rejects.toThrow(/voice_trusted_persist_aborted/);
+    expect(binding.sessionVersion).toBe(4);
+  });
+
+  /**
+   * Codex reopen round 5/6, R4-persist residual, second independent case:
+   * a response that correlates by `inputEpoch` alone is not sufficient --
+   * a misattributed response for an entirely different session (or one
+   * whose `sessionVersion` is not exactly the CAS's own `+1`) must never
+   * be trusted to advance (or regress) this binding's revision.
+   */
+  it("rejects a resolveInput response for a different voiceSessionId even though inputEpoch matches, leaving sessionVersion untouched", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 4,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      // Correlates on inputEpoch (7, matching the request below) but is
+      // for a different session entirely, with a sessionVersion that would
+      // *regress* this binding (1, not 4's own CAS-advanced 5).
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: "another-session",
+            sessionVersion: 1,
+            inputEpoch: 7,
+            pendingInput: true,
+          },
+        },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(
+      port.persist(
+        {} as VoiceDialogueState,
+        { inputEpoch: 7 } as VoiceDialogueRequest,
+      ),
+    ).rejects.toThrow(/voice_trusted_persist_stale_response/);
+    expect(binding.sessionVersion).toBe(4);
   });
 
   it("is mode 'trusted', distinct from the fixture port's mode 'fixture'", () => {

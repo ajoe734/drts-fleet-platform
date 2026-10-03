@@ -122,6 +122,7 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
         return jsonResponse(200, {
           data: {
             session: {
+              voiceSessionId: binding.voiceSessionId,
               sessionVersion: 6,
               inputEpoch: (body as { inputEpoch: number }).inputEpoch,
               pendingInput: false,
@@ -266,6 +267,7 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
           return jsonResponse(200, {
             data: {
               session: {
+                voiceSessionId: binding.voiceSessionId,
                 sessionVersion: 5,
                 inputEpoch: (body as { inputEpoch: number }).inputEpoch,
                 pendingInput: false,
