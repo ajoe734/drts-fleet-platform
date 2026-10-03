@@ -4792,3 +4792,80 @@ was performed this round.
   eslint/typecheck/vitest evidence is above. Hosted CI and an independent
   reviewer re-review on the exact `CANDIDATE_SHA` this round produces are
   both pending.
+
+## Round-22 follow-up: hosted CI `typecheck` failure on candidate `7de2b79c2` (compile-only fix, no behavior change)
+
+Hosted CI (`CI (integration trunk)` run `37149971287`, job `111281749290`,
+PR #2303) failed its `typecheck` job on the Round-22 candidate
+`7de2b79c20dd6159421b2a975407dac30647ede5` with three `tsc` errors, all in
+Round-22's own new test files, under `pnpm typecheck:root` (root
+`tsconfig.json` includes `tests/**/*.ts`, and resolves `@drts/contracts`
+from source, unlike the per-package worker `tsconfig.json`). Codex had not
+yet reopened this exact SHA; this entry only fixes the reported compile
+failures, with no change to any source file or test assertion/behavior.
+
+1. `dialogue-engine-cancelled-persist-reconciliation.test.ts(310)`:
+   `Property 'content' does not exist on type 'never'`. Cause: the captured
+   variable was declared `let turn1SnapshotBody: {...} | null = null;` and
+   only ever reassigned inside a nested closure (`fetchImpl`'s body).
+   TypeScript's control-flow analysis does not follow assignments inside a
+   nested function body back out to the enclosing scope, so every read of
+   `turn1SnapshotBody` in the enclosing `it(...)` body (including inside
+   `typeof turn1SnapshotBody`, which the original code used to build
+   `NonNullable<typeof turn1SnapshotBody>`) saw only the literal `null` type
+   from its initializer -- making `NonNullable<null>` evaluate to `never`.
+   Fix: replaced the bare `let` with a boxed object
+   (`const turn1Snapshot: { body: Turn1SnapshotBody | null } = { body: null }`)
+   and a named `Turn1SnapshotBody` type alias (removing the
+   self-referential `typeof` query too). TypeScript does not narrow mutable
+   object properties this way, so every read site now correctly sees the
+   full `Turn1SnapshotBody | null` declared type. No assertion or runtime
+   behavior changed; verified by rerunning the test file (still 1/1 pass).
+2. `voice-session-control-event-dedup-correlation.test.ts(329, 368)`:
+   `Object is possibly 'undefined'` on `fake.events[0].payload` and
+   `fake.events[0].sourceEventId`. Cause: `tsconfig.base.json`'s
+   `noUncheckedIndexedAccess: true` types `fake.events[0]` as
+   `VoiceSessionEventRecord | undefined`. Fix: added the non-null assertion
+   `fake.events[0]!`, matching this same suite's existing convention
+   (`handoff-service-cancellation.test.ts`, `voice-api-client.test.ts`,
+   `call-turn-coordinator.test.ts` all use `arr[0]!`); the preceding
+   `expect(fake.events).toHaveLength(1)` on the prior line already
+   guarantees the element exists at runtime.
+
+**Verification on this fix (still on `tests/unit/audit-voice-application-wiring-20261003/`'s write scope only; no source files touched):**
+
+- `pnpm exec tsc -p tsconfig.json --noEmit` (root, the exact command CI's
+  `typecheck` job ran): the three reported errors are gone. Unrelated to
+  this task: this worktree's local run also reports errors in
+  `tests/unit/fleet-partner-list-envelope.test.ts` and
+  `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+  from a cross-worktree `ApiClient` type collision (that package's
+  `node_modules` symlink resolves into a *different* concurrent worktree,
+  `claude2-audit-artifact-durability-20261002`) -- pre-existing local
+  multi-worktree noise, outside this task's `write_scopes`, not present in
+  CI's single-checkout environment, and not touched here.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/dialogue-engine-cancelled-persist-reconciliation.test.ts tests/unit/audit-voice-application-wiring-20261003/voice-session-control-event-dedup-correlation.test.ts`:
+  2 files, 8 tests, PASS.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/ --exclude tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts`:
+  12 files, 188 tests, PASS.
+- Full Round-21/22 regression command: `pnpm exec vitest run
+  tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+  tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts
+  tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts
+  --exclude tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts
+  --maxWorkers=1 --no-cache`: 30 files, 598 tests, PASS, zero regressions.
+- `pnpm exec eslint apps/voice-media-worker/src
+  apps/api/src/modules/voice-booking packages/contracts/src/voice-dialogue.ts
+  tests/unit/audit-voice-application-wiring-20261003
+  tests/integration/unattended-voice-postgres.integration.test.ts
+  --max-warnings=0`: exit 0.
+- The four VM-prohibited `server.start()`/localhost-`fetch` listener suites
+  were excluded per the standing VM restriction, same as every prior round.
+  No product/listening server, DB, browser/Compose, network provider,
+  package install, or history rewrite was performed.
+
+This is a compile-only fix layered on the exact Round-22 repair content; no
+R1-R12 finding's fix logic changed. A new `CANDIDATE_SHA` is produced for
+hosted CI and independent re-review; `same_sha_review_ci` remains pending on
+that new SHA.

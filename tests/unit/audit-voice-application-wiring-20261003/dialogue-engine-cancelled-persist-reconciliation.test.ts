@@ -115,15 +115,17 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist: a cancelled turn's
 
     let getDialogueSnapshotCalls = 0;
     let contentPostCount = 0;
-    let turn1SnapshotBody:
-      | {
-          expectedSessionVersion: number;
-          inputEpoch: number;
-          mediaEpoch: number;
-          turnId: string;
-          content: unknown;
-        }
-      | null = null;
+    type Turn1SnapshotBody = {
+      expectedSessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      content: unknown;
+    };
+    // Boxed in an object (rather than a bare `let`) so TypeScript doesn't
+    // narrow this captured variable to its initial `null` literal at every
+    // read site outside the closure that reassigns it.
+    const turn1Snapshot: { body: Turn1SnapshotBody | null } = { body: null };
     const laterSnapshotBodies: unknown[] = [];
 
     const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -162,33 +164,33 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist: a cancelled turn's
           });
         }
         // Ambiguous-commit reconciliation read, triggered once turn 1's own
-        // content POST below is aborted by its deadline. `turn1SnapshotBody`
+        // content POST below is aborted by its deadline. `turn1Snapshot.body`
         // was captured synchronously from that POST's own request body --
         // modeling a write that genuinely landed server-side with only its
         // HTTP acknowledgement lost, never a PostgreSQL behavior claim.
-        if (!turn1SnapshotBody) {
+        if (!turn1Snapshot.body) {
           throw new Error("test setup error: reconciliation GET before turn 1's own POST body was captured");
         }
         return jsonResponse(200, {
           data: {
             session: {
               voiceSessionId: binding.voiceSessionId,
-              sessionVersion: turn1SnapshotBody.expectedSessionVersion,
+              sessionVersion: turn1Snapshot.body.expectedSessionVersion,
               resourceScopeId: binding.resourceScopeId,
               routeProfileVersion: binding.routeProfileVersion,
               leaseEpoch: binding.leaseEpoch,
-              inputEpoch: turn1SnapshotBody.inputEpoch,
+              inputEpoch: turn1Snapshot.body.inputEpoch,
               pendingInput: false,
               lastAppliedControlSequence: 1,
             },
             snapshot: {
               snapshotId: "snapshot-turn-1",
               voiceSessionId: binding.voiceSessionId,
-              sessionVersion: turn1SnapshotBody.expectedSessionVersion,
-              inputEpoch: turn1SnapshotBody.inputEpoch,
-              mediaEpoch: turn1SnapshotBody.mediaEpoch,
-              turnId: turn1SnapshotBody.turnId,
-              content: turn1SnapshotBody.content,
+              sessionVersion: turn1Snapshot.body.expectedSessionVersion,
+              inputEpoch: turn1Snapshot.body.inputEpoch,
+              mediaEpoch: turn1Snapshot.body.mediaEpoch,
+              turnId: turn1Snapshot.body.turnId,
+              content: turn1Snapshot.body.content,
               createdAt: "2026-10-03T09:00:00.000Z",
               retentionExpiresAt: "2027-01-20T09:00:00.000Z",
             },
@@ -233,7 +235,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist: a cancelled turn's
       if (method !== "GET" && path.endsWith("/dialogue-snapshot")) {
         contentPostCount += 1;
         if (contentPostCount === 1) {
-          turn1SnapshotBody = body as typeof turn1SnapshotBody;
+          turn1Snapshot.body = body as Turn1SnapshotBody;
           // Never settles on its own -- only this stage's own bounded
           // signal (turnTimeoutMs below) can end it, modeling a write
           // whose own HTTP acknowledgement never comes back, exactly like
@@ -305,10 +307,10 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist: a cancelled turn's
     await new Promise((resolve) => setTimeout(resolve, 300));
     await flush(10);
 
-    expect(turn1SnapshotBody).not.toBeNull();
-    expect(
-      (turn1SnapshotBody as NonNullable<typeof turn1SnapshotBody>).content,
-    ).toMatchObject({ handoff: { reason: "urgent_safety", intent: "emergency" } });
+    expect(turn1Snapshot.body).not.toBeNull();
+    expect((turn1Snapshot.body as Turn1SnapshotBody).content).toMatchObject({
+      handoff: { reason: "urgent_safety", intent: "emergency" },
+    });
     // Turn 1 itself never got to speak -- it was cancelled before its
     // engine stage could resolve a prompt.
     expect(sentBinary).toHaveLength(0);

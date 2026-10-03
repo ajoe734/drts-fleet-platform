@@ -326,7 +326,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control: dedup result corre
     );
     expect(fake.session.lastAppliedControlSequence).toBe(1);
     expect(fake.events).toHaveLength(1);
-    expect(fake.events[0].payload).toEqual({ text: "original" });
+    expect(fake.events[0]!.payload).toEqual({ text: "original" });
   });
 
   it("[positive control, preserves prior fix] an IDENTICAL retry after a CAS failure still applies using the durable row's own fields", async () => {
@@ -365,7 +365,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control: dedup result corre
     // Still only the ORIGINAL row is durable -- the retry never inserted a
     // second row.
     expect(fake.events).toHaveLength(1);
-    expect(fake.events[0].sourceEventId).toBe("evt-original");
+    expect(fake.events[0]!.sourceEventId).toBe("evt-original");
   });
 
   it("NULL providerAccountId: an identical retry still dedups and applies correctly", async () => {
