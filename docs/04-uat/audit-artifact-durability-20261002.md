@@ -2126,3 +2126,218 @@ The actual pass/fail of the seven real-Postgres cases against this fix
 is, as before, only observable on the next hosted `unit` CI run for this
 candidate's new SHA -- that run is the `same_sha_review_ci` evidence for
 this follow-up.
+
+## Codex REOPEN (generation `8b3a794454664b3d858cd10a63e00948`, candidate
+## `abf408d90c8089630d034bc666da29a7e7f00d4d`, PR #2295): correction to the
+## `durable_producer_reader_wiring` closure claim at :1909, and fix for the
+## R10 delayed-baseline-GET byte-ownership defect
+
+**Correction, not retraction:** the "last of the four adjacent gaps ... is
+now closed" row in the acceptance-mapping table above (the row under
+"R7/R8 byte-ownership fix", itself added by the `c7135ab91` round) was
+true only for the case that round's own regression test covered -- a
+**delayed PUT** (the write itself stalls in flight, baseline capture is
+prompt). It did not hold for a second, independently reproduced case:
+a **delayed baseline GET** (the read that captures `fenceGeneration`
+stalls in flight; the subsequent write is prompt). Both the adjacent prior
+candidate (`e8455e94160e66b4e942a97f7d0417ed4425f3e8`) and this reopen's
+locked candidate (`abf408d90c8089630d034bc666da29a7e7f00d4d`) reproduced
+the same unrepaired defect under this second case, independently of the
+Postgres-fixture work those two candidates actually shipped. This section
+corrects the closure claim with that limitation and records the actual
+fix, now shipped in this repair's own candidate (`31557e813783fcf64e0532481c8123cfcfe112cb`).
+
+### Root cause (R10): a baseline read is not atomic with the claim it
+### is meant to represent
+
+`publishPlacardVersionExclusive` (`platform-admin.service.ts`, around
+line 1040 before this fix) captures `baselineArtifact` via
+`documentArtifactStore.get("placard", placardVersionId)` **after** this
+attempt has already won its DB claim (`claimPlacardPublish`), then fences
+its own render/write against that baseline's `generation`
+(`ensurePlacardArtifact(..., baselineArtifact?.record.generation ?? null)`
+-> `renderPlacardArtifact`'s `fenceGeneration` -> the S3 adapter's
+`putIfUnchanged` `IfMatch`/`IfNoneMatch`). The prior round's own fix
+comment claimed this closes the gap for "ANY write that lands after
+another writer has changed the object ... no matter how late it
+arrives" -- true for the write itself, but the comment did not account
+for the **read** that establishes the baseline being the thing that
+stalls. If attempt A's claim goes stale (>2 minutes), a reclaiming
+attempt C can claim, render, write and finalize **entirely within the
+window A's own baseline `GetObjectCommand` is still in flight to S3**.
+When A's GET finally completes, it legitimately observes C's own
+just-finalized object as "the current state" -- from the store's point of
+view, nothing has changed between that observation and A's own write, so
+A's `IfMatch`-fenced write is **correctly accepted** by S3 and clobbers
+C's bytes. A's own re-read (`storedEntry`, formerly line ~1056) then
+matches A's own just-written bytes (no contradiction detected), so A
+proceeds to `finalizePlacardPublish`, which **does** correctly fail (the
+DB row now names C, not A) -- but by then the object already holds A's
+bytes, not C's. The DB row, every cached service instance, and every
+previously issued link still name C; the actual stored bytes are A's.
+A subsequent `releasePlacardPublishClaim` call correctly no-ops (A's
+`publishedAt`+token no longer match the row), so nothing rolls the DB
+back either -- the corruption is store-only and silent.
+
+Call chain (unchanged by this fix, confirmed by reading the live source,
+not cached summaries): `PlatformAdminService.publishPlacardVersion` ->
+`publishPlacardVersionExclusive` -> `PlatformAdminRepository
+.claimPlacardPublish` (`platform-admin.repository.ts:474-549`, reclaim
+guard `:500-504`) -> baseline `documentArtifactStore.get` -> `ensurePlacardArtifact`
+-> `renderPlacardArtifact` -> `S3DocumentArtifactStoreAdapter.putIfUnchanged`
+(`s3-document-artifact-store.adapter.ts:123-166`, SDK `IfMatch`/`IfNoneMatch`
+at `:143-145`) -> re-read -> `PlatformAdminRepository.finalizePlacardPublish`
+(`platform-admin.repository.ts:628-656`).
+
+### Fix: compensating restore keyed to this attempt's own write
+
+`platform-admin.service.ts`, inside `publishPlacardVersionExclusive`'s
+`if (!finalized)` branch (formerly a bare throw): when the DB-level CAS in
+`finalizePlacardPublish` reports this attempt lost ownership, and this
+attempt's own write is confirmed to have landed (`storedEntry` already
+matched `wonClaim` just above, in the existing re-read), this attempt puts
+`baselineArtifact`'s own observed bytes/mimeType straight back via
+`documentArtifactStore.putIfUnchanged`, fenced on `storedEntry.record
+.generation` -- the generation THIS attempt's own write just produced.
+Two cases follow from that fencing, both correct:
+
+- Nothing else has written since this attempt's own write (the common
+  case, and the one the new regression below exercises): the restore's
+  `IfMatch` matches, and C's exact bytes are put back, repairing the
+  corruption -- the DB row, the original link, and any freshly issued
+  link all resolve to C's bytes again.
+- A third writer landed between this attempt's write and the restore: the
+  restore's `IfMatch` no longer matches that newer state, so it is itself
+  rejected by the store -- the restore never clobbers a legitimately newer
+  write, same fencing discipline as every other write in this method.
+
+`baselineArtifact` is never `null` on this path: a `null` baseline means
+this attempt's own write used `IfNoneMatch: "*"` (nothing existed yet),
+which `renderPlacardArtifact` already turns into a thrown
+`PLACARD_PUBLISH_CONFLICT` *before* reaching `finalizePlacardPublish`
+whenever any other writer created the object first -- so the restore
+branch is reached only when a non-null baseline was actually observed and
+written over.
+
+### Evidence
+
+**Before/after reproduction, immutable production source loaded via
+`git show` (not the working tree), only the S3 adapter's SDK
+`client.send` transport, repository SQL transport, and `Date`/time
+doubled -- real `PlatformAdminService`, real `PlatformAdminRepository`
+SQL generation, real PDF renderer, real signing, real
+`ControlledDownloadController`:**
+
+- Reopen's locked candidate `abf408d90c8089630d034bc666da29a7e7f00d4d`
+  (unchanged production code from the prior two rounds):
+  `{"heldBeforeTransport":"PutObjectCommand", ...,
+  "storedBytesMatchWinner":true, "originalAndFreshLinksAfterResume":"PASS"}`
+  (held-PUT case, already fixed) followed by
+  `{"heldBeforeTransport":"GetObjectCommand", ...,
+  "storedBytesMatchWinner":false,
+  "originalAndFreshLinksAfterResume":"CONTROLLED_DOWNLOAD_CONTENT_MISMATCH"}`
+  (held-GET case, confirmed still broken -- both the original winner's
+  link and an independently issued fresh link denied with
+  `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH`).
+- This repair's own candidate `31557e813783fcf64e0532481c8123cfcfe112cb`,
+  same probe, same two scenarios, loaded via `git show
+  31557e813783fcf64e0532481c8123cfcfe112cb:<path>` (the committed fix, not
+  an uncommitted edit): both scenarios now return
+  `"storedBytesMatchWinner":true, "originalAndFreshLinksAfterResume":"PASS"`.
+  Probe scope unchanged from the reopen's own description: no listeners,
+  outbound sockets, HTTP, live database, live S3, or Compose/browser
+  server; does not by itself prove live PostgreSQL isolation, real S3, or
+  a killed Cloud Run process -- that remains `SR-LIVE-DOC-001`.
+
+**New unit regression**,
+`tests/unit/audit-artifact-durability-20261002.test.ts`, describe block
+"R10 byte-ownership compensating restore (Codex REOPEN, generation
+8b3a794454664b3d858cd10a63e00948)": a `HeldGetDocumentArtifactStore`
+wraps the real `InMemoryDocumentArtifactStore` and holds exactly the
+first `get()` call for a given `subjectId` until released -- modelling a
+`GetObjectCommand` that has not yet reached the transport, the same shape
+as this file's existing `HeldWriteDocumentArtifactStore` but on the read
+side. Against real `PlatformAdminService`/`PlatformAdminRepository` (the
+same `createRealPlacardRepository` fake-SQL-transport helper this
+describe block's parent already uses) and the real controller:
+podA claims, its baseline read is held; podC's claim is aged past the
+2-minute window and podC reclaims, renders, writes and finalizes for
+real, entirely while podA's read sits held; the hold is released; podA's
+write is asserted to land, but its finalize is asserted to fail with
+`PLACARD_PUBLISH_CONFLICT`; the DB row, the stored bytes' sha256, podC's
+original link, and a freshly booted independent reader's freshly issued
+link are all asserted to still match podC's published hash.
+- **Before this fix** (confirmed by temporarily reverting only
+  `platform-admin.service.ts` via `git stash`, keeping the new test):
+  fails exactly as the production-path probe predicted --
+  `expect(stored?.record.sha256).toBe(published.artifactManifestHash)`
+  assertion fails, actual value is podA's hash, not podC's.
+- **After this fix**: passes. Full scoped suite re-run with the fix and
+  the new test both in place: `16 files / 185 tests passed, 0 failed, 0
+  skipped` (one more test than the `184` recorded in the prior round,
+  consistent with exactly one new case added).
+
+**Release-matrix gap this reopen also flagged** (prior review's
+"additional release controls remain absent from :286-339: only
+wrong-token and after-finalize no-ops are tested"): added two cases to
+`tests/integration/platform-admin-artifact-publication.integration.test.ts`
+(real-PostgreSQL-only, `describe.skipIf(!DATABASE_URL)`, same convention
+as the rest of that file) --
+"`releasePlacardPublishClaim`: matching publishedAt AND matching token
+actually reverts the claim back to an unpublished, retryable draft" (the
+genuine success path no prior case exercised, including a follow-up claim
+proving the reverted row is retryable) and
+"`releasePlacardPublishClaim`: the exact token but a stale
+claimedPublishedAt is a no-op, distinguishing the two SQL predicates"
+(proves the guard is a real AND, not satisfied by the token alone). This
+VM has no `DATABASE_URL`, so both new cases are confirmed only to skip
+cleanly, lint clean (`pnpm exec eslint
+tests/integration/platform-admin-artifact-publication.integration.test.ts`
+-> exit 0), and typecheck clean (see below); their actual PASS/FAIL is
+hosted-CI-only, same limitation as every other case in that file.
+
+**Full local verification run against this repair's committed HEAD
+(`31557e813783fcf64e0532481c8123cfcfe112cb`):**
+```
+pnpm --filter @drts/contracts run build              # pre-existing local dist gap, unrelated to this file
+pnpm --filter @drts/control-plane-auth run build      # same
+cd apps/api && pnpm exec tsc --noEmit -p tsconfig.json  # exit 0, zero errors
+pnpm exec eslint tests/unit/audit-artifact-durability-20261002.test.ts \
+  apps/api/src/modules/platform-admin/platform-admin.service.ts \
+  tests/integration/platform-admin-artifact-publication.integration.test.ts  # exit 0, no findings
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts tests/unit/audit-artifact-durability-s3-20261003.test.ts tests/unit/system-remediation/sr-artifact-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-placard-001/ tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts --maxWorkers=1
+# => exit 0, 16 files / 185 tests passed, 0 skipped
+cd apps/api && pnpm exec vitest run tests/unit/platform-admin.service.test.ts --maxWorkers=1
+# => exit 0, 1 file / 3 tests passed
+```
+Hosted CI for this repair's own candidate SHA is pending, same as every
+prior round -- produced by the handoff/candidate lifecycle, not run
+locally from this VM. The real-PostgreSQL matrix (all nine cases now,
+including the two new release cases) and any live S3/multi-replica
+Cloud Run behavior remain hosted-CI-only and `SR-LIVE-DOC-001`
+respectively, not proven from this VM.
+
+### Acceptance mapping (this repair, R10 round)
+
+| Finding/acceptance | Source location | Old → new | Evidence | Limitation |
+| --- | --- | --- | --- | --- |
+| R10: delayed baseline-GET lets a superseded attempt's write clobber a reclaimed-and-finalized winner's bytes | `platform-admin.service.ts` `publishPlacardVersionExclusive`'s `finalizePlacardPublish` failure branch | a failed finalize left the store holding the loser's bytes while DB/links named the winner → compensating restore puts the captured baseline bytes back, fenced on this attempt's own just-written generation | new `HeldGetDocumentArtifactStore` regression (fails before, passes after); production-path probe on both the locked reopen candidate (still broken) and this repair's own committed SHA (fixed) via `git show` | adapter/service/repository-level only, against transport mocks that honour real S3/SQL semantics -- not a live S3 bucket, live PostgreSQL connection, or killed Cloud Run process; `SR-LIVE-DOC-001` for that |
+| `durable_producer_reader_wiring` | R10 fix above | now actually closed for both the delayed-PUT and delayed-baseline-GET cases (the :1909 claim above is corrected to scope it to delayed-PUT only, as of this candidate) | same as above | same as above |
+| `cross_instance_restart_bytes` | R10 fix above | same | same as above | same |
+| `signature_hash_denial_regressions` | unchanged fail-closed mismatch checks, plus the restored-bytes path now correctly re-matching the winner's hash | still passing | scoped suite (185/185) | n/a |
+| `same_sha_review_ci` | this candidate's own SHA (`31557e813783fcf64e0532481c8123cfcfe112cb`) | pending (produced after handoff) | n/a yet | previous SHAs' hosted CI does not cover this repair |
+
+### Remaining limitations (this repair, R10 round)
+
+- Same VM restriction as every prior round: no live S3 bucket, no live
+  PostgreSQL connection, no Cloud Run process kill/restart. The
+  production-path probe and the new unit regression both model only the
+  S3 SDK transport and the repository's SQL transport, using real
+  production service/repository/controller/adapter code in between.
+- The real-PostgreSQL matrix's two new release-guard cases are confirmed
+  typed/linted/skip-clean only from this VM; their actual pass/fail is
+  the next hosted `unit` CI run for this candidate's SHA, same as the
+  other seven cases in that file.
+- Real multi-replica Cloud Run acceptance, combining genuine S3 and
+  genuine PostgreSQL under real network-level request reordering, remains
+  `SR-LIVE-DOC-001` and is not claimed here.
