@@ -277,12 +277,26 @@ export class VoiceMediaWorkerSession {
    * a media-epoch advance that happened while this call's own `propose`/
    * `synthesize` was still in flight) discard the result before it can
    * ever be marked started, let alone later accepted as completed.
+   *
+   * `cancelOn`, when supplied, is re-checked for the entire remaining
+   * *lifetime* of this registered playback, not only once before
+   * registration (Codex reopen round 4, R1): a newer final, a turn
+   * timeout, or a release/drain can all abort it well *after* this
+   * playback has already registered and even after its audio has already
+   * been published -- `isStillValid` alone cannot see that, since it is
+   * only ever consulted at this one point in time. Registering an abort
+   * listener here means any such later abort immediately cancels this
+   * specific playback (SD §11.5: once cancelled, a late completion mark
+   * must never "revive" it), instead of leaving it `cleared: false`
+   * forever until an unrelated barge-in/epoch-advance happens to touch the
+   * same generation.
    */
   async startPlayback(
     text: string,
     languageCode: string,
     occurredAt: string,
     isStillValid?: () => boolean,
+    cancelOn?: AbortSignal,
   ): Promise<VoiceTtsPlaybackHandle> {
     const generation = this.activeGeneration;
     const handle = await this.ttsAdapter.synthesize({
@@ -302,6 +316,19 @@ export class VoiceMediaWorkerSession {
       generation,
       cleared: false,
     });
+    if (cancelOn) {
+      cancelOn.addEventListener(
+        "abort",
+        () => {
+          this.cancelPlayback(
+            handle.playbackId,
+            "turn_superseded",
+            new Date().toISOString(),
+          );
+        },
+        { once: true },
+      );
+    }
     this.emit({
       type: "tts.playback.started",
       ...this.eventStamp(occurredAt),

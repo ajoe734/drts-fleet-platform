@@ -654,4 +654,248 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceSessionComposer + VoiceC
       true,
     );
   });
+
+  /**
+   * Codex reopen round 4, R1 finding 1: unlike the pending-synthesis cases
+   * above, this playback has already fully registered and published its
+   * audio *before* a newer final arrives -- no barge-in, no media-epoch
+   * advance. A newer final must still retroactively invalidate it: once a
+   * turn is superseded, a real `tts.complete` mark for its already-sent
+   * playback must never again succeed.
+   */
+  it("fences a retained playback's completion once a newer final supersedes its turn, after it already finished publishing", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeferredTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-retained-complete", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    tts.settle();
+    await flush(5);
+
+    // The first turn's playback fully registered and published -- not held,
+    // not superseded by anything yet.
+    expect(sentBinary.length).toBeGreaterThan(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-1")).toBe(
+      true,
+    );
+
+    // A second final, with no barge-in control frame and no media-epoch
+    // advance -- the only thing that happens is the coordinator superseding
+    // the first turn's abort controller.
+    asr.emitFinal("救命", "seg-2");
+    await flush(3);
+    tts.settle();
+    await flush(5);
+    expect(hasPlaybackEvent(events, "tts.playback.started", "pb-2")).toBe(
+      true,
+    );
+
+    // The first (now-superseded) turn's already-published playback must no
+    // longer accept a real completion mark.
+    sendTtsComplete(channel, "pb-1");
+    await flush();
+    expect(hasPlaybackEvent(events, "tts.playback.completed", "pb-1")).toBe(
+      false,
+    );
+  });
+
+  /**
+   * Codex reopen round 4, R1 finding 2: a turn's own deadline timer firing
+   * long after its playback already registered must still retroactively
+   * cancel it -- not only fence output that is still in flight at the
+   * moment the deadline fires.
+   */
+  it("fences a registered playback's completion once its own turn's deadline fires", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      40,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-timeout-complete", channel);
+    const playbackId = "pb-sess-timeout-complete-1";
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(sentBinary.length).toBeGreaterThan(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", playbackId)).toBe(
+      true,
+    );
+
+    // Past the 40ms deadline -- the playback has been registered and its
+    // audio already sent for well over its own turn's timeout window.
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    await flush();
+
+    sendTtsComplete(channel, playbackId);
+    await flush();
+    expect(
+      hasPlaybackEvent(events, "tts.playback.completed", playbackId),
+    ).toBe(false);
+  });
+
+  /**
+   * Codex reopen round 4, R1 finding 3: a registered playback that
+   * survives all the way to the attachment's own release/close must still
+   * lose completion validity, even reached directly through the retained
+   * `VoiceMediaWorkerSession` (not routed through the already-torn-down
+   * composer).
+   */
+  it("fences a registered playback's completion once the attachment is released on close", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const events: unknown[] = [];
+    composer.on("session.event", (payload) => events.push(payload));
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-close-registered", channel);
+    const session = composer.get("sess-close-registered")!;
+    const playbackId = "pb-sess-close-registered-1";
+
+    asr.emitFinal("", "seg-1");
+    await flush(3);
+    expect(sentBinary.length).toBeGreaterThan(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", playbackId)).toBe(
+      true,
+    );
+
+    (channel as unknown as EventEmitter).emit(
+      "close",
+      1000,
+      "Normal closure",
+    );
+    await flush();
+
+    expect(session.completePlayback(playbackId, new Date().toISOString())).toBe(
+      false,
+    );
+  });
+
+  /**
+   * Codex reopen round 4, R1 finding 4: the raw `tts.synthesize` control
+   * frame bypasses the turn coordinator entirely and has no abort signal
+   * of its own -- only the session's close must fence it, through the
+   * composer's own session-level `closeAbort`.
+   */
+  it("fences the raw tts.synthesize entry's result once the session closes while its synthesis is outstanding", async () => {
+    const tts = new DeferredTtsAdapter();
+    const composer = new VoiceSessionComposer({
+      createAdapters: () => ({
+        asrAdapter: new StreamingAsrAdapter(),
+        ttsAdapter: tts,
+      }),
+    });
+    const { channel, sentBinary } = makeChannel();
+    composer.attach("sess-raw-synth-close", channel);
+    const session = composer.get("sess-raw-synth-close")!;
+
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({
+        type: "tts.synthesize",
+        text: "hello",
+        languageCode: "cmn-TW",
+      }),
+      false,
+    );
+    await flush(2);
+    expect(tts.calls).toBe(1);
+
+    (channel as unknown as EventEmitter).emit(
+      "close",
+      1000,
+      "Normal closure",
+    );
+    await flush();
+
+    tts.settle();
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(session.completePlayback("pb-1", new Date().toISOString())).toBe(
+      false,
+    );
+  });
+
+  /**
+   * Codex reopen round 4, R1 finding 5: registration (inside
+   * `startPlayback`) and outbound audio publication are separate async
+   * boundaries. A `session.event` listener that reacts to
+   * `tts.playback.started` by delivering a real `speech.started` control
+   * frame (exactly like an external barge-in detector would) must fence
+   * the outbound audio batch itself, not only future completion marks --
+   * a pre-registration check alone cannot see a cancellation that lands in
+   * the gap between registration and publish.
+   */
+  it("fences outbound audio published after a barge-in control frame reacts to this same playback's own started event", async () => {
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    const events: unknown[] = [];
+    const playbackId = "pb-sess-started-race-1";
+    composer.on("session.event", (payload) => {
+      events.push(payload);
+      const event = (payload as { event?: { type?: string } }).event;
+      if (event?.type === "tts.playback.started") {
+        // Simulates a real external barge-in detector reacting to the
+        // "started" event asynchronously, on its own event-loop turn --
+        // not synchronously inside the same call stack.
+        queueMicrotask(() => {
+          (channel as unknown as EventEmitter).emit(
+            "message",
+            JSON.stringify({ type: "speech.started" }),
+            false,
+          );
+        });
+      }
+    });
+    composer.attach("sess-started-race", channel);
+
+    asr.emitFinal("", "seg-1");
+    await flush(5);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(hasPlaybackEvent(events, "tts.playback.started", playbackId)).toBe(
+      true,
+    );
+    expect(hasPlaybackEvent(events, "tts.playback.completed", playbackId)).toBe(
+      false,
+    );
+    sendTtsComplete(channel, playbackId);
+    await flush();
+    expect(hasPlaybackEvent(events, "tts.playback.completed", playbackId)).toBe(
+      false,
+    );
+  });
 });

@@ -28,6 +28,14 @@ interface ComposedSession {
   channel: WebSocketServerChannel;
   turnAttachment: VoiceCallAttachment | undefined;
   closing?: Promise<void>;
+  /** Aborted exactly once, from `beginClose` (Codex reopen round 4, R1
+   * finding 4): the raw `tts.synthesize` control frame has no turn/signal
+   * of its own to fence it (unlike the turn-coordinator-driven `speak`
+   * path below, which reuses the turn's own abort controller), so a
+   * dedicated session-level signal is what lets a synthesis started before
+   * close, but still outstanding when the channel closes, discard its
+   * result instead of registering/publishing after the session is gone. */
+  closeAbort: AbortController;
 }
 
 export type VoiceSessionControlFrame =
@@ -122,12 +130,35 @@ export class VoiceSessionComposer extends EventEmitter {
               // happened between this transcript's capture and now, which
               // `signal` alone would never see since none of those abort
               // the controller.
+              //
+              // `signal` is also passed as `cancelOn` (Codex reopen round
+              // 4, R1 findings 1-3): registration and audio publication are
+              // not the end of this playback's exposure -- a release,
+              // newer final, or timeout that aborts `signal` *after*
+              // registration (even long after, with audio already sent)
+              // must still retroactively invalidate it, so a later real
+              // `tts.complete` mark for it can never succeed.
               const handle = await session.startPlayback(
                 text,
                 languageCode,
                 new Date().toISOString(),
                 () => !signal.aborted && session.getMediaEpoch() === mediaEpoch,
+                signal,
               );
+              // Re-checked again here, immediately before publishing any
+              // audio (Codex reopen round 4, R1 finding 5): registration
+              // inside `startPlayback` and this outbound batch are
+              // separate async boundaries, and a cancellation that lands
+              // in between (e.g. a barge-in control frame reacting to the
+              // "started" event this same registration just emitted) must
+              // fence the audio itself, not only future completion marks --
+              // `handle.audioChunks` is a local copy already captured
+              // before this check, so the session's own bookkeeping being
+              // cancelled does not by itself stop these bytes from being
+              // sent.
+              if (signal.aborted || session.getMediaEpoch() !== mediaEpoch) {
+                return;
+              }
               for (const chunk of handle.audioChunks) {
                 channel.sendBinary(Buffer.from(chunk));
               }
@@ -137,7 +168,12 @@ export class VoiceSessionComposer extends EventEmitter {
         }
       },
     });
-    const composed: ComposedSession = { session, channel, turnAttachment };
+    const composed: ComposedSession = {
+      session,
+      channel,
+      turnAttachment,
+      closeAbort: new AbortController(),
+    };
     this.sessions.set(sessionId, composed);
 
     channel.on("message", (data: string | Buffer, isBinary: boolean) => {
@@ -198,6 +234,11 @@ export class VoiceSessionComposer extends EventEmitter {
    * does. */
   private beginClose(composed: ComposedSession): Promise<void> {
     if (composed.closing) return composed.closing;
+    // Fences the raw `tts.synthesize` control-frame path (Codex reopen
+    // round 4, R1 finding 4), which has no turn/signal of its own: a
+    // synthesis started before close but still outstanding when this runs
+    // must never register/publish once it resolves.
+    composed.closeAbort.abort();
     if (composed.turnAttachment) {
       this.turnCoordinator?.release(composed.turnAttachment);
     }
@@ -270,11 +311,21 @@ export class VoiceSessionComposer extends EventEmitter {
         composed.session.handleDtmf(frame.digit, occurredAt);
         return;
       case "tts.synthesize": {
+        // Codex reopen round 4, R1 finding 4: this raw entry bypasses the
+        // turn coordinator entirely, so it has no per-turn abort signal --
+        // `composed.closeAbort` (aborted once from `beginClose`, see
+        // above) is what fences it against the session closing while its
+        // synthesis is still outstanding.
         const handle = await composed.session.startPlayback(
           frame.text,
           frame.languageCode,
           occurredAt,
+          () => !composed.closeAbort.signal.aborted,
+          composed.closeAbort.signal,
         );
+        if (composed.closeAbort.signal.aborted) {
+          return;
+        }
         for (const chunk of handle.audioChunks) {
           composed.channel.sendBinary(Buffer.from(chunk));
         }

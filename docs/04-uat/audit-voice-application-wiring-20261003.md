@@ -901,3 +901,132 @@ the fail-closed contract).
 
 `same_sha_review_ci`: pending hosted CI on this round's new commit SHA
 (`CANDIDATE_SHA`/`CANDIDATE_BRANCH` handoff to Codex follows).
+
+## Round-6 (Codex reopen on c6169f97ad84a9aaa3a43984656e6001eb214152, review
+recorded via canonical `reopen`, candidate generation
+`134e188ec6194c27b19639231dafbbf0`) -- R1 residual playback-lifecycle gaps
+fixed; R2 follow-through and R4 remain open this round, by design (not
+re-litigated as resolved)
+
+This round addresses only R1's newly probed residual findings (1-5 in the
+reopen note), the smallest independently verifiable repair unit from this
+reopen. R2's follow-through (immediate media-authority cancellation) and
+R4 (consumed runtime composition, S3 backend) are **not** touched this
+round -- see "Still open" below. This keeps each repair unit separately
+checkable, per `AI_COLLABORATION_GUIDE.md` §0.7.
+
+### R1 (Codex reopen round 4, 5 new findings on the previously-fixed
+pre-registration fence) -- `authority_epoch_consent_fences`,
+`composed_turn_and_recording_path`
+
+**What was still wrong.** The previous round's `isStillValid` predicate on
+`VoiceMediaWorkerSession.startPlayback` was checked exactly once, before
+registration, then discarded -- nothing re-validated a playback's
+continued validity for the rest of its registered lifetime. Concretely:
+
+1. A newer final (no barge-in, no media-epoch advance) aborts the
+   superseded turn's `AbortController`, but nothing clears an
+   *already-registered* playback's `cleared` flag, so a real
+   `tts.complete` mark for it still succeeded after the fact
+   (`media-session.ts`'s `playbacksById` map had no link back to the
+   turn's own abort signal).
+2. The same gap for a turn's own deadline timer firing well after its
+   playback registered.
+3. The same gap for `release`/close/drain, reached directly through the
+   retained `VoiceMediaWorkerSession` (not routed through the
+   already-torn-down composer).
+4. The raw `tts.synthesize` control frame (`session-composer.ts`'s
+   `handleControlFrame`) bypassed the predicate entirely -- it called
+   `startPlayback` with no `isStillValid` and no signal at all, so a
+   session close while that one synthesis was outstanding could still
+   register/publish after the session was gone.
+5. Registration (inside `startPlayback`) and outbound binary publication
+   (the `for` loop in `session-composer.ts`'s `speak` closure) are
+   separate async boundaries: a `session.event` listener reacting to
+   `tts.playback.started` by delivering a real `speech.started` control
+   frame landed in that gap -- completion was already correctly fenced,
+   but the audio bytes themselves still reached the channel.
+
+**Fix.** `VoiceMediaWorkerSession.startPlayback` (`media-session.ts`)
+gains an optional trailing `cancelOn?: AbortSignal` parameter. When a
+playback successfully registers, and `cancelOn` is supplied, an
+`abort`-listener is attached (`{ once: true }`) that calls
+`this.cancelPlayback(...)` the moment that signal is ever aborted --
+however much later that happens relative to registration, and whether or
+not any audio was already published. `session-composer.ts` passes the
+turn's own `signal` as `cancelOn` in the `speak` closure (fixes 1-3: a
+newer final, a timeout, and `release` all abort that same controller) and
+a new session-level `ComposedSession.closeAbort` (aborted once from
+`beginClose`, before `closeAsr`) as `cancelOn` for the raw
+`tts.synthesize` control-frame path, which has no turn/signal of its own
+(fixes 4). Both call sites also re-check `signal.aborted` /
+`closeAbort.signal.aborted` a second time, immediately before the
+outbound binary loop -- after `startPlayback` has already returned --
+which is the explicit re-validation point fix 5 needed (registration and
+publish are different async boundaries; the pre-registration check alone
+cannot see a cancellation that lands in between).
+
+**Before -> after, with reproduction method.** Each of the 5 new
+`session-composer-turn-coordinator.test.ts` cases below was verified to
+fail against the pre-fix code and pass against the fix: the two call
+sites' new re-check lines were locally disabled (`if (false && ...)`,
+never committed) and the raw path's `isStillValid`/`cancelOn` arguments
+were locally dropped, the suite was re-run (4 failed on the disabled
+re-checks, 1 failed once the raw path's arguments were also dropped), then
+every line was restored to its exact original diff (confirmed with
+`diff` against the saved original patch) before any commit.
+
+| Finding | Test (`session-composer-turn-coordinator.test.ts`) | Pre-fix result | Post-fix result |
+| --- | --- | --- | --- |
+| 1 | "fences a retained playback's completion once a newer final supersedes its turn, after it already finished publishing" | `tts.complete` for the superseded, already-published pb-1 produced a `tts.playback.completed` event | no completed event; `pb-2` (the current turn) still completes/publishes normally |
+| 2 | "fences a registered playback's completion once its own turn's deadline fires" | `tts.complete` after the 40ms deadline passed still produced a completed event | no completed event |
+| 3 | "fences a registered playback's completion once the attachment is released on close" | retained `session.completePlayback(...)` returned `true` after close | returns `false` |
+| 4 | "fences the raw tts.synthesize entry's result once the session closes while its synthesis is outstanding" | held synthesis resolving after close still sent binary and left the playback completable | `sentBinary` stays empty; `completePlayback` returns `false` |
+| 5 | "fences outbound audio published after a barge-in control frame reacts to this same playback's own started event" | `sentBinary` received the playback's audio despite the barge-in control frame | `sentBinary` stays empty; the started event is still correctly recorded, completion still correctly fenced |
+
+**Commands run this round:**
+
+- `pnpm --filter @drts/voice-media-worker typecheck` -- exit 0.
+- `pnpm --filter @drts/voice-media-worker lint` -- exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/session-composer-turn-coordinator.test.ts`
+  -- 12 tests passed (7 unchanged from round 5 + 5 new R1 cases above).
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/internal-auth.test.ts
+  tests/unit/audit-voice-runtime-20261002/provider-composition.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-recording-finalize-authorization.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-authority-grant-expiry-race.test.ts
+  tests/unit/audit-voice-runtime-20261002/websocket-channel-frame-limits.test.ts
+  tests/unit/audit-voice-runtime-20261002/media-worker-server-shutdown-drain.test.ts
+  tests/unit/audit-voice-runtime-20261002/session-composer.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-network-client.test.ts
+  tests/unit/audit-voice-runtime-20261002/twm-lifecycle-boundaries.test.ts
+  tests/unit/uv-exec-008.test.ts tests/unit/uv-exec-010.test.ts
+  tests/unit/uv-exec-012.test.ts tests/unit/uv-exec-026.test.ts` -- 16
+  files / 265 tests passed (260 prior + 5 new), zero regressions from this
+  round's `media-session.ts`/`session-composer.ts` changes.
+
+### Still open this round (not re-litigated, not fabricated)
+
+- **R2 follow-through** (`authority_epoch_consent_fences`): immediate
+  media-authority cancellation on `advanceMediaEpoch()` is still absent --
+  `media-session.ts:136-150` does not notify/abort any in-flight
+  coordinator work the moment the epoch advances; the existing lazy
+  epoch-comparison fencing (checked when the proposal eventually settles)
+  is unchanged and still correctly rejects a laundered result. Per the
+  reopen note, this is requested as part of completing the *trusted*
+  runtime path (R4), which does not exist yet in this worker's
+  composition -- implementing it now, ahead of that path, would mean
+  fabricating a cancellation channel with nothing real on the other end.
+  Not attempted this round.
+- **R4** (`composed_turn_and_recording_path`,
+  `precise_unimplemented_and_external_boundaries`): `server.ts` still
+  always constructs `OpenAiRealtimeFixtureAdapter` with coordinator
+  defaults (`production=false`, fixture persist port); no trusted
+  persistence implementation, authenticated API client/routes, or
+  configured S3 recorder factory has been added; `apps/voice-media-worker/package.json`
+  is unchanged (still only `@drts/contracts`). This is explicitly a
+  separate, substantially larger repair unit (new dependency, new
+  first-party routes/client, a configured backend factory) than R1's
+  playback-lifecycle fix, and attempting it in the same pass risked a
+  half-finished result. Not attempted this round; still owed as the next
+  repair unit on this task.
