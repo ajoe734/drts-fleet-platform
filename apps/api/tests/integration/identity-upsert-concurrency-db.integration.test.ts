@@ -118,13 +118,34 @@ function traceClientQueries(db: DatabaseService): {
     connections: [],
   };
   const originalConnect = db.connect.bind(db);
+  // The underlying pg Pool can hand out the SAME physical client object
+  // across successive connect() calls once it is released back to the
+  // pool. Re-wrapping client.query on every connect() (as a prior version
+  // of this helper did) stacks a new closure on top of the previous one
+  // without ever restoring it, so a later lease's queries get recorded
+  // into every earlier lease's bucket too (and multiple times, once per
+  // stacked layer) -- inflating counts the longer a test leases
+  // connections, which is exactly what a retrying test does. Wrapping
+  // query exactly once per physical client (tracked via `wrapped`) and
+  // redirecting it to whichever bucket is current for that client (via
+  // `activeBucket`, updated on every connect()) keeps each logical lease's
+  // queries isolated to only that lease's array.
+  const wrapped = new WeakSet<object>();
+  const activeBucket = new WeakMap<
+    object,
+    { sql: string; params: unknown[] }[]
+  >();
   (db as unknown as { connect: typeof db.connect }).connect = async () => {
     const client = await originalConnect();
     const connectionQueries: { sql: string; params: unknown[] }[] = [];
     trace.connections.push(connectionQueries);
-    const originalQuery = client.query.bind(client);
-    (client as unknown as { query: (...args: unknown[]) => unknown }).query =
-      (...args: unknown[]) => {
+    activeBucket.set(client as unknown as object, connectionQueries);
+    if (!wrapped.has(client as unknown as object)) {
+      wrapped.add(client as unknown as object);
+      const originalQuery = client.query.bind(client);
+      (
+        client as unknown as { query: (...args: unknown[]) => unknown }
+      ).query = (...args: unknown[]) => {
         const first = args[0];
         const sql =
           typeof first === "string"
@@ -133,9 +154,10 @@ function traceClientQueries(db: DatabaseService): {
         const params = Array.isArray(args[1])
           ? (args[1] as unknown[])
           : ((first as { values?: unknown[] } | undefined)?.values ?? []);
-        connectionQueries.push({ sql, params });
+        activeBucket.get(client as unknown as object)?.push({ sql, params });
         return (originalQuery as (...a: unknown[]) => unknown)(...args);
       };
+    }
     return client;
   };
   return trace;
