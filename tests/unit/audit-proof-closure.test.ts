@@ -89,7 +89,9 @@ function s3Boundary() {
         objects.set(key, {
           bytes: Buffer.from(command.input.Body as Uint8Array),
           type: command.input.ContentType!,
-          metadata: command.input.Metadata,
+          ...(command.input.Metadata === undefined
+            ? {}
+            : { metadata: command.input.Metadata }),
         });
         return {};
       }

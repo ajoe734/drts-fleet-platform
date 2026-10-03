@@ -26,9 +26,9 @@ describe("proof client uses the actual API/BFF path for binary content", () => {
       vi.stubGlobal("fetch", fetcher);
       const client = new ApiClient({
         baseUrl,
-        pathTransform: baseUrl.startsWith("/")
-          ? (path) => path.replace(/^\/api/, "")
-          : undefined,
+        ...(baseUrl.startsWith("/")
+          ? { pathTransform: (path: string) => path.replace(/^\/api/, "") }
+          : {}),
       });
       const content = await client.downloadRemittanceProof(grant);
       expect(await content.text()).toBe(bytes);
@@ -95,7 +95,7 @@ describe("proof client uses the actual API/BFF path for binary content", () => {
     for (const [body, type] of [
       ["<html>login</html>", "text/html"],
       ["", "application/pdf"],
-    ]) {
+    ] as const) {
       vi.stubGlobal(
         "fetch",
         vi.fn(

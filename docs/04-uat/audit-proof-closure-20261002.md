@@ -18,6 +18,12 @@ The initial pushed candidate `3c452840a251cb3f0a49c93785cdb91bc528a7c4` (PR #228
 
 The owner explicitly reopened the task. No published commit was amended, rebased or force-pushed, and the check was not bypassed. An append-only successor branch, pi/audit-remediate-core-20261002-v2, was created from the same baseline with the complete original candidate diff. Before adding this note, its staged tree and the original candidate tree were **identical**: `16e792bd7e582e24bac8ecd5bd61b52f45a3582c`. Product/test blobs remain unchanged; this note is the only file-content delta. The original branch remains available as provenance. The successor has a correctly task-prefixed commit, a fresh immutable handoff and fresh same-SHA review/CI; the old failed candidate is not certified retroactively.
 
+## Hosted CI follow-up (2026-10-03)
+
+PR #2285 candidate `32213f32b64e3be4468864056422119ddb45f309` failed hosted root typechecking in run `37084130046` (Product smoke acceptance), with the same typecheck gate failing in integration run `37084130028`. The earlier standalone test check did **not** establish compatibility with the repository's full strict configuration: `exactOptionalPropertyTypes` rejected explicit undefined optional values in the API-client config and S3 test double, and indexed array inference allowed an undefined response Content-Type. These were test typing defects, not evidence of a hosted database or provider outage.
+
+The follow-up omits absent optional properties and preserves response cases as readonly tuples. It does not weaken tsconfig, remove assertions, or skip gates. Revalidation in an isolated checkout: repository `pnpm run typecheck:root` exit 0; the seven-file focused command below passes 89/89, zero skips; ESLint on both corrected files and `git diff --check` exit 0. Machine-specific logs are under `.local/proof-ci-evidence/`. Fresh same-SHA hosted CI and independent review remain required; this local result does not certify smoke, deployment, or real-service acceptance.
+
 ## Finding-level repair and regressions
 
 | Finding | Previous behavior | Repair | Committed regression / limitation |
