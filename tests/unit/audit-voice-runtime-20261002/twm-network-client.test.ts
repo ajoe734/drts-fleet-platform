@@ -1215,6 +1215,107 @@ describe("AUDIT-VOICE-RUNTIME-20261002: TwmAsrNetworkAdapter (real session flow,
     }
   });
 
+  /**
+   * Codex round 6 reopen: concurrent production-WIP inspection (recorded
+   * on the task board as a live finding, not yet a separate review round)
+   * caught that `failSetup()` is explicitly non-terminal (unlike
+   * `terminate()`, it never sets `this.terminated`), but the prior fix
+   * only re-checked `this.terminated` after each await -- so the real,
+   * never-cancelled upstream login call could still resolve *after* the
+   * setup deadline fired and go on to acquire access-info and a brand-new
+   * provider socket for an attempt nothing was waiting on anymore. This
+   * must stay rejected and must never construct a socket, even once the
+   * abandoned login call finally resolves.
+   */
+  it("(R12 round-6) a login call that finally resolves after the setup deadline already fired must not go on to acquire a socket", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveLogin: (() => void) | undefined;
+      const loginGate = new Promise<void>((resolve) => {
+        resolveLogin = resolve;
+      });
+      let accessCalls = 0;
+      const wsFactory = vi.fn(() => new StatefulSocket());
+      const transport: TwmHttpTransport = async (_method, path) => {
+        if (path === "/api/v1/login") {
+          await loginGate;
+          return jsonResponse(200, { token: "asr-tok" });
+        }
+        if (path === "/api/v1/streaming/transcript/access-info") {
+          accessCalls += 1;
+          return jsonResponse(200, {
+            websocketUrl: "wss://twm.example/stream",
+            ticket: "ticket-r6-late-login",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          });
+        }
+        throw new Error(`unexpected path ${path}`);
+      };
+      const shortSetupProfile: TwmAsrRouteProfile = {
+        ...profile,
+        timeouts: { ...profile.timeouts, noSpeechTimeoutMs: 20 },
+      };
+      const adapter = new TwmAsrNetworkAdapter(
+        transport,
+        wsFactory,
+        { accountId: "a", accountSecret: "s" },
+        shortSetupProfile,
+      );
+
+      const promise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([1]),
+        sequence: 1,
+      });
+      const rejection = expect(promise).rejects.toThrow(TwmNetworkError);
+
+      // The setup deadline fires with login still pending.
+      await vi.advanceTimersByTimeAsync(20);
+      await rejection;
+      expect(wsFactory).not.toHaveBeenCalled();
+
+      // The abandoned login call finally resolves well after the timeout.
+      resolveLogin!();
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+
+      expect(accessCalls).toBe(0);
+      expect(wsFactory).not.toHaveBeenCalled();
+
+      // A genuinely fresh attempt afterward must still work normally.
+      const freshSocket = new StatefulSocket();
+      wsFactory.mockImplementation(() => freshSocket);
+      const freshPromise = adapter.transcribe({
+        sessionId: "sess",
+        audioChunk: new Uint8Array([2]),
+        sequence: 2,
+      });
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      freshSocket.open();
+      freshSocket.fire("message", { data: JSON.stringify({ status: 180 }) });
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      freshSocket.fire("message", {
+        data: JSON.stringify({
+          providerSessionId: "p1",
+          segmentId: "seg-fresh",
+          revision: 1,
+          text: "fresh",
+          final: 1,
+          language: "cmn-TW",
+        }),
+      });
+      await expect(freshPromise).resolves.toMatchObject({ text: "fresh" });
+      expect(wsFactory).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("(R12) rejects without hanging if the provider connection closes while audio is still queued and not yet ready", async () => {
     const socket = new StatefulSocket();
     const adapter = new TwmAsrNetworkAdapter(
