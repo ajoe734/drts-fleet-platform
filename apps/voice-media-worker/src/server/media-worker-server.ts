@@ -393,28 +393,24 @@ export class MediaWorkerServer extends EventEmitter {
    * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry: the real production
    * attempt to resolve this admitted session's `VoiceSessionBinding` --
    * `sessionComposer.attach()`'s `binding` parameter previously had no
-   * caller at all outside tests. Never throws: a rejection (most likely,
-   * today, no `sessionBindingResolver` configured at all, or apps/api has
-   * no durable `voice.session` row yet for this id -- the real, still-
-   * missing SD §4.1 provider webhook is the genuine external gate, not a
-   * defect in this method) just means this attachment stays on the
-   * existing fixture-only persistence path, exactly as before this
-   * resolver existed.
+   * caller at all outside tests.
+   *
+   * No `sessionBindingResolver` configured at all is the explicit,
+   * separate fixture-only isolation decision (see `./dialogue/
+   * voice-session-binding.ts`'s own doc) and returns `undefined` without
+   * ever calling a resolver. Once one IS configured, a rejection is a real
+   * trusted-admission failure and is now propagated to the caller (Codex
+   * reopen round 18: previously this swallowed every rejection and
+   * returned `undefined`, which let `POST /sessions` fall back to
+   * unbound fixture persistence behind a successful `201` -- exactly the
+   * "configured trusted admission failure must block, not no-op" defect
+   * this task's acceptance forbids).
    */
   private async resolveSessionBinding(
     voiceSessionId: string,
   ): Promise<VoiceSessionBinding | undefined> {
     if (!this.sessionBindingResolver) return undefined;
-    try {
-      return await this.sessionBindingResolver.resolve(voiceSessionId);
-    } catch (err) {
-      console.warn(
-        `[voice-media-worker] Could not resolve a trusted VoiceSessionBinding for session ` +
-          `'${voiceSessionId}': ${err instanceof Error ? err.message : String(err)}. ` +
-          `Attaching without one (fixture-only persistence).`,
-      );
-      return undefined;
-    }
+    return await this.sessionBindingResolver.resolve(voiceSessionId);
   }
 
   closeSession(
@@ -723,19 +719,51 @@ export class MediaWorkerServer extends EventEmitter {
             // this response's caller sends next (which reads
             // `session.binding` synchronously, see `handleUpgrade`) never
             // races an admission that is still resolving it (AUDIT-VOICE-
-            // APPLICATION-WIRING-20261003 R4-entry). A rejection (e.g. no
-            // `voice.session` row exists yet for this id) never fails
-            // admission itself -- see `resolveSessionBinding`'s own doc.
-            session.binding = await this.resolveSessionBinding(
-              claims.sessionId,
-            );
+            // APPLICATION-WIRING-20261003 R4-entry). A resolver configured
+            // but rejecting is now a fail-closed admission failure --
+            // never a silent fixture-only downgrade behind a `201` -- and
+            // cleans up the grant/session this attempt already reserved,
+            // same as the `issueGrant` failure above.
+            let binding: VoiceSessionBinding | undefined;
+            try {
+              binding = await this.resolveSessionBinding(claims.sessionId);
+            } catch (err) {
+              this.activeSessions.delete(claims.sessionId);
+              this.sessionAuthority.release(claims.sessionId);
+              throw new VoiceMediaSessionAuthorityError(
+                "VOICE_MEDIA_SESSION_BINDING_FAILED",
+                `Could not resolve a trusted VoiceSessionBinding for session '${claims.sessionId}': ` +
+                  `${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            // R12 (Codex reopen round 18): the grant issued above has a TTL
+            // and can be reaped (`grant.expired`, see the constructor's
+            // listener) or drained away while the await above was in
+            // flight. Sending the already-built `responseBody` at that
+            // point would hand the caller a `201` for a grant/session that
+            // no longer exists -- the immediate WS upgrade it triggers
+            // would then always fail. Re-validate the session is still
+            // live and the grant still exactly what was issued before
+            // declaring success; the caller cannot have made this request
+            // since, since it is still awaiting this very POST's response.
+            const stillLive = this.activeSessions.get(claims.sessionId);
+            if (!stillLive) {
+              this.sessionAuthority.release(claims.sessionId);
+              throw new VoiceMediaSessionAuthorityError(
+                "VOICE_MEDIA_SESSION_ADMISSION_EXPIRED",
+                "Session admission expired or was withdrawn while resolving trusted binding; retry admission.",
+              );
+            }
+            stillLive.binding = binding;
             res.statusCode = 201;
             res.end(responseBody);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             res.statusCode =
               err instanceof VoiceMediaSessionAuthorityError &&
-              err.code === "VOICE_MEDIA_SESSION_EPOCH_STALE"
+              (err.code === "VOICE_MEDIA_SESSION_EPOCH_STALE" ||
+                err.code === "VOICE_MEDIA_SESSION_BINDING_FAILED" ||
+                err.code === "VOICE_MEDIA_SESSION_ADMISSION_EXPIRED")
                 ? 409
                 : err instanceof VoiceMediaSessionAuthorityError
                   ? 400
@@ -745,7 +773,14 @@ export class MediaWorkerServer extends EventEmitter {
                     : errorMsg.includes("CONFLICT")
                       ? 409
                       : 400;
-            res.end(JSON.stringify({ error: errorMsg }));
+            res.end(
+              JSON.stringify({
+                error: errorMsg,
+                ...(err instanceof VoiceMediaSessionAuthorityError
+                  ? { code: err.code }
+                  : {}),
+              }),
+            );
           }
         })
         .catch((err) => {

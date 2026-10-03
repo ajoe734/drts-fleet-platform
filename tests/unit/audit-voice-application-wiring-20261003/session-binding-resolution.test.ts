@@ -1,10 +1,55 @@
-import { describe, expect, it, vi } from "vitest";
+import * as http from "node:http";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MediaWorkerServer } from "../../../apps/voice-media-worker/src/server/media-worker-server";
+import { VOICE_MEDIA_INTERNAL_KEY_HEADER } from "../../../apps/voice-media-worker/src/server/internal-auth";
+import type { VoiceSessionComposer } from "../../../apps/voice-media-worker/src/server/session-composer";
+import { FakeCallAuthority } from "../audit-voice-runtime-20261002/fake-call-authority";
 import type {
   VoiceSessionBinding,
   VoiceSessionBindingResolver,
 } from "../../../apps/voice-media-worker/src/dialogue/voice-session-binding";
+
+const INTERNAL_KEY = "test-internal-key-r4-entry";
+
+const ORIGINAL_ENV = { ...process.env };
+function resetEnv() {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in ORIGINAL_ENV)) delete process.env[key];
+  }
+  Object.assign(process.env, ORIGINAL_ENV);
+}
+
+function attemptWsUpgrade(
+  port: number,
+  query: string,
+): Promise<{ statusCode: number; upgraded: boolean }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: "127.0.0.1",
+      port,
+      path: `/ws${query}`,
+      method: "GET",
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "Sec-WebSocket-Version": "13",
+        [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY,
+      },
+    });
+    req.on("upgrade", (res, socket) => {
+      resolve({ statusCode: res.statusCode ?? 0, upgraded: true });
+      socket.destroy();
+    });
+    req.on("response", (res) => {
+      resolve({ statusCode: res.statusCode ?? 0, upgraded: false });
+      res.resume();
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry (Codex reopen round
@@ -64,8 +109,7 @@ describe("MediaWorkerServer.resolveSessionBinding (R4-entry)", () => {
     expect(result).toEqual(binding());
   });
 
-  it("fails closed to undefined -- never throws, never fails admission -- when the resolver rejects (e.g. apps/api has no voice.session row yet for this id)", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("propagates the rejection (fail-closed) instead of swallowing it to undefined once a resolver IS configured (Codex reopen round 18, R4-entry)", async () => {
     const resolve = vi.fn(async () => {
       throw new Error("VOICE_SESSION_NOT_OWNER: Voice session not found.");
     });
@@ -73,17 +117,177 @@ describe("MediaWorkerServer.resolveSessionBinding (R4-entry)", () => {
       sessionBindingResolver: { resolve },
     });
 
-    const result = await (
-      server as unknown as ServerWithPrivateResolver
-    ).resolveSessionBinding("session-no-row-yet");
+    await expect(
+      (server as unknown as ServerWithPrivateResolver).resolveSessionBinding(
+        "session-no-row-yet",
+      ),
+    ).rejects.toThrow("VOICE_SESSION_NOT_OWNER");
+  });
+});
 
-    expect(result).toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("session-no-row-yet"),
-    );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("VOICE_SESSION_NOT_OWNER"),
-    );
-    warn.mockRestore();
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry / R12 (Codex reopen round
+ * 18): the real HTTP `POST /sessions` admission path end-to-end, with only
+ * the `VoiceCallAuthorityVerifier` and `VoiceSessionBindingResolver`
+ * boundaries doubled -- `MediaWorkerServer.start()` opens a real ephemeral
+ * (`port: 0`) listener on loopback, matching the established pattern in
+ * `tests/unit/audit-voice-runtime-20261002/media-worker-server-caller-
+ * session-authorization.test.ts`, never a product dev/preview server.
+ */
+describe("MediaWorkerServer POST /sessions -> WS upgrade -> composer.attach (R4-entry / R12)", () => {
+  afterEach(resetEnv);
+
+  it("passes the real resolved binding through to sessionComposer.attach on WS upgrade (positive path)", async () => {
+    const attach = vi.fn();
+    const composer = {
+      attach,
+      get: () => undefined,
+      on: () => undefined,
+      drain: async () => undefined,
+      awaitPendingCloses: async () => undefined,
+    } as unknown as VoiceSessionComposer;
+    const resolve = vi.fn(async (voiceSessionId: string) => ({
+      ...binding(),
+      voiceSessionId,
+    }));
+    const callAuthority = new FakeCallAuthority();
+    const server = new MediaWorkerServer({
+      port: 0,
+      internalKey: INTERNAL_KEY,
+      callAuthorityVerifier: callAuthority,
+      sessionBindingResolver: { resolve },
+      sessionComposer: composer,
+    });
+    const port = await server.start();
+    try {
+      const { token } = callAuthority.issue("sess-bound-ok");
+      const admitRes = await fetch(`http://127.0.0.1:${port}/sessions`, {
+        method: "POST",
+        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+        body: JSON.stringify({ callAuthorityToken: token }),
+      });
+      expect(admitRes.status).toBe(201);
+      const admitted = (await admitRes.json()) as {
+        grant: { token: string };
+      };
+
+      const upgrade = await attemptWsUpgrade(
+        port,
+        `?sessionId=sess-bound-ok&grant=${admitted.grant.token}`,
+      );
+      expect(upgrade.upgraded).toBe(true);
+
+      expect(attach).toHaveBeenCalledTimes(1);
+      const [attachedSessionId, , attachedBinding] = attach.mock.calls[0]!;
+      expect(attachedSessionId).toBe("sess-bound-ok");
+      expect(attachedBinding).toEqual({ ...binding(), voiceSessionId: "sess-bound-ok" });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("fails admission closed (never 201) when a configured resolver rejects, instead of falling back to unbound fixture persistence", async () => {
+    const resolve = vi.fn(async () => {
+      throw new Error("VOICE_SESSION_NOT_OWNER: Voice session not found.");
+    });
+    const callAuthority = new FakeCallAuthority();
+    const server = new MediaWorkerServer({
+      port: 0,
+      internalKey: INTERNAL_KEY,
+      callAuthorityVerifier: callAuthority,
+      sessionBindingResolver: { resolve },
+    });
+    const port = await server.start();
+    try {
+      const { token } = callAuthority.issue("sess-binding-denied");
+      const res = await fetch(`http://127.0.0.1:${port}/sessions`, {
+        method: "POST",
+        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+        body: JSON.stringify({ callAuthorityToken: token }),
+      });
+
+      // This is the exact previously-reopened defect: a configured
+      // resolver's rejection must not be swallowed into a successful
+      // `201 admitted` that silently attaches on the fixture-only path.
+      expect(res.status).not.toBe(201);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("VOICE_MEDIA_SESSION_BINDING_FAILED");
+      expect(server.sessionCount).toBe(0);
+
+      // The grant/session this attempt reserved must also be cleaned up --
+      // a later admission for the same session id must not be rejected as
+      // a stale-admission conflict.
+      const retryToken = callAuthority.issue("sess-binding-denied").token;
+      const retryResolve = vi.fn(async (voiceSessionId: string) => ({
+        ...binding(),
+        voiceSessionId,
+      }));
+      (
+        server as unknown as {
+          sessionBindingResolver: VoiceSessionBindingResolver;
+        }
+      ).sessionBindingResolver = { resolve: retryResolve };
+      const retryRes = await fetch(`http://127.0.0.1:${port}/sessions`, {
+        method: "POST",
+        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+        body: JSON.stringify({ callAuthorityToken: retryToken }),
+      });
+      expect(retryRes.status).toBe(201);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("fails admission closed (never a stale 201) when the grant is reaped by TTL expiry while binding resolution is still in flight", async () => {
+    let releaseResolver: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      releaseResolver = resolve;
+    });
+    const resolve = vi.fn(async (voiceSessionId: string) => {
+      await held;
+      return { ...binding(), voiceSessionId };
+    });
+    const callAuthority = new FakeCallAuthority();
+    const server = new MediaWorkerServer({
+      port: 0,
+      internalKey: INTERNAL_KEY,
+      callAuthorityVerifier: callAuthority,
+      sessionBindingResolver: { resolve },
+      // Short enough that the TTL timer fires well before `held` resolves
+      // below, reproducing the real race: grant-expiry reaps the session
+      // out of `activeSessions` while `POST /sessions` is still awaiting
+      // the (slow, real-network) binding resolution.
+      sessionGrantTtlMs: 20,
+    });
+    const port = await server.start();
+    try {
+      const { token } = callAuthority.issue("sess-reaped-mid-resolve");
+      const admitPromise = fetch(`http://127.0.0.1:${port}/sessions`, {
+        method: "POST",
+        headers: { [VOICE_MEDIA_INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+        body: JSON.stringify({ callAuthorityToken: token }),
+      });
+
+      // Let the grant's TTL timer fire and reap the still-unattached
+      // session before letting the resolver settle.
+      await new Promise((r) => setTimeout(r, 60));
+      expect(server.sessionCount).toBe(0);
+      releaseResolver!();
+
+      const res = await admitPromise;
+      expect(res.status).not.toBe(201);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe("VOICE_MEDIA_SESSION_ADMISSION_EXPIRED");
+
+      // An immediate WS upgrade with the (already-stale) grant this
+      // response never actually delivered must not succeed either.
+      const upgrade = await attemptWsUpgrade(
+        port,
+        "?sessionId=sess-reaped-mid-resolve",
+      );
+      expect(upgrade.upgraded).toBe(false);
+    } finally {
+      await server.stop();
+    }
   });
 });

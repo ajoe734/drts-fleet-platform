@@ -2578,28 +2578,84 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
     });
 
     it("the real FOR UPDATE row lock taken by persistDialogueSnapshot's fence-check blocks a concurrent CAS from changing the session underneath it", async () => {
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R10 (Codex reopen round
+      // 18): the prior version of this test never called
+      // `persistDialogueSnapshot` at all -- it manually ran its own
+      // `BEGIN`/`SELECT ... FOR UPDATE` and only proved that generic
+      // Postgres row locking works, not that the real service/repository
+      // transaction actually holds that lock across its own write. This
+      // version calls the ACTUAL `VoiceSessionService.persistDialogueSnapshot`
+      // -> `VoiceSessionRepository.withTransaction`/`insertDialogueSnapshot`
+      // path, held open at the one external query boundary allowed to be
+      // doubled (the real INSERT's own round-trip, intercepted on the
+      // same live `pg` connection `withTransaction` already opened --
+      // never a second, separate connection), and proves a REAL concurrent
+      // `casUpdateSessionControl` from an independent instance still blocks
+      // until that exact call's transaction commits.
       const f = await seedVoiceFixture();
-      const instA = createInstance();
+      let releaseInsert: (() => void) | undefined;
+      const insertHeld = new Promise<void>((resolve) => {
+        releaseInsert = resolve;
+      });
+      let sawHeldInsert = false;
+      const heldDatabase = {
+        isEnabled: () => true,
+        query: (sql: string, values?: unknown[]) => pool.query(sql, values),
+        connect: async () => {
+          const client = await pool.connect();
+          return new Proxy(client, {
+            get(target, prop) {
+              if (prop === "query") {
+                return async (sql: string, values?: unknown[]) => {
+                  if (
+                    typeof sql === "string" &&
+                    sql.includes("INSERT INTO voice.dialogue_snapshot")
+                  ) {
+                    // The preceding `FOR UPDATE` SELECT in this same
+                    // transaction has already returned by the time this
+                    // runs -- the row lock is held for the duration of
+                    // this await, exactly like a slow real write would.
+                    sawHeldInsert = true;
+                    await insertHeld;
+                  }
+                  return target.query(sql, values);
+                };
+              }
+              const value = Reflect.get(target, prop);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as PoolClient;
+        },
+      } as unknown as DatabaseService;
+
+      const sessionRepositoryA = new VoiceSessionRepository(heldDatabase);
+      const serviceA = new VoiceSessionService(
+        sessionRepositoryA,
+        undefined,
+        undefined,
+        new VoiceRetentionService(),
+      );
       const instB = createInstance();
-      const session = await instA.sessionRepository.findSessionById(
+      const session = await instB.sessionRepository.findSessionById(
         f.request.voiceSessionId,
       );
 
-      // Holds a real `FOR UPDATE` lock on the session row exactly the way
-      // `VoiceSessionService.persistDialogueSnapshot`'s fence-check does
-      // (`findSessionById(..., true)`), inside an open transaction, then
-      // confirms a real concurrent `casUpdateSessionControl` from a second
-      // instance blocks until this transaction commits -- proving the lock
-      // actually serializes against the session's own normal CAS writers,
-      // not just against another `persistDialogueSnapshot` caller.
-      const clientA = await (instA.database as unknown as {
-        connect: () => Promise<PoolClient>;
-      }).connect();
-      await clientA.query("BEGIN");
-      await clientA.query(
-        "SELECT * FROM voice.session WHERE voice_session_id = $1 FOR UPDATE",
-        [f.request.voiceSessionId],
-      );
+      const persistPromise = serviceA.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      // Give A's real transaction every reasonable chance to reach (and
+      // hold inside) its own INSERT before B's concurrent CAS is issued.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(sawHeldInsert).toBe(true);
 
       let bDone = false;
       const bPromise = instB.sessionRepository
@@ -2612,12 +2668,12 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         });
 
       // Give B's query every reasonable chance to (wrongly) complete while
-      // A still holds the row lock.
+      // A's real transaction still holds the row lock.
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(bDone).toBe(false);
 
-      await clientA.query("COMMIT");
-      clientA.release();
+      releaseInsert!();
+      await persistPromise;
 
       const bResult = await bPromise;
       expect(bResult).not.toBeNull();
@@ -2743,6 +2799,190 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [f.request.voiceSessionId],
       );
       expect(afterPurge.rows[0].count).toBe(0);
+    });
+  });
+
+  // =========================================================================
+  // SUITE 6: control_event_response_loss_dedup_evidence (R4-control, Codex
+  // reopen rounds 16-18: the exact previously-unrepairable "voice.session_event
+  // insert conflicted but no existing row could be located" throw that
+  // permanently wedged an attachment whenever a caller's retry after a lost
+  // `/events` HTTP response reused the same `(voiceSessionId, sequence)` slot
+  // under a fresh `sourceEventId` -- or, with the real NULL `providerAccountId`
+  // this worker always sends, even reused the SAME `sourceEventId`.)
+  // =========================================================================
+  describe("Suite 6: control_event_response_loss_dedup_evidence", () => {
+    it("Case 6.1: a retry with a fresh sourceEventId for an already-committed sequence dedupes against the real uq_voice_session_event_sequence index instead of throwing", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+
+      const first = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-original",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(first.deduped).toBe(false);
+
+      // The caller never saw the HTTP response for the write above, so its
+      // retry (correctly) carries a brand-new sourceEventId for the same
+      // logical sequence slot. Before the fix, the fallback lookup only
+      // searched by this NEW sourceEventId, found nothing (the stored row
+      // is keyed under "evt-original"), and threw instead of reconciling.
+      const retry = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-retry-after-lost-response",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(retry.deduped).toBe(true);
+      expect(retry.event.sourceEventId).toBe("evt-original");
+
+      const rows = await pool.query(
+        "SELECT source_event_id FROM voice.session_event WHERE voice_session_id = $1 AND sequence = 2",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0].source_event_id).toBe("evt-original");
+    });
+
+    it("Case 6.2: a literal retry of the same sourceEventId dedupes NULL-safely when providerAccountId is null, as every real call from this worker sends", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+
+      const first = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-same-retry",
+        occurredAt: new Date().toISOString(),
+        sequence: 3,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(first.deduped).toBe(false);
+
+      // Same sourceEventId, same NULL providerAccountId: the old
+      // `provider_account_id = $2` comparison is never true against a NULL
+      // parameter, so this previously fell through to "no existing row
+      // could be located" even though the dedup key matched exactly.
+      const retry = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-same-retry",
+        occurredAt: new Date().toISOString(),
+        sequence: 3,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(retry.deduped).toBe(true);
+      expect(retry.event.sourceEventId).toBe("evt-same-retry");
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.session_event WHERE voice_session_id = $1 AND sequence = 3",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(1);
+    });
+
+    it("Case 6.3: VoiceSessionService.recordControlEvent no longer permanently wedges the attachment after a lost-response retry; the already-applied watermark is reconciled instead of thrown away", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = new VoiceSessionService(inst.sessionRepository);
+
+      const committed = await service.recordControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-6.3-original",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+      });
+      expect(committed.deduped).toBe(false);
+      expect(committed.applied).toBe(true);
+      expect(committed.gap).toBe(false);
+      expect(committed.appliedThroughSequence).toBe(2);
+      expect(committed.session.lastAppliedControlSequence).toBe(2);
+
+      // The worker never received the HTTP response for the commit above
+      // (Codex reopen round 18's exact probe) and retries with a fresh
+      // sourceEventId. A real coordinator reads `appliedThroughSequence`
+      // off this result to advance its own `controlSequence` counter --
+      // if this throws instead of resolving, every later speech-start for
+      // this attachment keeps retrying the same doomed sequence forever.
+      const retried = await service.recordControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-6.3-retry",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+      });
+      expect(retried.deduped).toBe(true);
+      expect(retried.gap).toBe(false);
+      expect(retried.appliedThroughSequence).toBe(2);
+      expect(retried.session.lastAppliedControlSequence).toBe(2);
+
+      // A legitimate next input (sequence 3) must still apply cleanly --
+      // the reconciled retry above must not have corrupted the watermark.
+      const next = await service.recordControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-6.3-next",
+        occurredAt: new Date().toISOString(),
+        sequence: 3,
+        mediaEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+      });
+      expect(next.deduped).toBe(false);
+      expect(next.applied).toBe(true);
+      expect(next.appliedThroughSequence).toBe(3);
+
+      const rows = await pool.query(
+        "SELECT sequence::int AS sequence, source_event_id FROM voice.session_event WHERE voice_session_id = $1 AND sequence IN (2,3) ORDER BY sequence",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows).toEqual([
+        { sequence: 2, source_event_id: "evt-6.3-original" },
+        { sequence: 3, source_event_id: "evt-6.3-next" },
+      ]);
     });
   });
 });

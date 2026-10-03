@@ -841,6 +841,175 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
   });
 
   /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control boundedness (Codex
+   * reopen round 18): reproduces the reviewer's exact probe -- a bare
+   * `speech.started`'s own `/events` write (`recordSpeechStartControlEvent`,
+   * no turn of its own) previously had only `releaseAbort` cancellation,
+   * which never fires on its own. A hung response therefore held
+   * `controlEventQueue` open indefinitely, and every later chained write
+   * -- including a subsequent final's own fallback watermark-open at
+   * `executeTurn`'s `await turnSession.controlEventQueue` -- waited on it
+   * forever, producing no audio for turns that arrived after the hang.
+   */
+  it("R4-control boundedness: a hung speech.started /events response is bounded by turnTimeoutMs instead of blocking every later chained write forever", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "99999999-9999-9999-9999-999999999999",
+      resourceScopeId: "88888888-8888-8888-8888-888888888888",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 1,
+    };
+    let eventsCallCount = 0;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/events")) {
+        eventsCallCount += 1;
+        if (eventsCallCount === 1) {
+          // Never settles on its own -- only the bounded signal's abort
+          // can end it, modeling a real stalled/uncooperative apps/api
+          // call exactly like the restoration bound/cancel test does.
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          });
+        }
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: 1,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/input-resolutions")) {
+        const body = JSON.parse(init!.body as string) as {
+          expectedSessionVersion: number;
+          inputEpoch: number;
+        };
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: body.expectedSessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: body.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        // The final's real `turnId` is a freshly generated UUID (`handle()`
+        // assigns it), not known in advance -- echo back whatever this
+        // exact call actually submitted, same correlation discipline
+        // `createTrustedDialoguePersistPort` itself checks for.
+        const body = JSON.parse(init!.body as string) as {
+          expectedSessionVersion: number;
+          inputEpoch: number;
+          mediaEpoch: number;
+          turnId: string;
+        };
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "s1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: body.expectedSessionVersion,
+              inputEpoch: body.inputEpoch,
+              mediaEpoch: body.mediaEpoch,
+              turnId: body.turnId,
+              content: {},
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    // `turnTimeoutMs: 150` -- the reviewer's own probe value -- bounds
+    // both a turn's own stages AND (after this fix) this bare
+    // speech.started's control write.
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      150,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    await flush(5);
+
+    // Bare speech.started with no final -- its own /events write hangs.
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({ type: "speech.started" }),
+      false,
+    );
+    await flush(5);
+
+    // Longer than turnTimeoutMs (150ms) -- without the bound, this would
+    // still be hung at this point (the reviewer's probe used 440ms against
+    // the same 150ms timeout).
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(consoleError).toHaveBeenCalled();
+
+    // A later final must still complete and speak -- it was never
+    // permanently blocked waiting on the first (now-aborted) write.
+    asr.emitFinal("你好", "seg-1");
+    await flush(15);
+
+    expect(sentBinary.length).toBeGreaterThan(0);
+    expect(eventsCallCount).toBeGreaterThanOrEqual(2);
+    consoleError.mockRestore();
+  });
+
+  /**
    * Codex reopen round 5/6, R6: a turn's handoff tool execution must not
    * escape cancellation and must never submit a newer `inputEpoch` than
    * the one admitted when the triggering transcript arrived. Reproduces
@@ -1226,6 +1395,115 @@ describe("Restoration on attach: real VoiceSessionComposer + VoiceCallTurnCoordi
     consoleError.mockRestore();
   });
 
+  it("R4-persist (Codex reopen round 18): treats a restoration for a FOREIGN voiceSessionId as a failure, even with an identical scope/route/lease", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: "a-completely-different-session-id",
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { asr, sentBinary } = buildComposer(fetchImpl);
+    await flush(5);
+
+    asr.emitFinal("你好", "seg-1");
+    await flush(10);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("R4-persist (Codex reopen round 18): treats a restoration whose snapshot is foreign/from an incompatible revision/already expired as a failure -- never installs a foreign handoff", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+              lastAppliedControlSequence: 0,
+            },
+            // Same scope/route/lease as the session above, but a foreign
+            // snapshot: a different voiceSessionId, a revision/input the
+            // session's own authoritative values could not have produced,
+            // and an already-expired retention window -- plus a handoff
+            // that must never be installed into this attachment's state.
+            snapshot: {
+              snapshotId: "snapshot-foreign",
+              voiceSessionId: "a-completely-different-session-id",
+              sessionVersion: binding.sessionVersion + 5,
+              inputEpoch: 99,
+              mediaEpoch: 0,
+              turnId: "foreign-turn",
+              content: {
+                draftVersion: 1,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "customer_requested", intent: "human" },
+              },
+              createdAt: "2020-01-01T00:00:00.000Z",
+              retentionExpiresAt: "2020-02-01T00:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { asr, sentBinary } = buildComposer(fetchImpl);
+    await flush(5);
+
+    // The legitimate next final must become a real (non-terminal) turn --
+    // never immediately "handoff" from a foreign snapshot that was never
+    // actually verified as belonging to this session.
+    asr.emitFinal("你好", "seg-1");
+    await flush(10);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(
+      fetchImpl.mock.calls.some(([url]) =>
+        String(url).includes("/input-resolutions"),
+      ),
+    ).toBe(false);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("R11 (Codex reopen round 15/16): discards a final that arrived BEFORE restoration settled, once restoration then fails -- never runs a turn against unverified state just because it was already queued", async () => {
     let releaseSnapshotRead: (() => void) | undefined;
     const snapshotRead = new Promise<void>((resolve) => {
@@ -1327,6 +1605,104 @@ describe("Restoration on attach: real VoiceSessionComposer + VoiceCallTurnCoordi
       `GET /callcenter/voice/sessions/${binding.voiceSessionId}/dialogue-snapshot`,
     ]);
     expect(sentBinary).toHaveLength(0);
+    consoleError.mockRestore();
+  });
+
+  it("R11 (Codex reopen round 18): discards a speech.started control write chained onto the restoration queue BEFORE restoration settles, once restoration then fails -- never advances the authoritative watermark for unverified state", async () => {
+    let releaseSnapshotRead: (() => void) | undefined;
+    const snapshotRead = new Promise<void>((resolve) => {
+      releaseSnapshotRead = resolve;
+    });
+    const calledPaths: string[] = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      calledPaths.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Held open: `attach()`'s own `restoreBoundAttachment` call (and
+        // therefore `controlEventQueue`'s first link) is still pending
+        // when the speech.started frame below is chained onto it.
+        await snapshotRead;
+        return jsonResponse(500, { error: { code: "INTERNAL", message: "boom" } });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { channel, sentBinary } = buildComposer(fetchImpl);
+
+    // No `await flush(...)` here -- restoration is still pending.
+    // `recordSpeechStartControlEvent` chains its write onto
+    // `controlEventQueue`, whose first link IS the still-pending
+    // restoration promise, at a moment `turnSession.restoreFailed` is
+    // still `undefined`.
+    (channel as unknown as EventEmitter).emit(
+      "message",
+      JSON.stringify({ type: "speech.started" }),
+      false,
+    );
+    await flush(3);
+    // Only now does restoration actually settle into failure.
+    releaseSnapshotRead?.();
+    await flush(10);
+
+    // The only two calls that may ever happen are restoration's own
+    // capability issuance and its GET read -- never the chained
+    // speech-start's own POST /events, which would durably (and wrongly)
+    // advance the authoritative watermark for state that was never
+    // actually verified.
+    expect(calledPaths).toEqual([
+      "POST /callcenter/voice/capabilities",
+      `GET /callcenter/voice/sessions/${binding.voiceSessionId}/dialogue-snapshot`,
+    ]);
+    expect(sentBinary).toHaveLength(0);
+    consoleError.mockRestore();
+  });
+
+  it("R11 (Codex reopen round 18): release() cancels a never-settling restoration via the shared abort signal instead of leaving it dangling forever", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Never settles on its own -- only an abort on the forwarded
+        // signal can end it, exactly like a real stalled/uncooperative
+        // apps/api call that `release()` must still be able to bound.
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new Error("aborted"));
+          });
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { channel } = buildComposer(fetchImpl);
+    await flush(3);
+
+    // Without R11's bound/cancel fix, this restoration would never settle
+    // at all -- `release()` (triggered here by the channel closing, see
+    // `VoiceSessionComposer`'s own "close" handler) must actually cancel
+    // the in-flight GET via `turnSession.releaseAbort`, not merely stop
+    // caring about its result. A bounded number of microtask/timer flushes
+    // is enough to observe the cancellation if it happened; without it,
+    // the GET's promise (and therefore `restoreBoundAttachment`) would
+    // still be pending after this same number of flushes in every prior
+    // round, since nothing else in this test ever resolves it.
+    (channel as unknown as EventEmitter).emit("close");
+    await flush(10);
+
+    // `restoreBoundAttachment`'s own catch block only runs once the abort
+    // actually rejects the GET -- observing it here is exactly what proves
+    // the cancellation reached the real network call, not just the local
+    // bookkeeping.
+    expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });
 });

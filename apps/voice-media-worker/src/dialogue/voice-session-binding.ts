@@ -27,13 +27,20 @@ export interface VoiceSessionBinding {
  * caller `MediaWorkerServer` was missing (Codex reopen round 15/16,
  * R4-entry): `VoiceSessionComposer.attach`'s `binding` parameter existed
  * only for manually-constructed test attachments, with no call site that
- * ever tried to resolve one. A rejection here (most likely: no
- * `voice.session` row exists yet for this id, because the real,
- * still-missing SD §4.1 provider webhook never created one -- a genuine
- * external CTI/IVR gate, not this resolver's own fault) must leave the
- * attachment binding-less (the existing fixture-only persistence path),
- * never fail the admission itself -- a worker that cannot yet resolve
- * trusted coordination must still host the call.
+ * ever tried to resolve one.
+ *
+ * Fixture-only operation is a deliberate, separate isolation decision made
+ * by never configuring a resolver at all (`MediaWorkerServer`'s own
+ * `resolveSessionBinding` short-circuits to `undefined` in that case,
+ * without ever calling this interface). Once a resolver IS configured,
+ * this worker is declaring that admitted sessions must be bound to real
+ * authoritative coordination -- a rejection (e.g. no `voice.session` row
+ * exists yet for this id, because the real, still-missing SD §4.1 provider
+ * webhook never created one) must therefore fail admission closed rather
+ * than silently downgrade to unbound fixture persistence (Codex reopen
+ * round 18, R4-entry: a configured-but-failing binding is a trusted-wiring
+ * defect/outage, not a safe-to-ignore external gate, and must never be
+ * masked behind a successful `201 admitted`).
  */
 export interface VoiceSessionBindingResolver {
   resolve(

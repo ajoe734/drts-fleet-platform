@@ -368,25 +368,46 @@ export class VoiceCallTurnCoordinator {
    * matching this attachment's own binding) instead sets `restoreFailed`,
    * which `handle` checks exactly like `released` -- a trusted/bound
    * attachment whose restored state could not be verified must never
-   * silently run turns against an unverified one. */
+   * silently run turns against an unverified one.
+   *
+   * Both network calls are bound to `turnSession.releaseAbort.signal` (the
+   * same controller `release()` already fires and `recordAuthoritativeControlEvent`
+   * already uses) so a `release()`/replacement while this is still in
+   * flight actually cancels it (Codex reopen round 18, R11) instead of
+   * leaving a never-settling restoration with no bound at all -- the
+   * abort surfaces as a rejection into the `catch` below exactly like any
+   * other restoration failure, so it still resolves `restoreFailed` rather
+   * than leaking a dangling request.
+   */
   private async restoreBoundAttachment(
     turnSession: TurnSession,
     apiClient: VoiceApiClient,
     binding: VoiceSessionBinding,
   ): Promise<void> {
     try {
-      const capability = await apiClient.issueCapability({
-        voiceSessionId: binding.voiceSessionId,
-        resourceScopeId: binding.resourceScopeId,
-        routeProfileVersion: binding.routeProfileVersion,
-        leaseEpoch: binding.leaseEpoch,
-        scopes: ["session_execute"],
-      });
+      const capability = await apiClient.issueCapability(
+        {
+          voiceSessionId: binding.voiceSessionId,
+          resourceScopeId: binding.resourceScopeId,
+          routeProfileVersion: binding.routeProfileVersion,
+          leaseEpoch: binding.leaseEpoch,
+          scopes: ["session_execute"],
+        },
+        turnSession.releaseAbort.signal,
+      );
       const restoration = await apiClient.getDialogueSnapshotRestoration(
         binding.voiceSessionId,
         capability.token,
+        turnSession.releaseAbort.signal,
       );
       if (
+        // Codex reopen round 18, R4-persist: `voiceSessionId` itself was
+        // never checked -- only scope/route/lease -- so a response for a
+        // completely different session that happened to share this
+        // binding's scope/route/lease (a misattributed/foreign reply, not
+        // a legitimate "same session, different revision" case any of the
+        // other fields alone would cover) was silently trusted.
+        restoration.session.voiceSessionId !== binding.voiceSessionId ||
         restoration.session.resourceScopeId !== binding.resourceScopeId ||
         restoration.session.routeProfileVersion !==
           binding.routeProfileVersion ||
@@ -418,9 +439,25 @@ export class VoiceCallTurnCoordinator {
       turnSession.authoritativeInputEpochConsumed =
         !restoration.session.pendingInput;
       if (restoration.snapshot) {
-        turnSession.state.restoreFromSnapshotContent(
-          restoration.snapshot.content,
-        );
+        // Codex reopen round 18, R4-persist: previously trusted
+        // unconditionally -- no check that this snapshot actually belongs
+        // to this session, is from a revision this restoration's own
+        // `session` could plausibly have produced, or has not already
+        // passed its own retention window. A foreign/stale/expired
+        // snapshot installed here (e.g. a foreign handoff) would corrupt
+        // this attachment's dialogue state before any turn ever runs.
+        const snapshot = restoration.snapshot;
+        const snapshotCorrelates =
+          snapshot.voiceSessionId === binding.voiceSessionId &&
+          snapshot.sessionVersion <= restoration.session.sessionVersion &&
+          snapshot.inputEpoch <= restoration.session.inputEpoch &&
+          new Date(snapshot.retentionExpiresAt).getTime() > Date.now();
+        if (!snapshotCorrelates) {
+          throw new Error(
+            "voice_restore_snapshot_mismatch: the restored dialogue-snapshot does not correlate with this session's authoritative revision, or has already expired.",
+          );
+        }
+        turnSession.state.restoreFromSnapshotContent(snapshot.content);
       }
     } catch (error) {
       turnSession.restoreFailed = true;
@@ -591,12 +628,29 @@ export class VoiceCallTurnCoordinator {
    * doc) -- the returned promise still rejects for THIS caller so a
    * turn's own fallback write can fail its turn closed, but the queue
    * itself always continues to the next chained write regardless of how
-   * this one settles. */
+   * this one settles.
+   *
+   * R11 (Codex reopen round 18): this queue's first link, for a bound
+   * attachment, IS `restoreBoundAttachment`'s own promise (see `attach()`)
+   * -- which never rejects, only sets `restoreFailed` (so it can never
+   * wedge this queue either). A `speech.started` chained here before
+   * restoration settles would otherwise still run `task` once that
+   * promise fulfills, even though restoration is now known to have
+   * failed -- re-checked here, the same barrier `runTurn` already
+   * re-checks for the turn `queue`, so an authority-dependent control
+   * write can never execute against unverified dialogue state. */
   private chainControlEvent<T>(
     turnSession: TurnSession,
     task: () => Promise<T>,
   ): Promise<T> {
-    const settled = turnSession.controlEventQueue.then(task);
+    const settled = turnSession.controlEventQueue.then(() => {
+      if (turnSession.restoreFailed) {
+        throw new Error(
+          "voice_control_event_restoration_failed: attachment restoration failed; refusing to record an authority-dependent control event.",
+        );
+      }
+      return task();
+    });
     turnSession.controlEventQueue = settled.then(
       () => undefined,
       () => undefined,
@@ -635,19 +689,36 @@ export class VoiceCallTurnCoordinator {
     const binding = turnSession.binding;
     const persistPort = turnSession.persistPort ?? this.persistPort;
     if (!binding || !this.apiClient || persistPort.mode !== "trusted") return;
+    // Codex reopen round 18, R4-control (boundedness): this call's
+    // `signal` was previously only `turnSession.releaseAbort.signal`,
+    // which never fires on its own (R4-control's own doc on that same
+    // hazard) -- an uncooperative/hung apps/api `/events` call could hold
+    // `controlEventQueue` open indefinitely, and every later chained
+    // write (including a turn's own fallback at `executeTurn`'s
+    // `await turnSession.controlEventQueue`) waits on that exact queue.
+    // `recordAuthoritativeSpeechStart`'s own call to the same underlying
+    // method is already bounded by the turn's own `request.signal`
+    // (`runTurn`'s `setTimeout(() => abortController.abort(), ...)`); this
+    // is the one caller with no turn, and therefore no deadline, of its
+    // own -- bound it to the same `turnTimeoutMs` a turn's stages already
+    // use, so a hang here is cancelled on the same bounded timescale
+    // instead of blocking every later write for this attachment.
+    const bounded = this.boundedControlSignal(turnSession);
     this.chainControlEvent(turnSession, () =>
       this.recordAuthoritativeControlEvent(turnSession, binding, {
         sourceEventId: randomUUID(),
         occurredAt: event.occurredAt,
         mediaEpoch: event.mediaEpoch,
-        signal: turnSession.releaseAbort.signal,
+        signal: bounded.signal,
       }),
     ).then(
       (epoch) => {
+        bounded.cancel();
         turnSession.authoritativeInputEpoch = epoch;
         turnSession.authoritativeInputEpochConsumed = false;
       },
       (error) => {
+        bounded.cancel();
         if (!turnSession.releaseAbort.signal.aborted) {
           console.error(
             "[voice-call-turn-coordinator] speech-start control event failed",
@@ -656,6 +727,30 @@ export class VoiceCallTurnCoordinator {
         }
       },
     );
+  }
+
+  /** Combines `turnSession.releaseAbort.signal` with a `turnTimeoutMs`
+   * timer into one bounded signal for a control write that has no turn
+   * (and therefore no `request.deadline`) of its own -- see
+   * `recordSpeechStartControlEvent`'s own doc. Always pair with `cancel()`
+   * once the bounded call settles, or the timer leaks for this
+   * attachment's remaining lifetime. */
+  private boundedControlSignal(turnSession: TurnSession): {
+    signal: AbortSignal;
+    cancel: () => void;
+  } {
+    const controller = new AbortController();
+    if (turnSession.releaseAbort.signal.aborted) controller.abort();
+    const onRelease = () => controller.abort();
+    turnSession.releaseAbort.signal.addEventListener("abort", onRelease);
+    const timer = setTimeout(() => controller.abort(), this.turnTimeoutMs);
+    return {
+      signal: controller.signal,
+      cancel: () => {
+        clearTimeout(timer);
+        turnSession.releaseAbort.signal.removeEventListener("abort", onRelease);
+      },
+    };
   }
 
   /** Call once an attachment's channel/session is gone (close, drain).

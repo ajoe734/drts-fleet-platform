@@ -2,9 +2,44 @@ import type { VoiceDialogueState } from "./dialogue-state";
 import type { VoiceDialogueRequest } from "./voice-dialogue-provider";
 import type { VoiceSessionBinding } from "./voice-session-binding";
 import type {
+  DialogueSnapshotRestorationResult,
   IssueCapabilityCommand,
+  PersistDialogueSnapshotResult,
+  ResolveInputResult,
   VoiceApiClient,
 } from "../server/voice-api-client";
+
+/**
+ * Codex reopen round 18, R4-persist: a single, best-effort authoritative
+ * read used to disambiguate a `resolveInput`/`persistDialogueSnapshot` call
+ * whose own HTTP response was lost (network error, timeout, proxy reset) --
+ * never whether the response was merely slow. Only ever consulted from a
+ * `catch` block, after the real write attempt already failed; its own
+ * failure (apps/api also unreachable right now) must never replace the
+ * original error with a confusing new one, so it swallows every error from
+ * this read and lets the caller fall back to the original failure. Returns
+ * `undefined` on any such secondary failure or `signal` abort -- the caller
+ * still re-checks `signal.aborted` itself afterward, since this read's own
+ * success/failure says nothing about whether the turn that triggered it is
+ * still live.
+ */
+async function reconcileAmbiguousCommit(
+  client: VoiceApiClient,
+  voiceSessionId: string,
+  capabilityToken: string,
+  signal: AbortSignal | undefined,
+): Promise<DialogueSnapshotRestorationResult | undefined> {
+  if (signal?.aborted) return undefined;
+  try {
+    return await client.getDialogueSnapshotRestoration(
+      voiceSessionId,
+      capabilityToken,
+      signal,
+    );
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Explicitly isolates fixture-mode persistence from a trusted, durable
@@ -150,16 +185,56 @@ export function createTrustedDialoguePersistPort(
         );
       }
       const expectedSessionVersion = current.sessionVersion;
-      const result = await client.resolveInput(
-        current.voiceSessionId,
-        capability.token,
-        {
-          expectedSessionVersion,
-          inputEpoch: request.inputEpoch,
-          resolution: "relevant",
-        },
-        signal,
-      );
+      let sessionInfo: ResolveInputResult["session"];
+      try {
+        sessionInfo = (
+          await client.resolveInput(
+            current.voiceSessionId,
+            capability.token,
+            {
+              expectedSessionVersion,
+              inputEpoch: request.inputEpoch,
+              resolution: "relevant",
+            },
+            signal,
+          )
+        ).session;
+      } catch (err) {
+        if (signal?.aborted) {
+          throw new Error(
+            "voice_trusted_persist_aborted: request was aborted while awaiting the resolveInput response.",
+          );
+        }
+        // Codex reopen round 18, R4-persist ("regress lost replies, not
+        // only delayed ones"): a transport-level failure here (timeout,
+        // dropped response, proxy reset) does not prove the CAS never
+        // committed -- the write can genuinely have landed server-side
+        // with only its own HTTP acknowledgement lost in transit. Read
+        // authoritative truth back once before concluding this turn's
+        // admission never happened; `reconcileAmbiguousCommit` applies the
+        // exact same correlation discipline the success path below does,
+        // so an unrelated/foreign/stale read can never be mistaken for
+        // this turn's own outcome.
+        const reconciled = await reconcileAmbiguousCommit(
+          client,
+          current.voiceSessionId,
+          capability.token,
+          signal,
+        );
+        const candidate = reconciled?.session;
+        const reconciledCorrelates =
+          candidate !== undefined &&
+          candidate.voiceSessionId === current.voiceSessionId &&
+          candidate.resourceScopeId === current.resourceScopeId &&
+          candidate.routeProfileVersion === current.routeProfileVersion &&
+          candidate.leaseEpoch === current.leaseEpoch &&
+          candidate.inputEpoch === request.inputEpoch &&
+          candidate.sessionVersion === expectedSessionVersion + 1 &&
+          !candidate.pendingInput;
+        if (!reconciledCorrelates) throw err;
+        sessionInfo = candidate;
+      }
+      const result = { session: sessionInfo };
       // Defense in depth against a misattributed response (proxy/transport
       // bug, replay, response-stream confusion): a matching `inputEpoch`
       // alone cannot distinguish a reply for a *different* session that
@@ -231,22 +306,62 @@ export function createTrustedDialoguePersistPort(
       // fails this whole `persist()` call -- never a partial success where
       // admission succeeded but content silently wasn't recorded.
       const expectedSnapshotSessionVersion = current.sessionVersion;
-      const snapshotResult = await client.persistDialogueSnapshot(
-        current.voiceSessionId,
-        capability.token,
-        {
-          expectedSessionVersion: expectedSnapshotSessionVersion,
-          inputEpoch: request.inputEpoch,
-          // `mediaEpoch` is optional on `VoiceDialogueRequest` only for
-          // direct engine callers with no media-authority concept of their
-          // own (see that field's own doc); every turn this coordinator
-          // actually admits always carries a real one.
-          mediaEpoch: request.mediaEpoch ?? 0,
-          turnId: request.turnId,
-          content: state.toSnapshotContent(),
-        },
-        signal,
-      );
+      let snapshot: PersistDialogueSnapshotResult["snapshot"];
+      try {
+        snapshot = (
+          await client.persistDialogueSnapshot(
+            current.voiceSessionId,
+            capability.token,
+            {
+              expectedSessionVersion: expectedSnapshotSessionVersion,
+              inputEpoch: request.inputEpoch,
+              // `mediaEpoch` is optional on `VoiceDialogueRequest` only for
+              // direct engine callers with no media-authority concept of
+              // their own (see that field's own doc); every turn this
+              // coordinator actually admits always carries a real one.
+              mediaEpoch: request.mediaEpoch ?? 0,
+              turnId: request.turnId,
+              content: state.toSnapshotContent(),
+            },
+            signal,
+          )
+        ).snapshot;
+      } catch (err) {
+        if (signal?.aborted) {
+          throw new Error(
+            "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",
+          );
+        }
+        // Codex reopen round 18, R4-persist: the exact probe this
+        // reopened on -- a turn's content commit durably lands (the
+        // server accepted the write) but its own HTTP acknowledgement is
+        // lost. Without reconciling, the engine's in-memory `state` never
+        // learns this turn's content was actually durably recorded (see
+        // `VoiceDialogueEngine.turn`'s `Object.assign(state, next)`, which
+        // only runs once `persist()` resolves) and the NEXT turn silently
+        // starts a new, unrelated commit that supersedes/erases the
+        // already-accepted one -- loss of previously accepted dialogue
+        // state, not safe recovery. Read authoritative truth back once
+        // before concluding the content was never recorded; a mismatched
+        // or expired read still fails this call exactly as before.
+        const reconciled = await reconcileAmbiguousCommit(
+          client,
+          current.voiceSessionId,
+          capability.token,
+          signal,
+        );
+        const candidate = reconciled?.snapshot;
+        const reconciledCorrelates =
+          candidate != null &&
+          candidate.voiceSessionId === current.voiceSessionId &&
+          candidate.sessionVersion === expectedSnapshotSessionVersion &&
+          candidate.inputEpoch === request.inputEpoch &&
+          candidate.mediaEpoch === (request.mediaEpoch ?? 0) &&
+          candidate.turnId === request.turnId &&
+          new Date(candidate.retentionExpiresAt).getTime() > Date.now();
+        if (!reconciledCorrelates) throw err;
+        snapshot = candidate;
+      }
       if (signal?.aborted) {
         throw new Error(
           "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",
@@ -259,7 +374,6 @@ export function createTrustedDialoguePersistPort(
       // `resolveInput` above: every identifying field this exact call
       // submitted must come back unchanged, and the returned snapshot must
       // not already be expired the moment it is reported as persisted.
-      const snapshot = snapshotResult.snapshot;
       const snapshotCorrelates =
         snapshot.voiceSessionId === current.voiceSessionId &&
         snapshot.sessionVersion === expectedSnapshotSessionVersion &&

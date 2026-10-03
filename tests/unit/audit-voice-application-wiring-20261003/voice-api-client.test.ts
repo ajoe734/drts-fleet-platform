@@ -1138,6 +1138,297 @@ describe("createTrustedDialoguePersistPort", () => {
   });
 
   /**
+   * Codex reopen round 18, R4-persist ("regress lost replies, not only
+   * delayed ones"): a genuinely LOST response (the request never reaches
+   * the caller at all -- network error, timeout, proxy reset) is
+   * distinct from a correlated-but-late one (already covered above by the
+   * "LATE response" tests) -- the write can still have durably committed
+   * server-side with nothing at all coming back. Without reconciling,
+   * this turn's admission would wrongly fail even though apps/api already
+   * applied it.
+   */
+  it("reconciles a lost (network-unreachable) resolveInput response against authoritative truth instead of failing a CAS that actually committed", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        throw new Error("ECONNRESET: response never arrived");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: {},
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await port.persist(
+      { toSnapshotContent: () => ({}) } as unknown as VoiceDialogueState,
+      request,
+    );
+
+    expect(binding.sessionVersion).toBe(6);
+  });
+
+  it("still fails closed when a lost resolveInput response cannot be reconciled (the reconciliation read itself shows no matching commit)", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        throw new Error("ECONNRESET: response never arrived");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Authoritative truth shows the CAS never actually advanced --
+        // this is a genuinely lost write, not merely a lost reply.
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch - 1,
+              pendingInput: true,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(
+      port.persist(
+        { toSnapshotContent: () => ({}) } as unknown as VoiceDialogueState,
+        request,
+      ),
+    ).rejects.toThrow("ECONNRESET");
+    expect(binding.sessionVersion).toBe(5);
+  });
+
+  it("reconciles a lost (network-unreachable) persistDialogueSnapshot response against authoritative truth instead of losing previously-accepted dialogue content", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        // The content commit actually lands server-side -- this models
+        // the exact reopened probe (an emergency/handoff turn's content
+        // is durably accepted) but the HTTP acknowledgement is lost.
+        throw new Error("ECONNRESET: response never arrived");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: { handoff: { reason: "urgent_safety" } },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await port.persist(
+      { toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }) } as unknown as VoiceDialogueState,
+      request,
+    );
+
+    // persist() resolved successfully -- `VoiceDialogueEngine.turn` will
+    // now `Object.assign(state, next)`, so the engine's own in-memory
+    // state stays consistent with the content that was actually durably
+    // committed, instead of silently believing this turn's content was
+    // never recorded and letting the next turn overwrite it.
+    expect(binding.sessionVersion).toBe(6);
+  });
+
+  it("still fails closed when a lost persistDialogueSnapshot response cannot be reconciled (the reconciliation read shows an unrelated/older snapshot)", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        throw new Error("ECONNRESET: response never arrived");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Authoritative truth shows no snapshot for THIS turn's revision
+        // at all -- the content write genuinely never landed.
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-prior",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 5,
+              inputEpoch: request.inputEpoch - 1,
+              mediaEpoch: 0,
+              turnId: "some-prior-turn",
+              content: {},
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(
+      port.persist(
+        { toSnapshotContent: () => ({}) } as unknown as VoiceDialogueState,
+        request,
+      ),
+    ).rejects.toThrow("ECONNRESET");
+  });
+
+  /**
    * Codex reopen round 5/6, R4-persist residual, second independent case:
    * a response that correlates by `inputEpoch` alone is not sufficient --
    * a misattributed response for an entirely different session (or one

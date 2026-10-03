@@ -389,9 +389,27 @@ export class VoiceSessionRepository {
    * SD §9.1/§5.4 dedup: `(source, providerAccountId, sourceEventId)` covers a
    * provider resending the exact same event; `(voiceSessionId, sequence)`
    * (the DB's `uq_voice_session_event_sequence` index) covers a retry that
-   * omitted `sourceEventId`. Either conflict returns the pre-existing row
-   * with `deduped: true` instead of throwing, so a retried/duplicate HTTP
-   * delivery is always a safe no-op rather than a 500.
+   * omitted `sourceEventId` -- OR a retry that lost the HTTP response to an
+   * already-committed insert and therefore (legitimately) generates a FRESH
+   * `sourceEventId` for the same logical sequence slot (R4-control, Codex
+   * reopen rounds 16-18: a worker that never saw its own `/events` ack has
+   * no way to know it already succeeded, so it must retry with a new event
+   * identity rather than replay a stale one it never received).
+   * `ON CONFLICT DO NOTHING` fires on EITHER unique index without telling us
+   * which one, so the fallback lookup must be able to find the row under
+   * either constraint: first by the caller's own
+   * (source, providerAccountId, sourceEventId) identity (the literal-retry
+   * case), and if that finds nothing, by (voiceSessionId, sequence) (the
+   * lost-response case, where the existing row's sourceEventId differs from
+   * the one just submitted). Skipping the second lookup is exactly the bug
+   * that previously threw "insert conflicted but no existing row could be
+   * located" and permanently wedged the attachment -- the caller's retry
+   * could never be told the sequence was already durably applied.
+   *
+   * `provider_account_id` is nullable (this worker never supplies it, see
+   * `voice-booking.controller.ts`'s `/events` handler) and ordinary SQL
+   * equality (`provider_account_id = $2`) is never true when $2 is NULL, so
+   * both lookups use `IS NOT DISTINCT FROM` to stay NULL-safe.
    */
   async insertControlEvent(
     input: InsertControlEventInput,
@@ -430,25 +448,32 @@ export class VoiceSessionRepository {
       return { event: mapSessionEventRow(insertedRow), deduped: false };
     }
 
-    const existing = input.sourceEventId
-      ? await exec.query<VoiceSessionEventRow>(
-          `
-            SELECT * FROM voice.session_event
-            WHERE source = $1 AND provider_account_id = $2 AND source_event_id = $3
-            LIMIT 1
-          `,
-          [input.source, input.providerAccountId ?? null, input.sourceEventId],
-        )
-      : await exec.query<VoiceSessionEventRow>(
-          `
-            SELECT * FROM voice.session_event
-            WHERE voice_session_id = $1 AND sequence = $2
-            LIMIT 1
-          `,
-          [input.voiceSessionId, input.sequence],
-        );
+    let existingRow: VoiceSessionEventRow | undefined;
+    if (input.sourceEventId) {
+      const bySourceEvent = await exec.query<VoiceSessionEventRow>(
+        `
+          SELECT * FROM voice.session_event
+          WHERE source = $1
+            AND provider_account_id IS NOT DISTINCT FROM $2
+            AND source_event_id = $3
+          LIMIT 1
+        `,
+        [input.source, input.providerAccountId ?? null, input.sourceEventId],
+      );
+      existingRow = bySourceEvent.rows[0];
+    }
+    if (!existingRow) {
+      const bySequence = await exec.query<VoiceSessionEventRow>(
+        `
+          SELECT * FROM voice.session_event
+          WHERE voice_session_id = $1 AND sequence = $2
+          LIMIT 1
+        `,
+        [input.voiceSessionId, input.sequence],
+      );
+      existingRow = bySequence.rows[0];
+    }
 
-    const existingRow = existing.rows[0];
     if (!existingRow) {
       throw new Error(
         "voice.session_event insert conflicted but no existing row could be located",
