@@ -1,10 +1,11 @@
 # SR-LIVE-OPS-001 — restore drill evidence
 
 Owner: Codex. Reviewer: Claude2. Base: `cccd9b1118e2008adccabc117fef94bcebdccfe0`
-(original branch base, origin/dev fetched 2026-10-03). Current dispatch fetched
-`origin/dev` at `a1b84bd336b3e3179abd01a3f753a299275cc423`; published history is
-preserved without rebasing. The new operator/sweep delivery below supersedes the
-IAM-blocked checkpoint. No live acceptance is claimed.
+(original branch base, origin/dev fetched 2026-10-03). The preceding dispatch fetched
+`origin/dev` at `a1b84bd336b3e3179abd01a3f753a299275cc423`. This CI-registration
+follow-up fetched and merged `5bf63636aa1a0a7bf70cda6c692002ba88e942e6`;
+published history is preserved without rebasing. The operator/sweep delivery below
+supersedes the IAM-blocked checkpoint. No live acceptance is claimed.
 
 Supervisor rejected `e7e7d4ba7b038f2b075e51e48b6c39b873771a0e` on 2026-10-03:
 the runner only printed success, referenced the wrong source, proposed an overwrite,
@@ -22,7 +23,58 @@ returned RUNNABLE, POSTGRES_15, db-custom-1-3840, ZONAL, 10 GB, PITR enabled,
 daily backup 18:00 UTC, seven retained backups and seven days of transaction logs.
 These observations do not demonstrate restore success.
 
-## Supervisor decision and current delivery (2026-10-03T02:20Z)
+## CI registration follow-up (2026-10-03)
+
+Previous candidate: `d93d87d820b481ecfffbf34805cd342e07c19253`, PR #2286.
+Supervisor's 05:40Z scope approval permits exactly one unittest command in
+`.github/workflows/ci-integ.yml`; the 05:45Z correction requires merging current
+`origin/dev` before handoff and preserving both this task and
+`AUDIT-DEPENDENCY-GATES-20261002` additions. No independent Claude2 review was
+present on the PR at dispatch; the actionable finding is the failed CI gate.
+
+The new command is the final line of `changes` / `Verify scope classifier
+contract`, immediately before the existing live-mail unittest step. The workflow
+diff against the merged dev base is exactly one added line. Neither the checker
+nor the drill implementation/tests were changed. Checkpoint
+`fe64094cba7de0a1b360c0ba46533224ab5bdddc` was normally pushed; merge commit
+`144459467728a5fb77f5b9fcb55b4edbd972be2e` integrates the base above without
+conflicts. The final evidence-only commit's full SHA is recorded by canonical
+handoff after checking local, remote and PR heads agree.
+
+| Finding / acceptance | Source / change | Previous → current result | Commands / evidence | Remaining |
+| --- | --- | --- | --- | --- |
+| CI Python suite not registered | `ci-integ.yml` direct unittest line; `check_test_coverage.covered_targets/collected_files` | Previous candidate exits 1 for `test_drill.py` alone → merged implementation exits 0, all 80 tracked Python test files collect tests | `python3 tools/ci/check_test_coverage.py`; local `coverage-before.txt` / `coverage-merged.txt`; [previous hosted failure](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37090506760/job/111109685129) | New candidate hosted CI and Claude2 review required |
+| Earlier F1–F6, credential, cleanup and evidence regressions | Existing `test_drill.py` invokes production orchestration with fake CLI boundaries | 32/32 pass after registration; merged-version result below | Exact registered unittest command below | These are offline tests, not live acceptance |
+
+Machine-specific output is under this assigned worktree's
+`.local/sr-live-ops-001/ci-registration-20261003/`. Completed checks:
+
+- `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v`:
+  **exit 0, 32/32** at the registration checkpoint, 26.893 seconds
+  (`unit-after.txt`). The merged-version rerun is recorded in `unit-merged.txt`.
+- `python3 tools/ci/check_test_coverage.py`: **exit 1** on the previous candidate
+  (`coverage-before.txt`), **exit 0** after registration and after merging dev
+  (`coverage-after.txt`, `coverage-merged.txt`), all 80 files covered.
+- `python3 -m unittest tools/ci/test_check_test_coverage.py tools/ci/test_workflow_timeouts.py -v`:
+  **exit 0, 11/11** (`ci-contracts.txt`); merged rerun in `ci-contracts-merged.txt`.
+- Python `yaml.safe_load` of `ci-integ.yml` and `bash -n` over its **35** shell
+  run bodies: **exit 0**, syntax only, no workflow commands executed.
+- `pnpm exec prettier --check .github/workflows/ci-integ.yml`: **exit 1 before
+  loading Prettier**, shared dependency target missing. Explicit tool-cache
+  fallback `pnpm dlx prettier@3.6.2 --check .github/workflows/ci-integ.yml`:
+  **exit 0**. No dependency, lockfile or shared symlink was changed.
+- `git diff --check`: **exit 0**. The scoped source diff confirms the drill,
+  provisioner, artifact validator and their tests are unchanged from the prior
+  candidate; this follow-up repairs CI registration and records its evidence.
+
+All five live acceptance rows in the ledger below remain pending. Operator owns
+IAM apply/readiness; Supervisor owns hosted dispatch after main and collection
+of live restore, workload/SLO, scheduler/revision and deployed-source evidence.
+This worker did not apply IAM, publish readiness, create a clone, dispatch a
+workflow, run a product server or run Playwright. New candidate CI results belong
+to its own SHA; no previous candidate's green result is reused.
+
+## Supervisor decision and retained implementation (2026-10-03T02:20Z)
 
 The canonical task's `integration_notes` accepts the inability to enforce the
 clone destination through IAM. Supervisor explicitly directs an operator apply
@@ -139,9 +191,9 @@ pnpm exec playwright test -c playwright.system-remediation.config.ts sr-live-ops
 | `rpo_rto_capacity_baseline`            | Existing observed timings; validator explicitly leaves capacity unevaluated | No fabricated capacity/SLO result                                                                                                                 | Offline tests only                                                                                 | Approved representative workload/SLO; actual measurements                          |
 | `scheduled_job_restart_proof`          | Historical read-only Scheduler/revision observations below                  | HTTP 500 remains unresolved; no controlled restart inferred                                                                                       | Existing query/resource/insert IDs below                                                           | Independent assessment and candidate/deployment mapping                            |
 | `live_candidate_sha`                   | Full SHA checkout guards; receipt and artifact validator                    | Wrong candidate/provider/stale receipt rejected                                                                                                   | Unit regression; canonical candidate handoff                                                       | Hosted run + deployed API revision/source mapping                                  |
-| CI Python coverage registration        | `tools/ci/check_test_coverage.py` reads only `ci.yml`/`ci-integ.yml`        | Previous #2286 Change scope failed; dispatch-only workflow entry alone cannot repair it                                                           | Run `37086894984`, job `111098965308`; current checker to be recorded below                        | Supervisor scope/dependency update for shared CI entry; not modified outside scope |
+| CI Python coverage registration        | `tools/ci/check_test_coverage.py` reads only `ci.yml`/`ci-integ.yml`        | Previous #2286 Change scope failed; now repaired by the approved single-line registration above                                                    | Previous runs `37086894984` / `37090506760`; before/after checker evidence above                    | New candidate hosted CI and review; scope approval is recorded in canonical task notes |
 
-Current local checks at implementation anchor `2686475b78060cb0131c87bafaff375fa56c349e`
+Previous local checks at implementation anchor `2686475b78060cb0131c87bafaff375fa56c349e`
 (the final follow-up changes this evidence document only):
 
 - `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v`:
