@@ -29,6 +29,7 @@ import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
 import dgram from 'node:dgram';
+import { syncBuiltinESMExports } from 'node:module';
 
 const logFile = process.env.NETWORK_LOG_FILE;
 function record(api) {
@@ -48,8 +49,14 @@ patchMethod(http, 'get', 'http.get');
 patchMethod(https, 'request', 'https.request');
 patchMethod(https, 'get', 'https.get');
 patchMethod(net, 'connect', 'net.connect');
+patchMethod(net, 'createConnection', 'net.createConnection');
+if (net.Socket && net.Socket.prototype) {
+    patchMethod(net.Socket.prototype, 'connect', 'net.Socket.connect');
+}
 patchMethod(tls, 'connect', 'tls.connect');
 patchMethod(dgram, 'createSocket', 'dgram.createSocket');
+
+syncBuiltinESMExports();
 
 if (globalThis.fetch) {
     const origFetch = globalThis.fetch;
@@ -79,29 +86,42 @@ if (globalThis.WebSocket) {
     expect(log).toBe('');
   };
 
-  const expectRejection = (scriptCmd: string, env: any) => {
+  const expectRejection = (scriptCmd: string, env: any, expectedReason: string) => {
     // Test 1: Absent output target is not created
+    let error1: any;
     try {
       execSync(`${scriptCmd} --output ${outputFile}`, { stdio: 'pipe', env });
-      expect.fail('Expected script to exit with non-zero code');
     } catch (error: any) {
-      expect(error.status).not.toBe(0);
-      const stderr = error.stderr.toString();
-      const stdout = error.stdout.toString();
-      expect(stderr).toContain('[FAIL_CLOSED]');
-      expect(stdout).not.toContain('TELEPHONY EVALUATION COMPLETED');
-      expect(stdout).not.toContain('Completion Rate');
-      expect(fs.existsSync(outputFile)).toBe(false);
+      error1 = error;
     }
+    expect(error1, 'Expected script to fail').toBeDefined();
+    expect(Number.isInteger(error1.status)).toBe(true);
+    expect(error1.status).not.toBe(0);
+    const stderr1 = error1.stderr.toString();
+    const stdout1 = error1.stdout.toString();
+    expect(stderr1).toContain('[FAIL_CLOSED]');
+    expect(stderr1).toContain(expectedReason);
+    expect(stdout1).not.toContain('TELEPHONY EVALUATION COMPLETED');
+    expect(stdout1).not.toContain('Completion Rate');
+    expect(fs.existsSync(outputFile)).toBe(false);
     
     // Test 2: Existing target is preserved
+    let error2: any;
     try {
       execSync(`${scriptCmd} --output ${sentinelFile}`, { stdio: 'pipe', env });
-      expect.fail('Expected script to exit with non-zero code');
     } catch (error: any) {
-      expect(error.status).not.toBe(0);
-      expect(fs.readFileSync(sentinelFile, 'utf-8')).toBe('{"sentinel": true, "hash": "abcd123"}');
+      error2 = error;
     }
+    expect(error2, 'Expected script to fail').toBeDefined();
+    expect(Number.isInteger(error2.status)).toBe(true);
+    expect(error2.status).not.toBe(0);
+    const stderr2 = error2.stderr.toString();
+    const stdout2 = error2.stdout.toString();
+    expect(stderr2).toContain('[FAIL_CLOSED]');
+    expect(stderr2).toContain(expectedReason);
+    expect(stdout2).not.toContain('TELEPHONY EVALUATION COMPLETED');
+    expect(stdout2).not.toContain('Completion Rate');
+    expect(fs.readFileSync(sentinelFile, 'utf-8')).toBe('{"sentinel": true, "hash": "abcd123"}');
     
     expectNoNetwork();
   };
@@ -110,7 +130,7 @@ if (globalThis.WebSocket) {
     const invalidModes = ['LIVE', 'Live', 'invalid', 'FIXTURE', ''];
     for (const mode of invalidModes) {
       const scriptCmd = `node ${evalScript} --mode "${mode}"`;
-      expectRejection(scriptCmd, getEnv());
+      expectRejection(scriptCmd, getEnv(), 'INVALID MODE REJECTED');
     }
   }, 30000);
 
@@ -119,7 +139,7 @@ if (globalThis.WebSocket) {
     for (const auth of invalidAuths) {
       const authArg = auth ? `--authorization-ref "${auth}"` : '';
       const scriptCmd = `node ${evalScript} --mode live ${authArg}`;
-      expectRejection(scriptCmd, getEnv());
+      expectRejection(scriptCmd, getEnv(), 'Missing or invalid --authorization-ref');
     }
   }, 30000);
 
@@ -134,7 +154,7 @@ if (globalThis.WebSocket) {
       expectRejection(scriptCmd, getEnv({
         UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: trunk,
         UNATTENDED_VOICE_LIVE_AUTH_KEY: key,
-      }));
+      }), 'Live carrier PSTN credentials / trunk endpoints missing');
     }
   }, 30000);
 
@@ -143,7 +163,7 @@ if (globalThis.WebSocket) {
     expectRejection(scriptCmd, getEnv({
       UNATTENDED_VOICE_LIVE_TRUNK_ENDPOINT: 'sip:production@example.com',
       UNATTENDED_VOICE_LIVE_AUTH_KEY: 'test_key',
-    }));
+    }), 'Production telephony (CTI/ASR/TTS/recorder) adapter is not yet implemented');
   });
 
   it('succeeds in fixture mode with explicit fixture provenance, outputs results, and requires no credentials', () => {
