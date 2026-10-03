@@ -82,7 +82,7 @@ def audit_policy(policy, allowed, *, inherited=False):
         members = entry.get("members", [])
         if MEMBER in members:
             require(not inherited and any(same_binding(entry, b) for b in allowed), "unexpected_sa_grant")
-        broad = any(m in ("allUsers", "allAuthenticatedUsers") or m.startswith(("group:", "domain:", "principalSet:")) for m in members)
+        broad = any(m in ("allUsers", "allAuthenticatedUsers") or m.startswith(("group:", "principalSet://cloudresourcemanager.googleapis.com/")) or m == "domain:" + SA.split("@", 1)[1] for m in members)
         if broad:
             # Exact repository WIF binding is allowed only on this dedicated SA.
             if any(entry == b for b in allowed):
@@ -125,6 +125,21 @@ def inventory(design, complete=False):
     wif = {"role": "roles/iam.workloadIdentityUser", "members": [design["wif_member"]]}
     sa_policy = obj(gc("iam", "service-accounts", "get-iam-policy", SA)) if account else {"bindings": []}
     require(all(b == wif for b in sa_policy.get("bindings", [])), "unexpected_sa_impersonation_grant")
+    # Resource-level grants are not visible in the project policy. Check every
+    # secret and other SA, so a preexisting account cannot escape the allowlist
+    # through another credential secret or service-account impersonation.
+    resource_policies = []
+    for secret in obj(gc("secrets", "list")):
+        name = secret["name"].split("/")[-1]
+        if name != SECRET:
+            policy = obj(gc("secrets", "get-iam-policy", name))
+            audit_policy(policy, [])
+            resource_policies.append(policy)
+    for other in accounts:
+        if other["email"] != SA:
+            policy = obj(gc("iam", "service-accounts", "get-iam-policy", other["email"]))
+            audit_policy(policy, [])
+            resource_policies.append(policy)
     if complete:
         require(account and len(existing) == len(design["roles"]), "provisioning_incomplete")
         require(all(any(MEMBER in b.get("members", []) and same_binding(b, wanted) for b in project_policy.get("bindings", [])) for wanted in design["project_bindings"]), "project_binding_missing")
@@ -132,7 +147,7 @@ def inventory(design, complete=False):
         require(wif in sa_policy.get("bindings", []), "wif_binding_missing")
     return {"account": account, "roles": existing, "project_policy": project_policy,
             "secret_policy": secret_policy, "sa_policy": sa_policy,
-            "audit_digest": hashlib.sha256(json.dumps([policies, existing, secret_policy, sa_policy], sort_keys=True).encode()).hexdigest()}
+            "audit_digest": hashlib.sha256(json.dumps([policies, existing, secret_policy, sa_policy, resource_policies], sort_keys=True).encode()).hexdigest()}
 
 
 def apply(design, state):

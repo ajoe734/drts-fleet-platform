@@ -82,7 +82,9 @@ elif kind == "gcloud":
             fail()
         emit({"bindings": ([{"role": "roles/owner", "members": ["serviceAccount:drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}] if scenario == "inherited_owner" else [])})
     if args[:3] == ["iam", "service-accounts", "list"]:
-        emit(iam["accounts"])
+        emit(iam["accounts"] + ([{"email": "other@project.iam.gserviceaccount.com"}] if scenario == "other_sa_access" else []))
+    if args[:2] == ["secrets", "list"]:
+        emit([{"name": "projects/123/secrets/drts-dev-db-url"}] + ([{"name": "projects/123/secrets/other"}] if scenario == "other_secret_access" else []))
     if args[:3] == ["iam", "service-accounts", "create"]:
         iam["accounts"].append({"email": "drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"})
         save({})
@@ -97,6 +99,8 @@ elif kind == "gcloud":
         save({})
     policy_key = "project" if args[0] == "projects" else "secret" if args[0] == "secrets" else "sa" if args[:2] == ["iam", "service-accounts"] else None
     if policy_key and "get-iam-policy" in args:
+        if (scenario == "other_secret_access" and args[2] == "other") or (scenario == "other_sa_access" and "other@project.iam.gserviceaccount.com" in args):
+            emit({"bindings": [{"role": "roles/secretmanager.secretAccessor" if policy_key == "secret" else "roles/iam.serviceAccountTokenCreator", "members": ["serviceAccount:drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}]})
         emit(iam[policy_key])
     if policy_key and "add-iam-policy-binding" in args:
         item = {"role": flag("role"), "members": [flag("member")]}
@@ -120,6 +124,12 @@ elif kind == "gcloud":
         if scenario == "audit_foreign":
             other = json.loads(json.dumps(record))
             other["protoPayload"]["request"]["body"]["cloneContext"]["destinationInstanceName"] = "unexpected-extra-clone"
+            emit([record, other])
+        if scenario in ("audit_lro", "audit_lro_unknown"):
+            record["operation"] = {"id": "operation-1", "first": True}
+            other = {"insertId": "audit-2", "timestamp": now.isoformat(),
+                     "operation": {"id": "operation-1" if scenario == "audit_lro" else "unknown-operation", "last": True},
+                     "protoPayload": {"methodName": "cloudsql.instances.clone"}}
             emit([record, other])
         emit([record] * 1000 if scenario == "audit_truncated" else [record])
     if args[:3] == ["sql", "instances", "describe"]:

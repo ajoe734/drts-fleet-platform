@@ -2,13 +2,12 @@
 import argparse
 import datetime as dt
 import json
-import os
 from pathlib import Path
 import sys
 import time
 
 from provision_drill_sa import SA
-from restore_drill import PREFIX, PROJECT, DrillError, context, gc, iso, obj, require, utcnow, write
+from restore_drill import PREFIX, DrillError, context, gc, iso, obj, require, utcnow, write
 
 
 def destination(entry):
@@ -51,6 +50,14 @@ def sweep(target, evidence_file, output):
         safe = []
         for record in records:
             name = destination(record)
+            # LRO completion records can omit the request. Correlate them to
+            # the first entry by operation ID; never infer a destination from
+            # the source resourceName or silently discard an unknown record.
+            if not name and record.get("operation", {}).get("last") is True:
+                operation_id = record["operation"].get("id")
+                matches = [r for r in records if operation_id and r.get("operation", {}).get("id") == operation_id and destination(r)]
+                require(len({destination(r) for r in matches}) == 1, "audit_completion_uncorrelated")
+                name = destination(matches[0])
             require(isinstance(name, str) and name and record.get("insertId") and record.get("timestamp"), "audit_destination_or_identity_missing")
             safe.append({"destination": name, "insert_id": record["insertId"], "timestamp": record["timestamp"],
                          "method": record["protoPayload"]["methodName"]})

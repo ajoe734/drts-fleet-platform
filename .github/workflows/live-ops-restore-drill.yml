@@ -24,7 +24,7 @@ jobs:
   restore:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 80
+    timeout-minutes: 95
     permissions:
       contents: read
       id-token: write
@@ -109,6 +109,7 @@ jobs:
           path: |
             .local/sr-live-ops-001/restore.json
             .local/sr-live-ops-001/sweep.json
+            .local/sr-live-ops-001/readiness.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

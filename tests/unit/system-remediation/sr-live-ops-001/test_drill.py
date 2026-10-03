@@ -20,6 +20,7 @@ sys.modules["restore_drill"] = drill
 import provision_drill_sa as provision  # noqa: E402
 import sweep_drill as sweep  # noqa: E402
 import check_readiness as readiness  # noqa: E402
+import validate_live_evidence as live_evidence  # noqa: E402
 
 
 class Clock:
@@ -223,7 +224,7 @@ class RestoreDrillTest(unittest.TestCase):
 
     def test_inherited_owner_or_failed_ancestor_read_blocks_before_writes(self):
         design = provision.plan()
-        for scenario in ("inherited_owner", "ancestor_denied"):
+        for scenario in ("inherited_owner", "ancestor_denied", "other_secret_access", "other_sa_access"):
             with self.subTest(scenario=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaises(drill.DrillError):
                 provision.inventory(design)
         self.assertFalse(self.iam_writes())
@@ -233,17 +234,35 @@ class RestoreDrillTest(unittest.TestCase):
         provision.apply(design, provision.inventory(design))
         statefile = self.root / "iam.json"
         original = statefile.read_text()
-        for change in ("role", "grant", "impersonation"):
+        for change in ("role", "grant", "impersonation", "unconditioned_delete"):
             iam = json.loads(original)
             if change == "role":
                 iam["roles"]["drtsOpsDrillTemporary"]["includedPermissions"].append("cloudsql.instances.update")
             elif change == "grant":
                 iam["project"]["bindings"].append({"role": "roles/owner", "members": [provision.MEMBER]})
-            else:
+            elif change == "impersonation":
                 iam["sa"]["bindings"][0]["members"].append("allAuthenticatedUsers")
+            else:
+                iam["project"]["bindings"][1].pop("condition")
             statefile.write_text(json.dumps(iam))
             with self.subTest(change=change), self.assertRaises(drill.DrillError):
                 provision.inventory(design, complete=True)
+
+    def test_partial_apply_failure_can_be_retried_without_widening_or_readiness(self):
+        design = provision.plan()
+        original = provision.gc
+        def denied(*args, **kwargs):
+            if args[:2] == ("secrets", "add-iam-policy-binding"):
+                raise drill.DrillError("simulated_iam_failure")
+            return original(*args, **kwargs)
+        with patch.object(provision, "gc", denied), self.assertRaises(drill.DrillError):
+            provision.apply(design, provision.inventory(design))
+        with self.assertRaises(drill.DrillError):
+            provision.inventory(design, complete=True)
+        provision.apply(design, provision.inventory(design))
+        provision.inventory(design, complete=True)
+        self.assertEqual(len(self.iam_writes()), 11)
+        self.assertFalse((self.root / "ready.json").exists())
 
     def test_public_or_group_grant_is_not_assumed_to_exclude_drill_sa(self):
         for member in ("allAuthenticatedUsers", "group:operators@example.test"):
@@ -270,12 +289,31 @@ class RestoreDrillTest(unittest.TestCase):
         with self.assertRaises(drill.DrillError):
             readiness.check("", self.env["CANDIDATE_SHA"], "reviewed-provider")
 
+    def test_ready_publication_requires_complete_audit_and_confirmation(self):
+        design = provision.plan()
+        provision.apply(design, provision.inventory(design))
+        original = provision.command
+        def boundary(args, **kwargs):
+            # Only the local git dirty check is isolated from in-progress edits.
+            if args[:2] == ["git", "status"]:
+                return ""
+            return original(args, **kwargs)
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": ""}), patch.object(sys.stdin, "isatty", return_value=True), patch.object(provision, "command", boundary), patch.object(sys, "argv", ["provision", "--check-ready", "--output", str(self.root / "plan.json")]):
+            with patch("builtins.input", return_value="yes"):
+                self.assertEqual(provision.main(), 2)
+                self.assertFalse((self.root / "ready.json").exists())
+            with patch("builtins.input", return_value=f"READY {provision.SA} {self.env['CANDIDATE_SHA']}"):
+                self.assertEqual(provision.main(), 0)
+        receipt = json.loads((self.root / "ready.json").read_text())
+        readiness.check(json.dumps(receipt), self.env["CANDIDATE_SHA"], design["provider"])
+
     def test_sweep_clean_inventory_and_audit_pass_without_any_delete(self):
         prior = drill.context(self.target)
         prior["clone_operation_id"] = "op1"
         drill.write(self.output, prior)
         output = self.root / "sweep.json"
-        sweep.sweep(self.target, self.output, output)
+        with patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": "audit_lro"}):
+            sweep.sweep(self.target, self.output, output)
         self.assertEqual(json.loads(output.read_text())["status"], "sweep_passed")
         self.assertFalse(self.deleted())
 
@@ -284,7 +322,7 @@ class RestoreDrillTest(unittest.TestCase):
         prior["clone_operation_id"] = "op1"
         drill.write(self.output, prior)
         output = self.root / "sweep.json"
-        for scenario in ("leftover", "audit_foreign", "audit_unknown", "audit_empty", "audit_denied", "audit_truncated"):
+        for scenario in ("leftover", "audit_foreign", "audit_unknown", "audit_empty", "audit_denied", "audit_truncated", "audit_lro_unknown"):
             with self.subTest(scenario=scenario), patch.dict(os.environ, {"DRILL_FAKE_SCENARIO": scenario}), self.assertRaises(drill.DrillError):
                 sweep.sweep(self.target, self.output, output)
             result = json.loads(output.read_text())
@@ -295,6 +333,24 @@ class RestoreDrillTest(unittest.TestCase):
                 self.assertEqual(result["unexpected_destinations"], ["unexpected-extra-clone"])
             self.assertNotIn("TOP-SECRET", output.read_text())
         self.assertFalse(self.deleted())
+
+    def test_live_artifact_validator_recomputes_readback_and_never_claims_capacity(self):
+        self.output = self.root / "restore.json"
+        ready = {"candidate_sha": self.env["CANDIDATE_SHA"], "service_account": provision.SA,
+                 "checked_at": drill.iso(drill.utcnow()), "audit_sha256": "a" * 64}
+        drill.write(self.root / "readiness.json", ready)
+        restore = self.execute(success=True)
+        sweep.sweep(self.target, self.output, self.root / "sweep.json")
+        result = live_evidence.validate(self.root, self.env["CANDIDATE_SHA"], "123", "1")
+        self.assertEqual(result["capacity"], "not_evaluated")
+        self.assertEqual(result["scheduled_restart"], "not_evaluated")
+        restore["clone_readback"]["tables"][0]["row_count"] += 1
+        drill.write(self.output, restore)
+        with self.assertRaises(drill.DrillError):
+            live_evidence.validate(self.root, self.env["CANDIDATE_SHA"], "123", "1")
+        self.output.unlink()
+        with self.assertRaises(OSError):
+            live_evidence.validate(self.root, self.env["CANDIDATE_SHA"], "123", "1")
 
 
 if __name__ == "__main__":

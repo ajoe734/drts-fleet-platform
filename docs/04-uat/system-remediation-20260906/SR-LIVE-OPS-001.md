@@ -1,7 +1,10 @@
 # SR-LIVE-OPS-001 — restore drill evidence
 
 Owner: Codex. Reviewer: Claude2. Base: `cccd9b1118e2008adccabc117fef94bcebdccfe0`
-(origin/dev fetched 2026-10-03). This is an implementation checkpoint, not live acceptance.
+(original branch base, origin/dev fetched 2026-10-03). Current dispatch fetched
+`origin/dev` at `a1b84bd336b3e3179abd01a3f753a299275cc423`; published history is
+preserved without rebasing. The new operator/sweep delivery below supersedes the
+IAM-blocked checkpoint. No live acceptance is claimed.
 
 Supervisor rejected `e7e7d4ba7b038f2b075e51e48b6c39b873771a0e` on 2026-10-03:
 the runner only printed success, referenced the wrong source, proposed an overwrite,
@@ -19,7 +22,131 @@ returned RUNNABLE, POSTGRES_15, db-custom-1-3840, ZONAL, 10 GB, PITR enabled,
 daily backup 18:00 UTC, seven retained backups and seven days of transaction logs.
 These observations do not demonstrate restore success.
 
-## IAM boundary under investigation
+## Supervisor decision and current delivery (2026-10-03T02:20Z)
+
+The canonical task's `integration_notes` accepts the inability to enforce the
+clone destination through IAM. Supervisor explicitly directs an operator apply
+script and post-run compensating controls, with **no mediated service**. This
+resolves the design blocker at checkpoint `54b56c63617b7fbe23d935f20e4e7728b54633b4`;
+it does not constitute provisioning or a live restore. Implementation anchors:
+`a6a0ad69a7c1b4c622306e3664a603aca65388a7` and `10323e14f`.
+The final full candidate SHA, branch and PR #2286 are recorded by the canonical
+handoff command, after normal push. This document is part of that candidate.
+
+`provision-drill-sa.sh` now defaults to a read-only plan; `--apply` inventories
+IAM before prompting for `APPLY <SA> <full-candidate-SHA>`. It creates missing
+resources/bindings additively, verifies readback, and does not publish readiness.
+A rerun leaves exact existing resources untouched. Permission/condition drift,
+extra direct SA grants, inherited grants, ambiguous public/group grants and
+failed ancestor reads stop the operation; the script neither broadens access
+nor deletes unknown grants. It also checks resource policies on other secrets
+and service accounts for credential/impersonation paths. Operators need read
+access to these policies across project/ancestors; absence is a blocker, not an
+empty policy. The audit is conservative for group membership and does not claim
+IAM Policy Troubleshooter or a live permission probe has been performed.
+
+| Custom role | Permissions | Binding / purpose |
+| --- | --- | --- |
+| `drtsOpsDrillSourceClone` | `cloudsql.instances.clone` only | Exact source name + SQL service; never automatically falls back to unconditional |
+| `drtsOpsDrillTemporary` | `cloudsql.instances.get`, `.connect`, `.delete` | SQL service and `drts-dev-db-drill-` resource prefix; get also supports operation polling |
+| `drtsOpsDrillSourceRead` | `cloudsql.instances.get`, `.connect` | Exact source name + SQL service for profile, recovery-window and readback |
+| `drtsOpsDrillInventory` | `cloudsql.instances.list`, `logging.logEntries.list` | Project read-only inventory and Admin Activity sweep |
+
+`roles/secretmanager.secretAccessor` is bound on `drts-dev-db-url` only.
+`roles/iam.workloadIdentityUser` is bound on the dedicated SA only, to the existing
+repository principalSet after verifying issuer, mapping, condition and enabled
+state. This WIF trust is repository-wide, not restricted to this workflow.
+
+Authority: Google's [Cloud SQL permissions table](https://docs.cloud.google.com/sql/docs/postgres/iam-permissions)
+maps clone to `cloudsql.instances.clone`, operation polling to instance get, and
+listing to instance list (the table has duplicate list entries). Its
+[IAM Conditions example](https://docs.cloud.google.com/sql/docs/postgres/iam-conditions)
+uses the SQL service and instance resource name. The source-only clone condition
+is retained conservatively; actual clone/recovery-window/operation authorization
+under this SA is still a hosted validation item. If source conditioning is
+rejected, stop and provide the exact denial to Supervisor/operator; this candidate
+does not exercise the authorized fallback automatically.
+The [audit reference](https://docs.cloud.google.com/sql/docs/postgres/audit-logging)
+identifies clone/create Admin Activity methods and the Cloud SQL service name.
+
+**Residual risk accepted by Supervisor:** a misused token can create an extra
+clone, costing money and copying dev data within the project. Cloud SQL Admin API
+update/restore/import/export/user changes and deletion of non-drill instances are
+not granted. The existing DB secret retains its SQL-level privileges; read-only
+transactions are runner controls, not a newly restricted database credential.
+These controls must not be described as preventing all SQL writes by a stolen
+credential or as an IAM-enforced destination prefix.
+
+`--check-ready` requires a separate interactive `READY <SA> <SHA>` confirmation
+and a second complete policy audit. It is the **operator**, not the worker, who
+creates/updates the new repository variable `DEV_OPS_DRILL_READY`. Its JSON binds
+the candidate, provider, SA, check time and policy digest. It expires after 24 hours.
+The workflow validates it before authentication and uploads a sanitized receipt
+without the provider field. The digest is an audit fingerprint, not a signature
+or live permission proof. Changed IAM requires renewed operator audit; a receipt
+is not continuous enforcement against subsequent policy changes.
+
+The workflow remains dispatch-only/main-only. `always()` retries exact-target
+cleanup and runs `sweep_drill.py` independently, even if cleanup fails. The sweep
+lists all remaining drill instances and examines up to 999 retained Admin Activity
+clone/create records for this SA in a stated 400-day query window. Full pages,
+missing destinations, uncorrelated LRO completion records, missing own-clone audit,
+query failures, residual drill instances or non-prefix destinations fail the run.
+It prints exact leftover names and uploads allowlisted IDs/timestamps; it never
+bulk-deletes foreign resources. Audit ingestion has three 20-second retries.
+Retention, log latency or an unexpected response shape can therefore require
+operator investigation. A lost runner/token still cannot guarantee cleanup.
+
+The hosted-only `restore-artifact.spec.ts` retrieves the completed successful
+workflow run and candidate/run/attempt-named artifact from GitHub. It invokes
+`validate_live_evidence.py`, which recomputes readback comparisons and RPO and
+requires readiness, cleanup and sweep evidence. Missing evidence fails rather
+than skipping. This verifies restore evidence only; capacity/restart acceptance
+remain pending. No Playwright command was run on this VM.
+
+### Operator handoff (not executed by the worker)
+
+After Claude2 review and same-candidate integration, in a clean checkout at the
+reviewed full SHA, using the operator's GCP IAM and GitHub variables permissions:
+
+```bash
+bash infra/gcp/dev/ops-drill/provision-drill-sa.sh
+bash infra/gcp/dev/ops-drill/provision-drill-sa.sh --apply
+bash infra/gcp/dev/ops-drill/provision-drill-sa.sh --check-ready
+```
+
+Read the displayed plan, then type the exact candidate-bearing phrase at each
+prompt. A noninteractive pipe or GitHub Actions runner is refused. No `--yes`
+bypass exists. If the audit reports an unexpected grant, operator investigates
+the original policy; the script does not silently remove it. After the workflow
+is reachable from main, Supervisor dispatches with this full candidate SHA and
+the original base SHA above. Workers do not dispatch or apply IAM. On an
+authorized hosted acceptance runner, with `OPS_DRILL_RUN_ID` and `CANDIDATE_SHA`:
+
+```bash
+pnpm exec playwright test -c playwright.system-remediation.config.ts sr-live-ops-001
+```
+
+### Current finding / validation ledger
+
+| Finding / acceptance | Source / change | Previous → current result | Commands / evidence | Remaining |
+| --- | --- | --- | --- | --- |
+| F6: no operator apply | `provision_drill_sa.main/apply/inventory/confirm` | `54b56c63 --apply` exits 2 without CLI access → fake-boundary apply makes 11 intended mutations; rerun makes zero; partial failure safely resumes | `.local/sr-live-ops-001/old-apply-reproduction.txt`; unit + Vitest commands below | Actual operator apply/readiness not run |
+| Accepted destination risk | Exact clone source; conditioned temporary-role delete; `sweep_drill.sweep` | Previous unconditional readiness blocker removed after explicit Supervisor decision; non-prefix creation and leftovers now fail sweep | Unit scenarios cover leftovers, unknown/empty/denied/truncated audit and correlated LRO completion | Real conditioned clone/poll/recovery permissions and audit shape unverified |
+| F1–F5 + credential/cleanup regressions | Existing real `restore_drill.run` preserved | All earlier name/profile/PITR/readback/cleanup/signal/secret cases retained | Real shell/Python orchestration, fake external CLI only | No live clone or PG acceptance |
+| `authorized_isolated_ops_target` | Approved project/profile; dedicated IAM/operator receipt implementation | Real variables/provider re-read; plan only exits 0 | `.local/sr-live-ops-001/iam-plan-current.json` | Operator provisioning and hosted readiness evidence |
+| `backup_restore_readback` | Runner + GitHub artifact retrieval + shared readback validator | Offline orchestration/comparison checks pass | Unit results below | Supervisor hosted drill after main; real artifact |
+| `rpo_rto_capacity_baseline` | Existing observed timings; validator explicitly leaves capacity unevaluated | No fabricated capacity/SLO result | Offline tests only | Approved representative workload/SLO; actual measurements |
+| `scheduled_job_restart_proof` | Historical read-only Scheduler/revision observations below | HTTP 500 remains unresolved; no controlled restart inferred | Existing query/resource/insert IDs below | Independent assessment and candidate/deployment mapping |
+| `live_candidate_sha` | Full SHA checkout guards; receipt and artifact validator | Wrong candidate/provider/stale receipt rejected | Unit regression; canonical candidate handoff | Hosted run + deployed API revision/source mapping |
+| CI Python coverage registration | `tools/ci/check_test_coverage.py` reads only `ci.yml`/`ci-integ.yml` | Previous #2286 Change scope failed; dispatch-only workflow entry alone cannot repair it | Run `37086894984`, job `111098965308`; current checker to be recorded below | Supervisor scope/dependency update for shared CI entry; not modified outside scope |
+
+Current local checks and exit codes will be recorded here before final handoff.
+All tests below fake external CLI boundaries; none substitute for real IAM, PG,
+restore, capacity or scheduler acceptance. Prior evidence sections are retained
+for traceability and are explicitly historical where superseded.
+
+## Historical IAM-blocked checkpoint (54b56c63; superseded by decision above)
 
 [Google's permission table](https://docs.cloud.google.com/sql/docs/postgres/iam-permissions)
 documents `cloudsql.instances.clone` for `instances.clone`, without requiring
