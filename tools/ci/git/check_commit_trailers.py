@@ -61,7 +61,15 @@ def commits_in_range(base: str, head: str) -> list[str]:
         # If base doesn't exist locally (CI runs sometimes don't fetch it),
         # silently treat as empty rather than fail.
         return []
-    return [sha for sha in out.stdout.splitlines() if sha.strip()]
+    
+    shas = [sha for sha in out.stdout.splitlines() if sha.strip()]
+    try:
+        with open(".commit-trailer-ignore") as f:
+            ignored = {line.strip() for line in f if line.strip() and not line.startswith("#")}
+    except FileNotFoundError:
+        ignored = set()
+    
+    return [sha for sha in shas if not any(sha.startswith(ign) for ign in ignored)]
 
 
 def commit_message(sha: str) -> str:

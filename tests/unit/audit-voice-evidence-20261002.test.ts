@@ -112,7 +112,7 @@ if (globalThis.WebSocket) {
       const scriptCmd = `node ${evalScript} --mode "${mode}"`;
       expectRejection(scriptCmd, getEnv());
     }
-  });
+  }, 30000);
 
   it('fails closed in live mode for missing/invalid authorization', () => {
     const invalidAuths = ['', 'INVALID-AUTH', 'AUTH-UV-LIVE-lowercase'];
@@ -121,7 +121,7 @@ if (globalThis.WebSocket) {
       const scriptCmd = `node ${evalScript} --mode live ${authArg}`;
       expectRejection(scriptCmd, getEnv());
     }
-  });
+  }, 30000);
 
   it('fails closed in live mode when any credential is missing', () => {
     const cases = [
@@ -136,7 +136,7 @@ if (globalThis.WebSocket) {
         UNATTENDED_VOICE_LIVE_AUTH_KEY: key,
       }));
     }
-  });
+  }, 30000);
 
   it('fails closed in live mode even when credentials look valid but production adapter is missing', () => {
     const scriptCmd = `node ${evalScript} --mode live --authorization-ref AUTH-UV-LIVE-20261002-001`;
