@@ -166,7 +166,7 @@ describe("hosted bootstrap entry point and safe failure diagnostics", () => {
       GITHUB_ENV: "/unit/github-env",
     });
     const identity: BootstrapRequestIdentity = {
-      authMode: "jwt",
+      authMode: "jwt_bearer",
       actorType: "tenant_admin",
       actorId: env.DRTS_LIVE_MAIL_TENANT_ACTOR_ID!,
       tenantId: env.DRTS_LIVE_MAIL_TEST_TENANT_ID!,

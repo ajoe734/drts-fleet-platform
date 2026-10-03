@@ -1,8 +1,51 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：**F12 已依 Supervisor 核可接入 ci-integ.yml；正式 coverage gate 舊版 exit 1 → 修正版 exit 0，15 個 Python 測試實際通過。** hosted harness 的既有 scoped checks 亦重跑通過；新候選仍須獨立 review／同 SHA CI／merge，live acceptance 尚未執行。Supervisor 12:50Z 指定 promotion 後 dispatch。本輪沒有寄真郵件、部署、呼叫 `done` 或 `record-acceptance`。
-- **§0.3 是最新修正與檢查結果**；§0.2 保留首次 CI 退修定位，§0.1 是前輪交審，§0 為早先 checkpoint，§1–§6 保留前任 `f23a3068b9592f4853671c462903f641a14b4c60` 歷史觀察。歷史 scope blocker、IMAP 套件缺口、部署狀態與 acceptance 判定不能代替本輪證據。
+- 現況：首次 hosted run 在 bootstrap 失敗，郵件 runner **skipped**。本輪修正 TS／Python 兩處 Gmail-only mailbox 限制，補安全的 bootstrap stage／error-class 診斷；**127 TS＋18 Python tests 通過**。舊 live log 無 stage，尚不能斷言當次故障一定由 mailbox domain 引起；待 Supervisor 合併／部署後重跑確認。
+- **§0.4 是最新修正與檢查結果**；§0–§0.3 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+
+## 0.4 F13／F14：首次 hosted bootstrap 退修（2026-10-03）
+
+依 Supervisor `2026-10-03T10:55Z` 完整 integration note 續修，沿用原 owner／reviewer。本次是新的 hosted failure 定位，不冒稱兩輪 reviewer 已退回相同缺陷。
+
+### 版本與可取回的失敗證據
+
+- 前候選 `9f9873199fc31e00b78166baa8b1d023d3e7d3ad` 的 [PR #2275](https://github.com/ajoe734/drts-fleet-platform/pull/2275) 已於 `2026-10-02T16:42:07Z` merge；merge SHA `6f6869c18464be1e535c06f498e6c6fa6b9cfb32`。沒有改寫舊 candidate／published history。
+- 本輪 fetch 的 base／失敗 run 的 deployed source 均為 `d94d528f4a0257808922f85aaffbd6766a23b141`。工作分支以 merge `145c628963abd73f19948f84e4ea19e52b3478e3` 同步；唯一衝突 `ci-integ.yml` 保留 **origin/dev 原文**（含原 mail discover step 與別任務 ops-drill step）。merge 後 `git diff origin/dev --stat` 為空；無 task-authored workflow 或產品改動。
+- [hosted run 37117683815](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37117683815) 的 workflow source 是 `bc85c54cf080a5906721912e4c009f4bf5c11239`，checkout／candidate 是上述 `d94d528f`，run attempt **1**，結論 **failure**。重新取回 artifact **11271733603**：`live-mail-acceptance-d94d528f4a0257808922f85aaffbd6766a23b141-37117683815-1`。只有 `run-status.json` 與 `evidence-provider.json`；**沒有 evidence-mail.json／真送達回執**。
+- `run-status.json`：install／preflight／resources／teardown success，sessions failure，runner skipped。provider metadata 記錄 `drts-dev-devcc-20260825/us-central1`、revision `drts-dev-api-00045-t99`（created `2026-10-03T09:04:39.760410Z`）、alias freshness true、allowlist resolved version **2**；這不是郵件送達。
+- API request 序列來源為上述 Supervisor note：health 200 → token 201 → session 200 → proof 201 → logout 201。runner log 只有 `Mail session bootstrap failed; credential details omitted.`。未讀真 mailbox secret；無法從舊 log 判斷 proof validation、secret read、alias derivation 或環境檔寫入哪個步驟失敗。
+
+### Finding／修正邊界與驗證
+
+| Finding／驗收項 | 正式依據與修改位置 | 舊版重現 → 本輪結果 | 命令／證據 | 未驗與責任 |
+| --- | --- | --- | --- | --- |
+| F13：Workspace sender 被拒絕 | `session-bootstrap.ts: deriveAliasRecipient`；`mailbox_observer.py: main` 原本各自限制 `@gmail.com` | base 原程式的同案例 TS **2 failed**、Python 入口 **1 error** → 修後 **2 passed／1 passed**。兩處均接受有效 DNS mailbox domain，仍只准 invite／approve，拒絕多地址、標頭／環境注入、壞 domain／長度 | 下表 before／after；重現 anchor `e8423e3fb`、修正 anchor `97bb7717c` 已普通 push | 單元測試修復真實可重現的 runner 缺陷；**未證實是舊 hosted run 唯一原因**，由 Supervisor redispatch 確認 |
+| F14：bootstrap 隱藏拋錯階段 | `bootstrapMailSession` 是 CLI 同一執行入口；`mintTenantAdminSession.onStage`；`MailBootstrapError` | 原 CLI 只報泛用失敗 → 依 input／preflight／assertion／token／session／proof／secret read／alias／export 輸出固定 stage 與白名單 error class。單元注入含私密資料的 message/name/stderr/JSON，回報不含原值、stack 或 cause；CLI 授權拒絕實際 exit **1** 並帶 stage/class | `session-bootstrap.test.ts`；`cli-denial.log` | 新 live 失敗才會有精確 stage；不藉 error.message 輸出憑證／信箱 |
+| proofData／wire shape 調查 | `StepUpProofService.createProof`、`resolveStepUpActionPolicy`、`IdentityController.createStepUpProof`、`AuthController.getAuthSession`、`SnakeCaseInterceptor.deepToSnakeCase` | 正式 create policy 產生 proof → 正式 envelope／serializer → 真 runner 接受 snake_case；wrong action、required=false、含 whitespace reference、wrong actor/tenant/role 均拒絕。未重造 proof 常數來驗這條路徑 | 真 service／policy 只在 unit 記憶體使用，HTTP／IAM／Secret Manager／檔案 IO 是 mock 邊界；59 bootstrap tests | 沒有證據支持該 endpoint 在本次 live 回 camelCase；未放寬正式 shape。camel-only 回應會明確停在 step-up-validation |
+| session cleanup／既有 F01–F12 | 仍在 token 取得後立即輸出 cleanup handle；失敗後由 workflow teardown 使用；既有 profiles／gates 不改 | 後續 session/proof／mailbox 失敗時仍保留 token handle；本輪全套 **127 TS＋18 Python pass**，coverage **82 files** | 下表 scoped checks；既有正式 SMTP allowlist／IAM／tenant／SHA gate 保留 | 不把 unit pass 或舊 live teardown success 當成新 candidate live success |
+| `authorized_test_mailbox` | 既有 user option A、專用 sender 的 +invite／+approve aliases | 沿用授權，未擴大收件對象；只改合法 domain 支援 | TS／Python 正向與注入／unsupported tag 拒絕測試 | Supervisor hosted 真 IMAP UID／內容 hash 仍待收集 |
+| `configured_mail_provider` | 首次 run 的 evidence-provider.json | 已取回上述 source／revision／secret-version metadata，resources success | artifact 11271733603 | 新候選部署後仍要重新收集，未 record-acceptance |
+| `provider_message_receipts` | 首次 run 的 runner skipped／無 evidence-mail.json | **零真 receipt**，不把 skipped 寫成 pass | run-status.json | Supervisor/operator 仍需真 approval request、真 24h expiry 與 queued retryable delivery，詳 §0.1 |
+| `live_candidate_sha` | 原 run checkout／health SHA 是 d94d528f | 只證明舊 deployed source，未執行本次修正的 live run | 原 run、provider artifact；新候選由 handoff／PR head 鎖定 | Supervisor review／CI／merge／deploy 後 redispatch；owner 不 done |
+
+### 已結束的本機檢查
+
+機器輸出在本 worktree `.local/sr-live-mail-001/repair-20261003/`；下表與 hosted artifact ID 是 durable 查核入口。檢查程式版本為 `97bb7717c` 加測試 fixture 的 `authMode: jwt_bearer` 型別修正（原填 jwt，首次 tsc exit **2**，已修並重跑）；後續只更新本文件。最終完整 candidate SHA 由本輪 canonical handoff 與 PR head 記錄，不用 anchor SHA 冒充。
+
+| 命令 | Exit／結果 | Log |
+| --- | --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/session-bootstrap.test.ts -t Workspace`（base 原程式／修後同案例） | **1 → 0**；2 failed → 2 passed，14 filtered skips 不算通過 | alias-before.log／alias-after.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p test_mailbox_observer.py -k workspace -v`（base／修後） | **1 → 0**；main 的 Invalid dedicated mailbox → 真 MIME parser 成功；IMAP／secret／health 邊界 mock | imap-before.log／imap-after.log |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/` | **0**；6 files／127 tests passed，Vitest 4.1.4 | vitest.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v` | **0**；18 tests passed | python.log |
+| `pnpm exec tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json` | **0** | typecheck.log |
+| `pnpm exec eslint --max-warnings=0 tests/e2e/system-remediation/sr-live-mail-001/ tests/unit/system-remediation/sr-live-mail-001/` | **0** | lint.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py` | **0**；82 tracked test files covered | coverage.log |
+| `pnpm exec prettier --check tests/e2e/system-remediation/sr-live-mail-001/session-bootstrap.ts tests/unit/system-remediation/sr-live-mail-001/session-bootstrap.test.ts`；`git diff --check`；`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | **0** | prettier.log／terminal |
+| `DRTS_LIVE_MAIL_TEST_AUTHORIZED=false ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json tests/e2e/system-remediation/sr-live-mail-001/session-bootstrap.ts --preflight` | **1（預期拒絕）**；stage=input-validation; error_class=MailSessionInputError；未進 network | cli-denial.log |
+
+本輪未啟任何 VM product／browser／preview server、Docker／PG 或 Playwright，未改真 SMTP／IAM／allowlist、未寄信。C079 仍依 Supervisor 排除；§0.1 approval／expiry／retry 的未驗限制全部保留。下一步是同候選獨立 review／CI、Supervisor 合併部署後重跑，若仍失敗以新 stage 定位，不把本次 unit 結果寫成 live acceptance。
 
 ## 0.3 F12：接入正式 PR CI（2026-10-02）
 
