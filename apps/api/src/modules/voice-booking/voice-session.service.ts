@@ -276,26 +276,19 @@ export class VoiceSessionService {
       );
     }
 
-    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
-    // canonical 2026-10-03T17:41:28Z): `deduped` only tells us this exact
-    // row was already durable -- it says NOTHING about whether that row
-    // was ever actually applied to the watermark. The previous code
-    // returned `gap:false` here unconditionally on a dedup hit, using the
-    // `session` read from BEFORE this insert. That is a false success for
-    // the retry-after-CAS-failure case: a prior attempt can durably insert
-    // this exact (voiceSessionId, sequence) row and then fail its own
-    // `casUpdateSessionControl` below (stale `sessionVersion`), leaving the
-    // row durable but unapplied; a caller that retries the same sequence
-    // (necessarily with a fresh `sourceEventId`, since it never received
-    // the first attempt's id back) must NOT be told "no gap, nothing to
-    // do" -- it must fall through to the exact same contiguous-apply
-    // attempt a fresh insert would take, using a NEWLY read session so a
-    // since-resolved concurrent writer's CAS can now succeed. Whether this
-    // call's own insert was the one that landed the row or found it
-    // already there changes nothing about what application work is still
-    // owed, so `deduped` is carried through to the result purely as
-    // metadata from here on and never again used to skip that work.
-    const { deduped } = await this.repository.insertControlEvent({
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control dedup/application
+    // correlation (Codex reopen, canonical 2026-10-03T19:24:15Z): `deduped`
+    // only tells us the INSERT hit ONE of two independent unique indexes --
+    // `uq_voice_session_event_source_dedup` is scoped to (source,
+    // provider_account_id, source_event_id) ACROSS EVERY SESSION, while
+    // `uq_voice_session_event_sequence` is scoped to (voice_session_id,
+    // sequence). Either conflict can resolve `event` to a row that is NOT
+    // what `command` actually describes: a foreign session's event (global
+    // source-identity collision), or this session's row at a different
+    // sequence/epoch/payload than `command` claims (a reused sourceEventId
+    // pointed at new content). `command.*` must never again drive gap/apply
+    // decisions below -- only `event`, the row actually proven durable, may.
+    const { event, deduped } = await this.repository.insertControlEvent({
       voiceSessionId: command.voiceSessionId,
       legId: command.legId ?? null,
       source: command.source,
@@ -311,12 +304,46 @@ export class VoiceSessionService {
       payloadRef: command.payloadRef ?? null,
     });
 
+    if (event.voiceSessionId !== command.voiceSessionId) {
+      // The source identity this command claims is already durable under a
+      // DIFFERENT session. Applying this command's sequence/epoch here would
+      // silently accept a cross-session source-identity collision.
+      throw new ApiRequestError(
+        409,
+        "VOICE_ACTION_PAYLOAD_CONFLICT",
+        "Control event source identity is already recorded under a different voice session.",
+      );
+    }
+
+    if (
+      deduped &&
+      (event.sequence !== command.sequence ||
+        event.mediaEpoch !== command.mediaEpoch ||
+        event.eventType !== command.eventType ||
+        !isDeepStrictEqual(event.payload ?? null, command.payload ?? null))
+    ) {
+      // Same session, but this dedup hit resolved to a row that does not
+      // match what `command` claims (a reused sourceEventId now pointing at
+      // a different sequence/epoch, or the same (session, sequence) slot
+      // with different content). `command`'s claimed event was never
+      // durably inserted -- treating it as applied would advance the
+      // watermark past a row that does not exist in voice.session_event.
+      throw new ApiRequestError(
+        409,
+        "VOICE_ACTION_PAYLOAD_CONFLICT",
+        "Control event identity already recorded with a different sequence, epoch, type, or payload.",
+      );
+    }
+
+    // From here `event` is confirmed to be this command's own durable row --
+    // either freshly inserted, or an identical retry-after-CAS-failure dedup
+    // hit -- so every gap/apply decision uses `event`'s own stored fields.
     const appliedEpoch =
       session.lastAppliedControlSequence > 0
         ? await this.repository.findAppliedMediaEpoch(command.voiceSessionId)
         : null;
 
-    if (appliedEpoch !== null && command.mediaEpoch !== appliedEpoch) {
+    if (appliedEpoch !== null && event.mediaEpoch !== appliedEpoch) {
       // Cross-epoch arrival: fail closed rather than guess whether this is a
       // legitimate reconnect or a stale/superseded stream (SD §5.3: "舊
       // epoch final 不得覆蓋新連線內容"). The event is durable (inserted
@@ -331,10 +358,7 @@ export class VoiceSessionService {
     }
 
     const isBootstrap = appliedEpoch === null;
-    if (
-      !isBootstrap &&
-      command.sequence <= session.lastAppliedControlSequence
-    ) {
+    if (!isBootstrap && event.sequence <= session.lastAppliedControlSequence) {
       // Already applied (or superseded) -- safe no-op.
       return {
         deduped,
@@ -344,7 +368,7 @@ export class VoiceSessionService {
         session,
       };
     }
-    if (isBootstrap && command.sequence !== 1) {
+    if (isBootstrap && event.sequence !== 1) {
       // SD §5.4: the watermark starts at 0 (no event applied); the first
       // event to bootstrap the session MUST be sequence 1. Any earlier
       // sequence that arrives out of order (e.g. HTTP delivers seq 3 before
@@ -362,7 +386,7 @@ export class VoiceSessionService {
     }
     if (
       !isBootstrap &&
-      command.sequence !== session.lastAppliedControlSequence + 1
+      event.sequence !== session.lastAppliedControlSequence + 1
     ) {
       // Not the next contiguous frame: durably buffered, but the waterline
       // must not skip past this gap (SD §5.4: "不得跳號處理後面的肯定").
@@ -375,12 +399,12 @@ export class VoiceSessionService {
       };
     }
 
-    let appliedThrough = command.sequence;
-    let sawSpeechStart = command.eventType === "speech_start";
+    let appliedThrough = event.sequence;
+    let sawSpeechStart = event.eventType === "speech_start";
 
     const buffered = await this.repository.findControlEventsAfter(
       command.voiceSessionId,
-      command.mediaEpoch,
+      event.mediaEpoch,
       appliedThrough,
     );
     for (const bufferedEvent of buffered) {

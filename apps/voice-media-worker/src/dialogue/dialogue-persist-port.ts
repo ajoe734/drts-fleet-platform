@@ -97,6 +97,24 @@ export interface VoiceDialoguePersistPort {
   persist(
     state: VoiceDialogueState,
     request: VoiceDialogueRequest,
+    /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+     * canonical 2026-10-03T19:24:15Z): `state` above is always a CANDIDATE
+     * (the engine's own post-turn clone, `VoiceDialogueEngine.turn`'s
+     * `next`) -- writing a reconciled-durable commit onto it is useless the
+     * moment this turn is cancelled, because `VoiceDialogueEngine.
+     * boundedStage`'s abort/deadline race already discarded this call's
+     * eventual result before `Object.assign(state, next)` ever runs; `next`
+     * itself is then garbage. `recovery.attachmentState`, when supplied, is
+     * the REAL, long-lived per-attachment `VoiceDialogueState` instance
+     * (`TurnSession.state`) that survives across every turn regardless of
+     * this one's outcome -- the only object a late-settling ambiguous-
+     * commit reconciliation can usefully write into. A trusted
+     * implementation must apply a reconciled-durable commit's content
+     * there, under its own monotonic fencing (never regressing past a
+     * newer turn's already-admitted revision), as a plain side effect of
+     * this call's own execution -- NOT contingent on this call's returned
+     * promise ever being awaited to completion by its caller. */
+    recovery?: { attachmentState: VoiceDialogueState },
   ): Promise<void>;
 }
 
@@ -196,7 +214,7 @@ export function createTrustedDialoguePersistPort(
 ): VoiceDialoguePersistPort {
   return {
     mode: "trusted",
-    async persist(state, request) {
+    async persist(state, request, recovery) {
       const { signal } = request;
       if (signal?.aborted) {
         throw new Error(
@@ -209,16 +227,33 @@ export function createTrustedDialoguePersistPort(
           "voice_trusted_persist_unbound: no VoiceSessionBinding is attached for this session.",
         );
       }
-      const capability = await client.issueCapability(
-        {
-          voiceSessionId: current.voiceSessionId,
-          resourceScopeId: current.resourceScopeId,
-          routeProfileVersion: current.routeProfileVersion,
-          leaseEpoch: current.leaseEpoch,
-          scopes: PERSIST_CAPABILITY_SCOPES,
-        },
-        signal,
-      );
+      let capability: Awaited<ReturnType<typeof client.issueCapability>>;
+      try {
+        capability = await client.issueCapability(
+          {
+            voiceSessionId: current.voiceSessionId,
+            resourceScopeId: current.resourceScopeId,
+            routeProfileVersion: current.routeProfileVersion,
+            leaseEpoch: current.leaseEpoch,
+            scopes: PERSIST_CAPABILITY_SCOPES,
+          },
+          signal,
+        );
+      } catch (err) {
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R11/R12 boundedness
+        // residual: `VoiceApiClient.request` now itself races against
+        // `signal`, so an abort firing while this call is still pending
+        // rejects it directly (never waits for an uncooperative
+        // transport to settle on its own) -- surface that exactly like
+        // the pre-existing post-await abort check below always has,
+        // rather than leak the generic transport-level rejection.
+        if (signal?.aborted) {
+          throw new Error(
+            "voice_trusted_persist_aborted: request was aborted while awaiting capability issuance.",
+          );
+        }
+        throw err;
+      }
       // `issueCapability` can settle after `signal` already fired (an
       // abort does not retroactively un-resolve a promise); re-check
       // before the CAS write itself ever goes out, or a cancelled turn
@@ -419,13 +454,35 @@ export function createTrustedDialoguePersistPort(
           }
           throw err;
         }
-        // This turn's content commit DID durably land -- carry it into
-        // this attachment's own in-memory dialogue state now, even
-        // though this specific (cancelled) turn's own result is about to
-        // be discarded below (the re-check right after this block still
-        // throws when `signal.aborted`). Otherwise the NEXT turn's base
-        // state never learns this commit happened and silently overwrites
-        // it with blank/unrelated content.
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
+        // reopen, canonical 2026-10-03T19:24:15Z): this turn's content
+        // commit DID durably land. Writing it onto `state` (the engine's
+        // CANDIDATE clone, `next`) is not enough -- a cancelled turn's
+        // `VoiceDialogueEngine.boundedStage` abort/deadline race has
+        // already resolved and discarded this call's eventual result
+        // before `Object.assign(state, next)` can ever run, so `next`
+        // itself is abandoned the instant this call is observed to be
+        // racing a cancellation. The REAL per-attachment state
+        // (`recovery.attachmentState`) must receive this commit directly,
+        // right now, as a side effect of this call settling -- not
+        // contingent on anyone ever awaiting this call to completion.
+        // Fenced monotonically against a newer turn's own admission: if
+        // `current.sessionVersion` has already moved past
+        // `expectedSnapshotSessionVersion` by the time this late
+        // reconciliation resolves, a NEWER turn has already been admitted
+        // (and, via `Object.assign(state, next)`, already installed its
+        // own content into the real attachment state) -- applying this
+        // older commit now would regress that newer turn's content, so it
+        // is skipped, exactly like the admission-CAS reconciliation above
+        // skips a stale `sessionVersion` write.
+        if (
+          recovery &&
+          current.sessionVersion === expectedSnapshotSessionVersion
+        ) {
+          recovery.attachmentState.restoreFromSnapshotContent(
+            candidate.content,
+          );
+        }
         state.restoreFromSnapshotContent(candidate.content);
         snapshot = candidate;
       }

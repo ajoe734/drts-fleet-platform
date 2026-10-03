@@ -1048,13 +1048,27 @@ export class VoiceCallTurnCoordinator {
                 );
           turnSession.authoritativeInputEpoch = authoritativeInputEpoch;
           turnSession.authoritativeInputEpochConsumed = true;
-          await persistPort.persist(next, {
-            ...bounded,
-            inputEpoch: authoritativeInputEpoch,
-          });
+          await persistPort.persist(
+            next,
+            {
+              ...bounded,
+              inputEpoch: authoritativeInputEpoch,
+            },
+            // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
+            // reopen, canonical 2026-10-03T19:24:15Z): `turnSession.state`
+            // is this attachment's REAL, long-lived dialogue state --
+            // `next` is only this turn's candidate clone, discarded the
+            // instant `VoiceDialogueEngine.boundedStage` abandons a
+            // cancelled turn. A trusted port's ambiguous-commit
+            // reconciliation needs the real object to carry a late-but-
+            // durable commit forward past this turn's own cancellation.
+            { attachmentState: turnSession.state },
+          );
           return;
         }
-        await persistPort.persist(next, bounded);
+        await persistPort.persist(next, bounded, {
+          attachmentState: turnSession.state,
+        });
       },
       execute: (output, bounded) =>
         this.executeTools(output, turnSession, bounded),

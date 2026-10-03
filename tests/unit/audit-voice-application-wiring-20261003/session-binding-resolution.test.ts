@@ -123,6 +123,35 @@ describe("MediaWorkerServer.resolveSessionBinding (R4-entry)", () => {
       ),
     ).rejects.toThrow("VOICE_SESSION_NOT_OWNER");
   });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R11/R12 boundedness residual
+   * (Codex reopen, canonical 2026-10-03T19:24:15Z): the prior fix here
+   * only ever passed `controller.signal` to the resolver and trusted it
+   * to respect that signal -- merely firing `controller.abort()` on a
+   * timer is not itself a bound against a resolver that never checks
+   * `signal` at all (the reviewer's own probe: "after 160ms signal is
+   * aborted but the resolver promise still pending until manually
+   * released"). This double is deliberately uncooperative: it ignores
+   * the signal it is handed and never settles on its own either.
+   */
+  it("settles bounded by sessionGrantTtlMs even when the resolver never checks signal and never settles on its own", async () => {
+    const resolve = vi.fn(
+      () => new Promise<VoiceSessionBinding>(() => {
+        // Never settles, never reads its own `signal` argument.
+      }),
+    );
+    const server = new MediaWorkerServer({
+      sessionBindingResolver: { resolve },
+      sessionGrantTtlMs: 30,
+    });
+
+    await expect(
+      (server as unknown as ServerWithPrivateResolver).resolveSessionBinding(
+        binding().voiceSessionId,
+      ),
+    ).rejects.toThrow(/timed_out/);
+  });
 });
 
 /**
@@ -272,12 +301,23 @@ describe("MediaWorkerServer POST /sessions -> WS upgrade -> composer.attach (R4-
       // session before letting the resolver settle.
       await new Promise((r) => setTimeout(r, 60));
       expect(server.sessionCount).toBe(0);
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R11/R12 boundedness
+      // residual (Codex reopen, canonical 2026-10-03T19:24:15Z):
+      // `resolveSessionBinding` now races the resolver call against its
+      // own `sessionGrantTtlMs` bound (not merely an abort signal the
+      // resolver could ignore forever), so this attempt already fails
+      // closed with `VOICE_MEDIA_SESSION_BINDING_FAILED` at the TTL
+      // mark -- strictly faster, and still never a stale 201 -- rather
+      // than waiting for this slow resolver to settle before the
+      // separate grant-liveness check below gets a chance to classify it
+      // as `VOICE_MEDIA_SESSION_ADMISSION_EXPIRED`. Releasing the
+      // resolver now is harmless: nothing awaits its result any more.
       releaseResolver!();
 
       const res = await admitPromise;
       expect(res.status).not.toBe(201);
       const body = (await res.json()) as { code?: string };
-      expect(body.code).toBe("VOICE_MEDIA_SESSION_ADMISSION_EXPIRED");
+      expect(body.code).toBe("VOICE_MEDIA_SESSION_BINDING_FAILED");
 
       // An immediate WS upgrade with the (already-stale) grant this
       // response never actually delivered must not succeed either.

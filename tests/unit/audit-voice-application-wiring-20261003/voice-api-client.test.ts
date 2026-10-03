@@ -212,6 +212,51 @@ describe("VoiceApiClient", () => {
     expect(getToken).toHaveBeenCalledWith(controller.signal);
   });
 
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R11/R12 boundedness residual
+   * (Codex reopen, canonical 2026-10-03T19:24:15Z): merely forwarding
+   * `signal` into `fetchImpl` and awaiting its result is not itself a
+   * bound -- it only protects callers against a COOPERATIVE transport
+   * that actually checks `signal` and rejects. This double is
+   * deliberately UNCOOPERATIVE: it never reads `init?.signal` at all, the
+   * exact "uncooperative/hung upstream call" shape the reopened finding's
+   * own probe used against `restoreBoundAttachment`/
+   * `MediaWorkerServer.resolveSessionBinding`. Before this fix, aborting
+   * `signal` here would leave this `await` pending forever regardless.
+   */
+  it("settles bounded even when fetchImpl is uncooperative and never itself checks signal", async () => {
+    const fetchImpl = vi.fn(
+      () => new Promise<Response>(() => {
+        // Never settles on its own, and never even reads `init.signal` --
+        // nothing here reacts to the abort below at all.
+      }),
+    );
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      fakeTokenSource(),
+    );
+    const controller = new AbortController();
+
+    const pending = client.issueCapability(
+      {
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: ["session_execute"],
+      },
+      controller.signal,
+    );
+
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(VoiceApiError);
+    await expect(pending).rejects.toMatchObject({
+      code: "VOICE_API_UNREACHABLE",
+    });
+  });
+
   it("calls resolveInput using the capability token as bearer auth, scoped to the session path", async () => {
     const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       expect(String(url)).toBe(

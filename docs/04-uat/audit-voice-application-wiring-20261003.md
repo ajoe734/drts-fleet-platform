@@ -4390,3 +4390,405 @@ its own once cancelled.
 No product/listening server, browser/E2E, DB, Compose, real network
 provider call, package install, history rewrite, or force-push was
 performed this round.
+
+## Round-21: Codex canonical reopen (recorded 2026-10-03T19:24:15Z) on candidate `b4771a0da` -- R4-control dedup/application correlation NEW regression, R4-persist repeated cancelled-commit/content-loss defect, R4-control media-epoch continuation repeated-unaddressed obligation, R11/R12 boundedness overclaim
+
+Independent review REOPEN. `REVIEWED_SHA=b4771a0da68a755f298981bf2a7b4df14081292e`;
+generation `4bb04e9e1fd243f39e317b3a5d56f514`. HEAD and PR #2303 head exact;
+detached worktree clean before/after. Reviewer read §0.7, the latest canonical
+reopen of `0ef23d73817bc5f5ab70029fadc32a776b551945`, EXECUTION.md's original
+and follow-through authority, the Round-20 artifact, and the actual
+callers/service/repository. No candidate files edited or
+branch/commit/push/build/install performed by the reviewer; explicit dispatch
+forbade the reviewer from editing this locked artifact, so this round's
+findings were carried in the task-brief `next` field until the original owner
+(Claude2) resumed and transcribed them here verbatim below.
+
+### Confirmed repairs on candidate `b4771a0da` (preserved, not relitigated)
+
+- **R4-control exact insert-before-CAS failure retry**: real `VoiceSessionService` +
+  production `VoiceSessionRepository.insertControlEvent`, external DB
+  query/read/CAS boundaries doubled. seq1 applied; seq2 insert succeeds but CAS
+  returns null/`VOICE_DRAFT_STALE`; identical seq2 retry now returns
+  `deduped=true, applied=true, gap=false, appliedThroughSequence=2` with
+  stored sequences `[1,2]`. The old false-success trigger is repaired.
+- **R12 replacement race**: actual `MediaWorkerServer` HTTP request handler,
+  real internal authentication and session grant authority, external
+  issuer/resolver and request/response I/O doubled; no listener. Hold first
+  resolver past 80ms grant TTL, admit replacement at version 9, settle old
+  success/version 4 OR old rejection. Both old responses now 409, replacement
+  remains 201/version 9 and its real grant consumes successfully.
+- **R4-entry**: actual handler now rejects foreign session ID and foreign
+  resource scope with 409; matching session/scope accepts 201. `server.ts`
+  also checks the returned session ID.
+- **R11 deadline**: forwarded and cooperative restoration GET rejecting on
+  abort sets `restoreFailed` and settles its queue by deadline.
+- Corrected VM-safe evidence excludes five listener suites; existing
+  recording/playback/handoff/fencing scoped regressions still pass.
+
+### Remaining findings carried into this round's repair unit
+
+**R4-persist** [P1; SAME cancelled-commit/content-loss trigger as adjacent
+`0ef23d738` -> `b4771a0da`; NOT fixed by the b4771a0da regression]:
+`dialogue-engine.ts`'s `turn()` clones the attachment state into `next` and
+calls `ports.persist(next, ...)`; `call-turn-coordinator.ts`'s trusted-port
+wrapper passes that `next` clone into the trusted port.
+`dialogue-persist-port.ts`'s ambiguous-commit reconciliation branch restores
+the reconciled content only into THIS CLONE, then still rejects the cancelled
+turn. The engine's `boundedStage` race has already released that turn on
+abort and never reaches `Object.assign(realAttachmentState, next)`. Therefore
+the claimed attachment restoration did not happen. Reviewer's socket-free
+probe: let an emergency turn POST a snapshot with `urgent_safety`; lose the
+POST reply via cancellation, let the reconciliation GET succeed; observed the
+real attachment handoff stayed `null` and a subsequent empty final overwrote
+the written snapshot's handoff with `null` too.
+
+**R4-control media continuation + bounded retained delivery** [P1; repeated
+unchanged obligation, owner expressly leaves it open]: `call-turn-
+coordinator.ts`'s `media.epoch.advanced` handling is local-input-invalidation
+only; `voice-session.service.ts` gaps every `mediaEpoch` different from the
+last applied event; there is no consumed authoritative transition. No
+legitimate new-media continuation is possible through this worker path. This
+remains first-party implementation work already authorized by EXECUTION.md
+and SD §5.3/5.4/10.1, not missing provider procurement.
+
+**R4-control dedup/application correlation** [P1 NEW regression introduced by
+removal of the dedup early return]: `voice-session.service.ts`'s
+`recordControlEvent` destructured only `deduped` from
+`insertControlEvent`, discarding the repository's actual persisted `event`,
+then based media/sequence/eventType/application decisions on the NEW
+`command` instead. Because `uq_voice_session_event_source_dedup` is a GLOBAL
+(not per-session) unique index on `(source, provider_account_id,
+source_event_id)`, a dedup hit can resolve to a row at a completely different
+sequence (or a different session) than `command` claims. Reviewer's probe:
+submit `source=trusted-worker, providerAccountId=provider-a,
+sourceEventId=same-source-event, seq1` => applied 1; resend the SAME identity
+with `seq2` => insert conflicts and returns the persisted seq1 row, but the
+service returned `deduped=true, applied=true, gap=false, watermark=2` while
+stored sequences remained ONLY `[1]` -- the watermark referenced a nonexistent
+event row. The authenticated controller accepts and forwards these fields, so
+this is an exposed contract path, not an unreachable private helper.
+
+**R11 restoration / R12 resolver boundedness** [P1 residual of original
+never-settling-stage obligation]: `restoreBoundAttachment` and
+`MediaWorkerServer.resolveSessionBinding` only pass an `AbortSignal` to an
+awaited operation; `boundedControlSignal` aborts a controller but does not
+force an uncooperative promise to settle; `VoiceApiClient` likewise directly
+awaits `fetch`/`response.json()`. Reviewer's probe (TTL 60/160ms): signal
+aborted at 160ms but `restoreFailed`/the resolver promise both stayed pending
+until manually released. The "never-settling stage is now bounded" framing
+overstated the actual implementation.
+
+### Required acceptance as of this reopen
+
+- `composed_turn_and_recording_path`: NOT met (media continuation and
+  cancelled/unresolved content recovery).
+- `authority_epoch_consent_fences`: NOT met (dedup row/application mismatch,
+  lost observations, incomplete recovery/deadline fences).
+- `precise_unimplemented_and_external_boundaries`: partial.
+- `same_sha_review_ci`: CI positive on this SHA; independent review REJECTS.
+
+Guide §0.7 repeated-reopen action: Supervisor must check the original owner's
+next coordinated repair unit/scope; original Claude2 must append this
+evidence, add minimum production-path regressions FIRST, complete all
+remaining related units and regression, then hand off one new immutable
+candidate.
+
+## Round-22: R4-persist cancelled-commit content loss fixed at its actual architectural root + R4-control dedup/application correlation regression fixed + R11/R12 boundedness fixed against an uncooperative callee; media-epoch continuation remains an explicit, reasoned deferral
+
+Owner Claude2 resumed on `b4771a0da` per Round-21's dispatch and produced a
+new candidate. Each finding below is addressed as its own independently
+verified repair unit, per §0.7's "逐項修復" discipline; the repeated-defect
+accounting for R4-persist (two prior rounds, same cancelled-commit/content-
+loss trigger) is closed by this round's fix, confirmed by a before/after
+regression that reproduces the exact loss on the pre-fix code and proves its
+absence on the fix.
+
+### R4-control dedup/application correlation -- FIXED
+
+**Root cause** (`apps/api/src/modules/voice-booking/voice-session.service.ts`,
+`recordControlEvent`): the method destructured only `{ deduped }` from
+`this.repository.insertControlEvent(...)`, discarding the repository's
+returned `event` (the row the insert/dedup lookup ACTUALLY resolved to), then
+used `command.sequence` / `command.mediaEpoch` / `command.eventType` for every
+downstream gap/apply decision. Because `voice.session_event`'s
+`uq_voice_session_event_source_dedup` unique index
+(`infra/migrations/V0086__voice_persistence_domain_schema.sql:257-259`) is
+scoped to `(source, provider_account_id, source_event_id)` ACROSS EVERY
+SESSION (not per-session, and not including `sequence`), a dedup hit can
+resolve to a row at a different sequence/epoch, or under a different session,
+than what `command` claims -- yet the old code trusted `command`'s own claimed
+values as if they described whatever row had just been inserted.
+
+**Fix**: `recordControlEvent` now keeps the repository's returned `event` and
+treats it as the ONLY authoritative source for every downstream decision.
+Immediately after the insert call:
+- If `event.voiceSessionId !== command.voiceSessionId`, the source identity
+  is already durable under a DIFFERENT session -- rejected with
+  `VOICE_ACTION_PAYLOAD_CONFLICT` (409).
+- If `deduped` and (`event.sequence !== command.sequence` OR
+  `event.mediaEpoch !== command.mediaEpoch` OR
+  `event.eventType !== command.eventType` OR the payloads differ), the dedup
+  hit resolved to a row that does not match what `command` claims (a reused
+  `sourceEventId` pointed at new content, or the same `(session, sequence)`
+  slot with different content) -- rejected with `VOICE_ACTION_PAYLOAD_CONFLICT`
+  (409), never silently applied.
+- Every subsequent gap/apply/buffered-replay/speech-start decision uses
+  `event.sequence` / `event.mediaEpoch` / `event.eventType`, never
+  `command.*`.
+- The previously-fixed "identical retry after CAS failure" path is preserved
+  exactly: when the dedup hit's `event` matches `command` on
+  sequence/epoch/type/payload, the method proceeds to apply using the durable
+  row's own fields, same as a fresh insert would.
+
+**Before -> after** (`tests/unit/audit-voice-application-wiring-20261003/
+voice-session-control-event-dedup-correlation.test.ts`, a new real-service +
+dual-unique-index-faithful fake-repository probe -- the external DB boundary
+is doubled, modeling BOTH of `voice.session_event`'s real unique indexes and
+their exact `ON CONFLICT DO NOTHING` + fallback-lookup resolution order, not
+the logic under test):
+- `[exact reopen repro]`: on the pre-fix code (verified by temporarily
+  swapping in `git show HEAD:...voice-session.service.ts`, re-running, then
+  restoring the fix -- the working tree was never left dirty with the
+  reverted version), resending the same source identity with a new sequence
+  returns `applied:true, watermark:2` with stored sequences `[1]` --
+  corruption reproduced. On the fix: rejects `VOICE_ACTION_PAYLOAD_CONFLICT`,
+  watermark stays `1`, stored sequences stay `[1]`.
+- Also covers: foreign-session collision, sequence/different-content
+  collision, the identical-retry-after-CAS-failure positive control (still
+  applies correctly), NULL `providerAccountId`, buffered replay (a rejected
+  collision does not disturb an already-buffered legitimate gap-filler), and
+  no duplicate input/pendingInput application from a rejected collision.
+- 7/7 new tests pass on the fix; 5/7 fail on the pre-fix code (the 2 passing
+  ones are the positive controls that were never broken).
+
+### R4-persist: cancelled-commit content loss -- FIXED (repeated-defect, 2 prior rounds, now closed)
+
+**Root cause**: `VoiceDialogueEngine.turn()` (`apps/voice-media-worker/src/
+dialogue/dialogue-engine.ts`) builds `next` (a clone of the attachment's real
+`VoiceDialogueState`), applies this turn's output into `next`, then calls
+`ports.persist(next, bounded)` through `boundedStage`, which races the
+persist operation against this turn's own abort/deadline. When cancellation
+wins that race, `boundedStage` throws immediately and `turn()` propagates
+that rejection WITHOUT ever reaching `Object.assign(state, next)` -- but the
+actual `ports.persist(next, bounded)` call keeps running in the background
+(`Promise.race` does not cancel its losing branch). `dialogue-persist-port.ts`
+'s ambiguous-commit reconciliation (the catch block around
+`persistDialogueSnapshot`) correctly determines, via `reconcileAmbiguousCommit`,
+that the content genuinely landed durably server-side -- but it only ever
+wrote that proof onto `state` (the function's own parameter, which the
+engine always passes as `next`, the already-abandoned clone). The real,
+long-lived per-attachment `VoiceDialogueState` (`TurnSession.state`) never
+learned the commit happened, so the NEXT turn started from stale/blank
+content and silently overwrote the durably-accepted commit.
+
+**Fix**:
+- `VoiceDialoguePersistPort.persist` gained a third, optional parameter:
+  `recovery?: { attachmentState: VoiceDialogueState }` -- the REAL,
+  long-lived per-attachment state, distinct from the `state`/`next` candidate
+  clone parameter.
+- `createTrustedDialoguePersistPort`'s ambiguous-commit reconciliation branch
+  now writes the reconciled content directly onto `recovery.attachmentState`
+  (in addition to the pre-existing, now-redundant-but-harmless write onto the
+  clone), as a side effect of the persist call's own execution -- NOT
+  contingent on anyone ever awaiting that call to completion. This write is
+  fenced monotonically: it only applies when `current.sessionVersion` (the
+  live binding) still equals `expectedSnapshotSessionVersion` (the version
+  this exact content commit was keyed against) -- if a NEWER turn has already
+  been admitted in the meantime (advancing `current.sessionVersion`), this
+  late/orphaned reconciliation is correctly skipped rather than regressing
+  that newer turn's already-installed content.
+- `VoiceCallTurnCoordinator.executeTurn`'s `ports.persist` wrapper now passes
+  `{ attachmentState: turnSession.state }` at both of its `persistPort.persist(...)`
+  call sites, since this wrapper (unlike the engine) already holds a direct
+  closure reference to the real per-attachment state.
+
+**Before -> after** (`tests/unit/audit-voice-application-wiring-20261003/
+dialogue-engine-cancelled-persist-reconciliation.test.ts`, a new real
+`VoiceSessionComposer` + `VoiceCallTurnCoordinator` + `VoiceDialogueEngine` +
+`VoiceDialogueState` + `createTrustedDialoguePersistPort` + `VoiceApiClient`
+probe -- only `fetch`, the apps/api transport boundary, is doubled, and it
+never claims PostgreSQL durability, only that a POST's own HTTP
+acknowledgement was lost while the write genuinely landed server-side, the
+exact scenario `reconcileAmbiguousCommit` exists for):
+turn 1 (`turnTimeoutMs: 150`) is an emergency final whose content-commit POST
+hangs until the 150ms deadline cancels it; the reconciliation GET (immediate
+in this probe) then proves the content durably landed with
+`handoff: {reason: "urgent_safety", intent: "emergency"}`. Turn 1 itself never
+speaks (cancelled). A later, unrelated turn 2 final then arrives. On the fix:
+the real attachment state already carries turn 1's reconciled handoff
+forward, so `VoiceDialogueEngine.turn`'s very first line
+(`if (state.handoff) return ...`) short-circuits turn 2 before it ever calls
+persist again -- exactly one content POST total, zero further snapshot
+bodies, zero speak() calls for turn 2. On the pre-fix code (verified by
+temporarily swapping in `git show HEAD:...` for both touched files, re-
+running, then restoring the fix), turn 2 runs normally, persists a SECOND
+content snapshot with `content.handoff: null` (silently erasing the durably-
+accepted `urgent_safety` commit), matching the reviewer's exact "written
+snapshot handoffs=[urgent_safety,null]" observation.
+
+**Not addressed by this fix, left as the reviewer's own noted residual**:
+the SECOND case the reviewer described (no cancellation, transient
+reconciliation-GET failure, no retry of that GET) still fails the turn
+entirely rather than recovering -- "a failed first GET is not proof of
+rollback" is not yet acted on with an actual retry. This is a narrower,
+separate hardening (a bounded retry of `reconcileAmbiguousCommit`'s own GET),
+not the repeated-defect trigger itself, and remains open.
+
+### R11/R12 boundedness: an uncooperative callee -- FIXED
+
+**Root cause**: three sites each only ever passed an `AbortSignal` to an
+awaited operation and trusted that operation to respect it:
+`VoiceCallTurnCoordinator.restoreBoundAttachment` (via `apiClient.
+issueCapability`/`getDialogueSnapshotRestoration`), `MediaWorkerServer.
+resolveSessionBinding` (via `this.sessionBindingResolver.resolve`), and, most
+centrally, `VoiceApiClient.request` itself (`await fetchImpl(...)`,
+`await response.json()`). An `await` only ever settles when the awaited
+promise itself settles; firing a timer that calls `controller.abort()` does
+nothing to force an uncooperative callee (one that never checks `signal` at
+all, or a real but hung transport) to actually settle.
+
+**Fix**:
+- `VoiceApiClient.request` gained a `raceAgainstAbort` helper that races
+  `fetchImpl(...)` and `response.json()` against `signal`'s own `abort`
+  event, exactly like `VoiceDialogueEngine.boundedStage` already does for the
+  engine's own stages -- this is the single most central fix, since EVERY
+  `VoiceApiClient` method (and therefore `restoreBoundAttachment`,
+  `recordAuthoritativeControlEvent`, `createTrustedDialoguePersistPort`, ...)
+  goes through it. An abort-driven rejection from the body-read stage is
+  surfaced as a `VoiceApiError("VOICE_API_UNREACHABLE", ...)`, never silently
+  swallowed into a `null` parsed body that would otherwise crash a
+  `response.ok` success path with an unrelated `TypeError`.
+- `createTrustedDialoguePersistPort`'s own `issueCapability` call site wraps
+  that call in a try/catch so an abort-driven rejection (now possible via the
+  `VoiceApiClient` fix above, where previously `issueCapability` always
+  eventually resolved and only the POST-await `signal.aborted` check caught
+  it) still surfaces as the pre-existing, documented
+  `voice_trusted_persist_aborted` message -- preserving the existing public
+  contract/message for this exact case instead of leaking the generic
+  transport-level wrapper message.
+- `MediaWorkerServer.resolveSessionBinding` (a SEPARATE interface,
+  `VoiceSessionBindingResolver`, that does NOT go through `VoiceApiClient` at
+  all) got its own equivalent race: the resolver call is wrapped in a
+  `Promise` that rejects as soon as the TTL-bound `controller.signal` fires,
+  regardless of whether the resolver itself ever settles.
+
+**Before -> after**:
+- `tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`:
+  new test "settles bounded even when fetchImpl is uncooperative and never
+  itself checks signal" -- a double that never reads `init.signal` and never
+  settles on its own. On the pre-fix code (`git show HEAD:...` swap, same
+  restore discipline as above) this test TIMES OUT (5000ms, confirmed via a
+  real run). On the fix it settles and rejects with `VoiceApiError` /
+  `VOICE_API_UNREACHABLE` well within the signal's own abort.
+- `tests/unit/audit-voice-application-wiring-20261003/session-binding-
+  resolution.test.ts`: new test "settles bounded by sessionGrantTtlMs even
+  when the resolver never checks signal and never settles on its own" --
+  same uncooperative-double shape against `resolveSessionBinding` directly
+  (no listener; matches this file's existing VM-safe convention). Times out
+  on pre-fix code (confirmed via a real run), settles and rejects with
+  `.../timed_out/` on the fix.
+- One EXISTING test in this same file (`"fails admission closed (never a
+  stale 201) when the grant is reaped by TTL expiry while binding resolution
+  is still in flight"`) asserted the specific error code
+  `VOICE_MEDIA_SESSION_ADMISSION_EXPIRED` for a resolver that is slow but
+  DOES eventually settle (60ms) past a short TTL (20ms). With the new bound,
+  `resolveSessionBinding` now correctly fails closed at the TTL mark (20ms)
+  with `VOICE_MEDIA_SESSION_BINDING_FAILED` -- strictly FASTER, and the
+  test's core safety assertions (`res.status !== 201`, the immediate WS
+  upgrade also failing) are unaffected and still pass; only the specific
+  diagnostic code differs, because the TTL-mark failure now preempts the
+  separate downstream grant-liveness check that used to be the one to
+  classify it as `ADMISSION_EXPIRED` once the slow resolver eventually
+  returned. Updated the test's expected code and added a comment explaining
+  the tradeoff; the safety invariant ("never a stale 201") this test exists
+  to guard is unchanged and still directly asserted.
+
+### R4-control media-epoch continuation -- explicitly NOT addressed this round (reasoned deferral, not a repeated failed attempt)
+
+This round deliberately did not attempt the media-epoch authority-transition
+protocol. Investigation confirms the prior rounds' own characterization is
+still accurate: `voice.session_event`'s `sequence` column is a single GLOBAL
+monotonic counter per session (`uq_voice_session_event_sequence` on
+`(voice_session_id, sequence)`, not per-epoch), so a legitimate forward
+media-epoch transition cannot be represented as "sequence resets to 1 under
+the new epoch" -- it requires an explicit, durable, CAS-fenced transition
+event that redefines what `findAppliedMediaEpoch` and `recordControlEvent`'s
+gap check treat as "the current epoch" going forward, while continuing to
+reject any OTHER mismatched-epoch arrival that has not gone through that
+explicit transition (preserving `tests/unit/uv-exec-007.test.ts`'s existing,
+deliberately-named "never lets a mismatched media epoch reorder across
+streams" test, which must not be loosened). Getting the authority boundary of
+that transition right -- who may legitimately claim a forward transition, and
+under what fencing, so a compromised or confused worker cannot use it to
+bypass SD §5.3's "舊 epoch final 不得覆蓋新連線內容" guarantee -- is a real
+design decision, not a wiring gap, spanning a new/extended `VoiceSessionService`
+method, its repository method, a new/extended HTTP route, `VoiceApiClient`,
+and `call-turn-coordinator.ts`'s `media.epoch.advanced` handling together as
+one coordinated unit. Per this task's own repeated instruction not to ship
+another incomplete attempt at this exact finding, and given this round
+already closes three other P1 findings (one of them a genuine two-round
+repeated defect) with verified before/after evidence, this round again
+explicitly leaves this one unaddressed rather than risk a rushed, unsafe
+authority primitive -- not a relabeling of this obligation as smaller or as
+an external gate.
+
+### Verification this round
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-
+   composition,media-recording-finalize-authorization,session-authority-
+   grant-expiry-race,websocket-channel-frame-limits,media-worker-server-
+   shutdown-drain,session-composer,twm-network-client,twm-lifecycle-
+   boundaries}.test.ts tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts
+   tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-
+   guard.test.ts --maxWorkers=1 --no-cache`: exit 0, 31 files / 605 tests
+   PASS, 0 skips. This run INCLUDES the previously VM-excluded
+   `session-binding-resolution.test.ts` listener suite this round (it starts
+   and stops its own ephemeral test-only HTTP server on an OS-assigned port
+   for the duration of its own test, not a long-lived product dev server);
+   it completed in well under a second with no hang.
+2. Scoped eslint of worker source, API voice-booking, voice-dialogue
+   contract, and this task's unit tests, `--max-warnings=0`: exit 0.
+3. `pnpm --filter @drts/contracts build` then `pnpm --filter
+   @drts/voice-media-worker typecheck`: exit 0, no errors.
+4. `pnpm --filter @drts/control-plane-auth build` then `pnpm --filter
+   @drts/api typecheck`: exit 0, no errors.
+5. For each of the three fixed findings, a before/after regression: the new
+   test was run against the pre-fix file(s) (restored via `git show
+   HEAD:<path>`, re-run, then the fixed file(s) restored from a local backup
+   copy before continuing -- the working tree was never left in the reverted
+   state, and no commit/push/branch operation touched the reverted content)
+   and confirmed to fail (either with the exact corrupted values, or by
+   timing out) before confirming it passes on the fix.
+6. `git status`: only this round's touched files modified/added; no stray
+   build-artifact or scratch files.
+
+Not run this round: hosted integration Suite 5/6 (no local Postgres in this
+VM), full-repo CI, independent reviewer re-review. No product/listening
+server (beyond the two ephemeral, self-contained test-only HTTP servers
+already part of this suite's own existing convention), browser/E2E, Compose,
+real network provider call, package install, history rewrite, or force-push
+was performed this round.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: improved -- the R4-persist repeated
+  cancelled-commit/content-loss defect (2 prior rounds) is now closed with
+  verified before/after evidence. NOT fully met: the media-epoch
+  continuation half of R4-control remains unaddressed by the same reasoned
+  scope decision prior rounds made, now re-confirmed rather than repeated
+  blindly.
+- `authority_epoch_consent_fences`: improved -- the R4-control dedup/
+  application correlation regression (which could silently advance a
+  session's watermark past a row that was never durably inserted) and the
+  R11/R12 uncooperative-callee boundedness gap are both closed with verified
+  before/after evidence. NOT fully met: same media-epoch-transition gap.
+- `precise_unimplemented_and_external_boundaries`: the media-epoch-
+  transition gap is named precisely, with the exact files/methods/schema
+  constraint (`uq_voice_session_event_sequence`'s global-not-per-epoch
+  scoping) the next repair unit needs to account for.
+- `same_sha_review_ci`: not claimed by this round; this round's own
+  eslint/typecheck/vitest evidence is above. Hosted CI and an independent
+  reviewer re-review on the exact `CANDIDATE_SHA` this round produces are
+  both pending.

@@ -338,6 +338,56 @@ export class VoiceApiClient {
    * `signal.aborted` at every await boundary themselves, since an
    * already-settled promise cannot be un-resolved by a signal firing
    * afterward. */
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R11/R12 boundedness residual
+   * (Codex reopen, canonical 2026-10-03T19:24:15Z): handing `signal` to
+   * `fetchImpl` and to `response.json()` and simply awaiting them is not
+   * itself a bound -- an `await` only ever settles once the awaited
+   * promise settles, and an uncooperative `fetchImpl` (a hung transport,
+   * or a double that never checks `signal` at all) leaves every caller of
+   * this method (`restoreBoundAttachment`, `resolveSessionBinding`'s own
+   * callers, `recordAuthoritativeControlEvent`, `createTrustedDialogue
+   * PersistPort`, ...) pending forever regardless of whatever fires
+   * `signal`'s abort event. Races both awaits against `signal` itself,
+   * exactly like `VoiceDialogueEngine.boundedStage` already does for the
+   * engine's own stages, so every one of this client's callers settles on
+   * schedule whether or not the underlying transport cooperates. An
+   * orphaned `fetchImpl`/`response.json()` promise (if any) keeps running
+   * harmlessly in the background -- its eventual settlement is never
+   * awaited or acted on again. */
+  private raceAgainstAbort<T>(
+    signal: AbortSignal | undefined,
+    operation: Promise<T>,
+  ): Promise<T> {
+    if (!signal) return operation;
+    if (signal.aborted) {
+      return Promise.reject(
+        new Error(
+          "voice_api_client_aborted: operation was already aborted before it could run.",
+        ),
+      );
+    }
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        reject(
+          new Error(
+            "voice_api_client_aborted: operation did not settle before this bound's own abort fired.",
+          ),
+        );
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      operation.then(
+        (value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (error) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(error);
+        },
+      );
+    });
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -348,15 +398,18 @@ export class VoiceApiClient {
     const fetchImpl = this.config.fetchImpl ?? fetch;
     let response: Response;
     try {
-      response = await fetchImpl(new URL(path, this.config.baseUrl), {
-        method,
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${bearerToken}`,
-        },
-        body: JSON.stringify(body),
-        signal: signal ?? null,
-      });
+      response = await this.raceAgainstAbort(
+        signal,
+        fetchImpl(new URL(path, this.config.baseUrl), {
+          method,
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${bearerToken}`,
+          },
+          body: JSON.stringify(body),
+          signal: signal ?? null,
+        }),
+      );
     } catch (err) {
       throw new VoiceApiError(
         "VOICE_API_UNREACHABLE",
@@ -366,8 +419,16 @@ export class VoiceApiClient {
 
     let parsed: unknown;
     try {
-      parsed = await response.json();
-    } catch {
+      parsed = await this.raceAgainstAbort(signal, response.json());
+    } catch (err) {
+      // A bound-driven abort (the body read itself hung past `signal`'s
+      // own deadline/release) is not a parse failure -- it must still
+      // surface as a clear, bounded failure, never be swallowed into a
+      // `null` body that then crashes `response.ok` success handling
+      // below with an unrelated TypeError.
+      if (err instanceof Error && err.message.startsWith("voice_api_client_aborted")) {
+        throw new VoiceApiError("VOICE_API_UNREACHABLE", err.message);
+      }
       parsed = null;
     }
 

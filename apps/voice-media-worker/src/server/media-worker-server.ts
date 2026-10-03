@@ -441,18 +441,51 @@ export class MediaWorkerServer extends EventEmitter {
     // grant this attempt holds is already fenced by, so a hang here is
     // cancelled on the same timescale instead of staying outstanding
     // forever.
+    //
+    // R11/R12 boundedness residual (Codex reopen, canonical
+    // 2026-10-03T19:24:15Z): merely aborting `controller.signal` and
+    // trusting `this.sessionBindingResolver.resolve` to actually respect
+    // it is not a bound at all against an uncooperative implementation --
+    // an `await` only ever settles when the awaited promise itself
+    // settles, and a resolver that ignores (or never checks) `signal`
+    // leaves this call pending forever regardless of the timer firing.
+    // Race the resolver call against this same signal's own `abort`
+    // event, exactly like `VoiceDialogueEngine.boundedStage` already does
+    // for the engine's own stages, so this settles on schedule whether or
+    // not the resolver cooperates. The orphaned resolver promise (if any)
+    // keeps running harmlessly in the background -- never awaited again,
+    // never allowed to mutate anything after this point.
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
       this.sessionGrantTtlMs,
     );
+    let onAbort: () => void = () => {};
     try {
-      return await this.sessionBindingResolver.resolve(
-        voiceSessionId,
-        controller.signal,
+      return await new Promise<VoiceSessionBinding | undefined>(
+        (resolve, reject) => {
+          onAbort = () =>
+            reject(
+              new Error(
+                "voice_session_binding_resolution_timed_out: resolver did not settle within sessionGrantTtlMs.",
+              ),
+            );
+          if (controller.signal.aborted) {
+            onAbort();
+            return;
+          }
+          controller.signal.addEventListener("abort", onAbort, {
+            once: true,
+          });
+          this.sessionBindingResolver!.resolve(
+            voiceSessionId,
+            controller.signal,
+          ).then(resolve, reject);
+        },
       );
     } finally {
       clearTimeout(timer);
+      controller.signal.removeEventListener("abort", onAbort);
     }
   }
 
