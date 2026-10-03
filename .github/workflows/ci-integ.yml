@@ -83,6 +83,7 @@ jobs:
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
           python3 -m unittest tools/ci/test_dependency_security.py
+          python3 -m unittest tools/ci/test_dev_artifact_providers.py
           python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py
           python3 -m unittest tools/ci/test_academy_acceptance_workflow.py
           python3 -m unittest tools/ci/test_leave_acceptance_workflow.py
