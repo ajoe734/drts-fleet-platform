@@ -5,6 +5,10 @@ import {
 } from "../../../apps/voice-media-worker/src/dialogue/call-turn-coordinator";
 import { OpenAiRealtimeFixtureAdapter } from "../../../apps/voice-media-worker/src/providers/native-voice/native-voice-adapter";
 import type { VoiceAsrSegmentEvent } from "../../../apps/voice-media-worker/src/media-session";
+import type {
+  VoiceDialogueProvider,
+  VoiceDialogueRequest,
+} from "../../../apps/voice-media-worker/src/dialogue/voice-dialogue-provider";
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003: `VoiceDialogueEngine` and its
@@ -19,11 +23,18 @@ import type { VoiceAsrSegmentEvent } from "../../../apps/voice-media-worker/src/
  * `request_handoff` is the only tool this coordinator can honestly execute
  * (see the class doc in `call-turn-coordinator.ts`): apps/api's
  * DB-backed `VoiceToolGatewayService`/`VoiceBookingRepository` is
- * unreachable from this process (no `apps/api/src/modules/cti-ivr` driver
- * exists, and voice-media-worker has no database dependency at all). Every
- * other tool proposal must therefore force the same honest
- * `request_handoff` / `status: "unavailable"` outcome the contract already
- * defines for a genuinely unavailable provider.
+ * unreachable from this process (no exposed HTTP route and no capability-
+ * token issuance path exist), and voice-media-worker has no database
+ * dependency at all. Every other tool proposal must therefore force the
+ * same honest `request_handoff` / `status: "unavailable"` outcome the
+ * contract already defines for a genuinely unavailable provider.
+ *
+ * Codex review round 2 (reopen) R1/R2/R3: the first candidate never bound
+ * turn state to the *attachment* that created it (only to a bare
+ * `sessionId` string), never reacted to barge-in at all, and let a single
+ * hung speaker/provider block every later turn for a session regardless of
+ * `turnTimeoutMs`. The redesigned `attach()`/`handle()`/`release()` surface
+ * below and its tests exercise exactly those three fixes.
  */
 
 function finalSegment(
@@ -44,6 +55,16 @@ function finalSegment(
       language: "cmn-TW",
     },
   };
+}
+
+function speechStartedEvent(): VoiceAsrSegmentEvent {
+  return {
+    type: "speech.started",
+    sessionId: "sess-1",
+    mediaEpoch: 1,
+    controlSequence: 1,
+    occurredAt: new Date().toISOString(),
+  } as unknown as VoiceAsrSegmentEvent;
 }
 
 function trackingSpeaker(): VoiceCallTurnSpeaker & {
@@ -69,12 +90,57 @@ async function flush(times = 20): Promise<void> {
   }
 }
 
+/** A provider whose *first* `propose` call only resolves once the test
+ * explicitly releases it -- used to pin a turn mid-flight so release/
+ * barge-in/timeout behavior can be observed before the turn would
+ * otherwise complete. Every later call resolves immediately with an empty
+ * turn, so a later, unrelated turn on the same attachment is never stuck
+ * behind a probe this test has already finished observing. */
+function deferredProvider(): {
+  provider: VoiceDialogueProvider;
+  resolve(output: unknown): void;
+  lastSignal: () => AbortSignal | undefined;
+  proposeCalls: () => number;
+} {
+  let release: ((output: unknown) => void) | undefined;
+  let lastSignal: AbortSignal | undefined;
+  let proposeCalls = 0;
+  const provider: VoiceDialogueProvider = {
+    mode: "fixture",
+    profileVersion: "deferred:1",
+    propose(request: VoiceDialogueRequest) {
+      proposeCalls += 1;
+      lastSignal = request.signal;
+      if (proposeCalls > 1) return Promise.resolve(EMPTY_FINAL_OUTPUT);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+  };
+  return {
+    provider,
+    resolve: (output: unknown) => release?.(output),
+    lastSignal: () => lastSignal,
+    proposeCalls: () => proposeCalls,
+  };
+}
+
+const EMPTY_FINAL_OUTPUT = {
+  intent: "unknown",
+  text: "",
+  terminal: "turn_complete",
+  slots: [],
+  tools: [],
+  usage: { inputTokens: null, outputTokens: null },
+};
+
 describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", () => {
   it("runs a real turn for a plain greeting with no tools and speaks the real collection prompt", async () => {
     const coordinator = new VoiceCallTurnCoordinator(
       () => new OpenAiRealtimeFixtureAdapter(),
     );
     const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-1");
 
     // An empty transcript matches none of the fixture's intent branches, so
     // it proposes no tools (terminal: "turn_complete") and the engine falls
@@ -82,7 +148,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     // slot-less session -- asking for the pickup location, not a generic
     // menu prompt (that only fires for intent "unknown", which this
     // fixture never produces).
-    coordinator.handle("sess-1", finalSegment(""), speaker);
+    coordinator.handle(attachment, finalSegment(""), speaker);
     await flush();
 
     expect(speaker.calls).toHaveLength(1);
@@ -97,9 +163,10 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
       () => new OpenAiRealtimeFixtureAdapter(),
     );
     const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-2");
 
     coordinator.handle(
-      "sess-2",
+      attachment,
       finalSegment("從台北車站到松山機場"),
       speaker,
     );
@@ -112,7 +179,7 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     // re-run collection or re-propose tools -- VoiceDialogueEngine.turn
     // short-circuits with an empty prompt once `state.handoff` is set, so
     // the coordinator must not speak again.
-    coordinator.handle("sess-2", finalSegment("再問一次"), speaker);
+    coordinator.handle(attachment, finalSegment("再問一次"), speaker);
     await flush();
     expect(speaker.calls).toHaveLength(1);
   });
@@ -122,8 +189,9 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
       () => new OpenAiRealtimeFixtureAdapter(),
     );
     const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-3");
 
-    coordinator.handle("sess-3", finalSegment("救命"), speaker);
+    coordinator.handle(attachment, finalSegment("救命"), speaker);
     await flush();
 
     expect(speaker.calls).toHaveLength(1);
@@ -137,13 +205,14 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
       () => new OpenAiRealtimeFixtureAdapter(),
     );
     const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-4");
 
     // Two finals admitted back-to-back, synchronously, before either turn
     // has run: `handle` bumps the session's inputEpoch before queuing each
     // one, so the first turn must observe it is stale once it reaches the
     // engine/provider's own epoch checks instead of racing the second.
-    coordinator.handle("sess-4", finalSegment("", "seg-a"), speaker);
-    coordinator.handle("sess-4", finalSegment("救命", "seg-b"), speaker);
+    coordinator.handle(attachment, finalSegment("", "seg-a"), speaker);
+    coordinator.handle(attachment, finalSegment("救命", "seg-b"), speaker);
     await flush();
 
     expect(speaker.calls).toHaveLength(1);
@@ -157,18 +226,24 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
       () => new OpenAiRealtimeFixtureAdapter(),
     );
     const speaker = trackingSpeaker();
+    const firstAttachment = coordinator.attach("sess-5");
 
-    coordinator.handle("sess-5", finalSegment("從台北車站到松山機場"), speaker);
+    coordinator.handle(
+      firstAttachment,
+      finalSegment("從台北車站到松山機場"),
+      speaker,
+    );
     await flush();
     expect(speaker.calls).toHaveLength(1);
     expect(speaker.calls[0]!.text).toBe("已停止叫車資料蒐集。");
 
-    coordinator.release("sess-5");
+    coordinator.release(firstAttachment);
 
     // A session id reused for an unrelated later call must not resume the
     // prior call's handoff -- the slot-less collection prompt path must
     // run again, not the empty "handoff already happened" prompt.
-    coordinator.handle("sess-5", finalSegment(""), speaker);
+    const secondAttachment = coordinator.attach("sess-5");
+    coordinator.handle(secondAttachment, finalSegment(""), speaker);
     await flush();
     expect(speaker.calls).toHaveLength(2);
     expect(speaker.calls[1]!.text).toBe(
@@ -181,9 +256,10 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
       () => new OpenAiRealtimeFixtureAdapter(),
     );
     const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-6");
 
     coordinator.handle(
-      "sess-6",
+      attachment,
       {
         type: "speech.started",
         sessionId: "sess-6",
@@ -210,14 +286,141 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
       },
     }));
     const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-7");
 
     expect(() =>
-      coordinator.handle("sess-7", finalSegment("hello"), speaker),
+      coordinator.handle(attachment, finalSegment("hello"), speaker),
     ).not.toThrow();
     await flush();
 
     expect(speaker.calls).toHaveLength(0);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+
+  /**
+   * R1 (Codex reopen round 2), first probe: a late event tagged with an
+   * old, already-released attachment must never resurrect turn state --
+   * not even under the *same* session id a replacement attachment now
+   * owns -- and the replacement's own first final must run a completely
+   * fresh turn.
+   */
+  it("never lets a late event from a released attachment create or touch a replacement attachment's turn state", async () => {
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+    );
+    const speaker = trackingSpeaker();
+    const oldAttachment = coordinator.attach("sess-8");
+    coordinator.release(oldAttachment);
+
+    const replacementAttachment = coordinator.attach("sess-8");
+
+    // Late event still carrying the old (released) handle: must be treated
+    // as observable evidence only, never as input for the replacement.
+    coordinator.handle(oldAttachment, finalSegment("救命", "seg-old"), speaker);
+    await flush();
+    expect(speaker.calls).toHaveLength(0);
+
+    coordinator.handle(replacementAttachment, finalSegment(""), speaker);
+    await flush();
+    expect(speaker.calls).toHaveLength(1);
+    expect(speaker.calls[0]!.text).toBe(
+      "請說明上車地點的縣市、道路與門牌或入口。",
+    );
+  });
+
+  /**
+   * R1, second probe: `release` must actively abort a turn that is still
+   * in flight (blocked on the provider), not just delete the map entry --
+   * a late provider resolution after release must never reach the speaker.
+   */
+  it("aborts an in-flight turn's signal on release and never speaks its late result", async () => {
+    const deferred = deferredProvider();
+    const coordinator = new VoiceCallTurnCoordinator(() => deferred.provider);
+    const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-9");
+
+    coordinator.handle(attachment, finalSegment("hello"), speaker);
+    await flush(3);
+    expect(deferred.proposeCalls()).toBe(1);
+    expect(deferred.lastSignal()!.aborted).toBe(false);
+
+    coordinator.release(attachment);
+    expect(deferred.lastSignal()!.aborted).toBe(true);
+
+    deferred.resolve(EMPTY_FINAL_OUTPUT);
+    await flush();
+
+    expect(speaker.calls).toHaveLength(0);
+  });
+
+  /**
+   * R2: a `speech.started` barge-in must invalidate the currently active
+   * turn -- aborting its signal -- so a late provider resolution never
+   * reaches the speaker, instead of being silently ignored by `handle`.
+   */
+  it("aborts an in-flight turn's signal on speech.started barge-in and never speaks its late result", async () => {
+    const deferred = deferredProvider();
+    const coordinator = new VoiceCallTurnCoordinator(() => deferred.provider);
+    const speaker = trackingSpeaker();
+    const attachment = coordinator.attach("sess-10");
+
+    coordinator.handle(attachment, finalSegment("hello"), speaker);
+    await flush(3);
+    expect(deferred.proposeCalls()).toBe(1);
+
+    coordinator.handle(attachment, speechStartedEvent(), speaker);
+    expect(deferred.lastSignal()!.aborted).toBe(true);
+
+    deferred.resolve(EMPTY_FINAL_OUTPUT);
+    await flush();
+
+    expect(speaker.calls).toHaveLength(0);
+
+    // The attachment itself must stay usable: a final arriving after the
+    // barge-in starts a brand new turn.
+    coordinator.handle(attachment, finalSegment(""), speaker);
+    await flush();
+    expect(speaker.calls).toHaveLength(1);
+  });
+
+  /**
+   * R3: a turn whose own engine call resolves fine but whose `speaker.speak`
+   * call never settles must not block every later turn for the same
+   * attachment past `turnTimeoutMs`.
+   */
+  it("bounds the whole turn (including a hung speaker) so a later final still reaches the provider", async () => {
+    let releaseSpeak: (() => void) | undefined;
+    let speakCalls = 0;
+    const hungSpeaker: VoiceCallTurnSpeaker = {
+      speak: () => {
+        speakCalls += 1;
+        return new Promise<void>((resolve) => {
+          releaseSpeak = resolve;
+        });
+      },
+    };
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      40,
+    );
+    const attachment = coordinator.attach("sess-11");
+
+    coordinator.handle(attachment, finalSegment(""), hungSpeaker);
+    await flush(3);
+    expect(speakCalls).toBe(1);
+
+    const secondSpeaker = trackingSpeaker();
+    coordinator.handle(attachment, finalSegment("", "seg-second"), secondSpeaker);
+
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    await flush();
+
+    // The timeout released the queue: the second final's turn ran and
+    // spoke, even though the first turn's speaker call is still hung.
+    expect(secondSpeaker.calls).toHaveLength(1);
+
+    releaseSpeak?.();
+    await flush();
   });
 });

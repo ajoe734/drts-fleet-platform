@@ -18,14 +18,42 @@ export interface VoiceCallTurnSpeaker {
   speak(text: string, languageCode: string): Promise<void>;
 }
 
+/**
+ * Opaque handle for exactly one `VoiceSessionComposer.attach()` call's
+ * worth of turn state (R1, Codex reopen round 2: a released session id can
+ * be reused by an unrelated later call before every in-flight/late event
+ * from the old attachment has stopped arriving). Identity is by object
+ * reference, never by `sessionId` string -- that is precisely what lets a
+ * late event from an old, already-released attachment be told apart from a
+ * live event for a replacement attachment sharing the same session id,
+ * with no window where the two can collide on a shared map key.
+ */
+export interface VoiceCallAttachment {
+  readonly sessionId: string;
+}
+
 interface TurnSession {
   engine: VoiceDialogueEngine;
   state: VoiceDialogueState;
   inputEpoch: number;
-  /** Serializes turns for one session so a later final transcript's turn
+  /** Serializes turns for one attachment so a later final transcript's turn
    * never interleaves persist/execute with one still in flight for an
    * earlier one -- see `handle`. */
   queue: Promise<void>;
+  /** `true` once `release` has run for this attachment. A late event
+   * bound to this same (now-released) attachment is observable evidence
+   * only -- it must never start a new turn or be mistaken for a
+   * replacement attachment's input (see `handle`). */
+  released: boolean;
+  /** The controller backing the currently active/queued turn's
+   * `request.signal`, if any. `release` and a `speech.started` barge-in
+   * both abort it directly so a turn blocked on persist/execute/provider
+   * work is cancelled promptly instead of only discovering staleness by
+   * polling `inputEpoch` at its next await. A turn also checks this by
+   * reference before speaking (see `executeTurn`): once superseded, it is
+   * never still "current" even if it already held a reference before
+   * being replaced. */
+  activeAbort: AbortController | null;
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
@@ -34,11 +62,15 @@ const DEFAULT_TURN_TIMEOUT_MS = 8_000;
  * The real session.event -> bounded-turn composition that
  * docs/04-uat/audit-voice-runtime-20261002.md records as missing (the
  * "CTI/IVR dialogue orchestration layer" referenced in
- * `../server/session-composer.ts`). That driver -- the thing that would own
- * a verified call-authority channel into apps/api's DB-backed
- * `VoiceToolGatewayService`/`VoiceBookingRepository` -- lives at
- * `apps/api/src/modules/cti-ivr`, which does not exist and is out of this
- * task's write_scopes; `voice-media-worker` also carries no database
+ * `../server/session-composer.ts`). `apps/api/src/modules/voice-booking/`'s
+ * `VoiceToolGatewayService`/`VoiceSessionService` are real and DB-backed --
+ * the gap is not that they are missing. It is that apps/api exposes no
+ * authenticated HTTP route for a live call's turn to reach them, and this
+ * worker has no capability-token issuance path to call one if it existed;
+ * that reviewed cross-service contract (a new route plus a token-issuance
+ * flow) is the exact unresolved decision, precisely because it needs
+ * coordinated design on both sides, not a speculative endpoint this task
+ * invents unilaterally. `voice-media-worker` also carries no database
  * dependency at all (see its package.json) and must not acquire one here
  * just to reach that state.
  *
@@ -60,32 +92,72 @@ const DEFAULT_TURN_TIMEOUT_MS = 8_000;
  * success.
  */
 export class VoiceCallTurnCoordinator {
-  private readonly sessions = new Map<string, TurnSession>();
+  private readonly sessions = new Map<VoiceCallAttachment, TurnSession>();
 
   constructor(
     private readonly createProvider: () => VoiceDialogueProvider,
     private readonly turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   ) {}
 
-  /** Drops all turn state for a session. Call once its channel/session is
-   * gone (close, drain) -- a session id may later be reused by an unrelated
-   * call and must never resume a prior call's collected slots. */
-  release(sessionId: string): void {
-    this.sessions.delete(sessionId);
+  /** Call once per `VoiceSessionComposer.attach()`, before any event for
+   * that attachment can be delivered -- the returned handle is this
+   * attachment's only valid key into `handle`/`release`. Always starts
+   * fresh state: a reused session id never inherits a prior attachment's
+   * engine, slots, or handoff, whatever that prior attachment's own
+   * release/late-event state was. */
+  attach(sessionId: string): VoiceCallAttachment {
+    const attachment: VoiceCallAttachment = { sessionId };
+    this.sessions.set(attachment, {
+      // One engine per attachment: `VoiceDialogueEngine.turn` guards itself
+      // with a single instance-scoped `running` flag, so attachments must
+      // never share one.
+      engine: new VoiceDialogueEngine(this.createProvider(), false),
+      state: new VoiceDialogueState(),
+      inputEpoch: 0,
+      queue: Promise.resolve(),
+      released: false,
+      activeAbort: null,
+    });
+    return attachment;
   }
 
-  /** Call for every `session.event` a session emits. Only
-   * `asr.segment.final` drives a turn; every other event (TTS marks, DTMF,
-   * speech-started barge-in) has no reason to start one here. */
+  /** Call once an attachment's channel/session is gone (close, drain).
+   * Aborts whatever turn is currently active/queued for it and marks it
+   * released so a late event still carrying this same handle is never
+   * mistaken for new conversational input (R1). A session id may later be
+   * reused by an unrelated later call via a fresh `attach()`, which gets an
+   * entirely new handle and is therefore never affected by this call. */
+  release(attachment: VoiceCallAttachment): void {
+    const turnSession = this.sessions.get(attachment);
+    if (!turnSession) return;
+    turnSession.released = true;
+    turnSession.activeAbort?.abort();
+    this.sessions.delete(attachment);
+  }
+
+  /** Call for every `session.event` an attachment emits. `asr.segment.final`
+   * drives a turn; `speech.started` (barge-in) invalidates whatever turn is
+   * currently active/queued (R2) so late provider/TTS work is fenced before
+   * any audio reaches the caller. Every other event (TTS marks, DTMF) has
+   * no reason to touch a turn here. */
   handle(
-    sessionId: string,
+    attachment: VoiceCallAttachment,
     event: VoiceMediaWorkerEvent,
     speaker: VoiceCallTurnSpeaker,
   ): void {
+    const turnSession = this.sessions.get(attachment);
+    // Unknown or already-released attachment: either a late event from an
+    // attachment that was already torn down, or one that never started a
+    // turn. Either way this is observable evidence only -- it must never
+    // create new turn state under this (possibly stale) handle.
+    if (!turnSession) return;
+
+    if (event.type === "speech.started") {
+      turnSession.inputEpoch += 1;
+      turnSession.activeAbort?.abort();
+      return;
+    }
     if (event.type !== "asr.segment.final") return;
-    const turnSession =
-      this.sessions.get(sessionId) ?? this.createTurnSession();
-    this.sessions.set(sessionId, turnSession);
 
     // Bumped synchronously, before this turn is even queued: a second final
     // arriving while this one is still queued/running must make *this*
@@ -93,37 +165,78 @@ export class VoiceCallTurnCoordinator {
     // (`VoiceDialogueEngine`/`runVoiceDialogue` already fence on exactly
     // this), rather than let two turns race to persist/execute.
     turnSession.inputEpoch += 1;
+    // Promptly cancel whatever the previous final left active/queued,
+    // instead of only letting it discover staleness by polling `inputEpoch`
+    // at its own next await (R3).
+    turnSession.activeAbort?.abort();
+    const abortController = new AbortController();
+    turnSession.activeAbort = abortController;
     const request: VoiceDialogueRequest = {
-      sessionId,
+      sessionId: attachment.sessionId,
       turnId: randomUUID(),
       inputEpoch: turnSession.inputEpoch,
       segmentIds: [event.payload.segmentId],
       transcript: event.payload.text,
       verifiedContext: {},
       deadline: Date.now() + this.turnTimeoutMs,
-      signal: new AbortController().signal,
+      signal: abortController.signal,
     };
 
     turnSession.queue = turnSession.queue.then(() =>
-      this.runTurn(turnSession, request, event.payload.language, speaker),
+      this.runTurn(turnSession, request, abortController, event.payload.language, speaker),
     );
   }
 
-  private createTurnSession(): TurnSession {
-    return {
-      // One engine per session: `VoiceDialogueEngine.turn` guards itself
-      // with a single instance-scoped `running` flag, so sessions must
-      // never share one.
-      engine: new VoiceDialogueEngine(this.createProvider(), false),
-      state: new VoiceDialogueState(),
-      inputEpoch: 0,
-      queue: Promise.resolve(),
-    };
-  }
-
-  private async runTurn(
+  /** Bounds the *entire* queue stage -- including the final `speaker.speak`
+   * call, which has no abort channel of its own (R3) -- so a speaker/
+   * provider call that never settles cannot block every later turn behind
+   * it regardless of `turnTimeoutMs`. Never rejects into `queue`: there is
+   * no caller here to usefully receive it, and a long-lived worker process
+   * must not let one turn's failure break the chain for this attachment's
+   * later turns. */
+  private runTurn(
     turnSession: TurnSession,
     request: VoiceDialogueRequest,
+    abortController: AbortController,
+    languageCode: string,
+    speaker: VoiceCallTurnSpeaker,
+  ): Promise<void> {
+    return new Promise<void>((resolveQueueStage) => {
+      let settled = false;
+      const releaseQueue = () => {
+        if (settled) return;
+        settled = true;
+        resolveQueueStage();
+      };
+      const timer = setTimeout(
+        () => {
+          // Supersede: a hung speaker/provider must not keep blocking this
+          // attachment's queue past its own turn's deadline. The dangling
+          // operation (if it later settles) is fenced by the `isCurrent`
+          // check in `executeTurn`, never published.
+          abortController.abort();
+          releaseQueue();
+        },
+        Math.max(0, request.deadline - Date.now()),
+      );
+
+      this.executeTurn(turnSession, request, abortController, languageCode, speaker)
+        .catch((error) => {
+          if (!this.isExpectedSupersession(error)) {
+            console.error("[voice-call-turn-coordinator] turn failed", error);
+          }
+        })
+        .finally(() => {
+          clearTimeout(timer);
+          releaseQueue();
+        });
+    });
+  }
+
+  private async executeTurn(
+    turnSession: TurnSession,
+    request: VoiceDialogueRequest,
+    abortController: AbortController,
     languageCode: string,
     speaker: VoiceCallTurnSpeaker,
   ): Promise<void> {
@@ -139,24 +252,23 @@ export class VoiceCallTurnCoordinator {
       execute: (output) =>
         Promise.resolve(this.executeTools(output, turnSession.state)),
     };
-    try {
-      const result = await turnSession.engine.turn(
-        request,
-        turnSession.state,
-        () => turnSession.inputEpoch,
-        ports,
-      );
-      if (result.prompt) await speaker.speak(result.prompt, languageCode);
-    } catch (error) {
-      if (!this.isExpectedSupersession(error)) {
-        // Only a genuinely unexpected failure (e.g. the fixture provider's
-        // own schema violation) reaches here. Never rethrow into the
-        // session queue: a long-lived worker process must not let one
-        // turn's unexpected failure take down the chain for this session's
-        // later turns, and there is no caller here to usefully receive a
-        // rejected promise.
-        console.error("[voice-call-turn-coordinator] turn failed", error);
-      }
+    const result = await turnSession.engine.turn(
+      request,
+      turnSession.state,
+      () => turnSession.inputEpoch,
+      ports,
+    );
+    // Only the turn that is still this attachment's current, non-aborted
+    // one may actually speak -- a barge-in, release, timeout, or newer
+    // final may have superseded it in the time it took `engine.turn` to
+    // resolve (R2/R3): `activeAbort` having moved on (or already having
+    // been aborted in place) both mean this result is stale.
+    const isCurrent =
+      !turnSession.released &&
+      turnSession.activeAbort === abortController &&
+      !abortController.signal.aborted;
+    if (result.prompt && isCurrent) {
+      await speaker.speak(result.prompt, languageCode);
     }
   }
 

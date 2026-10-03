@@ -87,6 +87,12 @@ export class VoiceSessionComposer extends EventEmitter {
   attach(sessionId: string, channel: WebSocketServerChannel): void {
     const { asrAdapter, ttsAdapter } =
       this.providerFactory.createAdapters(sessionId);
+    // Created synchronously, before the channel's own "message"/"close"
+    // listeners are wired below -- this attachment's handle is live before
+    // any event for it can possibly be delivered (R1: a late event from a
+    // *prior*, already-released attachment of the same session id must
+    // never be confused with this one; see `VoiceCallTurnCoordinator`).
+    const turnAttachment = this.turnCoordinator?.attach(sessionId);
     const session = new VoiceMediaWorkerSession({
       sessionId,
       asrAdapter,
@@ -96,18 +102,20 @@ export class VoiceSessionComposer extends EventEmitter {
         // worker's control-plane consumer, independently of the media socket.
         this.emit("session.event", { sessionId, event });
         this.sendEvent(channel, event);
-        this.turnCoordinator?.handle(sessionId, event, {
-          speak: async (text, languageCode) => {
-            const handle = await session.startPlayback(
-              text,
-              languageCode,
-              new Date().toISOString(),
-            );
-            for (const chunk of handle.audioChunks) {
-              channel.sendBinary(Buffer.from(chunk));
-            }
-          },
-        });
+        if (turnAttachment) {
+          this.turnCoordinator?.handle(turnAttachment, event, {
+            speak: async (text, languageCode) => {
+              const handle = await session.startPlayback(
+                text,
+                languageCode,
+                new Date().toISOString(),
+              );
+              for (const chunk of handle.audioChunks) {
+                channel.sendBinary(Buffer.from(chunk));
+              }
+            },
+          });
+        }
       },
     });
     const composed: ComposedSession = { session, channel };
@@ -124,7 +132,7 @@ export class VoiceSessionComposer extends EventEmitter {
       this.sessions.delete(sessionId);
       // A session id may be reused by an unrelated later call; its turn
       // state (collected slots, handoff) must never bleed into that call.
-      this.turnCoordinator?.release(sessionId);
+      if (turnAttachment) this.turnCoordinator?.release(turnAttachment);
       // The ASR provider's connection/waiters/billing resource must not
       // outlive this session -- this fires on every close path (normal
       // close, drain, idle timeout, a frame-limit/failure-driven close),

@@ -136,7 +136,12 @@ export class VoiceMediaWorkerSession {
   advanceMediaEpoch(): number {
     const previousGeneration = this.activeGeneration;
     this.mediaEpoch += 1;
-    this.activeGeneration = this.mediaEpoch;
+    // Incremented independently of `mediaEpoch`'s own value (not assigned
+    // from it): `handleSpeechStarted` also advances `activeGeneration` on
+    // its own, unrelated schedule, and this must stay monotonic regardless
+    // of how many barge-ins happened since the last epoch advance -- never
+    // regress to a lower generation number than one already issued.
+    this.activeGeneration = previousGeneration + 1;
     for (const playback of this.playbacksById.values()) {
       if (!playback.cleared && playback.generation === previousGeneration) {
         playback.cleared = true;
@@ -150,11 +155,21 @@ export class VoiceMediaWorkerSession {
    * detected speech start, independent of any API/DB round trip. Returns the
    * ids of playbacks that were cleared by this call (if any), so the caller
    * (e.g. the CTI/media bridge) knows which outbound buffers to clear.
+   *
+   * Bumps `activeGeneration` (not just clearing already-registered
+   * playbacks): a `startPlayback` call whose `synthesize` is still in
+   * flight when speech starts has not registered into `playbacksById` yet,
+   * so scanning the map alone could never see it. Once bumped, that call's
+   * captured (now-stale) generation will mismatch `activeGeneration` the
+   * moment its `synthesize` resolves, and `startPlayback` discards it
+   * instead of registering/emitting late audio over the caller's barge-in.
    */
   handleSpeechStarted(occurredAt: string): { clearedPlaybackIds: string[] } {
     const clearedPlaybackIds: string[] = [];
+    const previousGeneration = this.activeGeneration;
+    this.activeGeneration += 1;
     for (const playback of this.playbacksById.values()) {
-      if (!playback.cleared && playback.generation === this.activeGeneration) {
+      if (!playback.cleared && playback.generation === previousGeneration) {
         playback.cleared = true;
         clearedPlaybackIds.push(playback.playbackId);
       }
@@ -241,7 +256,17 @@ export class VoiceMediaWorkerSession {
     });
   }
 
-  /** SD §11.2/§5.4: playback is tagged with the generation active at creation time. */
+  /** SD §11.2/§5.4: playback is tagged with the generation active at creation time.
+   *
+   * Barge-in (`handleSpeechStarted`) may bump `activeGeneration` while
+   * `synthesize` is still in flight -- before this playback has registered
+   * into `playbacksById` at all, so a plain map scan at barge-in time could
+   * never have cleared it. Checking the captured `generation` against the
+   * (possibly now-newer) `activeGeneration` here, after the await, is what
+   * actually fences that case: a stale result is discarded (never
+   * registered, never emitted, empty audio returned) instead of being
+   * played back over the caller's barge-in.
+   */
   async startPlayback(
     text: string,
     languageCode: string,
@@ -254,6 +279,9 @@ export class VoiceMediaWorkerSession {
       languageCode,
       generation,
     });
+    if (generation !== this.activeGeneration) {
+      return { ...handle, audioChunks: [] };
+    }
     this.playbacksById.set(handle.playbackId, {
       playbackId: handle.playbackId,
       generation,

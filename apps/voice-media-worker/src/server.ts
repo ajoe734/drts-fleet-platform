@@ -25,11 +25,20 @@ async function main() {
     sessionComposer,
     voiceRuntimeProductionCapable: composition.productionCapable,
     voiceRuntimeNotCapableReason: composition.notCapableReason,
-    // No durable `RecorderObjectStore` implementation exists yet (see
-    // docs/04-uat/audit-voice-runtime-20261002.md) -- leaving
-    // `recordingAdapter` unset means `/recording/finalize` correctly fails
-    // closed (503) rather than claiming a storage backend this worker does
-    // not actually have.
+    // `recordingAdapter` stays unset so `/recording/finalize` correctly
+    // fails closed (503). Two independent, precisely-scoped gaps block it
+    // (see docs/04-uat/audit-voice-application-wiring-20261003.md):
+    // (1) `RecorderObjectStore` has a real, unit-tested implementation
+    // against the provider-neutral `ObjectStoreClient` seam
+    // (./recording/object-store-recorder.ts) but no concrete backend
+    // client -- that needs `@aws-sdk/client-s3` added to this package's
+    // own dependencies, a manifest/lockfile change outside this task's
+    // write_scopes requiring the dependency-gates owner's coordination;
+    // (2) `RecordingClosureLedger` needs a trusted call-close event from
+    // the real call/line authority, which is the same missing
+    // `apps/api/src/modules/cti-ivr` channel `callAuthorityVerifier` below
+    // is blocked on -- resolving (1) alone would still not unblock
+    // `MediaRecordingAdapter`.
   });
 
   if (
@@ -53,9 +62,12 @@ async function main() {
   console.warn(
     "[voice-media-worker] Dialogue turns run against the real VoiceDialogueEngine/VoiceDialogueState " +
       "machinery but every tool proposal other than request_handoff forces an honest 'unavailable' " +
-      "handoff: this process has no database and apps/api/src/modules/cti-ivr (the verified channel " +
-      "into apps/api's VoiceToolGatewayService/VoiceBookingRepository) does not exist yet -- see " +
-      "docs/04-uat/audit-voice-application-wiring-20261003.md.",
+      "handoff, and persist() is an in-process-only no-op: apps/api's VoiceToolGatewayService/" +
+      "VoiceSessionService already exist and are DB-backed, but apps/api exposes no authenticated " +
+      "HTTP route for a live turn to reach them, and this worker has no capability-token issuance " +
+      "path to call one if it existed -- that reviewed cross-service contract (route + token " +
+      "issuance), not a missing 'apps/api/src/modules/cti-ivr' folder, is the exact unresolved " +
+      "decision. See docs/04-uat/audit-voice-application-wiring-20261003.md.",
   );
 
   let draining = false;
