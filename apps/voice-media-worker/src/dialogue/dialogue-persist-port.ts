@@ -178,7 +178,15 @@ export function createTrustedDialoguePersistPort(
         result.session.routeProfileVersion === current.routeProfileVersion &&
         result.session.leaseEpoch === current.leaseEpoch &&
         result.session.inputEpoch === request.inputEpoch &&
-        result.session.sessionVersion === expectedSessionVersion + 1;
+        result.session.sessionVersion === expectedSessionVersion + 1 &&
+        // Codex reopen round 15/16, R4-persist: a session/epoch/revision-
+        // matching response that still carries `pendingInput: true` means
+        // the authoritative watermark this admission CAS was supposed to
+        // durably clear is not actually clear -- SD §5.4's executor must
+        // wait for input resolution, so this turn's admission cannot be
+        // treated as cleanly correlated either, even though every other
+        // field matches.
+        !result.session.pendingInput;
       // Codex reopen round 5/6, R4-persist, then the no-history-rewrite
       // successor's R4-persist finding ("abort is not rollback"): `signal`
       // can fire while this exact await was outstanding, same as after
@@ -190,7 +198,16 @@ export function createTrustedDialoguePersistPort(
       // forever on `VOICE_DRAFT_STALE`. Reconciling never turns a cancelled
       // turn into a successful one: `persist()` still throws below whenever
       // `signal` fired, whatever the response said.
-      if (correlates) {
+      //
+      // Codex reopen round 15/16, R4-persist ("new late-response race"):
+      // this reconciliation must be MONOTONIC. A genuinely correlated but
+      // LATE response (this exact turn's own CAS truly committed, just
+      // reported back after this turn was already superseded) must never
+      // overwrite `current.sessionVersion` with an OLDER value than a
+      // newer turn has, in the meantime, already advanced it to -- that
+      // would regress the shared binding backwards under a later turn's
+      // feet, not "reconcile" anything.
+      if (correlates && result.session.sessionVersion > current.sessionVersion) {
         current.sessionVersion = result.session.sessionVersion;
       }
       if (signal?.aborted) {
@@ -213,11 +230,12 @@ export function createTrustedDialoguePersistPort(
       // persistDialogueSnapshot`). A rejected/unreachable content persist
       // fails this whole `persist()` call -- never a partial success where
       // admission succeeded but content silently wasn't recorded.
-      await client.persistDialogueSnapshot(
+      const expectedSnapshotSessionVersion = current.sessionVersion;
+      const snapshotResult = await client.persistDialogueSnapshot(
         current.voiceSessionId,
         capability.token,
         {
-          expectedSessionVersion: current.sessionVersion,
+          expectedSessionVersion: expectedSnapshotSessionVersion,
           inputEpoch: request.inputEpoch,
           // `mediaEpoch` is optional on `VoiceDialogueRequest` only for
           // direct engine callers with no media-authority concept of their
@@ -229,6 +247,31 @@ export function createTrustedDialoguePersistPort(
         },
         signal,
       );
+      if (signal?.aborted) {
+        throw new Error(
+          "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",
+        );
+      }
+      // Codex reopen round 15/16, R4-persist: the result was previously
+      // discarded entirely -- a response for a FOREIGN session/revision/
+      // turn, or one already past its own retention window, was accepted
+      // as success with no check at all. Same correlation discipline as
+      // `resolveInput` above: every identifying field this exact call
+      // submitted must come back unchanged, and the returned snapshot must
+      // not already be expired the moment it is reported as persisted.
+      const snapshot = snapshotResult.snapshot;
+      const snapshotCorrelates =
+        snapshot.voiceSessionId === current.voiceSessionId &&
+        snapshot.sessionVersion === expectedSnapshotSessionVersion &&
+        snapshot.inputEpoch === request.inputEpoch &&
+        snapshot.mediaEpoch === (request.mediaEpoch ?? 0) &&
+        snapshot.turnId === request.turnId &&
+        new Date(snapshot.retentionExpiresAt).getTime() > Date.now();
+      if (!snapshotCorrelates) {
+        throw new Error(
+          "voice_trusted_persist_snapshot_mismatch: dialogue-snapshot response does not correlate with the exact turn/revision just persisted.",
+        );
+      }
     },
   };
 }

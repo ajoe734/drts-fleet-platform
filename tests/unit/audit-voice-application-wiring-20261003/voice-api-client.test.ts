@@ -380,7 +380,7 @@ describe("VoiceApiClient", () => {
 });
 
 describe("createTrustedDialoguePersistPort", () => {
-  const request = { inputEpoch: 3 } as VoiceDialogueRequest;
+  const request = { inputEpoch: 3, turnId: "turn-1" } as VoiceDialogueRequest;
 
   it("rejects when no binding is attached, never silently succeeding like the fixture port would", async () => {
     const fetchImpl = vi.fn();
@@ -688,6 +688,254 @@ describe("createTrustedDialoguePersistPort", () => {
       expect.stringContaining("/dialogue-snapshot"),
       expect.anything(),
     );
+  });
+
+  /**
+   * Codex reopen round 15/16, R4-persist "new late-response race": the
+   * prior fix above reconciles a genuinely correlated but late response
+   * into `current.sessionVersion` unconditionally. If a NEWER turn's own
+   * (separate, already-settled) persist() call has, in the meantime,
+   * already advanced that SAME shared binding object further forward,
+   * blindly assigning the older response's value regresses it -- not a
+   * reconciliation, a corruption the next turn would then CAS against.
+   */
+  it("never regresses sessionVersion: a genuinely correlated but LATE response must not overwrite a value a newer turn already advanced it past", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 4,
+    };
+    let releaseResolveInput!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseResolveInput = resolve;
+    });
+    let resolveInputStarted = false;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      resolveInputStarted = true;
+      await gate;
+      // This turn's OWN CAS genuinely committed server-side (4 -> 5) --
+      // every field here is a real, correlated response to THIS request --
+      // but is only reported back after a newer turn already advanced the
+      // same binding further.
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 5,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            inputEpoch: 3,
+            pendingInput: false,
+          },
+        },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const controller = new AbortController();
+
+    const pending = port.persist(
+      {} as VoiceDialogueState,
+      { ...request, signal: controller.signal } as VoiceDialogueRequest,
+    );
+    for (let i = 0; i < 50 && !resolveInputStarted; i++) await Promise.resolve();
+    expect(resolveInputStarted).toBe(true);
+    // A newer turn's own, separate persist() call already advanced the
+    // SAME shared binding object past this turn's own expected value --
+    // modeled directly here, since this test exercises the persist port
+    // in isolation, not the full coordinator's turn sequencing.
+    binding.sessionVersion = 7;
+    controller.abort();
+    releaseResolveInput();
+
+    await expect(pending).rejects.toThrow(/voice_trusted_persist_aborted/);
+    // Stays at the newer turn's value -- never regressed by this one's
+    // late, now-stale-relative-to-current response.
+    expect(binding.sessionVersion).toBe(7);
+  });
+
+  it("rejects a resolveInput response with pendingInput: true even though every other field correlates -- the admission watermark was not actually cleared", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            inputEpoch: 3,
+            pendingInput: true,
+          },
+        },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(port.persist({} as VoiceDialogueState, request)).rejects.toThrow(
+      /voice_trusted_persist_stale_response/,
+    );
+    expect(binding.sessionVersion).toBe(5);
+  });
+
+  it("rejects a persistDialogueSnapshot response for a foreign session/version/input/media/turn even though resolveInput already correlated and committed", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (String(url).endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "foreign-snapshot",
+              voiceSessionId: "99999999-9999-9999-9999-999999999999",
+              sessionVersion: 999,
+              inputEpoch: 888,
+              mediaEpoch: 777,
+              turnId: "some-other-turn",
+              content: {},
+              createdAt: "2020-01-01T00:00:00.000Z",
+              retentionExpiresAt: "2020-01-02T00:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            inputEpoch: 3,
+            pendingInput: false,
+          },
+        },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(
+      port.persist(
+        { toSnapshotContent: () => ({}) } as unknown as VoiceDialogueState,
+        request,
+      ),
+    ).rejects.toThrow(/voice_trusted_persist_snapshot_mismatch/);
+    expect(
+      fetchImpl.mock.calls.some(([url]) => String(url).endsWith("/dialogue-snapshot")),
+    ).toBe(true);
+  });
+
+  it("rejects a persistDialogueSnapshot response whose own retention window has already expired, even with an otherwise fully-correlated identity", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (String(url).endsWith("/dialogue-snapshot")) {
+        const body = JSON.parse(init!.body as string) as {
+          expectedSessionVersion: number;
+          inputEpoch: number;
+          mediaEpoch: number;
+          turnId: string;
+        };
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: body.expectedSessionVersion,
+              inputEpoch: body.inputEpoch,
+              mediaEpoch: body.mediaEpoch,
+              turnId: body.turnId,
+              content: {},
+              createdAt: "2020-01-01T00:00:00.000Z",
+              // Already in the past: a snapshot cannot be reported as
+              // durably persisted while already past its own retention
+              // window -- that is either an expired-config bug or a
+              // misattributed/replayed response, not a success.
+              retentionExpiresAt: "2020-01-02T00:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      return jsonResponse(200, {
+        data: {
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            resourceScopeId: binding.resourceScopeId,
+            routeProfileVersion: binding.routeProfileVersion,
+            leaseEpoch: binding.leaseEpoch,
+            inputEpoch: 3,
+            pendingInput: false,
+          },
+        },
+      });
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+
+    await expect(
+      port.persist(
+        { toSnapshotContent: () => ({}) } as unknown as VoiceDialogueState,
+        request,
+      ),
+    ).rejects.toThrow(/voice_trusted_persist_snapshot_mismatch/);
   });
 
   /**

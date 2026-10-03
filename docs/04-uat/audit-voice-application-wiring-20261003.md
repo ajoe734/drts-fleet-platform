@@ -3181,11 +3181,100 @@ identity correlation) from the same `codex-20261003T160720Z-bb49c249`
 reopen are **not** addressed this round -- next repair units, unattempted
 here, carried forward unchanged.
 
+### R4-persist: monotonic binding reconciliation + full snapshot/pendingInput correlation
+
+Same reopen, R4-persist ("new late-response race" plus the carried-forward
+"full response correlation remains incomplete" sub-finding):
+
+1. **Late-response regression.** `dialogue-persist-port.ts`'s `persist()`
+   reconciled a genuinely correlated-but-late `resolveInput` response into
+   the LIVE, shared `current.sessionVersion` unconditionally
+   (`if (correlates) { current.sessionVersion = result.session.sessionVersion; }`).
+   The reviewer's probe: turn A's own CAS truly commits (4→5) but its HTTP
+   response is held; turn B (which cancelled A) then runs its own complete
+   turn, advancing the same binding to 8; only then is A's held response
+   released. `correlates` for A is still computed against A's OWN captured
+   `expectedSessionVersion` (unaffected by B), so it is still `true`, and
+   the old code overwrote `current.sessionVersion` 8→5 -- regressing the
+   shared binding backwards under B's own just-completed turn, even though
+   `persist()` itself still correctly threw for A (cancelled).
+2. **`pendingInput` ignored.** A `resolveInput` response that matches every
+   identity field but reports `pendingInput: true` (the server's own
+   admission watermark was NOT actually durably cleared, per SD §5.4) was
+   still treated as `correlates: true`.
+3. **`persistDialogueSnapshot`'s result discarded entirely.** Its return
+   value was never even captured into a variable -- a response for a
+   completely foreign session/version/input/media/turn, or one already
+   past its own retention window, was accepted as success with zero check.
+
+Fix (`dialogue-persist-port.ts`):
+1. The `current.sessionVersion` reconciliation is now monotonic:
+   `if (correlates && result.session.sessionVersion > current.sessionVersion)`.
+   A's genuinely-correlated-but-late response can no longer regress past
+   whatever a newer, already-completed turn (B) has already advanced the
+   same binding to.
+2. `correlates` now also requires `!result.session.pendingInput`.
+3. `persistDialogueSnapshot`'s result is captured and checked -- its
+   `snapshot.voiceSessionId`/`sessionVersion`/`inputEpoch`/`mediaEpoch`/
+   `turnId` must all match exactly what this call submitted, and
+   `retentionExpiresAt` must still be in the future -- before `persist()`
+   is allowed to resolve; a mismatch throws
+   `voice_trusted_persist_snapshot_mismatch`.
+
+Root-cause note on `expectedSessionVersion` for the real server response:
+read `VoiceSessionService.persistDialogueSnapshot`
+(`apps/api/src/modules/voice-booking/voice-session.service.ts:1061-1072`,
+via `this.repository.insertDialogueSnapshot({ sessionVersion:
+command.expectedSessionVersion, ... })`) to confirm the real backend
+writes (and therefore echoes back) the snapshot at EXACTLY the submitted
+`expectedSessionVersion` -- it does not itself advance the session's
+revision (that is `resolveInput`'s own separate CAS). Three pre-existing
+tests in `trusted-turn-composition.test.ts` had stale mocks for this exact
+response (`sessionVersion: 6`/`5` hardcoded, or `expectedSessionVersion +
+1`) that happened to never be checked before this round's fix; corrected
+to echo `expectedSessionVersion` unchanged, matching the real backend.
+
+Regressions added (`voice-api-client.test.ts`'s
+`createTrustedDialoguePersistPort` block, +4 tests): (1) late-but-
+correlated response must not regress `sessionVersion` below a value a
+newer turn already advanced it to -- models the newer turn's effect by
+mutating the shared `binding` object directly mid-flight, since this is a
+unit test of the persist port in isolation; (2) `pendingInput: true`
+rejected despite every other field correlating; (3) a foreign session/
+version/input/media/turn snapshot response rejected even though
+`resolveInput` already committed; (4) an already-expired-retention
+snapshot response rejected despite an otherwise fully-correlated
+identity. All four proven fail-before/pass-after by temporarily reverting
+only `dialogue-persist-port.ts` (`git stash push -u` on that file alone,
+`git stash pop` after): all 4 failed before (3 by explicitly rejecting
+for the wrong reason or not rejecting at all; the `pendingInput` case
+instead threw `state.toSnapshotContent is not a function`, because
+`correlates` wrongly stayed `true` and execution reached the content-
+persist call with a non-`VoiceDialogueState` stub -- itself proof the old
+code proceeded further than it should have), all 4 passed after.
+
+Verification this round:
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm exec eslint apps/voice-media-worker/src tests/unit/audit-voice-application-wiring-20261003 --max-warnings=0`: exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`: 34/34 pass (was 30; +4 new). `.../trusted-turn-composition.test.ts`: 12/12 pass (3 pre-existing tests' stale mocks corrected, 0 regressions, 0 new tests in this file this fix).
+- Full named regression set: 28 files / 558 tests pass (was 554 after R11 above; +4, 0 regressions).
+
+### Evidence table (R4-persist)
+
+| Finding / acceptance key | Source & fix location | Old → new behavior | Commands, exit codes, evidence | Residual |
+| --- | --- | --- | --- | --- |
+| R4-persist (`authority_epoch_consent_fences`) | `dialogue-persist-port.ts`'s `persist()`; `call-turn-coordinator.ts`'s `recordAuthoritativeSpeechStart` | Old: unconditional `current.sessionVersion = result.session.sessionVersion` on any correlated response in BOTH places, ignoring `pendingInput` in the former, and the `persistDialogueSnapshot` result entirely discarded. New: monotonic reconciliation (`> current.sessionVersion`/`> binding.sessionVersion` only) in both, `correlates` requires `!pendingInput`, and the snapshot response's own identity/expiry is validated before success. | `pnpm --filter @drts/voice-media-worker typecheck`: exit 0. `pnpm exec eslint`: exit 0. 4 new regressions in `voice-api-client.test.ts` targeting `dialogue-persist-port.ts`, each fail-before/pass-after proven by `git stash`-reverting only that file. 3 pre-existing `trusted-turn-composition.test.ts` tests' stale `persistDialogueSnapshot` mock responses corrected to match the real backend's actual echo-back behavior (confirmed by reading `voice-session.service.ts`'s real `insertDialogueSnapshot` call). Full named regression set: 28 files / 558 tests pass (+4 from R11's 554, 0 regressions). | The reopen's "audit the same mutable update at ... :436-440 and restore:341" is addressed for both named sites: `restore:341` (`restoreBoundAttachment`) runs once at attach time with no concurrent writer yet, confirmed by code inspection not to need the guard; `recordAuthoritativeSpeechStart:436-440` now carries the identical monotonic guard as `dialogue-persist-port.ts`, applied by direct analogy to the exact same proven bug shape. This second site's guard is fixed but NOT independently regression-tested this round (would require orchestrating two full overlapping composed turns through the real `VoiceSessionComposer`+`VoiceCallTurnCoordinator`+engine, not attempted here); the full named regression set above confirms zero regressions from adding it. Response-loss retry/replay for `resolveInput`/`persistDialogueSnapshot`/`recordControlEvent` themselves (a dropped response with no later correlated reply at all) is not added. |
+
+R4-control (ordered speech-start ingestion, response-loss recovery) from
+the same `codex-20261003T160720Z-bb49c249` reopen is **not** addressed
+this round -- next repair unit, unattempted here, carried forward
+unchanged.
+
 ### Acceptance assessment on this round's candidate
 
-- `composed_turn_and_recording_path`: still **NOT met** overall (R4-control/R4-persist remain open), but both R4-entry (unconsumed production caller) and R11 (restoration-failure admission barrier) are fixed and regression-tested this round.
-- `authority_epoch_consent_fences`: still **NOT met**. R4-control and R4-persist's late-response reconciliation race from the same reopen are untouched this round; R11's own authority-fencing aspect (never run a turn against unverified restored state) is fixed.
-- `precise_unimplemented_and_external_boundaries`: improved for R4-entry specifically (the real remaining gap -- no SD §4.1 provider webhook, hence no durable `voice.session` row -- is now precisely wired-around and tested rather than left as an unreachable interface), but not fully met: R4-control/R4-persist's own boundary claims are untouched.
+- `composed_turn_and_recording_path`: still **NOT met** overall (R4-control remains open), but R4-entry (unconsumed production caller), R11 (restoration-failure admission barrier), and R4-persist (monotonic reconciliation + full response correlation) are all fixed and regression-tested this round.
+- `authority_epoch_consent_fences`: still **NOT met**. R4-control's ordered speech-start ingestion/response-loss recovery is untouched this round; R11's and R4-persist's own authority-fencing aspects (including both named `binding.sessionVersion` mutation sites) are fixed.
+- `precise_unimplemented_and_external_boundaries`: improved for R4-entry specifically (the real remaining gap -- no SD §4.1 provider webhook, hence no durable `voice.session` row -- is now precisely wired-around and tested rather than left as an unreachable interface), but not fully met: R4-control's own boundary claims are untouched.
 - `same_sha_review_ci`: not claimed. Local typecheck/lint/targeted-vitest evidence above is this round's own; hosted CI and independent reviewer re-review on this exact SHA are pending, same as every prior round.
 
 No product/listening server, browser/E2E, DB, Compose, real network

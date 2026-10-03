@@ -184,7 +184,13 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
             snapshot: {
               snapshotId: "snapshot-1",
               voiceSessionId: binding.voiceSessionId,
-              sessionVersion: 6,
+              // Real `VoiceSessionService.persistDialogueSnapshot` writes
+              // the snapshot AT `expectedSessionVersion` -- it does not
+              // itself advance the session's revision (that is
+              // `resolveInput`'s own CAS, above) -- so the real backend
+              // always echoes it back unchanged.
+              sessionVersion: (body as { expectedSessionVersion: number })
+                .expectedSessionVersion,
               inputEpoch: (body as { inputEpoch: number }).inputEpoch,
               mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
               turnId: (body as { turnId: string }).turnId,
@@ -361,9 +367,11 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
             snapshot: {
               snapshotId: "snapshot-1",
               voiceSessionId: binding.voiceSessionId,
-              sessionVersion:
-                (body as { expectedSessionVersion: number })
-                  .expectedSessionVersion + 1,
+              // Real `persistDialogueSnapshot` echoes `expectedSessionVersion`
+              // unchanged -- it does not itself advance the session's
+              // revision (see the sibling mock's own comment above).
+              sessionVersion: (body as { expectedSessionVersion: number })
+                .expectedSessionVersion,
               inputEpoch: (body as { inputEpoch: number }).inputEpoch,
               mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
               turnId: (body as { turnId: string }).turnId,
@@ -645,7 +653,10 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
               snapshot: {
                 snapshotId: "snapshot-1",
                 voiceSessionId: binding.voiceSessionId,
-                sessionVersion: 5,
+                // Real `persistDialogueSnapshot` echoes `expectedSessionVersion`
+                // unchanged -- see the sibling mocks' own comment above.
+                sessionVersion: (body as { expectedSessionVersion: number })
+                  .expectedSessionVersion,
                 inputEpoch: (body as { inputEpoch: number }).inputEpoch,
                 mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
                 turnId: (body as { turnId: string }).turnId,

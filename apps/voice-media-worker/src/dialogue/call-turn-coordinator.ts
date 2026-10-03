@@ -436,7 +436,15 @@ export class VoiceCallTurnCoordinator {
     if (result.applied || result.deduped) {
       turnSession.controlSequence = sequence + 1;
     }
-    if (result.session.voiceSessionId === binding.voiceSessionId) {
+    // Codex reopen round 15/16, R4-persist ("audit the same mutable update
+    // at recordAuthoritativeSpeechStart"): same monotonic guard as
+    // `dialogue-persist-port.ts`'s `persist()` -- a genuinely correlated
+    // but late response here must not regress this binding below a value
+    // a newer, already-completed turn has advanced it to either.
+    if (
+      result.session.voiceSessionId === binding.voiceSessionId &&
+      result.session.sessionVersion > binding.sessionVersion
+    ) {
       binding.sessionVersion = result.session.sessionVersion;
     }
     if (signal.aborted) {
