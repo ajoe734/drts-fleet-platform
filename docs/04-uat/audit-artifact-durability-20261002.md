@@ -362,7 +362,14 @@ The later unpublished `d4d2d3ee0ef18efb5471fb7640ac8e8a4d329e15` checkpoint
 has an invalid Task-ID subject and remains preserved on a separate local
 history ref. It is not silently relabelled green or force-pushed away.
 Accepted dev provider/recovery commits copied by that historical checkpoint
-remain on dev; this contribution does not recopy them as new task work.
+are integrated here by a normal merge of dev `d94d528f4a0257808922f85aaffbd6766a23b141`,
+not by recopying their files or rewriting published history. The original
+merge approval history includes routine allows and later auto-pruned requests
+whose workers had exited, not a policy rejection of non-destructive branch
+integration. The earlier pre-merge consistency check correctly reported the
+dev-only resolver citation missing from the old base; normal ancestry
+integration restores the cited accepted source rather than silencing that
+check or fabricating a replacement file.
 
 ### Runtime defect and before/after evidence
 

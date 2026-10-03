@@ -9,7 +9,7 @@ import { BillingSettlementController } from "./billing-settlement.controller";
 import { BillingSettlementService } from "./billing-settlement.service";
 import {
   PAYMENT_RECOVERY_PORT,
-  UnavailablePaymentRecoveryPort,
+  PlatformManualPaymentRecoveryPort,
 } from "./payment-recovery.port";
 import { ReferralSettlementScaffoldService } from "./referral-settlement.scaffold.service";
 import { RemittanceProofService } from "./remittance-proof.service";
@@ -42,10 +42,12 @@ import {
   providers: [
     BillingSettlementService,
     BillingSettlementRepository,
-    UnavailablePaymentRecoveryPort,
+    PlatformManualPaymentRecoveryPort,
+    // retry_capture remains unavailable (no PSP/issuer is integrated); see
+    // PlatformManualPaymentRecoveryPort for the exact confirmed boundary.
     {
       provide: PAYMENT_RECOVERY_PORT,
-      useExisting: UnavailablePaymentRecoveryPort,
+      useExisting: PlatformManualPaymentRecoveryPort,
     },
     ReferralSettlementScaffoldService,
     RemittanceProofService,

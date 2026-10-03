@@ -644,8 +644,22 @@ jobs:
         with:
           project_id: ${{ needs.prepare.outputs.project_id }}
 
+      - name: Resolve configured artifact providers
+        id: artifact_providers
+        env:
+          DEV_PROVIDER_CONFIG_JSON: ${{ toJSON(vars) }}
+          PROVIDER_PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          PROVIDER_SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+        run: |
+          python3 operations/deployment/resolve-dev-artifact-providers.py \
+            --project "$PROVIDER_PROJECT_ID" \
+            --secret-prefix "$PROVIDER_SECRET_PREFIX" \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Resolve API secret mounts
         id: api_secrets
+        env:
+          ARTIFACT_PROVIDER_SECRET_SUFFIX: ${{ steps.artifact_providers.outputs.secret_suffix }}
         run: |
           set -euo pipefail
 
@@ -839,6 +853,7 @@ jobs:
 
           echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
           echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
+          secret_args="${secret_args}${ARTIFACT_PROVIDER_SECRET_SUFFIX}"
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
@@ -869,6 +884,8 @@ jobs:
 
       - name: Build API env vars
         id: api_env
+        env:
+          ARTIFACT_PROVIDER_ENV_SUFFIX: ${{ steps.artifact_providers.outputs.env_suffix }}
         run: |
           set -euo pipefail
 
@@ -929,6 +946,7 @@ jobs:
             fi
           fi
 
+          env_vars="${env_vars}${ARTIFACT_PROVIDER_ENV_SUFFIX}"
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
