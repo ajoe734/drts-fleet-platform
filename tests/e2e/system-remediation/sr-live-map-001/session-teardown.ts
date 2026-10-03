@@ -28,6 +28,7 @@ export async function teardownMapSessions(env: LiveEnv, deps: TeardownDeps) {
   const config = validateCoverageTargets(env);
   const evidence = {
     candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
     status: "failed",
     driver_id: config.driverId,
     recovery: "consumed-invitation",

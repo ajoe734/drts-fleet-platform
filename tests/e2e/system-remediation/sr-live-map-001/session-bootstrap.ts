@@ -37,6 +37,7 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
   );
   const evidence = {
     candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
     status: "failed",
     stage: "google-workload-identity",
     cleanup: "not-required",
@@ -284,7 +285,7 @@ export function createMapSessionRequest(
     assert(response.ok);
     assert.equal(
       response.headers.get("x-drts-candidate-sha"),
-      config.candidateSha,
+      config.deployedSha,
     );
     return normalizeApiResponse(await response.json()) as T;
   };

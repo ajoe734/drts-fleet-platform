@@ -17,6 +17,7 @@ export async function verifyLiveDeployment(
   assertAllowedUrl(url, config.allowedTargets);
   const evidence = {
     candidate_sha: config.candidateSha,
+    expected_deployed_sha: config.deployedSha,
     deployed_sha: "",
     api_origin: apiOrigin,
     effective_backend: "",
@@ -41,17 +42,17 @@ export async function verifyLiveDeployment(
       health.mapProvider?.effectiveBackend === "google"
         ? "google"
         : "non-google";
-    assert.equal(health.candidateSha, config.candidateSha);
+    assert.equal(health.candidateSha, config.deployedSha);
     assert.equal(
       response.headers.get("x-drts-candidate-sha"),
-      config.candidateSha,
+      config.deployedSha,
     );
     assert.equal(health.mapProvider?.effectiveBackend, "google");
     evidence.status = "passed";
     return evidence;
   } catch {
     throw new Error(
-      "Live API health must report this candidate SHA and Google backend; see deployment evidence",
+      "Live API health must report the requested deployment SHA and Google backend; see deployment evidence",
     );
   } finally {
     save(evidence);
