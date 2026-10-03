@@ -123,7 +123,7 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
       externalOrderId: "test-driver-accept",
     });
     
-    let order = service.listOrders()[0]!;
+    const order = service.listOrders()[0]!;
     service.broadcastOrder(order.mirrorOrderId, { candidateDriverIds: ["drv-demo-001"] });
     
     // Relay to provider - will throw because it fails
