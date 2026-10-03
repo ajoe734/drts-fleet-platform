@@ -1,5 +1,10 @@
 import { expect, it, vi } from "vitest";
 import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
+import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
+import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
+import { RegulatoryRegistryController } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
+import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { bootstrapMapSessions } from "../../../e2e/system-remediation/sr-live-map-001/session-bootstrap";
 
 const sha = "a".repeat(40);
@@ -29,6 +34,7 @@ function harness(
     wrongRealm?: boolean;
     expiresIn?: string;
     headerSha?: string;
+    registry?: unknown;
   } = {},
 ) {
   const readGoogleIdToken = vi.fn(() => "google-id-token");
@@ -50,7 +56,7 @@ function harness(
         mapProvider: { effectiveBackend: options.backend ?? "google" },
       });
     if (url.pathname === "/api/regulatory-registry/drivers")
-      return reply({
+      return reply("registry" in options ? options.registry : {
         data: {
           items: [
             {
@@ -184,6 +190,7 @@ it.each([true, false])(
     expect(deps.fetch).toHaveBeenCalledTimes(9);
     expect(deps.exportSession.mock.calls).toEqual([
       ["DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN", "temp-ops-test-secret"],
+      ["DRTS_LIVE_MAP_INVITATION_ATTEMPTED", "true"],
       ["DRTS_LIVE_MAP_INVITE_CODE", "test-reg-code"],
       ["DRTS_LIVE_MAP_OBSERVER_SESSION_TOKEN", "ops-test-secret"],
       ["DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN", "driver-test-secret"],
@@ -293,4 +300,67 @@ it("rejects an on-duty driver before invitation or binding mutation", async () =
   expect(
     deps.fetch.mock.calls.every(([url]) => !String(url).includes("device/")),
   ).toBe(true);
+});
+
+it.each([
+  { row: null, failure: "driver_missing", workState: "missing", eligible: "missing" },
+  { row: { workState: "available", dispatchEligible: true }, failure: "work_state_not_offline,dispatch_eligible", workState: "available", eligible: true },
+  { row: { workState: "offline", dispatchEligible: true }, failure: "dispatch_eligible", workState: "offline", eligible: true },
+  { row: { dispatchEligible: false }, failure: "work_state_missing", workState: "missing", eligible: false },
+  { row: { workState: "offline" }, failure: "dispatch_eligible_missing", workState: "offline", eligible: "missing" },
+  { row: { workState: "private-secret-body", dispatchEligible: "private-secret-body" }, failure: "work_state_invalid,dispatch_eligible_invalid", workState: "invalid", eligible: "invalid" },
+])("records bounded isolation diagnostics without provisioning: $failure", async ({ row, failure, workState, eligible }) => {
+  const deps = harness({ snake: true, registry: {
+    data: { items: row ? [{ driverId: env.DRTS_LIVE_MAP_TEST_DRIVER_ID, name: "private-secret-name", ...row }] : [] },
+  } });
+  await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
+    `Driver isolation failed: ${failure}; workState=${workState}; dispatchEligible=${eligible}`,
+  );
+  expect(deps.evidence.sessions).toMatchObject({
+    status: "failed", stage: "driver:isolation", cleanup: "not-required",
+    driver_isolation: {
+      driver_id: env.DRTS_LIVE_MAP_TEST_DRIVER_ID, status: "failed", found: row !== null,
+      work_state: workState, dispatch_eligible: eligible, failures: failure.split(","),
+    },
+  });
+  expect(deps.readGoogleIdToken).toHaveBeenCalledTimes(1);
+  expect(deps.exportSession).not.toHaveBeenCalled();
+  expect(deps.fetch.mock.calls.every(([url]) => !String(url).includes("device/"))).toBe(true);
+  expect(JSON.stringify(deps.evidence)).not.toContain("private-secret");
+});
+
+it.each([null, {}, { data: { items: "private-secret-body" } }])("reports a malformed registry envelope without dumping the response", async (registry) => {
+  const deps = harness({ registry });
+  await expect(bootstrapMapSessions(env, deps)).rejects.toThrow("registry_shape_invalid");
+  expect(deps.evidence.sessions).toMatchObject({ driver_isolation: { failures: ["registry_shape_invalid"] } });
+  expect(deps.exportSession).not.toHaveBeenCalled();
+  expect(JSON.stringify(deps.evidence)).not.toContain("private-secret");
+});
+
+it.each([false, true])("uses the actual registry controller/seed and production serializer, snake=%s", async (snake) => {
+  const emit = vi.fn();
+  const audit = new AuditNotificationService();
+  const registry = new RegulatoryRegistryService(new OpsDispatchEventsService({ emit } as never), audit, new DriverProfileService(audit));
+  const controller = new RegulatoryRegistryController(registry);
+  const deps = harness({ snake, registry: controller.listDrivers() });
+  await bootstrapMapSessions(env, deps);
+  expect(deps.evidence.sessions).toMatchObject({ driver_isolation: {
+    status: "passed", found: true, work_state: "offline", dispatch_eligible: false, failures: [],
+  } });
+  expect(emit).not.toHaveBeenCalled();
+});
+
+it("retains invitation attempt before a lost issuance response", async () => {
+  const deps = harness();
+  const fetch = deps.fetch.getMockImplementation()!;
+  deps.fetch.mockImplementation(async (input, init) => {
+    if (String(input).endsWith("auth/driver/device/invite")) {
+      expect(deps.exportSession).toHaveBeenCalledWith("DRTS_LIVE_MAP_INVITATION_ATTEMPTED", "true");
+      throw new Error("private-secret-response");
+    }
+    return fetch(input, init);
+  });
+  await expect(bootstrapMapSessions(env, deps)).rejects.toThrow("driver:issue-invite");
+  expect(deps.evidence.sessions).toMatchObject({ cleanup: "unconfirmed" });
+  expect(JSON.stringify(deps.evidence)).not.toContain("private-secret");
 });
