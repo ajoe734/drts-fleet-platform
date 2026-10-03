@@ -45,20 +45,29 @@ export class UnprovisionedDocumentArtifactStore implements DocumentArtifactStore
 export function createDocumentArtifactStore(
   env: Env = process.env,
 ): DocumentArtifactStore {
+  // Any strict deployment marker wins. CI/test flags or a lower-priority
+  // environment alias must not turn a staging/production instance into a
+  // process-local store. Enforce this at runtime, not only in deploy-dev.
+  const strict = ["DRTS_ENV", "APP_ENV", "NODE_ENV"].some((key) =>
+    ["prod", "production", "stage", "staging"].includes(
+      value(env, key).toLowerCase(),
+    ),
+  );
   const provider =
     value(env, "DOCUMENT_ARTIFACT_STORAGE_PROVIDER") ||
-    (env.NODE_ENV === "test" ? "memory" : "unprovisioned");
+    (!strict && env.NODE_ENV === "test" ? "memory" : "unprovisioned");
   if (provider === "unprovisioned")
     return new UnprovisionedDocumentArtifactStore();
-  // Unlike the implicit default above, an operator explicitly opting into
-  // "memory" is a deliberate choice, not a missing-configuration gap -- the
-  // same trust level "s3" already gets below. The dev/prod deploy resolver
-  // (operations/deployment/resolve-dev-artifact-providers.py) independently
-  // only ever accepts "s3" or "unprovisioned" for a real deployment, so this
-  // cannot reach a live Cloud Run instance through the blessed deploy path;
-  // it exists so hermetic CI (no S3 fixture) can opt in without flipping the
-  // process-wide NODE_ENV signal that unrelated provider configs also read.
-  if (provider === "memory") return new InMemoryDocumentArtifactStore();
+  // Hosted hermetic fixtures may explicitly opt in without changing
+  // unrelated auth settings, but never when any environment is strict.
+  if (provider === "memory") {
+    if (strict) {
+      throw new Error(
+        "In-memory document artifact storage is forbidden in staging/production.",
+      );
+    }
+    return new InMemoryDocumentArtifactStore();
+  }
   if (provider !== "s3")
     throw new Error(
       "Document artifact storage must be s3; memory is test-only.",

@@ -569,12 +569,49 @@ describe("createDocumentArtifactStore provider resolution", () => {
     expect(store).toBeInstanceOf(InMemoryDocumentArtifactStore);
   });
 
-  it("honours an explicit memory opt-in even outside NODE_ENV=test (hermetic CI, e.g. cross-surface-e2e, has no S3 fixture and must not flip process-wide NODE_ENV)", () => {
-    const store = createDocumentArtifactStore({
-      DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
-    });
-    expect(store).toBeInstanceOf(InMemoryDocumentArtifactStore);
-  });
+  it.each([{}, { NODE_ENV: "test" }, { NODE_ENV: "development" }])(
+    "allows explicit memory for a non-strict fixture without changing unrelated auth configuration: %j",
+    (env) => {
+      const store = createDocumentArtifactStore({
+        ...env,
+        DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
+      });
+      expect(store).toBeInstanceOf(InMemoryDocumentArtifactStore);
+    },
+  );
+
+  const strictEnvironments = ["NODE_ENV", "APP_ENV", "DRTS_ENV"].flatMap(
+    (key) => ["production", "prod", "staging", "stage", " PRODUCTION ", " STAGING "].map(
+      (value) => ({ key, value }),
+    ),
+  );
+  it.each(strictEnvironments)(
+    "rejects explicit memory for $key=$value even when other markers and CI claim fixture mode",
+    ({ key, value }) => {
+      expect(() => createDocumentArtifactStore({
+        NODE_ENV: "test",
+        APP_ENV: "development",
+        DRTS_ENV: "test",
+        CI: "true",
+        [key]: value,
+        DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
+      })).toThrow(/forbidden in staging\/production/);
+    },
+  );
+  it.each(strictEnvironments)(
+    "never implicitly defaults to memory for $key=$value",
+    async ({ key, value }) => {
+      const store = createDocumentArtifactStore({
+        NODE_ENV: "test",
+        APP_ENV: "development",
+        DRTS_ENV: "test",
+        CI: "true",
+        [key]: value,
+      });
+      expect(store).toBeInstanceOf(UnprovisionedDocumentArtifactStore);
+      await expect(store.get("tenant-invoice", "not-materialized")).rejects.toThrow(/not configured/);
+    },
+  );
 
   it("still rejects an unrecognised explicit provider", () => {
     expect(() =>

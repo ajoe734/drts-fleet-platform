@@ -3,8 +3,14 @@
 ## Status and provenance
 
 Owner: Claude2. Independent reviewer: Codex. This is **implementation and
-offline regression evidence**, not a cloud-storage or multi-instance
+regression evidence**, not a cloud-storage or multi-instance
 deployment live acceptance (that remains `SR-LIVE-DOC-001`).
+
+**Historical evidence correction:** the final "Pi completion contribution"
+section supersedes earlier blanket offline/no-server claims, the advice to
+rerun the whole suite locally, and the claim that deployment validation alone
+makes production memory storage safe. Earlier commands/results are retained
+as history, not instructions or acceptance of the successor.
 
 This revision replaces the prior candidate `32f1a2f18312ec1e6f1086a07be86842f0300a32`
 (generation `c059e4b079df4b1194bd957f23d11d99`), which Codex reopened with
@@ -344,3 +350,101 @@ not configured` or an equivalent Postgres-dependent assertion — a VM
   a later revision of this document as the authoritative full-sweep status,
   and should independently re-run it if this document does not contain a
   recorded result.
+
+## Pi completion contribution (2026-10-03): strict runtime and actual S3 path
+
+This is a coordinated contribution within the original task, not a new task,
+self-review or acceptance shortcut. Claude2 remains delivery owner and Codex
+remains the independent reviewer. It starts from the valid unpublished
+checkpoint `3b397938f64bb6bb0a9c35e86a0c52a6030694a2`, preserving every
+published #2295 commit, including `d563cb97b10d72b3dad92858d014b7a8e8ad3902`.
+The later unpublished `d4d2d3ee0ef18efb5471fb7640ac8e8a4d329e15` checkpoint
+has an invalid Task-ID subject and remains preserved on a separate local
+history ref. It is not silently relabelled green or force-pushed away.
+Accepted dev provider/recovery commits copied by that historical checkpoint
+remain on dev; this contribution does not recopy them as new task work.
+
+### Runtime defect and before/after evidence
+
+The previous explicit-memory CI fix also permitted production and staging to
+write process-local-only invoices. A real factory probe on d4d2 reproduced
+successful writes whose bytes a second factory-created instance could not
+read. Relying only on the deployment resolver was insufficient: the runtime
+factory itself must reject this configuration.
+
+New parameterized regressions exercise `NODE_ENV`, `APP_ENV` and `DRTS_ENV`,
+production/staging long and short names, case/whitespace normalization,
+contradictory test/development markers and `CI=true`. Any strict marker wins.
+Explicit memory then throws before a store is returned; missing provider
+configuration stays unprovisioned even if another marker says test. Explicit
+non-strict hermetic fixtures still work without changing unrelated auth
+configuration. Existing hosted fixture env wiring and the two CI missing-await
+repairs are retained.
+
+Before changing product code on 3b397938f, the expanded existing regression
+file produced **30 failed / 21 passed**, exit 1: explicit-memory and implicit
+mixed-environment bypasses were reproduced. After the runtime repair the
+same assertions pass. None were skipped, removed or weakened.
+
+### Actual configured producer/reader evidence
+
+New `tests/unit/audit-artifact-durability-s3-20261003.test.ts` calls the actual
+`ControlledDownloadModule` provider factory. Each instance constructs its own
+real `S3DocumentArtifactStoreAdapter` and SDK client. **Only SDK send/receive
+transport is doubled** using real PutObject/GetObject command classes; the
+factory, adapter, module metadata, domain producers, PDF renderer, signing,
+hash recomputation and download controller are not mocked.
+
+The 12 cases cover independent pre-existing and restarted readers, encoded
+object keys, real platform-admin placard generation, real invoice generation
+followed by billing-profile mutation, and real driver-statement generation.
+Returned original bytes are compared directly, not merely against a test
+constant. Negative cases preserve forged-signature denial before storage
+access, stale-link denial after same-length object corruption, missing objects,
+missing MIME, zero/oversized/truncated/overlong/unreadable bodies, propagated
+AccessDenied, oversized upload rejection before transport, and unprovisioned
+module denial. There is no claim of live S3 or Cloud Run replica verification.
+The earlier row saying the S3 adapter is not exercised is superseded for this
+successor, not retrospectively corrected for its predecessor.
+
+### Completed checks and retained failures
+
+All checks below ran in the isolated contribution worktree. Private dependency
+installation used the unchanged lockfile, `--frozen-lockfile --ignore-scripts
+--offline`, with zero downloads and no existing node_modules symlink.
+
+- Expanded artifact, configured S3, artifact/invoice/placard lifecycle/PDF,
+  and the two finance/release caller suites: **10 files / 108 tests passed,
+  zero skips**, exit 0. Command: `pnpm exec vitest run
+  tests/unit/audit-artifact-durability-20261002.test.ts
+  tests/unit/audit-artifact-durability-s3-20261003.test.ts
+  tests/unit/system-remediation/sr-artifact-001/
+  tests/unit/system-remediation/sr-invoice-001/
+  tests/unit/system-remediation/sr-placard-001/
+  tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts
+  tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts
+  --maxWorkers=1`. DB URL variables were unset; a NODE_OPTIONS preload prohibited
+  TCP listeners/outbound sockets and UDP bind/send. This is an inspected test
+  selection, not permission to run all repository tests here.
+- `pnpm run typecheck:root`: exit 0. Initial new-test strict typing errors
+  (explicit undefined fields, callback type, byte index) were fixed rather
+  than excluded from root compilation.
+- API typecheck initially failed because a fresh checkout had not built the
+  control-plane-auth package declarations. Ran its existing TypeScript-only
+  build, then `pnpm exec tsc --noEmit -p apps/api/tsconfig.json`: exit 0.
+- Changed runtime/test ESLint with `--max-warnings=0` and `git diff --check`:
+  exit 0. Initial SDK test collection failed on an undeclared root dependency;
+  corrected dependency resolution through the API package importer (same real
+  SDK), then all 12 S3 cases executed. That collection failure was not a
+  product-defect reproduction.
+
+Machine-specific commands/output are retained under the repository-local
+`.local/audit-followthrough-20261003/` evidence directory. A prior owner-started
+whole-repository sweep was stopped by the coordinator after verifying its
+process subtree; the attempted destructive rerun was denied through the
+approval queue. Its interrupted output and known listener/DB selection risk
+are retained, **not a full offline pass**. The earlier shared-symlink install
+and broad-suite advice are not authorized practices. Full unit/browser/PG
+verification belongs in hosted CI. Independent exact-SHA review, hosted CI,
+merge and task acceptance are still required; no deployment, real object
+store, scanner, or other live acceptance is claimed by these local results.
