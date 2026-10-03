@@ -2341,3 +2341,226 @@ respectively, not proven from this VM.
 - Real multi-replica Cloud Run acceptance, combining genuine S3 and
   genuine PostgreSQL under real network-level request reordering, remains
   `SR-LIVE-DOC-001` and is not claimed here.
+
+## Codex REOPEN of locked candidate `fac47ff8d577512f7a91ffa44cf6b297c84e5b3a`, generation `9f5f14e9954f4ee9bbb2cb629880b777`, PR #2295: R10-A/R10-B byte-ownership compensation gaps
+
+This reopen retained the R10 fix above as a genuine repair of its own
+exact trigger (delayed baseline-GET, single loser, no transport
+failures -- the reopen's own words: "This candidate DOES repair their
+precise single-loser/no-fault trigger"), and reproduced two further,
+independent gaps in that same compensation against this candidate's
+own unchanged code, via a read-only production-path probe (real
+`PlatformAdminService`/`PlatformAdminRepository`/`S3DocumentArtifactStoreAdapter`
+SDK-command shapes/`ControlledDownloadController`, only SQL/SDK
+transport and time modeled):
+
+- **R10-A**: the compensating restore lived ONLY inside
+  `publishPlacardVersionExclusive`'s `if (!finalized)` branch. A
+  transport failure on the post-write verification read
+  (`storedEntry`, the re-read right after the fenced write) threw
+  BEFORE that branch was ever reached, falling straight to the generic
+  `catch`, which only called `releasePlacardPublishClaim` (a correct
+  no-op against an already-finalized successor) and never touched the
+  object. The reopen's probe: podA's baseline GET held past podC's
+  real reclaim/write/finalize; released, podA's own fenced write
+  legitimately lands over podC's bytes (same R10 mechanism as the fix
+  above); ONE modeled `GetObjectCommand` failure on podA's immediately
+  following verification read reproduced `storedBytesMatchWinner:
+  false`, `originalAndFreshLinks: "CONTENT_MISMATCH"` -- both podC's
+  original link and an independently booted fresh reader's freshly
+  issued link denied.
+- **R10-B**: even with ZERO transport failures, two independently
+  superseded attempts overlapping their own compensations could durably
+  restore the WRONG bytes. The fix above restored "this attempt's own
+  observed baseline" -- correct for a single loser (the baseline IS the
+  real winner's bytes), but a SECOND loser's own baseline can already be
+  the FIRST loser's corruption, not the real winner's. The reopen's
+  probe (podA claims, baseline held; podB reclaims podA's stale claim,
+  baseline also held; podC reclaims podB's stale claim and finalizes
+  for real; podA's baseline released -- reads podC, writes podA's own
+  bytes over it; podB's baseline released -- reads podA's (wrong) bytes
+  as ITS baseline, writes podB's own bytes over THAT; both verification
+  reads then deliver, both finalizes correctly fail, both attempts
+  compensate) ended with the DB row still naming podC but the stored
+  object holding podA's bytes -- podB's compensation had restored podA's
+  baseline verbatim, which was never the real winner's content.
+
+### Root cause: compensation restored "what I personally observed
+### before I wrote", not "what the authoritative winner actually has"
+
+Both gaps trace to the same design choice in the R10 fix: the thing
+restored was `baselineArtifact`, a value captured once, early, by THIS
+attempt itself, and the restore was only wired into the one path
+(`!finalized`) that assumed the verification read beforehand had
+already succeeded cleanly. Neither property holds in general --
+`baselineArtifact` is only guaranteed correct when exactly one loser
+ever overwrites the winner, and the verification read is just another
+fallible S3 round trip like every other one in this method.
+
+### Fix: `repairPlacardArtifactAfterLostClaim` -- re-derive the
+### authoritative winner's bytes fresh, from every failure exit, fenced
+### on a fresh read
+
+`platform-admin.service.ts`:
+
+- `renderPlacardArtifact`'s bytes-construction step is factored out into
+  a new pure `renderPlacardBytes(placard)` (no store access), reused by
+  both the existing render path and the new repair path below, so the
+  repair path can hash-check a candidate render against the
+  authoritative winner's recorded hash BEFORE attempting any write, not
+  only after (a mismatch there means the source
+  `PublicInfoVersionRecord` has itself drifted since the winner
+  originally published -- a legitimate, separate case
+  `rebuildPlacardArtifact` already owns for readers -- and this method
+  must not risk storing a mismatched substitute under the winner's
+  name; it simply declines to touch the object instead).
+- New private `repairPlacardArtifactAfterLostClaim(placardVersionId)`:
+  fetches the authoritative row via
+  `PlatformAdminRepository.getPlacardVersionRecord` (the same call
+  `resolvePlacardVersion` already uses for readers); if it is not yet a
+  known-finalized row (unpublished, or still carrying a pending
+  `__publishClaimToken`), there is nothing yet to restore TO, and this
+  returns -- whichever attempt eventually finalizes that row will call
+  this same method on its own losing siblings' behalf once it is
+  authoritative, so the gap closes on the next real finalize, not a
+  guess made before one exists. Otherwise: re-renders that row's bytes
+  via `renderPlacardBytes`, confirms the hash matches the row's own
+  `artifactManifestHash`, and -- only if the store's CURRENT object
+  (read fresh, right here, never reused from an earlier call) does not
+  already hold that hash -- writes it back via `putIfUnchanged`, fenced
+  on that same fresh generation. If the fence loses to a concurrent
+  writer or another repairer, this simply stops: whoever landed is
+  itself subject to the identical hash check on ITS next call, so there
+  is nothing to retry here. Because every caller that reaches the write
+  step is reproducing the SAME bytes (the one authoritative winner's,
+  re-derived independently each time, never copied from a sibling's
+  possibly-already-wrong observation), it does not matter how many
+  losers overlap or in what order their repairs land -- whichever one
+  writes last still leaves the correct bytes in place. This directly
+  closes R10-B: there is no "my baseline vs. your baseline" to
+  reconcile, because nothing is restored from a baseline at all anymore.
+- Called from TWO sites in `publishPlacardVersionExclusive`: the
+  `if (!finalized)` branch (replacing the old baseline-restore-and-throw
+  with a repair-and-throw), AND the method's existing outer `catch`,
+  alongside the existing `releasePlacardPublishClaim` call. The `catch`
+  addition is what closes R10-A -- ANY failure after this attempt's own
+  object write (a transport error on the verification read, or
+  anything else) now triggers the same idempotent repair, not only a
+  clean `finalize() === false`. The verification read itself
+  (`storedEntry`, the generic-writer defense-in-depth check an
+  unrelated existing regression requires -- see below) is unchanged;
+  only what happens when it, or anything after it, fails is new.
+
+### New regression coverage
+
+Both added to
+`tests/unit/audit-artifact-durability-20261002.test.ts`, as siblings of
+the existing R10 describe block (same `createRealPlacardRepository`
+fake-SQL-transport helper, same real
+`PlatformAdminService`/`PlatformAdminRepository`/`ControlledDownloadController`):
+
+- **R10-A** -- describe "R10-A byte-ownership compensation must survive
+  a failed post-write verification read": a
+  `HeldThenFailingGetDocumentArtifactStore` holds podA's baseline GET
+  past podC's real reclaim/write/finalize (same setup as the existing
+  R10 test), then -- once released -- makes podA's immediately
+  following verification `get()` throw a modeled transport error
+  instead of reaching the backing store. Asserts `publishA` rejects
+  with that modeled error (not a clean `PLACARD_PUBLISH_CONFLICT`), and
+  that the DB row, the stored bytes' sha256, podC's original link, and
+  a freshly booted independent reader's freshly issued link all still
+  match podC's published hash afterward.
+- **R10-B** -- describe "R10-B overlapping compensations from two
+  independently superseded attempts must not durably restore a loser's
+  bytes": three `PerPodArtifactStore` instances share one
+  `InMemoryDocumentArtifactStore` backing (one per pod, modelling three
+  Cloud Run instances against one bucket, the same shape as the three
+  separately intercepted `store(label)` instances in the reopen's own
+  probe). Reproduces the exact podA/podB/podC overlapping schedule
+  above with zero modeled transport failures, then asserts both `publishA`
+  and `publishB` reject with `PLACARD_PUBLISH_CONFLICT`, and that the DB
+  row, the stored bytes' sha256, podC's original link, and a fresh
+  reader's freshly issued link all match podC's published hash.
+- **Before this fix**, confirmed by temporarily swapping in the
+  previously-committed `fac47ff8d577512f7a91ffa44cf6b297c84e5b3a` copy
+  of `platform-admin.service.ts` ONLY (via `git show
+  fac47ff8d577512f7a91ffa44cf6b297c84e5b3a:<path>` written to a scratch
+  copy, then restored -- no `git stash`, no edit to tracked history),
+  keeping both new tests as committed in this round: both fail exactly
+  as the reopen's own probe predicted --
+  `expect(stored?.record.sha256).toBe(published.artifactManifestHash)`
+  fails in each (actual value is podA's hash for R10-A, podA's hash
+  again for R10-B, neither is podC's).
+- **After this fix**: both pass. Full scoped suite with the fix and
+  both new tests in place: `16 files / 187 tests passed, 0 failed, 0
+  skipped` (two more than the `185` recorded in the prior round,
+  consistent with exactly two new cases added).
+
+An earlier draft of the `HeldThenFailingGetDocumentArtifactStore` had a
+harness bug, not a product bug: it checked the fail-trigger on the SAME
+`get()` invocation that had just been released from its hold, so the
+held baseline read itself (not the later, separate verification read)
+was the one that threw. Caught by re-running the R10-A test against
+this round's OWN fixed service code first -- it passed even though the
+harness bug meant it was not yet exercising the intended failure point
+-- then corrected before drawing any conclusion from it; no failed
+harness attempt is treated as evidence either way, same discipline as
+the reopen's own probe.
+
+### Verification at this repair
+
+```
+cd /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-audit-artifact-durability-20261002-2
+pnpm --filter @drts/contracts run build              # pre-existing local dist gap, unrelated to this file
+pnpm --filter @drts/control-plane-auth run build      # same
+cd apps/api && pnpm exec tsc --noEmit -p tsconfig.json  # exit 0, zero errors
+cd ..
+pnpm exec eslint tests/unit/audit-artifact-durability-20261002.test.ts \
+  apps/api/src/modules/platform-admin/platform-admin.service.ts  # exit 0, no findings
+git diff --check origin/dev...HEAD                     # exit 0
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts tests/unit/audit-artifact-durability-s3-20261003.test.ts tests/unit/system-remediation/sr-artifact-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-placard-001/ tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts --maxWorkers=1
+# => exit 0, 16 files / 187 tests passed, 0 skipped
+cd apps/api && pnpm exec vitest run tests/unit/platform-admin.service.test.ts --maxWorkers=1
+# => exit 0, 1 file / 3 tests passed
+```
+Run against this repair's committed HEAD,
+`2127eb1158cc47402add1e1414c1b0b91edda307`. Hosted CI for this SHA is
+pending, produced by the handoff/candidate lifecycle, not run locally
+from this VM. No local PostgreSQL/integration collection, browser,
+merge, or deployment is claimed. The real-PostgreSQL matrix and any
+live S3/multi-replica Cloud Run behavior remain hosted-CI-only and
+`SR-LIVE-DOC-001` respectively, unchanged by this round (this round
+touched no SQL text and no integration-test file).
+
+### Acceptance mapping (this repair, R10-A/R10-B round)
+
+| Finding/acceptance | Source location | Old → new | Evidence | Limitation |
+| --- | --- | --- | --- | --- |
+| R10-A: a transport failure on the post-write verification read bypassed compensation entirely | `platform-admin.service.ts` `publishPlacardVersionExclusive`'s outer `catch` | catch only released the DB claim, never touched the object → catch now also calls `repairPlacardArtifactAfterLostClaim` | new `HeldThenFailingGetDocumentArtifactStore` regression (fails before, passes after); reopen's own production-path probe against the locked candidate | adapter/service/repository-level only, against transport mocks that honour real S3/SQL semantics -- not a live S3 bucket, live PostgreSQL connection, or killed Cloud Run process; `SR-LIVE-DOC-001` for that |
+| R10-B: overlapping compensations from independently superseded attempts could durably restore a loser's bytes with zero transport failures | same method, both the `!finalized` branch and `catch` | "restore my own observed baseline" (can itself be another loser's corruption) → `repairPlacardArtifactAfterLostClaim` re-derives the authoritative winner's bytes fresh every time, fenced on a freshly read generation, so every repair attempt targets identical correct content regardless of overlap/order | new `PerPodArtifactStore` three-way regression (fails before, passes after); reopen's own production-path probe | same as above |
+| `durable_producer_reader_wiring` | both fixes above | now closed for the delayed-PUT, delayed-baseline-GET, failed-verification-read, and overlapping-compensation cases | same as above | same as above |
+| `cross_instance_restart_bytes` | both fixes above | same | same as above | same |
+| `signature_hash_denial_regressions` | unchanged fail-closed mismatch checks, plus both repaired paths now correctly re-matching the winner's hash | still passing | scoped suite (187/187) | n/a |
+| `same_sha_review_ci` | this candidate's own SHA (`2127eb1158cc47402add1e1414c1b0b91edda307`) | pending (produced after handoff) | n/a yet | previous SHAs' hosted CI does not cover this repair |
+
+### Remaining limitations (this repair, R10-A/R10-B round)
+
+- Same VM restriction as every prior round: no live S3 bucket, no live
+  PostgreSQL connection, no Cloud Run process kill/restart. Both new
+  regressions and the reopen's own probe model only the S3 SDK transport
+  and the repository's SQL transport, using real production
+  service/repository/controller/adapter code in between.
+- `repairPlacardArtifactAfterLostClaim` is itself a best-effort,
+  idempotent repair attempted synchronously within a losing publish
+  call -- it does not run, and nothing else currently runs it, if the
+  process dies (Cloud Run termination) between this attempt's own
+  destructive write and reaching either of the two call sites. That
+  specific gap -- process death, as opposed to a modeled transport
+  failure the process survives -- was explicitly out of scope for this
+  reopen's own probe too, and remains `SR-LIVE-DOC-001`.
+- This round changed no SQL text, no repository method signatures, and
+  no integration test file; the real-PostgreSQL matrix and its hosted
+  CI status are unchanged and not re-verified here.
+- Real multi-replica Cloud Run acceptance, combining genuine S3 and
+  genuine PostgreSQL under real network-level request reordering, remains
+  `SR-LIVE-DOC-001` and is not claimed here.
