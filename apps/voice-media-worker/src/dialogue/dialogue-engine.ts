@@ -86,7 +86,21 @@ export class VoiceDialogueEngine {
       request.signal.throwIfAborted();
       if (isStale() || Date.now() >= request.deadline)
         throw new Error("voice_stale_epoch");
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist overlapping
+      // recovery (Codex reopen, canonical 2026-10-03T22:41:06Z, "an
+      // obsolete marker resurrected from the clone"): `next.unresolvedCommit`
+      // is only ever a byproduct of the `structuredClone(state)` this
+      // method took BEFORE `ports.persist` ran -- a trusted persist port
+      // never writes a new value onto `next` itself, only onto the real,
+      // live `state` directly (via `recovery.attachmentState`, see
+      // `dialogue-persist-port.ts`). If a concurrent reconciliation
+      // resolved or re-armed `state.unresolvedCommit` while this call was
+      // in flight, `next`'s copy is simply stale and must never overwrite
+      // the live value below -- `state.unresolvedCommit` immediately
+      // before this merge is always the authoritative one.
+      const liveUnresolvedCommit = state.unresolvedCommit;
       Object.assign(state, next);
+      state.unresolvedCommit = liveUnresolvedCommit;
       const results = await this.boundedStage(request, isStale, (bounded) =>
         ports.execute(output, bounded),
       );

@@ -887,4 +887,134 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control: unified causal con
       "speech_start",
     ]);
   });
+
+  it("[R4-control boundedness, Codex reopen canonical 2026-10-03T22:41:06Z] a sustained outage that accumulates only protected media-epoch-transition entries cannot grow the backlog without bound -- the attachment fails closed instead", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "f0000000-0000-4000-8000-000000000061",
+      resourceScopeId: "f0000000-0000-4000-8000-000000000062",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 60,
+    };
+    const calls: Array<{ body: Record<string, unknown> }> = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let eventsCallCount = 0;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const body = init?.body
+        ? (JSON.parse(init.body as string) as Record<string, unknown>)
+        : {};
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return restorationGetHandler(binding);
+      }
+      if (path.endsWith("/events")) {
+        eventsCallCount += 1;
+        if (eventsCallCount === 1) {
+          // Observation 0 genuinely stays in flight (held, not timed
+          // out) across the whole burst below -- every later observation
+          // piles up BEHIND it, never evictable (all are
+          // `media_epoch_transition`).
+          await firstGate;
+        }
+        calls.push({ body });
+        const sequence = body.sequence as number;
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: sequence,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + calls.length,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      5_000,
+      undefined,
+      false,
+      apiClient,
+    );
+    const attachment = coordinator.attach(binding.voiceSessionId, binding);
+    await flush(10);
+
+    // Observation 0: genuinely in flight, held on `firstGate`.
+    coordinator.handle(
+      attachment,
+      mediaEpochAdvancedEvent(binding.voiceSessionId, 1, "2026-01-01T00:00:00.000Z"),
+      dumbSpeaker(),
+    );
+    await flush(10);
+    expect(eventsCallCount).toBe(1);
+    expect(calls).toHaveLength(0);
+
+    // 40 more media.epoch.advanced observations, ALL `media_epoch_
+    // transition` -- never evictable (see `isEvictableControlEvent`), so
+    // the per-kind soft cap (`MAX_CONTROL_EVENT_BACKLOG`) never fires at
+    // all here. Before this fix, this backlog grew without any bound;
+    // this burst is well past `MAX_TOTAL_CONTROL_EVENT_BACKLOG` (32).
+    for (let i = 2; i <= 41; i++) {
+      coordinator.handle(
+        attachment,
+        mediaEpochAdvancedEvent(
+          binding.voiceSessionId,
+          i,
+          `2026-01-01T00:01:${String(i).padStart(2, "0")}.000Z`,
+        ),
+        dumbSpeaker(),
+      );
+      await flush(1);
+    }
+    await flush(10);
+    // Still only observation 0 ever attempted -- the backlog was building
+    // up entirely behind it until the hard cap fired partway through the
+    // burst above.
+    expect(eventsCallCount).toBe(1);
+
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control boundedness
+    // (Codex reopen, canonical 2026-10-03T22:41:06Z): once the hard total
+    // cap is exceeded, this attachment has failed closed (the same
+    // `restoreFailed` semantics a failed restoration already uses) -- a
+    // later event is now observable evidence only, never new input.
+    // Prove it by sending one more observation and confirming it has no
+    // effect at all, even once observation 0 is finally released.
+    coordinator.handle(
+      attachment,
+      mediaEpochAdvancedEvent(binding.voiceSessionId, 42, "2026-01-01T00:02:00.000Z"),
+      dumbSpeaker(),
+    );
+    await flush(5);
+
+    releaseFirst();
+    await flush(20);
+
+    // Observation 0 (the one genuinely in flight when the cap was
+    // exceeded) is the only one ever delivered -- every other queued
+    // transition was rejected and removed rather than retained without
+    // bound, and the attachment refuses to admit anything further
+    // instead of silently dropping a required transition and letting a
+    // later one proceed as if the chain were intact.
+    expect(eventsCallCount).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body.occurredAt).toBe("2026-01-01T00:00:00.000Z");
+  });
 });

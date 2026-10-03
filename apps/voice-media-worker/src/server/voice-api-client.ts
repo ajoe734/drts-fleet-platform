@@ -451,8 +451,24 @@ export class VoiceApiClient {
 
     if (!response.ok) {
       const envelope = (parsed ?? {}) as ApiErrorEnvelope;
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+      // canonical 2026-10-03T22:41:06Z, "every non-2xx is treated as a
+      // trustworthy domain decision"): `envelope.error?.code` present means
+      // apps/api itself parsed this exact request and returned a structured
+      // domain decision (e.g. `VOICE_DRAFT_STALE`) -- that is real evidence
+      // the write never landed. Its ABSENCE means this response carries no
+      // structured error body at all: an intermediary (reverse proxy, load
+      // balancer) returning a bare 502/504, or any other opaque/malformed
+      // reply apps/api itself never produced. That case is exactly as
+      // ambiguous as `VOICE_API_UNREACHABLE` -- a response being received
+      // from *something* is not evidence the application ever saw, let
+      // alone rejected, this request -- so it gets its own distinct code
+      // instead of silently defaulting to the generic `VOICE_API_ERROR`
+      // label, which `dialogue-persist-port.ts`'s `isDefinitiveRejection`
+      // check must treat as ambiguous (reconcile), never as a confirmed
+      // rejection (fail closed immediately).
       throw new VoiceApiError(
-        envelope.error?.code ?? "VOICE_API_ERROR",
+        envelope.error?.code ?? "VOICE_API_UNSTRUCTURED_RESPONSE",
         envelope.error?.message ?? `apps/api '${path}' returned HTTP ${response.status}.`,
       );
     }

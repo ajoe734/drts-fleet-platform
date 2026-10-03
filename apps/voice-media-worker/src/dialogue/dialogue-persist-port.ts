@@ -109,22 +109,27 @@ const MAX_UNRESOLVED_COMMIT_RECONCILE_ATTEMPTS = 3;
  * snapshot but delivery remains held. BEFORE releasing GET, send empty
  * next final" in that reopen.
  *
- * Returns the correlating snapshot once resolved. When `attachmentState`
- * is supplied, installs the recovered content onto it (and clears
- * `unresolvedCommit`) as a side effect, under the same monotonic
- * `committedSessionVersion` fencing `createTrustedDialoguePersistPort`'s
- * success path already uses, and dedupes concurrent callers via
- * `unresolvedCommitRecoveries`. Without `attachmentState` (no cross-turn
- * memory to track this on at all -- a caller with no `recovery`, unchanged
- * from before this fix existed) this is just a bounded-retry version of
- * the single-shot `reconcileAmbiguousCommit` call this replaces, with no
- * promise-sharing of its own (nothing else could join it anyway).
+ * Returns `{ resolved: true, snapshot }` once a correlating response is
+ * found. When `attachmentState` is supplied, installs the recovered
+ * content onto it (and clears `unresolvedCommit`) as a side effect, under
+ * the same monotonic `committedSessionVersion` fencing
+ * `createTrustedDialoguePersistPort`'s success path already uses, and
+ * dedupes concurrent callers via `unresolvedCommitRecoveries`. Without
+ * `attachmentState` (no cross-turn memory to track this on at all -- a
+ * caller with no `recovery`, unchanged from before this fix existed) this
+ * is just a bounded-retry version of the single-shot
+ * `reconcileAmbiguousCommit` call this replaces, with no promise-sharing
+ * of its own (nothing else could join it anyway).
  *
- * Throws if the bounded attempts are exhausted with no correlating
- * response -- when `attachmentState` is supplied, its marker is
- * deliberately left set in that case, so the NEXT turn's own attempt (via
- * either entry point) retries it again rather than silently treating
- * "still unknown" as "safe to ignore."
+ * Resolves to `{ resolved: false }` -- never throws -- once the bounded
+ * attempts are exhausted with no correlating response found (Codex
+ * reopen, canonical 2026-10-03T22:41:06Z, "pre-store failure permanently
+ * wedges the attachment"): exhausting the bounded window is itself the
+ * authoritative "this write never landed" determination, so when
+ * `attachmentState` is supplied, its marker is cleared in that case too --
+ * a PRIOR version of this function left it set forever, which permanently
+ * wedged every later turn's own top-of-call gate on a write already known
+ * to have never been stored.
  */
 /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
  * canonical 2026-10-03T21:53:56Z, "new Promise field crashes cloning
@@ -140,9 +145,28 @@ const MAX_UNRESOLVED_COMMIT_RECONCILE_ATTEMPTS = 3;
  * per attachment, see `TurnSession.state`) so this stays just as joinable
  * across concurrent callers for that same attachment as the old field was,
  * without `structuredClone` ever seeing it. */
+/** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+ * canonical 2026-10-03T22:41:06Z, "pre-store failure permanently wedges
+ * the attachment"): `reconcileUnresolvedCommit` used to THROW once its
+ * bounded retries exhausted with no correlating snapshot found, leaving
+ * `unresolvedCommit` set regardless -- but exhausting the bounded window
+ * with nothing found is itself the authoritative "this write never
+ * landed" determination (SD never offers a fourth way to learn the
+ * outcome of an already-lost acknowledgement). Returning a tagged result
+ * instead of throwing lets both call sites tell "a prior write WAS
+ * reconciled onto the attachment" apart from "bounded retries exhausted,
+ * confirmed never stored" without conflating either with an unrelated
+ * secondary failure. */
+type UnresolvedCommitReconciliation =
+  | {
+      readonly resolved: true;
+      readonly snapshot: PersistDialogueSnapshotResult["snapshot"];
+    }
+  | { readonly resolved: false };
+
 const unresolvedCommitRecoveries = new WeakMap<
   VoiceDialogueState,
-  Promise<PersistDialogueSnapshotResult["snapshot"]>
+  Promise<UnresolvedCommitReconciliation>
 >();
 async function reconcileUnresolvedCommit(
   client: VoiceApiClient,
@@ -156,8 +180,8 @@ async function reconcileUnresolvedCommit(
     turnId: string;
   },
   attachmentState?: VoiceDialogueState,
-): Promise<PersistDialogueSnapshotResult["snapshot"]> {
-  const attempt = async (): Promise<PersistDialogueSnapshotResult["snapshot"]> => {
+): Promise<UnresolvedCommitReconciliation> {
+  const attempt = async (): Promise<UnresolvedCommitReconciliation> => {
     for (
       let i = 0;
       i < MAX_UNRESOLVED_COMMIT_RECONCILE_ATTEMPTS;
@@ -191,12 +215,18 @@ async function reconcileUnresolvedCommit(
           }
           attachmentState.unresolvedCommit = null;
         }
-        return candidate;
+        return { resolved: true, snapshot: candidate };
       }
     }
-    throw new Error(
-      "voice_trusted_persist_unresolved_commit: a previous turn's content commit outcome could not be reconciled within the bounded retry window.",
-    );
+    // Confirmed non-acceptance: the bounded retry window is exhausted
+    // with no correlating snapshot ever found. Clear the marker so a
+    // healthy LATER turn's own top-of-call gate does not re-enter this
+    // same bounded loop forever against a write that is now known to
+    // have never landed -- the previous behavior (throw, leave the
+    // marker set) permanently wedged every subsequent turn on this
+    // attachment once a single pre-store failure occurred.
+    if (attachmentState) attachmentState.unresolvedCommit = null;
+    return { resolved: false };
   };
   if (!attachmentState) return attempt();
   let inFlight = unresolvedCommitRecoveries.get(attachmentState);
@@ -424,7 +454,7 @@ export function createTrustedDialoguePersistPort(
       // write. The caller (a fresh turn, cloning `next` from the now-
       // reconciled `state`) is the only safe way to retry.
       if (recovery?.attachmentState.unresolvedCommit) {
-        await reconcileUnresolvedCommit(
+        const reconciliation = await reconcileUnresolvedCommit(
           client,
           current.voiceSessionId,
           capability.token,
@@ -432,8 +462,50 @@ export function createTrustedDialoguePersistPort(
           recovery.attachmentState.unresolvedCommit,
           recovery.attachmentState,
         );
+        if (reconciliation.resolved) {
+          throw new Error(
+            "voice_trusted_persist_superseded_by_recovered_commit: a prior turn's unresolved content commit was just reconciled onto this attachment; this turn's own candidate state predates it and must be retried from a fresh turn.",
+          );
+        }
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
+        // reopen, canonical 2026-10-03T22:41:06Z): confirmed
+        // non-acceptance -- `reconcileUnresolvedCommit` already cleared
+        // the marker, and nothing was ever actually committed, so this
+        // call's own submission may proceed normally below instead of
+        // being blocked forever behind a write that never landed.
+      }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist overlapping
+      // recovery (Codex reopen, canonical 2026-10-03T22:41:06Z, "a
+      // candidate cloned before recovery becomes admissible simply
+      // because recovery completed during capability issuance"): `state`
+      // (this call's `next` parameter) is a clone taken at the START of
+      // this turn, before the `issueCapability` await above -- a
+      // DIFFERENT, concurrent reconciliation (another call's
+      // `reconcileUnresolvedCommit`) can install new content directly
+      // onto `recovery.attachmentState` (the real, live object) at any
+      // point during that await, which the unresolvedCommit check just
+      // above can miss entirely once that recovery already finished
+      // (nothing is left set to check). `committedSessionVersion` is the
+      // one fencing value every successful install -- recovered or a
+      // normal turn's own success path -- always advances together with
+      // the attachment's actual content, so a mismatch between this
+      // clone's own baseline and the attachment's CURRENT value is
+      // conclusive proof this candidate predates content the attachment
+      // already has and must never submit over it. Guarded by
+      // `state.committedSessionVersion !== undefined` so a caller whose
+      // `state` is not a genuine engine clone at all (a hand-built test
+      // double with no such field) is unaffected, same as before this
+      // fence existed -- a real `VoiceDialogueState` instance (every
+      // production `next`) always initializes this field to `null`,
+      // never `undefined`.
+      if (
+        recovery &&
+        state.committedSessionVersion !== undefined &&
+        recovery.attachmentState.committedSessionVersion !==
+          state.committedSessionVersion
+      ) {
         throw new Error(
-          "voice_trusted_persist_superseded_by_recovered_commit: a prior turn's unresolved content commit was just reconciled onto this attachment; this turn's own candidate state predates it and must be retried from a fresh turn.",
+          "voice_trusted_persist_superseded_by_recovered_commit: this turn's candidate state predates a commit a concurrent recovery already installed onto the real attachment; retry from a fresh turn.",
         );
       }
       const expectedSessionVersion = current.sessionVersion;
@@ -554,6 +626,29 @@ export function createTrustedDialoguePersistPort(
           "voice_trusted_persist_stale_response: resolveInput response does not correlate with the resolved session/revision.",
         );
       }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist overlapping
+      // recovery (Codex reopen, canonical 2026-10-03T22:41:06Z): re-check
+      // the same fence as above, right before this candidate's own
+      // content is actually submitted -- `resolveInput`'s own await
+      // (just completed) is a second, independent window during which a
+      // concurrent recovery could have installed new content onto
+      // `recovery.attachmentState`. Closing this window only at
+      // capability-issuance time would still let a candidate cloned
+      // before THIS await started slip through and overwrite content a
+      // recovery installed while `resolveInput` was in flight. Same
+      // `state.committedSessionVersion !== undefined` guard as above, for
+      // the same reason (exempts a hand-built test double with no such
+      // field; never a real engine clone).
+      if (
+        recovery &&
+        state.committedSessionVersion !== undefined &&
+        recovery.attachmentState.committedSessionVersion !==
+          state.committedSessionVersion
+      ) {
+        throw new Error(
+          "voice_trusted_persist_superseded_by_recovered_commit: this turn's candidate state predates a commit a concurrent recovery already installed onto the real attachment; retry from a fresh turn.",
+        );
+      }
       // The admission CAS above only resolves this turn's input against the
       // session's control watermark -- it carries no dialogue-content
       // field at all (SD §10.1). The actual versioned, encrypted content
@@ -621,24 +716,28 @@ export function createTrustedDialoguePersistPort(
         // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
         // canonical 2026-10-03T21:53:56Z, "every failed snapshot write is
         // now made permanently unresolved unless that exact snapshot
-        // actually exists"): a structured `VoiceApiError` whose `code` is
-        // anything OTHER than `VOICE_API_UNREACHABLE` means `VoiceApiClient`
-        // actually received a response FROM apps/api -- the server ran,
-        // looked at this exact request, and explicitly rejected it (a stale
-        // CAS precondition, a validation failure, ...). That is not
-        // ambiguous: the write definitively never landed, so there is
-        // nothing for `reconcileUnresolvedCommit` to ever find, and marking
+        // actually exists"), corrected again (Codex reopen, canonical
+        // 2026-10-03T22:41:06Z, "an unstructured response is not a domain
+        // decision"): a structured `VoiceApiError` whose `code` is a real
+        // domain code apps/api itself produced (e.g. `VOICE_DRAFT_STALE`)
+        // means the server ran, looked at this exact request, and
+        // explicitly rejected it -- that is not ambiguous: the write
+        // definitively never landed, so there is nothing for
+        // `reconcileUnresolvedCommit` to ever find, and marking
         // `unresolvedCommit` here would block every later turn's persist,
         // polling forever, for a snapshot that is already known to not
-        // exist. Only `VOICE_API_UNREACHABLE` (no response was ever
-        // received at all -- transport failure, timeout, proxy reset,
-        // dropped connection) is genuinely ambiguous: the request may have
-        // been durably applied server-side with only its own
-        // acknowledgement lost. Fail this call closed immediately,
-        // unchanged from before this fix, without ever touching
-        // `unresolvedCommit` for a definitive rejection.
+        // exist. `VOICE_API_UNREACHABLE` (no response was ever received at
+        // all) and `VOICE_API_UNSTRUCTURED_RESPONSE` (a response WAS
+        // received, but with no structured error body apps/api itself
+        // produced -- an intermediary's bare 502/504, a malformed reply)
+        // are BOTH genuinely ambiguous: receiving *some* HTTP response is
+        // not evidence the application ever saw, let alone rejected, this
+        // write. Only a genuine structured domain rejection fails this call
+        // closed immediately without ever touching `unresolvedCommit`.
         const isDefinitiveRejection =
-          err instanceof VoiceApiError && err.code !== "VOICE_API_UNREACHABLE";
+          err instanceof VoiceApiError &&
+          err.code !== "VOICE_API_UNREACHABLE" &&
+          err.code !== "VOICE_API_UNSTRUCTURED_RESPONSE";
         if (isDefinitiveRejection) {
           throw err;
         }
@@ -651,30 +750,36 @@ export function createTrustedDialoguePersistPort(
         if (recovery) {
           recovery.attachmentState.unresolvedCommit = pending;
         }
-        let candidate: PersistDialogueSnapshotResult["snapshot"];
-        try {
-          candidate = await reconcileUnresolvedCommit(
-            client,
-            current.voiceSessionId,
-            capability.token,
-            recoverySignal,
-            pending,
-            recovery?.attachmentState,
-          );
-        } catch {
+        const reconciliation = await reconcileUnresolvedCommit(
+          client,
+          current.voiceSessionId,
+          capability.token,
+          recoverySignal,
+          pending,
+          recovery?.attachmentState,
+        );
+        if (!reconciliation.resolved) {
+          // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
+          // reopen, canonical 2026-10-03T22:41:06Z): bounded retries
+          // exhausted with no correlating snapshot ever found --
+          // confirmed non-acceptance, not merely "still unknown".
+          // `reconcileUnresolvedCommit` already cleared `unresolvedCommit`
+          // on the real attachment (unlike the previous version of this
+          // code, which left it set forever), so a LATER turn is free to
+          // submit its own fresh content rather than being permanently
+          // wedged behind this write. Surface the ORIGINAL write failure
+          // here, not an internal retry-exhaustion message, so this
+          // call's own externally-visible error is unchanged from before
+          // this fix -- unless THIS exact call's own `signal` is what
+          // aborted, same as before this fix.
           if (signal?.aborted) {
             throw new Error(
               "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",
             );
           }
-          // Bounded retries exhausted -- still genuinely unresolved. When
-          // `recovery` is present, `unresolvedCommit` is deliberately left
-          // set (see `reconcileUnresolvedCommit`'s own doc): surface the
-          // ORIGINAL write failure, not the internal retry-exhaustion
-          // message, so this call's externally-visible error is unchanged
-          // from before this fix for the "truly unreachable" case.
           throw err;
         }
+        const candidate = reconciliation.snapshot;
         // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
         // reopen, canonical 2026-10-03T19:24:15Z, corrected again per the
         // canonical 2026-10-03T20:13:00Z and 2026-10-03T21:09:40Z

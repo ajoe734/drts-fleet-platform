@@ -122,8 +122,36 @@ interface PendingControlEvent {
 }
 
 /** Bound on `TurnSession.pendingControlEvents` -- see that field's own doc
- * on the drop-oldest policy this enforces. */
+ * on the drop-oldest policy this enforces. Counts only EVICTABLE entries
+ * (see `isEvictableControlEvent`); a protected entry (ambiguous outcome,
+ * or any `media_epoch_transition`) never counts against this cap. */
 const MAX_CONTROL_EVENT_BACKLOG = 8;
+
+/** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control boundedness (Codex
+ * reopen, canonical 2026-10-03T22:41:06Z, "every media_epoch_transition is
+ * exempt and the backlog is explicitly unbounded"): `MAX_CONTROL_EVENT_BACKLOG`
+ * only bounds evictable entries -- every `media_epoch_transition` and every
+ * `attempted` (ambiguous-outcome) `speech_start` is deliberately exempt
+ * from it, by design (see `isEvictableControlEvent`'s own doc), since
+ * dropping either one permanently blocks every later event at the new
+ * epoch, or risks a duplicate the server's own dedup might not catch. SD
+ * §5.4 still requires a FINITE retained backlog even during a sustained
+ * outage where every outstanding entry is protected -- this is the total
+ * cap across ALL entries, evictable or not, that makes that true. It is
+ * deliberately far above `MAX_CONTROL_EVENT_BACKLOG` (every real call this
+ * worker admits needs far fewer than this many concurrently outstanding
+ * control observations) so it is never reached by the retained-delivery
+ * policy's own normal operation -- only by a sustained outage that
+ * accumulates more PROTECTED entries than this worker can safely retain
+ * memory for. Exceeding it is never resolved by dropping a required
+ * transition and silently letting a successor proceed as if the chain
+ * were intact (the previous, rejected approach) -- the only safe action
+ * left is to fail this attachment closed via the SAME `restoreFailed`
+ * path a failed restoration already uses (`handle()` then treats it
+ * exactly like a released attachment: a late event is observable evidence
+ * only, never new input), forcing an explicit reattachment/recovery
+ * instead of growing without bound. */
+const MAX_TOTAL_CONTROL_EVENT_BACKLOG = 32;
 
 interface TurnSession {
   engine: VoiceDialogueEngine;
@@ -1050,6 +1078,37 @@ export class VoiceCallTurnCoordinator {
         ),
       );
     }
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control boundedness
+    // (Codex reopen, canonical 2026-10-03T22:41:06Z): the eviction above
+    // only ever targets evictable entries, so a sustained outage that
+    // accumulates only PROTECTED entries (every `media_epoch_transition`,
+    // or an ambiguous-outcome `speech_start`) grows this array without
+    // bound -- see `MAX_TOTAL_CONTROL_EVENT_BACKLOG`'s own doc. Once that
+    // hard total cap is exceeded, there is no entry left that is both
+    // present and safe to evict; the only safe action is to fail this
+    // attachment closed rather than keep retaining unbounded memory for
+    // it or silently drop a required transition and let a successor
+    // proceed as if the chain were intact. The entry the drain loop is
+    // currently awaiting (if any) is preserved -- its own HTTP attempt is
+    // already in flight and may yet durably land -- every OTHER queued
+    // entry is rejected and removed.
+    if (turnSession.pendingControlEvents.length > MAX_TOTAL_CONTROL_EVENT_BACKLOG) {
+      const inFlight = turnSession.inFlightControlEvent;
+      const stuck = turnSession.pendingControlEvents.filter(
+        (candidate) => candidate !== inFlight,
+      );
+      turnSession.pendingControlEvents.length = 0;
+      if (inFlight) turnSession.pendingControlEvents.push(inFlight);
+      turnSession.restoreFailed = true;
+      for (const stuckEntry of stuck) {
+        stuckEntry.settle?.reject(
+          new Error(
+            "voice_control_event_backlog_exhausted: this attachment's control-event backlog exceeded its bounded total retained capacity with no entry safe to evict; the attachment has been failed closed and must be reattached.",
+          ),
+        );
+      }
+      return;
+    }
     this.flushControlEventBacklog(turnSession, binding);
   }
 
@@ -1080,62 +1139,78 @@ export class VoiceCallTurnCoordinator {
       clearTimeout(turnSession.controlEventRetryTimer);
       delete turnSession.controlEventRetryTimer;
     }
-    const bounded = this.boundedControlSignal(turnSession);
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control boundedness
+    // (Codex reopen, canonical 2026-10-03T22:41:06Z, "a single bounded
+    // drain/retry owner"): `boundedControlSignal` used to be called here,
+    // unconditionally, on EVERY invocation of this method -- including
+    // every one of N enqueue calls arriving while a single drain is
+    // already chained and running, each allocating its own
+    // `AbortController`, deadline timer and `releaseAbort` listener even
+    // though `chainControlEvent` already serializes them onto one queue
+    // and only the FIRST such invocation ever finds non-empty work left
+    // to do. Deferred inside the chained task itself, and only actually
+    // created once this invocation's own turn confirms there is
+    // something to drain, so an attachment accumulating a large backlog
+    // while one drain is in flight allocates exactly one bounded signal
+    // per invocation that genuinely does work, not one per enqueue.
     this.chainControlEvent(turnSession, async () => {
-      while (turnSession.pendingControlEvents.length > 0) {
-        const next = turnSession.pendingControlEvents[0]!;
-        turnSession.inFlightControlEvent = next;
-        // Set once, kept forever (see `PendingControlEvent.attempted`'s
-        // own doc) -- this entry's outcome is no longer definitively
-        // "never sent" even after this specific attempt's HTTP call
-        // settles, whatever the result.
-        next.attempted = true;
-        let epoch: number;
-        try {
-          epoch = await this.recordAuthoritativeControlEvent(
-            turnSession,
-            binding,
-            {
-              sourceEventId: next.sourceEventId,
-              occurredAt: next.occurredAt,
-              mediaEpoch: next.mediaEpoch,
-              eventType: next.eventType,
-              signal: bounded.signal,
-            },
-          );
-        } finally {
-          delete turnSession.inFlightControlEvent;
+      if (turnSession.pendingControlEvents.length === 0) return;
+      const bounded = this.boundedControlSignal(turnSession);
+      try {
+        while (turnSession.pendingControlEvents.length > 0) {
+          const next = turnSession.pendingControlEvents[0]!;
+          turnSession.inFlightControlEvent = next;
+          // Set once, kept forever (see `PendingControlEvent.attempted`'s
+          // own doc) -- this entry's outcome is no longer definitively
+          // "never sent" even after this specific attempt's HTTP call
+          // settles, whatever the result.
+          next.attempted = true;
+          let epoch: number;
+          try {
+            epoch = await this.recordAuthoritativeControlEvent(
+              turnSession,
+              binding,
+              {
+                sourceEventId: next.sourceEventId,
+                occurredAt: next.occurredAt,
+                mediaEpoch: next.mediaEpoch,
+                eventType: next.eventType,
+                signal: bounded.signal,
+              },
+            );
+          } finally {
+            delete turnSession.inFlightControlEvent;
+          }
+          // This exact entry is now durably applied -- remove it (by
+          // identity, never by blindly shifting the front: an overflow
+          // eviction concurrent with the await above can only ever target a
+          // DIFFERENT entry now, see `enqueueControlEvent`, but removing by
+          // identity here too is exact and immune to any future eviction
+          // policy change) before attempting the next one, so a later
+          // failure in this same flush never re-sends an already-confirmed
+          // observation.
+          const idx = turnSession.pendingControlEvents.indexOf(next);
+          if (idx !== -1) turnSession.pendingControlEvents.splice(idx, 1);
+          // A media-epoch transition is a different authority axis than ASR
+          // input (SD §5.3 vs §5.4, see `recordMediaEpochTransition`'s own
+          // doc) -- only a speech-start may open/reconfirm the speech-start
+          // watermark `executeTurn`'s `persist` stage reuses.
+          if (next.eventType === "speech_start") {
+            turnSession.authoritativeInputEpoch = epoch;
+            turnSession.authoritativeInputEpochConsumed = false;
+          }
+          // Tell `recordAuthoritativeSpeechStart`'s fallback caller (if this
+          // entry came from it) this exact observation's resolved epoch --
+          // never erased by a later unrelated failure elsewhere in this same
+          // drain loop, since it was already removed from the array above.
+          next.settle?.resolve(epoch);
         }
-        // This exact entry is now durably applied -- remove it (by
-        // identity, never by blindly shifting the front: an overflow
-        // eviction concurrent with the await above can only ever target a
-        // DIFFERENT entry now, see `enqueueControlEvent`, but removing by
-        // identity here too is exact and immune to any future eviction
-        // policy change) before attempting the next one, so a later
-        // failure in this same flush never re-sends an already-confirmed
-        // observation.
-        const idx = turnSession.pendingControlEvents.indexOf(next);
-        if (idx !== -1) turnSession.pendingControlEvents.splice(idx, 1);
-        // A media-epoch transition is a different authority axis than ASR
-        // input (SD §5.3 vs §5.4, see `recordMediaEpochTransition`'s own
-        // doc) -- only a speech-start may open/reconfirm the speech-start
-        // watermark `executeTurn`'s `persist` stage reuses.
-        if (next.eventType === "speech_start") {
-          turnSession.authoritativeInputEpoch = epoch;
-          turnSession.authoritativeInputEpochConsumed = false;
-        }
-        // Tell `recordAuthoritativeSpeechStart`'s fallback caller (if this
-        // entry came from it) this exact observation's resolved epoch --
-        // never erased by a later unrelated failure elsewhere in this same
-        // drain loop, since it was already removed from the array above.
-        next.settle?.resolve(epoch);
+      } finally {
+        bounded.cancel();
       }
     }).then(
-      () => {
-        bounded.cancel();
-      },
+      () => {},
       (error) => {
-        bounded.cancel();
         // Never retry past release, and never retry an attachment whose
         // restoration is permanently failed (`handle()` already stopped
         // accepting new observations for it) -- both would otherwise

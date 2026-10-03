@@ -1800,6 +1800,396 @@ describe("createTrustedDialoguePersistPort", () => {
     expect(reconciliationGetCalls).toBe(0);
   });
 
+  it("[pre-store failure, Codex reopen canonical 2026-10-03T22:41:06Z] a one-off transport failure before any snapshot is ever stored does not permanently wedge every later turn on this attachment", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    let contentPostCount = 0;
+    let reconciliationGetCalls = 0;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        const body = JSON.parse(init.body as string) as {
+          expectedSessionVersion: number;
+        };
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: body.expectedSessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        // The double NEVER actually stores anything -- every attempt fails
+        // before storage, exactly like the reopened probe's "double
+        // throws once BEFORE first snapshot storage, thereafter serves
+        // truthfully snapshot=null and accepts any new request".
+        contentPostCount += 1;
+        throw new TypeError("simulated pre-store transport failure");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        reconciliationGetCalls += 1;
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+
+    for (let turn = 1; turn <= 4; turn++) {
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+      // canonical 2026-10-03T22:41:06Z, "pre-store failure permanently
+      // wedges the attachment"): before this fix, turn 1's own failed
+      // write left `attachmentState.unresolvedCommit` set and
+      // `reconcileUnresolvedCommit` THREW once its bounded retries
+      // exhausted finding nothing -- every later turn's top-of-call gate
+      // re-entered that same bounded loop (never resolving it) instead of
+      // ever reaching its own fresh submission attempt. Each turn here
+      // must fail with its OWN natural transport error, never an opaque
+      // internal "unresolved_commit" exhaustion error, proving the gate
+      // never wedges.
+      await expect(
+        port.persist(
+          {
+            toSnapshotContent: () => ({}),
+            committedSessionVersion: attachmentState.committedSessionVersion,
+          } as unknown as VoiceDialogueState,
+          { ...request, turnId: `turn-${turn}` },
+          { attachmentState },
+        ),
+      ).rejects.toThrow(/simulated pre-store transport failure/);
+    }
+
+    expect(contentPostCount).toBe(4);
+    // 3 bounded reconciliation attempts per turn, none ever correlating
+    // (nothing was ever actually stored) -- 4 turns x 3 = 12.
+    expect(reconciliationGetCalls).toBe(12);
+    // Confirmed non-acceptance clears the marker every time -- it must
+    // never still be set once the last turn's own bounded retries
+    // exhaust, or the NEXT turn after this test would still be wedged.
+    expect(attachmentState.unresolvedCommit).toBeNull();
+  });
+
+  it("[unstructured response, Codex reopen canonical 2026-10-03T22:41:06Z] an opaque intermediary 502/504 with no structured error body is ambiguous, not a confirmed domain rejection -- the durably-landed write is still reconciled", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        // The write is durably accepted server-side (modelled the same
+        // way every sibling ambiguous-failure probe in this file does),
+        // but what comes back to THIS worker is a bare, non-JSON 502 from
+        // an intermediary (reverse proxy, load balancer) -- apps/api
+        // itself never produced this reply, so it carries no structured
+        // `error.code` at all.
+        return new Response("upstream reply unavailable", { status: 502 });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "urgent_safety", intent: "emergency" },
+              },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+    const restoreFromSnapshotContent = vi.fn();
+
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+    // canonical 2026-10-03T22:41:06Z, "every non-2xx is treated as a
+    // trustworthy domain decision"): before this fix, `isDefinitiveRejection`
+    // treated this exact opaque 502 (code defaulted to the old generic
+    // `VOICE_API_ERROR` label) as a confirmed domain rejection, skipping
+    // reconciliation entirely -- the durably-accepted "urgent_safety"
+    // commit would be silently lost from the attachment's view the
+    // instant a later turn submitted anything else. With this fix it is
+    // reconciled like any other ambiguous failure.
+    await port.persist(
+      {
+        toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),
+        restoreFromSnapshotContent,
+        committedSessionVersion: attachmentState.committedSessionVersion,
+      } as unknown as VoiceDialogueState,
+      request,
+      { attachmentState },
+    );
+
+    expect(restoreFromSnapshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handoff: { reason: "urgent_safety", intent: "emergency" },
+      }),
+    );
+    expect(attachmentState.unresolvedCommit).toBeNull();
+    expect(attachmentState.committedSessionVersion).toBe(6);
+  });
+
+  it("[overlapping recovery, Codex reopen canonical 2026-10-03T22:41:06Z] a candidate cloned before a concurrent recovery installed new content must never submit over it, even once the marker that triggered that recovery is already cleared", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    let releaseRecoveryGet: () => void = () => {};
+    const recoveryGate = new Promise<void>((resolve) => {
+      releaseRecoveryGet = resolve;
+    });
+    let releaseTurn2Capability: () => void = () => {};
+    const turn2CapabilityGate = new Promise<void>((resolve) => {
+      releaseTurn2Capability = resolve;
+    });
+    let capabilityCallCount = 0;
+    let contentPostCount = 0;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        capabilityCallCount += 1;
+        if (capabilityCallCount === 2) {
+          // Turn 2's own capability issuance -- held so its clone is
+          // observably taken (step 3 of the reopened probe) before its
+          // own persist() ever reaches the top-of-call gate.
+          await turn2CapabilityGate;
+        }
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        const body = JSON.parse(init.body as string) as {
+          expectedSessionVersion: number;
+        };
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: body.expectedSessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        contentPostCount += 1;
+        if (contentPostCount === 1) {
+          // Turn 1 (the emergency final): durably accepted server-side,
+          // but its own HTTP acknowledgement is lost.
+          throw new TypeError("simulated network failure after commit");
+        }
+        // Turn 2 would durably succeed here if it were ever allowed to
+        // submit -- the fix must never let this be reached at all.
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "snapshot-2",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 7,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: "turn-2",
+              content: {},
+              createdAt: "2026-10-03T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Turn 1's own ambiguous-commit reconciliation read -- held open
+        // until `releaseRecoveryGet()` below.
+        await recoveryGate;
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-turn-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "urgent_safety", intent: "emergency" },
+              },
+              createdAt: "2026-10-03T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+
+    // Turn 1: emergency final, content accepted, ack lost -- starts a
+    // held reconciliation. Not awaited yet; it stays suspended on the
+    // held GET above.
+    const turn1 = port.persist(
+      {
+        toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),
+        restoreFromSnapshotContent: vi.fn(),
+        committedSessionVersion: attachmentState.committedSessionVersion,
+      } as unknown as VoiceDialogueState,
+      request,
+      { attachmentState },
+    );
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+
+    // Turn 2: a later, unrelated final. Its OWN candidate state is cloned
+    // right now, BEFORE turn 1's recovery has installed anything --
+    // mirrors `VoiceDialogueEngine.turn`'s `structuredClone(state)`,
+    // taken at the very start of the turn.
+    const turn2State = {
+      toSnapshotContent: () => ({}),
+      restoreFromSnapshotContent: vi.fn(),
+      committedSessionVersion: attachmentState.committedSessionVersion,
+    } as unknown as VoiceDialogueState;
+    const turn2 = port.persist(
+      turn2State,
+      { ...request, turnId: "turn-2" },
+      { attachmentState },
+    );
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+
+    // Release turn 1's recovery FIRST -- it installs "urgent_safety"
+    // directly onto the real `attachmentState` and clears its marker.
+    releaseRecoveryGet();
+    await turn1;
+    expect(attachmentState.committedSessionVersion).toBe(6);
+    expect(attachmentState.unresolvedCommit).toBeNull();
+
+    // THEN release turn 2's held capability issuance -- its own
+    // top-of-call `unresolvedCommit` check now finds nothing (already
+    // cleared), which is exactly the gap this fix closes: without the
+    // `committedSessionVersion` fence, turn 2 would proceed to submit its
+    // own stale, pre-recovery content over the just-recovered commit.
+    releaseTurn2Capability();
+
+    await expect(turn2).rejects.toThrow(
+      /voice_trusted_persist_superseded_by_recovered_commit/,
+    );
+    // Turn 2's own content-persist POST must never have been reached.
+    expect(contentPostCount).toBe(1);
+    // The recovered emergency content must still be the attachment's own
+    // authoritative state -- never overwritten by turn 2's stale clone.
+    expect(attachmentState.committedSessionVersion).toBe(6);
+  });
+
   it("is mode 'trusted', distinct from the fixture port's mode 'fixture'", () => {
     const client_ = new VoiceApiClient(
       { baseUrl: "https://api.example.test" },
