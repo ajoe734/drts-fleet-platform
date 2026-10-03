@@ -21,9 +21,7 @@ import type {
  * explicit external-gate boundary this records.
  */
 @Injectable()
-export class UnprovisionedRemittanceProofScannerAdapter
-  implements RemittanceProofScannerPort
-{
+export class UnprovisionedRemittanceProofScannerAdapter implements RemittanceProofScannerPort {
   readonly providerName = "unprovisioned";
 
   availability(): RemittanceProofScannerAvailability {
@@ -54,15 +52,11 @@ const EICAR_TEST_SIGNATURE =
  * engine, and it does not pretend to be one -- it is an honest, opt-in
  * local/dev/test adapter that lets the `clean` path be exercised without
  * fabricating a scan result. It is never wired by default; a deployment
- * must explicitly configure `REMITTANCE_PROOF_SCANNER_PROVIDER=eicar-signature`
- * to use it, and doing so in production would be a deliberate,
- * documented choice to run a signature check narrower than a real AV
- * engine, not a claim that one is provisioned.
+ * may inject it only in tests. Runtime configuration explicitly rejects
+ * `eicar-signature`: a signature demo is not a provisioned malware engine.
  */
 @Injectable()
-export class EicarSignatureRemittanceProofScannerAdapter
-  implements RemittanceProofScannerPort
-{
+export class EicarSignatureRemittanceProofScannerAdapter implements RemittanceProofScannerPort {
   readonly providerName = "eicar-signature";
 
   constructor(private readonly inspect: (proofId: string) => Buffer | null) {}

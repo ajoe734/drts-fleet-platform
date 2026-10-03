@@ -453,6 +453,7 @@ export default function ReimbursementDetailPage() {
   const [readbackGrant, setReadbackGrant] =
     useState<RemittanceProofReadbackGrant | null>(null);
   const [readbackLoading, setReadbackLoading] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
   const [readbackError, setReadbackError] = useState<string | null>(null);
   const [payWithProofError, setPayWithProofError] = useState<string | null>(
     null,
@@ -488,8 +489,8 @@ export default function ReimbursementDetailPage() {
     let active = true;
 
     async function loadProof() {
-      const proofId = batch?.remittanceProofId;
-      if (!proofId) {
+      const proofBatchId = batch?.batchId;
+      if (!proofBatchId) {
         setProof(null);
         setProofError(null);
         return;
@@ -497,7 +498,7 @@ export default function ReimbursementDetailPage() {
       setProofLoading(true);
       setProofError(null);
       try {
-        const record = await client.getRemittanceProof(proofId);
+        const record = await client.getReimbursementProof(proofBatchId);
         if (active) {
           setProof(record);
         }
@@ -518,7 +519,7 @@ export default function ReimbursementDetailPage() {
     return () => {
       active = false;
     };
-  }, [batch?.remittanceProofId, client]);
+  }, [batch?.batchId, batch?.remittanceProofId, client]);
 
   async function handleApprove() {
     if (!batch) {
@@ -558,6 +559,19 @@ export default function ReimbursementDetailPage() {
     }
   }
 
+  async function handleRetryScan() {
+    if (!proof) return;
+    setScanLoading(true);
+    setReadbackError(null);
+    try {
+      setProof(await client.scanRemittanceProof(proof.proofId));
+    } catch (nextError: any) {
+      setReadbackError(nextError?.message ?? String(nextError));
+    } finally {
+      setScanLoading(false);
+    }
+  }
+
   async function handleRequestReadback() {
     if (!proof) {
       return;
@@ -568,6 +582,17 @@ export default function ReimbursementDetailPage() {
       const grant = await client.requestRemittanceProofReadback({
         proofId: proof.proofId,
       });
+      const content = await client.downloadRemittanceProof(grant);
+      const objectUrl = URL.createObjectURL(content);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download =
+        proof.originalFilename.replace(/[\\/\r\n]/g, "_") || "remittance-proof";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Let the browser consume the Blob before revoking its local handle.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
       setReadbackGrant(grant);
     } catch (nextError: any) {
       setReadbackError(nextError?.message ?? String(nextError));
@@ -883,14 +908,18 @@ export default function ReimbursementDetailPage() {
               body={proofError}
             />
           ) : proofLoading ? (
-            <div style={{ padding: "10px 0", color: theme.textMuted, fontSize: 12.5 }}>
+            <div
+              style={{
+                padding: "10px 0",
+                color: theme.textMuted,
+                fontSize: 12.5,
+              }}
+            >
               {t("payments.reimbursements.detail.loading")}
             </div>
           ) : proof ? (
             <div style={{ display: "grid", gap: 10 }}>
-              <div
-                style={{ display: "flex", alignItems: "center", gap: 10 }}
-              >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span
                   style={{
                     flex: 1,
@@ -924,13 +953,27 @@ export default function ReimbursementDetailPage() {
                   theme={theme}
                   size="sm"
                   icon="eye"
-                  disabled={readbackLoading}
+                  disabled={readbackLoading || proof.scanState !== "clean"}
                   onClick={() => void handleRequestReadback()}
                 >
                   {readbackLoading
                     ? proofT("proof.viewing", locale)
                     : proofT("proof.viewButton", locale)}
                 </Btn>
+                {proof.scanState === "pending_scan" ? (
+                  <Btn
+                    theme={theme}
+                    size="sm"
+                    icon="refresh"
+                    disabled={scanLoading}
+                    onClick={() => void handleRetryScan()}
+                  >
+                    {proofT(
+                      scanLoading ? "proof.scanning" : "proof.retryScan",
+                      locale,
+                    )}
+                  </Btn>
+                ) : null}
               </div>
               <div
                 style={{
