@@ -4,13 +4,21 @@ import type { Duplex } from "node:stream";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/** Default cap on a single WS frame payload. Voice audio frames are small
+ * (TWM's own fixture protocol rejects anything >= 384 KiB per chunk); this is
+ * a generous ceiling against a peer that declares an unbounded frame length
+ * and forces the server to buffer indefinitely while waiting for the rest. */
+export const DEFAULT_WS_MAX_PAYLOAD_BYTES = 1_048_576; // 1 MiB
+
 export interface WebSocketChannelOptions {
   timeoutMs?: number | undefined;
+  maxPayloadBytes?: number | undefined;
 }
 
 export class WebSocketServerChannel extends EventEmitter {
   private readonly socket: Duplex;
   private readonly timeoutMs: number;
+  private readonly maxPayloadBytes: number;
   private timer: NodeJS.Timeout | null = null;
   private buffer: Buffer = Buffer.alloc(0);
   private isClosed = false;
@@ -19,6 +27,8 @@ export class WebSocketServerChannel extends EventEmitter {
     super();
     this.socket = socket;
     this.timeoutMs = options?.timeoutMs ?? 300_000; // default 5 min
+    this.maxPayloadBytes =
+      options?.maxPayloadBytes ?? DEFAULT_WS_MAX_PAYLOAD_BYTES;
 
     this.socket.on("data", (chunk: Buffer) => this.handleData(chunk));
     this.socket.on("close", () => this.handleClose());
@@ -142,6 +152,16 @@ export class WebSocketServerChannel extends EventEmitter {
         if (this.buffer.length < 10) return;
         payloadLength = Number(this.buffer.readBigUInt64BE(2));
         offset = 10;
+      }
+
+      if (payloadLength > this.maxPayloadBytes) {
+        // Drop the buffered bytes before closing so a peer that keeps
+        // streaming after announcing an oversized frame cannot force this
+        // channel to keep growing `this.buffer` while the close frame is
+        // written out.
+        this.buffer = Buffer.alloc(0);
+        this.close(1009, "Frame payload exceeds maximum allowed size");
+        return;
       }
 
       let maskKey: Buffer | null = null;

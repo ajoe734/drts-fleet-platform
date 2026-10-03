@@ -1,7 +1,22 @@
 import { MediaWorkerServer } from "./server/media-worker-server";
+import { isStrictVoiceMediaEnvironment } from "./server/environment";
 
 async function main() {
   const server = new MediaWorkerServer();
+
+  if (
+    isStrictVoiceMediaEnvironment() &&
+    !process.env.VOICE_MEDIA_INTERNAL_KEY
+  ) {
+    console.error(
+      "[voice-media-worker] VOICE_MEDIA_INTERNAL_KEY is not set in a staging/production environment; " +
+        "/drain, /sessions, /recording/finalize and the WebSocket upgrade will refuse every request until it is configured.",
+    );
+  }
+  console.warn(
+    "[voice-media-worker] No production-capable CTI/ASR/TTS/recording provider is wired into this worker " +
+      "(see docs/04-uat/audit-voice-runtime-20261002.md); /ready will report not-ready in a staging/production environment.",
+  );
 
   let draining = false;
   const handleShutdown = async (signal: string) => {

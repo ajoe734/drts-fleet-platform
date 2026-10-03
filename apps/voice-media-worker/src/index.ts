@@ -18,3 +18,5 @@ export * from "./dialogue/confirmation/confirmation-controller";
 export * from "./handoff";
 export * from "./server/media-worker-server";
 export * from "./server/websocket-channel";
+export * from "./server/internal-auth";
+export * from "./server/environment";
