@@ -1,8 +1,55 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：第二次 hosted run 的 bootstrap 已成功，但 runner 殘留 Gmail-only gate 失敗。本輪移除最後一處網域限制並共用 TS alias validator，補 bootstrap→runner→Python observer 串接回歸及 deploy-dev 重疊拒絕檢查；**152 TS＋25 Python tests 通過**。真郵件回執／內容仍待 Supervisor 合併、部署並避開 deploy-dev 後重跑。
-- **§0.5 是最新修正與檢查結果**；§0–§0.4 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+- 現況：第三次 hosted run 已取得一封邀請的真 Gmail SMTP 回執，但 IMAP 觀測失敗。F16 改用 LIST 的 `\All` 屬性探索本地化資料夾；F17 將安全失敗階段保留至 CLI／Node／evidence。**160 TS＋37 Python tests 通過**；真 IMAP 內容、完整邀請／簽核／expiry／retry 仍待 Supervisor 合併部署後 hosted 重跑。
+- **§0.6 是最新修正與檢查結果**；§0–§0.5 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪只取回既有 hosted artifact，沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+
+## 0.6 F16／F17：本地化 All Mail 探索與安全階段診斷（2026-10-03）
+
+依 Supervisor `2026-10-03T14:45Z` integration note 續修；仍追溯 C006／N06、C026／N07，C079 依原授權排除。這是第三次 hosted run 暴露的新 IMAP 問題，前兩輪 domain 修正及獨立 approve 歷史保留；沒有把不同觸發條件改稱同一缺陷連續兩輪 reviewer 退修。
+
+### 原候選、真回執與修正邊界
+
+- 開工 local／remote／已合併 [PR #2302](https://github.com/ajoe734/drts-fleet-platform/pull/2302) head 為 `5ea482879aa326fdcd07eb01ae6c4ab7e2836ff7`；fresh base `origin/dev=893f2525d06364ffc73b6e84af59919312e3cc69`。`git merge --ff-only origin/dev` 因合併歷史不能 fast-forward 而 exit 128，未改動 branch；之後普通 merge `ff7b2f32017cd39cc2b0273f1d037fff59bb1bf9` 無衝突、tree 與該 base 相同。未 rebase/reset/amend/force push；後來 dev 前進不再改寫本輪候選。
+- [hosted run 37130291991](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37130291991)，job **111223892680**，attempt **1**，workflow source `bc85c54cf080a5906721912e4c009f4bf5c11239`，checkout／live candidate **893f2525d06364ffc73b6e84af59919312e3cc69**，已結束 **failure**。已用 `gh run download` 真正下載 artifact **11276403403**：`live-mail-acceptance-893f2525d06364ffc73b6e84af59919312e3cc69-37130291991-1`，非只引用 Supervisor 摘要。
+- 同 artifact `evidence-mail.json`：tenant user **tenant_user_e2fcaffb-6402-42dc-9200-0312e342e646**；invitation **invitation_a26742a2-c2ed-4b3b-9570-e5b91376550a**；delivery **360bfbca-b96f-4c9b-9ced-8acece178190**。正式 delivery readback 返回 **sent**、attempt **1**，provider **remote-smtp**，response 為 `250 2.0.0 OK … - gsmtp`，provider message ID **586e51a60fabf-49e16545353sm4734312fac.0**，accepted_at **2026-10-03T14:39:05.925Z**。這是可取回的真 provider acknowledgement，**不是 IMAP arrival／內容或完整 acceptance**。
+- `evidence-provider.json`：project **drts-dev-devcc-20260825**、region **us-central1**、revision **drts-dev-api-00048-gj7**，created_at **2026-10-03T14:29:37.780687Z**，allowlist version **2**、`alias_revision_fresh=true`。install／preflight／resources／sessions／teardown success，runner failure；`run-status.json` 整體 failed。該 run 用舊 main workflow，兩個 deployment guard outcome 是 **missing**，不能當作 F15 guard 通過；Supervisor note 說明此次無其它 run 重疊。新 guard 仍需正式 promotion 後執行。
+- errors 時間 **14:39:08.582Z**，只比 accepted_at 晚約 **2.66 秒**。原 CLI／Node／runner 三層都丟失 stage；無法據此確定此次是真 login 拒絕或英語 folder 不存在。F16 的程式缺陷已重現，**尚未證明它是該 live failure 的唯一原因**；下一次若出現 `imap_login_failed`，由 Supervisor／Workspace operator 查 IMAP 管理設定，不能重試到宣稱成功。
+- 呼叫鏈為 workflow → runner `runMailAcceptance`／live profiles／retry profile → `observeMailbox` → Python CLI `main` → TLS／login → `discover_all_mailbox`／`observe`／`inspect_message`。只改 task scope 的三個 harness 檔、三個既有 test 檔及本文件；本輪兩個 workflow 無修改，產品 API／allowlist／SMTP 設定不變。
+- 探索依 [RFC 6154 §2](https://www.rfc-editor.org/rfc/rfc6154.html#section-2) 的 special-use attribute 與 [Gmail IMAP extensions](https://developers.google.com/workspace/gmail/imap/imap-extensions) 的普通 LIST 回應；mailbox quoted/astring/literal 遵循 [RFC 3501 §9](https://www.rfc-editor.org/rfc/rfc3501.html#section-9)。保留伺服器給的 modified UTF-7 wire bytes，quoted name 正確 escape；無 `\All`、不可選或多個不同 `\All` 時 fail closed，不猜英文名或退回 Inbox／Sent。evidence 只留 `mailbox=\All`、wire-name SHA256，避免任意 folder 名洩漏個資。
+
+### 逐項修復與驗證
+
+| Finding／驗收項 | 正式依據與修改位置 | 舊版重現 → 修正版結果 | 命令、版本與證據 | 未驗與限制／責任 |
+| --- | --- | --- | --- | --- |
+| F16 英文 folder 導致本地化 mailbox 選取失敗 | `mailbox_observer.py: discover_all_mailbox / observe`；RFC 6154 LIST `\All`，readonly EXAMINE | 同一中文 modified UTF-7 LIST 案例在 base **1 error／exit 1**，卡在硬編碼英文 select；新版 **1 pass／exit 0**，實際 select 回傳的 bytes | 重現 anchor **23d4ce1e6**；修正 anchor **46d070cc7**；`localized-before.log`／`localized-after.log` | IMAP socket 邊界 mock；真 Workspace LIST／登入尚待 hosted，不宣稱已收信 |
+| F16 拒絕與內容邊界 | 同 `observe`／`inspect_message` | quoted／escaped／unquoted／literal、case-insensitive 精確 flag、無 flag／Noselect／歧義／畸形 literal／CRLF 注入均測；兩 aliases 的 Message-ID／To／From／Subject／正文不符都拒絕；UIDVALIDITY、duplicate、search、fetch 及 delayed arrival 保留 | Python suite **37 pass**，既有與新案例均呼叫真 parser／observer | 只 mock IMAP／HTTP／secret 邊界與 deadline 時鐘；未偽造產品 invitation expiry |
+| F17 generic error 無法定位真 IMAP failure | Python `observation_stage / run_cli` → Node `MailboxObservationError` → runner `mailExecutionErrorMessage`／recorder | 以 base Python CLI + 新 Node consumer 跑相同 login failure：**1 failed／10 按 -t 未選中**，實際只剩 fallback stage；修後整個 subprocess pipeline **11 pass** | `diagnostics-before.log` exit **1**；`pipeline-after.log` exit **0**；baseline 用 `git show` 暫置 observer 後 `finally` 恢復，未 reset branch | 此 before/after 隔離 Python CLI 的 stage 丟失；舊 Node 與 runner 丟失 stage 另由原始碼確認；不把未選中 tests 算通過 |
+| F17 安全且可用的 diagnostics | Python 與 Node 僅接受固定 stage 字典；runner 重建錯誤訊息，不信任可變 message | login／missing folder／select／deadline／content mismatch 經真 Python CLI 子程序與 Node 到 failed evidence；惡意 stage、額外 message、malformed JSON 均只輸出 fallback；logout 次生錯誤不蓋掉 login root stage | pipeline **11 pass**；Python **37 pass**；不輸出 upstream message／class／stack／folder name／token／body | credentials 僅原有 Actions add-mask 命令，正常輸出仍為安全 metadata；無本輪 live secret 讀取 |
+| F01–F15 先前修正與未驗項 | 原 §0–§0.5 保留；TS alias validator、API wire／SHA／provider／lifecycle／retry 與 deployment guard | 全 task **160 TS＋37 Python pass**；原肯定／拒絕回歸仍通過 | 同下表，code **73d5876ab570a646c9fa34f99635ae46e1dc53d9** | F07 外部相依與 F15 live workflow 限制保留；unit 不補足 live |
+| `authorized_test_mailbox` | 既有 user option A，sender 的 +invite／+approve 授權沿用 | 同 live SHA 已送一封 authorized invitation，但 **IMAP UID／內容 hash 尚缺** | 上述 artifact delivery ID；無重新索取／擴大寄件授權 | Supervisor hosted 重跑；operator 供真 approval request／專用 approver |
+| `configured_mail_provider` | 同 run provider metadata／Cloud Run revision | **真配置證據已取回**，見上述 project／revision／allowlist v2／freshness | artifact **11276403403** `evidence-provider.json`，live SHA **893f2525…** | 只代表該歷史 live SHA；新候選仍需重新部署取證 |
+| `provider_message_receipts` | 正式 `/api/tenant/mail-deliveries/:id` durable attempt readback | **一封真 invitation SMTP receipt 已取回**；IMAP arrival、完整 invitation lifecycle、approval、expiry、retry 未完成 | delivery **360bfbca…**／provider **586e51…fac.0**／accepted_at 如上；非 mock | 不能繼續沿用舊「零真回執」當最新結論，也不能把局部回執寫成全部完成；Supervisor/operator 供資源並 rerun |
+| `live_candidate_sha` | hosted checkout／health gate、provider metadata、run-status | 三個 artifact 同 **893f2525…**，整體 **failed**；非本輪修正 candidate | 最終新 candidate 由文件 commit 後 HEAD／PR／canonical handoff 鎖定，不用 anchor 冒充 | 本輪四項 required_acceptance 仍未整套完成；不 `done`／`record-acceptance` |
+
+### 完成的本機 checks 與後續交接
+
+修正程式 anchor **73d5876ab570a646c9fa34f99635ae46e1dc53d9** 的全部檢查已等待結束並讀取；之後只新增本文件。環境 Python **3.12.3**、Node **22.23.2**、Vitest **4.1.4**。機器輸出在 `.local/sr-live-mail-001/f16-20261003/`，durable review 依本節可重跑指令、Git commit 與 hosted artifact；不把忽略的 `.local` 當正式 acceptance。
+
+| 命令 | Exit／結果 | Log |
+| --- | --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p test_mailbox_observer.py -k localized -v` | baseline **1**／修後 **0**，1 case error → pass | localized-before.log／localized-after.log |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/mailbox-pipeline.test.ts -t 'records login'`（base Python CLI） | **1**，1 failed、10 未選中，精確缺失 imap_login_failed | diagnostics-before.log |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/mailbox-pipeline.test.ts` | **0**，11 tests pass | pipeline-after.log |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/` | **0**，7 files／160 tests pass | unit.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v` | **0**，37 tests pass | python.log |
+| `pnpm exec tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json` | **0** | typecheck.log |
+| `pnpm exec eslint --max-warnings=0 tests/e2e/system-remediation/sr-live-mail-001/ tests/unit/system-remediation/sr-live-mail-001/` | **0** | lint.log |
+| `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py` | **0**，83 tracked test files covered | coverage.log |
+| `pnpm exec prettier --check tests/e2e/system-remediation/sr-live-mail-001/mailbox-observer.ts tests/e2e/system-remediation/sr-live-mail-001/mail-acceptance-runner.ts tests/unit/system-remediation/sr-live-mail-001/mailbox-pipeline.test.ts` | **0** | terminal |
+| `git diff --check`；`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | **0** | terminal；final 文件 commit 後再核對 |
+
+沒有執行 Playwright／browser server／產品 server／Docker／PG 或真 SMTP／IMAP。真 24h expiry 與尚 queued retryable delivery、approval request 仍需 operator；§0.1 的流程限制不刪除。先普通 commit＋push 並確認 local／remote／PR head 同 SHA，再交 Claude2 獨立審查；同 candidate CI 實際結果於讀完後寫 canonical handoff。Supervisor 依 lifecycle merge／部署／promotion 後避開其它 deploy-dev run 再 dispatch，若 stage 為 `imap_login_failed` 則交 operator 查 IMAP 設定，不以本輪 mocks 冒稱 live 成功。
 
 ## 0.5 F13 續修／F15：完整網域 gate 與部署重疊（2026-10-03）
 
