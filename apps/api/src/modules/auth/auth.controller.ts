@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Optional, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Logger, Optional, Param, Post, Query, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import jwt from "jsonwebtoken";
 
@@ -127,6 +127,8 @@ function isStrictAuthEnvironment(): boolean {
 
 @Controller("auth")
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
@@ -424,6 +426,7 @@ export class AuthController {
     // Transitional dual-send fallback remains for existing non-system callers
     // only when the registry/identity is absent; provisioning fails closed.
     let googleCiTenantActorVerified = false;
+    let googleOpsActorVerified = false;
     if (rawGoogleAssertion) {
       if (!bootstrapIdentity) {
         throw new ApiRequestError(
@@ -508,6 +511,7 @@ export class AuthController {
         ) {
           // Direct authentication! The Google SA is asking for a token for ITSELF.
           googleCiTenantActorVerified = true;
+          googleOpsActorVerified = true;
           bootstrapIdentity.principalId = resolvedGoogle.principalId;
           bootstrapIdentity.roleFamilies = ["ops"];
         } else if (isCiTenantActorGateEnabled() && bootstrapIdentity.realm === "tenant" && bootstrapIdentity.actorType === "tenant_admin") {
@@ -657,6 +661,7 @@ export class AuthController {
     // this request, so their already-fetched updatedAt values are safe to
     // carry forward unchanged for the durable-version computation.
     let workforceVersionTimestamps: string[] | undefined;
+    let verifiedGooglePrincipalUpdatedAt: string | undefined;
     if (
       (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
       !durableIdentity.membershipId &&
@@ -666,9 +671,19 @@ export class AuthController {
         throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
       }
       const principalToLookup = durableIdentity.principalId ?? durableIdentity.actorId;
+      if (googleOpsActorVerified) {
+        const principal = await this.identityRepository.findPrincipalById(principalToLookup);
+        if (!principal || principal.status !== "active") {
+          this.denyWorkloadSessionIdentity("principal_not_active");
+        }
+        verifiedGooglePrincipalUpdatedAt = principal.updatedAt;
+      }
       const memberships = await this.identityRepository.findMembershipsByPrincipalId(principalToLookup);
       const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
       if (!membership) {
+        if (googleOpsActorVerified) {
+          this.denyWorkloadSessionIdentity("membership_not_active");
+        }
         throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
       }
       durableIdentity.membershipId = membership.membershipId;
@@ -678,6 +693,9 @@ export class AuthController {
       const activeBindings = roleBindings.filter(
         (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
       );
+      if (googleOpsActorVerified && !activeBindings.some((binding) => binding.roleCode === durableIdentity.actorType)) {
+        this.denyWorkloadSessionIdentity("role_binding_not_active");
+      }
 
       const allowedRoles = activeBindings.map((b) => b.roleCode);
       const allowedScopes = new Set<string>();
@@ -707,16 +725,34 @@ export class AuthController {
       principalId: durableIdentity.principalId ?? durableIdentity.actorId,
       membershipId: durableIdentity.membershipId ?? null,
       subject: durableIdentity.subject ?? durableIdentity.actorId,
-      ensurePrincipal: true,
+      // The Google verifier already persisted this principal under its own
+      // source_ref. Bootstrap-upserting it again changes that authority and
+      // collides with the principal_id PK in PostgreSQL (V0068).
+      ensurePrincipal: !googleOpsActorVerified,
       authTime: issuedAt,
       ...(assurance.amr ? { amr: assurance.amr } : {}),
       ...(assurance.acr ? { acr: assurance.acr } : {}),
-      tokenVersion: tenantUser
+      tokenVersion: verifiedGooglePrincipalUpdatedAt && workforceVersionTimestamps
+        ? Math.max(...[verifiedGooglePrincipalUpdatedAt, ...workforceVersionTimestamps].map(Date.parse))
+        : tenantUser
         ? Date.parse(tenantUser.updatedAt)
         : Date.parse(issuedAt),
       ...(workforceVersionTimestamps ? { workforceVersionTimestamps } : {}),
     });
     return { token: issued.token, expiresIn };
+  }
+
+  private denyWorkloadSessionIdentity(
+    reason: "principal_not_active" | "membership_not_active" | "role_binding_not_active",
+  ): never {
+    // Detailed reason stays server-side. Never include proof, tokens, headers,
+    // database errors or caller identifiers in either the log or response.
+    this.logger.warn(`[WORKLOAD_SESSION_IDENTITY_UNAVAILABLE] reason=${reason}`);
+    throw new ApiRequestError(
+      403,
+      "WORKLOAD_SESSION_IDENTITY_UNAVAILABLE",
+      "The verified workload cannot establish an active session.",
+    );
   }
 
   @Post("driver/device/invite")
