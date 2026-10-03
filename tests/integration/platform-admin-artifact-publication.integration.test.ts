@@ -62,6 +62,24 @@ function withClaimToken(
   return { ...record, __publishClaimToken: token };
 }
 
+// Mirrors the ONLY shape `PlatformAdminService.publishPlacardVersionExclusive`
+// ever hands to `claimPlacardPublish` (platform-admin.service.ts:978-981):
+// `publishedAt`/`updatedAt` are stamped to "now" on the staged record BEFORE
+// the claim attempt, never left `null`. The repository's claim guard
+// (`record->>'publishedAt' IS NULL OR (token present AND stale)`) depends on
+// that: a claim attempt that still carries `publishedAt: null` looks
+// indistinguishable from a brand-new, never-claimed row, so a second
+// concurrent claim of the same placard -- or a too-young reclaim -- would
+// wrongly be admitted by the first disjunct instead of being exercised
+// through the token/staleness guard this suite means to test.
+function stagedClaim(
+  record: PlacardVersionRecord,
+  token: string,
+): PlacardVersionRecord & { __publishClaimToken: string } {
+  const now = new Date().toISOString();
+  return withClaimToken({ ...record, publishedAt: now, updatedAt: now }, token);
+}
+
 type RawRow = {
   record: PlacardVersionRecord & { __publishClaimToken?: string | null };
 };
@@ -139,12 +157,8 @@ describe.skipIf(!DATABASE_URL)(
       const base = basePlacard(placardVersionId);
 
       const [resultA, resultB] = await Promise.all([
-        repoA.claimPlacardPublish(
-          withClaimToken(base, `token-a-${randomUUID()}`),
-        ),
-        repoB.claimPlacardPublish(
-          withClaimToken(base, `token-b-${randomUUID()}`),
-        ),
+        repoA.claimPlacardPublish(stagedClaim(base, `token-a-${randomUUID()}`)),
+        repoB.claimPlacardPublish(stagedClaim(base, `token-b-${randomUUID()}`)),
       ]);
 
       const claimed = [resultA, resultB].filter((r) => r.claimed);
@@ -167,13 +181,13 @@ describe.skipIf(!DATABASE_URL)(
       const owner = newRepository();
       const originalToken = `token-owner-${randomUUID()}`;
       const claimed = await owner.claimPlacardPublish(
-        withClaimToken(basePlacard(placardVersionId), originalToken),
+        stagedClaim(basePlacard(placardVersionId), originalToken),
       );
       expect(claimed.claimed).toBe(true);
 
       const challenger = newRepository();
       const reclaim = await challenger.claimPlacardPublish(
-        withClaimToken(
+        stagedClaim(
           basePlacard(placardVersionId),
           `token-challenger-${randomUUID()}`,
         ),
@@ -192,8 +206,18 @@ describe.skipIf(!DATABASE_URL)(
       const abandonedToken = `token-abandoned-${randomUUID()}`;
       const direct = new DatabaseService();
       databases.push(direct);
+      // `publishedAt` must already be set here too -- an abandoned claim is
+      // always a row that passed through the same `publishedAt`-stamping
+      // staged write as every other claim attempt (see `stagedClaim`).
+      // Leaving it `null` would let this reclaim succeed via the guard's
+      // first disjunct (`publishedAt IS NULL`) instead of actually
+      // exercising the "token present AND stale" branch this test means to
+      // cover.
       const abandoned = withClaimToken(
-        basePlacard(placardVersionId, { updatedAt: staleUpdatedAt }),
+        basePlacard(placardVersionId, {
+          publishedAt: staleUpdatedAt,
+          updatedAt: staleUpdatedAt,
+        }),
         abandonedToken,
       );
       await direct.query(
@@ -216,7 +240,7 @@ describe.skipIf(!DATABASE_URL)(
       const reclaimer = newRepository();
       const newToken = `token-reclaimer-${randomUUID()}`;
       const reclaim = await reclaimer.claimPlacardPublish(
-        withClaimToken(basePlacard(placardVersionId), newToken),
+        stagedClaim(basePlacard(placardVersionId), newToken),
       );
 
       expect(reclaim.claimed).toBe(true);
@@ -231,7 +255,7 @@ describe.skipIf(!DATABASE_URL)(
       const repo = newRepository();
       const claimToken = `token-finalize-${randomUUID()}`;
       const claim = await repo.claimPlacardPublish(
-        withClaimToken(basePlacard(placardVersionId), claimToken),
+        stagedClaim(basePlacard(placardVersionId), claimToken),
       );
       expect(claim.claimed).toBe(true);
       const wonClaim = claim.currentRecord!;
@@ -266,7 +290,7 @@ describe.skipIf(!DATABASE_URL)(
       const repo = newRepository();
       const claimToken = `token-release-${randomUUID()}`;
       const claim = await repo.claimPlacardPublish(
-        withClaimToken(basePlacard(placardVersionId), claimToken),
+        stagedClaim(basePlacard(placardVersionId), claimToken),
       );
       expect(claim.claimed).toBe(true);
       const wonClaim = claim.currentRecord!;
@@ -323,7 +347,7 @@ describe.skipIf(!DATABASE_URL)(
       const repo = newRepository();
       const claimToken = `token-generic-writer-${randomUUID()}`;
       const claim = await repo.claimPlacardPublish(
-        withClaimToken(basePlacard(placardVersionId), claimToken),
+        stagedClaim(basePlacard(placardVersionId), claimToken),
       );
       expect(claim.claimed).toBe(true);
       const wonClaim = claim.currentRecord!;

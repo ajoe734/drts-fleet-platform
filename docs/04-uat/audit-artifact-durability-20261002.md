@@ -2053,3 +2053,76 @@ Real execution happens the first time this candidate's SHA runs the hosted
 `unit` CI job; that job's own pass/fail (visible in `same_sha_review_ci`
 evidence) is the actual acceptance evidence for these seven cases, not
 this local run.
+
+## Follow-up: hosted CI caught a test-fixture bug in the new real-Postgres
+## matrix itself (candidate `e8455e94160e66b4e942a97f7d0417ed4425f3e8`)
+
+The exact prediction above came true the hard way: the first hosted
+`unit` CI run against `e8455e94160e66b4e942a97f7d0417ed4425f3e8`
+(https://github.com/ajoe734/drts-fleet-platform/actions/runs/37137467973,
+job `unit` id `111244975011`) ran the seven new real-Postgres cases for
+real and 5 of them failed:
+
+- `claimPlacardPublish: exactly one of two concurrent real connections
+  wins a fresh placard's claim` -- `expected [...] to have a length of 1
+  but got 2` (both connections' claims succeeded).
+- `claimPlacardPublish: a pending claim younger than 2 minutes is not
+  reclaimable` -- `expected true to be false` (the too-young reclaim
+  succeeded).
+- `finalizePlacardPublish: wrong claim token is a no-op; correct token
+  finalizes and drops the token` -- `expected null to be truthy`
+  (`publishedAt` was still `null` after a successful finalize).
+- `releasePlacardPublishClaim: requires both the claimed publishedAt and
+  the exact token; a superseded claim cannot be released by the loser` --
+  `expected null to be truthy` (same symptom).
+- `persistChanges generic-writer guard: ... rejects a stale
+  publishedAt:null writer against an already-finalized row ...` --
+  `expected null to be truthy` (the "already-finalized row" never
+  actually had `publishedAt` set).
+
+**Root cause (test bug, not a `PlatformAdminRepository` bug):** every one
+of these five cases built its `claimPlacardPublish` argument via
+`withClaimToken(basePlacard(placardVersionId), token)`, and `basePlacard`
+defaults `publishedAt: null`. Production code never calls
+`claimPlacardPublish` that way --
+`PlatformAdminService.publishPlacardVersionExclusive`
+(`platform-admin.service.ts:978-981`) always stamps
+`{ ...placard, publishedAt: now, updatedAt: now }` onto the staged record
+*before* claiming. `claimPlacardPublish`'s own `WHERE` guard
+(`platform-admin.repository.ts:500-504`) is `record->>'publishedAt' IS
+NULL OR (token present AND stale > 2 minutes)`: with the test's
+`publishedAt: null` claim argument, every attempt looked like a
+brand-new, never-claimed row forever, so the first disjunct always
+admitted it -- the race, the too-young-reclaim guard, and finalize/release
+persisting a real `publishedAt` were never actually exercised. This
+reproduces with a two-line check: claim an otherwise-fresh placard twice
+in sequence with the old helper and observe both return `claimed: true`.
+
+**Fix:** added a `stagedClaim(record, token)` test helper that mirrors
+the production staging shape exactly -- `publishedAt`/`updatedAt` stamped
+to `new Date().toISOString()` before the token is attached -- and switched
+all five affected cases (plus the manually-inserted "abandoned claim"
+fixture in the stale-reclaim case, which had the same gap: it must itself
+carry a non-null `publishedAt` to force the reclaim through the intended
+"token present AND stale" branch instead of trivially matching
+`publishedAt IS NULL`) to use it. The two cases that were already passing
+(`a pending claim older than 2 minutes IS reclaimable` and `persistChanges
+... an older updated_at never applies`) did not depend on this shape and
+are unchanged apart from the abandoned-claim fixture's `publishedAt`.
+
+Local re-verification after the fix (this VM still has no `DATABASE_URL`,
+so the suite still skips cleanly here; real pass/fail is hosted-CI-only,
+same as before):
+```
+pnpm --filter @drts/control-plane-auth run build   # pre-existing local dist gap, unrelated to this file
+pnpm exec tsc -p apps/api/tsconfig.json --noEmit    # exit 0, zero errors
+pnpm exec eslint tests/integration/platform-admin-artifact-publication.integration.test.ts  # exit 0
+pnpm exec vitest run tests/integration/platform-admin-artifact-publication.integration.test.ts --maxWorkers=1
+# => exit 0, 1 file / 7 tests, all SKIPPED (no DATABASE_URL)
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts tests/unit/system-remediation/sr-artifact-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-placard-001/ tests/unit/platform-admin.test.ts --maxWorkers=1
+# => exit 0, 8 files / 126 tests passed
+```
+The actual pass/fail of the seven real-Postgres cases against this fix
+is, as before, only observable on the next hosted `unit` CI run for this
+candidate's new SHA -- that run is the `same_sha_review_ci` evidence for
+this follow-up.
