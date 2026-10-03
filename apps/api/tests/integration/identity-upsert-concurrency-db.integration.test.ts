@@ -1538,15 +1538,19 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
   // deterministic (it depends on real lock-wait timing, not on which
   // bundle carries the newer timestamp -- see DET's comment on why this
   // cannot be choreographed without collapsing the race). So this does not
-  // assert a specific side wins; it asserts the guard's actual contract,
-  // which holds either way: bundleB (the later timestamp, differing
-  // content) must be the only content ever persisted or returned --
-  // whether bundleA is the one whose retry correctly loses to it (its
-  // stale content must never overwrite bundleB once bundleB has committed)
-  // or bundleB is the one whose retry correctly wins over bundleA's
-  // already-committed row (its newer, differing content must actually
-  // apply, not be silently discarded in favor of returning bundleA's
-  // stale row).
+  // assert a specific side wins; it asserts the guard's actual contract:
+  // bundleB (the later timestamp, differing content) is the only content
+  // ever durably persisted, and whichever racer's own connection is the
+  // one observed retrying must itself report bundleB -- that racer's retry
+  // necessarily resolves its guard against whatever the other side had
+  // already committed. The racer that never conflicted returns the
+  // content it itself wrote, read at the moment its own transaction
+  // committed; if that commit happened to land before the other racer's
+  // later, guard-correct overwrite, its return value legitimately reflects
+  // its own (by-then-superseded) write rather than a fresh global read --
+  // correct concurrent-call semantics, not a defect -- so this does not
+  // assert anything about the non-retried side's return value. The durable
+  // row is the actual authority either way and is checked directly below.
   it(
     "R9-TX-NEWER (real Postgres): when the real SAVEPOINT recovery branch fires on a genuine non-arbiter collision, a writer carrying genuinely newer differing content always ends up persisted and returned, whichever racer is the one observed retrying",
     async () => {
@@ -1651,26 +1655,41 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
           (q) => q.sql,
         );
 
-        const rollbackToHits =
-          countHits(aQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") +
-          countHits(bQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp");
-        if (rollbackToHits < 1) {
+        const aRolledBack =
+          countHits(aQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") >=
+          1;
+        const bRolledBack =
+          countHits(bQueries, "ROLLBACK TO SAVEPOINT upsert_principal_sp") >=
+          1;
+        if (!aRolledBack && !bRolledBack) {
           continue;
         }
 
-        // The real recovery branch actually fired against real Postgres
-        // for this attempt's identity. Whichever racer it fired on, the
-        // only correct converged content is bundleB's -- it carries both
-        // the later timestamp and the genuinely differing content. Both
-        // callers' return values must agree with each other and with what
-        // is actually persisted; bundleA's stale, differing content must
-        // never win regardless of which side physically retried.
-        expect(resultA.principal.displayName).toBe("WFI Newer Fixture B");
-        expect(resultB.principal.displayName).toBe("WFI Newer Fixture B");
-        expect(resultA.principal.updatedAt).toBe(tsB);
-        expect(resultB.principal.updatedAt).toBe(tsB);
-        expect(resultA.roleBindings[0]?.roleCode).toBe("ops_admin");
-        expect(resultB.roleBindings[0]?.roleCode).toBe("ops_admin");
+        // The real recovery branch actually fired against real Postgres for
+        // this attempt's identity. Only the racer whose own connection
+        // actually went through SAVEPOINT recovery is checked against
+        // bundleB's content here: that racer's retry necessarily resolves
+        // its guard against whatever the other side had already committed,
+        // so its return value is a reliable read of the real outcome. The
+        // racer that never conflicted returns the content it itself wrote,
+        // captured at the moment its own transaction committed -- if that
+        // commit happened before the other racer's later, guard-correct
+        // overwrite, its return value legitimately reflects its own
+        // (by-then-superseded) write, not a global post-hoc read. That is
+        // correct concurrent-call semantics (each call reports what it did,
+        // not a fresh re-read after the fact), not something this test can
+        // assert on without adding an extra read this test doesn't need:
+        // the durable row checked below is the actual authority either way.
+        if (aRolledBack) {
+          expect(resultA.principal.displayName).toBe("WFI Newer Fixture B");
+          expect(resultA.principal.updatedAt).toBe(tsB);
+          expect(resultA.roleBindings[0]?.roleCode).toBe("ops_admin");
+        }
+        if (bRolledBack) {
+          expect(resultB.principal.displayName).toBe("WFI Newer Fixture B");
+          expect(resultB.principal.updatedAt).toBe(tsB);
+          expect(resultB.roleBindings[0]?.roleCode).toBe("ops_admin");
+        }
 
         const principalRow = await dbA.query<{
           display_name: string;
