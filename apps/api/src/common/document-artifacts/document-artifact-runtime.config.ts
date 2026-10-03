@@ -50,8 +50,15 @@ export function createDocumentArtifactStore(
     (env.NODE_ENV === "test" ? "memory" : "unprovisioned");
   if (provider === "unprovisioned")
     return new UnprovisionedDocumentArtifactStore();
-  if (provider === "memory" && env.NODE_ENV === "test")
-    return new InMemoryDocumentArtifactStore();
+  // Unlike the implicit default above, an operator explicitly opting into
+  // "memory" is a deliberate choice, not a missing-configuration gap -- the
+  // same trust level "s3" already gets below. The dev/prod deploy resolver
+  // (operations/deployment/resolve-dev-artifact-providers.py) independently
+  // only ever accepts "s3" or "unprovisioned" for a real deployment, so this
+  // cannot reach a live Cloud Run instance through the blessed deploy path;
+  // it exists so hermetic CI (no S3 fixture) can opt in without flipping the
+  // process-wide NODE_ENV signal that unrelated provider configs also read.
+  if (provider === "memory") return new InMemoryDocumentArtifactStore();
   if (provider !== "s3")
     throw new Error(
       "Document artifact storage must be s3; memory is test-only.",

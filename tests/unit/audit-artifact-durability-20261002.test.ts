@@ -8,6 +8,10 @@ import {
   DocumentArtifactRebuildRegistry,
   InMemoryDocumentArtifactStore,
 } from "../../apps/api/src/common/document-artifacts";
+import {
+  createDocumentArtifactStore,
+  UnprovisionedDocumentArtifactStore,
+} from "../../apps/api/src/common/document-artifacts/document-artifact-runtime.config";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { BillingSettlementRepository } from "../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
@@ -551,5 +555,32 @@ describe("document artifacts survive a restart / a sibling Cloud Run instance (A
         ),
       ).toBe("ARTIFACT_NOT_MATERIALISED");
     });
+  });
+});
+
+describe("createDocumentArtifactStore provider resolution", () => {
+  it("fails closed when no provider is configured and NODE_ENV is not test", () => {
+    const store = createDocumentArtifactStore({});
+    expect(store).toBeInstanceOf(UnprovisionedDocumentArtifactStore);
+  });
+
+  it("falls back to memory only implicitly under NODE_ENV=test", () => {
+    const store = createDocumentArtifactStore({ NODE_ENV: "test" });
+    expect(store).toBeInstanceOf(InMemoryDocumentArtifactStore);
+  });
+
+  it("honours an explicit memory opt-in even outside NODE_ENV=test (hermetic CI, e.g. cross-surface-e2e, has no S3 fixture and must not flip process-wide NODE_ENV)", () => {
+    const store = createDocumentArtifactStore({
+      DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
+    });
+    expect(store).toBeInstanceOf(InMemoryDocumentArtifactStore);
+  });
+
+  it("still rejects an unrecognised explicit provider", () => {
+    expect(() =>
+      createDocumentArtifactStore({
+        DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "filesystem",
+      }),
+    ).toThrow(/must be s3; memory is test-only/);
   });
 });

@@ -203,6 +203,106 @@ placard self-heal test is replaced the same way.
 | `signature_hash_denial_regressions`   | `controlled-download.controller.ts` (`resolve()`, now `async`, otherwise unchanged logic/order)                                                                                                                                                                                                               | Before/after: all existing `sr-artifact-001` denial cases (expired, tampered subject, cross-kind, stale hash, never-materialised, reissued-link stability, no-args fallback) must still deny exactly as before. Retained in the new suite: "still denies a stale link after a rebuild," "still fails ... no registered rebuilder," "still fails ... genuinely unknown subjectId."                                                                                                                                         | See "Verification" below.                                                                                                                                                                 | —                                                                                                                                          |
 | `same_sha_review_ci`                  | —                                                                                                                                                                                                                                                                                                             | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Pending: hosted CI and independent review are a separate, later step of the candidate lifecycle, keyed to the pushed candidate SHA recorded at handoff.                                   | —                                                                                                                                          |
 
+## Independent re-verification round (after `d563cb97b`): real CI run found two gaps
+
+Candidate `d563cb97b10d72b3dad92858d014b7a8e8ad3902` (PR #2295) ran real
+hosted CI for the first time. Two findings surfaced that none of the local
+offline runs recorded above could catch, because they only exist once the
+app actually boots or the full, unfiltered test tree actually runs:
+
+- **CI-G1 (regression, `durable_producer_reader_wiring` /
+  `cross_instance_restart_bytes`)** — `cross-surface-e2e` (hermetic,
+  `.github/workflows/ci-integ.yml`) failed 6 of its scenarios
+  (E2E-001/007/008/012/014/015) with `HTTP 500` on `POST
+  /tenant/invoices/generate` and equivalent routes; `ui-route-e2e`'s
+  `platform-admin:/switchboard` route (placard-backed) failed the same way.
+  Server log: `Durable document artifact storage is not configured.` Root
+  cause: neither CI job nor `playwright.deterministic-route-suite.config.ts`
+  (which boots its own `pnpm --filter @drts/api start` for the UI route
+  suite) ever set `DOCUMENT_ARTIFACT_STORAGE_PROVIDER`, and neither sets
+  `NODE_ENV=test` for the booted server process — so
+  `createDocumentArtifactStore()`'s implicit default (fail-closed
+  `unprovisioned`) applied to invoice/placard/report generation, which
+  **previously always worked** via the unconditional
+  `InMemoryDocumentArtifactStore` this task replaced. This is a real
+  regression this task's own change introduced against currently-exercised
+  CI paths, not a pre-existing gap. Confirmed by direct comparison: the same
+  `cross-surface-e2e` check is `success` on `origin/dev` HEAD (`d94d528f4`,
+  `c00a4439a`, `9780f0bc2` — all before this task's change lands), so the
+  fail-closed default is what broke it.
+  - Fix: `document-artifact-runtime.config.ts`'s `createDocumentArtifactStore`
+    now trusts an **explicit** `DOCUMENT_ARTIFACT_STORAGE_PROVIDER=memory`
+    regardless of `NODE_ENV` (previously this still required
+    `NODE_ENV==="test"`, identical to `remittance-proof-runtime.config.ts`,
+    which this task's design deliberately mirrored). The *implicit* default
+    (nothing configured) is untouched and still fails closed to
+    `unprovisioned` outside `NODE_ENV=test` — satisfying EXECUTION.md's "keep
+    missing production configuration fail closed" unchanged. An explicit
+    `memory` opt-in is a deliberate operator choice, not missing
+    configuration, and gets the same trust `s3` already has with no
+    `NODE_ENV` gate at all. This does not weaken real-deployment safety:
+    `operations/deployment/resolve-dev-artifact-providers.py` (the only path
+    that can set this variable on a real Cloud Run instance) independently
+    only ever accepts `s3` or `unprovisioned`, never `memory` — so this opt-in
+    can only be reached by a CI job's own declared env, never by the blessed
+    deploy pipeline. Deliberately *not* mirrored by setting process-wide
+    `NODE_ENV=test` in the CI job instead: that would also flip
+    `remittance-proof-runtime.config.ts`'s identical gate (and
+    `driver-sos-provider.config.ts`, `regulatory-registry.service.ts`,
+    `geo-provider-config.service.ts`, `map-provider-config.ts`,
+    `platform-admin-assistant.audit.ts`, `internal-key-exception-registry.ts`,
+    `auth-startup-config.ts` — all distinct, unrelated `NODE_ENV`-gated
+    providers), an unbounded blast radius for a document-artifact-only fix.
+  - CI wiring: `.github/workflows/ci-integ.yml`'s `cross-surface-e2e` job env
+    and `playwright.deterministic-route-suite.config.ts`'s own
+    `apiTestEnvironment` both now set `DOCUMENT_ARTIFACT_STORAGE_PROVIDER:
+    memory` / `DOCUMENT_ARTIFACT_STORAGE_PROVIDER=memory` respectively,
+    alongside the existing `CONTROLLED_DOWNLOAD_SIGNING_SECRET` line each
+    already carried. `iam-negative-matrix` and `product_smoke_acceptance`
+    (vitest-driven, not a booted `dist/main.js`) were left untouched —
+    Vitest's own `NODE_ENV=test` already resolves them to `memory` through
+    the unchanged implicit-default path, so no explicit variable was needed
+    or added there.
+  - New regression tests: `tests/unit/audit-artifact-durability-20261002.test.ts`
+    → `describe("createDocumentArtifactStore provider resolution")` (4
+    tests): implicit default still fails closed outside `NODE_ENV=test`;
+    implicit default still resolves to memory under `NODE_ENV=test`; explicit
+    `memory` opt-in now works without `NODE_ENV=test` (the fix, reproduced
+    directly against the exported function rather than only inferred from a
+    CI log); an unrecognised explicit provider still throws.
+- **CI-G2 (missed callers, mechanical)** — CI's `unit` job (`ci.yml` /
+  `product_smoke_acceptance`, plain `pnpm run test:unit` +
+  `pnpm --filter @drts/api test`, both outside this task's declared
+  `write_scopes` but reached by the same interface change) found 2 failing
+  tests the prior local runs never selected:
+  - `tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts`
+    — `TypeError: Cannot read properties of undefined (reading 'mimeType')`.
+    `(service as any).documentArtifactStore.get(...)` was read synchronously;
+    now `await`ed.
+  - `tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts`
+    — `TypeError: file.getStream is not a function`. `controller.resolve(...)`
+    was called synchronously; now `await`ed.
+  Both are the exact same class of gap as `controlled-download-route.test.ts`
+  in the prior revision (d563cb97b): a caller of the now-`async`
+  store/controller that was never updated, so it silently asserted against a
+  stale/undefined value instead of the real one. Neither file is in this
+  task's declared `write_scopes`; before touching them,
+  `AI_NAME=Claude2 ai-status.sh list --status in_progress` was checked and
+  showed only this task and `AUDIT-VOICE-APPLICATION-WIRING-20261003` (scoped
+  to `apps/voice-media-worker/*` and `voice-booking`, no overlap) in progress
+  — the same scope-expansion precedent already used for
+  `platform-admin.service.ts` in the prior revision. A repo-wide grep for
+  every other `documentArtifactStore.get/put(` and `controller.resolve(` call
+  site (tests and source) confirmed these were the only two unawaited
+  callers; every other site already either declares `async`/awaits correctly
+  or returns the `Promise` through a helper that its own caller awaits.
+  Both fixes are purely mechanical (`await` insertion); no assertion was
+  weakened or removed.
+
+PR #2295 / candidate `d563cb97b` is otherwise unchanged by this round; these
+are additive fixes on top of it, captured in a new candidate SHA recorded at
+handoff.
+
 ## Verification
 
 This candidate was prepared in an isolated worker worktree whose shared

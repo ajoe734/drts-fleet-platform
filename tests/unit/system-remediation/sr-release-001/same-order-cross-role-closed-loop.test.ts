@@ -371,7 +371,7 @@ describe("SR-RELEASE-001 / C118: same-order cross-role closed loop", () => {
         documentArtifactStore,
       );
       const params = paramsOfDownloadUrl(invoice.artifactUrl!);
-      const file = controller.resolve(
+      const file = (await controller.resolve(
         "tenant-invoice",
         invoice.invoiceId,
         params.signedAt,
@@ -380,7 +380,7 @@ describe("SR-RELEASE-001 / C118: same-order cross-role closed loop", () => {
         params.manifestHash,
         params.sig,
         params.sigV,
-      ) as unknown as {
+      )) as unknown as {
         getStream(): NodeJS.ReadableStream;
         getHeaders(): { type?: string };
       };

@@ -14,6 +14,7 @@ const apiTestEnvironment = [
   "JWT_ISSUER=drts-local",
   "JWT_AUDIENCE=drts-api",
   "CONTROLLED_DOWNLOAD_SIGNING_SECRET=ci-e2e-controlled-download-secret",
+  "DOCUMENT_ARTIFACT_STORAGE_PROVIDER=memory",
   "PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT=ci-e2e-alpha-ingress-key",
   "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT=ci-e2e-beta-ingress-key",
   "REPORTING_SNAPSHOT_SCHEDULER_ENABLED=false",
