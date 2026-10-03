@@ -2528,6 +2528,36 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityPrincipalRecord,
   ) {
+    const existingResult = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_principals WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
+    );
+    const existing = existingResult.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+          existingResult.rows[0].record,
+          "iam.identity_principals",
+        )
+      : null;
+    // A session is issued every time a principal is re-verified
+    // (login, token refresh, workload identity exchange), and each issuance
+    // calls through here to "ensure" the principal still exists. If this
+    // unconditionally bumped updated_at, every re-issuance would advance the
+    // durable version fingerprint that JwtAuthService.validateDurableState
+    // compares against, silently revoking every other still-valid session
+    // for the same principal. Only a real field change may advance it.
+    const unchanged =
+      existing !== null &&
+      existing.issuer === record.issuer &&
+      existing.subject === record.subject &&
+      existing.principalType === record.principalType &&
+      existing.email === record.email &&
+      existing.emailVerified === record.emailVerified &&
+      existing.displayName === record.displayName &&
+      existing.status === record.status;
+    const createdAt = existing?.createdAt ?? record.createdAt;
+    const updatedAt = unchanged ? existing.updatedAt : record.updatedAt;
+    const effectiveRecord = { ...record, createdAt, updatedAt };
+
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_principals (
@@ -2563,18 +2593,18 @@ export class IdentityRepository implements OnModuleInit {
         RETURNING record
       `,
       [
-        record.principalId,
-        record.sourceRef,
-        record.issuer,
-        record.subject,
-        record.principalType,
-        record.email,
-        record.emailVerified,
-        record.displayName,
-        record.status,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
+        effectiveRecord.principalId,
+        effectiveRecord.sourceRef,
+        effectiveRecord.issuer,
+        effectiveRecord.subject,
+        effectiveRecord.principalType,
+        effectiveRecord.email,
+        effectiveRecord.emailVerified,
+        effectiveRecord.displayName,
+        effectiveRecord.status,
+        createdAt,
+        updatedAt,
+        JSON.stringify(effectiveRecord),
       ],
     );
     return this.parseRecord<CanonicalIdentityPrincipalRecord>(
@@ -2587,6 +2617,32 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityMembershipRecord,
   ) {
+    const existingResult = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
+    );
+    const existing = existingResult.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+          existingResult.rows[0].record,
+          "iam.identity_memberships",
+        )
+      : null;
+    // See upsertPrincipal: membership.updated_at feeds the same durable
+    // version fingerprint, so a no-op "ensure" must not advance it.
+    const unchanged =
+      existing !== null &&
+      existing.principalId === record.principalId &&
+      existing.realm === record.realm &&
+      existing.scopeRef === record.scopeRef &&
+      existing.tenantId === record.tenantId &&
+      existing.partnerId === record.partnerId &&
+      existing.status === record.status &&
+      existing.invitedByPrincipalId === record.invitedByPrincipalId &&
+      existing.invitationId === record.invitationId;
+    const createdAt = existing?.createdAt ?? record.createdAt;
+    const updatedAt = unchanged ? existing.updatedAt : record.updatedAt;
+    const effectiveRecord = { ...record, createdAt, updatedAt };
+
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_memberships (
@@ -2624,19 +2680,19 @@ export class IdentityRepository implements OnModuleInit {
         RETURNING record
       `,
       [
-        record.membershipId,
-        record.sourceRef,
-        record.principalId,
-        record.realm,
-        record.scopeRef,
-        record.tenantId,
-        record.partnerId,
-        record.status,
-        record.invitedByPrincipalId,
-        record.invitationId,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
+        effectiveRecord.membershipId,
+        effectiveRecord.sourceRef,
+        effectiveRecord.principalId,
+        effectiveRecord.realm,
+        effectiveRecord.scopeRef,
+        effectiveRecord.tenantId,
+        effectiveRecord.partnerId,
+        effectiveRecord.status,
+        effectiveRecord.invitedByPrincipalId,
+        effectiveRecord.invitationId,
+        createdAt,
+        updatedAt,
+        JSON.stringify(effectiveRecord),
       ],
     );
     return this.parseRecord<CanonicalIdentityMembershipRecord>(
@@ -2649,6 +2705,30 @@ export class IdentityRepository implements OnModuleInit {
     client: PoolClient,
     record: CanonicalIdentityRoleBindingRecord,
   ) {
+    const existingResult = await client.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 LIMIT 1`,
+      [record.sourceRef],
+    );
+    const existing = existingResult.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          existingResult.rows[0].record,
+          "iam.identity_role_bindings",
+        )
+      : null;
+    // See upsertPrincipal: role-binding updated_at also feeds the durable
+    // version fingerprint, so a no-op "ensure" must not advance it.
+    const unchanged =
+      existing !== null &&
+      existing.membershipId === record.membershipId &&
+      existing.roleCode === record.roleCode &&
+      existing.grantedByPrincipalId === record.grantedByPrincipalId &&
+      existing.approvalId === record.approvalId &&
+      existing.validFrom === record.validFrom &&
+      existing.validTo === record.validTo;
+    const createdAt = existing?.createdAt ?? record.createdAt;
+    const updatedAt = unchanged ? existing.updatedAt : record.updatedAt;
+    const effectiveRecord = { ...record, createdAt, updatedAt };
+
     const result = await client.query<JsonRecordRow>(
       `
         INSERT INTO iam.identity_role_bindings (
@@ -2682,17 +2762,17 @@ export class IdentityRepository implements OnModuleInit {
         RETURNING record
       `,
       [
-        record.roleBindingId,
-        record.sourceRef,
-        record.membershipId,
-        record.roleCode,
-        record.grantedByPrincipalId,
-        record.approvalId,
-        record.validFrom,
-        record.validTo,
-        record.createdAt,
-        record.updatedAt,
-        JSON.stringify(record),
+        effectiveRecord.roleBindingId,
+        effectiveRecord.sourceRef,
+        effectiveRecord.membershipId,
+        effectiveRecord.roleCode,
+        effectiveRecord.grantedByPrincipalId,
+        effectiveRecord.approvalId,
+        effectiveRecord.validFrom,
+        effectiveRecord.validTo,
+        createdAt,
+        updatedAt,
+        JSON.stringify(effectiveRecord),
       ],
     );
     return this.parseRecord<CanonicalIdentityRoleBindingRecord>(
@@ -2784,6 +2864,19 @@ export class IdentityRepository implements OnModuleInit {
         record.principalId)
       : record.principalId;
     const existing = this.fallbackPrincipals.get(existingPrincipalId) ?? null;
+    // Mirrors upsertPrincipal: a no-op "ensure" (e.g. re-issuing a session
+    // for an already-known principal) must not advance updatedAt, or it
+    // silently invalidates every other active session via
+    // computeWorkforceTokenVersion.
+    const unchanged =
+      existing !== null &&
+      existing.issuer === record.issuer &&
+      existing.subject === record.subject &&
+      existing.principalType === record.principalType &&
+      existing.email === record.email &&
+      existing.emailVerified === record.emailVerified &&
+      existing.displayName === record.displayName &&
+      existing.status === record.status;
     const persisted = existing
       ? {
           ...existing,
@@ -2795,7 +2888,7 @@ export class IdentityRepository implements OnModuleInit {
           emailVerified: record.emailVerified,
           displayName: record.displayName,
           status: record.status,
-          updatedAt: record.updatedAt,
+          updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
         }
       : { ...record };
     this.fallbackPrincipals.set(persisted.principalId, persisted);
@@ -2814,6 +2907,18 @@ export class IdentityRepository implements OnModuleInit {
         record.membershipId)
       : record.membershipId;
     const existing = this.fallbackMemberships.get(existingMembershipId) ?? null;
+    // Mirrors upsertFallbackPrincipal: see upsertPrincipal for why a no-op
+    // "ensure" must not advance updatedAt.
+    const unchanged =
+      existing !== null &&
+      existing.principalId === record.principalId &&
+      existing.realm === record.realm &&
+      existing.scopeRef === record.scopeRef &&
+      existing.tenantId === record.tenantId &&
+      existing.partnerId === record.partnerId &&
+      existing.status === record.status &&
+      existing.invitedByPrincipalId === record.invitedByPrincipalId &&
+      existing.invitationId === record.invitationId;
     const persisted = existing
       ? {
           ...existing,
@@ -2826,7 +2931,7 @@ export class IdentityRepository implements OnModuleInit {
           status: record.status,
           invitedByPrincipalId: record.invitedByPrincipalId,
           invitationId: record.invitationId,
-          updatedAt: record.updatedAt,
+          updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
         }
       : { ...record };
     this.fallbackMemberships.set(persisted.membershipId, persisted);
@@ -2848,6 +2953,16 @@ export class IdentityRepository implements OnModuleInit {
       : record.roleBindingId;
     const existing =
       this.fallbackRoleBindings.get(existingRoleBindingId) ?? null;
+    // Mirrors upsertFallbackPrincipal: see upsertPrincipal for why a no-op
+    // "ensure" must not advance updatedAt.
+    const unchanged =
+      existing !== null &&
+      existing.membershipId === record.membershipId &&
+      existing.roleCode === record.roleCode &&
+      existing.grantedByPrincipalId === record.grantedByPrincipalId &&
+      existing.approvalId === record.approvalId &&
+      existing.validFrom === record.validFrom &&
+      existing.validTo === record.validTo;
     const persisted = existing
       ? {
           ...existing,
@@ -2858,7 +2973,7 @@ export class IdentityRepository implements OnModuleInit {
           approvalId: record.approvalId,
           validFrom: record.validFrom,
           validTo: record.validTo,
-          updatedAt: record.updatedAt,
+          updatedAt: unchanged ? existing.updatedAt : record.updatedAt,
         }
       : { ...record };
     this.fallbackRoleBindings.set(persisted.roleBindingId, persisted);
