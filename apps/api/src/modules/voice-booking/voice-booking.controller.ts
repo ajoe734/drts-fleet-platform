@@ -328,6 +328,85 @@ export class VoiceBookingController {
   }
 
   /**
+   * SD §5.3/§5.4/§10.1 `POST /sessions/{sessionId}/events`: durably applies
+   * one control-plane event (speech-start, clear, playback terminal, DTMF,
+   * owner/language switch) to the session's ordered-event watermark.
+   * `VoiceSessionService.recordControlEvent` (SD §5.4) already implements
+   * the full dedup/gap/bootstrap/speech-start-watermark machinery this
+   * route only exposes -- Codex reopen round 5/6, R4: this worker had no
+   * route or client to reach it at all, so the durable speech-start
+   * watermark `VoiceSessionService.resolveInput` (above) actually checks
+   * against never advanced for any real call. Authenticated the same way
+   * as `resolveInput`: the SD §4.2 capability, re-verified here, not this
+   * route's own bearer claims trusted blindly, and `leaseEpoch` is always
+   * the capability's own bound value -- never a caller-supplied body field
+   * -- so a superseded lease can never durably push this watermark
+   * forward.
+   */
+  @Post("sessions/:sessionId/events")
+  @OpenRoute()
+  async recordControlEvent(
+    @Param("sessionId") sessionId: string,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body()
+    body: {
+      source: string;
+      providerAccountId?: string;
+      sourceEventId?: string;
+      legId?: string;
+      occurredAt: string;
+      sequence: number;
+      mediaEpoch: number;
+      eventType: string;
+      payload?: unknown;
+      payloadRef?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const voiceCapabilityGuard = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityGuard,
+      "voiceCapabilityGuard",
+    );
+    const voiceSessionService = this.requireVoiceApplicationDependency(
+      this.voiceSessionService,
+      "voiceSessionService",
+    );
+    const claims = await voiceCapabilityGuard.authenticate(headers);
+    if (claims.voiceSessionId !== sessionId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice capability is bound to a different session id.",
+      );
+    }
+    assertVoiceCapabilityScope(claims, "session_execute");
+    const result = await voiceSessionService.recordControlEvent({
+      voiceSessionId: sessionId,
+      legId: body.legId ?? null,
+      source: body.source,
+      providerAccountId: body.providerAccountId ?? null,
+      sourceEventId: body.sourceEventId ?? null,
+      occurredAt: body.occurredAt,
+      sequence: body.sequence,
+      mediaEpoch: body.mediaEpoch,
+      leaseEpoch: claims.leaseEpoch,
+      eventType: body.eventType,
+      payload: body.payload,
+      payloadRef: body.payloadRef ?? null,
+    });
+    return toApiSuccessEnvelope(
+      {
+        deduped: result.deduped,
+        applied: result.applied,
+        gap: result.gap,
+        appliedThroughSequence: result.appliedThroughSequence,
+        session: result.session,
+      },
+      requestId,
+    );
+  }
+
+  /**
    * Backs `VoiceCallTurnCoordinator.executeTools`'s (apps/voice-media-worker)
    * only real tool outcome, `request_handoff`, through the actual
    * `VoiceToolGatewayService.execute` repair anchor (Codex reopen round

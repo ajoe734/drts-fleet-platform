@@ -234,6 +234,63 @@ describe("VoiceApiClient", () => {
     expect(result.session.sessionVersion).toBe(6);
   });
 
+  it("calls recordControlEvent using the capability token as bearer auth, scoped to the session's events path", async () => {
+    let body: unknown;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toBe(
+        `https://api.example.test/callcenter/voice/sessions/${binding.voiceSessionId}/events`,
+      );
+      expect(init?.headers).toMatchObject({ authorization: "Bearer capability-token" });
+      body = JSON.parse(init!.body as string);
+      return jsonResponse(200, {
+        data: {
+          deduped: false,
+          applied: true,
+          gap: false,
+          appliedThroughSequence: 1,
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 5,
+            inputEpoch: 1,
+            pendingInput: true,
+          },
+        },
+      });
+    });
+    const client = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      fakeTokenSource(),
+    );
+
+    const result = await client.recordControlEvent(binding.voiceSessionId, "capability-token", {
+      source: "media_worker",
+      occurredAt: "2026-07-24T09:00:00.000Z",
+      sequence: 1,
+      mediaEpoch: 1,
+      eventType: "speech_start",
+    });
+
+    expect(body).toEqual({
+      source: "media_worker",
+      occurredAt: "2026-07-24T09:00:00.000Z",
+      sequence: 1,
+      mediaEpoch: 1,
+      eventType: "speech_start",
+    });
+    expect(result).toEqual({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: {
+        voiceSessionId: binding.voiceSessionId,
+        sessionVersion: 5,
+        inputEpoch: 1,
+        pendingInput: true,
+      },
+    });
+  });
+
   it("surfaces apps/api's structured error code/message, never swallowing a rejection as success", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(409, { error: { code: "VOICE_DRAFT_STALE", message: "stale" } }),

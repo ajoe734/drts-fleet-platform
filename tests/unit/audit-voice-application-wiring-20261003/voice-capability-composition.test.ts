@@ -104,6 +104,7 @@ function buildController(opts: {
   guardAuthenticate: ReturnType<typeof vi.fn>;
   issue?: ReturnType<typeof vi.fn>;
   resolveInput?: ReturnType<typeof vi.fn>;
+  recordControlEvent?: ReturnType<typeof vi.fn>;
   findSessionById?: ReturnType<typeof vi.fn>;
   initiateHandoff?: ReturnType<typeof vi.fn>;
 }) {
@@ -113,6 +114,7 @@ function buildController(opts: {
   } as unknown as VoiceCapabilityService;
   const sessionService = {
     resolveInput: opts.resolveInput ?? vi.fn(),
+    recordControlEvent: opts.recordControlEvent ?? vi.fn(),
   } as unknown as VoiceSessionService;
   const repository = {
     findSessionById: opts.findSessionById ?? vi.fn(async () => session()),
@@ -281,6 +283,156 @@ describe("VoiceBookingController.resolveInput (backs VoiceDialoguePersistPort tr
         { expectedSessionVersion: 1, inputEpoch: 2, resolution: "relevant" },
       ),
     ).rejects.toMatchObject({ code: "VOICE_DRAFT_STALE" });
+  });
+});
+
+describe("VoiceBookingController.recordControlEvent (backs VoiceSessionService.recordControlEvent, SD §5.4 durable speech-start watermark)", () => {
+  /**
+   * Codex reopen round 5/6, R4: this worker had no route or client to
+   * reach `VoiceSessionService.recordControlEvent` at all, so the durable
+   * speech-start watermark `resolveInput` checks against never advanced
+   * for any real call. This route exposes that already-built/tested
+   * service method.
+   */
+  it("rejects when the capability's bound session does not match the path", async () => {
+    const guardAuthenticate = vi.fn(async () =>
+      claims({ voiceSessionId: "99999999-9999-9999-9999-999999999999" }),
+    );
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        {
+          source: "media_worker",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+          sequence: 1,
+          mediaEpoch: 1,
+          eventType: "speech_start",
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("rejects when the capability lacks session_execute scope", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ scopes: ["handoff_request"] }));
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        {
+          source: "media_worker",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+          sequence: 1,
+          mediaEpoch: 1,
+          eventType: "speech_start",
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("calls VoiceSessionService.recordControlEvent with the capability-bound session id, the capability's own leaseEpoch (never a caller-supplied one), and the body's event fields", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ leaseEpoch: 1 }));
+    const recordControlEvent = vi.fn(async () => ({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: session({ inputEpoch: 1, pendingInput: true }),
+    }));
+    const { controller } = buildController({ guardAuthenticate, recordControlEvent });
+
+    const result = await controller.recordControlEvent(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      {
+        source: "media_worker",
+        providerAccountId: "acct-1",
+        sourceEventId: "evt-1",
+        occurredAt: "2026-07-24T09:00:00.000Z",
+        sequence: 1,
+        mediaEpoch: 1,
+        eventType: "speech_start",
+        payload: { foo: "bar" },
+      },
+    );
+
+    expect(recordControlEvent).toHaveBeenCalledWith({
+      voiceSessionId: session().voiceSessionId,
+      legId: null,
+      source: "media_worker",
+      providerAccountId: "acct-1",
+      sourceEventId: "evt-1",
+      occurredAt: "2026-07-24T09:00:00.000Z",
+      sequence: 1,
+      mediaEpoch: 1,
+      leaseEpoch: 1,
+      eventType: "speech_start",
+      payload: { foo: "bar" },
+      payloadRef: null,
+    });
+    expect(result.data).toEqual({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: session({ inputEpoch: 1, pendingInput: true }),
+    });
+  });
+
+  it("never trusts a caller-supplied leaseEpoch -- only the authenticated capability's own bound value reaches the service", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ leaseEpoch: 9 }));
+    const recordControlEvent = vi.fn(async () => ({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: session(),
+    }));
+    const { controller } = buildController({ guardAuthenticate, recordControlEvent });
+
+    await controller.recordControlEvent(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      {
+        // No `leaseEpoch` field exists on this route's body type at all --
+        // even if a forged client sent one, nothing here reads it.
+        source: "media_worker",
+        occurredAt: "2026-07-24T09:00:00.000Z",
+        sequence: 1,
+        mediaEpoch: 1,
+        eventType: "speech_start",
+      } as never,
+    );
+
+    expect(recordControlEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ leaseEpoch: 9 }),
+    );
+  });
+
+  it("propagates VOICE_SESSION_NOT_OWNER when the lease has been superseded, never silently succeeding", async () => {
+    const guardAuthenticate = vi.fn(async () => claims());
+    const recordControlEvent = vi.fn(async () => {
+      throw new ApiRequestError(409, "VOICE_SESSION_NOT_OWNER", "stale lease");
+    });
+    const { controller } = buildController({ guardAuthenticate, recordControlEvent });
+
+    await expect(
+      controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        {
+          source: "media_worker",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+          sequence: 1,
+          mediaEpoch: 1,
+          eventType: "speech_start",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
   });
 });
 

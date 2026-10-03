@@ -7,14 +7,22 @@ import type { WorkloadIdentityTokenSource } from "./workload-identity-token-sour
 /**
  * The first-party worker/API HTTP client SD §4.2/§10.1 already define
  * (Codex reopen round 5/6, R4) -- previously this worker "has no HTTP
- * client to call apps/api with" at all. Only the three routes this
- * worker's own dialogue turn loop actually needs are implemented:
- * capability issuance, the CAS input-resolution persist seam
- * (`VoiceSessionService.resolveInput`), and the `request_handoff` tool
- * gateway seam (`VoiceToolGatewayService.execute` via
- * `apps/api`'s `VoiceHandoffOnlyToolPorts`). This is not a generic HTTP
+ * client to call apps/api with" at all. Four routes this worker's own
+ * dialogue turn loop needs are implemented: capability issuance, the CAS
+ * input-resolution persist seam (`VoiceSessionService.resolveInput`), the
+ * `request_handoff` tool gateway seam (`VoiceToolGatewayService.execute`
+ * via `apps/api`'s `VoiceHandoffOnlyToolPorts`), and the ordered
+ * control-event watermark seam (`VoiceSessionService.recordControlEvent`,
+ * R4 residual) that durably advances the speech-start `inputEpoch`
+ * `resolveInput` itself checks against. This is not a generic HTTP
  * client -- it has no method for any other SD §10.1 route, since nothing
- * in this worker's current composition calls one.
+ * in this worker's current composition calls one. `recordControlEvent`'s
+ * own result is not yet consumed by `VoiceCallTurnCoordinator` to
+ * reconcile this worker's process-local turn-sequencing counter against
+ * the authoritative speech-start watermark -- that integration (and the
+ * local/remote epoch-semantic split it requires) is scoped separately;
+ * this client method exists so a future caller has a real seam to call
+ * through rather than none at all.
  */
 export class VoiceApiError extends Error {
   constructor(
@@ -75,6 +83,42 @@ export interface RequestHandoffResult {
   }>;
 }
 
+/** Mirrors `RecordControlEventCommand` (apps/api's
+ * `voice-session.service.ts`) minus `voiceSessionId`/`leaseEpoch`, which
+ * this client's `recordControlEvent` call already carries via the path and
+ * the capability token respectively -- never a client-supplied body
+ * field, same convention as `issueCapability`/`requestHandoff`. */
+export interface RecordControlEventCommand {
+  source: string;
+  providerAccountId?: string;
+  sourceEventId?: string;
+  legId?: string;
+  occurredAt: string;
+  /** This attachment's own monotonic control-stream position (SD §5.4):
+   * the caller must track and advance this per attachment, starting at 1
+   * for the first event ever sent for a session -- `apps/api` fails this
+   * event closed into a durably-buffered gap, never silently skipped, if
+   * it does not arrive as the current contiguous next value. */
+  sequence: number;
+  mediaEpoch: number;
+  eventType: string;
+  payload?: unknown;
+  payloadRef?: string;
+}
+
+export interface RecordControlEventResult {
+  deduped: boolean;
+  applied: boolean;
+  gap: boolean;
+  appliedThroughSequence: number;
+  session: {
+    voiceSessionId: string;
+    sessionVersion: number;
+    inputEpoch: number;
+    pendingInput: boolean;
+  };
+}
+
 interface ApiErrorEnvelope {
   error?: { code?: string; message?: string };
 }
@@ -111,6 +155,29 @@ export class VoiceApiClient {
     return this.request<ResolveInputResult>(
       "POST",
       `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/input-resolutions`,
+      capabilityToken,
+      command,
+      signal,
+    );
+  }
+
+  /** SD §5.3/§5.4's ordered control-event watermark seam
+   * (`VoiceSessionService.recordControlEvent`, Codex reopen round 5/6, R4
+   * residual) -- durably applies one control event (speech-start, clear,
+   * playback terminal, DTMF, owner/language switch) and, when it is the
+   * next contiguous one, advances the session's authoritative
+   * `inputEpoch`/`pendingInput` watermark that `resolveInput` above
+   * actually checks against. See `RecordControlEventCommand.sequence`'s
+   * own doc for the bootstrap/contiguity contract the caller must honor. */
+  async recordControlEvent(
+    sessionId: string,
+    capabilityToken: string,
+    command: RecordControlEventCommand,
+    signal?: AbortSignal,
+  ): Promise<RecordControlEventResult> {
+    return this.request<RecordControlEventResult>(
+      "POST",
+      `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/events`,
       capabilityToken,
       command,
       signal,
