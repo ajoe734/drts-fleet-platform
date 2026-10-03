@@ -1,6 +1,7 @@
 import type {
   VoiceCapabilityScope,
   VoiceCapabilityTokenEnvelope,
+  VoiceDialogueSnapshotContent,
 } from "@drts/contracts";
 import type { WorkloadIdentityTokenSource } from "./workload-identity-token-source";
 
@@ -55,19 +56,61 @@ export interface ResolveInputCommand {
 }
 
 export interface ResolveInputResult {
-  /** `voiceSessionId` (Codex reopen round 5/6, R4-persist residual): the
-   * real backend route (`VoiceBookingController#resolveInput`) already
-   * returns the full `VoiceSessionRecord`, which carries this field --
-   * `createTrustedDialoguePersistPort` needs it to correlate a response
-   * against the exact binding it issued the request for, not only the
-   * `inputEpoch`, which alone cannot distinguish a misattributed response
-   * for a *different* session that happens to carry the same epoch. */
+  /** The real backend route (`VoiceBookingController#resolveInput`) already
+   * returns the full `VoiceSessionRecord` -- `createTrustedDialoguePersistPort`
+   * needs more than just `voiceSessionId`/`inputEpoch` to correlate a
+   * response against the exact binding it issued the request for (Codex
+   * reopen round 5/6, R4-persist residual, then round 13/the no-history-
+   * rewrite successor's R4-persist finding): `resourceScopeId`,
+   * `routeProfileVersion` and `leaseEpoch` must also match, or a response
+   * that happens to carry the right `voiceSessionId`/`inputEpoch`/
+   * `sessionVersion+1` but a foreign scope/route/lease could still be
+   * silently accepted. */
   session: {
     voiceSessionId: string;
     sessionVersion: number;
+    resourceScopeId: string;
+    routeProfileVersion: number;
+    leaseEpoch: number;
     inputEpoch: number;
     pendingInput: boolean;
   };
+}
+
+export interface PersistDialogueSnapshotCommand {
+  expectedSessionVersion: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  content: VoiceDialogueSnapshotContent;
+}
+
+export interface PersistDialogueSnapshotResult {
+  snapshot: {
+    snapshotId: string;
+    voiceSessionId: string;
+    sessionVersion: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+    content: VoiceDialogueSnapshotContent;
+    createdAt: string;
+    retentionExpiresAt: string;
+  };
+  deduped: boolean;
+}
+
+export interface DialogueSnapshotRestorationResult {
+  session: {
+    voiceSessionId: string;
+    sessionVersion: number;
+    resourceScopeId: string;
+    routeProfileVersion: number;
+    leaseEpoch: number;
+    inputEpoch: number;
+    pendingInput: boolean;
+  };
+  snapshot: PersistDialogueSnapshotResult["snapshot"] | null;
 }
 
 export interface RequestHandoffCommand {
@@ -180,6 +223,46 @@ export class VoiceApiClient {
       `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/events`,
       capabilityToken,
       command,
+      signal,
+    );
+  }
+
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: persists this turn's
+   * versioned, encrypted dialogue-content snapshot through
+   * `VoiceSessionService.persistDialogueSnapshot` (see that service
+   * method's own doc and `infra/migrations/V0106__voice_dialogue_snapshot.sql`).
+   * Always called with the SAME capability token issued for this turn's
+   * `resolveInput` call above, immediately after it succeeds -- content is
+   * never persisted by itself without a corresponding admitted CAS. */
+  async persistDialogueSnapshot(
+    sessionId: string,
+    capabilityToken: string,
+    command: PersistDialogueSnapshotCommand,
+    signal?: AbortSignal,
+  ): Promise<PersistDialogueSnapshotResult> {
+    return this.request<PersistDialogueSnapshotResult>(
+      "POST",
+      `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/dialogue-snapshot`,
+      capabilityToken,
+      command,
+      signal,
+    );
+  }
+
+  /** Restoration read `VoiceCallTurnCoordinator.attach` uses to seed a bound
+   * attachment's dialogue state and `VoiceSessionBinding.sessionVersion`
+   * from authoritative truth instead of starting fresh/blank -- see
+   * `VoiceSessionService.getDialogueSnapshotRestoration`'s own doc. */
+  async getDialogueSnapshotRestoration(
+    sessionId: string,
+    capabilityToken: string,
+    signal?: AbortSignal,
+  ): Promise<DialogueSnapshotRestorationResult> {
+    return this.request<DialogueSnapshotRestorationResult>(
+      "GET",
+      `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/dialogue-snapshot`,
+      capabilityToken,
+      undefined,
       signal,
     );
   }

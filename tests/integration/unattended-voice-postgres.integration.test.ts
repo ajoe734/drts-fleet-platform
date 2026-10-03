@@ -17,6 +17,8 @@ import { VoiceBookingAuthorizationService } from "../../apps/api/src/modules/voi
 import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceHandoffService } from "../../apps/api/src/modules/voice-booking/voice-handoff.service";
 import { VoiceSessionRepository } from "../../apps/api/src/modules/voice-booking/voice-session.repository";
+import { VoiceSessionService } from "../../apps/api/src/modules/voice-booking/voice-session.service";
+import { VoiceRetentionService } from "../../apps/api/src/modules/voice-booking/voice-retention.service";
 import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -142,6 +144,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       "V0091__dispatch_reservation_commit_invariant.sql",
       "V0092__voice_booking_command_proof.sql",
       "V0093__voice_retention_and_legal_hold.sql",
+      "V0106__voice_dialogue_snapshot.sql",
     ]) {
       await pool.query(migration(name));
     }
@@ -2320,6 +2323,224 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
 
       const counts = await getCounts(f.request.intentId);
       expect(counts.receipts).toBe(0);
+    });
+  });
+
+  // =========================================================================
+  // SUITE 5: dialogue_snapshot_schema_and_cas_evidence
+  // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: the real Postgres coverage
+  // for `voice.dialogue_snapshot` (V0106) the task's own coordination note
+  // reserves for hosted execution only -- CAS/scope/lease/route/input/media
+  // fencing, dedup and append-only immutability against the ACTUAL schema,
+  // not a hand-rolled table/SQL standing in for it.
+  // =========================================================================
+  describe("Suite 5: dialogue_snapshot_schema_and_cas_evidence", () => {
+    const validContent = {
+      draftVersion: 1,
+      confirmationId: null,
+      slots: {},
+      slotHistory: [],
+      addressRepairs: { pickup: 0, dropoff: 0 },
+      addressHistory: [],
+      handoff: null,
+    };
+
+    function buildSessionService(inst: ReturnType<typeof createInstance>) {
+      return new VoiceSessionService(
+        inst.sessionRepository,
+        undefined,
+        undefined,
+        new VoiceRetentionService(),
+      );
+    }
+
+    const originalEnv = { ...process.env };
+    beforeAll(() => {
+      process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+        Buffer.alloc(32, 7).toString("base64");
+    });
+    afterAll(() => {
+      process.env = { ...originalEnv };
+    });
+
+    it("persists a real encrypted row against the actual schema, fenced by the real CAS/scope/lease/route", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const result = await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      expect(result.deduped).toBe(false);
+      expect(result.snapshot.content).toEqual(validContent);
+
+      // The actual stored row is ciphertext, never the plaintext slot data.
+      const row = await pool.query(
+        "SELECT content_ciphertext, retention_expires_at FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(row.rows).toHaveLength(1);
+      expect(Buffer.from(row.rows[0].content_ciphertext).length).toBeGreaterThan(0);
+      expect(new Date(row.rows[0].retention_expires_at).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    });
+
+    it("is dedup-safe against the real unique index: a retried write for the same (session, version) is a safe no-op, not a duplicate row", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const command = {
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      };
+
+      const first = await service.persistDialogueSnapshot(command);
+      const second = await service.persistDialogueSnapshot(command);
+
+      expect(first.deduped).toBe(false);
+      expect(second.deduped).toBe(true);
+      expect(second.snapshot.snapshotId).toBe(first.snapshot.snapshotId);
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(1);
+    });
+
+    it("rejects a foreign resource scope against the real session row, writing nothing", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: randomUUID(),
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(0);
+    });
+
+    it("the actual append-only trigger rejects UPDATE and DELETE on voice.dialogue_snapshot", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      await expect(
+        pool.query(
+          "UPDATE voice.dialogue_snapshot SET turn_id = 'tampered' WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        ),
+      ).rejects.toThrow(/append-only/i);
+
+      await expect(
+        pool.query(
+          "DELETE FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    });
+
+    it("restores the latest of several real persisted snapshots, by session_version, with decrypted content matching what was written", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session1 = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session1!.sessionVersion,
+        expectedLeaseEpoch: session1!.leaseEpoch,
+        expectedResourceScopeId: session1!.resourceScopeId,
+        expectedRouteProfileVersion: session1!.routeProfileVersion,
+        inputEpoch: session1!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      // Advance the real session row's revision (same CAS write path every
+      // other trusted mutation in this domain uses), then persist a second,
+      // later snapshot against the new revision.
+      const advanced = await inst.sessionRepository.casUpdateSessionControl(
+        f.request.voiceSessionId,
+        session1!.sessionVersion,
+        { pendingInput: false },
+      );
+      expect(advanced).not.toBeNull();
+      const secondContent = { ...validContent, draftVersion: 2 };
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: advanced!.sessionVersion,
+        expectedLeaseEpoch: advanced!.leaseEpoch,
+        expectedResourceScopeId: advanced!.resourceScopeId,
+        expectedRouteProfileVersion: advanced!.routeProfileVersion,
+        inputEpoch: advanced!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-2",
+        content: secondContent,
+      });
+
+      const restoration = await service.getDialogueSnapshotRestoration(
+        f.request.voiceSessionId,
+      );
+      expect(restoration.snapshot?.sessionVersion).toBe(advanced!.sessionVersion);
+      expect(restoration.snapshot?.content).toEqual(secondContent);
     });
   });
 });

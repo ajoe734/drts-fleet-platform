@@ -98,6 +98,15 @@ interface TurnSession {
    * `apiClient` are present; overrides the coordinator-wide default
    * `persistPort` for this attachment only. */
   persistPort?: VoiceDialoguePersistPort;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: set by
+   * `restoreBoundAttachment` if a bound attachment's restoration read
+   * (session + dialogue-snapshot) fails or the authoritative session no
+   * longer matches this attachment's own binding. `handle` treats such an
+   * attachment exactly like a released one -- a late event is observable
+   * evidence only, never new conversational input -- rather than let a
+   * trusted/bound attachment whose restored state could not be verified
+   * silently run turns against a blank/unverified one. */
+  restoreFailed?: boolean;
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
@@ -130,20 +139,30 @@ const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"]
  * `sessions/:id/handoffs`/`sessions/:id/events`, all guarded by
  * `VoiceCapabilityGuard`; `VoiceCapabilityService.issue` is called from the
  * first of those; and `../server/voice-api-client.ts` is this worker's own
- * HTTP client calling all four. `voice-media-worker` still carries no
- * database dependency at all (see its package.json) and still must not
- * acquire one here. What remains genuinely unavailable is the call-
- * admission flow that would supply any attachment a real
- * `VoiceSessionBinding` in the first place (see `attach()`'s own doc and
- * `../server/voice-session-binding.ts`), the ordered control-event/turn
- * persistence this worker does not yet call `recordControlEvent`/an
- * ASR-final-recording route for during a live turn (R4 residual -- the
- * route/client exist, see `voice-api-client.ts#recordControlEvent`, but
- * nothing in this coordinator's `handle()` calls it yet, and this
- * attachment's own process-local turn-sequencing counter is not yet
- * reconciled against the authoritative, speech-start-only remote
- * watermark that call would advance), and session restoration on
- * worker restart/reconnect.
+ * HTTP client calling all four, now joined by
+ * `sessions/:id/dialogue-snapshot` (GET + POST, AUDIT-VOICE-APPLICATION-
+ * WIRING-20261003 R4) backing the versioned, encrypted dialogue-content
+ * persist/restore `attach()`/`createTrustedDialoguePersistPort` use below.
+ * `voice-media-worker` still carries no database dependency at all (see its
+ * package.json) and still must not acquire one here. What remains
+ * genuinely unavailable is the call-admission flow that would supply any
+ * attachment a real `VoiceSessionBinding` in the first place (see
+ * `attach()`'s own doc and `../server/voice-session-binding.ts`), and the
+ * ordered control-event watermark this worker does not yet call
+ * `recordControlEvent`/an ASR-final-recording route for during a live turn
+ * (R4 residual -- the route/client exist, see
+ * `voice-api-client.ts#recordControlEvent`, but nothing in this
+ * coordinator's `handle()` calls it yet): this attachment's own
+ * process-local turn-sequencing counter (`turnSession.inputEpoch`) and the
+ * authoritative, speech-start-only remote watermark `resolveInput` checks
+ * against are two different epoch spaces today, and reconciling them needs
+ * a dedicated, Supervisor-coordinated redesign of the turn-cancellation
+ * invariants R1-R3 above already extensively regress-test -- deliberately
+ * not attempted in this round; see this task's UAT artifact. Restoration on
+ * attach/reconnect (session + latest dialogue snapshot) is implemented
+ * below (`restoreBoundAttachment`) for any attachment that IS given a real
+ * binding; restart-time re-attachment of an in-flight call is still gated
+ * on the same genuinely-unavailable call-admission flow.
  *
  * This coordinator therefore runs the real `VoiceDialogueEngine` /
  * `VoiceDialogueState` machinery against every admitted final transcript --
@@ -234,9 +253,78 @@ export class VoiceCallTurnCoordinator {
         this.apiClient,
         () => turnSession.binding,
       );
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: seed this bound
+      // attachment's dialogue state and `binding.sessionVersion` from
+      // authoritative truth before any turn runs, instead of always
+      // starting fresh/blank -- see `restoreBoundAttachment`'s own doc.
+      // `attach()` stays synchronous (unchanged signature, no blast radius
+      // on existing callers): the restoration promise is installed as this
+      // attachment's initial `queue` so the FIRST turn naturally waits for
+      // it, exactly the same mechanism that already serializes turns
+      // against each other.
+      turnSession.queue = this.restoreBoundAttachment(
+        turnSession,
+        this.apiClient,
+        binding,
+      );
     }
     this.sessions.set(attachment, turnSession);
     return attachment;
+  }
+
+  /** Reads this attachment's authoritative session + latest dialogue
+   * snapshot (`VoiceApiClient.getDialogueSnapshotRestoration`) and seeds
+   * `turnSession.state`/`binding.sessionVersion` from it, instead of this
+   * attachment silently starting fresh/blank the way an unbound one always
+   * does. Never rejects: a long-lived worker's turn `queue` chain is built
+   * entirely from `.then()` callbacks with no rejection handler (see
+   * `handle`), so a rejected `queue` would permanently wedge every later
+   * turn for this attachment, not just fail this one restoration. Failure
+   * (restoration read error, or the authoritative session no longer
+   * matching this attachment's own binding) instead sets `restoreFailed`,
+   * which `handle` checks exactly like `released` -- a trusted/bound
+   * attachment whose restored state could not be verified must never
+   * silently run turns against an unverified one. */
+  private async restoreBoundAttachment(
+    turnSession: TurnSession,
+    apiClient: VoiceApiClient,
+    binding: VoiceSessionBinding,
+  ): Promise<void> {
+    try {
+      const capability = await apiClient.issueCapability({
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: ["session_execute"],
+      });
+      const restoration = await apiClient.getDialogueSnapshotRestoration(
+        binding.voiceSessionId,
+        capability.token,
+      );
+      if (
+        restoration.session.resourceScopeId !== binding.resourceScopeId ||
+        restoration.session.routeProfileVersion !==
+          binding.routeProfileVersion ||
+        restoration.session.leaseEpoch !== binding.leaseEpoch
+      ) {
+        throw new Error(
+          "voice_restore_binding_mismatch: the authoritative session no longer matches this attachment's binding.",
+        );
+      }
+      binding.sessionVersion = restoration.session.sessionVersion;
+      if (restoration.snapshot) {
+        turnSession.state.restoreFromSnapshotContent(
+          restoration.snapshot.content,
+        );
+      }
+    } catch (error) {
+      turnSession.restoreFailed = true;
+      console.error(
+        "[voice-call-turn-coordinator] bound attachment restoration failed",
+        error,
+      );
+    }
   }
 
   /** Call once an attachment's channel/session is gone (close, drain).
@@ -273,8 +361,12 @@ export class VoiceCallTurnCoordinator {
     // Unknown or already-released attachment: either a late event from an
     // attachment that was already torn down, or one that never started a
     // turn. Either way this is observable evidence only -- it must never
-    // create new turn state under this (possibly stale) handle.
-    if (!turnSession) return;
+    // create new turn state under this (possibly stale) handle. A bound
+    // attachment whose restoration failed (see `restoreBoundAttachment`) is
+    // treated the same way: its dialogue state/binding could not be
+    // verified against authoritative truth, so it must never run a turn
+    // either.
+    if (!turnSession || turnSession.restoreFailed) return;
 
     if (event.type === "speech.started" || event.type === "media.epoch.advanced") {
       turnSession.inputEpoch += 1;

@@ -154,6 +154,80 @@ function mapSessionEventRow(
   };
 }
 
+export type InsertDialogueSnapshotInput = {
+  voiceSessionId: string;
+  sessionVersion: number;
+  resourceScopeId: string;
+  routeProfileVersion: number;
+  leaseEpoch: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  contentKeyVersion: string;
+  contentNonce: Buffer;
+  contentCiphertext: Buffer;
+  contentAuthTag: Buffer;
+  retentionExpiresAt: string;
+};
+
+export type DialogueSnapshotRow = {
+  snapshotId: string;
+  voiceSessionId: string;
+  sessionVersion: number;
+  resourceScopeId: string;
+  routeProfileVersion: number;
+  leaseEpoch: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  contentKeyVersion: string;
+  contentNonce: Buffer;
+  contentCiphertext: Buffer;
+  contentAuthTag: Buffer;
+  retentionExpiresAt: string;
+  createdAt: string;
+};
+
+type VoiceDialogueSnapshotRow = QueryResultRow & {
+  snapshot_id: string;
+  voice_session_id: string;
+  session_version: number;
+  resource_scope_id: string;
+  route_profile_version: number;
+  lease_epoch: number;
+  input_epoch: number;
+  media_epoch: number;
+  turn_id: string;
+  content_key_version: string;
+  content_nonce: Buffer;
+  content_ciphertext: Buffer;
+  content_auth_tag: Buffer;
+  retention_expires_at: Date | string;
+  created_at: Date | string;
+};
+
+function mapDialogueSnapshotRow(
+  row: VoiceDialogueSnapshotRow,
+): DialogueSnapshotRow {
+  return {
+    snapshotId: row.snapshot_id,
+    voiceSessionId: row.voice_session_id,
+    sessionVersion: row.session_version,
+    resourceScopeId: row.resource_scope_id,
+    routeProfileVersion: row.route_profile_version,
+    leaseEpoch: row.lease_epoch,
+    inputEpoch: row.input_epoch,
+    mediaEpoch: row.media_epoch,
+    turnId: row.turn_id,
+    contentKeyVersion: row.content_key_version,
+    contentNonce: row.content_nonce,
+    contentCiphertext: row.content_ciphertext,
+    contentAuthTag: row.content_auth_tag,
+    retentionExpiresAt: new Date(row.retention_expires_at).toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
 type VoiceConfirmationRow = QueryResultRow & {
   confirmation_id: string;
   voice_session_id: string;
@@ -532,6 +606,91 @@ export class VoiceSessionRepository {
       [voiceSessionId],
     );
     return result.rows.map(mapCommandReceiptRow);
+  }
+
+  /**
+   * Dedup key is `(voice_session_id, session_version)` -- a snapshot is only
+   * ever written immediately after a `resolveInput` CAS advances the
+   * session's revision for the turn whose content this row records, so a
+   * retried write for the same already-advanced revision is a safe no-op
+   * (same convention as `insertControlEvent`'s `ON CONFLICT DO NOTHING`
+   * above), never a duplicate or a silently-discarded second attempt.
+   */
+  async insertDialogueSnapshot(
+    input: InsertDialogueSnapshotInput,
+    executor?: VoiceQueryExecutor,
+  ): Promise<{ snapshot: DialogueSnapshotRow; deduped: boolean }> {
+    const exec = executor ?? this.requireDatabase();
+    const insertResult = await exec.query<VoiceDialogueSnapshotRow>(
+      `
+        INSERT INTO voice.dialogue_snapshot (
+          voice_session_id, session_version, resource_scope_id,
+          route_profile_version, lease_epoch, input_epoch, media_epoch,
+          turn_id, content_key_version, content_nonce, content_ciphertext,
+          content_auth_tag, retention_expires_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        ON CONFLICT (voice_session_id, session_version) DO NOTHING
+        RETURNING *
+      `,
+      [
+        input.voiceSessionId,
+        input.sessionVersion,
+        input.resourceScopeId,
+        input.routeProfileVersion,
+        input.leaseEpoch,
+        input.inputEpoch,
+        input.mediaEpoch,
+        input.turnId,
+        input.contentKeyVersion,
+        input.contentNonce,
+        input.contentCiphertext,
+        input.contentAuthTag,
+        input.retentionExpiresAt,
+      ],
+    );
+
+    const insertedRow = insertResult.rows[0];
+    if (insertedRow) {
+      return { snapshot: mapDialogueSnapshotRow(insertedRow), deduped: false };
+    }
+
+    const existing = await exec.query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE voice_session_id = $1 AND session_version = $2
+        LIMIT 1
+      `,
+      [input.voiceSessionId, input.sessionVersion],
+    );
+    const existingRow = existing.rows[0];
+    if (!existingRow) {
+      throw new Error(
+        "voice.dialogue_snapshot insert conflicted but no existing row could be located",
+      );
+    }
+    return { snapshot: mapDialogueSnapshotRow(existingRow), deduped: true };
+  }
+
+  async findLatestDialogueSnapshot(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotRow | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE voice_session_id = $1
+        ORDER BY session_version DESC
+        LIMIT 1
+      `,
+      [voiceSessionId],
+    );
+    const row = result.rows[0];
+    return row ? mapDialogueSnapshotRow(row) : null;
   }
 
   private requireDatabase(): VoiceQueryExecutor {

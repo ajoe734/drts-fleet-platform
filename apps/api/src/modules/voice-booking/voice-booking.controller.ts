@@ -479,4 +479,98 @@ export class VoiceBookingController {
     const results = await gateway.execute(body.output);
     return toApiSuccessEnvelope({ results }, requestId);
   }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: persists this turn's
+   * versioned, encrypted dialogue-content snapshot --
+   * `VoiceSessionService.persistDialogueSnapshot`'s own doc and
+   * `infra/migrations/V0106__voice_dialogue_snapshot.sql` have the full
+   * fencing/encryption/retention contract. Authenticated identically to
+   * `resolveInput`/`events` above; `resourceScopeId`/`routeProfileVersion`/
+   * `leaseEpoch` are always the capability's own bound values -- never
+   * caller-supplied body fields -- so a snapshot can never be recorded
+   * against a scope/route/lease this capability does not actually hold.
+   */
+  @Post("sessions/:sessionId/dialogue-snapshot")
+  @OpenRoute()
+  async persistDialogueSnapshot(
+    @Param("sessionId") sessionId: string,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body()
+    body: {
+      expectedSessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      content: unknown;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const voiceCapabilityGuard = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityGuard,
+      "voiceCapabilityGuard",
+    );
+    const voiceSessionService = this.requireVoiceApplicationDependency(
+      this.voiceSessionService,
+      "voiceSessionService",
+    );
+    const claims = await voiceCapabilityGuard.authenticate(headers);
+    if (claims.voiceSessionId !== sessionId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice capability is bound to a different session id.",
+      );
+    }
+    assertVoiceCapabilityScope(claims, "session_execute");
+    const result = await voiceSessionService.persistDialogueSnapshot({
+      voiceSessionId: sessionId,
+      expectedSessionVersion: body.expectedSessionVersion,
+      expectedLeaseEpoch: claims.leaseEpoch,
+      expectedResourceScopeId: claims.resourceScopeId,
+      expectedRouteProfileVersion: claims.routeProfileVersion,
+      inputEpoch: body.inputEpoch,
+      mediaEpoch: body.mediaEpoch,
+      turnId: body.turnId,
+      content: body.content,
+    });
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  /**
+   * Restoration read `VoiceCallTurnCoordinator.attach` (worker side) uses to
+   * seed a bound attachment's dialogue state and
+   * `VoiceSessionBinding.sessionVersion` from authoritative truth instead of
+   * starting fresh/blank -- see
+   * `VoiceSessionService.getDialogueSnapshotRestoration`'s own doc. Same
+   * capability/scope boundary as every other session route above.
+   */
+  @Get("sessions/:sessionId/dialogue-snapshot")
+  @OpenRoute()
+  async getDialogueSnapshot(
+    @Param("sessionId") sessionId: string,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const voiceCapabilityGuard = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityGuard,
+      "voiceCapabilityGuard",
+    );
+    const voiceSessionService = this.requireVoiceApplicationDependency(
+      this.voiceSessionService,
+      "voiceSessionService",
+    );
+    const claims = await voiceCapabilityGuard.authenticate(headers);
+    if (claims.voiceSessionId !== sessionId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice capability is bound to a different session id.",
+      );
+    }
+    assertVoiceCapabilityScope(claims, "session_execute");
+    const result =
+      await voiceSessionService.getDialogueSnapshotRestoration(sessionId);
+    return toApiSuccessEnvelope(result, requestId);
+  }
 }

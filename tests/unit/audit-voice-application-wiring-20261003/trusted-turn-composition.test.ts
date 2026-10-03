@@ -112,6 +112,24 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
           data: { token: `capability-for-${(body as { scopes: string[] }).scopes.join(",")}`, tokenType: "Bearer", expiresIn: 120 },
         });
       }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Restoration read at `attach()` time -- no prior snapshot for a
+        // brand-new session.
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
       if (path.endsWith("/input-resolutions")) {
         // Mirrors the real `VoiceSessionService.resolveInput`: it only
         // reaches a success response when the submitted `inputEpoch`
@@ -124,9 +142,30 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
             session: {
               voiceSessionId: binding.voiceSessionId,
               sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
               inputEpoch: (body as { inputEpoch: number }).inputEpoch,
               pendingInput: false,
             },
+          },
+        });
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+              mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
+              turnId: (body as { turnId: string }).turnId,
+              content: (body as { content: unknown }).content,
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
           },
         });
       }
@@ -263,15 +302,52 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
             data: { token: `capability-for-${scopes.join(",")}`, tokenType: "Bearer", expiresIn: 120 },
           });
         }
+        if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+          return jsonResponse(200, {
+            data: {
+              session: {
+                voiceSessionId: binding.voiceSessionId,
+                sessionVersion: binding.sessionVersion,
+                resourceScopeId: binding.resourceScopeId,
+                routeProfileVersion: binding.routeProfileVersion,
+                leaseEpoch: binding.leaseEpoch,
+                inputEpoch: 0,
+                pendingInput: false,
+              },
+              snapshot: null,
+            },
+          });
+        }
         if (path.endsWith("/input-resolutions")) {
           return jsonResponse(200, {
             data: {
               session: {
                 voiceSessionId: binding.voiceSessionId,
                 sessionVersion: 5,
+                resourceScopeId: binding.resourceScopeId,
+                routeProfileVersion: binding.routeProfileVersion,
+                leaseEpoch: binding.leaseEpoch,
                 inputEpoch: (body as { inputEpoch: number }).inputEpoch,
                 pendingInput: false,
               },
+            },
+          });
+        }
+        if (path.endsWith("/dialogue-snapshot")) {
+          return jsonResponse(200, {
+            data: {
+              snapshot: {
+                snapshotId: "snapshot-1",
+                voiceSessionId: binding.voiceSessionId,
+                sessionVersion: 5,
+                inputEpoch: (body as { inputEpoch: number }).inputEpoch,
+                mediaEpoch: (body as { mediaEpoch: number }).mediaEpoch,
+                turnId: (body as { turnId: string }).turnId,
+                content: (body as { content: unknown }).content,
+                createdAt: "2026-07-24T09:00:00.000Z",
+                retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+              },
+              deduped: false,
             },
           });
         }
@@ -376,5 +452,177 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
       expect(handoffCall?.body).toMatchObject({ inputEpoch: 1 });
       expect(sentBinary.length).toBeGreaterThan(0);
     });
+  });
+});
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: `VoiceCallTurnCoordinator.
+ * attach` restores a bound attachment's dialogue state and
+ * `VoiceSessionBinding.sessionVersion` from authoritative truth
+ * (`VoiceApiClient.getDialogueSnapshotRestoration`) instead of always
+ * starting fresh/blank -- see `restoreBoundAttachment`'s own doc.
+ */
+describe("Restoration on attach: real VoiceSessionComposer + VoiceCallTurnCoordinator + VoiceApiClient", () => {
+  const binding: VoiceSessionBinding = {
+    voiceSessionId: "66666666-6666-6666-6666-666666666666",
+    resourceScopeId: "77777777-7777-7777-7777-777777777777",
+    routeProfileVersion: 1,
+    leaseEpoch: 1,
+    sessionVersion: 9,
+  };
+
+  function buildComposer(fetchImpl: typeof fetch) {
+    const apiClient = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const asr = new StreamingAsrAdapter();
+    const tts = new DeterministicTtsAdapter();
+    const coordinator = new VoiceCallTurnCoordinator(
+      () => new OpenAiRealtimeFixtureAdapter(),
+      undefined,
+      undefined,
+      false,
+      apiClient,
+    );
+    const composer = new VoiceSessionComposer(
+      { createAdapters: () => ({ asrAdapter: asr, ttsAdapter: tts }) },
+      coordinator,
+    );
+    const { channel, sentBinary } = makeChannel();
+    composer.attach(binding.voiceSessionId, channel, binding);
+    return { asr, channel, sentBinary };
+  }
+
+  it("rehydrates a restored handoff into the dialogue state before any turn runs, so an admitted final is immediately terminal with no speech", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-restored",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              inputEpoch: 0,
+              mediaEpoch: 0,
+              turnId: "turn-prior",
+              content: {
+                draftVersion: 2,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "customer_requested", intent: "human" },
+              },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const { asr, sentBinary } = buildComposer(fetchImpl);
+
+    asr.emitFinal("你好", "seg-1");
+    await flush(10);
+
+    // `VoiceDialogueEngine.turn` short-circuits to a silent handoff result
+    // the moment `state.handoff` is already set -- the restored handoff
+    // reason took effect before this turn's provider was ever consulted,
+    // and no new capability/resolveInput/dialogue-snapshot call for a turn
+    // was made (only the restoration's own GET + capability calls ran).
+    expect(sentBinary).toHaveLength(0);
+    expect(
+      fetchImpl.mock.calls.some(([url]) =>
+        String(url).includes("/input-resolutions"),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats restoration failure (read error) the same as a released attachment -- never runs a turn against unverified state", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(500, {
+          error: { code: "INTERNAL", message: "boom" },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { asr, sentBinary } = buildComposer(fetchImpl);
+    await flush(5);
+
+    asr.emitFinal("你好", "seg-1");
+    await flush(10);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(
+      fetchImpl.mock.calls.some(([url]) =>
+        String(url).includes("/input-resolutions"),
+      ),
+    ).toBe(false);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("treats a restoration whose authoritative session no longer matches this attachment's binding as a failure -- never trusts a mismatched scope/route/lease", async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              resourceScopeId: "a-different-scope-entirely",
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 0,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { asr, sentBinary } = buildComposer(fetchImpl);
+    await flush(5);
+
+    asr.emitFinal("你好", "seg-1");
+    await flush(10);
+
+    expect(sentBinary).toHaveLength(0);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

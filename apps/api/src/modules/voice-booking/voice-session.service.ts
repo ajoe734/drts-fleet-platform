@@ -1,6 +1,11 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 
+import {
+  voiceDialogueSnapshotContentSchema,
+  type VoiceDialogueSnapshotContent,
+} from "@drts/contracts";
+
 import { ApiRequestError } from "../../common/api-envelope";
 import type {
   VoiceCommandReceiptRecord,
@@ -14,6 +19,12 @@ import {
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { voiceAlertMetrics } from "../../observability/voice-alert-metrics";
+import { VoiceRetentionService } from "./voice-retention.service";
+import {
+  decryptDialogueSnapshotContent,
+  encryptDialogueSnapshotContent,
+  resolveDialogueSnapshotEncryptionKey,
+} from "./voice-dialogue-snapshot-crypto";
 
 /**
  * SD §5: the session state machine, ordered-event application and
@@ -117,6 +128,40 @@ export interface CloseSessionWithFinalizeRecordingResult {
   deduped: boolean;
 }
 
+export interface PersistDialogueSnapshotCommand {
+  voiceSessionId: string;
+  expectedSessionVersion: number;
+  expectedLeaseEpoch: number;
+  expectedResourceScopeId: string;
+  expectedRouteProfileVersion: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  content: unknown;
+}
+
+export interface DialogueSnapshotRecord {
+  snapshotId: string;
+  voiceSessionId: string;
+  sessionVersion: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  content: VoiceDialogueSnapshotContent;
+  createdAt: string;
+  retentionExpiresAt: string;
+}
+
+export interface PersistDialogueSnapshotResult {
+  snapshot: DialogueSnapshotRecord;
+  deduped: boolean;
+}
+
+export interface DialogueSnapshotRestoration {
+  session: VoiceSessionRecord;
+  snapshot: DialogueSnapshotRecord | null;
+}
+
 @Injectable()
 export class VoiceSessionService {
   private readonly logger = new Logger(VoiceSessionService.name);
@@ -125,6 +170,7 @@ export class VoiceSessionService {
     private readonly repository: VoiceSessionRepository,
     @Optional() private readonly usageService?: VoiceUsageService,
     @Optional() private readonly metricsService?: VoiceBookingMetricsService,
+    @Optional() private readonly retentionService?: VoiceRetentionService,
   ) {}
 
   /**
@@ -828,5 +874,170 @@ export class VoiceSessionService {
     voiceSessionId: string,
   ): Promise<VoiceCommandReceiptRecord[]> {
     return this.repository.findPendingReceiptsForSession(voiceSessionId);
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: the versioned, encrypted,
+   * retention-bounded dialogue-content persist this domain was missing --
+   * distinct from `resolveInput` above (admission-only CAS, no content
+   * field) and from `voice.draft_revision` (a different, qualification-
+   * gated booking-intent domain object). Fenced by the FULL set of
+   * identifiers a stale/foreign caller could otherwise smuggle a snapshot
+   * through: session revision + lease (via `assertWriteAuthorized`),
+   * resource scope, route profile version, the session's current
+   * outstanding input epoch, and (when any control event has ever been
+   * applied) the last-applied media epoch. A caller must always submit the
+   * session_version a `resolveInput` CAS for the SAME turn just advanced to
+   * -- this never itself advances `voice.session`.
+   */
+  async persistDialogueSnapshot(
+    command: PersistDialogueSnapshotCommand,
+  ): Promise<PersistDialogueSnapshotResult> {
+    const session = await this.requireSession(command.voiceSessionId);
+    this.assertWriteAuthorized(session, {
+      sessionVersion: command.expectedSessionVersion,
+      leaseEpoch: command.expectedLeaseEpoch,
+    });
+    if (session.resourceScopeId !== command.expectedResourceScopeId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Resource scope no longer matches this session.",
+      );
+    }
+    if (session.routeProfileVersion !== command.expectedRouteProfileVersion) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_DRAFT_STALE",
+        "Route profile version has moved on; reload before writing.",
+      );
+    }
+    if (session.inputEpoch !== command.inputEpoch) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_DRAFT_STALE",
+        "inputEpoch does not match the session's current outstanding input.",
+      );
+    }
+    const appliedMediaEpoch = await this.repository.findAppliedMediaEpoch(
+      command.voiceSessionId,
+    );
+    if (
+      appliedMediaEpoch !== null &&
+      command.mediaEpoch !== appliedMediaEpoch
+    ) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_DRAFT_STALE",
+        "mediaEpoch refers to a media epoch that is no longer current.",
+      );
+    }
+
+    const content = voiceDialogueSnapshotContentSchema.parse(command.content);
+
+    const encryptionKey = resolveDialogueSnapshotEncryptionKey();
+    if (!encryptionKey) {
+      throw new ApiRequestError(
+        503,
+        "VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_UNCONFIGURED",
+        "Dialogue-snapshot encryption key is not configured; refusing to persist unencrypted dialogue content.",
+      );
+    }
+    const encrypted = encryptDialogueSnapshotContent(content, encryptionKey);
+
+    const retentionPolicy = this.retentionService?.evaluateRecordRetention({
+      family: "voice_transcript",
+      createdAt: new Date(),
+      subjectRef: command.voiceSessionId,
+    });
+    if (!retentionPolicy) {
+      throw new ApiRequestError(
+        500,
+        "VOICE_RETENTION_POLICY_UNAVAILABLE",
+        "Voice retention policy service is unavailable; refusing to persist dialogue content with no finite retention window.",
+      );
+    }
+
+    const { snapshot, deduped } = await this.repository.insertDialogueSnapshot(
+      {
+        voiceSessionId: command.voiceSessionId,
+        sessionVersion: command.expectedSessionVersion,
+        resourceScopeId: command.expectedResourceScopeId,
+        routeProfileVersion: command.expectedRouteProfileVersion,
+        leaseEpoch: command.expectedLeaseEpoch,
+        inputEpoch: command.inputEpoch,
+        mediaEpoch: command.mediaEpoch,
+        turnId: command.turnId,
+        contentKeyVersion: encrypted.keyVersion,
+        contentNonce: encrypted.nonce,
+        contentCiphertext: encrypted.ciphertext,
+        contentAuthTag: encrypted.authTag,
+        retentionExpiresAt: retentionPolicy.expiresAt,
+      },
+    );
+
+    return {
+      snapshot: {
+        snapshotId: snapshot.snapshotId,
+        voiceSessionId: snapshot.voiceSessionId,
+        sessionVersion: snapshot.sessionVersion,
+        inputEpoch: snapshot.inputEpoch,
+        mediaEpoch: snapshot.mediaEpoch,
+        turnId: snapshot.turnId,
+        content,
+        createdAt: snapshot.createdAt,
+        retentionExpiresAt: snapshot.retentionExpiresAt,
+      },
+      deduped,
+    };
+  }
+
+  /**
+   * The restoration read `VoiceCallTurnCoordinator.attach` (worker side)
+   * uses to seed a bound attachment's dialogue state and
+   * `VoiceSessionBinding.sessionVersion` from authoritative truth instead
+   * of starting fresh/blank, and to detect a binding that no longer matches
+   * the session's actual current scope/route/lease before trusting it for
+   * any turn.
+   */
+  async getDialogueSnapshotRestoration(
+    voiceSessionId: string,
+  ): Promise<DialogueSnapshotRestoration> {
+    const session = await this.requireSession(voiceSessionId);
+    const row = await this.repository.findLatestDialogueSnapshot(
+      voiceSessionId,
+    );
+    if (!row) {
+      return { session, snapshot: null };
+    }
+    const encryptionKey = resolveDialogueSnapshotEncryptionKey();
+    const content = voiceDialogueSnapshotContentSchema.parse(
+      decryptDialogueSnapshotContent(
+        {
+          keyVersion: row.contentKeyVersion,
+          nonce: row.contentNonce,
+          ciphertext: row.contentCiphertext,
+          authTag: row.contentAuthTag,
+        },
+        (version) =>
+          encryptionKey && encryptionKey.version === version
+            ? encryptionKey.key
+            : null,
+      ),
+    );
+    return {
+      session,
+      snapshot: {
+        snapshotId: row.snapshotId,
+        voiceSessionId: row.voiceSessionId,
+        sessionVersion: row.sessionVersion,
+        inputEpoch: row.inputEpoch,
+        mediaEpoch: row.mediaEpoch,
+        turnId: row.turnId,
+        content,
+        createdAt: row.createdAt,
+        retentionExpiresAt: row.retentionExpiresAt,
+      },
+    };
   }
 }
