@@ -2940,3 +2940,75 @@ worker-side client type needed widening).
   identifiers this worker cannot discover) rather than a repeated claim.
 - `same_sha_review_ci`: pending independent review and hosted CI on this
   exact candidate SHA; not claimed.
+
+## Round-16: hosted-CI-only fix -- `integration` job real failure on `2061c0520` (merged with Pi's `b41936758`)
+
+Hosted CI on the Round-15 candidate (`2061c05206fb028f87f7805b9082d2346fd1935d`,
+run [37135747468](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37135747468),
+`integration` job, step "Run UV-EXEC-024 real PostgreSQL two-instance race &
+fault matrix") reported `ci_status: "failure"`. This is a genuine test-side
+defect against the real append-only schema, not a flake: the real Postgres
+log shows `ERROR: dialogue_snapshot is append-only; UPDATE is not permitted`
+at `tests/integration/unattended-voice-postgres.integration.test.ts:2645`,
+inside the test *"denies restoring a real expired snapshot and the real
+governed purge path actually deletes it through the append-only bypass,
+respecting an active legal hold"*.
+
+Root cause: that test's own setup tried to simulate an already-expired
+snapshot with a raw
+`UPDATE voice.dialogue_snapshot SET retention_expires_at = now() - interval
+'1 day' ...`. `voice.dialogue_snapshot` (`V0106`) is unconditionally
+append-only for `UPDATE` -- `V0093`'s privileged-bypass GUC
+(`voice.allow_retention_archival`) only ever permits `DELETE`, never
+`UPDATE`, which is correct: a written snapshot's `retention_expires_at` is
+evidence computed once at write time (`VoiceRetentionService.
+evaluateRecordRetention`), never a mutable label. The test's setup
+contradicted the very invariant the task required (R4's "no success-shaped
+no-op, no masking a real schema constraint"), so the fix is to the test,
+not the schema or the trigger.
+
+Fix (`tests/integration/unattended-voice-postgres.integration.test.ts`):
+replaced the raw `UPDATE` with the SAME governed bypass
+`VoiceSessionRepository.deleteDialogueSnapshot` already uses for real
+archival -- a single transaction that sets
+`SET LOCAL voice.allow_retention_archival = 'on'`, `DELETE`s the row, then
+re-`INSERT`s the identical row (same `snapshot_id`, same encrypted
+`content_*` columns, same CAS/epoch fields) with
+`retention_expires_at = now() - interval '1 day'`. This simulates "a
+snapshot whose retention window has already passed" without ever asking
+the append-only table to accept an `UPDATE`, consistent with the test's
+own title ("... through the append-only bypass").
+
+Verification this round:
+- `pnpm exec tsc --noEmit -p tsconfig.json`: no new errors from this file
+  (pre-existing cross-worktree `@drts/api-client` type-identity errors in
+  unrelated `tests/unit/fleet-partner-list-envelope.test.ts` and
+  `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+  are the same documented environment limitation from prior rounds --
+  this worktree and a sibling worktree's `packages/api-client` are
+  structurally identical but type-identity-distinct symlink targets; not
+  caused by, or related to, this change).
+- `pnpm exec eslint tests/integration/unattended-voice-postgres.integration.test.ts --max-warnings=0`:
+  exit 0.
+- This test requires a real PostgreSQL instance (`UV_BOOKING_TEST_DATABASE_URL`)
+  and exercises the real `V0106`/`V0093` triggers; per the VM restriction on
+  this dispatch (no Docker Compose / local DB server), it was NOT re-run
+  end-to-end in this worker session. Verification is: (a) the root cause
+  read directly from the hosted failure log quoted above, (b) the real
+  Postgres trigger definitions in `V0106__voice_dialogue_snapshot.sql` and
+  `V0093__voice_retention_and_legal_hold.sql` confirmed to allow the bypass
+  GUC for `DELETE` only, never `UPDATE`, and (c) the replacement code
+  mirrors `VoiceSessionRepository.deleteDialogueSnapshot`'s own
+  already-reviewed, already-passing bypass pattern verbatim. Full
+  behavioral confirmation is pending this exact SHA's next hosted CI run.
+- No product/listening server, browser/E2E, DB, Compose, real network
+  provider call, package install, git history rewrite, or force-push was
+  performed this round.
+
+### Acceptance assessment on this round's candidate
+
+No change to `composed_turn_and_recording_path`, `authority_epoch_consent_fences`,
+or `precise_unimplemented_and_external_boundaries` from Round-15 -- this
+round is a hosted-CI-failure fix to test setup code only, touching no
+application source. `same_sha_review_ci`: pending hosted CI on this new
+SHA and independent reviewer re-review; not claimed.

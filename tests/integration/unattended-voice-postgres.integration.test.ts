@@ -2642,10 +2642,59 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         turnId: "turn-1",
         content: validContent,
       });
-      await pool.query(
-        "UPDATE voice.dialogue_snapshot SET retention_expires_at = now() - interval '1 day' WHERE voice_session_id = $1",
-        [f.request.voiceSessionId],
-      );
+      // `voice.dialogue_snapshot` is append-only (V0106): UPDATE is rejected
+      // unconditionally, even for `retention_expires_at` -- a written
+      // snapshot's retention window is evidence, not a mutable label. To
+      // simulate a snapshot that has already passed its own retention
+      // window, replace it through the SAME governed bypass
+      // `deleteDialogueSnapshot` uses (`SET LOCAL
+      // voice.allow_retention_archival = 'on'`, V0093), never a raw UPDATE.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const existing = await client.query(
+          "SELECT * FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        const row = existing.rows[0];
+        await client.query("SET LOCAL voice.allow_retention_archival = 'on'");
+        await client.query(
+          "DELETE FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        await client.query(
+          `
+            INSERT INTO voice.dialogue_snapshot (
+              snapshot_id, voice_session_id, session_version, resource_scope_id,
+              route_profile_version, lease_epoch, input_epoch, media_epoch,
+              turn_id, content_key_version, content_nonce, content_ciphertext,
+              content_auth_tag, retention_expires_at, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now() - interval '1 day', $14)
+          `,
+          [
+            row.snapshot_id,
+            row.voice_session_id,
+            row.session_version,
+            row.resource_scope_id,
+            row.route_profile_version,
+            row.lease_epoch,
+            row.input_epoch,
+            row.media_epoch,
+            row.turn_id,
+            row.content_key_version,
+            row.content_nonce,
+            row.content_ciphertext,
+            row.content_auth_tag,
+            row.created_at,
+          ],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
 
       const restoration = await service.getDialogueSnapshotRestoration(
         f.request.voiceSessionId,
