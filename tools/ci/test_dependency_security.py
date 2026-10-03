@@ -13,7 +13,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_no_vulnerabilities(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"advisories": {}})
+        mock_result.stdout = json.dumps({"advisories": {}, "metadata": {"vulnerabilities": {"high": 0}}})
         mock_result.returncode = 0
         mock_run.return_value = mock_result
         
@@ -33,7 +33,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_ignored_mobile_vulnerabilities(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, 
             "advisories": {
                 "123": {
                     "module_name": "expo",
@@ -74,7 +74,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_unexcepted_vulnerability(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, 
             "advisories": {
                 "456": {
                     "module_name": "some-server-lib",
@@ -152,7 +152,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_changed_version_reject(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, 
             "advisories": {
                 "123": {
                     "module_name": "expo",
@@ -194,7 +194,7 @@ class TestDependencySecurity(unittest.TestCase):
     @patch('dependency_security.Path')
     def test_expired_exception(self, mock_path, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = json.dumps({"advisories": {
+        mock_result.stdout = json.dumps({"metadata": {"vulnerabilities": {"high": 1}}, "advisories": {
             "123": {
                 "module_name": "expo",
                 "severity": "high",
@@ -228,6 +228,164 @@ class TestDependencySecurity(unittest.TestCase):
                 except SystemExit:
                     pass
                 mock_exit.assert_called_with(1)
+
+
+    @patch('dependency_security.subprocess.run')
+    def test_rc0_metadata_empty(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"metadata":{}})
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_rc0_metadata_vulnerabilities(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"metadata":{"vulnerabilities":{"high":1}}})
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    def test_rc0_advisories_empty_vulnerabilities(self, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"advisories":{},"metadata":{"vulnerabilities":{"high":1}}})
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            try:
+                dependency_security.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    @patch('dependency_security.Path')
+    def test_rc1_known_advisory_empty_findings(self, mock_path, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({
+            "advisories": {
+                "1119441": {
+                    "module_name": "uuid",
+                    "severity": "critical",
+                    "title": "review probe",
+                    "findings": []
+                }
+            },
+            "metadata": {"vulnerabilities": {"critical": 1}}
+        })
+        mock_result.returncode = 1
+        mock_run.return_value = mock_result
+        
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
+        exceptions = [{
+            "advisory_id": "1119441",
+            "module_name": "uuid",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "versions": ["8.3.2"],
+            "paths": ["apps__api>uuid"]
+        }]
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            with patch('builtins.open', mock_open(read_data=json.dumps(exceptions))):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    @patch('dependency_security.Path')
+    def test_rc1_known_advisory_empty_paths(self, mock_path, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({
+            "advisories": {
+                "1119441": {
+                    "module_name": "uuid",
+                    "severity": "critical",
+                    "title": "review probe",
+                    "findings": [{"version": "8.3.2", "paths": []}]
+                }
+            },
+            "metadata": {"vulnerabilities": {"critical": 1}}
+        })
+        mock_result.returncode = 1
+        mock_run.return_value = mock_result
+        
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
+        exceptions = [{
+            "advisory_id": "1119441",
+            "module_name": "uuid",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "versions": ["8.3.2"],
+            "paths": ["apps__api>uuid"]
+        }]
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            with patch('builtins.open', mock_open(read_data=json.dumps(exceptions))):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(1)
+
+    @patch('dependency_security.subprocess.run')
+    @patch('dependency_security.Path')
+    def test_rc1_known_advisory_string_paths(self, mock_path, mock_run):
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({
+            "advisories": {
+                "1119441": {
+                    "module_name": "uuid",
+                    "severity": "critical",
+                    "title": "review probe",
+                    "findings": [{"version": "8.3.2", "paths": ""}]
+                }
+            },
+            "metadata": {"vulnerabilities": {"critical": 1}}
+        })
+        mock_result.returncode = 1
+        mock_run.return_value = mock_result
+        
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_path.return_value.parent.__truediv__.return_value = mock_file
+        
+        exceptions = [{
+            "advisory_id": "1119441",
+            "module_name": "uuid",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "versions": ["8.3.2"],
+            "paths": ["apps__api>uuid"]
+        }]
+        
+        with patch('sys.exit', side_effect=SystemExit) as mock_exit:
+            with patch('builtins.open', mock_open(read_data=json.dumps(exceptions))):
+                try:
+                    dependency_security.main()
+                except SystemExit:
+                    pass
+                mock_exit.assert_called_with(1)
+
 
 if __name__ == '__main__':
     unittest.main()

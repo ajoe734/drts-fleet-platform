@@ -37,8 +37,12 @@ def run_audit():
         print("Malformed audit report: missing advisories and metadata")
         sys.exit(1)
         
-    if 'metadata' in data and not isinstance(data['metadata'], dict):
+    if 'metadata' not in data or not isinstance(data['metadata'], dict):
         print("Malformed audit report: metadata is not an object")
+        sys.exit(1)
+        
+    if 'vulnerabilities' not in data['metadata'] or not isinstance(data['metadata']['vulnerabilities'], dict):
+        print("Malformed audit report: metadata.vulnerabilities missing or not an object")
         sys.exit(1)
         
     if 'advisories' in data and not isinstance(data['advisories'], dict):
@@ -46,7 +50,16 @@ def run_audit():
         sys.exit(1)
         
     advisories = data.get('advisories', {})
+    vuln_totals = sum(data['metadata']['vulnerabilities'].values())
     
+    if result.returncode == 0 and vuln_totals > 0:
+        print("pnpm audit exited 0 but metadata indicates vulnerabilities are present")
+        sys.exit(1)
+        
+    if result.returncode == 1 and vuln_totals == 0:
+        print("pnpm audit exited 1 but metadata indicates no vulnerabilities")
+        sys.exit(1)
+        
     if result.returncode == 1 and not advisories:
         print("pnpm audit exited 1 but no advisories found to evaluate")
         sys.exit(1)
@@ -130,13 +143,25 @@ def main():
         expected_paths = set(exc['paths'])
         expected_versions = set(exc['versions'])
         
-        for finding in vuln['findings']:
-            ver = finding['version']
-            if ver not in expected_versions:
+        findings = vuln.get('findings', [])
+        if not findings or not isinstance(findings, list):
+            failed = True
+            unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Missing or empty findings.")
+            continue
+            
+        for finding in findings:
+            ver = finding.get('version')
+            if not ver or ver not in expected_versions:
                 failed = True
                 unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Version {ver} is not excepted.")
                 
-            for path in finding['paths']:
+            paths = finding.get('paths', [])
+            if not paths or not isinstance(paths, list):
+                failed = True
+                unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Missing or empty paths in finding.")
+                continue
+                
+            for path in paths:
                 if path not in expected_paths:
                     failed = True
                     unexcepted.append(f"[{severity}] ID: {vuln_id} ({module_name}): Path {path} is not excepted.")
