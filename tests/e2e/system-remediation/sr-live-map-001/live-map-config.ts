@@ -45,6 +45,12 @@ export function validateLiveMapGate(env: LiveEnv) {
   ) {
     throw new Error("Candidate must be a full SHA matching the workflow SHA");
   }
+  // Supplied by the dispatch input, never inferred from the target's response.
+  // Default preserves the existing same-candidate deployment contract.
+  const deployedSha = env.DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA ?? candidateSha;
+  if (!/^[a-f0-9]{40}$/.test(deployedSha)) {
+    throw new Error("Expected deployment must be a full lowercase commit SHA");
+  }
   const allowedTargets = required(env, "DRTS_LIVE_MAP_ALLOWED_TARGETS")
     .split(",")
     .map((value) => origin(value.trim()));
@@ -55,8 +61,7 @@ export function validateLiveMapGate(env: LiveEnv) {
   };
   return {
     candidateSha,
-    // Expected deployment is this candidate; health verifies the observed SHA.
-    deployedSha: candidateSha,
+    deployedSha,
     allowedTargets,
     opsOrigin: requireTarget("DRTS_LIVE_MAP_TEST_ORIGIN"),
     requireTarget,
