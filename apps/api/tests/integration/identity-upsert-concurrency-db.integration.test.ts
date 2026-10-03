@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -8,7 +8,10 @@ import type {
   CanonicalIdentityRoleBindingRecord,
 } from "@drts/contracts";
 
+import type { PoolClient } from "pg";
+
 import { DatabaseService } from "../../src/common/db";
+import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 
 // SR-AUTH-SESSION-SUPERSEDE-20261003 R2 (second reopen): the session-supersede
@@ -64,11 +67,18 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
   const principalIds = new Set<string>();
   const membershipIds = new Set<string>();
   const roleBindingIds = new Set<string>();
+  const sessionIds = new Set<string>();
 
   afterEach(async () => {
     if (DATABASE_URL) {
       const cleanup = new DatabaseService();
       try {
+        if (sessionIds.size > 0) {
+          await cleanup.query(
+            `DELETE FROM iam.identity_sessions WHERE session_id = ANY($1::text[])`,
+            [Array.from(sessionIds)],
+          );
+        }
         if (roleBindingIds.size > 0) {
           await cleanup.query(
             `DELETE FROM iam.identity_role_bindings WHERE role_binding_id = ANY($1::text[])`,
@@ -88,6 +98,7 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
           );
         }
       } finally {
+        sessionIds.clear();
         roleBindingIds.clear();
         membershipIds.clear();
         principalIds.clear();
@@ -341,11 +352,21 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     expect(resultA.validFrom).toBe(resultB.validFrom);
     expect([validFromA, validFromB]).toContain(resultA.validFrom);
 
-    const dbRow = await dbA.query<{ valid_from: Date }>(
-      `SELECT valid_from FROM iam.identity_role_bindings WHERE role_binding_id = $1`,
+    // Convergence must extend to updated_at too: whichever writer's
+    // validFrom won, both callers' returned records -- and the persisted
+    // row -- must agree on the exact same updatedAt, not just validFrom.
+    // A diverging updatedAt here would feed computeWorkforceTokenVersion
+    // differently depending on which racing caller last read the row,
+    // reintroducing a version race even though validFrom itself converged.
+    expect(resultA.updatedAt).toBe(resultB.updatedAt);
+    expect([validFromA, validFromB]).toContain(resultA.updatedAt);
+
+    const dbRow = await dbA.query<{ valid_from: Date; updated_at: Date }>(
+      `SELECT valid_from, updated_at FROM iam.identity_role_bindings WHERE role_binding_id = $1`,
       [roleBindingId],
     );
     expect(dbRow.rows[0]?.valid_from.toISOString()).toBe(resultA.validFrom);
+    expect(dbRow.rows[0]?.updated_at.toISOString()).toBe(resultA.updatedAt);
   });
 
   it("R4 (real Postgres): an explicit allowValidFromMutation grant change persists its new validFrom, and a later no-op with the same option does not re-advance it", async () => {
@@ -645,94 +666,233 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
     );
   });
 
-  it("R2/R6 (real Postgres): a stale content-differing ensurePrincipalRecord forced to execute after a genuine newer suspension commits does not revert the suspension or roll back updated_at", async () => {
+  it("R2/R6 (real Postgres): a stale content-differing ensurePrincipalRecord forced to execute after a genuine newer suspension -- committed through the real repository mutation under a real row lock -- does not revert the suspension, roll back updated_at, or leave a token issued before the suspension still valid", async () => {
     expect(DATABASE_URL).toBeTruthy();
 
     const dbGate = new DatabaseService();
     const dbA = new DatabaseService();
-    databases.push(dbGate, dbA);
+    const dbMonitor = new DatabaseService();
+    databases.push(dbGate, dbA, dbMonitor);
     const repoA = new IdentityRepository(dbA);
+    const repoGate = new IdentityRepository(dbGate);
 
-    const principalId = `principal_overlap_${randomUUID()}`;
-    const sourceRef = `source_overlap_${principalId}`;
-    principalIds.add(principalId);
-
-    const t0 = new Date(Date.now() - 120_000).toISOString();
-    const base: CanonicalIdentityPrincipalRecord = {
-      principalId,
-      sourceRef,
-      issuer: "test_issuer",
-      subject: `sub_${principalId}`,
-      principalType: "human",
-      email: "overlap@example.com",
-      emailVerified: true,
-      displayName: "Overlap Fixture",
-      status: "active",
-      createdAt: t0,
-      updatedAt: t0,
-    };
-    const created = await repoA.ensurePrincipalRecord(base);
-    expect(created.status).toBe("active");
-
-    // Connection B holds a real row lock on the principal row inside an
-    // open, uncommitted transaction, genuinely suspending it. This is a
-    // plain UPDATE used purely to gate timing (it does not copy the
-    // product's ON CONFLICT ... WHERE logic): it forces A's concurrent
-    // statement below to physically block at the database level until this
-    // transaction commits, giving a deterministic "A begins, B commits,
-    // then A completes" ordering instead of hoping Promise.all interleaves.
-    // It also writes `record` in the same transaction as account_status/
-    // updated_at so the fixture leaves column and JSON coherent, matching
-    // what the production ON CONFLICT write would have produced -- the
-    // repository's stale-write fallback path reads `record` directly, so a
-    // fixture that only updated the columns would make this assertion fail
-    // on its own inconsistency, not on repository behavior.
-    const gateClient = await dbGate.connect();
-    const t2 = new Date(Date.now() - 20_000).toISOString();
-    await gateClient.query("BEGIN");
-    await gateClient.query(
-      `UPDATE iam.identity_principals
-         SET account_status = 'suspended',
-             updated_at = $2::timestamptz,
-             record = jsonb_set(
-               jsonb_set(record, '{status}', '"suspended"'),
-               '{updatedAt}',
-               to_jsonb($2::timestamptz)
-             )
-       WHERE principal_id = $1`,
-      [principalId, t2],
-    );
-
-    // A's real ensurePrincipalRecord call still believes the principal is
-    // active as of T0 (e.g. a reauth whose assertion iat predates the
-    // admin's suspension). It is issued concurrently and must block on the
-    // gate's row lock until the suspension commits.
-    const stalePromise = repoA.ensurePrincipalRecord({
-      ...base,
-      updatedAt: t0,
+    const testKeyPair = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
+    const originalKeyRing = process.env.JWT_KEY_RING_JSON;
+    process.env.JWT_KEY_RING_JSON = JSON.stringify([
+      {
+        kid: "key-r2r6-overlap",
+        status: "active",
+        algorithm: "RS256",
+        privateKey: testKeyPair.privateKey,
+        publicKey: testKeyPair.publicKey,
+      },
+    ]);
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await gateClient.query("COMMIT");
-    gateClient.release();
+    try {
+      const jwtAuthService = new JwtAuthService(repoA);
 
-    const staleResult = await stalePromise;
+      const principalId = `principal_overlap_${randomUUID()}`;
+      const membershipId = `membership_overlap_${randomUUID()}`;
+      const roleBindingId = `role_binding_overlap_${randomUUID()}`;
+      principalIds.add(principalId);
+      membershipIds.add(membershipId);
+      roleBindingIds.add(roleBindingId);
 
-    // The stale, content-differing write must lose: the suspension must
-    // still be in effect, and updated_at must not regress to T0 -- which
-    // would both resurrect the suspended principal and revive any token
-    // version computed from the pre-suspension state.
-    expect(staleResult.status).toBe("suspended");
-    expect(staleResult.updatedAt).toBe(t2);
+      const identity = {
+        authMode: "jwt_bearer" as const,
+        actorType: "ops_user" as const,
+        actorId: principalId,
+        principalId,
+        realm: "ops" as const,
+        tenantId: null,
+        roles: ["ops_user"],
+        roleFamilies: ["ops" as const],
+        scopes: [] as string[],
+      };
 
-    const dbRow = await dbA.query<{
-      account_status: string;
-      updated_at: Date;
-    }>(
-      `SELECT account_status, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
-      [principalId],
-    );
-    expect(dbRow.rows[0]?.account_status).toBe("suspended");
-    expect(dbRow.rows[0]?.updated_at.toISOString()).toBe(t2);
+      // Create the principal through the real production path
+      // (JwtAuthService.issueSessionToken -> ensurePrincipalRecord ->
+      // upsertPrincipal), not a hand-written fixture shape. This is what
+      // the earlier version of this case got wrong below: a raw
+      // `to_jsonb($2::timestamptz)` UPDATE serializes with a "+00:00"
+      // offset, while every real write stores `record` via
+      // JSON.stringify(record), which keeps the "Z" suffix. Letting the
+      // real repository build the row keeps every later "no-op" comparison
+      // in this test genuinely a no-op, and keeps the suspension write
+      // below byte-for-byte consistent with what production actually
+      // writes.
+      const bootstrapIssued = await jwtAuthService.issueSessionToken(
+        identity,
+        { ensurePrincipal: true, authTime: new Date().toISOString() },
+      );
+      sessionIds.add(bootstrapIssued.sessionId);
+      const base = await repoA.findPrincipalById(principalId);
+      if (!base) {
+        throw new Error(
+          "expected ensurePrincipalRecord to have created the principal",
+        );
+      }
+      const t0 = base.updatedAt;
+
+      await repoA.ensureMembershipRecord({
+        membershipId,
+        sourceRef: `source_overlap_${membershipId}`,
+        principalId,
+        realm: "ops",
+        scopeRef: `scope_${membershipId}`,
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: t0,
+        updatedAt: t0,
+      });
+      await repoA.ensureRoleBindingRecord({
+        roleBindingId,
+        sourceRef: `source_overlap_${roleBindingId}`,
+        membershipId,
+        roleCode: "ops_user",
+        grantedByPrincipalId: null,
+        approvalId: null,
+        validFrom: t0,
+        validTo: null,
+        createdAt: t0,
+        updatedAt: t0,
+      });
+
+      // The actual token under test: issued while principal, membership
+      // and role binding are all still at T0. `ensurePrincipal: true`
+      // re-runs the exact real no-op ensure a genuine reauth would -- since
+      // nothing tracked about the principal differs from `base`, it must
+      // not itself advance updated_at past t0.
+      const issued = await jwtAuthService.issueSessionToken(
+        { ...identity, membershipId },
+        {
+          ensurePrincipal: true,
+          workforceVersionTimestamps: [t0, t0],
+          authTime: new Date().toISOString(),
+        },
+      );
+      sessionIds.add(issued.sessionId);
+      expect(issued.tokenVersion).toBe(Date.parse(t0));
+      expect(
+        await jwtAuthService.verifyAccessToken(issued.token),
+      ).not.toBeNull();
+
+      const gateClient = await dbGate.connect();
+      let committed = false;
+      try {
+        // Connection B performs the genuine suspension through the real
+        // IdentityRepository mutation (the same private upsertPrincipal
+        // that the public ensurePrincipalRecord calls), inside an explicit
+        // transaction on its own connection, so this test controls exactly
+        // when it commits without duplicating the repository's ON CONFLICT
+        // SQL.
+        await gateClient.query("BEGIN");
+        const gatePidResult = await gateClient.query<{ pid: number }>(
+          "SELECT pg_backend_pid() AS pid",
+        );
+        const gatePid = gatePidResult.rows[0]!.pid;
+
+        const t2 = new Date().toISOString();
+        const suspendedRecord: CanonicalIdentityPrincipalRecord = {
+          ...base,
+          status: "suspended",
+          updatedAt: t2,
+        };
+        await (
+          repoGate as unknown as {
+            upsertPrincipal(
+              client: PoolClient,
+              record: CanonicalIdentityPrincipalRecord,
+            ): Promise<CanonicalIdentityPrincipalRecord>;
+          }
+        ).upsertPrincipal(gateClient, suspendedRecord);
+
+        // A's real ensurePrincipalRecord call still believes the principal
+        // is active as of T0 (e.g. a reauth whose assertion iat predates
+        // the admin's suspension). It is issued concurrently and must
+        // physically block on the gate's still-open row lock.
+        const stalePromise = repoA.ensurePrincipalRecord({
+          ...base,
+          updatedAt: t0,
+        });
+
+        // Explicit lock-wait barrier, bounded by a timeout: poll Postgres
+        // itself until some other backend is reported blocked specifically
+        // on gatePid's lock, instead of hoping a fixed sleep outlasts A's
+        // connect+submit latency.
+        const deadline = Date.now() + 5_000;
+        let observedBlocked = false;
+        while (Date.now() < deadline) {
+          const blocked = await dbMonitor.query<{ pid: number }>(
+            `
+              SELECT pid
+              FROM pg_stat_activity
+              WHERE pid <> $1
+                AND $1 = ANY (pg_blocking_pids(pid))
+            `,
+            [gatePid],
+          );
+          if (blocked.rows.length > 0) {
+            observedBlocked = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        if (!observedBlocked) {
+          throw new Error(
+            "Timed out waiting for the stale ensurePrincipalRecord call to block on the gate's row lock",
+          );
+        }
+
+        await gateClient.query("COMMIT");
+        committed = true;
+
+        const staleResult = await stalePromise;
+
+        // The stale, content-differing write must lose: the suspension
+        // must still be in effect, and updated_at must not regress to T0
+        // -- which would both resurrect the suspended principal and
+        // revive any token version computed from the pre-suspension
+        // state.
+        expect(staleResult.status).toBe("suspended");
+        expect(staleResult.updatedAt).toBe(t2);
+
+        const dbRow = await dbA.query<{
+          account_status: string;
+          updated_at: Date;
+        }>(
+          `SELECT account_status, updated_at FROM iam.identity_principals WHERE principal_id = $1`,
+          [principalId],
+        );
+        expect(dbRow.rows[0]?.account_status).toBe("suspended");
+        expect(dbRow.rows[0]?.updated_at.toISOString()).toBe(t2);
+
+        // The actual acceptance requirement: a token issued while the
+        // principal was still active at T0 must be rejected once the
+        // genuine suspension has landed, even though that suspension only
+        // committed after this token's issuance.
+        expect(
+          await jwtAuthService.verifyAccessToken(issued.token),
+        ).toBeNull();
+      } finally {
+        if (!committed) {
+          await gateClient.query("ROLLBACK").catch(() => undefined);
+        }
+        gateClient.release();
+      }
+    } finally {
+      if (originalKeyRing === undefined) {
+        delete process.env.JWT_KEY_RING_JSON;
+      } else {
+        process.env.JWT_KEY_RING_JSON = originalKeyRing;
+      }
+    }
   });
 });
