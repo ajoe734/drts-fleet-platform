@@ -159,9 +159,11 @@ by several closeout/sidecar docs). Each of the 128 was classified by:
 No file was created or deleted to make any of these findings disappear. The
 classification below is additive context next to the existing checker output;
 none of the 237 findings were edited out of existence, and no citing document
-listed here had its path corrected in this task (all of them sit outside this
-task's `write_scopes`) — this file is the repair map handed to whichever
-task/owner is responsible for each one.
+listed here had its path corrected in this task except the two noted below
+(`README.md` and `local-development.md`, both inside this task's
+`write_scopes`); every other citing document sits outside this task's
+`write_scopes` — this file is the repair map handed to whichever task/owner is
+responsible for each one.
 
 ### Summary
 
@@ -337,7 +339,7 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
     tests/e2e/E2E-010-cti-recording-filing.sh, tests/e2e/E2E-010-platform-admin-control-plane.sh
 - [2] literal ellipsis placeholder in source doc, not a real path
     apps/api/.../regulatory-registry.service.ts, infra/migrations/V0001__...sql
-- [2] storybook story planned in 2026-05 UI redesign workbreakdown; not materialized under this name
+- [2] storybook story planned in 2026-05 UI redesign workbreakdown; each exists only on an unmerged side branch, not an ancestor of dev (platform-pricing.stories.tsx: 60a8c7d6b, origin/claude/pbk-ui-003; storybook-smoke.stories.tsx: fced012c5, origin/claude/pbk-ui-003) — not never-written, just never merged under this name
     packages/ui-web/src/platform-pricing.stories.tsx, packages/ui-web/src/storybook-smoke.stories.tsx
 - [2] multi-agent consensus session transcript referenced by its own sidecar summary; session working file was not committed
     docs/02-architecture/consensus/sessions/20260413T025550Z-repo-gap-reassessment-v3/consensus-packet.md (x2)
@@ -365,13 +367,13 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
     docs/05-ui/platform-admin-redesign-closeout-20260513.md
 - [1] copilot lane removed from orchestrator dispatch (commit fbc744877); integration guide not yet pruned to match
     tools/development-orchestrator/adapters/copilot_cloud.py
-- [1] partner-booking-web exists but this lib file was never materialized under this name; partner booking is paused scope (REPORT.md section 6)
+- [1] partner-booking-web exists but this lib file was committed only on an unmerged side branch (7cd25a978, origin/codex2/pbk-ui-003), not an ancestor of dev; partner booking is paused scope (REPORT.md section 6)
     apps/partner-booking-web/lib/route-state.ts
 - [1] consolidated into apps/tenant-console-web/app/webhooks/page.tsx
     apps/tenant-console-web/app/webhooks/actions.ts
-- [1] smoke file planned in 2026-05 UI redesign workbreakdown; not materialized under this name
+- [1] smoke file planned in 2026-05 UI redesign workbreakdown; committed only on an unmerged side branch (2cc1b24f5, origin/claude/pbk-ui-003), not an ancestor of dev
     packages/ui-web/src/ui-tokens-import-smoke.ts
-- [1] design-canvas requirements doc referenced by a later unblock doc; never added to the design canvas set
+- [1] design-canvas requirements doc committed only on unmerged side branch (4e7d40db1, origin/codex/iam-ui-ten-001), not an ancestor of dev; a later implementation attempt from the same branch (7f85fe593) was reverted (ff97e96af), so the doc's own "blocked pending a canonical Tenant Console canvas response" status still holds — this is an unmerged requirements/blocker handoff, not a claim that a session screen was designed or accepted
     docs/05-ui/drts-design-canvas/tenant-iam-session-screen-requirements-20260809.md
 - [1] production live-exec evidence pack drafted only on unmerged side branch (0bca939f0, origin/claude2/wf-prod-001-live-exec), not an ancestor of dev; SR-LIVE-* gates remain open regardless
     support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md
@@ -383,12 +385,16 @@ paused/retired product scope per REPORT.md section 6. Historical docs are not re
 |---|---|---|
 | `truthful_scope_and_deployment_instructions` | met | README Status section now distinguishes implementation/CI/dev-deployment/live-acceptance and names the open F01–F08 gaps instead of a bare "closed"; `docs/03-runbooks/smarttransport-tw-custom-domains.md` carries a historical-scope banner naming the suspended project and pointing at `DEV_GCP_*`/`deploy-dev.yml`; `docs/03-runbooks/local-development.md` now states the shared orchestrator machine is a different machine under `AGENTS.md`'s VM restriction, not the "VM dev" this runbook describes; `docs/ops/branch-strategy.md` disambiguates "dev VM" from the agent working machine. |
 | `cited_path_findings_classified_without_fake_evidence` | met | all 237 findings (128 unique paths) classified above into machine-local / resolved-elsewhere / archived-history / genuinely-missing, with the method and evidence for each; no file was fabricated or deleted to change the checker's output; the 19 genuinely-missing findings are named explicitly rather than hidden. |
-| `same_sha_review_ci` | met | candidate SHA `73f60713938114ae4cb6b39c977216b84f849d1f` (this commit, PR #2280 head). Local: `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` → exit 0, 0 findings across all four sub-checks. Hosted: `gh api repos/ajoe734/drts-fleet-platform/commits/73f60713938114ae4cb6b39c977216b84f849d1f/check-runs` → "Canonical consistency" `conclusion: success` for this exact `head_sha` (run 37080508933/job 111079759178); PR state `OPEN`/`MERGEABLE`. R2's commit:path evidence spot-checked directly against git objects (`git show <sha>:<path>`) for the three files Codex named (b1707c55a → forwarder-adapter-proof-spec-20260519.md and FWD-LIVE-SANDBOX-EVIDENCE.md; 0ab277dd2 → cti-recording-filing-uat-20260519.md; 0bca939f0 → PROD-LIVE-EXEC-EVIDENCE.md), all four confirmed present at the cited commits. |
+| `same_sha_review_ci` | met | candidate SHA `cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f` (`git rev-parse HEAD` and `gh pr view 2280 --json headRefOid` both return this SHA; it is the exact PR #2280 head). Local: `python3 tools/ci/git/check_canonical_consistency.py --ci --base 2b4b6b96aed1c41ae4b252681e0466ee808cbd0e --head HEAD` → exit 0, 0 findings across all four sub-checks. Hosted: `gh api repos/ajoe734/drts-fleet-platform/commits/cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f/check-runs` → "Canonical consistency" job `111085986290` in run `37082544300` is `conclusion: success` for this exact `head_sha`; the paired `ci-integ` run `37082544302` is also completed/success; every required (non-skipped) check on both runs is `success`. (An earlier evidence-only commit, `73f60713938114ae4cb6b39c977216b84f849d1f`, was independently CI-validated at run `37080508933`/job `111079759178` and is preserved as historical validation of the fixes it introduced, but it is no longer the candidate HEAD and is not cited here as this commit's own review/CI.) R2's commit:path evidence spot-checked directly against git objects (`git show <sha>:<path>`) for the three files Codex named (b1707c55a → forwarder-adapter-proof-spec-20260519.md and FWD-LIVE-SANDBOX-EVIDENCE.md; 0ab277dd2 → cti-recording-filing-uat-20260519.md; 0bca939f0 → PROD-LIVE-EXEC-EVIDENCE.md), all four confirmed present at the cited commits. |
 
 ## What was explicitly not done
 
-- Did not edit any of the 237 findings' citing documents (all outside this
-  task's `write_scopes`); did not create the 19 genuinely-missing artifacts.
+- Did not edit any of the 237 findings' citing documents except `README.md`
+  and `local-development.md` (both inside this task's `write_scopes`, and
+  both already recorded above as the R1 fix that turned 2 of the 11
+  intentional-machine-local findings into resolved-elsewhere references);
+  every other citing document sits outside this task's `write_scopes`. Did
+  not create the 19 genuinely-missing artifacts.
 - Did not touch F01–F08, G01, G03, G04, or G05 from the audit — those are
   other tasks' scope.
 - Did not restore `passenger-web`, `partner-booking-web`,
@@ -454,3 +460,74 @@ Both are fixed in this candidate:
   missing` category makes a narrower, still-accurate claim ("no replacement
   in the tracked tree under any name today"), not a "never existed" claim,
   so it did not need correction.
+
+## Review round 2 fixes (Codex, candidate `cf3e9e772`)
+
+Codex reopened the second candidate (PR #2280, `cf3e9e772`; evidence-only
+commit `73f6071` had intervened) with one residual R2-pattern finding and one
+evidence-identity finding. Both are fixed in this candidate:
+
+- **R2 residual (`cited_path_findings_classified_without_fake_evidence`,
+  P2):** the archived-history entry for the design-canvas requirements doc
+  under docs/05-ui/drts-design-canvas/ (full name:
+  tenant-iam-session-screen-requirements-20260809.md)
+  still said "never added to the design canvas set." Re-verified with
+  `git show 4e7d40db1:docs/05-ui/drts-design-canvas/tenant-iam-session-screen-requirements-20260809.md`
+  (exit 0; a real requirements/blocker handoff document, status "blocked
+  pending a canonical Tenant Console canvas response"), `git branch --all
+  --contains 4e7d40db1` (→ only `origin/codex/iam-ui-ten-001`, not `dev`),
+  and `git log --oneline dev..origin/codex/iam-ui-ten-001`, which also shows
+  a later implementation attempt from that same branch (`7f85fe593` "build
+  tenant users roles sessions and credential lifecycle surfaces") was
+  reverted (`ff97e96af`) rather than merged. Same provenance error as R2:
+  this is a requirements doc that exists, committed only on an unmerged side
+  branch whose one implementation attempt was reverted, not a document that
+  was "never added." Fix: the entry now names the commit/branch and the
+  revert, while preserving the still-true, unchanged program fact that drove
+  the original archived-history conclusion — no tenant-session screen is
+  live in `dev`, so `IAM-UI-TEN-001` still cannot claim UI acceptance.
+  Category totals are unchanged (archived history: 79 unique paths / 171
+  findings); only this entry's explanation text was corrected. Also
+  rechecked every other `never created` / `not materialized` / `was not
+  committed` statement in this classification against `git log --all --
+  <path>` and `git branch --all --contains <sha>`: the four 2026-05 planning
+  E2E script names (`E2E-007-partner-booking-pilot.sh`,
+  `E2E-008-cti-recording-filing.sh`,
+  `E2E-008-partner-eligibility-airport-transfer.sh`,
+  `E2E-009-governance-billing-reporting.sh`,
+  `E2E-010-cti-recording-filing.sh`,
+  `E2E-010-platform-admin-control-plane.sh`) and the consensus-packet working
+  file have empty history on every branch and remain correctly described as
+  never committed. Three more entries shared the same provenance error as
+  the design-canvas doc and are corrected here too:
+  platform-pricing.stories.tsx and storybook-smoke.stories.tsx under
+  packages/ui-web/src/ (`60a8c7d6b` / `fced012c5`, both
+  `origin/claude/pbk-ui-003`), route-state.ts under
+  apps/partner-booking-web/lib/ (`7cd25a978`, `origin/codex2/pbk-ui-003`),
+  and ui-tokens-import-smoke.ts under packages/ui-web/src/ (`2cc1b24f5`,
+  `origin/claude/pbk-ui-003`) — each committed only on an
+  unmerged side branch, none an ancestor of `dev`
+  (`git log --oneline dev -- <path>` empty for all four). No file was
+  restored and no live/UI acceptance is claimed for any of these; they
+  remain absent from the tracked tree today.
+- **R3 (`same_sha_review_ci` evidence identity, P2):** this document's
+  acceptance-mapping row named the prior evidence-only commit
+  `73f60713938114ae4cb6b39c977216b84f849d1f` as "this commit, PR #2280
+  head," but that commit was superseded by the current candidate
+  `cf3e9e7723f8d28bbfc9a4f6d88ea2330e32570f` the moment this file was
+  edited again — an evidence row cannot describe its own future self. Fix:
+  the row now cites `cf3e9e772` directly, confirmed identical by both
+  `git rev-parse HEAD` and `gh pr view 2280 --json headRefOid`, with its own
+  hosted CI evidence (`Canonical consistency` job `111085986290` in run
+  `37082544300`, success; paired `ci-integ` run `37082544302`, success; all
+  required/non-skipped checks on both runs green) and its own local
+  `check_canonical_consistency.py --ci` run (exit 0, 0 findings). `73f6071`
+  is kept as a named historical validation point, not as this commit's
+  stand-in. Also reconciled the "no citing documents edited" statements
+  (Method section and "What was explicitly not done" above) with the two
+  real reference repairs already recorded under Review round 1: `README.md`
+  and `local-development.md` are both citing documents for 2 of the 11
+  intentional-machine-local findings and both sit inside this task's
+  `write_scopes`, so the blanket "none edited / all outside write_scopes"
+  phrasing was corrected to name that exception explicitly instead of
+  contradicting the R1 record.
