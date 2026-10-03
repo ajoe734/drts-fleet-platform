@@ -25,6 +25,23 @@ def mime(recipient='unit+invite@gmail.com', body='Invitation code: ti_SUPER_SECR
 
 
 class MailboxObservationTest(unittest.TestCase):
+    def test_localized_all_folder_is_discovered_before_readonly_selection(self):
+        # Modified UTF-7 wire name for a localized mailbox, not an English alias.
+        mailbox = b'[Gmail]/&YkBnCZg1TvY-'
+        client = Mock()
+        client.list.return_value = ('OK', [
+            b'(\\HasNoChildren) "/" "INBOX"',
+            b'(\\HasNoChildren \\Sent) "/" "[Gmail]/Sent Mail"',
+            b'(\\HasNoChildren \\All) "/" "' + mailbox + b'"',
+        ])
+        client.select.side_effect = lambda name, readonly: ('OK', []) if name == b'"' + mailbox + b'"' and readonly else ('NO', [b'Unknown mailbox'])
+        client.response.return_value = ('UIDVALIDITY', [b'900'])
+        client.uid.side_effect = [('OK', [b'45']), ('OK', [(b'data', mime())])]
+        result = observer.observe(client, MESSAGE_ID, 'unit+invite@gmail.com', 'unit@gmail.com', '邀請測試', ['Business id 123'])
+        self.assertTrue(result['matched_content'])
+        client.list.assert_called_once_with('""', '*')
+        client.select.assert_called_once_with(b'"' + mailbox + b'"', readonly=True)
+
     def test_placeholder_domains_are_rejected_for_both_flows(self):
         for domain in ('example.com', 'EXAMPLE.NET', 'sub.example.org', 'fixture-mail.org',
                        'demo.mail.org', 'mail.invalid', 'mail.test', 'mail.localhost'):
