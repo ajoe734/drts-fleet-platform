@@ -82,6 +82,7 @@ jobs:
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
+          python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py
           python3 -m unittest tools/ci/test_academy_acceptance_workflow.py
           python3 -m unittest tools/ci/test_leave_acceptance_workflow.py
@@ -398,6 +399,29 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run i18n:guard
 
+  dependency-security:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Run dependency security gate
+        run: python3 tools/ci/dependency_security.py
+
   orchestrator-tests:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.orchestrator == 'true'
@@ -566,6 +590,7 @@ jobs:
         iam-negative-matrix,
         build,
         i18n-guard,
+        dependency-security,
         orchestrator-tests,
         e2e,
       ]
@@ -584,6 +609,8 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "Change scope gate failed"; exit 1; }
+
+          [ '${{ needs.dependency-security.result }}' = 'success' ] || { echo "Dependency security check failed"; exit 1; }
 
           if [ '${{ needs.changes.outputs.product }}' = 'true' ]; then
             for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.iam-negative-matrix.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}'; do

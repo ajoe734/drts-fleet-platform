@@ -6,7 +6,7 @@ This document serves as evidence and documentation for the dependency audit gate
 
 ## Actionable Production Dependency Security Gate
 
-We have added an actionable production dependency security gate that runs in our CI pipeline via the `.github/workflows/dependency-security.yml` workflow.
+We have added an actionable production dependency security gate that runs in our CI pipelines (`.github/workflows/ci.yml` and `.github/workflows/ci-integ.yml`) as part of the primary branch protection checks.
 It executes `pnpm audit --prod` and processes the results.
 
 ### Runtime-Reachability Distinction
