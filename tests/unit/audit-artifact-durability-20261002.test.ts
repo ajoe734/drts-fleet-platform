@@ -4243,6 +4243,181 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       expect(sha256(await drain(freshFile.getStream()))).toBe(cHash);
     });
   });
+
+  describe("R10-G a single failed publication-backup write must not let a destructive publish report success without it (Codex REOPEN, generation 86c0d8a2b0a94499b721fdb97ab1fbaf)", () => {
+    const PUBLIC_INFO_R10G_BACKUP_FAILURE = {
+      versionId: "public-info-r10g-backup-failure",
+      title: "R10-G Backup Failure Disclosure",
+      callPhone: "0800-070-070",
+      complaintPhone: "0800-070-080",
+      callRateText: "依表計費",
+      fareText: "依公告",
+      paymentMethodText: "現金",
+      status: "draft" as const,
+      effectiveFrom: "2026-04-01T00:00:00Z",
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      createdAt: "2026-03-20T00:00:00Z",
+      updatedAt: "2026-04-01T00:00:00Z",
+    };
+
+    /** Fails the FIRST `putIfAbsent` whose subjectId is a publication-backup
+     * key (`preservePlacardPublicationBytes`'s own key shape), then
+     * delegates every other call -- including a later retry's own backup
+     * write, which lands under a different hash it has never seen -- to the
+     * backing store untouched. Every other store method always delegates. */
+    class FailingBackupArtifactStore implements DocumentArtifactStore {
+      private failed = false;
+
+      constructor(private readonly backing: DocumentArtifactStore) {}
+
+      put(...args: Parameters<DocumentArtifactStore["put"]>) {
+        return this.backing.put(...args);
+      }
+
+      async putIfAbsent(
+        ...args: Parameters<DocumentArtifactStore["putIfAbsent"]>
+      ) {
+        const [command] = args;
+        if (
+          !this.failed &&
+          command.kind === "placard" &&
+          command.subjectId.includes("::publication-backup::")
+        ) {
+          this.failed = true;
+          throw Object.assign(
+            new Error("MODELED_ONE_BACKUP_PUT_FAILURE"),
+            { name: "ModeledTransportError" },
+          );
+        }
+        return this.backing.putIfAbsent(...args);
+      }
+
+      putIfUnchanged(
+        ...args: Parameters<DocumentArtifactStore["putIfUnchanged"]>
+      ) {
+        return this.backing.putIfUnchanged(...args);
+      }
+
+      get(...args: Parameters<DocumentArtifactStore["get"]>) {
+        return this.backing.get(...args);
+      }
+    }
+
+    it("fails the publish safely and leaves it retryable when the durable backup write fails, instead of committing a publication with no recovery copy", async () => {
+      const { repository, rows } = createRealPlacardRepository([
+        PUBLIC_INFO_R10G_BACKUP_FAILURE,
+      ]);
+      const backing = new InMemoryDocumentArtifactStore();
+      const registry = new DocumentArtifactRebuildRegistry();
+
+      // The draft is generated through a fault-free pod -- its own backup
+      // write (over the draft's render hash) must succeed normally, so the
+      // fault below lands on the PUBLISH attempt's own (different) render
+      // hash, not on draft generation.
+      const podA = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await podA.onModuleInit();
+      const draft = await podA.generatePlacardVersion({
+        versionCode: "placard-r10g-backup-failure",
+        publicInfoVersionId: PUBLIC_INFO_R10G_BACKUP_FAILURE.versionId,
+        templateName: "seatback-r10g-backup-failure",
+      });
+      const draftHash = draft.artifactManifestHash;
+      expect(draftHash).toBeTruthy();
+
+      const faultyStore = new FailingBackupArtifactStore(backing);
+      const podC = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        faultyStore,
+        registry,
+      );
+      await podC.onModuleInit();
+
+      // The modeled single backup-write failure must reject the publish
+      // itself -- the R10-G defect was reporting SUCCESS over it instead.
+      await expect(
+        podC.publishPlacardVersion(draft.placardVersionId),
+      ).rejects.toThrow(/MODELED_ONE_BACKUP_PUT_FAILURE/);
+
+      // The claim must have been released: the durable row is retryable,
+      // not stuck mid-publish with a dangling claim token.
+      const afterFailure = rows.get(draft.placardVersionId);
+      expect(afterFailure?.record.publishedAt).toBeNull();
+      expect(afterFailure?.record.__publishClaimToken).toBeUndefined();
+
+      // The destructive write to the shared public slot must never have
+      // run: `preservePlacardPublicationBytes` throwing (required) aborts
+      // BEFORE it, in `renderPlacardArtifact`, so the slot still holds
+      // exactly the pre-publish draft bytes, nothing half-published for a
+      // sibling to clobber or a reader to see.
+      const afterFailureObject = await backing.get(
+        "placard",
+        draft.placardVersionId,
+      );
+      expect(afterFailureObject?.record.sha256).toBe(draftHash);
+
+      // A healthy retry -- same placard, now through a store with no fault
+      // -- must succeed normally, with both the public slot and the durable
+      // backup copy actually present, and both the original and a fresh
+      // reader's link resolving the real published bytes.
+      const retryService = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await retryService.onModuleInit();
+      const published = await retryService.publishPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(published.publishedAt).toBeTruthy();
+      const stored = await backing.get("placard", draft.placardVersionId);
+      expect(stored?.record.sha256).toBe(published.artifactManifestHash);
+
+      const controller = new ControlledDownloadController(backing, registry);
+      const originalFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(published.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(originalFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+
+      const freshReader = new PlatformAdminService(
+        new AuditNotificationService(),
+        repository,
+        undefined,
+        backing,
+        registry,
+      );
+      await freshReader.onModuleInit();
+      const fresh = await freshReader.getPlacardVersion(
+        draft.placardVersionId,
+      );
+      expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
+      const freshFile = (await resolve(
+        controller,
+        "placard",
+        draft.placardVersionId,
+        paramsOf(fresh.artifactDownloadUrl!),
+      )) as unknown as StreamableFileLike;
+      expect(sha256(await drain(freshFile.getStream()))).toBe(
+        published.artifactManifestHash,
+      );
+    });
+  });
 });
 
 describe("createDocumentArtifactStore provider resolution", () => {

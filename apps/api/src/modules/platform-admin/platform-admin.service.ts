@@ -1051,11 +1051,14 @@ export class PlatformAdminService implements OnModuleInit {
         "placard",
         placard.placardVersionId,
       );
-      // Force re-render so PDF reflects the actual publishedAt timestamp
+      // Force re-render so PDF reflects the actual publishedAt timestamp.
+      // (R10-G fix) `requireDurableBackup: true` -- this is the actual
+      // destructive publish; see `preservePlacardPublicationBytes`.
       await this.ensurePlacardArtifact(
         wonClaim,
         true,
         baselineArtifact?.record.generation ?? null,
+        true,
       );
 
       // The claim above only fences the durable *record*; the fenced write
@@ -2732,6 +2735,7 @@ export class PlatformAdminService implements OnModuleInit {
     placard: PlacardVersionRecord,
     forceRerender = false,
     fenceGeneration?: string | null,
+    requireDurableBackup = false,
   ): Promise<PlacardVersionRecord> {
     const materialised = !forceRerender && placard.artifactManifestHash != null;
     const expired = this.isPlacardArtifactExpired(
@@ -2759,6 +2763,7 @@ export class PlatformAdminService implements OnModuleInit {
 
     const record = await this.renderPlacardArtifact(placard, {
       fenceGeneration,
+      requireDurableBackup,
     });
 
     const downloadMetadata = this.createPlacardDownloadMetadata(
@@ -2843,6 +2848,7 @@ export class PlatformAdminService implements OnModuleInit {
     options: {
       recover?: boolean;
       fenceGeneration?: string | null | undefined;
+      requireDurableBackup?: boolean;
     } = {},
   ): Promise<DocumentArtifactRecord> {
     const bytes = this.renderPlacardBytes(placard);
@@ -2854,10 +2860,16 @@ export class PlatformAdminService implements OnModuleInit {
     // content-addressed copy is what lets a later repair restore these
     // precise bytes even after the source they came from has legitimately
     // moved on.
+    //
+    // (R10-G fix, Codex REOPEN generation 86c0d8a2b0a94499b721fdb97ab1fbaf)
+    // `requireDurableBackup` (set only by the actual publish path) makes a
+    // failure here abort BEFORE the destructive write below runs at all --
+    // see `preservePlacardPublicationBytes`'s own doc.
     await this.preservePlacardPublicationBytes(
       placard.placardVersionId,
       bytes,
       mimeType,
+      options.requireDurableBackup ?? false,
     );
     const command = {
       kind: "placard" as const,
@@ -2981,16 +2993,29 @@ export class PlatformAdminService implements OnModuleInit {
    * happen to produce identical bytes (same placard, same source) safely
    * agree on the same backup key and never re-write it; renders that differ
    * land at different keys and can never collide or clobber each other.
-   * Best-effort on purpose -- a failure here must not block the render this
-   * call is actually performing; a missing backup just means a later
-   * repair/restore attempt safely declines instead of corrupting anything,
-   * the same abstain-on-uncertainty posture every durable read in this area
-   * already has.
+   *
+   * (R10-G fix, Codex REOPEN generation 86c0d8a2b0a94499b721fdb97ab1fbaf)
+   * Best-effort was the wrong posture for `required` callers: a publish that
+   * destructively overwrites the shared public slot and finalizes
+   * authoritative metadata MUST NOT be allowed to report success while this,
+   * the only durable recovery copy of what it just published, silently does
+   * not exist -- a later legitimate clobber (a stale sibling's write landing
+   * after this attempt, followed by that sibling itself losing the DB race)
+   * would then have nothing to repair FROM. `required` callers (the actual
+   * publish path, via `renderPlacardArtifact`'s `requireDurableBackup`)
+   * therefore rethrow after logging, which -- because this call always runs
+   * BEFORE the destructive write in `renderPlacardArtifact` -- aborts the
+   * publish attempt before that write, or any metadata finalize, ever runs.
+   * Non-publish callers (initial generation, recovery re-renders) keep the
+   * original abstain-on-uncertainty posture: a missing backup there just
+   * means a later repair/restore attempt safely declines instead of
+   * corrupting anything.
    */
   private async preservePlacardPublicationBytes(
     placardVersionId: string,
     bytes: Buffer,
     mimeType: string,
+    required = false,
   ): Promise<void> {
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     try {
@@ -3008,6 +3033,9 @@ export class PlatformAdminService implements OnModuleInit {
         error,
         "placard publication backup",
       );
+      if (required) {
+        throw error;
+      }
     }
   }
 

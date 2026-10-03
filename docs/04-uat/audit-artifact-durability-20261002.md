@@ -3030,11 +3030,17 @@ changed files appear in that output. Hosted CI for this SHA is pending,
 produced by the handoff/candidate lifecycle, not run locally from this
 VM. No local PostgreSQL/integration collection, browser, merge, or
 deployment is claimed. This round added no new SQL and no new
-integration-test file; `tests/integration/platform-admin-artifact-publication.integration.test.ts`
-still does not exist in this tree (same as every prior round), so
-`same_sha_review_ci`'s real-PostgreSQL matrix below records the prior,
-unchanged-by-this-round hosted evidence for that matrix, not a fresh
-local run of this commit's own new code.
+integration-test file. **Correction (made during the R10-G reopen
+below):** the statement that
+`tests/integration/platform-admin-artifact-publication.integration.test.ts`
+"does not exist in this tree" was wrong when written -- it exists in
+this exact tracked candidate (added by an earlier round, commit
+`e8455e94160e66b4e942a97f7d0417ed4425f3e8`), uses the production
+repository against the formal migrated schema, and is selected by
+hosted unit CI. No local PostgreSQL collection/execution of it was
+performed at this round; `same_sha_review_ci`'s real-PostgreSQL matrix
+below recorded only the prior, unchanged-by-this-round hosted evidence
+for that matrix, not a fresh local run of this commit's own new code.
 
 ### Acceptance mapping (this repair, R10-E/R10-F round)
 
@@ -3076,10 +3082,220 @@ local run of this commit's own new code.
   again stays uncorrected indefinitely. This is consistent with (not a
   regression from) how the pre-existing `not_found` rebuild path has
   always worked.
+- **Correction (made during the R10-G reopen below):**
+  `tests/integration/platform-admin-artifact-publication.integration.test.ts`
+  DOES exist in this tree (added by an earlier round, commit
+  `e8455e94160e66b4e942a97f7d0417ed4425f3e8`) and uses the production
+  repository against the formal migrated schema; the statement above
+  that it "does not exist" was wrong when written. The real-PostgreSQL
+  matrix and its hosted CI status for this round's own SHA were
+  unchanged and not re-verified here; that remains a real limitation,
+  just not for the reason originally stated.
+- Real multi-replica Cloud Run acceptance, combining genuine S3 and
+  genuine PostgreSQL under real network-level request reordering,
+  remains `SR-LIVE-DOC-001` and is not claimed here.
+
+## Codex REOPEN of locked candidate `93dd2f173d984bbcbfadc27e06d60282dbd640a2`, generation `86c0d8a2b0a94499b721fdb97ab1fbaf`, PR #2295: R10-G swallowed backup-write failure
+
+Confirmed by that review as repaired and NOT re-litigated here: the
+original R10-E (source published AFTER winner finalizes) and R10-F
+(one failed GET during success-path repair) schedules both now pass as
+POSITIVE controls when the backup write itself succeeds; the six
+earlier controls (delayed PUT, delayed baseline GET, failed loser
+verification GET, two overlapping superseded publishers, source drift
+BEFORE winner renders, pending winner eventually finalizes) and a new
+positive on-access-recovery control (an independent reader recovering
+both the winner's original and a freshly issued link from the durable
+backup while the original publisher's own repair continuation never
+runs) all pass unchanged. None of those are re-litigated here.
+
+### Root cause: the new durable backup was best-effort, so publish success did not actually guarantee it existed
+
+`preservePlacardPublicationBytes` (the R10-E/R10-F fix) wrote a
+durable, content-addressed backup of every render, but swallowed its
+own write failure unconditionally -- exactly the limitation the
+R10-E/R10-F round's own "Remaining limitations" already flagged: "It
+does not address...the backup write itself failing." A single ordinary
+transient failure on that one `PutObjectCommand` let
+`publishPlacardVersionExclusive` go on to write, verify, and finalize
+the public slot normally and report publish SUCCESS, with the
+publication's only durable recovery copy silently absent. This was not
+cosmetic: a later legitimate clobber (a stale sibling's object write
+landing after this attempt, then that sibling itself losing the DB
+race) had nothing to repair FROM -- `restorePlacardPublicationBackup`
+correctly returned `null` for the missing backup, both the finalizing
+attempt's own original link and a fresh reader's freshly issued link
+then failed `CONTROLLED_DOWNLOAD_CONTENT_MISMATCH` even through the
+new on-access self-heal path, and there was no way back to the
+originally published bytes at all.
+
+### Fix: the durable backup is a required precondition for the actual publish; a backup failure aborts before the destructive write, not after
+
+- `preservePlacardPublicationBytes` (platform-admin.service.ts:3016,
+  was :2990) gained a `required` parameter (default `false`, preserving
+  the prior best-effort posture for every non-publish caller). When
+  `required` is `true`, a write failure is still logged via
+  `reportPersistenceFailure` and then rethrown, instead of swallowed.
+- `renderPlacardArtifact` (:2848) gained a `requireDurableBackup` option
+  on its `options`, threaded straight into the (unchanged) call to
+  `preservePlacardPublicationBytes`, which that method already calls
+  BEFORE any of its own writes (plain `put`, `putIfAbsent`, or the
+  fenced `putIfUnchanged`) -- so a required backup failure aborts the
+  entire render before the destructive write to the shared public slot
+  ever runs, not merely before some later step.
+- `ensurePlacardArtifact` (:2731) gained a matching `requireDurableBackup`
+  parameter (default `false`), forwarded into its own call to
+  `renderPlacardArtifact`.
+- `publishPlacardVersionExclusive` (:1055, the one actual destructive
+  publish call site -- the draft-generation call at :1273 and the
+  read-path resolve call at :3285 both keep the default `false`, since
+  neither destructively overwrites a shared slot another instance's
+  claim depends on) now passes `requireDurableBackup: true`. A backup
+  failure there throws out of `ensurePlacardArtifact` into the method's
+  own existing generic `catch` (unchanged), which already releases the
+  DB claim and calls `repairPlacardArtifactAfterLostClaim` (a safe
+  no-op here, since nothing was ever written) before rethrowing --
+  exactly the existing "failed/ambiguous attempt" handling every prior
+  `catch`-path failure in this method already goes through, now also
+  covering this one.
+- Net effect: a publish whose own backup write fails never writes the
+  public slot, never finalizes the DB row, and reports the failure to
+  its caller instead of success -- the DB row is left exactly as
+  unpublished/retryable as any other failed publish attempt in this
+  method, and a subsequent healthy retry succeeds normally with both
+  the public slot and its backup actually present.
+
+### New regression coverage
+
+Added to `tests/unit/audit-artifact-durability-20261002.test.ts`, as a
+new top-level `describe` inside the same outer "R7-followthrough/R8/R9"
+scope (reusing `createRealPlacardRepository`), immediately after the
+R10-F describe (:4247 onward in the new file):
+
+- **R10-G** -- describe "R10-G a single failed publication-backup write
+  must not let a destructive publish report success without it", it
+  "fails the publish safely and leaves it retryable when the durable
+  backup write fails...". A new `FailingBackupArtifactStore` wraps the
+  real `InMemoryDocumentArtifactStore`, throwing on exactly the first
+  `putIfAbsent` call whose `subjectId` contains
+  `"::publication-backup::"` (the exact key shape
+  `placardPublicationBackupSubjectId` produces) and delegating every
+  other call, including every later call of any kind, untouched. The
+  draft is generated through a fault-free pod first (so its own backup
+  write, over the draft's own render hash, succeeds and is not what the
+  fault targets), then a second pod wired to the faulty store attempts
+  `publishPlacardVersion` on it. Asserts: the publish call itself
+  rejects with the modeled error (not a reported success); the durable
+  row's `publishedAt` is `null` and `__publishClaimToken` is cleared
+  (claim released, retryable); the public slot's stored bytes are
+  unchanged from the pre-publish draft hash (the destructive write
+  never ran); and a subsequent retry through a fault-free pod against
+  the SAME placard succeeds normally, with the public slot, the
+  original link, and a fresh independent reader's freshly issued link
+  all converging on the retry's own published hash.
+- **Before this fix**, confirmed the same way as every prior round in
+  this lineage: copied the current (post-R10-E/R10-F-fix,
+  pre-R10-G-fix) `platform-admin.service.ts` out via `git show
+  HEAD:apps/api/src/modules/platform-admin/platform-admin.service.ts`
+  (HEAD at the time being `93dd2f173d984bbcbfadc27e06d60282dbd640a2`,
+  the locked candidate this reopen reviewed), overwrote the working
+  tree with it (not the new test file), ran only the new test, then
+  restored this round's fixed file from a local backup copy -- no edit
+  to tracked history, no `git stash`. It failed exactly on the
+  `rejects.toThrow(/MODELED_ONE_BACKUP_PUT_FAILURE/)` assertion: the
+  unfixed code swallowed the modeled backup failure and resolved the
+  publish successfully instead, leaving the public slot overwritten
+  with no backup behind it.
+- **After this fix**: it passes, and the full existing suite (191
+  tests before this round, per the R10-E/R10-F round's own count) plus
+  this 1 is `16 files / 192 tests passed, 0 failed, 0 skipped`.
+
+### Verification at this repair
+
+```
+cd /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-audit-artifact-durability-20261002-2
+pnpm exec eslint apps/api/src/modules/platform-admin/platform-admin.service.ts \
+  apps/api/src/modules/controlled-download/controlled-download.controller.ts \
+  apps/api/src/common/document-artifacts/document-artifact-rebuild-registry.ts \
+  tests/unit/audit-artifact-durability-20261002.test.ts
+# => exit 0, no findings
+git diff --check origin/dev...HEAD                     # exit 0
+pnpm exec vitest run tests/unit/audit-artifact-durability-20261002.test.ts tests/unit/audit-artifact-durability-s3-20261003.test.ts tests/unit/system-remediation/sr-artifact-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-placard-001/ tests/unit/controlled-download-route.test.ts tests/unit/platform-admin.test.ts tests/unit/system-remediation/sr-qa-finance-001/c077-c078-c079-tenant-billing-invoice-pdf.test.ts tests/unit/system-remediation/sr-release-001/same-order-cross-role-closed-loop.test.ts tests/unit/system-remediation/sr-qa-reports-001/c094-c096-public-info-placards-governance.test.ts tests/unit/system-remediation/sr-qa-reports-001/c097-placard-printable-download.test.ts tests/unit/system-remediation/sr-qa-ux-001/c125-document-artifacts-upload-download.test.ts tests/unit/system-remediation/sr-qa-concurrency-001/cross-month-batch-billing.test.ts --maxWorkers=1
+# => exit 0, 16 files / 192 tests passed, 0 failed, 0 skipped
+cd apps/api && pnpm exec vitest run tests/unit/platform-admin.service.test.ts --maxWorkers=1
+# => exit 0, 1 file / 3 tests passed
+```
+
+Run against this repair's uncommitted working tree (committed as this
+section's own handoff SHA, below). `pnpm exec tsc --noEmit -p
+tsconfig.json` inside `apps/api` reports the same four pre-existing
+`Cannot find module '@drts/control-plane-auth'` errors as every prior
+round, all in files this round never touched
+(`bootstrap-auth.guard.ts`, `jwt-auth.service.ts`, `auth.controller.ts`,
+`iap-subject.adapter.ts`); none of this round's own changed files
+appear in that output. The task brief's own reproduction probe
+(`.local/audit-followthrough-20261003/artifact-cross-instance-publish-probe.cjs`)
+was read-only evidence for the REOPEN finding, not run as part of this
+repair's own verification -- this repair's verification is the
+production-path regression test above plus the commands here. The
+`NODE_OPTIONS=--require=.../no-network.cjs` network-disabling guard
+specified in the task brief's own common test-command prefix could not
+be applied: this VM's command-permission layer deferred every attempt
+to invoke it (via `env -u ...`, `NODE_OPTIONS=...`, and a `bash -c`
+wrapper alike) without ever resolving the deferral, for reasons outside
+this task's own write scope. All test runs above instead ran with this
+shell's ordinary environment; no `DATABASE_URL`/`API_DATABASE_URL`/
+`TEST_DATABASE_URL`/`PG_DATABASE_URL` happened to be set in it, and no
+test in any run above made or required a real network call, so this is
+recorded as a verification-tooling limitation, not a claim that the
+guard's absence was proven harmless. Hosted CI for this SHA is pending,
+produced by the handoff/candidate lifecycle, not run locally from this
+VM. No local PostgreSQL/integration collection, browser, merge, or
+deployment is claimed. This round added no new SQL and no new
+integration-test file.
+
+### Acceptance mapping (this repair, R10-G round)
+
+| Finding/acceptance | Source location | Old → new | Evidence | Limitation |
+| --- | --- | --- | --- | --- |
+| R10-G: a single failed backup-write was swallowed, letting a destructive publish report success with no durable recovery copy | `platform-admin.service.ts` `preservePlacardPublicationBytes`/`renderPlacardArtifact`/`ensurePlacardArtifact`/`publishPlacardVersionExclusive` | backup failure always swallowed (best-effort) → required for the actual publish call site, rethrown and caught by the existing claim-release/repair `catch`, aborting BEFORE the destructive write | new R10-G regression (fails before, passes after); existing R10/R10-A/B/C/D/E/F regressions and the new on-access-recovery control unchanged and still passing | adapter/service/repository-level only, against transport mocks that honour real S3/SQL semantics -- not a live S3 bucket, live PostgreSQL connection, or killed Cloud Run process; `SR-LIVE-DOC-001` for that |
+| `durable_producer_reader_wiring` | all of the above | now additionally closed for the swallowed-backup-failure case, on top of every case the R10 through R10-F rounds already closed | same as above | same as above |
+| `cross_instance_restart_bytes` | all of the above | same | same as above | same |
+| `signature_hash_denial_regressions` | unchanged fail-closed mismatch checks | still passing | scoped suite (192/192) | n/a |
+| `same_sha_review_ci` | this repair's own candidate SHA (produced at handoff, below) | pending (produced after handoff) | n/a yet | previous SHAs' hosted CI does not cover this repair |
+
+### Remaining limitations (this repair, R10-G round)
+
+- Same VM restriction as every prior round: no live S3 bucket, no live
+  PostgreSQL connection, no Cloud Run process kill/restart. The new
+  regression models only the S3 SDK-equivalent store transport, using
+  real production service/repository/controller code underneath.
+- The fix only changes the posture for the ONE call site that performs
+  a destructive, shared-slot publish (`publishPlacardVersionExclusive`
+  via `ensurePlacardArtifact`'s publish call at :1055).
+  Draft generation (`generatePlacardVersion`, :1273) and the read-path
+  resolve helper (`resolvePlacardVersion`, :3285) both keep the backup
+  best-effort, by design: neither destructively overwrites a shared
+  slot another instance's claim depends on, and a fresh placard id has
+  no prior reader to lose a recovery copy for yet. A backup failure
+  during draft generation is therefore still only logged, not
+  propagated -- this is an intentional scope boundary, not an
+  oversight, but it means a draft's OWN first render is not covered by
+  this round's "required" invariant.
+- This round does not add retry-before-fail for the backup write itself
+  (unlike `restorePlacardArtifactWithRetry`'s bounded retries on the
+  restore side) -- a required backup failure fails the publish attempt
+  on the first error, relying on the caller's own retry (a fresh
+  `publishPlacardVersion` call) rather than an internal retry loop. The
+  task brief's own text treats bounded retries as optional ("Bounded
+  retries are fine but cannot end by silently declaring success"); this
+  satisfies the "cannot end by silently declaring success" requirement
+  without adding one.
 - `tests/integration/platform-admin-artifact-publication.integration.test.ts`
-  still does not exist in this tree, same as every prior round; the
-  real-PostgreSQL matrix and its hosted CI status are unchanged and not
-  re-verified here.
+  exists in this tree (see the correction above) but was not run
+  locally at this round (VM PostgreSQL restriction); its hosted CI
+  result for THIS round's own SHA is pending, produced by the
+  handoff/candidate lifecycle.
 - Real multi-replica Cloud Run acceptance, combining genuine S3 and
   genuine PostgreSQL under real network-level request reordering,
   remains `SR-LIVE-DOC-001` and is not claimed here.
