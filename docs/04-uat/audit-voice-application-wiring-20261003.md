@@ -2305,3 +2305,265 @@ This does NOT close R4 or R4-persist, prove PostgreSQL transactions, create
 live model/issuer/storage accounts, approve the replacement SHA, or deploy.
 Original owner must implement the already-coordinated remaining content
 persistence/restoration and consumed composition before final handoff.
+
+## Round-14: R4 durable encrypted dialogue snapshot + R4-persist reconciliation
+(candidate `a01087df5...` on `pi/audit-voice-application-wiring-20261003-v2`,
+tree-identical ancestor `a1ce29e38` -- the Round-13 bounded R7 checkpoint --
+plus this round's diff)
+
+This round implements the two obligations Round-13 explicitly left OPEN:
+R4's "already-authorized encrypted candidate-dialogue snapshot/retention/
+V0106/repository restore" and R4-persist's "correlation/ambiguous-commit
+reconciliation." Both are real, consumed composition, not another
+unconsumed interface or doc-only correction.
+
+### R4-persist: widened response correlation + ambiguous-commit reconciliation
+
+Source: `apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts`'s
+`createTrustedDialoguePersistPort`.
+
+- **Widened correlation.** The no-history-rewrite successor's retained R4-
+  persist finding: "a response with correct id/epoch/version5 but foreign
+  scope, lease99, route99 and pendingInput=true was accepted and advanced
+  binding." `resolveInput`'s real route (`VoiceBookingController#resolveInput`)
+  already returns the full `VoiceSessionRecord`; the client's
+  `ResolveInputResult.session` type only declared `voiceSessionId`/
+  `sessionVersion`/`inputEpoch`/`pendingInput`, so the correlation check
+  never saw `resourceScopeId`/`routeProfileVersion`/`leaseEpoch` even though
+  they were present on the wire. Widened the type and the check to require
+  all three match `current` (the binding), not just the three fields
+  previously checked.
+- **Ambiguous-commit reconciliation.** The same finding's "abort is not
+  rollback": a `signal` firing while the `resolveInput` response was still
+  outstanding previously just threw, discarding a response that (per this
+  round's regression) had *already proven* the CAS committed -- the next
+  turn would then resubmit the stale pre-CAS `sessionVersion` and loop on
+  `VOICE_DRAFT_STALE` forever. The fix needed no new network round-trip:
+  the already-in-hand `result` from `resolveInput` is validated/applied
+  *before* deciding whether to throw for cancellation, not only when not
+  cancelled. A correlated response's `sessionVersion` is now always
+  reconciled into the binding; `persist()` still rejects (this turn was
+  genuinely cancelled) whenever `signal` fired, whatever the response said
+  -- reconciliation never turns a cancelled turn into a successful one.
+
+Both are fenced only by fields the real backend's CAS already guarantees on
+success (an exact `+1` session_version, the request's own scope/route/
+lease), so neither check can ever fire against a genuine apps/api reply --
+they exist purely to reject a corrupted/misattributed/cross-scope one.
+
+### R4: versioned, encrypted dialogue-content snapshot persist/restore
+
+Previously `createTrustedDialoguePersistPort`'s `_state` parameter was
+unused -- `resolveInput` is an *admission* CAS over `sessionVersion`/
+`inputEpoch` only, with no field for dialogue content at all, and prior
+rounds' doc comments argued (first too narrowly, per Round-7's correction,
+then too broadly again, per Round-13's correction) about whether a content
+seam was in scope. The coordinator's own "Voice schema coordination"
+note (`.local/project-fixes-20261002/EXECUTION.md`) settled this: a NEW,
+dedicated migration/table was explicitly reserved and authorized, distinct
+from `voice.draft_revision` (a different, qualification-gated booking-intent
+domain object) and `voice.turn` (per-ASR-segment transcript evidence with no
+session/scope/lease/revision CAS fields).
+
+**Schema** (`infra/migrations/V0106__voice_dialogue_snapshot.sql`): new
+`voice.dialogue_snapshot`, one row per `(voice_session_id, session_version)`
+(unique index, `ON CONFLICT DO NOTHING` dedup -- same convention as
+`insertControlEvent`), append-only via the existing
+`voice._make_append_only` helper (same as `voice.draft_revision`/
+`voice.turn`/`voice.session_event`). Columns carry the full fence set:
+`resource_scope_id`, `route_profile_version`, `lease_epoch`, `input_epoch`,
+`media_epoch`, `turn_id`, plus `content_key_version`/`content_nonce`/
+`content_ciphertext`/`content_auth_tag` (AES-256-GCM) and a mandatory
+`retention_expires_at`.
+
+**Content schema** (`packages/contracts/src/voice-dialogue.ts`):
+`voiceDialogueSnapshotContentSchema`, a `.strict()` zod schema mirroring
+`VoiceDialogueState`'s serializable fields (slots, slot history, address
+repairs/history, handoff) field-for-field, so the API validates submitted
+content against a real schema rather than accepting arbitrary `jsonb` (guide
+§0.7's "不能自行複製業務 SQL／另造不符正式 migration 的資料表" applies in
+spirit to schema-less content too).
+
+**Encryption** (`apps/api/src/modules/voice-booking/
+voice-dialogue-snapshot-crypto.ts`): AES-256-GCM, key resolved from
+`VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY`/`VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION`
+env vars. Deliberately NOT `oidc-pkce.service.ts`'s
+`createSignedStateToken` pattern, which falls back to a hardcoded default
+secret when unconfigured -- an absent/malformed key here returns `null` and
+the service rejects the write (`VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_UNCONFIGURED`,
+503) rather than ever storing content unencrypted or under a public key. No
+live key is provisioned in any environment this change touches; this is the
+fail-closed denial path, not a claim of live encryption-at-rest acceptance.
+
+**Service** (`voice-session.service.ts#persistDialogueSnapshot`): re-reads
+the session, fences `expectedSessionVersion`/`expectedLeaseEpoch` via the
+existing `assertWriteAuthorized`, then independently checks
+`resourceScopeId`, `routeProfileVersion`, the session's current `inputEpoch`,
+and (once any control event has been applied) `mediaEpoch` via the existing
+`findAppliedMediaEpoch` -- the same bootstrap-exempt convention
+`assertControlCutoffStillValid` already uses. Validates content against the
+real schema, encrypts, computes a finite `retention_expires_at` via
+`VoiceRetentionService.evaluateRecordRetention({family: "voice_transcript",
+...})` (the same service/family `apps/api`'s evidence-retention subsystem
+already defines, capped at 180 days), and fails closed
+(`VOICE_RETENTION_POLICY_UNAVAILABLE`) if that service is unavailable --
+never persists with an unbounded/undefined retention window. Dedup is a
+real unique-index `ON CONFLICT DO NOTHING` + re-read, not an app-level
+check. `getDialogueSnapshotRestoration` reads the latest snapshot (if any)
+alongside the current authoritative session row and decrypts it.
+
+**Routes** (`voice-booking.controller.ts`): `POST
+sessions/:sessionId/dialogue-snapshot` and `GET
+sessions/:sessionId/dialogue-snapshot`, authenticated identically to
+`resolveInput`/`events` (`VoiceCapabilityGuard`, `session_execute` scope);
+`resourceScopeId`/`routeProfileVersion`/`leaseEpoch` are always the
+capability's own bound claims, never caller-supplied body fields.
+
+**Worker consumption**:
+- `createTrustedDialoguePersistPort` now calls
+  `VoiceApiClient.persistDialogueSnapshot` (via a new client method,
+  `VoiceDialogueState.toSnapshotContent()`) immediately after a correlated
+  `resolveInput` succeeds, using the SAME capability token and the
+  just-advanced `sessionVersion`. A rejected/unreachable content persist
+  fails the WHOLE `persist()` call -- there is no partial-success state
+  where admission succeeded but content silently wasn't recorded (the
+  engine's fail-closed persist gate, per `VoiceDialogueTurnPorts.persist`'s
+  own doc, blocks tools/playback on any `persist()` rejection).
+- `VoiceCallTurnCoordinator.attach` now restores a bound attachment
+  (`restoreBoundAttachment`, new private method) via a new
+  `VoiceApiClient.getDialogueSnapshotRestoration` call: issues a
+  `session_execute` capability, reads the authoritative session + latest
+  snapshot, verifies the session's scope/route/lease still match this
+  attachment's own binding (rejecting a mismatch as a restoration failure,
+  never silently trusting it), seeds `binding.sessionVersion` from truth,
+  and rehydrates `turnSession.state` via the new
+  `VoiceDialogueState.restoreFromSnapshotContent` when a prior snapshot
+  exists. `attach()` itself stays synchronous (unchanged signature, zero
+  blast radius on existing callers): the restoration promise is installed
+  as the attachment's initial `queue`, so the first turn naturally waits
+  for it via the same mechanism that already serializes turns. Restoration
+  never rejects its own promise (a rejected `queue` would permanently wedge
+  every later turn, not just this one) -- failure instead sets a new
+  `restoreFailed` flag, which `handle()` now checks exactly like
+  `released`: a bound attachment whose restored state could not be
+  verified must never silently run a turn against an unverified one.
+
+### Corrected stale scope claims
+
+`dialogue-persist-port.ts`'s class doc previously argued (Round-7's
+correction, itself already superseding an even narrower Round-2 claim) that
+completing content persistence needed `voice-booking-command.service.ts`/
+intent-creation wiring outside this task's `write_scopes`, and that
+`infra/migrations/` was therefore out of scope. The no-history-rewrite
+successor's R4 finding (retained from the prior reviewed candidate) called
+this too broad, the same way two earlier over-broad claims about capability
+issuance and first-party routes were. The doc now states precisely why a
+NEW migration (not `voice.draft_revision` reuse) was the coordinator's own
+decision, with the real anchors (this migration's own doc,
+`VoiceCallTurnCoordinator`'s class doc, EXECUTION.md's coordination note).
+
+### Still open, not attempted this round, with reasoning
+
+- **`recordControlEvent` still has no coordinator caller in the live turn
+  loop.** `voice-api-client.ts#recordControlEvent` and the backing route
+  exist (Round-11); nothing in `VoiceCallTurnCoordinator.handle` calls it.
+  The coordinator's own `turnSession.inputEpoch` (a local turn-sequencing
+  counter, bumped on every final/`speech.started`/media-epoch-advance) and
+  the authoritative server-side `inputEpoch` (a durable, speech-start-only
+  watermark `resolveInput` checks against) are two different epoch spaces;
+  reconciling them is not a drop-in call, it needs a dedicated redesign of
+  turn admission that the extensively regression-tested R1-R3 turn-
+  cancellation invariants (rounds 1-10, ~500 tests) are built on top of.
+  Attempting this inside the same round as the R4/R4-persist work above,
+  without a dedicated Supervisor-coordinated scope the way the capability-
+  issuance and V0106 gaps each received, risks a correctness regression in
+  already-hardened cancellation behavior for a benefit (epoch-space
+  unification) this round's required acceptance keys do not name. Same
+  reasoning Round-11 gave; repeated here because it remains accurate, not
+  because it is unchanged by inertia.
+- **No real call-admission flow exists yet.** `server.ts`/
+  `media-worker-server.ts` still never construct a `VoiceSessionBinding` --
+  that remains the separate, already-documented `apps/api/src/modules/
+  cti-ivr`-shaped gap this task has never claimed to close.
+- **No live encryption key, model, issuer, or storage account is
+  provisioned anywhere this change touches.** Every new fail-closed denial
+  path (`VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_UNCONFIGURED`,
+  `VOICE_RETENTION_POLICY_UNAVAILABLE`) is real code, exercised by real
+  tests; none of it is a claim that a live account exists.
+- **Real PostgreSQL CAS/dedup/append-only evidence for `voice.dialogue_snapshot`
+  is in `tests/integration/unattended-voice-postgres.integration.test.ts`'s
+  new Suite 5 (5 cases), per this task's own coordination note reserving
+  that file for hosted execution only.** Confirmed locally that the suite
+  collects and fails closed exactly as designed
+  (`UV_BOOKING_TEST_DATABASE_URL` unset -> explicit error, 23 tests listed
+  up from 18, no syntax/import errors) -- it was NOT run against a real
+  Postgres instance in this VM, and no hosted run was triggered by this
+  round.
+
+### Verification completed this round
+
+- `pnpm --filter @drts/contracts build`: exit 0.
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- apps/api `tsc --noEmit`: exit 0, after a one-time local
+  `pnpm --filter @drts/control-plane-auth build` (the generated-declarations
+  gap Round-13 also hit; not a product defect, same-SHA hosted typecheck
+  already passes).
+- Root `tsc --noEmit`: clean for every file this round touched. The only
+  remaining errors are pre-existing and unrelated: `tests/unit/
+  fleet-partner-list-envelope.test.ts` and `tests/unit/system-remediation/
+  sr-admin-verify-001/fleet-lists.test.ts` resolve `@drts/api-client`'s type
+  against a *different*, stale sibling worktree
+  (`.artifacts/worktrees/.../claude2-audit-artifact-durability-20261002`) via
+  a cross-worktree `node_modules` symlink -- the same category of local
+  environment limitation Round-9's artifact already documented, not a
+  regression from this round's source changes.
+- `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/
+  voice-booking packages/contracts/src/voice-dialogue.ts tests/unit/
+  audit-voice-application-wiring-20261003 tests/integration/
+  unattended-voice-postgres.integration.test.ts --max-warnings=0`: exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+  tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,
+  media-recording-finalize-authorization,session-authority-grant-expiry-race,
+  websocket-channel-frame-limits,media-worker-server-shutdown-drain,
+  session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+  tests/unit/uv-exec-{008,010,012,017,020,026}.test.ts
+  tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts
+  --maxWorkers=1`: **26 files / 524 tests pass** (up from 25 files / 496 at
+  Round-13; zero regressions, net +28: 20 new in a new
+  `voice-dialogue-snapshot-persistence.test.ts`, 3 new restoration cases in
+  `trusted-turn-composition.test.ts`, 5 new correlation/reconciliation/
+  snapshot-wiring cases in `voice-api-client.test.ts`, net of response-shape
+  updates to 2 pre-existing tests that the widened correlation check
+  required).
+- `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev
+  --head HEAD`: `OK`, 0 findings across all four checks.
+- `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`:
+  `25 commit(s) OK` (confirms this round's new commit and the entire
+  append-only-replacement history from Round-13 all still pass).
+- `pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.test.ts`:
+  confirmed collects (23 tests) and fails closed with the suite's own
+  explicit `UV_BOOKING_TEST_DATABASE_URL` error -- not executed against
+  real Postgres (VM restriction), not claimed as hosted-PG acceptance.
+
+No product/listening server, browser/E2E, DB, Compose, real network
+provider/GCP call, package install beyond the two local `pnpm --filter
+build` invocations above (both pre-existing generated-declaration steps,
+not dependency changes), git history rewrite, or force-push was performed
+this round.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: the composed turn path now includes
+  real, consumed dialogue-content persistence (not just admission) for any
+  attachment given a binding; recording-adapter composition is unchanged
+  from Round-11/13 (still the separately-tracked S3 backend work). Not
+  independently re-claimed as fully met -- reviewer determines.
+- `authority_epoch_consent_fences`: R4-persist's correlation/reconciliation
+  gap is closed with regression evidence; the `recordControlEvent`/local-
+  vs-remote-epoch gap remains explicitly open, see above.
+- `precise_unimplemented_and_external_boundaries`: stale scope claims about
+  `infra/migrations/` corrected; the three genuinely-still-open boundaries
+  (call-admission, live encryption key/account, hosted-PG evidence) are
+  named precisely above, not conflated with finished code.
+- `same_sha_review_ci`: pending independent review and hosted CI on this
+  exact candidate SHA; not claimed.
