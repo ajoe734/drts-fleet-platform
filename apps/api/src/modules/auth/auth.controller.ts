@@ -655,13 +655,11 @@ export class AuthController {
         }
       : identity;
 
-    // Only the principal row is mutated by this same issuance call (via
-    // ensurePrincipal below), so its post-write updatedAt would race a
-    // timestamp guessed here. Membership and role bindings are read-only in
-    // this request, so their already-fetched updatedAt values are safe to
-    // carry forward unchanged for the durable-version computation.
+    // Bootstrap issuance still ensures its principal and needs the post-write
+    // timestamp. Google ops issuance instead preserves the verifier's principal
+    // and signs the version of the existing durable rows.
     let workforceVersionTimestamps: string[] | undefined;
-    let verifiedGooglePrincipalUpdatedAt: string | undefined;
+    let verifiedGoogleWorkforceVersion: number | undefined;
     if (
       (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
       !durableIdentity.membershipId &&
@@ -671,8 +669,11 @@ export class AuthController {
         throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
       }
       const principalToLookup = durableIdentity.principalId ?? durableIdentity.actorId;
+      let verifiedGooglePrincipalUpdatedAt: string | undefined;
       if (googleOpsActorVerified) {
-        const principal = await this.identityRepository.findPrincipalById(principalToLookup);
+        const principal = await this.identityRepository.findPrincipalById(
+          principalToLookup,
+        );
         if (!principal || principal.status !== "active") {
           this.denyWorkloadSessionIdentity("principal_not_active");
         }
@@ -693,7 +694,10 @@ export class AuthController {
       const activeBindings = roleBindings.filter(
         (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
       );
-      if (googleOpsActorVerified && !activeBindings.some((binding) => binding.roleCode === durableIdentity.actorType)) {
+      if (
+        googleOpsActorVerified &&
+        !activeBindings.some((binding) => binding.roleCode === durableIdentity.actorType)
+      ) {
         this.denyWorkloadSessionIdentity("role_binding_not_active");
       }
 
@@ -714,6 +718,11 @@ export class AuthController {
         membership.updatedAt,
         ...roleBindings.map((b) => b.updatedAt),
       ];
+      if (verifiedGooglePrincipalUpdatedAt) {
+        verifiedGoogleWorkforceVersion = Math.max(
+          ...[verifiedGooglePrincipalUpdatedAt, ...workforceVersionTimestamps].map(Date.parse),
+        );
+      }
     }
 
     const expiresIn: JwtExpiresIn =
@@ -732,18 +741,21 @@ export class AuthController {
       authTime: issuedAt,
       ...(assurance.amr ? { amr: assurance.amr } : {}),
       ...(assurance.acr ? { acr: assurance.acr } : {}),
-      tokenVersion: verifiedGooglePrincipalUpdatedAt && workforceVersionTimestamps
-        ? Math.max(...[verifiedGooglePrincipalUpdatedAt, ...workforceVersionTimestamps].map(Date.parse))
-        : tenantUser
-        ? Date.parse(tenantUser.updatedAt)
-        : Date.parse(issuedAt),
-      ...(workforceVersionTimestamps ? { workforceVersionTimestamps } : {}),
+      tokenVersion: verifiedGoogleWorkforceVersion ?? (
+        tenantUser ? Date.parse(tenantUser.updatedAt) : Date.parse(issuedAt)
+      ),
+      ...(workforceVersionTimestamps && !googleOpsActorVerified
+        ? { workforceVersionTimestamps }
+        : {}),
     });
     return { token: issued.token, expiresIn };
   }
 
   private denyWorkloadSessionIdentity(
-    reason: "principal_not_active" | "membership_not_active" | "role_binding_not_active",
+    reason:
+      | "principal_not_active"
+      | "membership_not_active"
+      | "role_binding_not_active",
   ): never {
     // Detailed reason stays server-side. Never include proof, tokens, headers,
     // database errors or caller identifiers in either the log or response.
