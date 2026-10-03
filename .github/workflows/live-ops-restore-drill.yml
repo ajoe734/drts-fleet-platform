@@ -1,0 +1,100 @@
+name: Live Ops Restore Drill
+
+# Supervisor dispatch only, after review and promotion to main. No cron/cost recurrence.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Reviewed full commit SHA, reachable from main
+        required: true
+        type: string
+      base_sha:
+        description: Full origin/dev base SHA recorded by the candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-ops-restore-drill
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      BASE_SHA: ${{ inputs.base_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+      DEV_GCP_CLOUDSQL_INSTANCE: ${{ vars.DEV_GCP_CLOUDSQL_INSTANCE }}
+      TARGET: drts-dev-db-drill-${{ github.run_id }}-${{ github.run_attempt }}
+      EVIDENCE: .local/sr-live-ops-001/restore.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate immutable candidate before checkout or cloud authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+          [[ "$DEV_GCP_CLOUDSQL_INSTANCE" == drts-dev-devcc-20260825:us-central1:drts-dev-db ]]
+          [[ "$TARGET" =~ ^drts-dev-db-drill-[0-9]+-[0-9]+$ ]]
+          git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
+          git merge-base --is-ancestor "$BASE_SHA" "$CANDIDATE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+      - name: Require resolved IAM isolation design
+        # Intentionally exits 2 today. No cost or credential is acquired until
+        # Supervisor resolves the clone destination IAM finding in the runbook.
+        run: bash infra/gcp/dev/ops-drill/provision-drill-sa.sh --check-ready
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Install hosted readback clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+          # An exact release; downloading it does not start the proxy.
+          curl --fail --silent --show-error --location --retry 3 \
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.2/cloud-sql-proxy.linux.amd64 \
+            -o "$RUNNER_TEMP/cloud-sql-proxy"
+          printf '07d61ae3876cf51377317d87996927a97beee5d1210fd33ef6dbcd6a2d8b1185  %s\n' "$RUNNER_TEMP/cloud-sql-proxy" | sha256sum --check
+          chmod 0755 "$RUNNER_TEMP/cloud-sql-proxy"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Restore and read back (cleanup in finally)
+        id: drill
+        timeout-minutes: 55
+        run: bash infra/gcp/dev/ops-drill/run-restore-drill.sh --target "$TARGET" --evidence "$EVIDENCE"
+      - name: Retry uncertain cleanup after failure or cancellation
+        if: always() && steps.drill.outcome != 'skipped'
+        timeout-minutes: 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$EVIDENCE" ]]; then
+            bash infra/gcp/dev/ops-drill/run-restore-drill.sh --target "$TARGET" --evidence "$EVIDENCE" --cleanup-only
+          fi
+      - name: Upload only sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sr-live-ops-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .local/sr-live-ops-001/restore.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
