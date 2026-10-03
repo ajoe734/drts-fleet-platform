@@ -184,7 +184,7 @@ describe("ForwarderService", () => {
     ]);
   });
 
-  it("labels the checked-in Grab Taiwan adapter as stub-only on module init", async () => {
+  it("labels the checked-in Grab Taiwan adapter as needing configuration on module init", async () => {
     const regulatoryRegistryService = {
       getEligibleCandidates: vi.fn(() => []),
     };
@@ -202,14 +202,14 @@ describe("ForwarderService", () => {
     expect(service.listAdapterHealth()).toEqual([
       expect.objectContaining({
         platformCode: GRAB_TAIWAN_PLATFORM_CODE,
-        status: "healthy",
-        reason: "stub",
-        credentialStatus: "stub",
-        authStatus: "stub",
-        webhookStatus: "stub",
-        rateLimitStatus: "stub",
+        status: "degraded",
+        reason: "credential",
+        credentialStatus: "not_configured",
+        authStatus: "not_configured",
+        webhookStatus: "not_configured",
+        rateLimitStatus: "not_configured",
         capabilitySummary: expect.objectContaining({
-          productionStatus: "stub",
+          productionStatus: "configuration_required",
         }),
       }),
     ]);

@@ -133,4 +133,97 @@ describe("audit-forwarder-runtime-20261002: Grab Taiwan unapproved adapter regre
     // Since accept returns acknowledged: false, status should be sync_failed
     expect(updatedOrder.status).toBe("sync_failed");
   });
+
+  it("F3/F4: rejected webhook creates zero orders and preserves credential failure on next ingest", async () => {
+    const auditService = new AuditNotificationService();
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
+    );
+    const mockRepo = {
+      loadState: vi.fn().mockResolvedValue({ forwardedOrders: [], adapterHealth: [] }),
+      persistChanges: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new ForwarderService(
+      regulatoryRegistryService,
+      auditService,
+      [new GrabTaiwanAdapter()],
+      mockRepo,
+    );
+    await service.onModuleInit();
+
+    for (let i = 0; i < 2; i++) {
+      try {
+        await service.ingestGrabTaiwanWebhook(
+          { orderId: "replayed-unapproved" },
+          { "x-grab-signature": "unapproved" }
+        );
+        expect.unreachable("Should have thrown");
+      } catch (e: any) {
+        expect(e).toBeDefined();
+        if (e.code) expect(e.code).toBe("FORWARDER_WEBHOOK_VERIFICATION_FAILED");
+      }
+    }
+
+    expect(service.listOrders().length).toBe(0);
+
+    await service.ingestExternalOrder({
+      platformCode: PLATFORM_CODE_GRAB_TAIWAN,
+      externalOrderId: "local-inbound-after-hook"
+    });
+
+    const health = service.listAdapterHealth().find(a => a.platformCode === PLATFORM_CODE_GRAB_TAIWAN);
+    expect(health?.status).toBe("degraded");
+    expect(health?.credentialStatus).toBe("not_configured");
+  });
+
+  it("F3/F4: relay driver accept failure preserves credential failure on next ingest", async () => {
+    const auditService = new AuditNotificationService();
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
+    );
+    // Explicitly add eligible candidates
+    regulatoryRegistryService.getEligibleCandidates = vi.fn().mockReturnValue([{ driverId: "review-driver" }]);
+    const mockRepo = {
+      loadState: vi.fn().mockResolvedValue({ forwardedOrders: [], adapterHealth: [] }),
+      persistChanges: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new ForwarderService(
+      regulatoryRegistryService,
+      auditService,
+      [new GrabTaiwanAdapter()],
+      mockRepo,
+    );
+    await service.onModuleInit();
+
+    const order = await service.ingestExternalOrder({
+      platformCode: PLATFORM_CODE_GRAB_TAIWAN,
+      externalOrderId: "local-inbound-before-relay"
+    });
+    
+    await service.broadcastOrder(order.mirrorOrderId, { candidateDriverIds: ["review-driver"] });
+    
+    await expect(
+      service.relayDriverAccept(order.mirrorOrderId, { driverId: "review-driver" })
+    ).rejects.toThrow();
+    
+    const updatedOrder = service.listOrders().find(o => o.mirrorOrderId === order.mirrorOrderId);
+    expect(updatedOrder?.status).toBe("sync_failed");
+
+    await service.ingestExternalOrder({
+      platformCode: PLATFORM_CODE_GRAB_TAIWAN,
+      externalOrderId: "local-inbound-after-relay"
+    });
+
+    const health = service.listAdapterHealth().find(a => a.platformCode === PLATFORM_CODE_GRAB_TAIWAN);
+    expect(health?.status).toBe("degraded");
+    expect(health?.credentialStatus).toBe("not_configured");
+  });
 });

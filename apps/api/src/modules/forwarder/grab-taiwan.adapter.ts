@@ -22,8 +22,8 @@ export const GRAB_TAIWAN_PLATFORM_CODE = PLATFORM_CODE_GRAB_TAIWAN;
 export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
   readonly platformCode = GRAB_TAIWAN_PLATFORM_CODE;
   readonly capabilitySummary: ForwarderAdapterCapabilitySummary = {
-    mode: "stub",
-    productionStatus: "stub",
+    mode: "api",
+    productionStatus: "configuration_required",
     supportsInboundWebhook: true,
     supportsOutboundActions: true,
     supportedWebhookEvents: [
