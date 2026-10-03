@@ -25,5 +25,5 @@ The parent task `AUDIT-DEPENDENCY-GATES-20261002` has been unblocked. Gemini mus
 1. `git fetch origin`
 2. `git switch gemini/audit-dependency-gates-20261002-v2` or use `git worktree add` if not already checked out.
 3. Verify HEAD is `2022f28e225c37ff197c3b36140e1385e5ef5056` or its successor.
-4. Diff between `2022f28e225c37ff197c3b36140e1385e5ef5056` and `4e04fd073212194139edee4154e4db3f54342552` to extract the good R9 doc fixes from `docs/04-uat/audit-dependency-gates-20261002.md` and apply them, retaining the passing gate implementation on `v2`.
+4. Diff between `2022f28e225c37ff197c3b36140e1385e5ef5056` and `4e04fd073212194139edee4154e4db3f54342552` to extract the good R9 doc fixes from *docs/04-uat/audit-dependency-gates-20261002.md* and apply them, retaining the passing gate implementation on `v2`.
 5. Commit, push, and handoff to Codex with `CANDIDATE_BRANCH=gemini/audit-dependency-gates-20261002-v2` and `PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2287`.
