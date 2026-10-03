@@ -3118,16 +3118,73 @@ no SD §4.1 provider webhook exists yet to create the `voice.session` row
 twice-reviewed, genuinely external CTI/IVR gate -- not a new or different
 blocker, and not weakened by this round's wiring.
 
+### R11: restoration-failure admission barrier re-checked at execution, not just enqueue
+
+Same reopen, R11 (new): `handle()` checks `turnSession.restoreFailed`
+once, synchronously, at the moment a final is enqueued onto
+`turnSession.queue` -- but for a bound attachment's first final(s), that
+queue IS the still-pending `restoreBoundAttachment` promise itself (see
+`attach()`). If a final arrives *before* restoration settles, the
+enqueue-time check passes (`restoreFailed` is still `undefined`); if
+restoration then settles into failure, nothing re-checked that before the
+queued `runTurn` callback actually ran, so it still executed a real turn
+(provider propose, persist, tool execution) against unverified/blank
+dialogue state. The reviewer's own exact-SHA socket-free probe held the
+GET `/dialogue-snapshot` read open, emitted a final before releasing it,
+then rejected it -- and observed `recordControlEvent`/`persist` calls and
+outbound audio for the discarded final.
+
+Fix (`call-turn-coordinator.ts`'s `runTurn`): re-checks
+`turnSession.restoreFailed` at the top of its executor -- the first point
+after any predecessor this specific turn could have been queued behind
+(restoration, or an earlier turn) is guaranteed to have already settled --
+and releases the queue stage immediately, without ever calling
+`executeTurn`, when it is `true`. Scoped to exactly this finding; does not
+also gate on `turnSession.released` (a separate, not-requested behavior
+this round does not touch).
+
+Regression (`trusted-turn-composition.test.ts`, new test under
+"Restoration on attach"): holds the GET `/dialogue-snapshot` response
+open, emits a final with **no** `flush()` beforehand (so it is enqueued
+while restoration is still pending -- the exact race the file's three
+pre-existing restoration tests never exercise, since each `await
+flush(...)` *before* emitting its final), then lets restoration settle
+into failure, and asserts the complete list of HTTP calls ever made is
+exactly `[capabilities, GET dialogue-snapshot]` -- never `/events`,
+`/input-resolutions`, or a POST `dialogue-snapshot` -- and that no audio
+was ever sent. Proven fail-before/pass-after on this exact test by
+temporarily reverting only the `runTurn` guard (`git stash push -u` on
+`call-turn-coordinator.ts` alone, `git stash pop` after): without the
+guard, the mock recorded 7 calls including a real `/events` and
+`/input-resolutions` round-trip; with it, exactly the 2 restoration-only
+calls. (The mock responds successfully to every path a real turn could
+reach, specifically so an unguarded turn would complete and leave real
+evidence, rather than merely throwing on an unhandled mock path and
+masking the defect behind an unrelated error.)
+
+Verification this round:
+- `pnpm --filter @drts/voice-media-worker typecheck`: exit 0.
+- `pnpm exec eslint apps/voice-media-worker/src tests/unit/audit-voice-application-wiring-20261003 --max-warnings=0`: exit 0.
+- `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`: 12/12 pass (was 11; +1 new).
+- Full named regression set: 28 files / 554 tests pass (was 553 after R4-entry above; +1, 0 regressions).
+
 ### Evidence table
 
 | Finding / acceptance key | Source & fix location | Old → new behavior | Commands, exit codes, evidence | Residual |
 | --- | --- | --- | --- | --- |
-| R4-entry (`composed_turn_and_recording_path`, `precise_unimplemented_and_external_boundaries`) | `media-worker-server.ts` admission handler + new `resolveSessionBinding`; `session.ts` wiring; new `GET /sessions/:sessionId` (`voice-booking.controller.ts` + `voice-session.service.ts`); new `VoiceApiClient.getSession` | Old: `attach()` never called with a `binding` from any production path -- dead code outside tests. New: the real `POST /sessions` admission attempts real resolution via a real HTTP route, and forwards whatever it resolves (including `undefined`, fail-closed) into the real `attach()` call. | `pnpm --filter @drts/voice-media-worker typecheck`: exit 0. `pnpm --filter @drts/api typecheck`: exit 0 (both only after `pnpm --filter @drts/contracts build` / `pnpm --filter @drts/control-plane-auth build` refreshed this worktree's own stale `dist/` -- a local build-order artifact, not a product defect; not needed in hosted CI, which always builds from clean). `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003 tests/integration/unattended-voice-postgres.integration.test.ts --max-warnings=0`: exit 0. New tests (all real production code, only the named external boundary doubled): `tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts` (new file, 3 tests: no-resolver default, real resolver success, resolver-rejection fail-closed -- only `VoiceSessionBindingResolver` doubled, `MediaWorkerServer` constructed but never `.start()`ed); `voice-api-client.test.ts` (+2: `getSession` uses the workload token on the real session path; surfaces apps/api's structured rejection); `voice-capability-composition.test.ts` (+2: controller `getSession` forwards to the service and propagates not-found, only `VoiceSessionService`/`VoiceCapabilityGuard` doubled); `voice-dialogue-snapshot-persistence.test.ts` (+2: `VoiceSessionService.getSession` against a real repository double, found + not-found). `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`: 11 files / 165 tests pass (was 10 files / 156 before this round -- +9 new, 0 regressions). Full named regression set (`tests/unit/audit-voice-application-wiring-20261003/` + `audit-voice-runtime-20261002` subset + `uv-exec-{008,010,012,017,020,026}` + `uv-exec-001` contract + idempotency guard): 28 files / 553 tests pass (was 544 before Round-15; +9, 0 regressions). | Functionally inert everywhere this worker runs today: `VOICE_API_BASE_URL` unset (no `voiceApiClient`, so no `sessionBindingResolver`); and even if configured, `getSession` would genuinely reject for every real session id until the SD §4.1 provider webhook exists to create a `voice.session` row -- the same already-documented external CTI/IVR gate, unchanged by this round. R4-control (ordered speech-start ingestion, response-loss recovery) and R4-persist (late-response reconciliation race, `pendingInput`/snapshot-identity correlation) and R11 (restoration-failure admission barrier for already-queued finals) from the same `codex-20261003T160720Z-bb49c249` reopen are **not** addressed this round -- next repair units, unattempted here, carried forward unchanged. |
+| R4-entry (`composed_turn_and_recording_path`, `precise_unimplemented_and_external_boundaries`) | `media-worker-server.ts` admission handler + new `resolveSessionBinding`; `session.ts` wiring; new `GET /sessions/:sessionId` (`voice-booking.controller.ts` + `voice-session.service.ts`); new `VoiceApiClient.getSession` | Old: `attach()` never called with a `binding` from any production path -- dead code outside tests. New: the real `POST /sessions` admission attempts real resolution via a real HTTP route, and forwards whatever it resolves (including `undefined`, fail-closed) into the real `attach()` call. | `pnpm --filter @drts/voice-media-worker typecheck`: exit 0. `pnpm --filter @drts/api typecheck`: exit 0 (both only after `pnpm --filter @drts/contracts build` / `pnpm --filter @drts/control-plane-auth build` refreshed this worktree's own stale `dist/` -- a local build-order artifact, not a product defect; not needed in hosted CI, which always builds from clean). `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003 tests/integration/unattended-voice-postgres.integration.test.ts --max-warnings=0`: exit 0. New tests (all real production code, only the named external boundary doubled): `tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts` (new file, 3 tests: no-resolver default, real resolver success, resolver-rejection fail-closed -- only `VoiceSessionBindingResolver` doubled, `MediaWorkerServer` constructed but never `.start()`ed); `voice-api-client.test.ts` (+2: `getSession` uses the workload token on the real session path; surfaces apps/api's structured rejection); `voice-capability-composition.test.ts` (+2: controller `getSession` forwards to the service and propagates not-found, only `VoiceSessionService`/`VoiceCapabilityGuard` doubled); `voice-dialogue-snapshot-persistence.test.ts` (+2: `VoiceSessionService.getSession` against a real repository double, found + not-found). `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/`: 11 files / 165 tests pass (was 10 files / 156 before this round -- +9 new, 0 regressions). Full named regression set (`tests/unit/audit-voice-application-wiring-20261003/` + `audit-voice-runtime-20261002` subset + `uv-exec-{008,010,012,017,020,026}` + `uv-exec-001` contract + idempotency guard): 28 files / 553 tests pass (was 544 before Round-15; +9, 0 regressions). | Functionally inert everywhere this worker runs today: `VOICE_API_BASE_URL` unset (no `voiceApiClient`, so no `sessionBindingResolver`); and even if configured, `getSession` would genuinely reject for every real session id until the SD §4.1 provider webhook exists to create a `voice.session` row -- the same already-documented external CTI/IVR gate, unchanged by this round. |
+| R11 (`composed_turn_and_recording_path`, `authority_epoch_consent_fences`) | `call-turn-coordinator.ts`'s `runTurn` | Old: `restoreFailed` checked only at enqueue time in `handle()` -- a final queued behind a still-pending restoration ran a real turn once restoration later failed. New: re-checked at the top of `runTurn`, immediately before `executeTurn` would otherwise run; releases the queue with zero side effects when `true`. | `pnpm --filter @drts/voice-media-worker typecheck`: exit 0. `pnpm exec eslint`: exit 0. New regression in `trusted-turn-composition.test.ts` (12th test in the "Restoration on attach" block): fail-before (7 calls incl. real `/events`+`/input-resolutions`) / pass-after (exactly 2, restoration-only) proven by temporarily `git stash`-reverting only the `runTurn` guard. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`: 12/12 pass. Full named regression set: 28 files / 554 tests pass (+1 from R4-entry's 553, 0 regressions). | Scoped to exactly this finding -- does not also gate `runTurn` on `turnSession.released`, and does not add a signal/deadline to `restoreBoundAttachment` itself (both separately mentioned in the reopen, neither re-raised as a named, numbered finding). |
+
+R4-control (ordered speech-start ingestion, response-loss recovery) and
+R4-persist (late-response reconciliation race, `pendingInput`/snapshot-
+identity correlation) from the same `codex-20261003T160720Z-bb49c249`
+reopen are **not** addressed this round -- next repair units, unattempted
+here, carried forward unchanged.
 
 ### Acceptance assessment on this round's candidate
 
-- `composed_turn_and_recording_path`: still **NOT met**. R4-entry's unconsumed-production-caller defect is fixed; R11 (restoration-failure admission barrier) is untouched this round.
-- `authority_epoch_consent_fences`: still **NOT met**. R4-control and R4-persist's late-response reconciliation race from the same reopen are untouched this round.
+- `composed_turn_and_recording_path`: still **NOT met** overall (R4-control/R4-persist remain open), but both R4-entry (unconsumed production caller) and R11 (restoration-failure admission barrier) are fixed and regression-tested this round.
+- `authority_epoch_consent_fences`: still **NOT met**. R4-control and R4-persist's late-response reconciliation race from the same reopen are untouched this round; R11's own authority-fencing aspect (never run a turn against unverified restored state) is fixed.
 - `precise_unimplemented_and_external_boundaries`: improved for R4-entry specifically (the real remaining gap -- no SD §4.1 provider webhook, hence no durable `voice.session` row -- is now precisely wired-around and tested rather than left as an unreachable interface), but not fully met: R4-control/R4-persist's own boundary claims are untouched.
 - `same_sha_review_ci`: not claimed. Local typecheck/lint/targeted-vitest evidence above is this round's own; hosted CI and independent reviewer re-review on this exact SHA are pending, same as every prior round.
 

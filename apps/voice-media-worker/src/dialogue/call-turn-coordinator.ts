@@ -565,6 +565,24 @@ export class VoiceCallTurnCoordinator {
         settled = true;
         resolveQueueStage();
       };
+      // R11 (Codex reopen round 15/16): `handle()` only checks
+      // `restoreFailed` at enqueue time, synchronously, before chaining
+      // this turn onto `turnSession.queue`. For a bound attachment's
+      // FIRST final(s), that queue IS the still-pending
+      // `restoreBoundAttachment` promise itself (see `attach()`) -- if
+      // restoration settles into failure only *after* this final was
+      // already enqueued (but before this callback actually runs), the
+      // enqueue-time check already passed, and without this re-check
+      // `executeTurn` would still run a real turn (provider propose,
+      // persist, tool execution) against unverified dialogue state. This
+      // is the first point after any predecessor this specific turn could
+      // have been queued behind (restoration, or an earlier turn) is
+      // guaranteed to have already settled, so it is checked again here,
+      // not just at enqueue time.
+      if (turnSession.restoreFailed) {
+        releaseQueue();
+        return;
+      }
       // Fences this turn's own output once its deadline passes, by
       // aborting the controller `speak`'s detached call re-checks (see
       // `executeTurn`) -- independent of the queue stage above, which by

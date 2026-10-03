@@ -933,4 +933,108 @@ describe("Restoration on attach: real VoiceSessionComposer + VoiceCallTurnCoordi
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });
+
+  it("R11 (Codex reopen round 15/16): discards a final that arrived BEFORE restoration settled, once restoration then fails -- never runs a turn against unverified state just because it was already queued", async () => {
+    let releaseSnapshotRead: (() => void) | undefined;
+    const snapshotRead = new Promise<void>((resolve) => {
+      releaseSnapshotRead = resolve;
+    });
+    // Every path a real turn could reach, so that -- without R11's fix --
+    // a turn that wrongly runs against unverified state would complete
+    // successfully (real side effects: a durable speech-start watermark
+    // call, a real TTS synthesis, a sent playback) instead of merely
+    // throwing on an unhandled path, which would otherwise mask the exact
+    // defect this test exists to catch.
+    const calledPaths: string[] = [];
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      calledPaths.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/callcenter/voice/capabilities") {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Held open: `attach()`'s own `restoreBoundAttachment` call is
+        // still in flight when the final below is emitted -- this is
+        // exactly the race the prior round's tests (which `await
+        // flush(5)` before ever emitting a final) never exercised.
+        await snapshotRead;
+        return jsonResponse(500, { error: { code: "INTERNAL", message: "boom" } });
+      }
+      if (path.endsWith("/events")) {
+        return jsonResponse(200, {
+          data: {
+            deduped: false,
+            applied: true,
+            gap: false,
+            appliedThroughSequence: 1,
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion,
+              inputEpoch: 1,
+              pendingInput: true,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: 1,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            snapshot: {
+              snapshotId: "s1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: binding.sessionVersion + 1,
+              inputEpoch: 1,
+              mediaEpoch: 1,
+              turnId: "turn-1",
+              content: {},
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+            deduped: false,
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { asr, sentBinary } = buildComposer(fetchImpl);
+
+    // No `await flush(...)` here -- restoration is still pending. This
+    // final is enqueued behind it (see `attach()`'s `turnSession.queue =
+    // this.restoreBoundAttachment(...)`), at a moment `turnSession.
+    // restoreFailed` is still `undefined`.
+    asr.emitFinal("你好", "seg-1");
+    await flush(3);
+    // Only now does restoration actually settle into failure.
+    releaseSnapshotRead?.();
+    await flush(10);
+
+    // The only two calls that may ever happen are restoration's own
+    // capability issuance and its GET read -- never anything a real turn
+    // would reach (speech-start watermark, input-resolutions CAS,
+    // dialogue-snapshot persist), and never any synthesized/sent audio.
+    expect(calledPaths).toEqual([
+      "POST /callcenter/voice/capabilities",
+      `GET /callcenter/voice/sessions/${binding.voiceSessionId}/dialogue-snapshot`,
+    ]);
+    expect(sentBinary).toHaveLength(0);
+    consoleError.mockRestore();
+  });
 });
