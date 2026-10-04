@@ -142,7 +142,8 @@
       "target_schema": "voice",
       "primary_tables": [
         "voice.dialogue_snapshot",
-        "voice.dialogue_snapshot_purge_receipt"
+        "voice.dialogue_snapshot_purge_receipt",
+        "voice.dialogue_snapshot_purge_receipt_scan_cursor"
       ],
       "referenced_tables": ["voice.session"],
       "table_invariants": [
@@ -150,7 +151,8 @@
         "resource_scope_id, route_profile_version, lease_epoch, input_epoch, media_epoch and turn_id are mandatory context fields; this candidate-dialogue record is not a qualified booking draft, confirmation or consent proof.",
         "content_key_version, content_nonce, content_ciphertext and content_auth_tag store server-encrypted content; retention_expires_at is mandatory. Transactional authority, deduplication, authenticated context, expiry and governed retention behavior remain application/schema verification obligations, not claims certified by this allocation entry.",
         "voice.dialogue_snapshot_purge_receipt: voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id), session_version integer NOT NULL, input_epoch/media_epoch/turn_id mandatory identity, retention_expires_at (the purged row's own original value) and purged_at mandatory, PRIMARY KEY (voice_session_id, session_version). Bounded, non-content acceptance metadata only, written in the same transaction as deleteDialogueSnapshot's DELETE (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge loses accepted-history distinction) -- never dialogue content, never a parallel retention authority.",
-        "voice.session gains dialogue_snapshot_history_unavailable_floor integer NOT NULL DEFAULT 0 (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt lifecycle): a SEPARATE monotonic watermark from dialogue_snapshot_fence_version, raised only when VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts ages a receipt out under the EXISTING voice_booking_evidence evidence policy (no new evidence family registered) -- never a new per-turn table, so the receipt table itself stays bounded rather than accumulating forever."
+        "voice.session gains dialogue_snapshot_history_unavailable_floor integer NOT NULL DEFAULT 0 (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt lifecycle): a SEPARATE monotonic watermark from dialogue_snapshot_fence_version, raised only when VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts ages a receipt out under the EXISTING voice_booking_evidence evidence policy (no new evidence family registered) -- never a new per-turn table, so the receipt table itself stays bounded rather than accumulating forever.",
+        "voice.dialogue_snapshot_purge_receipt_scan_cursor: a single singleton row (id boolean PRIMARY KEY DEFAULT true, CHECK (id)) persisting only the keyset position (purged_at_text, voice_session_id, session_version) VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts stopped at when a scan hit its page bound mid-backlog, so the next invocation resumes past an already-examined held run instead of re-scanning it forever; cleared to NULL once a scan reaches the real end of the eligible backlog so holds released since can be re-checked. Bounded at exactly one row -- no retention policy needed."
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
       "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]

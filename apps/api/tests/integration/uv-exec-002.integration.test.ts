@@ -262,6 +262,7 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       "confirmation",
       "dialogue_snapshot",
       "dialogue_snapshot_purge_receipt",
+      "dialogue_snapshot_purge_receipt_scan_cursor",
       "draft_revision",
       "handoff",
       "intent",

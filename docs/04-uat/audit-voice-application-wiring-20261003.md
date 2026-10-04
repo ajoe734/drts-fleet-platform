@@ -7330,3 +7330,127 @@ fixes themselves are untouched from Round-33.
   separately by the candidate lifecycle, never fabricated here.
 
 No merge/deploy/live-provider claim is made by this section.
+
+## Round-35 (owner Claude2): hosted CI failure on candidate `cc0b2981c` (Round-34) -- stale schema-enumeration test fixed, schema-allocation.json completeness gap closed
+
+### Trigger
+
+Round-34's `CANDIDATE_SHA=cc0b2981cad558127484763dff9aa34b617ef733`
+(PR #2303) was dispatched for review and reconciled, and the `integration`
+job on its own hosted CI run
+(https://github.com/ajoe734/drts-fleet-platform/actions/runs/37176146759/job/111359313044)
+failed before any reviewer action. Read the completed job log via
+`gh api repos/ajoe734/drts-fleet-platform/actions/jobs/111359313044/logs
+--allow-escape-sequences`:
+
+```
+FAIL tests/integration/uv-exec-002.integration.test.ts > UV-EXEC-002
+voice-booking runtime schema > upgrades an isolated Postgres instance from
+the pre-existing schema and exposes every new voice table
+AssertionError: expected [ 'booking_audit_intent', …(28) ] to deeply equal
+[ 'booking_audit_intent', …(27) ]
+  + "dialogue_snapshot_purge_receipt_scan_cursor",
+```
+Test Files 1 failed | 45 passed (46). Tests 1 failed | 310 passed (311).
+
+### Diagnosis
+
+Round-33 (`d9a1535f3`) added `voice.dialogue_snapshot_purge_receipt_scan_cursor`
+(the F2 held-prefix-starvation fix's singleton scan-cursor row; see
+`V0106__voice_dialogue_snapshot.sql:157-168` and
+`voice-session.repository.ts:1233,1264`) as a real, intentional new table in
+the `voice` schema. `apps/api/tests/integration/uv-exec-002.integration.test.ts`
+asserts the exhaustive, alphabetically-ordered list of every table in
+`information_schema.tables WHERE table_schema = 'voice'` (a deliberate
+drift guard per its own comment: "exposes every new voice table") but was
+never updated for the new table when Round-33 landed it -- this is a stale
+test-fixture gap, not a production defect; the table itself is intentional
+and already covered by Round-33's own F2 unit-test evidence. The repository
+had never previously exercised this exact hosted path (it requires real
+Postgres and is excluded from this VM's local checks per dispatch
+guardrails), so this is the first time the drift guard actually ran against
+the new table.
+
+Separately, `docs/04-uat/system-remediation-20260906/schema-allocation.json`'s
+`voice_application_allocations` entry for this task's `V0106` migration
+listed `primary_tables: [dialogue_snapshot, dialogue_snapshot_purge_receipt]`
+only -- also missing the scan-cursor table, and with no `table_invariants`
+line describing it. Per this task's own title ("...without masking missing
+contracts"), an allocation record that omits a real table the migration
+creates is exactly the kind of incompleteness this task exists to close,
+even though no automated check currently enforces full table coverage in
+that specific JSON entry (unlike `uv-exec-002`'s exhaustive assertion).
+
+### Fix
+
+1. `apps/api/tests/integration/uv-exec-002.integration.test.ts:254-ff`:
+   inserted `"dialogue_snapshot_purge_receipt_scan_cursor"` into the
+   expected table list immediately after
+   `"dialogue_snapshot_purge_receipt"`, matching the exact alphabetical
+   position CI's own `ORDER BY table_name` query reported in the diff
+   above. No other line in the expected array changed.
+2. `docs/04-uat/system-remediation-20260906/schema-allocation.json`: added
+   `voice.dialogue_snapshot_purge_receipt_scan_cursor` to the
+   `AUDIT-VOICE-APPLICATION-WIRING-20261003` / `V0106` entry's
+   `primary_tables`, and appended a `table_invariants` line describing it
+   (singleton `id boolean PRIMARY KEY DEFAULT true` row with a
+   `CHECK (id)` constraint, holding only the keyset scan-resume position
+   from the F2 fix; bounded at exactly one row, no retention policy
+   needed). No other allocation entry in this file was touched.
+
+No other production or test file changed this round; the F1/F2/F3 fixes
+and the Round-34 test-cleanup fix are both untouched.
+
+### Verification (this round)
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts
+   tests/security/idempotency-regression-guard.test.ts --maxWorkers=1 --no-cache`:
+   exit 0, 37 files / 681 tests, 0 skips -- identical to Round-33/34 (this
+   round touches only the hosted-only `uv-exec-002.integration.test.ts`
+   and a JSON doc, neither in this glob).
+2. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+   packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003
+   tests/integration/unattended-voice-postgres.integration.test.ts
+   apps/api/tests/integration/uv-exec-002.integration.test.ts --max-warnings=0`: exit 0.
+3. `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: exit 2, the
+   same 13 pre-existing cross-worktree `ApiClient` identity errors every
+   prior round has recorded, in the same two files, exclusively; zero
+   errors in any file this round touched.
+4. `git diff --check`: exit 0.
+5. `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`:
+   57 commits OK.
+6. `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`:
+   exit 0, 0 findings.
+7. `python3 -c "import json; json.load(open('docs/04-uat/system-remediation-20260906/schema-allocation.json'))"`:
+   confirms the edited JSON remains valid.
+8. `uv-exec-002.integration.test.ts` itself was **not** re-executed locally
+   this round -- it requires a real Postgres instance with migrations
+   applied, and this VM is restricted from starting PostgreSQL/Docker
+   Compose per dispatch guardrails (same limitation as every prior round's
+   PG-dependent evidence). The fix is a direct, position-exact
+   transcription of the table name CI's own failure diff reported as
+   `+ Received`, not a guess; a fresh hosted CI run on this round's own
+   `CANDIDATE_SHA` is the pending proof that the full suite (46 files / 311
+   tests) now passes.
+9. No product/browser/DB/Compose servers, `playwright`, package
+   installation/builds, predecessor-candidate execution, or mutation of
+   any file outside this task's `write_scopes` were performed this round.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path` / `authority_epoch_consent_fences`:
+  unchanged from Round-33/34 (no production code touched this round).
+- `precise_unimplemented_and_external_boundaries`: this round closes a
+  genuine (if test/doc-only) completeness gap -- a real table the F2 fix
+  created was missing from both the CI drift guard and the schema
+  allocation record. It does not change the assessment of the F1/F2/F3
+  production fixes themselves.
+- `same_sha_review_ci`: not claimed by this round. The prior hosted CI
+  `integration` job failure on `cc0b2981c` is the trigger for this round,
+  not evidence this round resolves by local claim; a fresh hosted CI run
+  on this round's own `CANDIDATE_SHA` (captured at handoff) is the pending
+  proof, together with an independent reviewer re-review.
+
+No merge/deploy/live-provider claim is made by this section.
