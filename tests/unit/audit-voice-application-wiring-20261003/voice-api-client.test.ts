@@ -1810,6 +1810,7 @@ describe("createTrustedDialoguePersistPort", () => {
     };
     let contentPostCount = 0;
     let reconciliationGetCalls = 0;
+    let resolveCalls = 0;
     const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const path = String(url);
       if (path.endsWith("/capabilities")) {
@@ -1834,6 +1835,18 @@ describe("createTrustedDialoguePersistPort", () => {
             },
           },
         });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot/resolve")) {
+        // R4-persist late-acceptance fence: nothing was ever actually
+        // stored (every content POST throws before storage below), so the
+        // atomic adjudication authoritatively confirms non-acceptance
+        // every time, same as the bounded GET polling already truthfully
+        // observed. Checked ahead of the plain `/dialogue-snapshot` POST
+        // branch below since that branch's own suffix match would not
+        // otherwise collide, but ordering it first keeps this double
+        // legible as the adjudication path.
+        resolveCalls += 1;
+        return jsonResponse(200, { data: { accepted: false } });
       }
       if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
         // The double NEVER actually stores anything -- every attempt fails
@@ -1897,10 +1910,232 @@ describe("createTrustedDialoguePersistPort", () => {
     // 3 bounded reconciliation attempts per turn, none ever correlating
     // (nothing was ever actually stored) -- 4 turns x 3 = 12.
     expect(reconciliationGetCalls).toBe(12);
+    // R4-persist late-acceptance fence: each turn's bounded polling
+    // exhausts, then falls back to exactly one atomic adjudication call,
+    // which authoritatively confirms non-acceptance -- 4 turns x 1 = 4.
+    expect(resolveCalls).toBe(4);
     // Confirmed non-acceptance clears the marker every time -- it must
     // never still be set once the last turn's own bounded retries
     // exhaust, or the NEXT turn after this test would still be wedged.
     expect(attachmentState.unresolvedCommit).toBeNull();
+  });
+
+  it("[late acceptance, Codex reopen canonical 2026-10-03T23:31:57Z] three truthful null reads before the delayed write lands are not a fence -- the atomic adjudication call still finds it and installs it", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    let resolveCalls = 0;
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        throw new TypeError("simulated lost acknowledgement");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        // Three genuinely truthful reads, all BEFORE the delayed write
+        // lands -- "three successful null reads are no more a fence
+        // against late acceptance than one."
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (
+        init?.method === "POST" &&
+        path.endsWith("/dialogue-snapshot/resolve")
+      ) {
+        resolveCalls += 1;
+        // The atomic adjudication call lands AFTER the bounded polling
+        // above already (truthfully) observed nothing -- by now the
+        // delayed write has actually landed server-side.
+        return jsonResponse(200, {
+          data: {
+            accepted: true,
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "urgent_safety", intent: "emergency" },
+              },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+    const restoreFromSnapshotContent = vi.fn();
+
+    // This exact write's content commit DID durably land -- the atomic
+    // adjudication call found it, so this call's own `persist()` resolves
+    // successfully (its content is the recovered one, not a fresh
+    // submission), same as the sibling bounded-GET-finds-it probes above.
+    await port.persist(
+      {
+        toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),
+        restoreFromSnapshotContent,
+        committedSessionVersion: attachmentState.committedSessionVersion,
+      } as unknown as VoiceDialogueState,
+      request,
+      { attachmentState },
+    );
+
+    expect(resolveCalls).toBe(1);
+    expect(restoreFromSnapshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handoff: { reason: "urgent_safety", intent: "emergency" },
+      }),
+    );
+    expect(attachmentState.committedSessionVersion).toBe(6);
+    expect(attachmentState.unresolvedCommit).toBeNull();
+  });
+
+  it("[outcome unknown, Codex reopen canonical 2026-10-03T23:31:57Z] when the atomic adjudication call is itself unreachable, the marker stays set and a concurrent turn fails closed instead of admitting new content", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        throw new TypeError("simulated lost acknowledgement");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (
+        init?.method === "POST" &&
+        path.endsWith("/dialogue-snapshot/resolve")
+      ) {
+        // apps/api is itself unreachable for this exact adjudication call
+        // -- genuinely unknown, never a confirmed verdict either way.
+        throw new TypeError("simulated adjudication transport failure");
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+
+    await expect(
+      port.persist(
+        {
+          toSnapshotContent: () => ({}),
+          committedSessionVersion: attachmentState.committedSessionVersion,
+        } as unknown as VoiceDialogueState,
+        request,
+        { attachmentState },
+      ),
+    ).rejects.toThrow(/simulated lost acknowledgement/);
+
+    // The marker must still be set -- the outcome is genuinely unknown,
+    // never cleared merely because the bounded retry/adjudication budget
+    // ran out.
+    expect(attachmentState.unresolvedCommit).not.toBeNull();
+
+    // A later turn's own top-of-call gate must fail closed with a
+    // distinct, honest error -- never silently proceed as if the prior
+    // write were confirmed non-accepted, and never claim it was
+    // "superseded" by a recovered commit that was never actually found.
+    await expect(
+      port.persist(
+        {
+          toSnapshotContent: () => ({}),
+          committedSessionVersion: attachmentState.committedSessionVersion,
+        } as unknown as VoiceDialogueState,
+        { ...request, turnId: "turn-2" },
+        { attachmentState },
+      ),
+    ).rejects.toThrow(/voice_trusted_persist_unresolved_commit_unknown/);
   });
 
   it("[unstructured response, Codex reopen canonical 2026-10-03T22:41:06Z] an opaque intermediary 502/504 with no structured error body is ambiguous, not a confirmed domain rejection -- the durably-landed write is still reconciled", async () => {
@@ -1995,6 +2230,113 @@ describe("createTrustedDialoguePersistPort", () => {
     // commit would be silently lost from the attachment's view the
     // instant a later turn submitted anything else. With this fix it is
     // reconciled like any other ambiguous failure.
+    await port.persist(
+      {
+        toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),
+        restoreFromSnapshotContent,
+        committedSessionVersion: attachmentState.committedSessionVersion,
+      } as unknown as VoiceDialogueState,
+      request,
+      { attachmentState },
+    );
+
+    expect(restoreFromSnapshotContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        handoff: { reason: "urgent_safety", intent: "emergency" },
+      }),
+    );
+    expect(attachmentState.unresolvedCommit).toBeNull();
+    expect(attachmentState.committedSessionVersion).toBe(6);
+  });
+
+  it("[error provenance, Codex reopen canonical 2026-10-03T23:31:57Z] a structured but generic INTERNAL_SERVER_ERROR envelope is ambiguous, never a definitive rejection -- the durably-landed write is still reconciled", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex
+        // reopen, canonical 2026-10-03T23:31:57Z, "an unexpected failure
+        // is not a definitive rejection"): the write is durably accepted
+        // server-side, but apps/api's own exception filter emits a
+        // genuinely structured `INTERNAL_SERVER_ERROR` envelope back to
+        // this worker anyway (e.g. a COMMIT acknowledgement that itself
+        // threw) -- a real structured body, unlike the sibling bare-502
+        // probe above, but still never proof this call's own content was
+        // rejected.
+        return jsonResponse(500, {
+          error: { code: "INTERNAL_SERVER_ERROR", message: "unexpected failure" },
+        });
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: {
+              snapshotId: "snapshot-1",
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              inputEpoch: request.inputEpoch,
+              mediaEpoch: 0,
+              turnId: request.turnId,
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "urgent_safety", intent: "emergency" },
+              },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+    const restoreFromSnapshotContent = vi.fn();
+
     await port.persist(
       {
         toSnapshotContent: () => ({ handoff: { reason: "urgent_safety" } }),

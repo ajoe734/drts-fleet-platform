@@ -110,6 +110,29 @@ export interface PersistDialogueSnapshotResult {
   deduped: boolean;
 }
 
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance fence
+ * (Codex reopen, canonical 2026-10-03T23:31:57Z): the single atomic
+ * adjudication `reconcileUnresolvedCommit` (`dialogue-persist-port.ts`)
+ * falls back to once its own bounded restoration-read polling exhausts
+ * with nothing correlating observed -- see
+ * `VoiceSessionService.resolveDialogueSnapshotOutcome`'s own doc for the
+ * server-side atomicity this relies on.
+ */
+export interface ResolveDialogueSnapshotOutcomeCommand {
+  expectedSessionVersion: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+}
+
+export type ResolveDialogueSnapshotOutcomeResult =
+  | {
+      accepted: true;
+      snapshot: PersistDialogueSnapshotResult["snapshot"];
+    }
+  | { accepted: false };
+
 export interface DialogueSnapshotRestorationResult {
   session: {
     voiceSessionId: string;
@@ -330,6 +353,23 @@ export class VoiceApiClient {
       `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/dialogue-snapshot`,
       capabilityToken,
       undefined,
+      signal,
+    );
+  }
+
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence: see `ResolveDialogueSnapshotOutcomeCommand`'s own doc. */
+  async resolveDialogueSnapshotOutcome(
+    sessionId: string,
+    capabilityToken: string,
+    command: ResolveDialogueSnapshotOutcomeCommand,
+    signal?: AbortSignal,
+  ): Promise<ResolveDialogueSnapshotOutcomeResult> {
+    return this.request<ResolveDialogueSnapshotOutcomeResult>(
+      "POST",
+      `/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/dialogue-snapshot/resolve`,
+      capabilityToken,
+      command,
       signal,
     );
   }

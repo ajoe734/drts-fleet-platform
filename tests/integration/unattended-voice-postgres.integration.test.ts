@@ -2800,6 +2800,107 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       );
       expect(afterPurge.rows[0].count).toBe(0);
     });
+
+    /**
+     * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+     * fence (Codex reopen, canonical 2026-10-03T23:31:57Z): against the
+     * REAL `voice.session.dialogue_snapshot_fence_version` column and the
+     * real `voice.dialogue_snapshot` unique index -- proves the fence this
+     * task adds is a genuine server-side barrier, not merely an in-memory
+     * flag some mock could agree to honor.
+     */
+    it("resolveDialogueSnapshotOutcome reports accepted:false and durably fences this exact version against the real schema -- a late insert attempt for it is then genuinely rejected", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const outcome = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-never-landed",
+      });
+      expect(outcome.accepted).toBe(false);
+
+      const fenced = await pool.query(
+        "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(fenced.rows[0].dialogue_snapshot_fence_version).toBe(
+        session!.sessionVersion,
+      );
+
+      // The exact write this adjudication call just voided tries to land
+      // "late" -- same version, same identifiers -- and is genuinely
+      // rejected, never silently inserted alongside whatever a successor
+      // turn already committed.
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-never-landed",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(0);
+    });
+
+    it("resolveDialogueSnapshotOutcome reports accepted:true with the real decrypted content when the exact write already landed", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const persisted = await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-landed",
+        content: validContent,
+      });
+
+      const outcome = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-landed",
+      });
+      expect(outcome.accepted).toBe(true);
+      if (outcome.accepted) {
+        expect(outcome.snapshot.snapshotId).toBe(persisted.snapshot.snapshotId);
+        expect(outcome.snapshot.content).toEqual(validContent);
+      }
+
+      // Confirming an already-landed write must never itself raise the
+      // fence -- a later retry at the SAME (already-accepted) version is
+      // still the safe dedup no-op `insertDialogueSnapshot` always was.
+      const fenced = await pool.query(
+        "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(fenced.rows[0].dialogue_snapshot_fence_version).toBe(0);
+    });
   });
 
   // =========================================================================

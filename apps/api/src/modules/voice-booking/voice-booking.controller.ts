@@ -573,6 +573,56 @@ export class VoiceBookingController {
   }
 
   /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence -- `VoiceSessionService.resolveDialogueSnapshotOutcome`'s own
+   * doc has the full atomic-adjudication contract. Same
+   * `session_execute`-scoped capability boundary as `persistDialogueSnapshot`
+   * above, but deliberately does not require `expectedSessionVersion` to
+   * still be the session's current revision -- that is exactly the case
+   * this call exists to adjudicate.
+   */
+  @Post("sessions/:sessionId/dialogue-snapshot/resolve")
+  @OpenRoute()
+  async resolveDialogueSnapshotOutcome(
+    @Param("sessionId") sessionId: string,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Body()
+    body: {
+      expectedSessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const voiceCapabilityGuard = this.requireVoiceApplicationDependency(
+      this.voiceCapabilityGuard,
+      "voiceCapabilityGuard",
+    );
+    const voiceSessionService = this.requireVoiceApplicationDependency(
+      this.voiceSessionService,
+      "voiceSessionService",
+    );
+    const claims = await voiceCapabilityGuard.authenticate(headers);
+    if (claims.voiceSessionId !== sessionId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice capability is bound to a different session id.",
+      );
+    }
+    assertVoiceCapabilityScope(claims, "session_execute");
+    const result = await voiceSessionService.resolveDialogueSnapshotOutcome({
+      voiceSessionId: sessionId,
+      expectedSessionVersion: body.expectedSessionVersion,
+      inputEpoch: body.inputEpoch,
+      mediaEpoch: body.mediaEpoch,
+      turnId: body.turnId,
+    });
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  /**
    * Restoration read `VoiceCallTurnCoordinator.attach` (worker side) uses to
    * seed a bound attachment's dialogue state and
    * `VoiceSessionBinding.sessionVersion` from authoritative truth instead of

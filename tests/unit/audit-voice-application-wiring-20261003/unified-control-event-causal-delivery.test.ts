@@ -1017,4 +1017,118 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control: unified causal con
     expect(calls).toHaveLength(1);
     expect(calls[0]!.body.occurredAt).toBe("2026-01-01T00:00:00.000Z");
   });
+
+  it("[R4-control coalescing, Codex reopen canonical 2026-10-03T23:31:57Z] N synchronous speech.started observations arriving while one drain is held chain at most one drain task, and release leaves no retry timer behind", async () => {
+    vi.useFakeTimers();
+    try {
+      const binding: VoiceSessionBinding = {
+        voiceSessionId: "f0000000-0000-4000-8000-000000000071",
+        resourceScopeId: "f0000000-0000-4000-8000-000000000072",
+        routeProfileVersion: 1,
+        leaseEpoch: 1,
+        sessionVersion: 70,
+      };
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let eventsCallCount = 0;
+      const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(url)).pathname;
+        if (path === "/callcenter/voice/capabilities") {
+          return jsonResponse(200, {
+            data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+          });
+        }
+        if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+          return restorationGetHandler(binding);
+        }
+        if (path.endsWith("/events")) {
+          eventsCallCount += 1;
+          if (eventsCallCount === 1) {
+            // Observation 0 stays genuinely in flight -- every later
+            // observation below arrives while this is still pending.
+            await firstGate;
+          }
+          // Every attempt (the held one once released, and every retry
+          // after it) fails -- this reopen's own probe: "Release first
+          // HTTP call into failure; subsequent attempts fail immediately."
+          throw new TypeError("simulated transport failure");
+        }
+        throw new Error(`unexpected path ${path}`);
+      });
+      const apiClient = new VoiceApiClient(
+        { baseUrl: "https://api.example.test", fetchImpl },
+        { getToken: vi.fn(async () => "workload-token") },
+      );
+      const coordinator = new VoiceCallTurnCoordinator(
+        () => new OpenAiRealtimeFixtureAdapter(),
+        5_000,
+        undefined,
+        false,
+        apiClient,
+      );
+      const attachment = coordinator.attach(binding.voiceSessionId, binding);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Observation 0: genuinely in flight, held on `firstGate`.
+      coordinator.handle(
+        attachment,
+        speechStartedEvent(binding.voiceSessionId, 1, "2026-01-01T00:00:00.000Z"),
+        dumbSpeaker(),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(eventsCallCount).toBe(1);
+
+      // 255 more speech.started observations, all synchronous, all while
+      // observation 0's own HTTP call is still pending -- before this
+      // fix, each one chained its OWN `flushControlEventBacklog` task
+      // (and, once observation 0 failed, its own independent retry
+      // timer). `isEvictableControlEvent` keeps the backlog itself
+      // bounded regardless, but that bound says nothing about how much
+      // chained promise/timer WORK those 255 calls created.
+      for (let i = 2; i <= 256; i++) {
+        coordinator.handle(
+          attachment,
+          speechStartedEvent(
+            binding.voiceSessionId,
+            1,
+            `2026-01-01T00:01:${String(i).padStart(2, "0")}.000Z`,
+          ),
+          dumbSpeaker(),
+        );
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      // Still exactly one HTTP attempt outstanding -- the other 255
+      // enqueues never chained a drain task of their own.
+      expect(eventsCallCount).toBe(1);
+
+      releaseFirst();
+      await vi.advanceTimersByTimeAsync(0);
+      // The held call just settled (rejected), arming exactly one retry
+      // timer (`turnTimeoutMs` away) -- never an immediate flood of 255
+      // re-attempts from the other chained-but-coalesced calls.
+      expect(eventsCallCount).toBe(1);
+
+      // Advance past the single retry timer's own deadline
+      // (`turnTimeoutMs`): exactly one more attempt, proving exactly one
+      // retry timer was armed, not up to 255 orphaned ones layered on
+      // top of each other (which would each fire their own attempt here).
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(eventsCallCount).toBe(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(eventsCallCount).toBe(3);
+
+      // `release()` must cancel the one outstanding retry timer -- if
+      // any of the 255 enqueue calls above had leaked an orphaned timer
+      // of its own (the pre-fix behavior: only the LAST-assigned timer
+      // field is ever cleared), advancing well past every such timer's
+      // deadline here would still drive further attempts.
+      coordinator.release(attachment);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(eventsCallCount).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

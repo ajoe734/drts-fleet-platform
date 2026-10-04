@@ -58,3 +58,21 @@ CREATE INDEX IF NOT EXISTS idx_voice_dialogue_snapshot_retention
   ON voice.dialogue_snapshot (retention_expires_at);
 
 SELECT voice._make_append_only('voice.dialogue_snapshot');
+
+-- AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+-- canonical 2026-10-03T23:31:57Z, "three successful null reads are no more
+-- a fence against late acceptance than one"): a worker that lost a
+-- `persistDialogueSnapshot` acknowledgement can never learn, from
+-- bounded client-side polling alone, whether that write will still land at
+-- some later moment -- an authoritative "this exact version will NEVER be
+-- accepted" verdict can only come from the server durably fencing it before
+-- conceding. This watermark is that fence: any `voice.dialogue_snapshot`
+-- insert attempt for a `session_version` at or below it is rejected (see
+-- `VoiceSessionRepository.insertDialogueSnapshot`'s own doc and
+-- `VoiceSessionService.resolveDialogueSnapshotOutcome`, which is the only
+-- writer of this column), closing the race where a delayed write lands
+-- in the narrow window before any successor turn has advanced
+-- `session_version` far enough for the pre-existing CAS check in
+-- `assertWriteAuthorized` to catch it on its own.
+ALTER TABLE voice.session
+  ADD COLUMN IF NOT EXISTS dialogue_snapshot_fence_version integer NOT NULL DEFAULT 0;

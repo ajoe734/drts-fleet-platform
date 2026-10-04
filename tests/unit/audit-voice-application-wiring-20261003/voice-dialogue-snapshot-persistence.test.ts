@@ -53,6 +53,7 @@ function createSessionRecord(
     pendingInput: false,
     lastResolvedInputEpoch: 3,
     lastAppliedControlSequence: 2,
+    dialogueSnapshotFenceVersion: 0,
     createdAt: "2026-07-24T09:00:00.000Z",
     updatedAt: "2026-07-24T09:00:00.000Z",
     ...overrides,
@@ -134,6 +135,20 @@ function buildHarness(
         (a, b) => b.sessionVersion - a.sessionVersion,
       );
       return sorted[0] ?? null;
+    }),
+    findDialogueSnapshotByVersion: vi.fn(
+      async (id: string, version: number) =>
+        snapshots.find(
+          (s) => s.voiceSessionId === id && s.sessionVersion === version,
+        ) ?? null,
+    ),
+    raiseDialogueSnapshotFence: vi.fn(async (id: string, version: number) => {
+      if (id === session.voiceSessionId) {
+        session.dialogueSnapshotFenceVersion = Math.max(
+          session.dialogueSnapshotFenceVersion ?? 0,
+          version,
+        );
+      }
     }),
     findExpiredDialogueSnapshots: vi.fn(async () =>
       snapshots.filter(
@@ -445,6 +460,123 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
       serviceWithoutRetention.persistDialogueSnapshot(validCommand()),
     ).rejects.toMatchObject({ code: "VOICE_RETENTION_POLICY_UNAVAILABLE" });
     expect(repository.insertDialogueSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("[R4-persist late-acceptance fence, Codex reopen canonical 2026-10-03T23:31:57Z] rejects a write for a session_version the fence has already voided, even though every other check (scope/route/lease/epoch) still matches", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+    await repository.raiseDialogueSnapshotFence(VOICE_SESSION_ID, 5);
+
+    await expect(
+      service.persistDialogueSnapshot(validCommand()),
+    ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+    expect(repository.insertDialogueSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("does not fence a version strictly ABOVE whatever was voided", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+    await repository.raiseDialogueSnapshotFence(VOICE_SESSION_ID, 4);
+
+    await expect(
+      service.persistDialogueSnapshot(validCommand()),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
+  beforeEach(() => {
+    process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+    process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+      randomBytes(32).toString("base64");
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence (Codex reopen, canonical 2026-10-03T23:31:57Z): the single
+   * atomic adjudication `reconcileUnresolvedCommit` (worker side) falls
+   * back to once its own bounded restoration-read polling exhausts with
+   * nothing correlating found -- see that function's own doc.
+   */
+
+  it("reports accepted:true with the real decrypted content when the exact write already landed", async () => {
+    const { service } = buildHarness({ appliedMediaEpoch: 2 });
+    const persisted = await service.persistDialogueSnapshot(validCommand());
+
+    const outcome = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "turn-xyz",
+    });
+
+    expect(outcome.accepted).toBe(true);
+    if (outcome.accepted) {
+      expect(outcome.snapshot.snapshotId).toBe(persisted.snapshot.snapshotId);
+      expect(outcome.snapshot.content).toEqual(validContent);
+    }
+  });
+
+  it("reports accepted:false and durably fences this exact version when nothing ever landed -- a late arrival for the SAME version is then rejected", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+
+    const outcome = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "turn-xyz",
+    });
+
+    expect(outcome.accepted).toBe(false);
+    expect(repository.raiseDialogueSnapshotFence).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      5,
+      undefined,
+    );
+
+    // The exact write this adjudication just voided (same version/turn)
+    // must never be allowed to land after the fact -- proving the fence
+    // this call raised is the real, server-authoritative one
+    // `persistDialogueSnapshot` itself consults, not a disconnected flag.
+    await expect(
+      service.persistDialogueSnapshot(validCommand()),
+    ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+  });
+
+  it("does not require sessionVersion/routeProfileVersion to still be current -- that is exactly the case this call exists to adjudicate", async () => {
+    const { service, session } = buildHarness({ appliedMediaEpoch: 2 });
+    // Simulate the session having moved on well past the pending write's
+    // own version, the way three successor turns would in the real
+    // regression this closes.
+    session.sessionVersion = 20;
+
+    await expect(
+      service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: VOICE_SESSION_ID,
+        expectedSessionVersion: 5,
+        inputEpoch: 3,
+        mediaEpoch: 2,
+        turnId: "turn-xyz",
+      }),
+    ).resolves.toMatchObject({ accepted: false });
+  });
+
+  it("treats a row at the right version but a DIFFERENT turnId/mediaEpoch as not correlating -- never confuses a different turn's content for this one", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+    await service.persistDialogueSnapshot(
+      validCommand({ turnId: "a-different-turn" }),
+    );
+
+    const outcome = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "turn-xyz",
+    });
+
+    expect(outcome.accepted).toBe(false);
+    expect(repository.raiseDialogueSnapshotFence).toHaveBeenCalled();
   });
 });
 
