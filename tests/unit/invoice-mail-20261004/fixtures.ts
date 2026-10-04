@@ -1,4 +1,5 @@
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
+import { getIamTenantRoleScopes } from "@drts/contracts";
 
 export const financeIdentity: BootstrapRequestIdentity = {
   authMode: "jwt_bearer",
@@ -7,7 +8,7 @@ export const financeIdentity: BootstrapRequestIdentity = {
   realm: "tenant",
   tenantId: "tenant-demo-001",
   roleFamilies: ["tenant"],
-  roles: ["tenant_finance"],
-  scopes: ["billing:read", "billing:write"],
+  roles: ["tenant_finance_admin"],
+  scopes: [...getIamTenantRoleScopes("tenant_finance_admin")!],
   requestId: null,
 };

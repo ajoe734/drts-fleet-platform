@@ -20,25 +20,29 @@ export class InvoiceMailController {
   constructor(private readonly mail: InvoiceMailService) {}
 
   @Get()
-  @RequireScopes("billing:read")
+  @RequireScopes("tenant:billing:read")
   async read(
     @Param("invoiceId") invoiceId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const tenant = authorizeInvoiceTenant(identity, tenantId, "billing:read");
+    const tenant = authorizeInvoiceTenant(
+      identity,
+      tenantId,
+      "tenant:billing:read",
+    );
     return toApiSuccessEnvelope(
       {
         ...(await this.mail.read(tenant, invoiceId)),
-        canSend: Boolean(identity?.scopes.includes("billing:write")),
+        canSend: Boolean(identity?.scopes.includes("tenant:billing:write")),
       },
       requestId,
     );
   }
 
   @Post()
-  @RequireScopes("billing:write")
+  @RequireScopes("tenant:billing:write")
   async send(
     @Param("invoiceId") invoiceId: string,
     @Body() body: unknown,
@@ -46,7 +50,11 @@ export class InvoiceMailController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const tenant = authorizeInvoiceTenant(identity, tenantId, "billing:write");
+    const tenant = authorizeInvoiceTenant(
+      identity,
+      tenantId,
+      "tenant:billing:write",
+    );
     if (
       body !== undefined &&
       (!body ||

@@ -12,7 +12,7 @@ import type {
 export function authorizeInvoiceTenant(
   identity: BootstrapRequestIdentity | null | undefined,
   tenantId: string | undefined,
-  scope: "billing:read" | "billing:write",
+  scope: "tenant:billing:read" | "tenant:billing:write",
 ): string {
   if (
     !identity ||

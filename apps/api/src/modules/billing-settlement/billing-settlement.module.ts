@@ -75,9 +75,7 @@ import {
             : null,
           {
             fromEmail: process.env.NOTIFICATION_FROM_EMAIL,
-            portalOrigin:
-              process.env.INVOICE_MAIL_PORTAL_ORIGIN ??
-              process.env.TENANT_INVITATION_ACCEPT_URL_BASE,
+            portalOrigin: process.env.INVOICE_MAIL_PORTAL_ORIGIN,
           },
         );
       },

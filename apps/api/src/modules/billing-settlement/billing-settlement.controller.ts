@@ -134,7 +134,7 @@ export class BillingSettlementController {
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.getTenantBillingProfile(
-        authorizeInvoiceTenant(identity, tenantId, "billing:read"),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
       ),
       requestId,
     );
@@ -149,7 +149,7 @@ export class BillingSettlementController {
   ) {
     return toApiSuccessEnvelope(
       await this.billingSettlementService.updateTenantBillingProfile(
-        authorizeInvoiceTenant(identity, tenantId, "billing:write"),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:write"),
         command,
         requestId,
       ),
@@ -166,7 +166,7 @@ export class BillingSettlementController {
   ) {
     return toApiSuccessEnvelope(
       await this.billingSettlementService.generateTenantInvoice(
-        authorizeInvoiceTenant(identity, tenantId, "billing:write"),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:write"),
         command,
         requestId,
       ),
@@ -253,7 +253,7 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     const data = await this.billingSettlementService.listTenantInvoicesFresh(
-      authorizeInvoiceTenant(identity, tenantId, "billing:read"),
+      authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
     );
     return toApiSuccessEnvelope(data, requestId);
   }
@@ -267,7 +267,7 @@ export class BillingSettlementController {
   ) {
     return toApiSuccessEnvelope(
       await this.billingSettlementService.getTenantInvoiceFresh(
-        authorizeInvoiceTenant(identity, tenantId, "billing:read"),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
         invoiceId,
       ),
       requestId,

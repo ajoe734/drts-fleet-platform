@@ -83,12 +83,15 @@ describe("invoice mail producer with the real durable outbox and delivery core",
   function transport() {
     return {
       provider: "test",
-      send: vi.fn(async (_message: TransportMessage) => ({
-        provider: "test",
-        response: "250 secret-recipient finance@example.test",
-        providerMessageId: "secret-provider-id",
-        acceptedAt: now().toISOString(),
-      })),
+      send: vi.fn(async (message: TransportMessage) => {
+        void message;
+        return {
+          provider: "test",
+          response: "250 secret-recipient finance@example.test",
+          providerMessageId: "secret-provider-id",
+          acceptedAt: now().toISOString(),
+        };
+      }),
     };
   }
   function runtime(
@@ -300,7 +303,7 @@ describe("invoice mail producer with the real durable outbox and delivery core",
   it("read-only finance can read but cannot send; callers cannot override recipient or tenant", async () => {
     const provider = transport();
     const { controller } = runtime(provider);
-    const readOnly = { ...financeIdentity, scopes: ["billing:read"] };
+    const readOnly = { ...financeIdentity, scopes: ["tenant:billing:read"] };
     expect((await controller.read(invoiceId, readOnly)).data.canSend).toBe(
       false,
     );
