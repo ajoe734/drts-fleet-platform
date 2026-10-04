@@ -470,3 +470,39 @@ or live `gcloud`/Docker command was run by this fix round; every
 provisioning-helper and SDK-behavior assertion above is against either a
 mocked `subprocess.run` boundary or a real, offline import of the installed
 SDK's own python library — never a live API call.
+
+### CI-caught regression on candidate `e47fa0fa45c7ce0fd32de62f206947a6eb2ddc9d` (same generation), fixed before handoff
+
+Hosted CI on this PR's prior head (`e47fa0fa4...`, the commit implementing
+the round-2 fix table above) failed three required checks —
+`typecheck`, `Product smoke acceptance`, `Smoke acceptance` — all on the
+identical root cause: `pnpm typecheck:root` (`tsc -p tsconfig.json
+--noEmit`) reported `operations/artifact-scanner/gateway/clamd-protocol.ts(60,42):
+error TS2345: Argument of type 'string | undefined' is not assignable to
+parameter of type 'string'` (run
+`37180229471`/job `111371243436`; identical failure in the product-smoke
+job `111371181172`). The root `tsconfig.base.json` sets
+`noUncheckedIndexedAccess: true`, so `found[1]` from
+`/^stream: ([^\r\n\0]+) FOUND$/.exec(reply)` types as `string | undefined`
+even though the mandatory capturing group guarantees it is defined whenever
+`found` is truthy. The round-2 fix evidence table's isolated gateway `tsc`
+probe command (used for R3/R8 above) does not pass
+`--noUncheckedIndexedAccess`, so it never exercised this path — a real gap
+in that probe's flag parity with the root config, caught only by hosted CI.
+
+Fix: `clamd-protocol.ts`'s `parseInstreamReply` now calls
+`isLimitExceededSignature(found[1] ?? "")`, satisfying the stricter root
+config without changing runtime behavior (the fallback is unreachable given
+the mandatory capture group). Verification: `node node_modules/typescript/bin/tsc
+-p tsconfig.json --noEmit` now reports zero errors referencing
+`operations/artifact-scanner/` or this task's test files — the only
+remaining 13 errors are the pre-existing, unrelated cross-worktree
+`packages/api-client` type-identity collision in
+`tests/unit/fleet-partner-list-envelope.test.ts` and
+`tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+(a local-worktree-path artifact of this VM having multiple sibling
+worktrees on disk; CI checks out a single tree and does not hit it).
+`node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004`:
+unchanged 6 files/51 tests pass. This fix carries forward on the next
+candidate SHA handed off after this entry; it does not reopen or alter any
+R1/R5/R8/R9 finding above.

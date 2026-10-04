@@ -57,6 +57,8 @@ function isLimitExceededSignature(signature: string): boolean {
 export function parseInstreamReply(reply: string): ClamdVerdict | null {
   if (reply === "stream: OK") return "clean";
   const found = /^stream: ([^\r\n\0]+) FOUND$/.exec(reply);
-  if (found && !isLimitExceededSignature(found[1])) return "infected";
+  // The capturing group is mandatory ([^\r\n\0]+), so it is always defined
+  // once `found` matches; the fallback only satisfies noUncheckedIndexedAccess.
+  if (found && !isLimitExceededSignature(found[1] ?? "")) return "infected";
   return null;
 }
