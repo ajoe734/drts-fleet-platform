@@ -84,6 +84,14 @@ const MAX_UNRESOLVED_COMMIT_RECONCILE_ATTEMPTS = 3;
  * never this one). A whitelist, not a blacklist: an unrecognized or generic
  * code (`INTERNAL_SERVER_ERROR`, anything apps/api's exception filter maps
  * an unexpected failure to) must default to ambiguous, never to rejected.
+ *
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention history-unavailable
+ * write fence (Codex reopen, canonical 2026-10-04T03:06:22Z): deliberately
+ * excludes `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` -- unlike
+ * `VOICE_DIALOGUE_SNAPSHOT_VOIDED` (a real later-reconciliation fence),
+ * that code means the one governed record that could have proven
+ * acceptance has aged out, which is genuinely unknown, not rejected (same
+ * category as the already-excluded `VOICE_DIALOGUE_SNAPSHOT_PURGED`).
  */
 const DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES = new Set([
   "VOICE_SESSION_NOT_OWNER",

@@ -14,6 +14,7 @@ import { VoiceRetentionService } from "../../../apps/api/src/modules/voice-booki
 import type { VoiceSessionRecord } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import {
   DialogueSnapshotPurgeReceiptConflictError,
+  type DialogueSnapshotPurgeReceiptCursor,
   type DialogueSnapshotPurgeReceiptRow,
   type DialogueSnapshotRow,
 } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
@@ -230,10 +231,26 @@ function buildHarness(
       },
     ),
     findExpiredDialogueSnapshotPurgeReceipts: vi.fn(
-      async (purgedBefore: string) =>
-        purgeReceipts.filter(
-          (r) => new Date(r.purgedAt).getTime() <= new Date(purgedBefore).getTime(),
-        ),
+      async (
+        purgedBefore: string,
+        limit = 200,
+        cursor?: DialogueSnapshotPurgeReceiptCursor,
+      ) => {
+        const key = (r: DialogueSnapshotPurgeReceiptRow) =>
+          `${r.purgedAt} ${r.voiceSessionId} ${String(r.sessionVersion).padStart(20, "0")}`;
+        const cursorKey = cursor
+          ? `${cursor.purgedAt} ${cursor.voiceSessionId} ${String(cursor.sessionVersion).padStart(20, "0")}`
+          : null;
+        return purgeReceipts
+          .filter(
+            (r) =>
+              new Date(r.purgedAt).getTime() <=
+              new Date(purgedBefore).getTime(),
+          )
+          .filter((r) => cursorKey === null || key(r) > cursorKey)
+          .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0))
+          .slice(0, limit);
+      },
     ),
     retireDialogueSnapshotPurgeReceipt: vi.fn(
       async (id: string, version: number) => {
@@ -651,7 +668,23 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
     });
   });
 
-  it("rejects a write at a version whose purge receipt has since been governed-retired (receipt gone, but the history-unavailable floor still blocks reuse)", async () => {
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
+   * history-unavailable write fence (Codex reopen, canonical
+   * 2026-10-04T03:06:22Z, "history-unavailable write response falsely
+   * becomes definitive non-acceptance"): a prior version of this test
+   * asserted `VOICE_DIALOGUE_SNAPSHOT_VOIDED` here -- but this version was
+   * never authoritatively voided by a later reconciliation (that is what
+   * `dialogue_snapshot_fence_version`/the SIBLING "late-acceptance fence"
+   * test above covers); it was genuinely ACCEPTED, and only the governed
+   * metadata proof of that (the purge receipt) has since aged out. The
+   * caller must get the dedicated, deliberately non-whitelisted
+   * `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` code (see
+   * `persistDialogueSnapshot`'s own doc) -- and `resolveDialogueSnapshotOutcome`
+   * for the SAME identity must report `accepted: "unknown"`, never a
+   * confirmed non-acceptance either.
+   */
+  it("rejects a write at a version whose purge receipt has since been governed-retired as history-unavailable (receipt gone, but the floor still blocks reuse) -- never as a confirmed void", async () => {
     const { service, repository, snapshots } = buildHarness({
       appliedMediaEpoch: 2,
     });
@@ -665,7 +698,21 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
 
     await expect(
       service.persistDialogueSnapshot(validCommand()),
-    ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+    ).rejects.toMatchObject({
+      code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+    });
+
+    const outcome = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "some-other-unverified-turn",
+    });
+    expect(outcome).toMatchObject({ accepted: "unknown" });
   });
 });
 
@@ -1319,6 +1366,76 @@ describe("VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts", () => 
     expect(deletedCount).toBe(0);
     expect(repository.retireDialogueSnapshotPurgeReceipt).not.toHaveBeenCalled();
     expect(purgeReceipts).toHaveLength(1);
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+   * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z): minimal
+   * reproduction of the exact trigger -- a legally-held run exactly
+   * filling the first page (oldest `purged_at`), with one unheld eligible
+   * receipt strictly behind it. Against the OLD single-page scan this
+   * receipt could never be reached (`totalExamined` would stop at 200,
+   * `deletedCount` at 0) no matter how many times the sweep reran; the
+   * paginated scan must advance past the held run WITHIN this one call.
+   */
+  it("pages past a held run so an eligible receipt behind it is still purged in the same sweep", async () => {
+    const harness = buildHarness({ appliedMediaEpoch: 2 });
+    const { service, repository, retentionService, purgeReceipts } = harness;
+    const HELD_SESSION_ID = "33333333-3333-4333-8333-333333333333";
+    retentionService.placeLegalHold({
+      caseNumber: "CASE-HELD",
+      evidenceFamily: "voice_booking_evidence",
+      subjectRef: HELD_SESSION_ID,
+      reasonCode: "regulatory_inquiry",
+      placedBy: "ops-1",
+    });
+    // Fills the first page (limit 200) with receipts that are strictly
+    // OLDER (by purged_at) than the single eligible receipt below, all
+    // under the same active legal hold.
+    for (let version = 1; version <= 200; version++) {
+      purgeReceipts.push({
+        voiceSessionId: HELD_SESSION_ID,
+        sessionVersion: version,
+        inputEpoch: 1,
+        mediaEpoch: 1,
+        turnId: `held-turn-${version}`,
+        retentionExpiresAt: new Date(Date.now() + 1000).toISOString(),
+        purgedAt: new Date(
+          Date.now() - 731 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      });
+    }
+    // One unheld, eligible receipt with a LATER purged_at than the held
+    // page (so it sorts strictly after it) but still past the governed
+    // voice_booking_evidence retention window.
+    purgeReceipts.push({
+      voiceSessionId: VOICE_SESSION_ID,
+      sessionVersion: 1,
+      inputEpoch: 1,
+      mediaEpoch: 1,
+      turnId: "eligible-turn",
+      retentionExpiresAt: new Date(Date.now() + 1000).toISOString(),
+      purgedAt: new Date(
+        Date.now() - 730 * 24 * 60 * 60 * 1000 - 1000,
+      ).toISOString(),
+    });
+
+    const { report, deletedCount } =
+      await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+        "operator-1",
+        false,
+      );
+
+    expect(report.totalExamined).toBe(201);
+    expect(report.skippedHeldCount).toBe(200);
+    expect(report.purgedCount).toBe(1);
+    expect(deletedCount).toBe(1);
+    expect(repository.retireDialogueSnapshotPurgeReceipt).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      1,
+    );
+    expect(repository.findExpiredDialogueSnapshotPurgeReceipts).toHaveBeenCalledTimes(2);
+    expect(purgeReceipts).toHaveLength(200);
   });
 
   it("fails closed when the retention policy service is unavailable -- never retires without its legal-hold-aware decision", async () => {

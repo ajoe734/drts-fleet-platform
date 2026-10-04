@@ -6764,3 +6764,247 @@ Dispatch and the VM's guardrails prohibit starting a browser/PG/Compose/live-pro
 - `same_sha_review_ci`: not claimed by this round. This round's own vitest/eslint/typecheck evidence is above; hosted CI and an independent reviewer re-review on this round's own `CANDIDATE_SHA` are both pending and will be reported separately by the candidate lifecycle, never fabricated here.
 
 Per Guide §0.7: both repair units named by this reopen are new/residual findings distinct from every already-closed trigger in Round-30 and earlier; the reopen itself explicitly distinguishes the post-purge-replay and receipt-lifetime triggers from the now-fixed exact A/B/C/D and immediate-post-purge-resolve triggers, so the "same defect across two adjacent reviews" escalation protocol does not apply. No merge/deploy/live-provider claim is made by this section; those are recorded separately by the candidate lifecycle once CI and independent review land on this round's own `CANDIDATE_SHA`.
+
+## Round-32 (owner Claude2, in response to the 2026-10-04T03:06:22Z Codex REOPEN)
+
+This round addresses the two P2 findings from the reopen quoted above, on top of
+`edbea7112aa4174f293f7ceb287d91cd6bdcd24e` (Round-31's reviewed candidate). Per
+Guide §0.7's "same defect across two adjacent reviews" test: these are NOT the
+same trigger as any already-closed finding -- the reopen itself identifies them
+as new, narrower defects in logic Round-31 introduced (the receipt-retirement
+floor and the receipt-scan pagination), distinct from the now-fixed sequential
+purged-replay reuse and the now-fixed ungoverned-receipt-lifetime gap.
+
+### FINDING 1 fix -- R4-retention history-unavailable write response falsely
+### becomes definitive non-acceptance
+
+**Root cause** (`apps/api/src/modules/voice-booking/voice-session.service.ts`,
+`persistDialogueSnapshot`): the pre-insert void check combined
+`dialogueSnapshotFenceVersion` (a REAL later-reconciliation fence -- this
+version was authoritatively adjudicated non-accepted) and
+`dialogueSnapshotHistoryUnavailableFloor` (merely: the ONE governed receipt
+that could have proven acceptance for this version has aged out and been
+deleted) via a single `Math.max(...) >= expectedSessionVersion` check, both
+throwing the same `VOICE_DIALOGUE_SNAPSHOT_VOIDED` code. That code is in
+`apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts`'s
+`DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES` whitelist, so the worker's
+`persist()` catch block short-circuited straight to "confirmed rejection" --
+`throw err` -- without ever setting `unresolvedCommit` or calling
+`resolveDialogueSnapshotOutcome`. But `resolveDialogueSnapshotOutcome`, for the
+EXACT SAME identity, already correctly answers `accepted: "unknown"` once the
+receipt has aged out (added in Round-31). The two codepaths disagreed:
+`persistDialogueSnapshot` said "definitely rejected," `resolveDialogueSnapshotOutcome`
+said "unknown" -- and because the worker trusted the former, it discarded its
+pending marker and let an unrelated later turn silently proceed, instead of
+treating the outcome as genuinely open and reconciling it.
+
+**Fix**: split the combined check into two independent branches in
+`persistDialogueSnapshot` --
+`apps/api/src/modules/voice-booking/voice-session.service.ts` (current lines
+~1244-1277):
+- `dialogueSnapshotFenceVersion >= expectedSessionVersion` still throws
+  `VOICE_DIALOGUE_SNAPSHOT_VOIDED` (unchanged: a genuine fence).
+- `dialogueSnapshotHistoryUnavailableFloor >= expectedSessionVersion` (and NOT
+  already caught by the fence above) now throws a NEW, distinct code,
+  `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` (409).
+
+`VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` is deliberately left OUT of
+`dialogue-persist-port.ts`'s `DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES`
+whitelist (same treatment the existing `VOICE_DIALOGUE_SNAPSHOT_PURGED` code
+already gets) -- so `isDefinitiveRejection` is `false` for it, and the worker's
+existing bounded `reconcileUnresolvedCommit` -> `resolveDialogueSnapshotOutcome`
+path runs instead, correctly landing on the SAME `accepted: "unknown"` verdict
+`classifyResolveOutcome` already treats safely (bounded retry, marker retained,
+never a confirmed rejection, never a resurrected restore). No worker-side
+behavior CHANGE was needed beyond leaving the new code out of the Set --the
+whitelist mechanism is purely code-string-based and already defaults anything
+absent to ambiguous.
+
+**Reproduction** (before/after, real production function,
+`git stash push -u -m "AUDIT-VOICE-APPLICATION-WIRING-20261003-round32-repro-prefix" --
+apps/api/src/modules/voice-booking/voice-session.repository.ts
+apps/api/src/modules/voice-booking/voice-session.service.ts
+apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts`, confirmed at
+`stash@{0}` = `7289d570919a4f2d4c0e0ae26df9718c486af1bc`, restored via
+`git stash apply 7289d570919a4f2d4c0e0ae26df9718c486af1bc` -- never `pop` --
+re-confirmed present by name immediately before, then dropped via
+`git stash drop stash@{0}` only after `git status --short` confirmed the fix
+was back):
+- With production reverted, the existing (now-corrected) test
+  "rejects a write at a version whose purge receipt has since been
+  governed-retired as history-unavailable ... -- never as a confirmed void"
+  (`tests/unit/audit-voice-application-wiring-20261003/voice-dialogue-snapshot-persistence.test.ts`)
+  failed: `persistDialogueSnapshot` threw `VOICE_DIALOGUE_SNAPSHOT_VOIDED`
+  instead of the expected `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` --
+  reproducing the exact false-definite-rejection defect the reopen named.
+  This SAME test previously asserted the old (wrong) `VOICE_DIALOGUE_SNAPSHOT_VOIDED`
+  contract before this round edited it; the prior assertion is what the
+  reopen is referring to when it says existing unit/integration expectations
+  "currently codify the wrong contract."
+- Restored (fix back in place): same test passes, asserting
+  `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` from `persistDialogueSnapshot`
+  AND `accepted: "unknown"` from a same-identity `resolveDialogueSnapshotOutcome`
+  call added to the same test, proving the two codepaths now agree.
+- `tests/integration/unattended-voice-postgres.integration.test.ts`'s existing
+  real-schema case (the one the reopen cites by name, "a late insert attempt
+  ... genuinely rejected") that asserted `VOICE_DIALOGUE_SNAPSHOT_VOIDED` for
+  the retired-receipt scenario was corrected to assert
+  `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` instead -- hosted-PG-only, not
+  executable on this VM (same documented limitation as every prior round's
+  real-schema additions); awaits hosted CI on this round's own `CANDIDATE_SHA`.
+  The SIBLING integration test in the same file asserting
+  `VOICE_DIALOGUE_SNAPSHOT_VOIDED` for the genuine
+  `resolveDialogueSnapshotOutcome`-raised fence (not a history-unavailable
+  floor) was left unchanged -- that is a real fence, not this finding.
+- The worker-side ambiguous-treatment mechanism for a non-whitelisted code is
+  independently and already proven generically (code-string-agnostic) by the
+  pre-existing `tests/unit/audit-voice-application-wiring-20261003/voice-api-client.test.ts`
+  case "a structured but generic INTERNAL_SERVER_ERROR envelope is ambiguous,
+  never a definitive rejection" -- it exercises the real
+  `createTrustedDialoguePersistPort` -> `VoiceApiClient` -> `isDefinitiveRejection`
+  path end-to-end against an arbitrary code absent from the whitelist. No
+  additional worker-level unit test was added duplicating this mechanism for
+  the new code specifically; the server-side identity-specific proof is the
+  integration test above.
+
+### FINDING 2 fix -- R4-retention held first page indefinitely starves
+### unrelated eligible purge receipts
+
+**Root cause** (`apps/api/src/modules/voice-booking/voice-session.repository.ts`,
+`findExpiredDialogueSnapshotPurgeReceipts`; `voice-session.service.ts`,
+`purgeExpiredDialogueSnapshotPurgeReceipts`): a single fixed-size page
+(`LIMIT 200`, `ORDER BY purged_at ASC`, no cursor) was fetched ONCE per
+invocation, always starting from the oldest eligible row. When the oldest 200
+eligible receipts are all under an active legal hold (same subject, e.g. 200
+revisions of one held session), every invocation re-examines and re-skips the
+exact same 200 held rows; a 201st, unheld, eligible receipt with a later
+`purged_at` is never reached no matter how many times the sweep runs.
+
+**Fix**: keyset (cursor) pagination, not a bigger fixed limit (which would
+only move the starvation point, never close it):
+- `DialogueSnapshotPurgeReceiptCursor` (new exported type,
+  `voice-session.repository.ts`): `{ purgedAt, voiceSessionId, sessionVersion }`.
+- `findExpiredDialogueSnapshotPurgeReceipts(purgedBefore, limit, cursor?, executor?)`:
+  orders by `purged_at ASC, voice_session_id ASC, session_version ASC`
+  (deterministic tie-break) and, when `cursor` is supplied, adds
+  `AND (purged_at, voice_session_id, session_version) > ($cursor tuple)` --
+  a tuple comparison that advances strictly past the last row examined
+  regardless of its hold/purge outcome.
+- `purgeExpiredDialogueSnapshotPurgeReceipts`: loops pages (bounded by a new
+  `MAX_PURGE_RECEIPT_SCAN_PAGES = 50` safety cap, `PURGE_RECEIPT_SCAN_PAGE_LIMIT
+  = 200` per page -- 10,000 receipts/invocation), advancing `cursor` to the
+  LAST row of every page (held or not) before fetching the next, accumulating
+  `totalExamined`/`skippedHeldCount`/`purgedCount`/`deletedCount`/`results`
+  across all pages into one `PurgeExecutionReport`. Stops when a page returns
+  fewer rows than the limit (backlog exhausted) or the page cap is hit (the
+  NEXT invocation simply resumes scanning from the oldest row again, since
+  there is no cross-call persisted cursor -- not a new starvation point, since
+  a backlog that deep would make progress across successive invocations
+  rather than being stuck on the same page forever).
+- Held receipts, and each retired version's atomic floor-raise + delete, are
+  unaffected: `isSubjectUnderHold` and `retireDialogueSnapshotPurgeReceipt`
+  are still called identically per-row, just across more pages instead of one.
+
+**Reproduction** (same stash cycle as Finding 1 above, same restore/drop):
+- With production reverted, the new test "pages past a held run so an
+  eligible receipt behind it is still purged in the same sweep"
+  (`voice-dialogue-snapshot-persistence.test.ts`) failed:
+  `report.totalExamined` was `200` (only the held page), not the expected
+  `201` -- the single eligible receipt behind the held run was never reached,
+  reproducing the exact starvation the reopen's static-evidence trigger
+  describes (200 held rows at `purged_at` = now-731d, one unheld eligible row
+  at now-730d-1s, same single `purgeExpiredDialogueSnapshotPurgeReceipts("operator-1", false)`
+  call).
+- Restored (fix back in place): same test passes --
+  `totalExamined: 201`, `skippedHeldCount: 200`, `purgedCount: 1`,
+  `deletedCount: 1`, `retireDialogueSnapshotPurgeReceipt` called with the
+  eligible identity, and `findExpiredDialogueSnapshotPurgeReceipts` called
+  exactly twice (page 1 = 200 held rows triggers a second page; page 2 = 1 row
+  < limit stops the loop) -- proving the sweep pages PAST the held run and
+  reaches the eligible receipt within the SAME invocation, not merely across
+  repeated calls.
+- The repository-level mock in this test file
+  (`buildHarness`'s `findExpiredDialogueSnapshotPurgeReceipts`) was extended to
+  honor `limit` and `cursor` with the same ordering/tuple-comparison semantics
+  as the real SQL, so this test exercises the actual pagination contract the
+  service now depends on, not an unrelated simplified stub.
+- Not independently reproduced against the real PostgreSQL schema/driver on
+  this VM (no local PG); the hosted `unattended-voice-postgres.integration.test.ts`
+  suite does not yet have a dedicated held-page-starvation case at this
+  round's `write_scopes` (adding one was judged lower priority than closing
+  the defect itself within this round, given the unit-level repository mock
+  already exercises the identical SQL shape/ordering this fix adds). This is
+  an explicit gap, not a claimed pass.
+
+### Verification (this round, against the restored fix)
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts
+   tests/security/idempotency-regression-guard.test.ts
+   --exclude tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts
+   --maxWorkers=1 --no-cache`: exit 0, 36 files / **672** tests (671 Round-31
+   baseline + 1 new: "pages past a held run ..."; the pre-existing
+   "rejects a write at a version whose purge receipt has since been
+   governed-retired" test was edited in place to assert the corrected code,
+   not added), 0 skips, ~30s. `DATABASE_URL`/`TEST_DATABASE_URL`/`VOICE_DATABASE_URL`
+   confirmed unset in this shell. Listener-bearing `session-binding-resolution.test.ts`
+   NOT run locally, same as every prior round.
+2. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+   packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003
+   tests/unit/uv-exec-007.test.ts tests/integration/unattended-voice-postgres.integration.test.ts
+   apps/api/tests/integration/uv-exec-002.integration.test.ts --max-warnings=0`: exit 0.
+3. `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: exit 2 (13
+   errors), all 13 confirmed the SAME pre-existing cross-worktree `ApiClient`
+   identity errors in `tests/unit/fleet-partner-list-envelope.test.ts` and
+   `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+   every prior round already recorded (grepped the full error list; those are
+   the only two filenames present). Zero errors in any file this round
+   touched. NOT a local typecheck pass; no dependency install/build performed.
+4. `git diff --check 06ff3865d HEAD`: exit 0 (clean), confirmed both before
+   and after the stash-revert-confirm-restore-drop cycle above.
+5. No product/browser/DB/Compose servers, `playwright`, package
+   installation/builds, predecessor-candidate execution, or mutation of any
+   file outside this task's `write_scopes` were performed this round. No
+   `git merge`/`rebase`/`reset`/force-push was used; this round's changes are
+   ordinary edits on the existing task branch plus the push-apply-drop `git
+   stash` reproduction cycle documented above (never a bare `git
+   stash`/`git stash pop`).
+6. Hosted CI and an independent reviewer re-review on this round's own
+   `CANDIDATE_SHA` (to be captured at handoff) are both pending at the time of
+   this writing and will be reported separately by the candidate lifecycle,
+   never fabricated here.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path` / `authority_epoch_consent_fences`: the
+  history-unavailable write-response misclassification is fixed -- a retired
+  receipt's key now surfaces as `VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE`
+  (ambiguous, reconciled) rather than `VOICE_DIALOGUE_SNAPSHOT_VOIDED`
+  (confirmed rejection), agreeing with `resolveDialogueSnapshotOutcome`'s
+  `accepted: "unknown"` for the identical identity. Every previously-confirmed
+  repair through Round-31 is preserved per the full scoped regression
+  (672/672 passing, superset of the 671 Round-31 baseline).
+- `precise_unimplemented_and_external_boundaries`: the held-page starvation is
+  fixed via keyset pagination that provably advances past a held run within
+  one invocation (unit-level proof above); the real-PG integration-level proof
+  for this specific pagination behavior remains an open gap, explicitly
+  recorded rather than claimed. The Round-31 evidence-correction instruction
+  (do not overstate harness-failure-only cases as behavioral reproductions) is
+  followed in this round's own reproduction methodology above: both new tests
+  were shown failing against genuinely-reverted production code (never a
+  pre-existing fixture/harness error), then passing once restored.
+- `same_sha_review_ci`: not claimed by this round. This round's own
+  vitest/eslint/typecheck evidence is above; hosted CI and an independent
+  reviewer re-review on this round's own `CANDIDATE_SHA` are both pending and
+  will be reported separately by the candidate lifecycle, never fabricated
+  here.
+
+Per Guide §0.7: the two findings this reopen named are each fixed with real
+production-path code (never a test-only or mock-only patch), each with its own
+before/after-proven regression test at the exact seam the reopen's own
+static-evidence/probe exercised (confirmed failing against genuinely-reverted
+production code, then passing once restored, per "Reproduction" above). No
+merge/deploy/live-provider claim is made by this section; those are recorded
+separately by the candidate lifecycle once CI and independent review land on
+this round's own `CANDIDATE_SHA`.

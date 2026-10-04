@@ -252,6 +252,24 @@ export type DialogueSnapshotPurgeReceiptRow = {
   purgedAt: string;
 };
 
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+ * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z): keyset
+ * cursor for `findExpiredDialogueSnapshotPurgeReceipts`'s stable
+ * `(purged_at, voice_session_id, session_version)` ordering. A plain
+ * offset/limit page re-reads the SAME oldest rows every call when the
+ * legally-held rows at the front of the ordering are never deleted -- this
+ * cursor instead advances past the LAST row the caller examined
+ * regardless of whether that row was held, purged, or skipped, so a later
+ * unheld receipt behind a held run is reachable on the very next page
+ * within the same sweep.
+ */
+export type DialogueSnapshotPurgeReceiptCursor = {
+  purgedAt: string;
+  voiceSessionId: string;
+  sessionVersion: number;
+};
+
 type VoiceDialogueSnapshotPurgeReceiptRow = QueryResultRow & {
   voice_session_id: string;
   session_version: number;
@@ -1100,14 +1118,30 @@ export class VoiceSessionRepository {
    * a new registered family) for that service to run through the SAME
    * legal-hold-aware check every other evidence family's purge already
    * uses before this repository ever deletes anything.
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+   * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z): `cursor`
+   * (see `DialogueSnapshotPurgeReceiptCursor`'s own doc) is an optional
+   * keyset bound -- when supplied, only rows STRICTLY after it in the
+   * `(purged_at, voice_session_id, session_version)` ordering are
+   * returned. Without one, this still starts from the oldest eligible row
+   * (unchanged for a caller with no need to page past a held run).
    */
   async findExpiredDialogueSnapshotPurgeReceipts(
     purgedBefore: string,
     limit = 200,
+    cursor?: DialogueSnapshotPurgeReceiptCursor,
     executor?: VoiceQueryExecutor,
   ): Promise<DialogueSnapshotPurgeReceiptRow[]> {
     if (!this.isEnabled()) {
       return [];
+    }
+    const params: unknown[] = [purgedBefore, limit];
+    let cursorClause = "";
+    if (cursor) {
+      params.push(cursor.purgedAt, cursor.voiceSessionId, cursor.sessionVersion);
+      cursorClause =
+        "AND (purged_at, voice_session_id, session_version) > ($3, $4, $5)";
     }
     const result = await (
       executor ?? this.requireDatabase()
@@ -1115,10 +1149,11 @@ export class VoiceSessionRepository {
       `
         SELECT * FROM voice.dialogue_snapshot_purge_receipt
         WHERE purged_at <= $1
-        ORDER BY purged_at ASC
+        ${cursorClause}
+        ORDER BY purged_at ASC, voice_session_id ASC, session_version ASC
         LIMIT $2
       `,
-      [purgedBefore, limit],
+      params,
     );
     return result.rows.map(mapDialogueSnapshotPurgeReceiptRow);
   }

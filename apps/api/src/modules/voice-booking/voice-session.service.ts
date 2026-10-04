@@ -15,6 +15,7 @@ import type {
 import {
   VoiceSessionRepository,
   DialogueSnapshotPurgeReceiptConflictError,
+  type DialogueSnapshotPurgeReceiptCursor,
   type DialogueSnapshotRow,
   type SessionControlPatch,
   type VoiceQueryExecutor,
@@ -81,6 +82,23 @@ export type InputResolution = "relevant" | "irrelevant";
  * a caller can never CAS-write an invariant-violating jump (e.g.
  * `collecting` -> `awaiting_dispatch`).
  */
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+ * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z): per-page size
+ * for `purgeExpiredDialogueSnapshotPurgeReceipts`'s keyset-paginated scan
+ * -- see that method's own doc for why a single page is never enough on
+ * its own.
+ */
+const PURGE_RECEIPT_SCAN_PAGE_LIMIT = 200;
+
+/**
+ * Safety bound on how many pages `purgeExpiredDialogueSnapshotPurgeReceipts`
+ * will walk in a single invocation (200 * 50 = 10,000 receipts) -- not a
+ * new starvation point, since the next invocation simply resumes the scan
+ * from the oldest eligible row again.
+ */
+const MAX_PURGE_RECEIPT_SCAN_PAGES = 50;
+
 const DIALOG_STATE_TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
   admitted: ["greeting", "handoff_pending", "closed"],
   greeting: ["collecting", "handoff_pending", "closed"],
@@ -1254,25 +1272,44 @@ export class VoiceSessionService {
       // must never land after that, or the exact silent-content-loss race
       // that fence exists to close would just move here instead.
       //
-      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
-      // lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z): also
-      // checks `dialogueSnapshotHistoryUnavailableFloor` -- once
-      // `purgeExpiredDialogueSnapshotPurgeReceipts` has retired an aged
-      // receipt, `insertDialogueSnapshot`'s own `WHERE NOT EXISTS` guard
-      // against that now-deleted receipt would otherwise no longer block a
-      // fresh insert at this exact key. This floor is what keeps that
-      // already-accepted-then-purged-then-receipt-retired revision
-      // permanently non-reusable even after its receipt is gone.
-      if (
-        Math.max(
-          session.dialogueSnapshotFenceVersion ?? 0,
-          session.dialogueSnapshotHistoryUnavailableFloor ?? 0,
-        ) >= command.expectedSessionVersion
-      ) {
+      if ((session.dialogueSnapshotFenceVersion ?? 0) >= command.expectedSessionVersion) {
         throw new ApiRequestError(
           409,
           "VOICE_DIALOGUE_SNAPSHOT_VOIDED",
           "This exact content commit was already authoritatively voided by a later reconciliation; retry from a fresh turn.",
+        );
+      }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
+      // history-unavailable write fence (Codex reopen, canonical
+      // 2026-10-04T03:06:22Z, "history-unavailable write response falsely
+      // becomes definitive non-acceptance"): `dialogueSnapshotHistoryUnavailableFloor`
+      // used to share the VOIDED branch above via `Math.max`, but that
+      // floor means something categorically different from the real fence
+      // -- it only marks that `purgeExpiredDialogueSnapshotPurgeReceipts`
+      // retired the ONE receipt that could have proven this exact version
+      // was already accepted (see that method's own doc), never that a
+      // later reconciliation determined non-acceptance. The genuine fence
+      // above still blocks a fresh insert here (an already-deleted receipt
+      // would otherwise no longer stop `insertDialogueSnapshot`'s own
+      // `WHERE NOT EXISTS` guard from readmitting this exact key), but the
+      // caller must never be told this was authoritatively voided --
+      // `resolveDialogueSnapshotOutcome` reports the SAME identity as
+      // `accepted: "unknown"` (see that method's own doc), and this must
+      // stay the ambiguous twin of that: a DIFFERENT code than
+      // `VOICE_DIALOGUE_SNAPSHOT_VOIDED`, deliberately left out of the
+      // worker's `DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES` whitelist
+      // so `createTrustedDialoguePersistPort`'s catch block reconciles it
+      // via `resolveDialogueSnapshotOutcome` instead of short-circuiting
+      // straight to a confirmed rejection (the same ambiguous treatment
+      // `VOICE_DIALOGUE_SNAPSHOT_PURGED` above already gets).
+      if (
+        (session.dialogueSnapshotHistoryUnavailableFloor ?? 0) >=
+        command.expectedSessionVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+          "The governed acceptance history for this exact version has aged out; its outcome is unknown, not confirmed voided.",
         );
       }
 
@@ -1812,6 +1849,26 @@ export class VoiceSessionService {
    * `resolveDialogueSnapshotOutcome` can still answer `accepted: "unknown"`
    * (history genuinely unavailable) rather than falsely reporting
    * definitive non-acceptance once this receipt is gone.
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+   * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z): a single
+   * fixed-size page, re-fetched from the same oldest-first start every
+   * call, never advances past a run of legally-held receipts at the front
+   * of the ordering -- any unheld receipt behind that run is skipped
+   * forever regardless of how many times this method runs. This pages
+   * through `findExpiredDialogueSnapshotPurgeReceipts` with
+   * `DialogueSnapshotPurgeReceiptCursor`, advancing past the LAST row
+   * examined on every page (held, purged, or dry-run-eligible alike)
+   * until a page comes back short of the limit (backlog exhausted) or
+   * `MAX_PURGE_RECEIPT_SCAN_PAGES` is hit (a safety bound, not a new
+   * starvation point -- the NEXT invocation resumes from fresh cursor
+   * `undefined`, re-scanning from the oldest row again, since this
+   * governed scan has no cross-call cursor of its own to resume from;
+   * only increasing this bound, never shrinking the per-page limit, would
+   * be needed for a backlog deep enough to hit it). Merely raising the
+   * per-page limit without this loop would not fix the defect: the held
+   * run at the front would still occupy however large that single page
+   * is.
    */
   async purgeExpiredDialogueSnapshotPurgeReceipts(
     operatorId: string,
@@ -1830,50 +1887,70 @@ export class VoiceSessionService {
     const purgedBefore = new Date(
       Date.now() - policy.hotRetentionDays * 24 * 60 * 60 * 1000,
     ).toISOString();
-    const candidates =
-      await this.repository.findExpiredDialogueSnapshotPurgeReceipts(
-        purgedBefore,
-      );
 
     const results: PurgeExecutionReport["results"] = [];
+    let totalExamined = 0;
     let purgedCount = 0;
     let skippedHeldCount = 0;
     let deletedCount = 0;
-    for (const receipt of candidates) {
-      if (
-        this.retentionService.isSubjectUnderHold(
-          "voice_booking_evidence",
-          receipt.voiceSessionId,
-        )
-      ) {
-        skippedHeldCount++;
-        results.push({
-          subjectRef: receipt.voiceSessionId,
-          action: "skipped_held",
-          reason: `Record is under active legal hold for voice_booking_evidence:${receipt.voiceSessionId}`,
-        });
-        continue;
+    let cursor: DialogueSnapshotPurgeReceiptCursor | undefined;
+    for (let page = 0; page < MAX_PURGE_RECEIPT_SCAN_PAGES; page++) {
+      const candidates =
+        await this.repository.findExpiredDialogueSnapshotPurgeReceipts(
+          purgedBefore,
+          PURGE_RECEIPT_SCAN_PAGE_LIMIT,
+          cursor,
+        );
+      if (candidates.length === 0) {
+        break;
       }
-      if (dryRun) {
-        results.push({
-          subjectRef: receipt.voiceSessionId,
-          action: "eligible_to_purge",
-          reason: `Dry run: purge receipt past governed voice_booking_evidence retention (purged_at=${receipt.purgedAt}) with no legal hold.`,
-        });
-        continue;
+      for (const receipt of candidates) {
+        totalExamined++;
+        if (
+          this.retentionService.isSubjectUnderHold(
+            "voice_booking_evidence",
+            receipt.voiceSessionId,
+          )
+        ) {
+          skippedHeldCount++;
+          results.push({
+            subjectRef: receipt.voiceSessionId,
+            action: "skipped_held",
+            reason: `Record is under active legal hold for voice_booking_evidence:${receipt.voiceSessionId}`,
+          });
+          continue;
+        }
+        if (dryRun) {
+          results.push({
+            subjectRef: receipt.voiceSessionId,
+            action: "eligible_to_purge",
+            reason: `Dry run: purge receipt past governed voice_booking_evidence retention (purged_at=${receipt.purgedAt}) with no legal hold.`,
+          });
+          continue;
+        }
+        const retired =
+          await this.repository.retireDialogueSnapshotPurgeReceipt(
+            receipt.voiceSessionId,
+            receipt.sessionVersion,
+          );
+        if (retired) {
+          purgedCount++;
+          deletedCount++;
+          results.push({
+            subjectRef: receipt.voiceSessionId,
+            action: "purged",
+            reason: "Aged purge receipt retired in accordance with voice_booking_evidence retention policy; history-unavailable floor raised in the same transaction.",
+          });
+        }
       }
-      const retired = await this.repository.retireDialogueSnapshotPurgeReceipt(
-        receipt.voiceSessionId,
-        receipt.sessionVersion,
-      );
-      if (retired) {
-        purgedCount++;
-        deletedCount++;
-        results.push({
-          subjectRef: receipt.voiceSessionId,
-          action: "purged",
-          reason: "Aged purge receipt retired in accordance with voice_booking_evidence retention policy; history-unavailable floor raised in the same transaction.",
-        });
+      const last = candidates[candidates.length - 1]!;
+      cursor = {
+        purgedAt: last.purgedAt,
+        voiceSessionId: last.voiceSessionId,
+        sessionVersion: last.sessionVersion,
+      };
+      if (candidates.length < PURGE_RECEIPT_SCAN_PAGE_LIMIT) {
+        break;
       }
     }
 
@@ -1882,7 +1959,7 @@ export class VoiceSessionService {
       family: "voice_booking_evidence",
       mode: dryRun ? "dry-run" : "apply",
       retentionDays: policy.hotRetentionDays,
-      totalExamined: candidates.length,
+      totalExamined,
       purgedCount,
       skippedHeldCount,
       operatorId,

@@ -2977,8 +2977,17 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         floorAfterRetirement.rows[0].dialogue_snapshot_history_unavailable_floor,
       ).toBe(session!.sessionVersion);
 
-      // Once the receipt is gone, the history-unavailable floor still
-      // blocks reuse of this exact key against the real schema...
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
+      // history-unavailable write fence (Codex reopen, canonical
+      // 2026-10-04T03:06:22Z, "history-unavailable write response falsely
+      // becomes definitive non-acceptance"): once the receipt is gone, the
+      // history-unavailable floor still blocks reuse of this exact key
+      // against the real schema -- but this is `VOICE_DIALOGUE_SNAPSHOT_
+      // HISTORY_UNAVAILABLE`, NOT `VOICE_DIALOGUE_SNAPSHOT_VOIDED`: the
+      // governed metadata proof of acceptance aged out, which is genuinely
+      // unknown, never a confirmed non-acceptance. A prior version of this
+      // test asserted `VOICE_DIALOGUE_SNAPSHOT_VOIDED` here, which codified
+      // the wrong contract (see this method's own doc).
       await expect(
         service.persistDialogueSnapshot({
           voiceSessionId: f.request.voiceSessionId,
@@ -2991,7 +3000,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
           turnId: "turn-1",
           content: validContent,
         }),
-      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+      ).rejects.toMatchObject({
+        code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+      });
 
       // ...and resolving it now reports the honestly-indeterminate
       // `accepted: "unknown"` -- never a confirmed non-acceptance, since
