@@ -145,12 +145,20 @@ const DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES = new Set([
  * Resolves to `{ resolved: false }` -- never throws -- once the bounded
  * attempts are exhausted with no correlating response found (Codex
  * reopen, canonical 2026-10-03T22:41:06Z, "pre-store failure permanently
- * wedges the attachment"): exhausting the bounded window is itself the
+ * wedges the attachment"): exhausting the bounded window used to BE the
  * authoritative "this write never landed" determination, so when
- * `attachmentState` is supplied, its marker is cleared in that case too --
+ * `attachmentState` is supplied, its marker was cleared in that case too --
  * a PRIOR version of this function left it set forever, which permanently
  * wedged every later turn's own top-of-call gate on a write already known
  * to have never been stored.
+ *
+ * Correction (Codex reopen, canonical 2026-10-03T23:31:57Z, "retry
+ * exhaustion is not authoritative non-acceptance"): "exhausting the bounded
+ * window is itself the authoritative determination" above was itself
+ * wrong -- it is not, as the `"unknown"` branch below and its own doc now
+ * explain; `resolved: false` only follows the ADDITIONAL atomic server-side
+ * adjudication call that bounded-retry exhaustion now falls back to, never
+ * from exhaustion alone.
  */
 /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
  * canonical 2026-10-03T21:53:56Z, "new Promise field crashes cloning
@@ -171,13 +179,19 @@ const DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES = new Set([
  * the attachment"): `reconcileUnresolvedCommit` used to THROW once its
  * bounded retries exhausted with no correlating snapshot found, leaving
  * `unresolvedCommit` set regardless -- but exhausting the bounded window
- * with nothing found is itself the authoritative "this write never
- * landed" determination (SD never offers a fourth way to learn the
- * outcome of an already-lost acknowledgement). Returning a tagged result
- * instead of throwing lets both call sites tell "a prior write WAS
- * reconciled onto the attachment" apart from "bounded retries exhausted,
- * confirmed never stored" without conflating either with an unrelated
- * secondary failure. */
+ * with nothing found was then treated as itself the authoritative "this
+ * write never landed" determination (corrected below: it is not). Returning
+ * a tagged result instead of throwing lets both call sites tell "a prior
+ * write WAS reconciled onto the attachment" apart from "bounded retries
+ * exhausted, outcome still genuinely open" without conflating either with
+ * an unrelated secondary failure.
+ *
+ * Correction (Codex reopen, canonical 2026-10-03T23:31:57Z, "retry
+ * exhaustion is not authoritative non-acceptance"): SD in fact does offer a
+ * fourth way to learn the outcome of an already-lost acknowledgement --
+ * `VoiceSessionService.resolveDialogueSnapshotOutcome`'s atomic check-then-
+ * fence, added below. Bounded-retry exhaustion alone now yields
+ * `{ resolved: "unknown" }`, never `{ resolved: false }`. */
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
  * canonical 2026-10-03T23:31:57Z, "retry exhaustion is not authoritative
@@ -195,13 +209,159 @@ const DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES = new Set([
  * reconciliation again instead of wrongly admitting new content over a
  * write whose fate is still genuinely open.
  */
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist adjudication-response
+ * validation (Codex reopen, canonical 2026-10-04T00:26:49Z, "an accepted
+ * response mutates the REAL attachment and clears its marker BEFORE
+ * validating identity/content/retention"): `resolved: "expired"` is a
+ * fourth, distinct outcome from the three above -- the atomic adjudication
+ * call authoritatively confirms this exact write WAS accepted (history/
+ * fencing is real, never a false rollback report), but its content has
+ * already passed its own retention window server-side and is therefore not
+ * returned as restorable (see `VoiceSessionService.
+ * resolveDialogueSnapshotOutcome`'s own doc on the expired-row case). Like
+ * `false`, this clears `unresolvedCommit` (the outcome IS known, so a later
+ * call must not keep retrying this same reconciliation) but, unlike `true`,
+ * never installs any content onto the attachment -- there is none to
+ * install.
+ */
 type UnresolvedCommitReconciliation =
   | {
       readonly resolved: true;
       readonly snapshot: PersistDialogueSnapshotResult["snapshot"];
     }
   | { readonly resolved: false }
-  | { readonly resolved: "unknown" };
+  | { readonly resolved: "unknown" }
+  | { readonly resolved: "expired" };
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist adjudication-response
+ * validation (Codex reopen, canonical 2026-10-04T00:26:49Z): `VoiceApiClient
+ * .request` returns `response.json()` cast to its declared return type with
+ * NO runtime validation -- a malformed, empty, or otherwise-shaped envelope
+ * from `resolveDialogueSnapshotOutcome` type-checks at compile time but can
+ * carry anything at runtime (a proxy/intermediary rewriting the body, a
+ * future/older apps/api version, a corrupted response). The previous
+ * version of this adjudication branch trusted `outcome.accepted` as a bare
+ * truthy/falsy check and, on `accepted: true`, installed `outcome.snapshot`
+ * onto the real attachment with NO correlation check at all -- an
+ * `{accepted: true}` response for a completely different session/version/
+ * turn would have been silently installed as if it were this exact pending
+ * write's own content, and a malformed `{}` body (falsy `accepted`) would
+ * have been treated as a confirmed, fence-worthy rejection rather than the
+ * genuinely-unknown case it actually is. Every branch here applies the SAME
+ * correlation discipline `reconcileAmbiguousCommit`'s bounded polling above
+ * already does for its own response shape -- never installs a mismatched
+ * candidate, never fences on an uninterpretable body.
+ */
+function isWellFormedSnapshotRecord(
+  value: unknown,
+): value is PersistDialogueSnapshotResult["snapshot"] {
+  if (value == null || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.snapshotId === "string" &&
+    typeof v.voiceSessionId === "string" &&
+    typeof v.sessionVersion === "number" &&
+    typeof v.inputEpoch === "number" &&
+    typeof v.mediaEpoch === "number" &&
+    typeof v.turnId === "string" &&
+    typeof v.createdAt === "string" &&
+    typeof v.retentionExpiresAt === "string" &&
+    v.content != null &&
+    typeof v.content === "object"
+  );
+}
+
+function resolveOutcomeIdentityCorrelates(
+  candidate: {
+    voiceSessionId: unknown;
+    sessionVersion: unknown;
+    inputEpoch: unknown;
+    mediaEpoch: unknown;
+    turnId: unknown;
+  },
+  voiceSessionId: string,
+  pending: {
+    expectedSessionVersion: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+  },
+): boolean {
+  return (
+    candidate.voiceSessionId === voiceSessionId &&
+    candidate.sessionVersion === pending.expectedSessionVersion &&
+    candidate.inputEpoch === pending.inputEpoch &&
+    candidate.mediaEpoch === pending.mediaEpoch &&
+    candidate.turnId === pending.turnId
+  );
+}
+
+type ResolveOutcomeVerdict =
+  | {
+      readonly kind: "accepted";
+      readonly snapshot: PersistDialogueSnapshotResult["snapshot"];
+    }
+  | { readonly kind: "expired" }
+  | { readonly kind: "rejected" }
+  | { readonly kind: "unknown" };
+
+/**
+ * Runtime-validates the complete discriminated verdict BEFORE any caller
+ * ever touches live attachment state -- see this function's own doc above.
+ * `"unknown"` is the safe default for anything this cannot positively
+ * classify: a missing/non-boolean `accepted`, an `accepted: true` whose
+ * `snapshot` is malformed or does not correlate with `pending` (foreign
+ * session/version/input/media/turn, or already past its own retention
+ * window), or an `expired` verdict whose own identity fields do not
+ * correlate. Only `accepted === false` (exactly, never merely falsy) is
+ * ever treated as `"rejected"`.
+ */
+function classifyResolveOutcome(
+  outcome: unknown,
+  voiceSessionId: string,
+  pending: {
+    expectedSessionVersion: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+  },
+): ResolveOutcomeVerdict {
+  if (outcome == null || typeof outcome !== "object") {
+    return { kind: "unknown" };
+  }
+  const o = outcome as Record<string, unknown>;
+  if (o.accepted === false) {
+    return { kind: "rejected" };
+  }
+  if (o.accepted !== true) {
+    return { kind: "unknown" };
+  }
+  if (o.expired === true) {
+    return resolveOutcomeIdentityCorrelates(
+      o as {
+        voiceSessionId: unknown;
+        sessionVersion: unknown;
+        inputEpoch: unknown;
+        mediaEpoch: unknown;
+        turnId: unknown;
+      },
+      voiceSessionId,
+      pending,
+    )
+      ? { kind: "expired" }
+      : { kind: "unknown" };
+  }
+  if (!isWellFormedSnapshotRecord(o.snapshot)) {
+    return { kind: "unknown" };
+  }
+  const candidate = o.snapshot;
+  const correlates =
+    resolveOutcomeIdentityCorrelates(candidate, voiceSessionId, pending) &&
+    new Date(candidate.retentionExpiresAt).getTime() > Date.now();
+  return correlates ? { kind: "accepted", snapshot: candidate } : { kind: "unknown" };
+}
 
 const unresolvedCommitRecoveries = new WeakMap<
   VoiceDialogueState,
@@ -263,7 +423,7 @@ async function reconcileUnresolvedCommit(
     // polling can never give: an atomic check-then-fence that is either
     // already known accepted, or is now durably voided from ever landing.
     const atomic = recoverySignal();
-    let outcome: Awaited<ReturnType<VoiceApiClient["resolveDialogueSnapshotOutcome"]>>;
+    let outcome: unknown;
     try {
       outcome = await client.resolveDialogueSnapshotOutcome(
         voiceSessionId,
@@ -280,8 +440,16 @@ async function reconcileUnresolvedCommit(
     } finally {
       atomic.cancel();
     }
-    if (outcome.accepted) {
-      const candidate = outcome.snapshot;
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist adjudication-
+    // response validation (Codex reopen, canonical 2026-10-04T00:26:49Z):
+    // see `classifyResolveOutcome`'s own doc -- a malformed or uncorrelated
+    // response must never mutate the real attachment or clear its marker.
+    const verdict = classifyResolveOutcome(outcome, voiceSessionId, pending);
+    if (verdict.kind === "unknown") {
+      return { resolved: "unknown" };
+    }
+    if (verdict.kind === "accepted") {
+      const candidate = verdict.snapshot;
       if (attachmentState) {
         if (
           attachmentState.committedSessionVersion === null ||
@@ -295,6 +463,16 @@ async function reconcileUnresolvedCommit(
         attachmentState.unresolvedCommit = null;
       }
       return { resolved: true, snapshot: candidate };
+    }
+    if (verdict.kind === "expired") {
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve expired-content
+      // resurrection (Codex reopen, canonical 2026-10-04T00:26:49Z): this
+      // exact write WAS accepted -- never report it as voided/rolled back
+      // -- but its content has already passed retention and must never be
+      // installed as live/restorable state. Clear the marker (the outcome
+      // is known) without touching `committedSessionVersion`/content.
+      if (attachmentState) attachmentState.unresolvedCommit = null;
+      return { resolved: "expired" };
     }
     // Confirmed non-acceptance: the server has now durably fenced this
     // exact version (see `resolveDialogueSnapshotOutcome`'s own doc), so a
@@ -567,6 +745,11 @@ export function createTrustedDialoguePersistPort(
         // the marker, and nothing was ever actually committed, so this
         // call's own submission may proceed normally below instead of
         // being blocked forever behind a write that never landed.
+        // `resolved: "expired"` (R4-resolve expired-content resurrection,
+        // canonical 2026-10-04T00:26:49Z) falls through here too: the
+        // marker is cleared the same way, since the prior write's outcome
+        // IS known (accepted, just no longer restorable) and must not keep
+        // wedging this attachment's own top-of-call gate.
       }
       // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist overlapping
       // recovery (Codex reopen, canonical 2026-10-03T22:41:06Z, "a
@@ -868,11 +1051,15 @@ export function createTrustedDialoguePersistPort(
           // `resolved: "unknown"` means the outcome is still genuinely
           // open (bounded polling AND the adjudication call both failed to
           // settle it) -- `unresolvedCommit` stays set so a later call
-          // retries this same reconciliation. Either way, THIS call's own
-          // externally-visible error is unchanged from before this fix:
-          // surface the ORIGINAL write failure, not an internal
-          // retry-exhaustion message, unless THIS exact call's own
-          // `signal` is what aborted.
+          // retries this same reconciliation. `resolved: "expired"`
+          // (R4-resolve expired-content resurrection, canonical
+          // 2026-10-04T00:26:49Z) is a third: THIS exact write was
+          // accepted, but its content is already past retention, so there
+          // is nothing to install here either. In every one of these three
+          // cases THIS call's own externally-visible error is unchanged
+          // from before this fix: surface the ORIGINAL write failure, not
+          // an internal retry-exhaustion message, unless THIS exact call's
+          // own `signal` is what aborted.
           if (signal?.aborted) {
             throw new Error(
               "voice_trusted_persist_aborted: request was aborted while awaiting the dialogue-snapshot response.",

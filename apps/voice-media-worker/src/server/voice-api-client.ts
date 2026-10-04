@@ -126,10 +126,31 @@ export interface ResolveDialogueSnapshotOutcomeCommand {
   turnId: string;
 }
 
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve expired-content
+ * resurrection (Codex reopen, canonical 2026-10-04T00:26:49Z): a third
+ * shape, distinct from both `accepted: true` (with restorable content) and
+ * `accepted: false` (durably voided) -- the exact pending write WAS
+ * accepted (never falsely reported as rolled back), but its content has
+ * already passed its own retention window server-side and is therefore not
+ * returned as restorable/live content at all. Carries the same identifying
+ * fields as a normal accepted snapshot (so the worker can still verify this
+ * is genuinely an answer about ITS OWN pending write) but never `content`.
+ */
 export type ResolveDialogueSnapshotOutcomeResult =
   | {
       accepted: true;
       snapshot: PersistDialogueSnapshotResult["snapshot"];
+    }
+  | {
+      accepted: true;
+      expired: true;
+      voiceSessionId: string;
+      sessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      retentionExpiresAt: string;
     }
   | { accepted: false };
 

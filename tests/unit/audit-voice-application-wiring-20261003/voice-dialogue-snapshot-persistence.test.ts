@@ -497,20 +497,41 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
    * nothing correlating found -- see that function's own doc.
    */
 
+  function validResolveCommand(
+    overrides: Partial<{
+      voiceSessionId: string;
+      expectedSessionVersion: number;
+      expectedLeaseEpoch: number;
+      expectedResourceScopeId: string;
+      expectedRouteProfileVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+    }> = {},
+  ) {
+    return {
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "turn-xyz",
+      ...overrides,
+    };
+  }
+
   it("reports accepted:true with the real decrypted content when the exact write already landed", async () => {
     const { service } = buildHarness({ appliedMediaEpoch: 2 });
     const persisted = await service.persistDialogueSnapshot(validCommand());
 
-    const outcome = await service.resolveDialogueSnapshotOutcome({
-      voiceSessionId: VOICE_SESSION_ID,
-      expectedSessionVersion: 5,
-      inputEpoch: 3,
-      mediaEpoch: 2,
-      turnId: "turn-xyz",
-    });
+    const outcome = await service.resolveDialogueSnapshotOutcome(
+      validResolveCommand(),
+    );
 
     expect(outcome.accepted).toBe(true);
-    if (outcome.accepted) {
+    if (outcome.accepted && !("expired" in outcome)) {
       expect(outcome.snapshot.snapshotId).toBe(persisted.snapshot.snapshotId);
       expect(outcome.snapshot.content).toEqual(validContent);
     }
@@ -519,13 +540,9 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
   it("reports accepted:false and durably fences this exact version when nothing ever landed -- a late arrival for the SAME version is then rejected", async () => {
     const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
 
-    const outcome = await service.resolveDialogueSnapshotOutcome({
-      voiceSessionId: VOICE_SESSION_ID,
-      expectedSessionVersion: 5,
-      inputEpoch: 3,
-      mediaEpoch: 2,
-      turnId: "turn-xyz",
-    });
+    const outcome = await service.resolveDialogueSnapshotOutcome(
+      validResolveCommand(),
+    );
 
     expect(outcome.accepted).toBe(false);
     expect(repository.raiseDialogueSnapshotFence).toHaveBeenCalledWith(
@@ -543,7 +560,7 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
     ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
   });
 
-  it("does not require sessionVersion/routeProfileVersion to still be current -- that is exactly the case this call exists to adjudicate", async () => {
+  it("does not require sessionVersion to still be current -- that is exactly the case this call exists to adjudicate (authorized reconciliation of an older version)", async () => {
     const { service, session } = buildHarness({ appliedMediaEpoch: 2 });
     // Simulate the session having moved on well past the pending write's
     // own version, the way three successor turns would in the real
@@ -551,13 +568,7 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
     session.sessionVersion = 20;
 
     await expect(
-      service.resolveDialogueSnapshotOutcome({
-        voiceSessionId: VOICE_SESSION_ID,
-        expectedSessionVersion: 5,
-        inputEpoch: 3,
-        mediaEpoch: 2,
-        turnId: "turn-xyz",
-      }),
+      service.resolveDialogueSnapshotOutcome(validResolveCommand()),
     ).resolves.toMatchObject({ accepted: false });
   });
 
@@ -567,16 +578,119 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
       validCommand({ turnId: "a-different-turn" }),
     );
 
-    const outcome = await service.resolveDialogueSnapshotOutcome({
-      voiceSessionId: VOICE_SESSION_ID,
-      expectedSessionVersion: 5,
-      inputEpoch: 3,
-      mediaEpoch: 2,
-      turnId: "turn-xyz",
-    });
+    const outcome = await service.resolveDialogueSnapshotOutcome(
+      validResolveCommand(),
+    );
 
     expect(outcome.accepted).toBe(false);
     expect(repository.raiseDialogueSnapshotFence).toHaveBeenCalled();
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve server mutation
+   * authority and version bounds (Codex reopen, canonical
+   * 2026-10-04T00:26:49Z): "old-version adjudication does not justify
+   * fencing future writes." Before this fix, an `expectedSessionVersion`
+   * the session has never reached was still durably fenced, permanently
+   * blocking every later integer version once the session actually
+   * advanced to it.
+   */
+  it("rejects a future/never-attempted session_version without ever raising the fence -- a later real write at the current version still succeeds", async () => {
+    const { service, repository, session } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    expect(session.sessionVersion).toBe(5);
+
+    await expect(
+      service.resolveDialogueSnapshotOutcome(
+        validResolveCommand({
+          expectedSessionVersion: 2147483647,
+          inputEpoch: 999,
+          mediaEpoch: 999,
+          turnId: "turn-never-attempted",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_FUTURE_VERSION" });
+    expect(repository.raiseDialogueSnapshotFence).not.toHaveBeenCalled();
+
+    // The fence must never have been raised for the future version -- a
+    // genuine write at the session's own CURRENT version is unaffected.
+    await expect(
+      service.persistDialogueSnapshot(validCommand()),
+    ).resolves.toMatchObject({ deduped: false });
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve server mutation
+   * authority and version bounds (Codex reopen, canonical
+   * 2026-10-04T00:26:49Z): "No comparison is possible because the
+   * controller did not pass the verified authority through." A capability
+   * whose scope/route/lease has since moved on must never be allowed to
+   * adjudicate, raise, or read this session's fence.
+   */
+  it("rejects adjudication under a stale capability authority (lease no longer matches the locked session) without raising the fence or disclosing content", async () => {
+    const { service, repository, session } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    await service.persistDialogueSnapshot(validCommand());
+    // Authority moved on underneath this capability (new lease/owner).
+    session.leaseEpoch = 2;
+
+    await expect(
+      service.resolveDialogueSnapshotOutcome(validResolveCommand()),
+    ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+    expect(repository.raiseDialogueSnapshotFence).not.toHaveBeenCalled();
+  });
+
+  it("rejects adjudication under a stale capability resourceScopeId/routeProfileVersion the same way", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+
+    await expect(
+      service.resolveDialogueSnapshotOutcome(
+        validResolveCommand({ expectedResourceScopeId: "foreign-scope" }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+    await expect(
+      service.resolveDialogueSnapshotOutcome(
+        validResolveCommand({ expectedRouteProfileVersion: 99 }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+    expect(repository.raiseDialogueSnapshotFence).not.toHaveBeenCalled();
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve expired-content
+   * resurrection (Codex reopen, canonical 2026-10-04T00:26:49Z): "historical
+   * acceptance metadata and permission to restore content are different
+   * facts." An accepted write whose content has already passed retention
+   * must report `accepted: true` (never falsely reported as voided) but
+   * must never decrypt/return the content itself, and must never raise the
+   * fence for a version that genuinely did land.
+   */
+  it("reports accepted:true, expired:true with no content when the exact write landed but has already passed retention -- never discloses expired content, never fences an accepted version", async () => {
+    const { service, repository, snapshots } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    const persisted = await service.persistDialogueSnapshot(validCommand());
+    const row = snapshots.find(
+      (s) => s.snapshotId === persisted.snapshot.snapshotId,
+    )!;
+    row.retentionExpiresAt = "2020-01-01T00:00:00.000Z";
+
+    const outcome = await service.resolveDialogueSnapshotOutcome(
+      validResolveCommand(),
+    );
+
+    expect(outcome.accepted).toBe(true);
+    expect(outcome).toMatchObject({
+      accepted: true,
+      expired: true,
+      voiceSessionId: VOICE_SESSION_ID,
+      sessionVersion: 5,
+      turnId: "turn-xyz",
+    });
+    expect(outcome).not.toHaveProperty("snapshot");
+    expect(repository.raiseDialogueSnapshotFence).not.toHaveBeenCalled();
   });
 });
 

@@ -276,7 +276,19 @@ interface TurnSession {
    * short-circuits to a no-op while this is `true`, since the single
    * outstanding drain's own `while` loop already keeps consuming
    * `pendingControlEvents` from the front until empty -- any entry a
-   * later call just enqueued is already covered by it. */
+   * later call enqueues WHILE the `while` loop is still running is already
+   * covered by it.
+   *
+   * Correction (Codex reopen, canonical 2026-10-04T00:26:49Z, "lost wakeup
+   * after successful drain"): an arrival landing in the gap AFTER the
+   * `while` loop exits (queue observed empty) but BEFORE the chained
+   * task's own promise settlement actually clears this flag is NOT
+   * covered by the loop that already exited -- a prior version of the
+   * success continuation only cleared this flag with no backlog recheck,
+   * silently stranding any such arrival with no running/scheduled owner.
+   * `flushControlEventBacklog`'s own success continuation now re-checks
+   * the backlog in the same tick it clears this flag; see that method's
+   * own doc. */
   controlEventDrainInFlight?: boolean;
   /** The authoritative, server-durable `inputEpoch` the most recent
    * `recordAuthoritativeControlEvent` call resolved -- distinct from
@@ -1239,6 +1251,31 @@ export class VoiceCallTurnCoordinator {
     }).then(
       () => {
         turnSession.controlEventDrainInFlight = false;
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control lost wakeup
+        // after successful drain (Codex reopen, canonical
+        // 2026-10-04T00:26:49Z): an arrival between the chained task's own
+        // `while` loop above exiting (queue observed empty) and THIS
+        // continuation actually running -- the Promise microtask-
+        // settlement window `chainControlEvent`'s own chaining imposes --
+        // finds `controlEventDrainInFlight` still `true` and returns
+        // immediately at the top of this method with no owner left to
+        // drain it. A speech-start with no later final/event could then
+        // remain unreported indefinitely despite a healthy transport, even
+        // though the drain that "missed" it had already completed
+        // successfully. Reacquire ownership atomically with this backlog
+        // recheck, in the SAME synchronous continuation that clears the
+        // flag, so every such arrival is covered by a fresh drain/retry
+        // owner instead of being silently stranded. Bounded the same way
+        // every other call to this method is: at most one more drain task
+        // is chained here, which itself re-checks for further arrivals
+        // during ITS OWN settlement window.
+        if (
+          turnSession.pendingControlEvents.length > 0 &&
+          !turnSession.releaseAbort.signal.aborted &&
+          !turnSession.restoreFailed
+        ) {
+          this.flushControlEventBacklog(turnSession, binding);
+        }
       },
       (error) => {
         turnSession.controlEventDrainInFlight = false;

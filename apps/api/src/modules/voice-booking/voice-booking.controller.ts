@@ -580,6 +580,19 @@ export class VoiceBookingController {
    * above, but deliberately does not require `expectedSessionVersion` to
    * still be the session's current revision -- that is exactly the case
    * this call exists to adjudicate.
+   *
+   * Correction (Codex reopen, canonical 2026-10-04T00:26:49Z, "no under-lock
+   * capability authority checks or upper bound against the current session
+   * version exist"): this route used to forward only the caller's own body
+   * identifiers, never the authenticated capability's own
+   * `resourceScopeId`/`routeProfileVersion`/`leaseEpoch` -- unlike every
+   * other mutating route here (`resolveInput`, `events`,
+   * `persistDialogueSnapshot`), which always passes those through as the
+   * authoritative values a caller cannot override via its own request body.
+   * `VoiceSessionService.resolveDialogueSnapshotOutcome` re-verifies these
+   * under the SAME row lock it reads the session with, so a capability
+   * whose authority has since moved on (a new lease/handoff) can no longer
+   * silently raise/read the fence as if it still held the session.
    */
   @Post("sessions/:sessionId/dialogue-snapshot/resolve")
   @OpenRoute()
@@ -615,6 +628,9 @@ export class VoiceBookingController {
     const result = await voiceSessionService.resolveDialogueSnapshotOutcome({
       voiceSessionId: sessionId,
       expectedSessionVersion: body.expectedSessionVersion,
+      expectedLeaseEpoch: claims.leaseEpoch,
+      expectedResourceScopeId: claims.resourceScopeId,
+      expectedRouteProfileVersion: claims.routeProfileVersion,
       inputEpoch: body.inputEpoch,
       mediaEpoch: body.mediaEpoch,
       turnId: body.turnId,

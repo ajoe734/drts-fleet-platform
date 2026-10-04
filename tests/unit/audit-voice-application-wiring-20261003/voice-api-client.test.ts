@@ -2138,6 +2138,305 @@ describe("createTrustedDialoguePersistPort", () => {
     ).rejects.toThrow(/voice_trusted_persist_unresolved_commit_unknown/);
   });
 
+  it("[adjudication-response validation, Codex reopen canonical 2026-10-04T00:26:49Z] a malformed resolve response with no `accepted` field at all is UNKNOWN -- never installed, never a confirmed rejection", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        throw new TypeError("simulated lost acknowledgement");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot/resolve")) {
+        // Malformed/empty envelope -- no `accepted` field at all. Before
+        // this fix, a falsy `outcome.accepted` was treated as a confirmed,
+        // fence-worthy non-acceptance.
+        return jsonResponse(200, { data: {} });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+    const restoreFromSnapshotContent = vi.fn();
+
+    await expect(
+      port.persist(
+        {
+          toSnapshotContent: () => ({}),
+          restoreFromSnapshotContent,
+          committedSessionVersion: attachmentState.committedSessionVersion,
+        } as unknown as VoiceDialogueState,
+        request,
+        { attachmentState },
+      ),
+    ).rejects.toThrow(/simulated lost acknowledgement/);
+
+    // A malformed response must never be treated as a confirmed verdict in
+    // either direction: no content installed, and the marker stays set so
+    // a later turn still retries this same reconciliation instead of
+    // proceeding as if the write were definitively rejected.
+    expect(restoreFromSnapshotContent).not.toHaveBeenCalled();
+    expect(attachmentState.committedSessionVersion).toBeNull();
+    expect(attachmentState.unresolvedCommit).not.toBeNull();
+    await expect(
+      port.persist(
+        {
+          toSnapshotContent: () => ({}),
+          committedSessionVersion: attachmentState.committedSessionVersion,
+        } as unknown as VoiceDialogueState,
+        { ...request, turnId: "turn-2" },
+        { attachmentState },
+      ),
+    ).rejects.toThrow(/voice_trusted_persist_unresolved_commit_unknown/);
+  });
+
+  it("[adjudication-response validation, Codex reopen canonical 2026-10-04T00:26:49Z] accepted:true with a FOREIGN session/version/epoch/turn is UNKNOWN -- never installed as if it answered this pending write", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        throw new TypeError("simulated lost acknowledgement");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot/resolve")) {
+        // `accepted: true` but EVERY identifying field is foreign to this
+        // pending write (different session, version, epochs, turn) --
+        // before this fix, this was installed onto the attachment with no
+        // correlation check at all.
+        return jsonResponse(200, {
+          data: {
+            accepted: true,
+            snapshot: {
+              snapshotId: "snapshot-foreign",
+              voiceSessionId: "99999999-9999-9999-9999-999999999999",
+              sessionVersion: 999,
+              inputEpoch: 999,
+              mediaEpoch: 999,
+              turnId: "a-different-turn",
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: null,
+              },
+              createdAt: "2026-07-24T09:00:00.000Z",
+              retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+    const restoreFromSnapshotContent = vi.fn();
+
+    await expect(
+      port.persist(
+        {
+          toSnapshotContent: () => ({}),
+          restoreFromSnapshotContent,
+          committedSessionVersion: attachmentState.committedSessionVersion,
+        } as unknown as VoiceDialogueState,
+        request,
+        { attachmentState },
+      ),
+    ).rejects.toThrow(/simulated lost acknowledgement/);
+
+    expect(restoreFromSnapshotContent).not.toHaveBeenCalled();
+    expect(attachmentState.committedSessionVersion).toBeNull();
+    expect(attachmentState.unresolvedCommit).not.toBeNull();
+  });
+
+  it("[R4-resolve expired-content resurrection, Codex reopen canonical 2026-10-04T00:26:49Z] accepted:true, expired:true clears the marker without installing any content -- never a false rollback, never a resurrected expired handoff", async () => {
+    const binding: VoiceSessionBinding = {
+      voiceSessionId: "22222222-2222-2222-2222-222222222222",
+      resourceScopeId: "33333333-3333-3333-3333-333333333333",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      sessionVersion: 5,
+    };
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/capabilities")) {
+        return jsonResponse(200, {
+          data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+        throw new TypeError("simulated lost acknowledgement");
+      }
+      if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+        return jsonResponse(200, {
+          data: {
+            session: {
+              voiceSessionId: binding.voiceSessionId,
+              sessionVersion: 6,
+              resourceScopeId: binding.resourceScopeId,
+              routeProfileVersion: binding.routeProfileVersion,
+              leaseEpoch: binding.leaseEpoch,
+              inputEpoch: request.inputEpoch,
+              pendingInput: false,
+            },
+            snapshot: null,
+          },
+        });
+      }
+      if (init?.method === "POST" && path.endsWith("/dialogue-snapshot/resolve")) {
+        return jsonResponse(200, {
+          data: {
+            accepted: true,
+            expired: true,
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: 6,
+            inputEpoch: request.inputEpoch,
+            mediaEpoch: 0,
+            turnId: request.turnId,
+            retentionExpiresAt: "2020-01-01T00:00:00.000Z",
+          },
+        });
+      }
+      throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+    });
+    const client_ = new VoiceApiClient(
+      { baseUrl: "https://api.example.test", fetchImpl },
+      { getToken: vi.fn(async () => "workload-token") },
+    );
+    const port = createTrustedDialoguePersistPort(client_, () => binding);
+    const attachmentState = new VoiceDialogueState();
+    const restoreFromSnapshotContent = vi.fn();
+
+    // This exact call's own write is now known accepted-but-expired -- it
+    // still fails (nothing restorable to report as this call's own
+    // success), but with the ORIGINAL write error, never a fabricated
+    // rollback/unknown message.
+    await expect(
+      port.persist(
+        {
+          toSnapshotContent: () => ({}),
+          restoreFromSnapshotContent,
+          committedSessionVersion: attachmentState.committedSessionVersion,
+        } as unknown as VoiceDialogueState,
+        request,
+        { attachmentState },
+      ),
+    ).rejects.toThrow(/simulated lost acknowledgement/);
+
+    expect(restoreFromSnapshotContent).not.toHaveBeenCalled();
+    expect(attachmentState.committedSessionVersion).toBeNull();
+    // The marker IS cleared (the outcome is known) -- a later turn is free
+    // to proceed instead of being permanently wedged behind content that
+    // will never become restorable.
+    expect(attachmentState.unresolvedCommit).toBeNull();
+  });
+
   it("[unstructured response, Codex reopen canonical 2026-10-03T22:41:06Z] an opaque intermediary 502/504 with no structured error body is ambiguous, not a confirmed domain rejection -- the durably-landed write is still reconciled", async () => {
     const binding: VoiceSessionBinding = {
       voiceSessionId: "22222222-2222-2222-2222-222222222222",

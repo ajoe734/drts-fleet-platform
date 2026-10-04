@@ -178,16 +178,50 @@ export interface DialogueSnapshotRestoration {
  * (`accepted: false`, and `voice.session.dialogue_snapshot_fence_version`
  * is now durably raised to block it from ever landing after the fact).
  */
+/**
+ * Correction (Codex reopen, canonical 2026-10-04T00:26:49Z, "no under-lock
+ * capability authority checks or upper bound against the current session
+ * version exist"): `expectedLeaseEpoch`/`expectedResourceScopeId`/
+ * `expectedRouteProfileVersion` mirror `PersistDialogueSnapshotCommand`'s
+ * own fields above -- always the AUTHENTICATED capability's bound values
+ * (`VoiceBookingController#resolveDialogueSnapshotOutcome` passes
+ * `claims.*`, never a caller-supplied body field), re-checked under the
+ * same `FOR UPDATE` lock this method already takes on the session row
+ * before this call is allowed to read content or raise the fence.
+ */
 export interface ResolveDialogueSnapshotOutcomeCommand {
   voiceSessionId: string;
   expectedSessionVersion: number;
+  expectedLeaseEpoch: number;
+  expectedResourceScopeId: string;
+  expectedRouteProfileVersion: number;
   inputEpoch: number;
   mediaEpoch: number;
   turnId: string;
 }
 
+/**
+ * Correction (Codex reopen, canonical 2026-10-04T00:26:49Z, "R4-resolve
+ * expired-content resurrection"): the `accepted: true; expired: true`
+ * variant is a distinct, authoritative third outcome -- this exact write
+ * WAS accepted (the fence must never be raised for it, and it must never be
+ * reported as voided/rolled back), but its content has already passed its
+ * own retention window and is therefore never returned/restorable. Carries
+ * the same identifying fields a normal accepted snapshot does (so a caller
+ * can still verify this answers ITS OWN pending write) but never `content`.
+ */
 export type ResolveDialogueSnapshotOutcomeResult =
   | { accepted: true; snapshot: DialogueSnapshotRecord }
+  | {
+      accepted: true;
+      expired: true;
+      voiceSessionId: string;
+      sessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      retentionExpiresAt: string;
+    }
   | { accepted: false };
 
 @Injectable()
@@ -1287,15 +1321,29 @@ export class VoiceSessionService {
    * fence (Codex reopen, canonical 2026-10-03T23:31:57Z): the single
    * atomic adjudication worker-side bounded polling falls back to -- see
    * `ResolveDialogueSnapshotOutcomeCommand`'s own doc. Deliberately does
-   * NOT re-check `expectedSessionVersion`/`routeProfileVersion` against
-   * the session's CURRENT values the way `persistDialogueSnapshot` does:
-   * this call's entire purpose is to adjudicate a write whose version the
-   * session may already have moved past, which `assertWriteAuthorized`
-   * would reject as stale. The session row is still read `FOR UPDATE` in
-   * the SAME transaction as the fence raise below, so this check-then-
-   * fence sequence is atomic with respect to a concurrent
+   * NOT require `expectedSessionVersion` to still be the session's CURRENT
+   * value the way `persistDialogueSnapshot`'s own `assertWriteAuthorized`
+   * does: this call's entire purpose is to adjudicate a write whose version
+   * the session may already have moved past. The session row is still read
+   * `FOR UPDATE` in the SAME transaction as the fence raise below, so this
+   * check-then-fence sequence is atomic with respect to a concurrent
    * `persistDialogueSnapshot` call's own check-then-insert against the
    * exact same row (see `raiseDialogueSnapshotFence`'s own doc).
+   *
+   * Correction (Codex reopen, canonical 2026-10-04T00:26:49Z, "no under-lock
+   * capability authority checks or upper bound against the current session
+   * version exist"): "deliberately does not require current" was too broad
+   * -- it must still reject an `expectedSessionVersion` STRICTLY ABOVE the
+   * session's current value (a version the session has never reached can
+   * never have a pending write to adjudicate at all; fencing it anyway
+   * would durably block every future write once the session eventually
+   * reaches it) and must re-verify the SAME scope/route/lease authority
+   * `persistDialogueSnapshot` already checks, under this method's own lock,
+   * before ever reading content or touching the fence -- a capability whose
+   * authority has since moved on (a new lease/handoff) must never be able
+   * to adjudicate, raise, or read this session's fence. Only an
+   * authorized, non-future version may still be safely adjudicated,
+   * including one well below the session's current value.
    */
   async resolveDialogueSnapshotOutcome(
     command: ResolveDialogueSnapshotOutcomeCommand,
@@ -1305,7 +1353,33 @@ export class VoiceSessionService {
     ): Promise<ResolveDialogueSnapshotOutcomeResult> => {
       // FOR UPDATE: see this method's own doc on why this lock is what
       // makes the check-then-fence sequence below atomic.
-      await this.requireSession(command.voiceSessionId, executor, true);
+      const session = await this.requireSession(
+        command.voiceSessionId,
+        executor,
+        true,
+      );
+      if (
+        session.leaseEpoch !== command.expectedLeaseEpoch ||
+        session.resourceScopeId !== command.expectedResourceScopeId ||
+        session.routeProfileVersion !== command.expectedRouteProfileVersion
+      ) {
+        throw new ApiRequestError(
+          403,
+          "VOICE_SESSION_NOT_OWNER",
+          "Capability authority no longer matches the current session scope/route/lease.",
+        );
+      }
+      if (
+        !Number.isInteger(command.expectedSessionVersion) ||
+        command.expectedSessionVersion < 0 ||
+        command.expectedSessionVersion > session.sessionVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DIALOGUE_SNAPSHOT_FUTURE_VERSION",
+          "Cannot adjudicate a session_version this session has not yet reached.",
+        );
+      }
       const row = await this.repository.findDialogueSnapshotByVersion(
         command.voiceSessionId,
         command.expectedSessionVersion,
@@ -1317,6 +1391,30 @@ export class VoiceSessionService {
         row.mediaEpoch === command.mediaEpoch &&
         row.turnId === command.turnId;
       if (correlates) {
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve expired-
+        // content resurrection (Codex reopen, canonical
+        // 2026-10-04T00:26:49Z): `findDialogueSnapshotByVersion`
+        // deliberately includes an already-expired row (see that method's
+        // own doc) because a write that durably landed and only later
+        // expired still proves this exact commit was ACCEPTED -- but
+        // "accepted" and "still permitted to disclose/restore" are
+        // different facts. Never decrypt or return an expired row's
+        // content here (a legal hold must not silently authorize ordinary
+        // replay of content that has aged out); report the accepted/
+        // historical fact without it instead of resurrecting it as live
+        // state.
+        if (new Date(row.retentionExpiresAt).getTime() <= Date.now()) {
+          return {
+            accepted: true,
+            expired: true,
+            voiceSessionId: row.voiceSessionId,
+            sessionVersion: row.sessionVersion,
+            inputEpoch: row.inputEpoch,
+            mediaEpoch: row.mediaEpoch,
+            turnId: row.turnId,
+            retentionExpiresAt: row.retentionExpiresAt,
+          };
+        }
         const encryptionKey = resolveDialogueSnapshotEncryptionKey();
         const content = voiceDialogueSnapshotContentSchema.parse(
           decryptDialogueSnapshotContent(

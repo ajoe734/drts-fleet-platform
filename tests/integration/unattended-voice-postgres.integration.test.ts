@@ -2820,6 +2820,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const outcome = await service.resolveDialogueSnapshotOutcome({
         voiceSessionId: f.request.voiceSessionId,
         expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
         inputEpoch: session!.inputEpoch,
         mediaEpoch: 0,
         turnId: "turn-never-landed",
@@ -2882,12 +2885,15 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const outcome = await service.resolveDialogueSnapshotOutcome({
         voiceSessionId: f.request.voiceSessionId,
         expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
         inputEpoch: session!.inputEpoch,
         mediaEpoch: 0,
         turnId: "turn-landed",
       });
       expect(outcome.accepted).toBe(true);
-      if (outcome.accepted) {
+      if (outcome.accepted && !("expired" in outcome)) {
         expect(outcome.snapshot.snapshotId).toBe(persisted.snapshot.snapshotId);
         expect(outcome.snapshot.content).toEqual(validContent);
       }
