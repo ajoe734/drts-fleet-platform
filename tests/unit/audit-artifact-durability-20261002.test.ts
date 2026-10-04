@@ -4480,6 +4480,6 @@ describe("createDocumentArtifactStore provider resolution", () => {
       createDocumentArtifactStore({
         DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "filesystem",
       }),
-    ).toThrow(/must be s3; memory is test-only/);
+    ).toThrow(/must be s3 or gcs; memory is test-only/);
   });
 });
