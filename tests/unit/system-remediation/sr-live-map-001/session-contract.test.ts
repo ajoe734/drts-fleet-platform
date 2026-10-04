@@ -267,6 +267,19 @@ it("auth/token accepts ops_user and ops_observer principals through WIF direct l
       };
 
       // Simulate what the real adapter does now
+      await repository.ensurePrincipalRecord({
+        principalId: p.principalId,
+        sourceRef: `google_workload_identity:${p.principalId}`,
+        issuer: "https://accounts.google.com",
+        subject: p.subject,
+        principalType: "service",
+        email: p.email,
+        emailVerified: true,
+        displayName: p.displayName,
+        status: "active",
+        createdAt: p.authTime,
+        updatedAt: p.authTime,
+      });
       const membershipRecord: any = {
         membershipId: `mem_${p.principalId}_ops`,
         principalId: p.principalId,

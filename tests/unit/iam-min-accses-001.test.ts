@@ -684,20 +684,60 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
     const seeded1 = await repo1.ensureDefaultPlatformAccount();
     const initialUpdatedAt = seeded1.principal.updatedAt;
 
-    // Create second instance and copy state to simulate persistent backend restart
+    // Simulate a second instance reading from the same already-persisted
+    // store after a restart (e.g. a shared PostgreSQL backend), not a fresh
+    // instance that bootstraps its own brand-new default account and then
+    // gets reconciled against it: ensure*Record is a no-op-preserving upsert
+    // for real traffic, not a snapshot-restore API, so it must never be
+    // asked to roll an already-persisted updatedAt backward (see
+    // SR-AUTH-SESSION-SUPERSEDE-20261003). Seed repo2's store directly and
+    // synchronously, before its own constructor-fired bootstrap (or an
+    // explicit onModuleInit call) can observe an empty store and mint a
+    // competing, later updatedAt for the same default account.
     const { identityRepository: repo2 } = createTestHarness();
-    await repo2.onModuleInit();
-
+    const repo2Internal = repo2 as unknown as {
+      fallbackPrincipals: Map<string, unknown>;
+      fallbackPrincipalSourceRefs: Map<string, string>;
+      fallbackMemberships: Map<string, unknown>;
+      fallbackMembershipSourceRefs: Map<string, string>;
+      fallbackRoleBindings: Map<string, unknown>;
+      fallbackRoleBindingSourceRefs: Map<string, string>;
+    };
     for (const principal of repo1.listPrincipals()) {
-      await repo2.ensurePrincipalRecord(principal);
+      repo2Internal.fallbackPrincipals.set(principal.principalId, {
+        ...principal,
+      });
+      if (principal.sourceRef) {
+        repo2Internal.fallbackPrincipalSourceRefs.set(
+          principal.sourceRef,
+          principal.principalId,
+        );
+      }
     }
     for (const membership of repo1.listMemberships()) {
-      await repo2.ensureMembershipRecord(membership);
+      repo2Internal.fallbackMemberships.set(membership.membershipId, {
+        ...membership,
+      });
+      if (membership.sourceRef) {
+        repo2Internal.fallbackMembershipSourceRefs.set(
+          membership.sourceRef,
+          membership.membershipId,
+        );
+      }
     }
     for (const binding of repo1.listRoleBindings()) {
-      await repo2.ensureRoleBindingRecord(binding);
+      repo2Internal.fallbackRoleBindings.set(binding.roleBindingId, {
+        ...binding,
+      });
+      if (binding.sourceRef) {
+        repo2Internal.fallbackRoleBindingSourceRefs.set(
+          binding.sourceRef,
+          binding.roleBindingId,
+        );
+      }
     }
 
+    await repo2.onModuleInit();
     const reseeded2 = await repo2.ensureDefaultPlatformAccount();
     await repo2.onModuleInit();
 
@@ -708,5 +748,106 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
       "principal_platform_admin_default",
     );
     expect(reloadedPrincipal?.updatedAt).toBe(initialUpdatedAt);
+  });
+
+  it("R6 regression: a later-arriving but older-iat-derived ensure for an unchanged principal/membership/role must not roll updatedAt backward", async () => {
+    const { identityRepository: repo } = createTestHarness();
+    const seeded = await repo.ensureDefaultPlatformAccount();
+    const principalId = seeded.principal.principalId;
+    const membershipId = seeded.membership.membershipId;
+    const binding = (
+      await repo.findRoleBindingsByMembershipId(membershipId)
+    )[0];
+    if (!binding) {
+      throw new Error("expected a seeded role binding");
+    }
+
+    // A real caller (e.g. GoogleWorkloadIdentityAdapter) derives updatedAt
+    // from a signed assertion's `iat`, which is not guaranteed to be
+    // monotonic with wall-clock arrival order: two independent, unconsumed,
+    // correctly signed assertions for the same principal can be exchanged in
+    // either order. An older-timestamped but otherwise identical re-ensure
+    // must be treated as a no-op, never as a reason to move the durable
+    // updatedAt earlier.
+    const olderIso = new Date(
+      Date.parse(seeded.principal.updatedAt) - 60_000,
+    ).toISOString();
+
+    const principalAfterOlderEnsure = await repo.ensurePrincipalRecord({
+      ...seeded.principal,
+      updatedAt: olderIso,
+    });
+    expect(principalAfterOlderEnsure.updatedAt).toBe(
+      seeded.principal.updatedAt,
+    );
+
+    const membershipAfterOlderEnsure = await repo.ensureMembershipRecord({
+      ...seeded.membership,
+      updatedAt: olderIso,
+    });
+    expect(membershipAfterOlderEnsure.updatedAt).toBe(
+      seeded.membership.updatedAt,
+    );
+
+    const bindingAfterOlderEnsure = await repo.ensureRoleBindingRecord({
+      ...binding,
+      updatedAt: olderIso,
+    });
+    expect(bindingAfterOlderEnsure.updatedAt).toBe(binding.updatedAt);
+
+    const reloadedPrincipal = await repo.findPrincipalById(principalId);
+    expect(reloadedPrincipal?.updatedAt).toBe(seeded.principal.updatedAt);
+  });
+
+  it("R6 regression: a genuine role removal followed by regrant still invalidates a token issued before the removal, even if an older-iat no-op ensure is replayed afterward", async () => {
+    const { identityRepository: repo } = createTestHarness();
+    const seeded = await repo.ensureDefaultPlatformAccount();
+    const membershipId = seeded.membership.membershipId;
+    const binding = (
+      await repo.findRoleBindingsByMembershipId(membershipId)
+    )[0];
+    if (!binding) {
+      throw new Error("expected a seeded role binding");
+    }
+    const grantedUpdatedAt = binding.updatedAt;
+
+    const removedAt = new Date(
+      Date.parse(grantedUpdatedAt) + 20_000,
+    ).toISOString();
+    const removed = await repo.ensureRoleBindingRecord({
+      ...binding,
+      validTo: removedAt,
+      updatedAt: removedAt,
+    });
+    expect(removed.validTo).toBe(removedAt);
+    expect(removed.updatedAt).toBe(removedAt);
+
+    const regrantedAt = new Date(
+      Date.parse(removedAt) + 20_000,
+    ).toISOString();
+    const regranted = await repo.ensureRoleBindingRecord(
+      { ...binding, validTo: null, updatedAt: regrantedAt },
+      { allowValidFromMutation: true },
+    );
+    expect(regranted.validTo).toBeNull();
+    expect(regranted.updatedAt).toBe(regrantedAt);
+
+    // Replaying an older-iat-derived ensure for the pre-removal state must
+    // not roll updatedAt back behind the regrant: that would revive a token
+    // minted before the removal, which the removal was supposed to kill.
+    const staleReplay = await repo.ensureRoleBindingRecord({
+      ...binding,
+      validTo: null,
+      updatedAt: grantedUpdatedAt,
+    });
+    expect(staleReplay.updatedAt).toBe(regrantedAt);
+
+    const reloaded = (
+      await repo.findRoleBindingsByMembershipId(membershipId)
+    )[0];
+    if (!reloaded) {
+      throw new Error("expected a persisted role binding");
+    }
+    expect(reloaded.updatedAt).toBe(regrantedAt);
   });
 });

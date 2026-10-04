@@ -68,10 +68,12 @@ async function drain(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-function expectApiError(fn: () => unknown, status: number, code: string) {
+async function expectApiError(fn: () => unknown, status: number, code: string) {
   try {
-    fn();
-    expect.unreachable(`Expected function to throw ApiRequestError with code ${code}`);
+    await fn();
+    expect.unreachable(
+      `Expected function to throw ApiRequestError with code ${code}`,
+    );
   } catch (err) {
     expect(err).toBeInstanceOf(ApiRequestError);
     const apiErr = err as ApiRequestError;
@@ -91,7 +93,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
       callPhone: "0800-999-000",
     });
 
-    const placard = platformAdminService.generatePlacardVersion({
+    const placard = await platformAdminService.generatePlacardVersion({
       versionCode: "placard-lifecycle-exp-01",
       publicInfoVersionId: publicInfo.versionId,
       templateName: "seatback-standard",
@@ -101,12 +103,12 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const originalParams = paramsOf(originalUrl);
 
     // Initial link resolves successfully
-    const initialFile = resolveDownload(
+    const initialFile = (await resolveDownload(
       downloadController,
       "placard",
       placard.placardVersionId,
       originalParams,
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
     const initialBytes = await drain(initialFile.getStream());
     expect(initialBytes.length).toBeGreaterThan(0);
 
@@ -117,7 +119,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
 
     try {
       // 1. The original link should now fail with 410 CONTROLLED_DOWNLOAD_EXPIRED
-      expectApiError(
+      await expectApiError(
         () =>
           resolveDownload(
             downloadController,
@@ -134,25 +136,27 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
       expect(parseArtifactExpiry(originalUrl)).toBe(originalParams.expiresAt);
 
       // 3. User re-enters page (which calls listPlacardVersions or getPlacardVersion)
-      const reEnteredPlacard = platformAdminService.getPlacardVersion(
+      const reEnteredPlacard = await platformAdminService.getPlacardVersion(
         placard.placardVersionId,
       );
 
       // Verify the URL was refreshed with a new signature and later expiry
       expect(reEnteredPlacard.artifactDownloadUrl).not.toBe(originalUrl);
       const refreshedParams = paramsOf(reEnteredPlacard.artifactDownloadUrl!);
-      expect(Date.parse(refreshedParams.expiresAt!)).toBeGreaterThan(futureTime);
+      expect(Date.parse(refreshedParams.expiresAt!)).toBeGreaterThan(
+        futureTime,
+      );
       expect(reEnteredPlacard.artifactManifestHash).toBe(
         placard.artifactManifestHash,
       );
 
       // 4. Refreshed link now resolves 200 OK without re-uploading corrupted bytes
-      const refreshedFile = resolveDownload(
+      const refreshedFile = (await resolveDownload(
         downloadController,
         "placard",
         reEnteredPlacard.placardVersionId,
         refreshedParams,
-      ) as StreamableFileLike;
+      )) as StreamableFileLike;
       const refreshedBytes = await drain(refreshedFile.getStream());
       expect(createHash("sha256").update(refreshedBytes).digest("hex")).toBe(
         placard.artifactManifestHash,
@@ -162,66 +166,60 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     }
   });
 
-  it("self-heals missing artifact from store when re-entering or querying placard", async () => {
+  it("keeps serving the same placard artifact after a restart, because the durable store survives it: a repository-reloaded instance sharing the SAME store never needs to re-render", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
 
     const publicInfo = platformAdminService.createPublicInfoVersion({
-      title: "Self-Healing Test Disclosure",
+      title: "Durable Restart Test Disclosure",
       callPhone: "0800-777-111",
       fareText: "Flat fare NT$50",
     });
 
-    const placard = platformAdminService.generatePlacardVersion({
-      versionCode: "placard-selfheal-01",
+    const placard = await platformAdminService.generatePlacardVersion({
+      versionCode: "placard-durable-restart-01",
       publicInfoVersionId: publicInfo.versionId,
       templateName: "seatback-standard",
     });
 
     const initialSha = placard.artifactManifestHash!;
+    const stored = await store.get("placard", placard.placardVersionId);
+    expect(stored).not.toBeNull();
+    expect(stored?.record.sha256).toBe(initialSha);
 
-    // Simulate in-memory store eviction / cache eviction
-    const removed = store.get("placard", placard.placardVersionId);
-    expect(removed).not.toBeNull();
-    // Re-create a fresh store to simulate service restart where store is empty
-    const freshStore = new InMemoryDocumentArtifactStore();
+    // A restart constructs a fresh PlatformAdminService (publicInfoVersions /
+    // placardVersions reloaded from the repository), but DOCUMENT_ARTIFACT_STORE
+    // is durable and shared -- a real restart never empties it, so the
+    // restarted instance shares the SAME store, not a fresh one.
     const restartedService = new PlatformAdminService(
       new AuditNotificationService(),
       undefined,
       undefined,
-      freshStore,
+      store,
     );
-    const restartedDownloadController = new ControlledDownloadController(
-      freshStore,
+    const restartedDownloadController = new ControlledDownloadController(store);
+
+    (
+      restartedService as unknown as { publicInfoVersions: unknown[] }
+    ).publicInfoVersions = [publicInfo];
+    (
+      restartedService as unknown as { placardVersions: unknown[] }
+    ).placardVersions = [{ ...placard }];
+
+    const recovered = await restartedService.getPlacardVersion(
+      placard.placardVersionId,
     );
-
-    // Force inject the existing placard record into restartedService's in-memory array
-    (restartedService as unknown as { publicInfoVersions: unknown[] }).publicInfoVersions = [
-      publicInfo,
-    ];
-    (restartedService as unknown as { placardVersions: unknown[] }).placardVersions = [
-      { ...placard },
-    ];
-
-    // Verify freshStore initially does not have the artifact
-    expect(freshStore.get("placard", placard.placardVersionId)).toBeNull();
-
-    // Querying placard triggers ensurePlacardArtifact self-healing
-    const recovered = restartedService.getPlacardVersion(placard.placardVersionId);
     expect(recovered.artifactManifestHash).toBe(initialSha);
+    // No self-heal/re-render needed: the bytes were never gone, so the link
+    // itself (still unexpired) is untouched.
+    expect(recovered.artifactDownloadUrl).toBe(placard.artifactDownloadUrl);
 
-    // Verify artifact is now restored in freshStore
-    const restoredInStore = freshStore.get("placard", placard.placardVersionId);
-    expect(restoredInStore).not.toBeNull();
-    expect(restoredInStore?.record.sha256).toBe(initialSha);
-
-    // Can be downloaded through restarted download controller
-    const file = resolveDownload(
+    const file = (await resolveDownload(
       restartedDownloadController,
       "placard",
       recovered.placardVersionId,
       paramsOf(recovered.artifactDownloadUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
     const bytes = await drain(file.getStream());
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(initialSha);
   });
@@ -236,7 +234,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
       callPhone: "0800-333-444",
     });
 
-    const draftPlacard = platformAdminService.generatePlacardVersion({
+    const draftPlacard = await platformAdminService.generatePlacardVersion({
       versionCode: "placard-publish-test",
       publicInfoVersionId: publicInfo.versionId,
       templateName: "seatback-standard",
@@ -246,19 +244,19 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const draftBytes = (
       await drain(
         (
-          resolveDownload(
+          (await resolveDownload(
             downloadController,
             "placard",
             draftPlacard.placardVersionId,
             paramsOf(draftPlacard.artifactDownloadUrl!),
-          ) as StreamableFileLike
+          )) as StreamableFileLike
         ).getStream(),
       )
     ).toString("latin1");
     expect(draftBytes).toContain("Published At: Draft");
 
     // Publish the placard
-    const publishedPlacard = platformAdminService.publishPlacardVersion(
+    const publishedPlacard = await platformAdminService.publishPlacardVersion(
       draftPlacard.placardVersionId,
       {},
       "req-publish-001",
@@ -273,12 +271,12 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const publishedBytes = (
       await drain(
         (
-          resolveDownload(
+          (await resolveDownload(
             downloadController,
             "placard",
             publishedPlacard.placardVersionId,
             paramsOf(publishedPlacard.artifactDownloadUrl!),
-          ) as StreamableFileLike
+          )) as StreamableFileLike
         ).getStream(),
       )
     ).toString("latin1");
@@ -287,7 +285,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     );
 
     // Double publish is rejected with 409
-    expectApiError(
+    await expectApiError(
       () =>
         platformAdminService.publishPlacardVersion(
           draftPlacard.placardVersionId,
@@ -300,7 +298,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     );
   });
 
-  it("guards against retired public info versions and duplicate version codes", () => {
+  it("guards against retired public info versions and duplicate version codes", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
 
@@ -334,7 +332,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     expect(retiredInfo?.status).toBe("retired");
 
     // 3. Generation with retired source fails with 400 PUBLIC_INFO_VERSION_RETIRED
-    expectApiError(
+    await expectApiError(
       () =>
         platformAdminService.generatePlacardVersion({
           versionCode: "placard-from-retired",
@@ -346,18 +344,18 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     );
 
     // 4. Frontend helper blocks retired source
-    expect(isPlacardSourceSelectionBlocked({ status: "retired", title: "Retired" })).toBe(
-      true,
-    );
+    expect(
+      isPlacardSourceSelectionBlocked({ status: "retired", title: "Retired" }),
+    ).toBe(true);
 
     // 5. Duplicate version code check (case-insensitive)
-    platformAdminService.generatePlacardVersion({
+    await platformAdminService.generatePlacardVersion({
       versionCode: "placard-dup-check",
       publicInfoVersionId: publicInfo2.versionId,
       templateName: "seatback-standard",
     });
 
-    expectApiError(
+    await expectApiError(
       () =>
         platformAdminService.generatePlacardVersion({
           versionCode: "PLACARD-DUP-CHECK",
@@ -377,7 +375,7 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const publicInfo = platformAdminService.createPublicInfoVersion({
       title: "Tamper Test",
     });
-    const placard = platformAdminService.generatePlacardVersion({
+    const placard = await platformAdminService.generatePlacardVersion({
       versionCode: "placard-tamper-check",
       publicInfoVersionId: publicInfo.versionId,
       templateName: "seatback-standard",
@@ -386,23 +384,33 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     const validParams = paramsOf(placard.artifactDownloadUrl!);
 
     // 1. Missing signature param -> 400 CONTROLLED_DOWNLOAD_LINK_INCOMPLETE
-    expectApiError(
+    await expectApiError(
       () =>
-        resolveDownload(downloadController, "placard", placard.placardVersionId, {
-          ...validParams,
-          sig: undefined,
-        }),
+        resolveDownload(
+          downloadController,
+          "placard",
+          placard.placardVersionId,
+          {
+            ...validParams,
+            sig: undefined,
+          },
+        ),
       400,
       "CONTROLLED_DOWNLOAD_LINK_INCOMPLETE",
     );
 
     // 2. Forged signature -> 403 CONTROLLED_DOWNLOAD_SIGNATURE_INVALID
-    expectApiError(
+    await expectApiError(
       () =>
-        resolveDownload(downloadController, "placard", placard.placardVersionId, {
-          ...validParams,
-          sig: "forged_signature_hex_value_0000000000000000",
-        }),
+        resolveDownload(
+          downloadController,
+          "placard",
+          placard.placardVersionId,
+          {
+            ...validParams,
+            sig: "forged_signature_hex_value_0000000000000000",
+          },
+        ),
       403,
       "CONTROLLED_DOWNLOAD_SIGNATURE_INVALID",
     );
@@ -412,33 +420,35 @@ describe("SR-PLACARD-001: placard download lifecycle, self-healing, and authoriz
     // which aligns with ControlledDownloadController security rule: check signature before content.
 
     // 4. Placard not found -> 404 PLACARD_VERSION_NOT_FOUND
-    expectApiError(
+    await expectApiError(
       () => platformAdminService.getPlacardVersion("nonexistent-placard-id"),
       404,
       "PLACARD_VERSION_NOT_FOUND",
     );
   });
 
-  it("enforces actorId identity requirements on platform admin publish controller route", () => {
+  it("enforces actorId identity requirements on platform admin publish controller route", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
     const controller = new PlatformAdminController(platformAdminService);
 
     // Null identity throws 401 PLATFORM_ADMIN_IDENTITY_REQUIRED
-    expectApiError(
+    await expectApiError(
       () => controller.publishPlacardVersion("placard-any", {}, null),
       401,
       "PLATFORM_ADMIN_IDENTITY_REQUIRED",
     );
 
     // Blank actorId throws 401 PLATFORM_ADMIN_IDENTITY_REQUIRED
-    expectApiError(
+    await expectApiError(
       () =>
         controller.publishPlacardVersion("placard-any", {}, {
           actorId: "   ",
           actorType: "platform_admin",
           tenantId: null,
-        } as unknown as Parameters<PlatformAdminController["publishPlacardVersion"]>[2]),
+        } as unknown as Parameters<
+          PlatformAdminController["publishPlacardVersion"]
+        >[2]),
       401,
       "PLATFORM_ADMIN_IDENTITY_REQUIRED",
     );

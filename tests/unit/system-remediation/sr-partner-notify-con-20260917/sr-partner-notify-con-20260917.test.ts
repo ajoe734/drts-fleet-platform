@@ -468,6 +468,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...content.additional_allocations.map((a: any) => a.version),
         ...content.launch_allocations.map((a: any) => a.version),
         ...content.partner_notification_allocations.map((a: any) => a.version),
+        ...(content.voice_application_allocations || []).map((a: any) => a.version),
       ];
       expect(new Set(allVersions).size).toBe(allVersions.length);
     });
@@ -484,7 +485,11 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
       // ROUTE owns V0104; TRANSPORT now owns V0105. The CON task remains
       // allocation-only, while downstream DDL must match its allocation.
       const diskFiles = fs.readdirSync(path.join(repoRoot, "infra/migrations"));
-      for (const alloc of readAllocation().partner_notification_allocations) {
+      const allocation = readAllocation();
+      for (const alloc of [
+        ...allocation.partner_notification_allocations,
+        ...(allocation.voice_application_allocations || []),
+      ]) {
         expect(
           diskFiles.filter((file) => file.startsWith(`${alloc.version}_`)),
         ).toEqual([alloc.migration_filename]);
@@ -499,6 +504,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...(content.additional_allocations || []),
         ...(content.launch_allocations || []),
         ...(content.partner_notification_allocations || []),
+        ...(content.voice_application_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,

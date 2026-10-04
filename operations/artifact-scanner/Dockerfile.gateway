@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.7
+#
+# Standalone Node gateway for the private ClamAV Cloud Run scanner service.
+# `operations/` is not in pnpm-workspace.yaml, so this image intentionally
+# has zero npm runtime dependencies (only Node builtins: node:http,
+# node:net, node:crypto, node:fs) -- `typescript` is a build-stage-only
+# devDependency, never copied into the runtime stage.
+
+FROM node:22-alpine AS build
+WORKDIR /gateway
+COPY gateway/*.ts ./
+RUN npm install --no-save --no-audit --no-fund typescript@5.7.3 @types/node@22.10.2 && \
+    npx tsc --strict --target es2022 --module commonjs --moduleResolution node \
+      --types node --outDir dist ./*.ts
+
+FROM node:22-alpine AS runtime
+LABEL org.opencontainers.image.source="drts-fleet-platform" \
+      org.opencontainers.image.title="drts-artifact-scanner-gateway" \
+      org.opencontainers.image.description="Private first-party gateway in front of a sidecar ClamAV engine"
+
+ENV NODE_ENV=production \
+    PORT=8080
+
+WORKDIR /app
+COPY --from=build /gateway/dist ./
+
+USER node
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --retries=12 CMD node -e "require('http').get('http://127.0.0.1:'+process.env.PORT+'/health',res=>{process.exit(res.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
+
+CMD ["node", "server.js"]

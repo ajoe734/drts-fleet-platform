@@ -283,7 +283,7 @@ test.describe("SR-QA-UX-001: 全角色響應式／可及性／多語／錯誤恢
     const digest = createHash("sha256").update(pdfBytes).digest("hex");
 
     // N04: Store real invoice PDF
-    const storedArtifact = artifactStore.put({
+    const storedArtifact = await artifactStore.put({
       kind: "tenant-invoice",
       subjectId: ns.qualifyId("inv-001"),
       mimeType: "application/pdf",
