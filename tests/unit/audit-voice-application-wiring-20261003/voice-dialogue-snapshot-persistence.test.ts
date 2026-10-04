@@ -807,6 +807,165 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
       code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
     });
   });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist overlapping
+   * version-fence misclassification (Codex reopen, canonical
+   * 2026-10-04T04:28:50Z, "the same previously accepted identity can be
+   * reported accepted by resolve but treated as never accepted by
+   * retry/recovery"): the SIBLING test above already covers the case where
+   * A's own surviving proof (row AND receipt) is gone by the time its
+   * fence-overlapping retry lands -- that one still correctly reports
+   * HISTORY_UNAVAILABLE. This covers the narrower, previously-unfixed gap:
+   * a fence some OTHER turn raised at the SAME version must never
+   * disprove THIS identity's surviving acceptance proof while that proof
+   * (a still-live row, an already-expired-but-not-yet-purged row, or an
+   * intact purge receipt) still correlates. Walks the full
+   * live -> expired -> purged -> receipt-retired lifecycle, asserting the
+   * exact resolve/persist pairing at every step.
+   */
+  it("[R34-F1 regression] a different turn's fence at this version never disproves THIS turn's own still-surviving acceptance proof, through the live/expired/purged/retired lifecycle", async () => {
+    const { service, repository, snapshots } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+    const urgentContent = {
+      ...validContent,
+      handoff: { reason: "urgent_safety", intent: "emergency" },
+    };
+    const commandA = validCommand({
+      turnId: "accepted-A",
+      content: urgentContent,
+    });
+
+    // 1-2. Turn A is genuinely accepted; an exact retry BEFORE any fence
+    // exists is the positive control (already-correct safe dedup).
+    const firstA = await service.persistDialogueSnapshot(commandA);
+    expect(firstA.deduped).toBe(false);
+    const retryBeforeFence = await service.persistDialogueSnapshot(commandA);
+    expect(retryBeforeFence.deduped).toBe(true);
+    expect(retryBeforeFence.snapshot.content).toEqual(urgentContent);
+
+    // 3. A DIFFERENT, never-accepted turn B adjudicates the SAME version --
+    // this legitimately raises dialogueSnapshotFenceVersion to 5, but says
+    // nothing about turn A's own acceptance.
+    const bOutcome = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "different-B",
+    });
+    expect(bOutcome).toMatchObject({ accepted: false, fenceVersion: 5 });
+
+    // 4. A's own resolve still reports its real, live, surviving content --
+    // and a retry of A's OWN exact persist must succeed (safe dedup), never
+    // VOICE_DIALOGUE_SNAPSHOT_VOIDED, despite the fence B just raised.
+    const aResolveLive = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "accepted-A",
+    });
+    expect(aResolveLive).toMatchObject({ accepted: true });
+    if (aResolveLive.accepted === true && "snapshot" in aResolveLive) {
+      expect(aResolveLive.snapshot.content).toEqual(urgentContent);
+    }
+    const persistAfterLiveFence =
+      await service.persistDialogueSnapshot(commandA);
+    expect(persistAfterLiveFence.deduped).toBe(true);
+    expect(persistAfterLiveFence.snapshot.content).toEqual(urgentContent);
+
+    // 5. Advance past A's own content expiry (row still physically present,
+    // not yet purged). Resolve reports accepted/expired with no content;
+    // retry of A's own persist must still succeed as a safe dedup, never
+    // VOIDED.
+    const liveRow = snapshots.find(
+      (s) => s.voiceSessionId === VOICE_SESSION_ID && s.sessionVersion === 5,
+    )!;
+    liveRow.retentionExpiresAt = new Date(Date.now() - 1000).toISOString();
+    const aResolveExpired = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "accepted-A",
+    });
+    expect(aResolveExpired).toMatchObject({ accepted: true, expired: true });
+    expect(aResolveExpired).not.toHaveProperty("snapshot");
+    const persistAfterExpiry = await service.persistDialogueSnapshot(commandA);
+    expect(persistAfterExpiry.deduped).toBe(true);
+
+    // 6. The governed sweep purges the expired row, preserving a bounded
+    // receipt. Resolve still reports accepted/expired from the receipt;
+    // retry of A's own persist must now get the ambiguous
+    // VOICE_DIALOGUE_SNAPSHOT_PURGED -- an honest "already accepted, key
+    // immutable" conflict -- never the "authoritatively voided" VOIDED
+    // code B's fence would otherwise imply.
+    await service.purgeExpiredDialogueSnapshots("operator-1", false);
+    expect(
+      snapshots.some(
+        (s) => s.voiceSessionId === VOICE_SESSION_ID && s.sessionVersion === 5,
+      ),
+    ).toBe(false);
+    const aResolvePurged = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "accepted-A",
+    });
+    expect(aResolvePurged).toMatchObject({ accepted: true, expired: true });
+    await expect(service.persistDialogueSnapshot(commandA)).rejects.toMatchObject(
+      { code: "VOICE_DIALOGUE_SNAPSHOT_PURGED" },
+    );
+
+    // 7. Once the receipt itself is governed-retired (its own
+    // voice_booking_evidence retention aged out), surviving proof is
+    // genuinely gone -- this control remains correctly repaired from the
+    // earlier R4-retention rounds: resolve is honestly "unknown" and
+    // persist is the ambiguous HISTORY_UNAVAILABLE (never VOIDED either).
+    const retiredReceipt = await repository.findDialogueSnapshotPurgeReceipt(
+      VOICE_SESSION_ID,
+      5,
+    );
+    expect(retiredReceipt).not.toBeNull();
+    (
+      await repository.findDialogueSnapshotPurgeReceipt(VOICE_SESSION_ID, 5)
+    )!.purgedAt = new Date(
+      Date.now() - 731 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+      "operator-1",
+      false,
+    );
+    const aResolveRetired = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "accepted-A",
+    });
+    expect(aResolveRetired).toMatchObject({ accepted: "unknown" });
+    await expect(service.persistDialogueSnapshot(commandA)).rejects.toMatchObject(
+      { code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE" },
+    );
+  });
 });
 
 describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
@@ -1634,6 +1793,98 @@ describe("VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts", () => 
     // The scan has now genuinely caught up to the end of the backlog --
     // the cursor is cleared so a later invocation re-checks released
     // holds from the oldest row again.
+    expect(
+      await repository.getDialogueSnapshotPurgeReceiptScanCursor(),
+    ).toBeNull();
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention preview cursor
+   * starvation (Codex reopen, canonical 2026-10-04T04:28:50Z, "preview
+   * still consumes/reset apply cursor and starves eligible receipt"):
+   * before this fix, a `dryRun=true` call read the SAME durable cursor
+   * `apply` uses and, once ITS OWN bounded scan (resuming from apply's
+   * progress) reached the backlog end, persisted `null` -- silently
+   * discarding every page of real progress `apply` had already made.
+   * Interleaving a dry-run preview between two `apply` calls must never
+   * change what the SECOND `apply` call examines or purges, no matter how
+   * many preview calls run in between.
+   */
+  it("[R34-F2 regression] a dry-run preview interleaved between apply calls never resets apply's own cursor or starves the eligible receipt behind a deep held run", async () => {
+    const harness = buildHarness({ appliedMediaEpoch: 2 });
+    const { service, repository, retentionService, purgeReceipts } = harness;
+    const HELD_SESSION_ID = "55555555-5555-4555-8555-555555555555";
+    retentionService.placeLegalHold({
+      caseNumber: "CASE-HELD-PREVIEW",
+      evidenceFamily: "voice_booking_evidence",
+      subjectRef: HELD_SESSION_ID,
+      reasonCode: "regulatory_inquiry",
+      placedBy: "ops-1",
+    });
+    const base = Date.now() - 800 * 24 * 60 * 60 * 1000;
+    for (let version = 1; version <= 10_000; version++) {
+      purgeReceipts.push({
+        voiceSessionId: HELD_SESSION_ID,
+        sessionVersion: version,
+        inputEpoch: 1,
+        mediaEpoch: 1,
+        turnId: `held-turn-${version}`,
+        retentionExpiresAt: new Date(Date.now() + 1000).toISOString(),
+        purgedAt: new Date(base + version).toISOString(),
+      });
+    }
+    purgeReceipts.push({
+      voiceSessionId: VOICE_SESSION_ID,
+      sessionVersion: 1,
+      inputEpoch: 1,
+      mediaEpoch: 1,
+      turnId: "eligible-turn",
+      retentionExpiresAt: new Date(Date.now() + 1000).toISOString(),
+      purgedAt: new Date(base + 10_001).toISOString(),
+    });
+
+    // Apply #1: bounded by MAX_PURGE_RECEIPT_SCAN_PAGES, lands entirely
+    // inside the held run and persists its own stop position.
+    const apply1 = await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+      "operator-1",
+      false,
+    );
+    expect(apply1.report.totalExamined).toBe(10_000);
+    expect(apply1.deletedCount).toBe(0);
+    const cursorAfterApply1 =
+      await repository.getDialogueSnapshotPurgeReceiptScanCursor();
+    expect(cursorAfterApply1).toMatchObject({ sessionVersion: 10_000 });
+
+    // A dry-run preview, repeated three times, must be purely observational
+    // -- it may report on today's backlog, but it must never read or
+    // perturb apply's own durable cursor.
+    for (let i = 0; i < 3; i++) {
+      const preview = await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+        "operator-1",
+        true,
+      );
+      expect(preview.report.mode).toBe("dry-run");
+      expect(preview.deletedCount).toBe(0);
+      expect(repository.retireDialogueSnapshotPurgeReceipt).not.toHaveBeenCalled();
+      expect(
+        await repository.getDialogueSnapshotPurgeReceiptScanCursor(),
+      ).toMatchObject({ sessionVersion: 10_000 });
+    }
+
+    // Apply #2 must resume from apply #1's own persisted position --
+    // completely unaffected by the dry-run previews in between -- and
+    // actually reach and purge the single eligible receipt.
+    const apply2 = await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+      "operator-1",
+      false,
+    );
+    expect(apply2.report.totalExamined).toBe(1);
+    expect(apply2.report.purgedCount).toBe(1);
+    expect(apply2.deletedCount).toBe(1);
+    expect(repository.retireDialogueSnapshotPurgeReceipt).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      1,
+    );
     expect(
       await repository.getDialogueSnapshotPurgeReceiptScanCursor(),
     ).toBeNull();

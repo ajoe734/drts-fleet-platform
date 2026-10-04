@@ -1294,37 +1294,90 @@ export class VoiceSessionService {
       // win. The `WHERE NOT EXISTS` guard in `insertDialogueSnapshot` still
       // independently refuses to readmit an already-purged key regardless
       // of which of these two errors is thrown here.
-      if (
-        (session.dialogueSnapshotHistoryUnavailableFloor ?? 0) >=
-        command.expectedSessionVersion
-      ) {
-        throw new ApiRequestError(
-          409,
-          "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
-          "The governed acceptance history for this exact version has aged out; its outcome is unknown, not confirmed voided.",
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist overlapping
+      // version-fence misclassification (Codex reopen, canonical
+      // 2026-10-04T04:28:50Z, "the same previously accepted identity can be
+      // reported accepted by resolve but treated as never accepted by
+      // retry/recovery"): both watermarks below are raised per-VERSION,
+      // never per-identity (see each one's own doc) -- a fence or floor some
+      // OTHER, never-accepted identity's `resolveDialogueSnapshotOutcome`
+      // call raised at this exact version can never disprove THIS call's
+      // own exact identity when that identity's own surviving acceptance
+      // proof -- a still-live/expired row, or (once the row itself has been
+      // governed-purged) its intact purge receipt -- still correlates (same
+      // correlation `resolveDialogueSnapshotOutcome` itself already trusts
+      // for this same question). Consult that proof FIRST, before either
+      // watermark, and when it correlates fall straight through to the
+      // normal dedup / purge-conflict handling below exactly as if neither
+      // watermark had ever been raised -- never report a surviving
+      // acceptance as "voided" or "history unavailable." A row or receipt
+      // that exists for this version but belongs to a DIFFERENT identity is
+      // a genuinely different write occupying this version, not this call's
+      // own proof, and still falls through to the watermark checks.
+      const existingSnapshotForIdentity =
+        await this.repository.findDialogueSnapshotByVersion(
+          command.voiceSessionId,
+          command.expectedSessionVersion,
+          executor,
         );
+      const correlatesWithSurvivingRow =
+        existingSnapshotForIdentity !== null &&
+        existingSnapshotForIdentity.inputEpoch === command.inputEpoch &&
+        existingSnapshotForIdentity.mediaEpoch === command.mediaEpoch &&
+        existingSnapshotForIdentity.turnId === command.turnId;
+      let correlatesWithSurvivingReceipt = false;
+      if (existingSnapshotForIdentity === null) {
+        const existingReceiptForIdentity =
+          await this.repository.findDialogueSnapshotPurgeReceipt(
+            command.voiceSessionId,
+            command.expectedSessionVersion,
+            executor,
+          );
+        correlatesWithSurvivingReceipt =
+          existingReceiptForIdentity !== null &&
+          existingReceiptForIdentity.inputEpoch === command.inputEpoch &&
+          existingReceiptForIdentity.mediaEpoch === command.mediaEpoch &&
+          existingReceiptForIdentity.turnId === command.turnId;
       }
-      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
-      // fence (Codex reopen, canonical 2026-10-03T23:31:57Z): `session` was
-      // read `FOR UPDATE` by `requireSession` above, in this same
-      // transaction -- a concurrent `resolveDialogueSnapshotOutcome` call
-      // raising this fence for this exact version can only ever
-      // interleave strictly before or strictly after this check (never
-      // during it), since both take the SAME row's write lock before
-      // reading/writing it. A version this call's OWN candidate state
-      // predates may already have been authoritatively voided by a
-      // reconciliation that gave up waiting on it; this call's content
-      // must never land after that, or the exact silent-content-loss race
-      // that fence exists to close would just move here instead. Reached
-      // only once the history-unavailable floor above has already cleared
-      // this version, so a fence that merely overlaps retired acceptance
-      // history can never reach here first.
-      if ((session.dialogueSnapshotFenceVersion ?? 0) >= command.expectedSessionVersion) {
-        throw new ApiRequestError(
-          409,
-          "VOICE_DIALOGUE_SNAPSHOT_VOIDED",
-          "This exact content commit was already authoritatively voided by a later reconciliation; retry from a fresh turn.",
-        );
+      const hasSurvivingAcceptanceProof =
+        correlatesWithSurvivingRow || correlatesWithSurvivingReceipt;
+
+      if (!hasSurvivingAcceptanceProof) {
+        if (
+          (session.dialogueSnapshotHistoryUnavailableFloor ?? 0) >=
+          command.expectedSessionVersion
+        ) {
+          throw new ApiRequestError(
+            409,
+            "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+            "The governed acceptance history for this exact version has aged out; its outcome is unknown, not confirmed voided.",
+          );
+        }
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+        // fence (Codex reopen, canonical 2026-10-03T23:31:57Z): `session`
+        // was read `FOR UPDATE` by `requireSession` above, in this same
+        // transaction -- a concurrent `resolveDialogueSnapshotOutcome` call
+        // raising this fence for this exact version can only ever
+        // interleave strictly before or strictly after this check (never
+        // during it), since both take the SAME row's write lock before
+        // reading/writing it. A version this call's OWN candidate state
+        // predates may already have been authoritatively voided by a
+        // reconciliation that gave up waiting on it; this call's content
+        // must never land after that, or the exact silent-content-loss race
+        // that fence exists to close would just move here instead. Reached
+        // only once the history-unavailable floor above has already cleared
+        // this version, so a fence that merely overlaps retired acceptance
+        // history can never reach here first.
+        if (
+          (session.dialogueSnapshotFenceVersion ?? 0) >=
+          command.expectedSessionVersion
+        ) {
+          throw new ApiRequestError(
+            409,
+            "VOICE_DIALOGUE_SNAPSHOT_VOIDED",
+            "This exact content commit was already authoritatively voided by a later reconciliation; retry from a fresh turn.",
+          );
+        }
       }
 
       let snapshot: DialogueSnapshotRow;
@@ -1886,12 +1939,27 @@ export class VoiceSessionService {
    * method's own page loop stops WITHOUT reaching the actual end of the
    * eligible backlog (hit `MAX_PURGE_RECEIPT_SCAN_PAGES` while the last
    * page was still full), it durably persists exactly where it stopped, so
-   * the NEXT invocation (dry-run or apply alike -- both page through the
-   * same scan and both must make progress) resumes past that point instead
-   * of restarting at the oldest held row. Once a scan DOES reach the real
-   * end of the backlog, the persisted cursor is cleared (`null`) so the
+   * the NEXT **apply** invocation resumes past that point instead of
+   * restarting at the oldest held row. Once a scan DOES reach the real end
+   * of the backlog, the persisted cursor is cleared (`null`) so the
    * following invocation legitimately restarts from the oldest row, to
    * re-check any holds released since.
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention preview cursor
+   * starvation (Codex reopen, canonical 2026-10-04T04:28:50Z, "preview
+   * still consumes/reset apply cursor and starves eligible receipt"): the
+   * durable cursor above is apply's OWN forward-progress bookmark, not a
+   * shared mode-independent scan position -- `dryRun=true` never reads or
+   * writes it. A dry-run call that resumed from apply's cursor and then
+   * reached the backlog end (because its own bounded window landed past
+   * the held run apply is still stuck behind) would persist `null`,
+   * silently discarding every page of real progress apply had already
+   * made and sending the NEXT apply call back to the oldest held row --
+   * forever repeating the same held prefix and never reaching the eligible
+   * receipt behind it. A preview always starts its own ephemeral scan from
+   * the oldest row (same as apply's very first call) and never persists
+   * anything it saw, so it can report on today's backlog without ever
+   * perturbing apply's own cross-invocation progress.
    */
   async purgeExpiredDialogueSnapshotPurgeReceipts(
     operatorId: string,
@@ -1916,9 +1984,13 @@ export class VoiceSessionService {
     let purgedCount = 0;
     let skippedHeldCount = 0;
     let deletedCount = 0;
-    let cursor: DialogueSnapshotPurgeReceiptCursor | undefined =
-      (await this.repository.getDialogueSnapshotPurgeReceiptScanCursor()) ??
-      undefined;
+    // R4-retention preview cursor starvation: only `apply` consults the
+    // durable cursor -- a preview always scans from the oldest row, same
+    // as `undefined` on a fresh/caught-up backlog, and never advances it.
+    let cursor: DialogueSnapshotPurgeReceiptCursor | undefined = dryRun
+      ? undefined
+      : ((await this.repository.getDialogueSnapshotPurgeReceiptScanCursor()) ??
+        undefined);
     let reachedBacklogEnd = false;
     for (let page = 0; page < MAX_PURGE_RECEIPT_SCAN_PAGES; page++) {
       const candidates =
@@ -1981,9 +2053,14 @@ export class VoiceSessionService {
         break;
       }
     }
-    await this.repository.saveDialogueSnapshotPurgeReceiptScanCursor(
-      reachedBacklogEnd ? null : cursor ?? null,
-    );
+    // A preview never persists a scan position: it must stay observational
+    // with respect to apply's own cross-invocation progress (see this
+    // method's own doc on "preview cursor starvation").
+    if (!dryRun) {
+      await this.repository.saveDialogueSnapshotPurgeReceiptScanCursor(
+        reachedBacklogEnd ? null : cursor ?? null,
+      );
+    }
 
     const report: PurgeExecutionReport = {
       executionId: randomUUID(),
