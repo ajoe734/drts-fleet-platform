@@ -4,6 +4,7 @@ import unittest
 import io
 import json
 from datetime import datetime, timezone, timedelta
+from email import policy
 from email.message import EmailMessage
 from unittest.mock import Mock, MagicMock, patch
 
@@ -353,6 +354,63 @@ class InvitationConsumptionTest(unittest.TestCase):
         result.status = status
         result.headers = {'x-drts-candidate-sha': sha}
         return result
+
+    def smtp_body(self, body, cte='7bit'):
+        message = EmailMessage(policy=policy.SMTP)
+        message.set_content(body, cte=cte)
+        decoded = observer.message_body(message.as_bytes())
+        self.assertIn('\r\n', decoded)
+        return decoded
+
+    def test_smtp_crlf_code_and_expiry_are_parsed_after_real_mime_decoding(self):
+        expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+        for cte in ('7bit', 'quoted-printable', 'base64'):
+            with self.subTest(cte=cte):
+                decoded = self.smtp_body(self.body(expiry), cte)
+                token, parsed_expiry = observer.invitation_from_body(decoded)
+                self.assertEqual(token, self.token)
+                self.assertEqual(parsed_expiry, expiry)
+                # Parsing must not normalize the content used for MIME hashes.
+                self.assertIn('\r\n', decoded)
+
+    def test_smtp_crlf_link_is_not_followed_and_http_denial_still_required(self):
+        body = ('Accept your invitation: https://untrusted.invalid/accept?token=' + self.token
+                + '\nThis invitation expires at 2026-10-01T01:00:00Z.\n')
+        opener = Mock()
+        opener.open.return_value = self.response(403, {'error': {'code': 'TENANT_INVITATION_ACCEPTANCE_DENIED'}})
+        result = observer.accept_invitation(self.smtp_body(body, 'quoted-printable'),
+                                            {**self.request, 'acceptance': 'denied'}, opener)
+        self.assertEqual(result['acceptance_status'], 403)
+        self.assertEqual(opener.open.call_args.args[0].full_url,
+                         self.request['api_origin'] + '/api/tenant/invitations/accept')
+        self.assertNotIn(self.token, str(result))
+
+    def test_smtp_crlf_actual_acceptance_and_expiry_guards_are_retained(self):
+        decoded = self.smtp_body(self.body(datetime.now(timezone.utc) + timedelta(hours=24)))
+        opener = Mock()
+        with self.assertRaisesRegex(ValueError, 'not elapsed'):
+            observer.accept_invitation(decoded, self.request, opener)
+        opener.open.assert_not_called()
+        opener.open.return_value = self.response(201, {'data': {'accepted': True, 'user': {
+            'user_id': self.request['user_id'], 'tenant_id': '10000000-0000-0000-0000-000000000201', 'status': 'active'}}})
+        result = observer.accept_invitation(decoded, {**self.request, 'acceptance': 'accepted'}, opener)
+        self.assertEqual(result['acceptance'], 'accepted')
+        self.assertNotIn(self.token, str(result))
+
+    def test_crlf_duplicate_or_malformed_token_and_expiry_remain_rejected(self):
+        body = self.body(datetime.now(timezone.utc) + timedelta(hours=24))
+        invalid = [
+            body + 'Invitation code: ' + self.token + '\n',
+            body + 'Accept your invitation: https://untrusted.invalid/?token=' + self.token + '\n',
+            body + 'This invitation expires at 2026-10-05T00:00:00Z.\n',
+            body.replace(self.token, self.token[:15] + '\n' + self.token[15:]),
+            body.replace(self.token, self.token + ' extra'),
+        ]
+        for value in invalid:
+            with self.subTest(value_index=invalid.index(value)), self.assertRaises(ValueError):
+                observer.invitation_from_body(self.smtp_body(value))
+        with self.assertRaises(ValueError):
+            observer.invitation_from_body(body.replace('\n', '\r'))
 
     def test_no_fake_fast_forward_or_http_before_real_expiry(self):
         opener = Mock()
