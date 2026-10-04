@@ -261,6 +261,23 @@ interface TurnSession {
    * 2026-10-03T21:09:40Z reopen) -- now unified, both kinds share this
    * same timer since both now share the same backlog. */
   controlEventRetryTimer?: ReturnType<typeof setTimeout>;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+   * canonical 2026-10-03T23:31:57Z, "arbitrary N speech observations still
+   * creates arbitrary N promise-chain work and then N timers"): every
+   * `enqueueControlEvent` call used to chain its own
+   * `flushControlEventBacklog` task regardless of whether one was already
+   * chained and would drain the exact same backlog anyway -- N enqueues
+   * while one drain is outstanding chained N independent tasks, and a
+   * failure in each independently armed its OWN `controlEventRetryTimer`,
+   * each overwriting (never clearing) whichever timer the previous one had
+   * just armed, leaking N-1 orphaned timers no `release()` could ever
+   * reach. `true` from the moment a drain task is chained until its
+   * promise settles (success or failure); `flushControlEventBacklog`
+   * short-circuits to a no-op while this is `true`, since the single
+   * outstanding drain's own `while` loop already keeps consuming
+   * `pendingControlEvents` from the front until empty -- any entry a
+   * later call just enqueued is already covered by it. */
+  controlEventDrainInFlight?: boolean;
   /** The authoritative, server-durable `inputEpoch` the most recent
    * `recordAuthoritativeControlEvent` call resolved -- distinct from
    * `inputEpoch` above (this class's process-local turn-sequencing
@@ -1139,6 +1156,17 @@ export class VoiceCallTurnCoordinator {
       clearTimeout(turnSession.controlEventRetryTimer);
       delete turnSession.controlEventRetryTimer;
     }
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (Codex reopen,
+    // canonical 2026-10-03T23:31:57Z, "genuinely coalesce enqueue-triggered
+    // flushes behind ONE running/scheduled drain and ONE retry owner"): at
+    // most one drain task is ever chained at a time -- see
+    // `controlEventDrainInFlight`'s own doc. A later call arriving while
+    // one is already outstanding does nothing of its own; the outstanding
+    // drain's `while` loop below keeps consuming `pendingControlEvents`
+    // from the front until it is empty, so whatever this call just
+    // enqueued is already covered.
+    if (turnSession.controlEventDrainInFlight) return;
+    turnSession.controlEventDrainInFlight = true;
     // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control boundedness
     // (Codex reopen, canonical 2026-10-03T22:41:06Z, "a single bounded
     // drain/retry owner"): `boundedControlSignal` used to be called here,
@@ -1209,8 +1237,11 @@ export class VoiceCallTurnCoordinator {
         bounded.cancel();
       }
     }).then(
-      () => {},
+      () => {
+        turnSession.controlEventDrainInFlight = false;
+      },
       (error) => {
+        turnSession.controlEventDrainInFlight = false;
         // Never retry past release, and never retry an attachment whose
         // restoration is permanently failed (`handle()` already stopped
         // accepting new observations for it) -- both would otherwise

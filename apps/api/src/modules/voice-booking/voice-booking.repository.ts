@@ -44,6 +44,17 @@ export type VoiceSessionRecord = {
   pendingInput: boolean;
   lastResolvedInputEpoch: number;
   lastAppliedControlSequence: number;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence (Codex reopen, canonical 2026-10-03T23:31:57Z) -- see
+   * `V0106__voice_dialogue_snapshot.sql`'s own doc and
+   * `VoiceSessionService.resolveDialogueSnapshotOutcome`. Any
+   * `dialogue_snapshot` insert for a `session_version` at or below this
+   * watermark is durably rejected, never silently applied. Optional (never
+   * `undefined` for a real DB row, which always has the `NOT NULL DEFAULT
+   * 0` column) only so hand-built `VoiceSessionRecord` test fixtures
+   * predating this field do not all need updating; every real reader
+   * treats an absent value as `0` (never fenced). */
+  dialogueSnapshotFenceVersion?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -264,6 +275,7 @@ type VoiceSessionRow = QueryResultRow & {
   pending_input: boolean;
   last_resolved_input_epoch: number;
   last_applied_control_sequence: number;
+  dialogue_snapshot_fence_version: number;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -291,6 +303,7 @@ function mapSessionRow(row: VoiceSessionRow): VoiceSessionRecord {
     pendingInput: row.pending_input,
     lastResolvedInputEpoch: row.last_resolved_input_epoch,
     lastAppliedControlSequence: row.last_applied_control_sequence,
+    dialogueSnapshotFenceVersion: row.dialogue_snapshot_fence_version,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };

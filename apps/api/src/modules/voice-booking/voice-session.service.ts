@@ -166,6 +166,30 @@ export interface DialogueSnapshotRestoration {
   snapshot: DialogueSnapshotRecord | null;
 }
 
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance fence
+ * (Codex reopen, canonical 2026-10-03T23:31:57Z): the single atomic
+ * adjudication `reconcileUnresolvedCommit` (worker side,
+ * `dialogue-persist-port.ts`) falls back to once its own bounded,
+ * best-effort restoration-read polling exhausts with no correlating
+ * snapshot observed. Unlike that polling, this command's answer is always
+ * authoritative the instant it returns: either the exact pending write
+ * already landed (`accepted: true`, with its content), or it never will
+ * (`accepted: false`, and `voice.session.dialogue_snapshot_fence_version`
+ * is now durably raised to block it from ever landing after the fact).
+ */
+export interface ResolveDialogueSnapshotOutcomeCommand {
+  voiceSessionId: string;
+  expectedSessionVersion: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+}
+
+export type ResolveDialogueSnapshotOutcomeResult =
+  | { accepted: true; snapshot: DialogueSnapshotRecord }
+  | { accepted: false };
+
 @Injectable()
 export class VoiceSessionService {
   private readonly logger = new Logger(VoiceSessionService.name);
@@ -1142,6 +1166,28 @@ export class VoiceSessionService {
           "mediaEpoch refers to a media epoch that is no longer current.",
         );
       }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+      // fence (Codex reopen, canonical 2026-10-03T23:31:57Z): `session` was
+      // read `FOR UPDATE` by `requireSession` above, in this same
+      // transaction -- a concurrent `resolveDialogueSnapshotOutcome` call
+      // raising this fence for this exact version can only ever
+      // interleave strictly before or strictly after this check (never
+      // during it), since both take the SAME row's write lock before
+      // reading/writing it. A version this call's OWN candidate state
+      // predates may already have been authoritatively voided by a
+      // reconciliation that gave up waiting on it; this call's content
+      // must never land after that, or the exact silent-content-loss race
+      // that fence exists to close would just move here instead.
+      if (
+        (session.dialogueSnapshotFenceVersion ?? 0) >=
+        command.expectedSessionVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DIALOGUE_SNAPSHOT_VOIDED",
+          "This exact content commit was already authoritatively voided by a later reconciliation; retry from a fresh turn.",
+        );
+      }
 
       const { snapshot, deduped } = await this.repository.insertDialogueSnapshot(
         {
@@ -1229,6 +1275,98 @@ export class VoiceSessionService {
         },
         deduped: true,
       };
+    };
+
+    return typeof this.repository.withTransaction === "function"
+      ? this.repository.withTransaction(runWork)
+      : runWork();
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence (Codex reopen, canonical 2026-10-03T23:31:57Z): the single
+   * atomic adjudication worker-side bounded polling falls back to -- see
+   * `ResolveDialogueSnapshotOutcomeCommand`'s own doc. Deliberately does
+   * NOT re-check `expectedSessionVersion`/`routeProfileVersion` against
+   * the session's CURRENT values the way `persistDialogueSnapshot` does:
+   * this call's entire purpose is to adjudicate a write whose version the
+   * session may already have moved past, which `assertWriteAuthorized`
+   * would reject as stale. The session row is still read `FOR UPDATE` in
+   * the SAME transaction as the fence raise below, so this check-then-
+   * fence sequence is atomic with respect to a concurrent
+   * `persistDialogueSnapshot` call's own check-then-insert against the
+   * exact same row (see `raiseDialogueSnapshotFence`'s own doc).
+   */
+  async resolveDialogueSnapshotOutcome(
+    command: ResolveDialogueSnapshotOutcomeCommand,
+  ): Promise<ResolveDialogueSnapshotOutcomeResult> {
+    const runWork = async (
+      executor?: VoiceQueryExecutor,
+    ): Promise<ResolveDialogueSnapshotOutcomeResult> => {
+      // FOR UPDATE: see this method's own doc on why this lock is what
+      // makes the check-then-fence sequence below atomic.
+      await this.requireSession(command.voiceSessionId, executor, true);
+      const row = await this.repository.findDialogueSnapshotByVersion(
+        command.voiceSessionId,
+        command.expectedSessionVersion,
+        executor,
+      );
+      const correlates =
+        row !== null &&
+        row.inputEpoch === command.inputEpoch &&
+        row.mediaEpoch === command.mediaEpoch &&
+        row.turnId === command.turnId;
+      if (correlates) {
+        const encryptionKey = resolveDialogueSnapshotEncryptionKey();
+        const content = voiceDialogueSnapshotContentSchema.parse(
+          decryptDialogueSnapshotContent(
+            {
+              keyVersion: row.contentKeyVersion,
+              nonce: row.contentNonce,
+              ciphertext: row.contentCiphertext,
+              authTag: row.contentAuthTag,
+            },
+            (version) =>
+              encryptionKey && encryptionKey.version === version
+                ? encryptionKey.key
+                : null,
+            this.dialogueSnapshotAssociatedData({
+              voiceSessionId: row.voiceSessionId,
+              sessionVersion: row.sessionVersion,
+              resourceScopeId: row.resourceScopeId,
+              routeProfileVersion: row.routeProfileVersion,
+              leaseEpoch: row.leaseEpoch,
+              inputEpoch: row.inputEpoch,
+              mediaEpoch: row.mediaEpoch,
+              turnId: row.turnId,
+            }),
+          ),
+        );
+        return {
+          accepted: true,
+          snapshot: {
+            snapshotId: row.snapshotId,
+            voiceSessionId: row.voiceSessionId,
+            sessionVersion: row.sessionVersion,
+            inputEpoch: row.inputEpoch,
+            mediaEpoch: row.mediaEpoch,
+            turnId: row.turnId,
+            content,
+            createdAt: row.createdAt,
+            retentionExpiresAt: row.retentionExpiresAt,
+          },
+        };
+      }
+      // Not (yet) landed, and never will be: durably fence this exact
+      // version now, before this transaction's lock on the session row
+      // releases, so a write that is still genuinely in flight server-side
+      // can never land after this point.
+      await this.repository.raiseDialogueSnapshotFence(
+        command.voiceSessionId,
+        command.expectedSessionVersion,
+        executor,
+      );
+      return { accepted: false };
     };
 
     return typeof this.repository.withTransaction === "function"

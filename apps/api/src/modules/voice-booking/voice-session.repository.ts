@@ -79,6 +79,7 @@ type VoiceSessionRow = QueryResultRow & {
   pending_input: boolean;
   last_resolved_input_epoch: number;
   last_applied_control_sequence: number;
+  dialogue_snapshot_fence_version: number;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -109,6 +110,7 @@ function mapSessionRow(row: VoiceSessionRow): VoiceSessionRecord {
     pendingInput: row.pending_input,
     lastResolvedInputEpoch: row.last_resolved_input_epoch,
     lastAppliedControlSequence: row.last_applied_control_sequence,
+    dialogueSnapshotFenceVersion: row.dialogue_snapshot_fence_version,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
@@ -746,6 +748,70 @@ export class VoiceSessionRepository {
     );
     const row = result.rows[0];
     return row ? mapDialogueSnapshotRow(row) : null;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence: exact-version lookup (never "latest") for
+   * `VoiceSessionService.resolveDialogueSnapshotOutcome`'s own atomic
+   * adjudication -- distinct from `findLatestDialogueSnapshot` above,
+   * which answers "what is current" rather than "did THIS exact pending
+   * write already land." Deliberately includes an already-expired row
+   * (unlike `findLatestDialogueSnapshot`): a write that durably landed and
+   * only later expired still proves this exact commit was ACCEPTED, which
+   * is the only question this lookup answers.
+   */
+  async findDialogueSnapshotByVersion(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotRow | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE voice_session_id = $1 AND session_version = $2
+        LIMIT 1
+      `,
+      [voiceSessionId, sessionVersion],
+    );
+    const row = result.rows[0];
+    return row ? mapDialogueSnapshotRow(row) : null;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence: the only writer of `voice.session.dialogue_snapshot_fence_version`
+   * (see that column's own doc in `V0106__voice_dialogue_snapshot.sql`).
+   * Monotonic (`GREATEST`) so a concurrent call fencing an OLDER version
+   * can never un-fence a newer one a different call already raised.
+   * Callers must already hold this session row `FOR UPDATE` in the SAME
+   * transaction as whatever existence check preceded this (see
+   * `VoiceSessionService.resolveDialogueSnapshotOutcome`) -- this call's
+   * own `UPDATE` re-acquires that same row's write lock regardless, which
+   * is what makes the check-then-fence sequence atomic with respect to a
+   * concurrent `insertDialogueSnapshot` doing its own check-then-insert
+   * against the exact same row.
+   */
+  async raiseDialogueSnapshotFence(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<void> {
+    const exec = executor ?? this.requireDatabase();
+    await exec.query(
+      `
+        UPDATE voice.session
+        SET dialogue_snapshot_fence_version =
+          GREATEST(dialogue_snapshot_fence_version, $2)
+        WHERE voice_session_id = $1
+      `,
+      [voiceSessionId, sessionVersion],
+    );
   }
 
   /**
