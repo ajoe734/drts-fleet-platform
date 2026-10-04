@@ -6438,3 +6438,29 @@ observations and this correction, rather than silently replacing their history.
 Actual issuer/model/key/storage/call-authority/PSTN limits remain distinct from
 these code defects; productionCapable remains false. All candidate review/CI,
 merge and required acceptance gates still apply to the final integrated source.
+
+### Successful-drain lost-wakeup follow-through
+
+The independent f495 review distinguished the FIXED256-burst leak from a NEW
+successful-settlement lost wakeup. Pi reproduced it without replacing any
+business method: after genuine HTTP success, observe the real microtask window
+where backlog is empty but drainInFlight remains true; deliver another actual
+speech event and then NO further events. Both speech-only and transition/speech
+cases leave one retained event without a drain. Added tests:2fail/6pass on the
+unchanged f495 scheduler (voice-control-lost-wakeup-before.log).
+
+The success continuation now clears ownership and synchronously rechecks the
+backlog, release signal and fail-closed restoration state before reacquiring a
+drain. There is no await in this transfer. The old single-drain/single-retry
+bounds remain. Scheduler, causal delivery, media continuation, future-version
+fence and snapshot suites:5files/63tests pass, zero skips; rootTS, changed lint
+and diff pass (voice-control-lost-wakeup-*). This repairs that exact lost-wakeup
+trigger, not the separately open atomic-outcome authority/retention/validation
+units. The complete f495 independent review is preserved in canonical outcomes
+and local voice-f495-review.txt for the original owner's full successor record.
+
+The complete inspected socket-free selection then passed35files/646tests,
+zero skips (voice-contribution-full-scoped.log), with DB URLs unset and the
+TCP/UDP-denial preload. This is the existing635-test selection plus11 new
+regressions; listener-bearing session-binding-resolution.test.ts remains
+explicitly excluded from VM execution, not silently counted as passed.

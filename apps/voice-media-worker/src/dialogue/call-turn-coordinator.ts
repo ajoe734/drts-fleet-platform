@@ -1239,6 +1239,16 @@ export class VoiceCallTurnCoordinator {
     }).then(
       () => {
         turnSession.controlEventDrainInFlight = false;
+        // An observation can arrive after the loop's last empty check but
+        // before this continuation settles ownership. Recheck without an
+        // intervening await so every retained arrival has a drain owner.
+        if (
+          !turnSession.releaseAbort.signal.aborted &&
+          !turnSession.restoreFailed &&
+          turnSession.pendingControlEvents.length > 0
+        ) {
+          this.flushControlEventBacklog(turnSession, binding);
+        }
       },
       (error) => {
         turnSession.controlEventDrainInFlight = false;

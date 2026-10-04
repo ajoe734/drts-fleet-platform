@@ -12,6 +12,7 @@ interface SessionObservation {
   controlEventQueue: Promise<void>;
   pendingControlEvents: unknown[];
   restoreFailed?: boolean;
+  controlEventDrainInFlight?: boolean;
 }
 interface SchedulerObservation {
   sessions: Map<object, SessionObservation>;
@@ -28,7 +29,7 @@ function json(body: unknown) {
   });
 }
 
-async function setup(mixed: boolean) {
+async function setup(mixed: boolean, options: { burstSize?: number; firstTransition?: boolean } = {}) {
   vi.useFakeTimers();
   vi.spyOn(console, "error").mockImplementation(() => {});
   const binding: VoiceSessionBinding = {
@@ -81,7 +82,7 @@ async function setup(mixed: boolean) {
   let mediaEpoch = 1;
   const speaker = { speak: async () => {}, currentMediaEpoch: () => mediaEpoch };
   function send(i: number) {
-    const transition = mixed && i > 0 && i % 32 === 0;
+    const transition = (options.firstTransition === true && i === 0) || (mixed && i > 0 && i % 32 === 0);
     if (transition) mediaEpoch++;
     coordinator.handle(attachment, {
       type: transition ? "media.epoch.advanced" : "speech.started",
@@ -91,9 +92,11 @@ async function setup(mixed: boolean) {
   }
   send(0);
   await entered.promise;
-  for (let i = 1; i < 256; i++) send(i);
+  for (let i = 1; i < (options.burstSize ?? 256); i++) send(i);
   return {
     coordinator, attachment, session, scheduled, bodies,
+    emit: send,
+    releaseHeld: () => held.resolve(),
     attempts: () => attempts,
     recover: () => { healthy = true; },
     failHeld: async () => { held.resolve(); await session.controlEventQueue; },
@@ -138,6 +141,32 @@ describe.each([false, true])("R4-control total scheduler boundedness (mixed=%s)"
       h.coordinator.release(h.attachment);
       await vi.advanceTimersByTimeAsync(2000);
       expect(h.attempts()).toBe(delivered);
+    } finally { await h.cleanup(); }
+  });
+
+  it("hands ownership to an arrival between successful loop completion and promise settlement, without another event", async () => {
+    const h = await setup(mixed, { burstSize: 1, firstTransition: mixed });
+    try {
+      h.recover();
+      h.releaseHeld();
+      let observedSettlementWindow = false;
+      for (let i = 0; i < 200; i++) {
+        await Promise.resolve();
+        if (h.session.pendingControlEvents.length === 0 && h.session.controlEventDrainInFlight) {
+          observedSettlementWindow = true;
+          break;
+        }
+      }
+      // No sleeps, timer advance or replaced business method creates this
+      // window: observe the real drain and deliver a real public event.
+      expect(observedSettlementWindow).toBe(true);
+      h.emit(1);
+      for (let i = 0; i < 200; i++) await Promise.resolve();
+      expect(h.attempts()).toBe(2);
+      expect(h.bodies.map((body) => body.sequence)).toEqual([1, 2]);
+      expect(h.session.pendingControlEvents).toHaveLength(0);
+      expect(h.session.controlEventDrainInFlight).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
     } finally { await h.cleanup(); }
   });
 
