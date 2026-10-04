@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+#
+# The authorized deploy pipeline must resolve this tag to an exact
+# name@sha256:<digest> reference (e.g. `docker buildx imagetools inspect`)
+# before operations/deployment/provision-dev-artifact-backends.py accepts
+# it -- that script refuses any --clamd-image that is not already a digest
+# reference, so a later mutable-tag push can never silently change what is
+# already deployed. The tag here stays mutable so routine version-bump
+# tooling can still propose updates against it; the immutability guarantee
+# lives at the provisioning boundary, not in this file.
+FROM clamav/clamav:1.3
+
+COPY clamd.conf /etc/clamav/clamd.conf
+COPY clamd-entrypoint.sh /usr/local/bin/clamd-entrypoint.sh
+RUN chmod +x /usr/local/bin/clamd-entrypoint.sh
+
+LABEL org.opencontainers.image.source="drts-fleet-platform" \
+      org.opencontainers.image.title="drts-artifact-scanner-clamd" \
+      org.opencontainers.image.description="Pinned ClamAV sidecar, loopback-only, no storage/network privilege"
+
+# No port is EXPOSEd: clamd.conf binds TCPAddr 127.0.0.1 only, reachable
+# solely by the gateway container inside this same Cloud Run instance.
+ENTRYPOINT ["/usr/local/bin/clamd-entrypoint.sh"]

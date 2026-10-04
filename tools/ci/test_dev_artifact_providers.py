@@ -1,4 +1,5 @@
-"""Offline deployment resolver and workflow-wiring regressions. No servers/cloud."""
+"""Offline deployment resolver, provisioning-helper and workflow-wiring
+regressions. No servers/cloud: every gcloud/deploy call is mocked."""
 import contextlib
 import importlib.util
 import io
@@ -17,6 +18,13 @@ SPEC = importlib.util.spec_from_file_location(
 resolver = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(resolver)
 PREFIX = "drts-dev"
+
+PROVISION_SPEC = importlib.util.spec_from_file_location(
+    "provision_dev_artifact_backends",
+    ROOT / "operations/deployment/provision-dev-artifact-backends.py",
+)
+provisioner = importlib.util.module_from_spec(PROVISION_SPEC)
+PROVISION_SPEC.loader.exec_module(provisioner)
 
 
 def s3(prefix="REMITTANCE_PROOF"):
@@ -174,6 +182,88 @@ class DevArtifactProvidersTest(unittest.TestCase):
             with patch.object(resolver.subprocess, "run", side_effect=exception), self.assertRaises(resolver.ConfigurationError):
                 resolver.check_secret("project", "name")
 
+    def test_gcs_storage_configuration_both_namespaces(self):
+        env, mounts = resolver.resolve({
+            "DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs",
+            "DEV_REMITTANCE_PROOF_GCS_BUCKET": "drts-dev-devcc-20260825-remittance-proofs",
+            "DEV_DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs",
+            "DEV_DOCUMENT_ARTIFACT_GCS_BUCKET": "drts-dev-devcc-20260825-document-artifacts",
+        }, PREFIX)
+        self.assertEqual(env["REMITTANCE_PROOF_STORAGE_PROVIDER"], "gcs")
+        self.assertEqual(env["REMITTANCE_PROOF_GCS_BUCKET"], "drts-dev-devcc-20260825-remittance-proofs")
+        self.assertEqual(env["DOCUMENT_ARTIFACT_STORAGE_PROVIDER"], "gcs")
+        self.assertEqual(env["DOCUMENT_ARTIFACT_GCS_BUCKET"], "drts-dev-devcc-20260825-document-artifacts")
+        # GCS auth is the ambient Cloud Run metadata identity: no secret mounts.
+        self.assertEqual(mounts, {})
+
+    def test_gcs_rejects_s3_fields_and_invalid_bucket(self):
+        cases = [
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs"},
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs", "DEV_REMITTANCE_PROOF_GCS_BUCKET": "ba"},
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs", "DEV_REMITTANCE_PROOF_GCS_BUCKET": "$(id)"},
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs", "DEV_REMITTANCE_PROOF_GCS_BUCKET": "valid-bucket-name",
+             "DEV_REMITTANCE_PROOF_S3_REGION": "us-east-1"},
+            {"DEV_REMITTANCE_PROOF_GCS_BUCKET": "valid-bucket-name"},
+        ]
+        for values in cases:
+            with self.subTest(values=values), self.assertRaises(resolver.ConfigurationError):
+                resolver.resolve(values, PREFIX)
+
+    def test_cloud_run_clamd_scanner_defaults_and_overrides(self):
+        base = {
+            "DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs",
+            "DEV_REMITTANCE_PROOF_GCS_BUCKET": "drts-dev-devcc-20260825-remittance-proofs",
+            "DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
+            "DEV_REMITTANCE_PROOF_SCANNER_URL": "https://drts-dev-artifact-scanner-abc123-uc.a.run.app",
+        }
+        env, mounts = resolver.resolve(base, PREFIX)
+        self.assertEqual(env["REMITTANCE_PROOF_SCANNER_PROVIDER"], "cloud-run-clamd")
+        self.assertEqual(env["REMITTANCE_PROOF_SCANNER_URL"], base["DEV_REMITTANCE_PROOF_SCANNER_URL"])
+        self.assertEqual(env["REMITTANCE_PROOF_SCANNER_TIMEOUT_MS"], "60000")
+        self.assertEqual(mounts, {})
+        env, _ = resolver.resolve(base | {"DEV_REMITTANCE_PROOF_SCANNER_TIMEOUT_MS": "30000"}, PREFIX)
+        self.assertEqual(env["REMITTANCE_PROOF_SCANNER_TIMEOUT_MS"], "30000")
+        # s3 proof storage also satisfies the "configured storage" requirement.
+        env, _ = resolver.resolve(s3() | {
+            "DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
+            "DEV_REMITTANCE_PROOF_SCANNER_URL": base["DEV_REMITTANCE_PROOF_SCANNER_URL"],
+        }, PREFIX)
+        self.assertEqual(env["REMITTANCE_PROOF_SCANNER_PROVIDER"], "cloud-run-clamd")
+
+    def test_cloud_run_clamd_requires_storage_and_rejects_clamd_fields(self):
+        cases = [
+            {"DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
+             "DEV_REMITTANCE_PROOF_SCANNER_URL": "https://scanner.invalid"},
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs", "DEV_REMITTANCE_PROOF_GCS_BUCKET": "valid-bucket-name",
+             "DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd"},
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs", "DEV_REMITTANCE_PROOF_GCS_BUCKET": "valid-bucket-name",
+             "DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
+             "DEV_REMITTANCE_PROOF_SCANNER_URL": "https://scanner.invalid",
+             "DEV_REMITTANCE_PROOF_CLAMD_HOST": "scanner.internal"},
+            {"DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs", "DEV_REMITTANCE_PROOF_GCS_BUCKET": "valid-bucket-name",
+             "DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "clamd",
+             "DEV_REMITTANCE_PROOF_SCANNER_URL": "https://scanner.invalid"},
+        ]
+        for values in cases:
+            with self.subTest(values=values), self.assertRaises(resolver.ConfigurationError):
+                resolver.resolve(values, PREFIX)
+
+    def test_cloud_run_clamd_url_must_be_exact_root_origin(self):
+        base = {
+            "DEV_REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs",
+            "DEV_REMITTANCE_PROOF_GCS_BUCKET": "valid-bucket-name",
+            "DEV_REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
+        }
+        for url in ("http://scanner.invalid", "https://user:pass@scanner.invalid",
+                    "https://scanner.invalid/path", "https://scanner.invalid?x=1",
+                    "https://scanner.invalid#frag", "https://", "https://scanner.invalid/\nevil=true",
+                    "https://scanner invalid"):
+            with self.subTest(url=url), self.assertRaises(resolver.ConfigurationError):
+                resolver.resolve(base | {"DEV_REMITTANCE_PROOF_SCANNER_URL": url}, PREFIX)
+        for url in ("https://scanner.invalid", "https://scanner.invalid/"):
+            env, _ = resolver.resolve(base | {"DEV_REMITTANCE_PROOF_SCANNER_URL": url}, PREFIX)
+            self.assertEqual(env["REMITTANCE_PROOF_SCANNER_URL"], url)
+
     def test_workflow_wires_outputs_into_existing_api_arguments_only(self):
         workflow = (ROOT / ".github/workflows/deploy-dev.yml").read_text()
         self.assertIn("DEV_PROVIDER_CONFIG_JSON: ${{ toJSON(vars) }}", workflow)
@@ -190,6 +280,174 @@ class DevArtifactProvidersTest(unittest.TestCase):
         self.assertIn("NOTIFICATION_OUTBOX_TYPE=postgres", workflow)
         for ci in ("ci.yml", "ci-integ.yml"):
             self.assertIn("python3 -m unittest tools/ci/test_dev_artifact_providers.py", (ROOT / ".github/workflows" / ci).read_text())
+
+
+GOOD_ARGS = [
+    "--project", "drts-dev-devcc-20260825",
+    "--region", "us-central1",
+    "--document-bucket", "drts-dev-devcc-20260825-document-artifacts",
+    "--remittance-bucket", "drts-dev-devcc-20260825-remittance-proofs",
+    "--runtime-service-account", "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "--scanner-service", "drts-dev-artifact-scanner",
+    "--scanner-service-account", "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+    "--gateway-image", "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/artifact-scanner-gateway@sha256:" + "a" * 64,
+    "--clamd-image", "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/artifact-scanner-clamd@sha256:" + "b" * 64,
+    "--invoker-member", "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+]
+
+
+class DevArtifactBackendsProvisioningTest(unittest.TestCase):
+    """operations/deployment/provision-dev-artifact-backends.py: every
+    gcloud/deploy call is mocked at the subprocess boundary; no real
+    bucket, IAM binding or Cloud Run service is ever touched."""
+
+    @staticmethod
+    def never_called(*args, **kwargs):
+        raise AssertionError(f"unexpected subprocess call: {args!r}")
+
+    def run_main(self, argv, run_side_effect):
+        with patch.object(provisioner.subprocess, "run", side_effect=run_side_effect) as run, \
+             patch("sys.argv", ["provision", *argv]), \
+             contextlib.redirect_stdout(io.StringIO()) as out, \
+             contextlib.redirect_stderr(io.StringIO()) as err:
+            code = provisioner.main()
+        return code, out.getvalue() + err.getvalue(), run.call_args_list
+
+    def test_success_creates_missing_bucket_updates_existing_deploys_and_grants_invoker(self):
+        def side_effect(args, **kwargs):
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                if "document-artifacts" in args[4]:
+                    return subprocess.CompletedProcess(args, 1, "", "not found")
+                return subprocess.CompletedProcess(args, 0, "drts-dev-devcc-20260825-remittance-proofs\n")
+            return subprocess.CompletedProcess(args, 0, "")
+
+        code, _, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 0)
+        argvs = [call.args[0] for call in calls]
+
+        self.assertIn(
+            ["gcloud", "storage", "buckets", "create", "gs://drts-dev-devcc-20260825-document-artifacts",
+             "--project", "drts-dev-devcc-20260825", "--location", "us-central1",
+             "--uniform-bucket-level-access", "--public-access-prevention", "--versioning"],
+            argvs,
+        )
+        self.assertNotIn(
+            ["gcloud", "storage", "buckets", "create", "gs://drts-dev-devcc-20260825-remittance-proofs",
+             "--project", "drts-dev-devcc-20260825", "--location", "us-central1",
+             "--uniform-bucket-level-access", "--public-access-prevention", "--versioning"],
+            argvs,
+        )
+        for bucket in ("drts-dev-devcc-20260825-document-artifacts", "drts-dev-devcc-20260825-remittance-proofs"):
+            self.assertIn(
+                ["gcloud", "storage", "buckets", "update", f"gs://{bucket}",
+                 "--project", "drts-dev-devcc-20260825",
+                 "--uniform-bucket-level-access", "--public-access-prevention"],
+                argvs,
+            )
+            self.assertIn(
+                ["gcloud", "storage", "buckets", "add-iam-policy-binding", f"gs://{bucket}",
+                 "--project", "drts-dev-devcc-20260825",
+                 "--member", "serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+                 "--role", "roles/storage.objectAdmin"],
+                argvs,
+            )
+
+        deploy_calls = [a for a in argvs if a and a[0] == str(provisioner.DEPLOY_CLOUD_RUN_SERVICE)]
+        self.assertEqual(len(deploy_calls), 1)
+        deploy_args = deploy_calls[0]
+        self.assertIn("--no-allow-unauthenticated", deploy_args)
+        self.assertNotIn("--allow-unauthenticated", deploy_args)
+        self.assertEqual(deploy_args.count("--container"), 2)
+        self.assertIn("--min-instances", deploy_args)
+        self.assertEqual(deploy_args[deploy_args.index("--min-instances") + 1], "0")
+        self.assertEqual(deploy_args[deploy_args.index("--max-instances") + 1], "1")
+        self.assertEqual(deploy_args[deploy_args.index("--concurrency") + 1], "1")
+
+        self.assertIn(
+            ["gcloud", "run", "services", "add-iam-policy-binding", "drts-dev-artifact-scanner",
+             "--project", "drts-dev-devcc-20260825", "--region", "us-central1",
+             "--member", "serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
+             "--role", "roles/run.invoker"],
+            argvs,
+        )
+        # The scanner's own identity never appears as a storage.objectAdmin member.
+        for a in argvs:
+            if a[:4] == ["gcloud", "storage", "buckets", "add-iam-policy-binding"]:
+                self.assertNotIn("drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", a)
+
+    def test_public_invoker_member_rejected_before_any_cloud_call(self):
+        args = [v if v != GOOD_ARGS[GOOD_ARGS.index("--invoker-member") + 1] else "allUsers" for v in GOOD_ARGS]
+        code, _, calls = self.run_main(args, self.never_called)
+        self.assertEqual(code, 1)
+        self.assertEqual(calls, [])
+
+    def test_mutable_image_tag_rejected_before_any_cloud_call(self):
+        for flag in ("--gateway-image", "--clamd-image"):
+            with self.subTest(flag=flag):
+                args = list(GOOD_ARGS)
+                args[args.index(flag) + 1] = "us-central1-docker.pkg.dev/project/repo/image:latest"
+                code, _, calls = self.run_main(args, self.never_called)
+                self.assertEqual(code, 1)
+                self.assertEqual(calls, [])
+
+    def test_invalid_names_rejected_before_any_cloud_call(self):
+        cases = {
+            "--project": "Invalid_Project",
+            "--document-bucket": "$(id)",
+            "--runtime-service-account": "not-a-service-account",
+            "--scanner-service": "Not_A_Service",
+            "--invoker-member": "allAuthenticatedUsers",
+        }
+        for flag, bad_value in cases.items():
+            with self.subTest(flag=flag):
+                args = list(GOOD_ARGS)
+                args[args.index(flag) + 1] = bad_value
+                code, _, calls = self.run_main(args, self.never_called)
+                self.assertEqual(code, 1)
+                self.assertEqual(calls, [])
+
+    def test_bucket_create_failure_stops_before_iam_and_deploy(self):
+        def side_effect(args, **kwargs):
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                return subprocess.CompletedProcess(args, 1, "", "not found")
+            if args[:4] == ["gcloud", "storage", "buckets", "create"]:
+                return subprocess.CompletedProcess(args, 1, "", "quota exceeded")
+            raise AssertionError(f"unexpected call after bucket create failure: {args}")
+
+        code, output, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 1)
+        self.assertIn("Failed to create bucket", output)
+        kinds = {tuple(call.args[0][:4]) for call in calls}
+        self.assertEqual(
+            kinds,
+            {("gcloud", "storage", "buckets", "describe"), ("gcloud", "storage", "buckets", "create")},
+        )
+
+    def test_deploy_failure_stops_before_granting_invoker(self):
+        def side_effect(args, **kwargs):
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                return subprocess.CompletedProcess(args, 0, "exists\n")
+            if args and args[0] == str(provisioner.DEPLOY_CLOUD_RUN_SERVICE):
+                return subprocess.CompletedProcess(args, 1, "", "deploy failed")
+            if args[:4] == ["gcloud", "storage", "buckets", "update"] or \
+               args[:4] == ["gcloud", "storage", "buckets", "add-iam-policy-binding"]:
+                return subprocess.CompletedProcess(args, 0, "")
+            raise AssertionError(f"unexpected call after deploy failure: {args}")
+
+        code, output, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 1)
+        self.assertIn("Scanner Cloud Run deploy failed", output)
+        self.assertFalse(any(
+            call.args[0][:4] == ["gcloud", "run", "services", "add-iam-policy-binding"] for call in calls
+        ))
+
+    def test_no_secret_manager_call_is_ever_made(self):
+        def side_effect(args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, "exists\n")
+
+        _, _, calls = self.run_main(GOOD_ARGS, side_effect)
+        for call in calls:
+            self.assertNotIn("secrets", call.args[0])
 
 
 if __name__ == "__main__":
