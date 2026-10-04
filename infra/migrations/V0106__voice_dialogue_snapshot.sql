@@ -106,3 +106,34 @@ CREATE TABLE IF NOT EXISTS voice.dialogue_snapshot_purge_receipt (
 );
 
 SELECT voice._make_append_only('voice.dialogue_snapshot_purge_receipt');
+
+-- AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+-- lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z, "new purge
+-- receipts have no governed lifetime"): the receipt row above has no
+-- policy-registered retention of its own -- its `retention_expires_at` is
+-- the ALREADY-expired CONTENT row's past expiry, never a lifetime for
+-- this metadata row itself -- so it would otherwise accumulate one row per
+-- purged turn/session forever. phase1-unattended-voice-booking-sd-20260906
+-- .md §9.2 forbids default-indefinite retention for a new metadata family.
+-- `VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts` instead
+-- ages these out under the EXISTING approved `voice_booking_evidence`
+-- family (confirmation/command/manifest metadata, already 730-day bounded
+-- and legal-hold-aware) rather than registering a brand new one.
+--
+-- Deleting a receipt must never reopen its own
+-- `(voice_session_id, session_version)` key for write reuse (see
+-- `VoiceSessionRepository.insertDialogueSnapshot`'s own `WHERE NOT EXISTS`
+-- guard against this exact table), nor let a later
+-- `resolveDialogueSnapshotOutcome` call mistake "the metadata proof itself
+-- aged out" for "this write definitively never landed." This monotonic
+-- per-session floor is raised (`GREATEST`, same convention as
+-- `dialogue_snapshot_fence_version` above) in the SAME transaction as the
+-- receipt delete (see `retireDialogueSnapshotPurgeReceipt`) -- a crash
+-- between the two leaves either both committed or neither. Deliberately a
+-- SEPARATE column from `dialogue_snapshot_fence_version`: that one means
+-- "already known non-acceptance" (write genuinely never landed);
+-- this one means "was accepted, proof now governed-expired" --
+-- `resolveDialogueSnapshotOutcome` answers `accepted: "unknown"` for the
+-- latter, never a false confirmed rejection.
+ALTER TABLE voice.session
+  ADD COLUMN IF NOT EXISTS dialogue_snapshot_history_unavailable_floor integer NOT NULL DEFAULT 0;

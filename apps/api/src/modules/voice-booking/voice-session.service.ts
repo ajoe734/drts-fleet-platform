@@ -14,6 +14,8 @@ import type {
 } from "./voice-booking.repository";
 import {
   VoiceSessionRepository,
+  DialogueSnapshotPurgeReceiptConflictError,
+  type DialogueSnapshotRow,
   type SessionControlPatch,
   type VoiceQueryExecutor,
 } from "./voice-session.repository";
@@ -238,6 +240,29 @@ export type ResolveDialogueSnapshotOutcomeResult =
       mediaEpoch: number;
       turnId: string;
       fenceVersion: number;
+    }
+  | {
+      /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+       * lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z): a FOURTH,
+       * genuinely indeterminate outcome -- distinct from `accepted: false`
+       * above -- for a version at or below
+       * `dialogueSnapshotHistoryUnavailableFloor` with no row and no
+       * correlating receipt. This can mean either "never landed" or "was
+       * accepted, but the governed, finite-lifetime purge-receipt proof has
+       * since aged out" and this call cannot tell the two apart; reporting
+       * it as a confirmed non-acceptance would be the exact false-rejection
+       * the receipt mechanism exists to prevent. Deliberately not the
+       * literal `true` or `false` so the worker's existing
+       * `classifyResolveOutcome` -- which already treats anything other
+       * than those two literals as its own safe `"unknown"` verdict -- keeps
+       * bounded-retrying rather than treating this as either acceptance or
+       * rejection. */
+      accepted: "unknown";
+      voiceSessionId: string;
+      sessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
     };
 
 @Injectable()
@@ -1228,9 +1253,21 @@ export class VoiceSessionService {
       // reconciliation that gave up waiting on it; this call's content
       // must never land after that, or the exact silent-content-loss race
       // that fence exists to close would just move here instead.
+      //
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+      // lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z): also
+      // checks `dialogueSnapshotHistoryUnavailableFloor` -- once
+      // `purgeExpiredDialogueSnapshotPurgeReceipts` has retired an aged
+      // receipt, `insertDialogueSnapshot`'s own `WHERE NOT EXISTS` guard
+      // against that now-deleted receipt would otherwise no longer block a
+      // fresh insert at this exact key. This floor is what keeps that
+      // already-accepted-then-purged-then-receipt-retired revision
+      // permanently non-reusable even after its receipt is gone.
       if (
-        (session.dialogueSnapshotFenceVersion ?? 0) >=
-        command.expectedSessionVersion
+        Math.max(
+          session.dialogueSnapshotFenceVersion ?? 0,
+          session.dialogueSnapshotHistoryUnavailableFloor ?? 0,
+        ) >= command.expectedSessionVersion
       ) {
         throw new ApiRequestError(
           409,
@@ -1239,24 +1276,50 @@ export class VoiceSessionService {
         );
       }
 
-      const { snapshot, deduped } = await this.repository.insertDialogueSnapshot(
-        {
-          voiceSessionId: command.voiceSessionId,
-          sessionVersion: command.expectedSessionVersion,
-          resourceScopeId: command.expectedResourceScopeId,
-          routeProfileVersion: command.expectedRouteProfileVersion,
-          leaseEpoch: command.expectedLeaseEpoch,
-          inputEpoch: command.inputEpoch,
-          mediaEpoch: command.mediaEpoch,
-          turnId: command.turnId,
-          contentKeyVersion: encrypted.keyVersion,
-          contentNonce: encrypted.nonce,
-          contentCiphertext: encrypted.ciphertext,
-          contentAuthTag: encrypted.authTag,
-          retentionExpiresAt: retentionPolicy.expiresAt,
-        },
-        executor,
-      );
+      let snapshot: DialogueSnapshotRow;
+      let deduped: boolean;
+      try {
+        ({ snapshot, deduped } = await this.repository.insertDialogueSnapshot(
+          {
+            voiceSessionId: command.voiceSessionId,
+            sessionVersion: command.expectedSessionVersion,
+            resourceScopeId: command.expectedResourceScopeId,
+            routeProfileVersion: command.expectedRouteProfileVersion,
+            leaseEpoch: command.expectedLeaseEpoch,
+            inputEpoch: command.inputEpoch,
+            mediaEpoch: command.mediaEpoch,
+            turnId: command.turnId,
+            contentKeyVersion: encrypted.keyVersion,
+            contentNonce: encrypted.nonce,
+            contentCiphertext: encrypted.ciphertext,
+            contentAuthTag: encrypted.authTag,
+            retentionExpiresAt: retentionPolicy.expiresAt,
+          },
+          executor,
+        ));
+      } catch (err) {
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged
+        // revision reuse (Codex reopen, canonical 2026-10-04T02:13:45Z):
+        // `insertDialogueSnapshot` refuses to write (or renew the retention
+        // of) a `(voiceSessionId, sessionVersion)` key
+        // `voice.dialogue_snapshot_purge_receipt` already has a receipt
+        // for. Surfaced to the caller as a conflict -- same category as
+        // `VOICE_ACTION_PAYLOAD_CONFLICT` below ("a DIFFERENT already-
+        // landed write occupies this exact version") -- never a silent
+        // success and never this call's own content. The worker's
+        // `resolveDialogueSnapshotOutcome` reconciliation path (ambiguous,
+        // not definitive, for exactly this code) is what recovers the
+        // actual accepted/expired history for the identity THIS call
+        // attempted, from the still-intact receipt.
+        if (err instanceof DialogueSnapshotPurgeReceiptConflictError) {
+          throw new ApiRequestError(
+            409,
+            "VOICE_DIALOGUE_SNAPSHOT_PURGED",
+            "This session revision was already accepted and governed-purged; it can never be reused for a new or replacement write.",
+          );
+        }
+        throw err;
+      }
 
       if (!deduped) {
         return {
@@ -1443,6 +1506,36 @@ export class VoiceSessionService {
             mediaEpoch: receipt.mediaEpoch,
             turnId: receipt.turnId,
             retentionExpiresAt: receipt.retentionExpiresAt,
+          };
+        }
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+        // lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z, "new
+        // purge receipts have no governed lifetime"): no row AND no
+        // (correlating) receipt for this exact version is ambiguous, not
+        // automatically a confirmed non-acceptance, whenever this version
+        // is at or below `dialogueSnapshotHistoryUnavailableFloor` --
+        // `purgeExpiredDialogueSnapshotPurgeReceipts` raises that floor in
+        // the SAME transaction it retires (deletes) the one receipt that
+        // could have proven acceptance for a version at or below it, so
+        // its absence here could equally mean "was accepted, the governed
+        // metadata proof has since aged out" as "never landed." Report
+        // `accepted: "unknown"` (genuinely indeterminate) rather than
+        // durably fencing/rejecting an identity this call cannot actually
+        // disprove -- the worker's own `classifyResolveOutcome` already
+        // treats any `accepted` value other than the literals `true`/
+        // `false` as its existing safe `"unknown"` verdict (bounded retry,
+        // never a confirmed rejection, never a resurrected restore).
+        if (
+          command.expectedSessionVersion <=
+          (session.dialogueSnapshotHistoryUnavailableFloor ?? 0)
+        ) {
+          return {
+            accepted: "unknown",
+            voiceSessionId: command.voiceSessionId,
+            sessionVersion: command.expectedSessionVersion,
+            inputEpoch: command.inputEpoch,
+            mediaEpoch: command.mediaEpoch,
+            turnId: command.turnId,
           };
         }
       }
@@ -1684,6 +1777,109 @@ export class VoiceSessionService {
     const report: PurgeExecutionReport = {
       executionId: randomUUID(),
       family: "voice_transcript",
+      mode: dryRun ? "dry-run" : "apply",
+      retentionDays: policy.hotRetentionDays,
+      totalExamined: candidates.length,
+      purgedCount,
+      skippedHeldCount,
+      operatorId,
+      executedAt: new Date().toISOString(),
+      policyVersion: this.retentionService.getPolicyCatalog().version,
+      results,
+    };
+    return { report, deletedCount };
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+   * lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z, "new purge
+   * receipts have no governed lifetime"): `voice.dialogue_snapshot_purge_receipt`
+   * (written by `deleteDialogueSnapshot`) has no policy-registered
+   * retention of its own and no existing sweep ever ages it out --
+   * `purgeExpiredDialogueSnapshots` above only considers CONTENT candidates
+   * from `voice.dialogue_snapshot`, which this receipt is never a row of.
+   * This governs that receipt's OWN finite lifetime instead, under the
+   * EXISTING approved `voice_booking_evidence` family (confirmation/
+   * command/manifest metadata, already 730-day bounded and legal-hold-
+   * aware) -- deliberately not a newly-registered family, since this
+   * task's write scope does not extend to `@drts/contracts`'
+   * `EVIDENCE_RETENTION_FAMILIES`.
+   *
+   * `retireDialogueSnapshotPurgeReceipt` raises
+   * `dialogue_snapshot_history_unavailable_floor` to this exact
+   * `sessionVersion` in the SAME transaction as the receipt delete, so the
+   * key can never be reopened for write reuse and
+   * `resolveDialogueSnapshotOutcome` can still answer `accepted: "unknown"`
+   * (history genuinely unavailable) rather than falsely reporting
+   * definitive non-acceptance once this receipt is gone.
+   */
+  async purgeExpiredDialogueSnapshotPurgeReceipts(
+    operatorId: string,
+    dryRun = true,
+  ): Promise<{ report: PurgeExecutionReport; deletedCount: number }> {
+    if (!this.retentionService) {
+      throw new ApiRequestError(
+        500,
+        "VOICE_RETENTION_POLICY_UNAVAILABLE",
+        "Voice retention policy service is unavailable; refusing to purge without its legal-hold-aware policy decision.",
+      );
+    }
+    const policy = this.retentionService.assertRetentionDefined(
+      "voice_booking_evidence",
+    );
+    const purgedBefore = new Date(
+      Date.now() - policy.hotRetentionDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const candidates =
+      await this.repository.findExpiredDialogueSnapshotPurgeReceipts(
+        purgedBefore,
+      );
+
+    const results: PurgeExecutionReport["results"] = [];
+    let purgedCount = 0;
+    let skippedHeldCount = 0;
+    let deletedCount = 0;
+    for (const receipt of candidates) {
+      if (
+        this.retentionService.isSubjectUnderHold(
+          "voice_booking_evidence",
+          receipt.voiceSessionId,
+        )
+      ) {
+        skippedHeldCount++;
+        results.push({
+          subjectRef: receipt.voiceSessionId,
+          action: "skipped_held",
+          reason: `Record is under active legal hold for voice_booking_evidence:${receipt.voiceSessionId}`,
+        });
+        continue;
+      }
+      if (dryRun) {
+        results.push({
+          subjectRef: receipt.voiceSessionId,
+          action: "eligible_to_purge",
+          reason: `Dry run: purge receipt past governed voice_booking_evidence retention (purged_at=${receipt.purgedAt}) with no legal hold.`,
+        });
+        continue;
+      }
+      const retired = await this.repository.retireDialogueSnapshotPurgeReceipt(
+        receipt.voiceSessionId,
+        receipt.sessionVersion,
+      );
+      if (retired) {
+        purgedCount++;
+        deletedCount++;
+        results.push({
+          subjectRef: receipt.voiceSessionId,
+          action: "purged",
+          reason: "Aged purge receipt retired in accordance with voice_booking_evidence retention policy; history-unavailable floor raised in the same transaction.",
+        });
+      }
+    }
+
+    const report: PurgeExecutionReport = {
+      executionId: randomUUID(),
+      family: "voice_booking_evidence",
       mode: dryRun ? "dry-run" : "apply",
       retentionDays: policy.hotRetentionDays,
       totalExamined: candidates.length,

@@ -2841,6 +2841,176 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(fencedAfterPurge.rows[0].dialogue_snapshot_fence_version).toBe(
         0,
       );
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged
+      // revision reuse (Codex reopen, canonical 2026-10-04T02:13:45Z,
+      // "purged revision remains writable, reintroducing content and
+      // losing acceptance identity"): continuing from the SAME
+      // already-purged (session, version) key above -- against the real
+      // unique index AND the real purge-receipt table, neither an
+      // identical resubmit nor a different replacement write may ever
+      // land there again.
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_PURGED" });
+      const afterIdenticalRetry = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(afterIdenticalRetry.rows[0].count).toBe(0);
+      const receiptAfterIdenticalRetry = await pool.query(
+        "SELECT retention_expires_at FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(receiptAfterIdenticalRetry.rows[0].retention_expires_at).toEqual(
+        receiptRows.rows[0].retention_expires_at,
+      );
+
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-replacement",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_PURGED" });
+      const afterReplacementRetry = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(afterReplacementRetry.rows[0].count).toBe(0);
+
+      // Original accepted history survives both rejected attempts intact.
+      const outcomeStillIntact = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      });
+      expect(outcomeStillIntact).toMatchObject({
+        accepted: true,
+        expired: true,
+        turnId: "turn-1",
+      });
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+      // lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z, "new
+      // purge receipts have no governed lifetime"): age the receipt's OWN
+      // `purged_at` well past the real `voice_booking_evidence` policy
+      // window (append-only, so simulate via the SAME governed
+      // DELETE+reinsert bypass the fixture above uses for
+      // `retention_expires_at`, never a raw UPDATE), then retire it
+      // through the real service/repository path against the actual
+      // schema.
+      const receiptClient = await pool.connect();
+      try {
+        await receiptClient.query("BEGIN");
+        const existingReceipt = await receiptClient.query(
+          "SELECT * FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        const receiptRow = existingReceipt.rows[0];
+        await receiptClient.query(
+          "SET LOCAL voice.allow_retention_archival = 'on'",
+        );
+        await receiptClient.query(
+          "DELETE FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        await receiptClient.query(
+          `
+            INSERT INTO voice.dialogue_snapshot_purge_receipt (
+              voice_session_id, session_version, input_epoch, media_epoch,
+              turn_id, retention_expires_at, purged_at
+            ) VALUES ($1,$2,$3,$4,$5,$6, now() - interval '731 days')
+          `,
+          [
+            receiptRow.voice_session_id,
+            receiptRow.session_version,
+            receiptRow.input_epoch,
+            receiptRow.media_epoch,
+            receiptRow.turn_id,
+            receiptRow.retention_expires_at,
+          ],
+        );
+        await receiptClient.query("COMMIT");
+      } catch (error) {
+        await receiptClient.query("ROLLBACK");
+        throw error;
+      } finally {
+        receiptClient.release();
+      }
+
+      const retirement = await serviceWithRetention
+        .purgeExpiredDialogueSnapshotPurgeReceipts("operator-1", false);
+      expect(retirement.report.family).toBe("voice_booking_evidence");
+      expect(retirement.deletedCount).toBe(1);
+      const receiptAfterRetirement = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(receiptAfterRetirement.rows[0].count).toBe(0);
+      const floorAfterRetirement = await pool.query(
+        "SELECT dialogue_snapshot_history_unavailable_floor FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(
+        floorAfterRetirement.rows[0].dialogue_snapshot_history_unavailable_floor,
+      ).toBe(session!.sessionVersion);
+
+      // Once the receipt is gone, the history-unavailable floor still
+      // blocks reuse of this exact key against the real schema...
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+
+      // ...and resolving it now reports the honestly-indeterminate
+      // `accepted: "unknown"` -- never a confirmed non-acceptance, since
+      // this version WAS historically accepted and only the governed
+      // metadata proof has aged out.
+      const outcomeAfterRetirement = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      });
+      expect(outcomeAfterRetirement).toMatchObject({
+        accepted: "unknown",
+        turnId: "turn-1",
+      });
     });
 
     /**
@@ -2935,7 +3105,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         turnId: "turn-landed",
       });
       expect(outcome.accepted).toBe(true);
-      if (outcome.accepted && !("expired" in outcome)) {
+      if (outcome.accepted === true && !("expired" in outcome)) {
         expect(outcome.snapshot.snapshotId).toBe(persisted.snapshot.snapshotId);
         expect(outcome.snapshot.content).toEqual(validContent);
       }

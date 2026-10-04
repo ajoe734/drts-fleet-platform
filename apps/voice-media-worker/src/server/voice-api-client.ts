@@ -169,6 +169,24 @@ export type ResolveDialogueSnapshotOutcomeResult =
       mediaEpoch: number;
       turnId: string;
       fenceVersion: number;
+    }
+  | {
+      /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+       * lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z): mirrors
+       * `VoiceSessionService.resolveDialogueSnapshotOutcome`'s own doc on
+       * this fourth, genuinely indeterminate outcome. This client-side type
+       * is compile-time only; `classifyResolveOutcome`
+       * (`dialogue-persist-port.ts`) already treats any `accepted` value
+       * other than the literals `true`/`false` as its own existing safe
+       * `"unknown"` verdict -- bounded-retried, never trusted as either
+       * acceptance or confirmed rejection -- with no code changes needed
+       * there for this literal specifically. */
+      accepted: "unknown";
+      voiceSessionId: string;
+      sessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
     };
 
 export interface DialogueSnapshotRestorationResult {

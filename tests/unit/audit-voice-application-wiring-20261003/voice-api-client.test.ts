@@ -3054,6 +3054,56 @@ describe("createTrustedDialoguePersistPort", () => {
       expect(attachmentState.unresolvedCommit).not.toBeNull();
     });
 
+    /**
+     * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+     * lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z): the
+     * server's new, honestly-indeterminate `accepted: "unknown"` outcome
+     * (raised once a version's own purge-receipt metadata has aged past
+     * its governed retention, with no row and no receipt left to prove
+     * either acceptance or rejection) requires NO worker-side contract
+     * change at all -- it is neither the literal `true` nor `false`, so
+     * `classifyResolveOutcome`'s existing whitelist-not-blacklist
+     * validation already falls through to its own pre-existing safe
+     * `"unknown"` verdict, with exactly the same effect as any other
+     * malformed/foreign body: never a confirmed accept, never a confirmed
+     * rejection, `unresolvedCommit` stays set for a later retry.
+     */
+    it("[R4-retention purge-receipt lifecycle] a server `accepted: \"unknown\"` response (receipt governed-retired, history genuinely indeterminate) is never trusted as either acceptance or rejection", async () => {
+      const { binding } = harness();
+      const fetchImpl = baseFetch(binding, {
+        accepted: "unknown",
+        voiceSessionId: binding.voiceSessionId,
+        sessionVersion: 6,
+        inputEpoch: request.inputEpoch,
+        mediaEpoch: 0,
+        turnId: request.turnId,
+      });
+      const client_ = new VoiceApiClient(
+        { baseUrl: "https://api.example.test", fetchImpl },
+        { getToken: vi.fn(async () => "workload-token") },
+      );
+      const port = createTrustedDialoguePersistPort(client_, () => binding);
+      const attachmentState = new VoiceDialogueState();
+
+      await expect(
+        port.persist(
+          {
+            toSnapshotContent: () => ({}),
+            committedSessionVersion: attachmentState.committedSessionVersion,
+          } as unknown as VoiceDialogueState,
+          request,
+          { attachmentState },
+        ),
+      ).rejects.toThrow(/simulated lost acknowledgement/);
+
+      expect(attachmentState.committedSessionVersion).toBeNull();
+      expect(attachmentState.handoff).toBeNull();
+      // Never a confirmed rejection either -- this is genuinely unknown,
+      // not durably voided, so a later call must still be free to retry
+      // this same reconciliation.
+      expect(attachmentState.unresolvedCommit).not.toBeNull();
+    });
+
     it("[finding D] an `expired:true` response with correct identity but no `retentionExpiresAt` evidence is never trusted -- well-formed expiry evidence is required, not the bare boolean alone", async () => {
       const { binding } = harness();
       const fetchImpl = baseFetch(binding, {
