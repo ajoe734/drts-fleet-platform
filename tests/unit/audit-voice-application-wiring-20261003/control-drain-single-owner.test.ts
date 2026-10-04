@@ -70,7 +70,7 @@ async function setup(mixed: boolean) {
     },
   }, { getToken: async () => "fixture-workload" });
   const coordinator = new VoiceCallTurnCoordinator(
-    () => new OpenAiRealtimeFixtureAdapter(), undefined, undefined, false, client,
+    () => new OpenAiRealtimeFixtureAdapter(), 1000, undefined, false, client,
   );
   const attachment = coordinator.attach(binding.voiceSessionId, binding);
   const observed = coordinator as unknown as SchedulerObservation;
