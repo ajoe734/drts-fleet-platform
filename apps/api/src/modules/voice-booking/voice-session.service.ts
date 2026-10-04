@@ -1305,7 +1305,22 @@ export class VoiceSessionService {
     ): Promise<ResolveDialogueSnapshotOutcomeResult> => {
       // FOR UPDATE: see this method's own doc on why this lock is what
       // makes the check-then-fence sequence below atomic.
-      await this.requireSession(command.voiceSessionId, executor, true);
+      const session = await this.requireSession(command.voiceSessionId, executor, true);
+      // An outcome may concern an older issued revision, never a future
+      // one. Otherwise this monotonic fence can void every subsequent
+      // legitimate turn, even though no such attempt could have existed.
+      // Check against the SAME locked row used by snapshot persistence.
+      if (
+        !Number.isSafeInteger(command.expectedSessionVersion) ||
+        command.expectedSessionVersion < 0 ||
+        command.expectedSessionVersion > session.sessionVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DRAFT_STALE",
+          "Snapshot outcome must refer to an already-issued session revision.",
+        );
+      }
       const row = await this.repository.findDialogueSnapshotByVersion(
         command.voiceSessionId,
         command.expectedSessionVersion,
