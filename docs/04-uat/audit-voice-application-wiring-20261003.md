@@ -7008,3 +7008,235 @@ production code, then passing once restored, per "Reproduction" above). No
 merge/deploy/live-provider claim is made by this section; those are recorded
 separately by the candidate lifecycle once CI and independent review land on
 this round's own `CANDIDATE_SHA`.
+
+## Round-33 (owner Claude2, in response to the 2026-10-04T03:36:06Z Codex REOPEN, REVIEWED_SHA=34c80ade7db3ab14586cfbc5423cb5408c9a05a8)
+
+This round addresses the three findings (F1/F2/F3) from the reopen quoted
+above, on top of `34c80ade7db3ab14586cfbc5423cb5408c9a05a8` (Round-32's
+reviewed candidate). Per Guide §0.7's repeated-rework test: the reopen itself
+states the held-prefix-starvation trigger survives across both
+`edbea7112aa4174f293f7ceb287d91cd6bdcd24e` and `34c80ade7db3ab14586cfbc5423cb5408c9a05a8`
+(F2/F3 are the same underlying held-page-starvation repair unit, refined
+twice now -- first the per-invocation page bound, now the cross-invocation
+cursor and its timestamp precision); F1 is an explicitly NEW, narrower
+overlap case the reopen distinguishes from the now-fixed pure history-only
+case. The already-fixed history-only subcase (`historyFloor5`, `fence0`) and
+the single-invocation 200-held/1-unheld page-advance case are both preserved
+unchanged below.
+
+### F1 fix -- another turn's version fence misclassified retired accepted
+### history as a definitive void
+
+**Root cause** (`apps/api/src/modules/voice-booking/voice-session.service.ts`,
+`persistDialogueSnapshot`): `dialogueSnapshotFenceVersion` (a real
+later-reconciliation non-acceptance fence) was checked BEFORE
+`dialogueSnapshotHistoryUnavailableFloor` (merely: the one governed receipt
+that could prove THIS version was accepted has aged out). Both watermarks are
+raised per-VERSION, never per-identity, so they can both legitimately reach
+the same `expectedSessionVersion` from two DIFFERENT turns: turn A is
+genuinely accepted and later governed-purged (raising the floor once its
+receipt retires), while an unrelated, never-accepted turn B's own
+`resolveDialogueSnapshotOutcome` call against the SAME version separately
+raises the fence. Checking the fence first meant A's own retry was told it
+was "authoritatively voided" (`VOICE_DIALOGUE_SNAPSHOT_VOIDED`, a whitelisted
+definitive rejection in the worker's `DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES`)
+purely because SOME identity's fence overlapped this version -- not because
+A itself was ever disproven.
+
+**Fix**: swap the check order -- `dialogueSnapshotHistoryUnavailableFloor` is
+now checked, and can short-circuit to the ambiguous
+`VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE` (never whitelisted as
+definitive; the worker reconciles via `resolveDialogueSnapshotOutcome`
+instead), BEFORE `dialogueSnapshotFenceVersion` is ever consulted. A version
+with no overlapping history-floor still falls through to the fence check
+exactly as before, so a turn that was genuinely never accepted is still
+durably voided. The `WHERE NOT EXISTS` guard in `insertDialogueSnapshot`
+independently still refuses to readmit an already-purged key regardless of
+which of the two errors is thrown.
+
+**Reproduction**: new test "[F1 regression] a different turn's fence at the
+SAME version must never make THIS turn's genuinely-accepted-then-retired
+history report as a confirmed void"
+(`tests/unit/audit-voice-application-wiring-20261003/voice-dialogue-snapshot-persistence.test.ts`):
+persists turn A at version 5, expires+purges it, resolves a DIFFERENT turn B
+at the SAME version (raises the fence to 5), retires A's purge receipt (raises
+the history-unavailable floor to 5 -- both watermarks now overlap at version
+5), then re-resolves A (`accepted: "unknown"`, unaffected) and re-persists A.
+Against the pre-fix check order this re-persist threw
+`VOICE_DIALOGUE_SNAPSHOT_VOIDED`; with the fix it throws
+`VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE`, matching
+`resolveDialogueSnapshotOutcome`'s own `"unknown"` answer for the identical
+identity. The sibling "late-acceptance fence" test (fence raised alone, no
+history-floor overlap) still asserts `VOICE_DIALOGUE_SNAPSHOT_VOIDED`,
+confirming genuine non-acceptance rejection is unaffected by the reorder.
+
+### F2 fix -- a bounded per-invocation page cap alone cannot prevent
+### held-prefix starvation, only move where it starts
+
+**Root cause** (`voice-session.service.ts`,
+`purgeExpiredDialogueSnapshotPurgeReceipts`): `MAX_PURGE_RECEIPT_SCAN_PAGES`
+bounds a SINGLE invocation's own runtime, but the loop always started from a
+fresh `cursor = undefined`. A held run deeper than
+`MAX_PURGE_RECEIPT_SCAN_PAGES * PURGE_RECEIPT_SCAN_PAGE_LIMIT` (10,000
+receipts) made every invocation re-examine the identical 10,000 held rows and
+never reach an eligible receipt behind them, no matter how many times the
+sweep reran. The prior round's own doc comment asserted the opposite ("the
+NEXT invocation simply resumes... not a new starvation point"), which this
+round corrects.
+
+**Fix**: a new durable singleton row,
+`voice.dialogue_snapshot_purge_receipt_scan_cursor` (added to
+`V0106__voice_dialogue_snapshot.sql`, one row, all columns nullable),
+persists the keyset position across invocations via two new repository
+methods, `getDialogueSnapshotPurgeReceiptScanCursor` /
+`saveDialogueSnapshotPurgeReceiptScanCursor`. `purgeExpiredDialogueSnapshotPurgeReceipts`
+now loads this cursor at the START of every invocation (dry-run and apply
+alike -- both must make progress) instead of starting at `undefined`, and at
+the END persists wherever its own page loop stopped if that stop was NOT the
+real end of the backlog (`reachedBacklogEnd` false: the loop hit the page
+bound while the last page was still full), or clears it (`null`) once the
+scan genuinely catches up to the end of the backlog, so a later invocation
+legitimately re-checks any holds released since.
+
+**Reproduction**: new test "persists the scan cursor across invocations so a
+held run deeper than one invocation's page bound does not starve an eligible
+receipt behind it forever" (same test file): 10,000 held receipts (one
+subject, under an active legal hold) followed by one unheld, eligible
+receipt. The first invocation examines exactly the 10,000 held rows (50 pages
+of 200) and purges nothing; `getDialogueSnapshotPurgeReceiptScanCursor()`
+afterward returns a cursor at `sessionVersion: 10_000` -- against the pre-fix
+code this would always have been `undefined`. The SECOND invocation's own
+first page call is asserted to have been made WITH that cursor (not a fresh
+`undefined`), examines exactly 1 row (the eligible receipt), purges it, and
+the cursor is cleared afterward (scan caught up to the end of the backlog).
+
+### F3 fix -- a keyset cursor built from a millisecond-truncated `purged_at`
+### can repeat the same page of held rows on every subsequent page
+
+**Root cause** (`voice-session.repository.ts`): `purged_at` is a `timestamptz`
+whose column default is `now()`, which genuinely carries microsecond
+precision under Postgres. `mapDialogueSnapshotPurgeReceiptRow` converted it
+through `new Date(row.purged_at).toISOString()` -- a JS `Date` has only
+millisecond resolution, so this ALWAYS rounds the value down, never up. The
+previous round's cursor fed this lossy, truncated value straight back as the
+keyset lower bound (`DialogueSnapshotPurgeReceiptCursor.purgedAt`). Since the
+truncated value is strictly LESS than the real stored value for any row
+sharing that millisecond, the next page's `(purged_at, voice_session_id,
+session_version) > (cursor...)` tuple comparison matched every row of the
+PREVIOUS page again (their real `purged_at` is greater than the truncated
+cursor), repeating the identical page forever instead of advancing -- this
+is a normal microsecond default, not malformed data, and would silently
+defeat the F2 cursor fix above for any formal-schema deployment.
+
+**Fix**: never round-trip `purged_at` through a JS `Date` for cursor
+purposes. `findExpiredDialogueSnapshotPurgeReceipts`'s query now also selects
+`purged_at::text AS purged_at_raw` -- a lossless, full-precision string
+straight from Postgres's own text output, never parsed into a `Date`. A new
+`DialogueSnapshotPurgeReceiptScanRow` (extending the existing row type with
+`purgedAtCursor: string`) and dedicated mapper
+(`mapDialogueSnapshotPurgeReceiptScanRow`) carry this raw value separately
+from the existing `purgedAt` (kept as the millisecond ISO string, for
+display/reporting only -- unaffected). `DialogueSnapshotPurgeReceiptCursor`'s
+field is renamed `purgedAtCursor` to make the distinction explicit at every
+call site (the service's page-advance assignment, the F2 persisted-cursor
+round-trip, and the SQL parameter binding).
+
+**Reproduction**: the in-memory unit-test fake cannot exercise this -- its
+`purged_at` values are already plain ISO strings with no sub-millisecond
+component to lose, as called out directly in its own updated comment. A new
+hosted-PG integration test, "[F3 regression] a keyset cursor built from
+purged_at must preserve real microsecond precision across pg's own decoding,
+or the next page repeats the same 200 rows forever"
+(`tests/integration/unattended-voice-postgres.integration.test.ts`, Suite 5),
+inserts 200 real rows at the literal microsecond timestamp
+`2020-01-01 00:00:00.123456+00` plus one row one second later, then calls
+`VoiceSessionRepository.findExpiredDialogueSnapshotPurgeReceipts` directly
+(bypassing the service, to isolate the exact repository/driver boundary this
+finding names) for page 1, builds a cursor from the real row's
+`purgedAtCursor`, and asserts page 2 returns ONLY the 201st row. Against the
+pre-fix lossy cursor, page 2 would have re-returned the same 200 rows
+(verified by inspection of the fix: `new Date("...123456Z").toISOString()`
+truncates to `...123Z`, which is less than `...123456` for the tuple
+comparison). A fixed, far-past (`2020-06-01`) `purgedBefore` cutoff isolates
+this test from this file's shared database regardless of execution order
+(every other test in this suite uses `now() - N days`, always 2024 or later).
+**NOT executed locally** -- this VM is restricted from starting
+PostgreSQL/Docker Compose (see dispatch guardrails); this test requires the
+already-authorized hosted `unattended-voice-postgres.integration.test.ts` CI
+run to execute. Static review of the fix (the `::text` cast bypasses the `pg`
+driver's own `Date`-producing type parser entirely, and the SQL tuple
+comparison's semantics are unchanged from before) is the evidence available
+from this VM; hosted CI on this round's own `CANDIDATE_SHA` is the pending
+execution proof.
+
+### Verification (this round)
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts
+   tests/security/idempotency-regression-guard.test.ts --maxWorkers=1 --no-cache`:
+   exit 0, 37 files / **681** tests, 0 skips, ~33-40s. `DATABASE_URL`/
+   `TEST_DATABASE_URL`/`VOICE_DATABASE_URL` unset in this shell throughout.
+   This run includes `session-binding-resolution.test.ts` (part of the
+   directory glob; it completed without hanging in this VM, unlike prior
+   rounds' explicit exclusion) -- 9 new tests above the prior round's 672
+   (the 2 new regression tests above plus `session-binding-resolution.test.ts`'s
+   own suite not counted in the 672 baseline).
+2. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+   packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003
+   tests/unit/uv-exec-007.test.ts tests/integration/unattended-voice-postgres.integration.test.ts
+   apps/api/tests/integration/uv-exec-002.integration.test.ts --max-warnings=0`: exit 0.
+3. `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: exit 2 (26
+   error lines / 13 distinct errors), confirmed identical in content and
+   count to the pre-existing cross-worktree `ApiClient` identity errors in
+   `tests/unit/fleet-partner-list-envelope.test.ts` and
+   `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+   every prior round already recorded (compared the full output text before
+   and after this round's edits -- byte-identical). Zero errors in any file
+   this round touched. NOT a local typecheck pass.
+4. `git diff --check HEAD`: exit 0 (clean).
+5. No product/browser/DB/Compose servers, `playwright`, package
+   installation/builds, predecessor-candidate execution, or mutation of any
+   file outside this task's `write_scopes` were performed this round.
+6. Hosted CI and an independent reviewer re-review on this round's own
+   `CANDIDATE_SHA` (captured at handoff) are both pending and will be
+   reported separately by the candidate lifecycle, never fabricated here.
+   In particular, the F3 integration test above has NOT been executed
+   anywhere yet -- hosted CI running it for the first time is the pending
+   proof, not a claimed pass.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path` / `authority_epoch_consent_fences`: F1's
+  overlap misclassification is fixed (history-unavailable now takes priority
+  over an unrelated turn's fence at the same version); every previously
+  confirmed repair through Round-32 is preserved per the full scoped
+  regression (681/681 passing, superset of the 672 Round-32 unit baseline
+  plus `session-binding-resolution.test.ts`).
+- `precise_unimplemented_and_external_boundaries`: F2's cross-invocation
+  progress gap is fixed with a durably persisted cursor, proven at the exact
+  10,000-receipt bound the reopen named; F3's timestamp-precision gap is
+  fixed in the repository layer with a lossless raw-text cursor field, but
+  its own dedicated regression is hosted-PG-only and has not yet run
+  anywhere -- recorded here as an explicit, unexecuted gap, not a claimed
+  pass. The repeated-rework instruction in the reopen (do not resubmit merely
+  a larger cap or renamed finding) is followed: this round's fix is a
+  durable cross-invocation cursor plus a lossless timestamp carrier, not a
+  bigger `MAX_PURGE_RECEIPT_SCAN_PAGES`.
+- `same_sha_review_ci`: not claimed by this round. This round's own
+  vitest/eslint/typecheck evidence is above; hosted CI (including the new F3
+  integration test's first real execution) and an independent reviewer
+  re-review on this round's own `CANDIDATE_SHA` are both pending and will be
+  reported separately by the candidate lifecycle, never fabricated here.
+
+Per Guide §0.7: F2/F3 are the SAME repair unit (held-page/receipt-scan
+starvation) reopened a second consecutive time, per the reopen's own
+"GUIDE §0.7 REPEATED REWORK" section; this round addresses both named repair
+boundaries (durable cursor for F2, lossless timestamp carrier for F3) rather
+than resubmitting a larger page/cap bound or a renamed finding. F1 is a new,
+distinct trigger (an overlap between two DIFFERENT turns' watermarks at the
+same version) the reopen explicitly separates from the now-fixed pure
+history-only case, which remains unchanged and covered by its own
+preserved test. No merge/deploy/live-provider claim is made by this section;
+those are recorded separately by the candidate lifecycle once CI and
+independent review land on this round's own `CANDIDATE_SHA`.

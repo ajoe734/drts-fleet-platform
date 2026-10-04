@@ -93,9 +93,19 @@ const PURGE_RECEIPT_SCAN_PAGE_LIMIT = 200;
 
 /**
  * Safety bound on how many pages `purgeExpiredDialogueSnapshotPurgeReceipts`
- * will walk in a single invocation (200 * 50 = 10,000 receipts) -- not a
- * new starvation point, since the next invocation simply resumes the scan
- * from the oldest eligible row again.
+ * will walk in a SINGLE invocation (200 * 50 = 10,000 receipts) -- purely a
+ * limit on that one call's own runtime.
+ *
+ * Correction (Codex reopen, canonical 2026-10-04T03:36:06Z, "the 50-page
+ * cap merely moves the held-prefix starvation point"): restarting at the
+ * oldest eligible row on every invocation is NOT by itself safe against
+ * starvation -- a held run deeper than this bound would make every
+ * invocation re-examine the identical prefix and never reach an unheld
+ * receipt behind it, no matter how many times it runs. What actually
+ * prevents that is `purgeExpiredDialogueSnapshotPurgeReceipts` persisting
+ * its stop position via `{get,save}DialogueSnapshotPurgeReceiptScanCursor`
+ * whenever it stops short of the real end of the backlog, so the next
+ * invocation resumes past it instead of restarting from the front.
  */
 const MAX_PURGE_RECEIPT_SCAN_PAGES = 50;
 
@@ -1259,6 +1269,41 @@ export class VoiceSessionService {
           "mediaEpoch refers to a media epoch that is no longer current.",
         );
       }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
+      // history-unavailable write fence (Codex reopen, canonical
+      // 2026-10-04T03:06:22Z, then reopened again canonical
+      // 2026-10-04T03:36:06Z, "another turn's version fence still
+      // misclassifies retired accepted history as definitive rejection"):
+      // this floor check MUST run BEFORE the `dialogueSnapshotFenceVersion`
+      // check below, not after it. Both watermarks are raised per-VERSION,
+      // never per-identity, so they can both legitimately reach the same
+      // `expectedSessionVersion` at once -- e.g. turn A was genuinely
+      // accepted at this version and its receipt later governed-retired
+      // (raising this floor), while a DIFFERENT, never-accepted turn B's
+      // `resolveDialogueSnapshotOutcome` call against the SAME version
+      // separately raised the fence below. A fence raised for B is not
+      // proof that A (or any other identity at this version) was never
+      // accepted; checking the fence first would tell A's retry it was
+      // "authoritatively voided" when its own history is merely
+      // unavailable, not disproven. `dialogueSnapshotHistoryUnavailableFloor`
+      // only marks that `purgeExpiredDialogueSnapshotPurgeReceipts` retired
+      // the ONE receipt that could have proven this exact version was
+      // already accepted (see that method's own doc) -- never that a
+      // later reconciliation determined non-acceptance -- so whenever it
+      // overlaps the fence, the ambiguous "unknown" classification must
+      // win. The `WHERE NOT EXISTS` guard in `insertDialogueSnapshot` still
+      // independently refuses to readmit an already-purged key regardless
+      // of which of these two errors is thrown here.
+      if (
+        (session.dialogueSnapshotHistoryUnavailableFloor ?? 0) >=
+        command.expectedSessionVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+          "The governed acceptance history for this exact version has aged out; its outcome is unknown, not confirmed voided.",
+        );
+      }
       // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
       // fence (Codex reopen, canonical 2026-10-03T23:31:57Z): `session` was
       // read `FOR UPDATE` by `requireSession` above, in this same
@@ -1270,46 +1315,15 @@ export class VoiceSessionService {
       // predates may already have been authoritatively voided by a
       // reconciliation that gave up waiting on it; this call's content
       // must never land after that, or the exact silent-content-loss race
-      // that fence exists to close would just move here instead.
-      //
+      // that fence exists to close would just move here instead. Reached
+      // only once the history-unavailable floor above has already cleared
+      // this version, so a fence that merely overlaps retired acceptance
+      // history can never reach here first.
       if ((session.dialogueSnapshotFenceVersion ?? 0) >= command.expectedSessionVersion) {
         throw new ApiRequestError(
           409,
           "VOICE_DIALOGUE_SNAPSHOT_VOIDED",
           "This exact content commit was already authoritatively voided by a later reconciliation; retry from a fresh turn.",
-        );
-      }
-      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
-      // history-unavailable write fence (Codex reopen, canonical
-      // 2026-10-04T03:06:22Z, "history-unavailable write response falsely
-      // becomes definitive non-acceptance"): `dialogueSnapshotHistoryUnavailableFloor`
-      // used to share the VOIDED branch above via `Math.max`, but that
-      // floor means something categorically different from the real fence
-      // -- it only marks that `purgeExpiredDialogueSnapshotPurgeReceipts`
-      // retired the ONE receipt that could have proven this exact version
-      // was already accepted (see that method's own doc), never that a
-      // later reconciliation determined non-acceptance. The genuine fence
-      // above still blocks a fresh insert here (an already-deleted receipt
-      // would otherwise no longer stop `insertDialogueSnapshot`'s own
-      // `WHERE NOT EXISTS` guard from readmitting this exact key), but the
-      // caller must never be told this was authoritatively voided --
-      // `resolveDialogueSnapshotOutcome` reports the SAME identity as
-      // `accepted: "unknown"` (see that method's own doc), and this must
-      // stay the ambiguous twin of that: a DIFFERENT code than
-      // `VOICE_DIALOGUE_SNAPSHOT_VOIDED`, deliberately left out of the
-      // worker's `DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES` whitelist
-      // so `createTrustedDialoguePersistPort`'s catch block reconciles it
-      // via `resolveDialogueSnapshotOutcome` instead of short-circuiting
-      // straight to a confirmed rejection (the same ambiguous treatment
-      // `VOICE_DIALOGUE_SNAPSHOT_PURGED` above already gets).
-      if (
-        (session.dialogueSnapshotHistoryUnavailableFloor ?? 0) >=
-        command.expectedSessionVersion
-      ) {
-        throw new ApiRequestError(
-          409,
-          "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
-          "The governed acceptance history for this exact version has aged out; its outcome is unknown, not confirmed voided.",
         );
       }
 
@@ -1851,7 +1865,9 @@ export class VoiceSessionService {
    * definitive non-acceptance once this receipt is gone.
    *
    * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
-   * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z): a single
+   * starvation (Codex reopen, canonical 2026-10-04T03:06:22Z, reopened
+   * again canonical 2026-10-04T03:36:06Z, "the 50-page cap merely moves
+   * the held-prefix starvation point to 10,000 receipts"): a single
    * fixed-size page, re-fetched from the same oldest-first start every
    * call, never advances past a run of legally-held receipts at the front
    * of the ordering -- any unheld receipt behind that run is skipped
@@ -1860,15 +1876,22 @@ export class VoiceSessionService {
    * `DialogueSnapshotPurgeReceiptCursor`, advancing past the LAST row
    * examined on every page (held, purged, or dry-run-eligible alike)
    * until a page comes back short of the limit (backlog exhausted) or
-   * `MAX_PURGE_RECEIPT_SCAN_PAGES` is hit (a safety bound, not a new
-   * starvation point -- the NEXT invocation resumes from fresh cursor
-   * `undefined`, re-scanning from the oldest row again, since this
-   * governed scan has no cross-call cursor of its own to resume from;
-   * only increasing this bound, never shrinking the per-page limit, would
-   * be needed for a backlog deep enough to hit it). Merely raising the
-   * per-page limit without this loop would not fix the defect: the held
-   * run at the front would still occupy however large that single page
-   * is.
+   * `MAX_PURGE_RECEIPT_SCAN_PAGES` is hit (a safety bound against a single
+   * invocation's own runtime, never a correctness bound -- raising it only
+   * moves where a deep-enough held run stops THIS call, it does not by
+   * itself give the NEXT call anywhere new to resume from).
+   *
+   * What makes this safety bound non-starving is
+   * `{get,save}DialogueSnapshotPurgeReceiptScanCursor`: whenever this
+   * method's own page loop stops WITHOUT reaching the actual end of the
+   * eligible backlog (hit `MAX_PURGE_RECEIPT_SCAN_PAGES` while the last
+   * page was still full), it durably persists exactly where it stopped, so
+   * the NEXT invocation (dry-run or apply alike -- both page through the
+   * same scan and both must make progress) resumes past that point instead
+   * of restarting at the oldest held row. Once a scan DOES reach the real
+   * end of the backlog, the persisted cursor is cleared (`null`) so the
+   * following invocation legitimately restarts from the oldest row, to
+   * re-check any holds released since.
    */
   async purgeExpiredDialogueSnapshotPurgeReceipts(
     operatorId: string,
@@ -1893,7 +1916,10 @@ export class VoiceSessionService {
     let purgedCount = 0;
     let skippedHeldCount = 0;
     let deletedCount = 0;
-    let cursor: DialogueSnapshotPurgeReceiptCursor | undefined;
+    let cursor: DialogueSnapshotPurgeReceiptCursor | undefined =
+      (await this.repository.getDialogueSnapshotPurgeReceiptScanCursor()) ??
+      undefined;
+    let reachedBacklogEnd = false;
     for (let page = 0; page < MAX_PURGE_RECEIPT_SCAN_PAGES; page++) {
       const candidates =
         await this.repository.findExpiredDialogueSnapshotPurgeReceipts(
@@ -1902,6 +1928,7 @@ export class VoiceSessionService {
           cursor,
         );
       if (candidates.length === 0) {
+        reachedBacklogEnd = true;
         break;
       }
       for (const receipt of candidates) {
@@ -1945,14 +1972,18 @@ export class VoiceSessionService {
       }
       const last = candidates[candidates.length - 1]!;
       cursor = {
-        purgedAt: last.purgedAt,
+        purgedAtCursor: last.purgedAtCursor,
         voiceSessionId: last.voiceSessionId,
         sessionVersion: last.sessionVersion,
       };
       if (candidates.length < PURGE_RECEIPT_SCAN_PAGE_LIMIT) {
+        reachedBacklogEnd = true;
         break;
       }
     }
+    await this.repository.saveDialogueSnapshotPurgeReceiptScanCursor(
+      reachedBacklogEnd ? null : cursor ?? null,
+    );
 
     const report: PurgeExecutionReport = {
       executionId: randomUUID(),

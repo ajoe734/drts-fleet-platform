@@ -137,3 +137,32 @@ SELECT voice._make_append_only('voice.dialogue_snapshot_purge_receipt');
 -- latter, never a false confirmed rejection.
 ALTER TABLE voice.session
   ADD COLUMN IF NOT EXISTS dialogue_snapshot_history_unavailable_floor integer NOT NULL DEFAULT 0;
+
+-- AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+-- starvation (Codex reopen, canonical 2026-10-04T03:06:22Z, reopened again
+-- canonical 2026-10-04T03:36:06Z, "the 50-page cap merely moves the
+-- held-prefix starvation point"): `VoiceSessionService
+-- .purgeExpiredDialogueSnapshotPurgeReceipts` bounds each invocation to
+-- `MAX_PURGE_RECEIPT_SCAN_PAGES` pages for safety, but a backlog of legally
+-- held receipts deeper than that bound would otherwise starve every unheld
+-- receipt behind it forever -- each invocation restarting its scan from the
+-- oldest row re-examines the exact same held prefix every time. This
+-- singleton row persists the keyset position (see
+-- `DialogueSnapshotPurgeReceiptCursor`) the scan stopped at when it hit the
+-- page bound mid-backlog, so the NEXT invocation resumes past the held run
+-- instead of restarting at its front; it is cleared (all columns NULL)
+-- once a scan reaches the actual end of the eligible backlog, so the
+-- following invocation legitimately restarts from the oldest row to
+-- re-check any holds that may have since been released.
+CREATE TABLE IF NOT EXISTS voice.dialogue_snapshot_purge_receipt_scan_cursor (
+  id boolean PRIMARY KEY DEFAULT true,
+  purged_at_text text NULL,
+  voice_session_id uuid NULL,
+  session_version integer NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT dialogue_snapshot_purge_receipt_scan_cursor_singleton CHECK (id)
+);
+
+INSERT INTO voice.dialogue_snapshot_purge_receipt_scan_cursor (id)
+  VALUES (true)
+  ON CONFLICT (id) DO NOTHING;

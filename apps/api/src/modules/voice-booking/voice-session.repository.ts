@@ -263,11 +263,32 @@ export type DialogueSnapshotPurgeReceiptRow = {
  * regardless of whether that row was held, purged, or skipped, so a later
  * unheld receipt behind a held run is reachable on the very next page
  * within the same sweep.
+ *
+ * Correction (Codex reopen, canonical 2026-10-04T03:36:06Z, "keyset
+ * timestamp truncation can repeat the original held rows on EVERY page"):
+ * `purgedAt` here MUST be `purgedAtCursor` below's lossless, full-precision
+ * text -- never a value round-tripped through a JS `Date` (millisecond
+ * resolution only). `purged_at` is a `timestamptz` and can legitimately
+ * carry microsecond precision (its column default is `now()`); truncating
+ * it to milliseconds before sending it back as the next page's lower bound
+ * makes that bound strictly LESS than every already-returned row sharing
+ * that millisecond, so the next page's `>` comparison matches them again --
+ * repeating the exact same page forever instead of advancing.
  */
 export type DialogueSnapshotPurgeReceiptCursor = {
-  purgedAt: string;
+  purgedAtCursor: string;
   voiceSessionId: string;
   sessionVersion: number;
+};
+
+/**
+ * Row shape specific to `findExpiredDialogueSnapshotPurgeReceipts`'s
+ * paginated scan, which (unlike the other two single-row lookups sharing
+ * `mapDialogueSnapshotPurgeReceiptRow`) also needs `purgedAtCursor` -- see
+ * `DialogueSnapshotPurgeReceiptCursor`'s own doc.
+ */
+export type DialogueSnapshotPurgeReceiptScanRow = DialogueSnapshotPurgeReceiptRow & {
+  purgedAtCursor: string;
 };
 
 type VoiceDialogueSnapshotPurgeReceiptRow = QueryResultRow & {
@@ -278,6 +299,15 @@ type VoiceDialogueSnapshotPurgeReceiptRow = QueryResultRow & {
   turn_id: string;
   retention_expires_at: Date | string;
   purged_at: Date | string;
+};
+
+type VoiceDialogueSnapshotPurgeReceiptScanRow = VoiceDialogueSnapshotPurgeReceiptRow & {
+  /**
+   * `purged_at::text` cast IN SQL, never parsed into a JS `Date` -- the
+   * only lossless carrier of `purged_at`'s full stored precision. See
+   * `DialogueSnapshotPurgeReceiptCursor`'s own doc.
+   */
+  purged_at_raw: string;
 };
 
 /**
@@ -312,6 +342,15 @@ function mapDialogueSnapshotPurgeReceiptRow(
     turnId: row.turn_id,
     retentionExpiresAt: new Date(row.retention_expires_at).toISOString(),
     purgedAt: new Date(row.purged_at).toISOString(),
+  };
+}
+
+function mapDialogueSnapshotPurgeReceiptScanRow(
+  row: VoiceDialogueSnapshotPurgeReceiptScanRow,
+): DialogueSnapshotPurgeReceiptScanRow {
+  return {
+    ...mapDialogueSnapshotPurgeReceiptRow(row),
+    purgedAtCursor: row.purged_at_raw,
   };
 }
 
@@ -1132,22 +1171,27 @@ export class VoiceSessionRepository {
     limit = 200,
     cursor?: DialogueSnapshotPurgeReceiptCursor,
     executor?: VoiceQueryExecutor,
-  ): Promise<DialogueSnapshotPurgeReceiptRow[]> {
+  ): Promise<DialogueSnapshotPurgeReceiptScanRow[]> {
     if (!this.isEnabled()) {
       return [];
     }
     const params: unknown[] = [purgedBefore, limit];
     let cursorClause = "";
     if (cursor) {
-      params.push(cursor.purgedAt, cursor.voiceSessionId, cursor.sessionVersion);
+      params.push(
+        cursor.purgedAtCursor,
+        cursor.voiceSessionId,
+        cursor.sessionVersion,
+      );
       cursorClause =
         "AND (purged_at, voice_session_id, session_version) > ($3, $4, $5)";
     }
     const result = await (
       executor ?? this.requireDatabase()
-    ).query<VoiceDialogueSnapshotPurgeReceiptRow>(
+    ).query<VoiceDialogueSnapshotPurgeReceiptScanRow>(
       `
-        SELECT * FROM voice.dialogue_snapshot_purge_receipt
+        SELECT *, purged_at::text AS purged_at_raw
+        FROM voice.dialogue_snapshot_purge_receipt
         WHERE purged_at <= $1
         ${cursorClause}
         ORDER BY purged_at ASC, voice_session_id ASC, session_version ASC
@@ -1155,7 +1199,82 @@ export class VoiceSessionRepository {
       `,
       params,
     );
-    return result.rows.map(mapDialogueSnapshotPurgeReceiptRow);
+    return result.rows.map(mapDialogueSnapshotPurgeReceiptScanRow);
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+   * starvation (Codex reopen, canonical 2026-10-04T03:36:06Z): a single
+   * invocation's bounded `MAX_PURGE_RECEIPT_SCAN_PAGES` walk can still land
+   * entirely inside a held run deep enough to exceed it; without a durable,
+   * cross-invocation cursor the NEXT invocation always restarts at the
+   * SAME oldest row, never reaching an unheld receipt behind that run no
+   * matter how many times it runs. This singleton row holds the keyset
+   * position the scan stopped at mid-backlog; `null` once the scan has
+   * caught up to the end of the eligible backlog (so the next invocation
+   * legitimately restarts from the oldest row, to re-check any holds that
+   * may have since been released).
+   */
+  async getDialogueSnapshotPurgeReceiptScanCursor(
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotPurgeReceiptCursor | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<{
+      purged_at_text: string | null;
+      voice_session_id: string | null;
+      session_version: number | null;
+    }>(
+      `
+        SELECT purged_at_text, voice_session_id, session_version
+        FROM voice.dialogue_snapshot_purge_receipt_scan_cursor
+        WHERE id
+      `,
+    );
+    const row = result.rows[0];
+    if (
+      !row ||
+      row.purged_at_text === null ||
+      row.voice_session_id === null ||
+      row.session_version === null
+    ) {
+      return null;
+    }
+    return {
+      purgedAtCursor: row.purged_at_text,
+      voiceSessionId: row.voice_session_id,
+      sessionVersion: row.session_version,
+    };
+  }
+
+  /** Counterpart to `getDialogueSnapshotPurgeReceiptScanCursor` -- `null`
+   * clears the cursor (scan has caught up to the end of the backlog). */
+  async saveDialogueSnapshotPurgeReceiptScanCursor(
+    cursor: DialogueSnapshotPurgeReceiptCursor | null,
+    executor?: VoiceQueryExecutor,
+  ): Promise<void> {
+    if (!this.isEnabled()) {
+      return;
+    }
+    await (executor ?? this.requireDatabase()).query(
+      `
+        UPDATE voice.dialogue_snapshot_purge_receipt_scan_cursor
+        SET
+          purged_at_text = $1,
+          voice_session_id = $2,
+          session_version = $3,
+          updated_at = now()
+        WHERE id
+      `,
+      [
+        cursor?.purgedAtCursor ?? null,
+        cursor?.voiceSessionId ?? null,
+        cursor?.sessionVersion ?? null,
+      ],
+    );
   }
 
   /**

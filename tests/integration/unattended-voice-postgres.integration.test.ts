@@ -3130,6 +3130,96 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       );
       expect(fenced.rows[0].dialogue_snapshot_fence_version).toBe(0);
     });
+
+    /**
+     * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+     * starvation (Codex reopen, canonical 2026-10-04T03:36:06Z, "keyset
+     * timestamp truncation can repeat the original 200 held rows on EVERY
+     * page"): against the REAL `voice.dialogue_snapshot_purge_receipt`
+     * schema and the real `pg` driver's own `timestamptz` decoding (not a
+     * reimplementation of SQL) -- `purged_at`'s column default is `now()`,
+     * which genuinely carries microsecond precision; a cursor built by
+     * round-tripping that value through a JS `Date` (millisecond
+     * resolution only) truncates it DOWN below every row sharing that
+     * millisecond, so the next page's strict `>` comparison would match
+     * the SAME 200 rows again instead of advancing. A fixed, far-past
+     * `purgedBefore` cutoff (2020, vs. every other test's `now() - N
+     * days`, always 2024+) isolates this test from this suite's shared
+     * database regardless of execution order.
+     */
+    it("[F3 regression] a keyset cursor built from purged_at must preserve real microsecond precision across pg's own decoding, or the next page repeats the same 200 rows forever", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL voice.allow_retention_archival = 'on'");
+        for (let version = 1; version <= 200; version++) {
+          await client.query(
+            `
+              INSERT INTO voice.dialogue_snapshot_purge_receipt (
+                voice_session_id, session_version, input_epoch, media_epoch,
+                turn_id, retention_expires_at, purged_at
+              ) VALUES ($1, $2, 1, 1, $3, '2099-01-01T00:00:00Z', '2020-01-01 00:00:00.123456+00')
+            `,
+            [f.request.voiceSessionId, version, `page1-turn-${version}`],
+          );
+        }
+        // Strictly behind the 200 rows above in keyset order (later
+        // purged_at), but still well before the test's own purgedBefore
+        // cutoff -- the row this defect makes unreachable.
+        await client.query(
+          `
+            INSERT INTO voice.dialogue_snapshot_purge_receipt (
+              voice_session_id, session_version, input_epoch, media_epoch,
+              turn_id, retention_expires_at, purged_at
+            ) VALUES ($1, 201, 1, 1, 'page2-turn', '2099-01-01T00:00:00Z', '2020-01-01 00:00:01+00')
+          `,
+          [f.request.voiceSessionId],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      const purgedBefore = "2020-06-01T00:00:00Z";
+      const page1 =
+        await inst.sessionRepository.findExpiredDialogueSnapshotPurgeReceipts(
+          purgedBefore,
+          200,
+        );
+      expect(page1).toHaveLength(200);
+      expect(page1.map((r) => r.sessionVersion).sort((a, b) => a - b)).toEqual(
+        Array.from({ length: 200 }, (_, i) => i + 1),
+      );
+      const lastOfPage1 = page1[page1.length - 1]!;
+
+      const page2 =
+        await inst.sessionRepository.findExpiredDialogueSnapshotPurgeReceipts(
+          purgedBefore,
+          200,
+          {
+            purgedAtCursor: lastOfPage1.purgedAtCursor,
+            voiceSessionId: lastOfPage1.voiceSessionId,
+            sessionVersion: lastOfPage1.sessionVersion,
+          },
+        );
+      // Against the pre-fix, millisecond-truncated cursor, page2 would
+      // re-return the SAME 200 rows (their real purged_at .123456 is
+      // strictly greater than the truncated .123000 cursor) -- never
+      // reaching the 201st row within this or even many more pages.
+      expect(page2.map((r) => r.sessionVersion)).toEqual([201]);
+      expect(page2[0]!.turnId).toBe("page2-turn");
+
+      await pool.query(
+        "DELETE FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+    });
   });
 
   // =========================================================================

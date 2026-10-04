@@ -98,6 +98,12 @@ function buildHarness(
   const snapshots: DialogueSnapshotRow[] = [...(options.existingSnapshots ?? [])];
   const purgeReceipts: DialogueSnapshotPurgeReceiptRow[] = [];
   const appliedMediaEpoch = options.appliedMediaEpoch ?? null;
+  // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+  // starvation (Codex reopen, canonical 2026-10-04T0X:XX:XXZ): in-memory
+  // stand-in for `voice.dialogue_snapshot_purge_receipt_scan_cursor`,
+  // mirroring the real repository's single durable row across invocations
+  // of `purgeExpiredDialogueSnapshotPurgeReceipts` within one test.
+  let scanCursor: DialogueSnapshotPurgeReceiptCursor | null = null;
 
   const repository = {
     isEnabled: () => true,
@@ -239,7 +245,7 @@ function buildHarness(
         const key = (r: DialogueSnapshotPurgeReceiptRow) =>
           `${r.purgedAt} ${r.voiceSessionId} ${String(r.sessionVersion).padStart(20, "0")}`;
         const cursorKey = cursor
-          ? `${cursor.purgedAt} ${cursor.voiceSessionId} ${String(cursor.sessionVersion).padStart(20, "0")}`
+          ? `${cursor.purgedAtCursor} ${cursor.voiceSessionId} ${String(cursor.sessionVersion).padStart(20, "0")}`
           : null;
         return purgeReceipts
           .filter(
@@ -249,7 +255,19 @@ function buildHarness(
           )
           .filter((r) => cursorKey === null || key(r) > cursorKey)
           .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0))
-          .slice(0, limit);
+          .slice(0, limit)
+          // This fake's `purgedAt` is already a plain ISO string with no
+          // sub-millisecond component to lose -- see
+          // `tests/integration/unattended-voice-postgres.integration.test.ts`
+          // for the real-Postgres-precision regression (F3) this cannot
+          // exercise.
+          .map((r) => ({ ...r, purgedAtCursor: r.purgedAt }));
+      },
+    ),
+    getDialogueSnapshotPurgeReceiptScanCursor: vi.fn(async () => scanCursor),
+    saveDialogueSnapshotPurgeReceiptScanCursor: vi.fn(
+      async (next: DialogueSnapshotPurgeReceiptCursor | null) => {
+        scanCursor = next;
       },
     ),
     retireDialogueSnapshotPurgeReceipt: vi.fn(
@@ -713,6 +731,81 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
       turnId: "some-other-unverified-turn",
     });
     expect(outcome).toMatchObject({ accepted: "unknown" });
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention (Codex reopen,
+   * canonical 2026-10-04T0X:XX:XXZ, "another turn's version fence still
+   * misclassifies retired accepted history as definitive rejection"): both
+   * `dialogueSnapshotFenceVersion` and `dialogueSnapshotHistoryUnavailableFloor`
+   * are raised per-VERSION, never per-identity, so they can legitimately
+   * both reach the SAME version from two DIFFERENT turns -- turn A was
+   * genuinely accepted here and its receipt later governed-retired
+   * (raising the floor), while a SEPARATE, never-accepted turn B's own
+   * `resolveDialogueSnapshotOutcome` call against the SAME version
+   * independently raised the fence. A fence B caused is not proof turn A
+   * (or any identity at this version) was never accepted; checking it
+   * before the floor used to tell A's retry it was "authoritatively
+   * voided" -- a confirmed rejection -- when A's own history is merely
+   * unavailable, not disproven.
+   */
+  it("[F1 regression] a different turn's fence at the SAME version must never make THIS turn's genuinely-accepted-then-retired history report as a confirmed void", async () => {
+    const { service, repository, snapshots } = buildHarness({
+      appliedMediaEpoch: 2,
+    });
+
+    // Turn A is genuinely accepted and persisted at session_version 5.
+    await service.persistDialogueSnapshot(
+      validCommand({ turnId: "accepted-turn-A" }),
+    );
+    snapshots[0]!.retentionExpiresAt = new Date(
+      Date.now() - 1000,
+    ).toISOString();
+    await repository.deleteDialogueSnapshot(VOICE_SESSION_ID, 5);
+
+    // A DIFFERENT, never-accepted turn B adjudicates the SAME version --
+    // this legitimately raises dialogueSnapshotFenceVersion to 5, but says
+    // nothing about turn A's own acceptance.
+    const bOutcome = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "rejected-turn-B",
+    });
+    expect(bOutcome).toMatchObject({ accepted: false, fenceVersion: 5 });
+
+    // The governed purge-receipt lifecycle now retires A's own receipt,
+    // raising the history-unavailable floor to the SAME version 5 -- both
+    // watermarks now overlap at this exact version.
+    await repository.retireDialogueSnapshotPurgeReceipt(VOICE_SESSION_ID, 5);
+
+    // Resolving A again is genuinely ambiguous (its receipt is retired).
+    const aResolve = await service.resolveDialogueSnapshotOutcome({
+      voiceSessionId: VOICE_SESSION_ID,
+      expectedSessionVersion: 5,
+      expectedLeaseEpoch: 1,
+      expectedResourceScopeId: RESOURCE_SCOPE_ID,
+      expectedRouteProfileVersion: 1,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "accepted-turn-A",
+    });
+    expect(aResolve).toMatchObject({ accepted: "unknown" });
+
+    // A retry of A's OWN persist must get the ambiguous
+    // HISTORY_UNAVAILABLE code, never VOICE_DIALOGUE_SNAPSHOT_VOIDED --
+    // the fence overlapping this version belongs to B, not A.
+    await expect(
+      service.persistDialogueSnapshot(
+        validCommand({ turnId: "accepted-turn-A" }),
+      ),
+    ).rejects.toMatchObject({
+      code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+    });
   });
 });
 
@@ -1450,6 +1543,100 @@ describe("VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts", () => 
       ),
     ).rejects.toMatchObject({ code: "VOICE_RETENTION_POLICY_UNAVAILABLE" });
     expect(repository.retireDialogueSnapshotPurgeReceipt).not.toHaveBeenCalled();
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+   * starvation (Codex reopen, canonical 2026-10-04T0X:XX:XXZ, "the 50-page
+   * cap merely moves the held-prefix starvation point to 10,000
+   * receipts"): a held run deeper than
+   * `MAX_PURGE_RECEIPT_SCAN_PAGES * PURGE_RECEIPT_SCAN_PAGE_LIMIT` (200 *
+   * 50 = 10,000) cannot be fully walked in one invocation -- that alone is
+   * an acceptable, bounded safety limit. What must NOT happen is the next
+   * invocation restarting at the SAME oldest held row: against the OLD
+   * code (fresh `cursor = undefined` every call) this would re-examine the
+   * identical 10,000 held receipts forever, never reaching the single
+   * unheld one just behind them. The fix persists the stop position across
+   * invocations.
+   */
+  it("persists the scan cursor across invocations so a held run deeper than one invocation's page bound does not starve an eligible receipt behind it forever", async () => {
+    const harness = buildHarness({ appliedMediaEpoch: 2 });
+    const { service, repository, retentionService, purgeReceipts } = harness;
+    const HELD_SESSION_ID = "44444444-4444-4444-8444-444444444444";
+    retentionService.placeLegalHold({
+      caseNumber: "CASE-HELD-DEEP",
+      evidenceFamily: "voice_booking_evidence",
+      subjectRef: HELD_SESSION_ID,
+      reasonCode: "regulatory_inquiry",
+      placedBy: "ops-1",
+    });
+    const base = Date.now() - 800 * 24 * 60 * 60 * 1000;
+    for (let version = 1; version <= 10_000; version++) {
+      purgeReceipts.push({
+        voiceSessionId: HELD_SESSION_ID,
+        sessionVersion: version,
+        inputEpoch: 1,
+        mediaEpoch: 1,
+        turnId: `held-turn-${version}`,
+        retentionExpiresAt: new Date(Date.now() + 1000).toISOString(),
+        purgedAt: new Date(base + version).toISOString(),
+      });
+    }
+    // One unheld, eligible receipt sorting strictly AFTER the entire held
+    // run (later purged_at), also past the governed retention window.
+    purgeReceipts.push({
+      voiceSessionId: VOICE_SESSION_ID,
+      sessionVersion: 1,
+      inputEpoch: 1,
+      mediaEpoch: 1,
+      turnId: "eligible-turn",
+      retentionExpiresAt: new Date(Date.now() + 1000).toISOString(),
+      purgedAt: new Date(base + 10_001).toISOString(),
+    });
+
+    const first = await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+      "operator-1",
+      false,
+    );
+    expect(first.report.totalExamined).toBe(10_000);
+    expect(first.report.skippedHeldCount).toBe(10_000);
+    expect(first.report.purgedCount).toBe(0);
+    expect(first.deletedCount).toBe(0);
+    expect(
+      repository.findExpiredDialogueSnapshotPurgeReceipts,
+    ).toHaveBeenCalledTimes(50);
+    // The cursor persisted after the first (bound-exhausted) invocation
+    // must be defined -- NOT the fresh-every-call `undefined` the old code
+    // always passed.
+    const persistedCursor =
+      await repository.getDialogueSnapshotPurgeReceiptScanCursor();
+    expect(persistedCursor).toMatchObject({ sessionVersion: 10_000 });
+
+    const second = await service.purgeExpiredDialogueSnapshotPurgeReceipts(
+      "operator-1",
+      false,
+    );
+    // The SECOND invocation's own first page call (call #51 overall) must
+    // have been made WITH that persisted cursor, not a fresh `undefined`
+    // that would re-examine the same 10,000 held receipts again.
+    const secondInvocationFirstCall =
+      repository.findExpiredDialogueSnapshotPurgeReceipts.mock.calls[50]!;
+    expect(secondInvocationFirstCall[2]).toMatchObject({
+      sessionVersion: 10_000,
+    });
+    expect(second.report.totalExamined).toBe(1);
+    expect(second.report.purgedCount).toBe(1);
+    expect(second.deletedCount).toBe(1);
+    expect(repository.retireDialogueSnapshotPurgeReceipt).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      1,
+    );
+    // The scan has now genuinely caught up to the end of the backlog --
+    // the cursor is cleared so a later invocation re-checks released
+    // holds from the oldest row again.
+    expect(
+      await repository.getDialogueSnapshotPurgeReceiptScanCursor(),
+    ).toBeNull();
   });
 });
 
