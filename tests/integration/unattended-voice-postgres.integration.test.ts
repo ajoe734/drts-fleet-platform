@@ -17,6 +17,8 @@ import { VoiceBookingAuthorizationService } from "../../apps/api/src/modules/voi
 import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceHandoffService } from "../../apps/api/src/modules/voice-booking/voice-handoff.service";
 import { VoiceSessionRepository } from "../../apps/api/src/modules/voice-booking/voice-session.repository";
+import { VoiceSessionService } from "../../apps/api/src/modules/voice-booking/voice-session.service";
+import { VoiceRetentionService } from "../../apps/api/src/modules/voice-booking/voice-retention.service";
 import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -142,6 +144,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       "V0091__dispatch_reservation_commit_invariant.sql",
       "V0092__voice_booking_command_proof.sql",
       "V0093__voice_retention_and_legal_hold.sql",
+      "V0106__voice_dialogue_snapshot.sql",
     ]) {
       await pool.query(migration(name));
     }
@@ -2320,6 +2323,1105 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
 
       const counts = await getCounts(f.request.intentId);
       expect(counts.receipts).toBe(0);
+    });
+  });
+
+  // =========================================================================
+  // SUITE 5: dialogue_snapshot_schema_and_cas_evidence
+  // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: the real Postgres coverage
+  // for `voice.dialogue_snapshot` (V0106) the task's own coordination note
+  // reserves for hosted execution only -- CAS/scope/lease/route/input/media
+  // fencing, dedup and append-only immutability against the ACTUAL schema,
+  // not a hand-rolled table/SQL standing in for it.
+  // =========================================================================
+  describe("Suite 5: dialogue_snapshot_schema_and_cas_evidence", () => {
+    const validContent = {
+      draftVersion: 1,
+      confirmationId: null,
+      slots: {},
+      slotHistory: [],
+      addressRepairs: { pickup: 0, dropoff: 0 },
+      addressHistory: [],
+      handoff: null,
+    };
+
+    function buildSessionService(inst: ReturnType<typeof createInstance>) {
+      return new VoiceSessionService(
+        inst.sessionRepository,
+        undefined,
+        undefined,
+        new VoiceRetentionService(),
+      );
+    }
+
+    const originalEnv = { ...process.env };
+    beforeAll(() => {
+      process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+        Buffer.alloc(32, 7).toString("base64");
+    });
+    afterAll(() => {
+      process.env = { ...originalEnv };
+    });
+
+    it("persists a real encrypted row against the actual schema, fenced by the real CAS/scope/lease/route", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const result = await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      expect(result.deduped).toBe(false);
+      expect(result.snapshot.content).toEqual(validContent);
+
+      // The actual stored row is ciphertext, never the plaintext slot data.
+      const row = await pool.query(
+        "SELECT content_ciphertext, retention_expires_at FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(row.rows).toHaveLength(1);
+      expect(Buffer.from(row.rows[0].content_ciphertext).length).toBeGreaterThan(0);
+      expect(new Date(row.rows[0].retention_expires_at).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    });
+
+    it("is dedup-safe against the real unique index: a retried write for the same (session, version) is a safe no-op, not a duplicate row", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const command = {
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      };
+
+      const first = await service.persistDialogueSnapshot(command);
+      const second = await service.persistDialogueSnapshot(command);
+
+      expect(first.deduped).toBe(false);
+      expect(second.deduped).toBe(true);
+      expect(second.snapshot.snapshotId).toBe(first.snapshot.snapshotId);
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(1);
+    });
+
+    it("rejects a foreign resource scope against the real session row, writing nothing", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: randomUUID(),
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(0);
+    });
+
+    it("the actual append-only trigger rejects UPDATE and DELETE on voice.dialogue_snapshot", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      await expect(
+        pool.query(
+          "UPDATE voice.dialogue_snapshot SET turn_id = 'tampered' WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        ),
+      ).rejects.toThrow(/append-only/i);
+
+      await expect(
+        pool.query(
+          "DELETE FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        ),
+      ).rejects.toThrow(/append-only/i);
+    });
+
+    it("restores the latest of several real persisted snapshots, by session_version, with decrypted content matching what was written", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session1 = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session1!.sessionVersion,
+        expectedLeaseEpoch: session1!.leaseEpoch,
+        expectedResourceScopeId: session1!.resourceScopeId,
+        expectedRouteProfileVersion: session1!.routeProfileVersion,
+        inputEpoch: session1!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      // Advance the real session row's revision (same CAS write path every
+      // other trusted mutation in this domain uses), then persist a second,
+      // later snapshot against the new revision.
+      const advanced = await inst.sessionRepository.casUpdateSessionControl(
+        f.request.voiceSessionId,
+        session1!.sessionVersion,
+        { pendingInput: false },
+      );
+      expect(advanced).not.toBeNull();
+      const secondContent = { ...validContent, draftVersion: 2 };
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: advanced!.sessionVersion,
+        expectedLeaseEpoch: advanced!.leaseEpoch,
+        expectedResourceScopeId: advanced!.resourceScopeId,
+        expectedRouteProfileVersion: advanced!.routeProfileVersion,
+        inputEpoch: advanced!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-2",
+        content: secondContent,
+      });
+
+      const restoration = await service.getDialogueSnapshotRestoration(
+        f.request.voiceSessionId,
+      );
+      expect(restoration.snapshot?.sessionVersion).toBe(advanced!.sessionVersion);
+      expect(restoration.snapshot?.content).toEqual(secondContent);
+    });
+
+    it("rejects a conflicting replay against the real unique index: a second real write for the same (session, version) with DIFFERENT content is a genuine conflict, never a silent echo", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      const base = {
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      };
+
+      await service.persistDialogueSnapshot({ ...base, content: validContent });
+
+      await expect(
+        service.persistDialogueSnapshot({
+          ...base,
+          content: { ...validContent, draftVersion: 99 },
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_ACTION_PAYLOAD_CONFLICT" });
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(1);
+    });
+
+    it("the real FOR UPDATE row lock taken by persistDialogueSnapshot's fence-check blocks a concurrent CAS from changing the session underneath it", async () => {
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R10 (Codex reopen round
+      // 18): the prior version of this test never called
+      // `persistDialogueSnapshot` at all -- it manually ran its own
+      // `BEGIN`/`SELECT ... FOR UPDATE` and only proved that generic
+      // Postgres row locking works, not that the real service/repository
+      // transaction actually holds that lock across its own write. This
+      // version calls the ACTUAL `VoiceSessionService.persistDialogueSnapshot`
+      // -> `VoiceSessionRepository.withTransaction`/`insertDialogueSnapshot`
+      // path, held open at the one external query boundary allowed to be
+      // doubled (the real INSERT's own round-trip, intercepted on the
+      // same live `pg` connection `withTransaction` already opened --
+      // never a second, separate connection), and proves a REAL concurrent
+      // `casUpdateSessionControl` from an independent instance still blocks
+      // until that exact call's transaction commits.
+      const f = await seedVoiceFixture();
+      let releaseInsert: (() => void) | undefined;
+      const insertHeld = new Promise<void>((resolve) => {
+        releaseInsert = resolve;
+      });
+      let sawHeldInsert = false;
+      const heldDatabase = {
+        isEnabled: () => true,
+        query: (sql: string, values?: unknown[]) => pool.query(sql, values),
+        connect: async () => {
+          const client = await pool.connect();
+          return new Proxy(client, {
+            get(target, prop) {
+              if (prop === "query") {
+                return async (sql: string, values?: unknown[]) => {
+                  if (
+                    typeof sql === "string" &&
+                    sql.includes("INSERT INTO voice.dialogue_snapshot")
+                  ) {
+                    // The preceding `FOR UPDATE` SELECT in this same
+                    // transaction has already returned by the time this
+                    // runs -- the row lock is held for the duration of
+                    // this await, exactly like a slow real write would.
+                    sawHeldInsert = true;
+                    await insertHeld;
+                  }
+                  return target.query(sql, values);
+                };
+              }
+              const value = Reflect.get(target, prop);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as PoolClient;
+        },
+      } as unknown as DatabaseService;
+
+      const sessionRepositoryA = new VoiceSessionRepository(heldDatabase);
+      const serviceA = new VoiceSessionService(
+        sessionRepositoryA,
+        undefined,
+        undefined,
+        new VoiceRetentionService(),
+      );
+      const instB = createInstance();
+      const session = await instB.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const persistPromise = serviceA.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+
+      // Give A's real transaction every reasonable chance to reach (and
+      // hold inside) its own INSERT before B's concurrent CAS is issued.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(sawHeldInsert).toBe(true);
+
+      let bDone = false;
+      const bPromise = instB.sessionRepository
+        .casUpdateSessionControl(f.request.voiceSessionId, session!.sessionVersion, {
+          pendingInput: false,
+        })
+        .then((result) => {
+          bDone = true;
+          return result;
+        });
+
+      // Give B's query every reasonable chance to (wrongly) complete while
+      // A's real transaction still holds the row lock.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(bDone).toBe(false);
+
+      releaseInsert!();
+      await persistPromise;
+
+      const bResult = await bPromise;
+      expect(bResult).not.toBeNull();
+      expect(bDone).toBe(true);
+    });
+
+    it("denies restoring a real expired snapshot and the real governed purge path actually deletes it through the append-only bypass, respecting an active legal hold", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+      await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+        content: validContent,
+      });
+      // `voice.dialogue_snapshot` is append-only (V0106): UPDATE is rejected
+      // unconditionally, even for `retention_expires_at` -- a written
+      // snapshot's retention window is evidence, not a mutable label. To
+      // simulate a snapshot that has already passed its own retention
+      // window, replace it through the SAME governed bypass
+      // `deleteDialogueSnapshot` uses (`SET LOCAL
+      // voice.allow_retention_archival = 'on'`, V0093), never a raw UPDATE.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const existing = await client.query(
+          "SELECT * FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        const row = existing.rows[0];
+        await client.query("SET LOCAL voice.allow_retention_archival = 'on'");
+        await client.query(
+          "DELETE FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        await client.query(
+          `
+            INSERT INTO voice.dialogue_snapshot (
+              snapshot_id, voice_session_id, session_version, resource_scope_id,
+              route_profile_version, lease_epoch, input_epoch, media_epoch,
+              turn_id, content_key_version, content_nonce, content_ciphertext,
+              content_auth_tag, retention_expires_at, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now() - interval '1 day', $14)
+          `,
+          [
+            row.snapshot_id,
+            row.voice_session_id,
+            row.session_version,
+            row.resource_scope_id,
+            row.route_profile_version,
+            row.lease_epoch,
+            row.input_epoch,
+            row.media_epoch,
+            row.turn_id,
+            row.content_key_version,
+            row.content_nonce,
+            row.content_ciphertext,
+            row.content_auth_tag,
+            row.created_at,
+          ],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      const restoration = await service.getDialogueSnapshotRestoration(
+        f.request.voiceSessionId,
+      );
+      expect(restoration.snapshot).toBeNull();
+
+      const retention = new VoiceRetentionService();
+      const serviceWithRetention = new VoiceSessionService(
+        inst.sessionRepository,
+        undefined,
+        undefined,
+        retention,
+      );
+      retention.placeLegalHold({
+        caseNumber: "CASE-1",
+        evidenceFamily: "voice_transcript",
+        subjectRef: f.request.voiceSessionId,
+        reasonCode: "regulatory_inquiry",
+        placedBy: "ops-1",
+      });
+      const heldPurge = await serviceWithRetention.purgeExpiredDialogueSnapshots(
+        "operator-1",
+        false,
+      );
+      expect(heldPurge.report.skippedHeldCount).toBe(1);
+      expect(heldPurge.deletedCount).toBe(0);
+      const stillThere = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(stillThere.rows[0].count).toBe(1);
+
+      retention.releaseLegalHold({
+        holdId: retention.listActiveHolds("voice_transcript")[0]!.holdId,
+        releasedBy: "admin-1",
+        releasedByRole: "platform_admin",
+      });
+      const realPurge = await serviceWithRetention.purgeExpiredDialogueSnapshots(
+        "operator-1",
+        false,
+      );
+      expect(realPurge.report.purgedCount).toBe(1);
+      expect(realPurge.deletedCount).toBe(1);
+      const afterPurge = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(afterPurge.rows[0].count).toBe(0);
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge
+      // loses accepted-history distinction (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): against the REAL schema -- the content row
+      // is genuinely gone, but `voice.dialogue_snapshot_purge_receipt`
+      // (written in the SAME transaction as the DELETE above, by the real
+      // `deleteDialogueSnapshot`) still proves this exact write was
+      // accepted. Resolving the SAME request must still report
+      // accepted:true, expired:true -- never a confirmed non-acceptance --
+      // and must never raise the fence.
+      const receiptRows = await pool.query(
+        "SELECT * FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(receiptRows.rows).toHaveLength(1);
+      expect(receiptRows.rows[0].turn_id).toBe("turn-1");
+
+      const outcomeAfterPurge = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      });
+      expect(outcomeAfterPurge).toMatchObject({
+        accepted: true,
+        expired: true,
+        voiceSessionId: f.request.voiceSessionId,
+        sessionVersion: session!.sessionVersion,
+      });
+      expect(outcomeAfterPurge).not.toHaveProperty("snapshot");
+
+      const fencedAfterPurge = await pool.query(
+        "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(fencedAfterPurge.rows[0].dialogue_snapshot_fence_version).toBe(
+        0,
+      );
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged
+      // revision reuse (Codex reopen, canonical 2026-10-04T02:13:45Z,
+      // "purged revision remains writable, reintroducing content and
+      // losing acceptance identity"): continuing from the SAME
+      // already-purged (session, version) key above -- against the real
+      // unique index AND the real purge-receipt table, neither an
+      // identical resubmit nor a different replacement write may ever
+      // land there again.
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_PURGED" });
+      const afterIdenticalRetry = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(afterIdenticalRetry.rows[0].count).toBe(0);
+      const receiptAfterIdenticalRetry = await pool.query(
+        "SELECT retention_expires_at FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(receiptAfterIdenticalRetry.rows[0].retention_expires_at).toEqual(
+        receiptRows.rows[0].retention_expires_at,
+      );
+
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-replacement",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_PURGED" });
+      const afterReplacementRetry = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(afterReplacementRetry.rows[0].count).toBe(0);
+
+      // Original accepted history survives both rejected attempts intact.
+      const outcomeStillIntact = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      });
+      expect(outcomeStillIntact).toMatchObject({
+        accepted: true,
+        expired: true,
+        turnId: "turn-1",
+      });
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+      // lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z, "new
+      // purge receipts have no governed lifetime"): age the receipt's OWN
+      // `purged_at` well past the real `voice_booking_evidence` policy
+      // window (append-only, so simulate via the SAME governed
+      // DELETE+reinsert bypass the fixture above uses for
+      // `retention_expires_at`, never a raw UPDATE), then retire it
+      // through the real service/repository path against the actual
+      // schema.
+      const receiptClient = await pool.connect();
+      try {
+        await receiptClient.query("BEGIN");
+        const existingReceipt = await receiptClient.query(
+          "SELECT * FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        const receiptRow = existingReceipt.rows[0];
+        await receiptClient.query(
+          "SET LOCAL voice.allow_retention_archival = 'on'",
+        );
+        await receiptClient.query(
+          "DELETE FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        await receiptClient.query(
+          `
+            INSERT INTO voice.dialogue_snapshot_purge_receipt (
+              voice_session_id, session_version, input_epoch, media_epoch,
+              turn_id, retention_expires_at, purged_at
+            ) VALUES ($1,$2,$3,$4,$5,$6, now() - interval '731 days')
+          `,
+          [
+            receiptRow.voice_session_id,
+            receiptRow.session_version,
+            receiptRow.input_epoch,
+            receiptRow.media_epoch,
+            receiptRow.turn_id,
+            receiptRow.retention_expires_at,
+          ],
+        );
+        await receiptClient.query("COMMIT");
+      } catch (error) {
+        await receiptClient.query("ROLLBACK");
+        throw error;
+      } finally {
+        receiptClient.release();
+      }
+
+      const retirement = await serviceWithRetention
+        .purgeExpiredDialogueSnapshotPurgeReceipts("operator-1", false);
+      expect(retirement.report.family).toBe("voice_booking_evidence");
+      expect(retirement.deletedCount).toBe(1);
+      const receiptAfterRetirement = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(receiptAfterRetirement.rows[0].count).toBe(0);
+      const floorAfterRetirement = await pool.query(
+        "SELECT dialogue_snapshot_history_unavailable_floor FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(
+        floorAfterRetirement.rows[0].dialogue_snapshot_history_unavailable_floor,
+      ).toBe(session!.sessionVersion);
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
+      // history-unavailable write fence (Codex reopen, canonical
+      // 2026-10-04T03:06:22Z, "history-unavailable write response falsely
+      // becomes definitive non-acceptance"): once the receipt is gone, the
+      // history-unavailable floor still blocks reuse of this exact key
+      // against the real schema -- but this is `VOICE_DIALOGUE_SNAPSHOT_
+      // HISTORY_UNAVAILABLE`, NOT `VOICE_DIALOGUE_SNAPSHOT_VOIDED`: the
+      // governed metadata proof of acceptance aged out, which is genuinely
+      // unknown, never a confirmed non-acceptance. A prior version of this
+      // test asserted `VOICE_DIALOGUE_SNAPSHOT_VOIDED` here, which codified
+      // the wrong contract (see this method's own doc).
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({
+        code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE",
+      });
+
+      // ...and resolving it now reports the honestly-indeterminate
+      // `accepted: "unknown"` -- never a confirmed non-acceptance, since
+      // this version WAS historically accepted and only the governed
+      // metadata proof has aged out.
+      const outcomeAfterRetirement = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      });
+      expect(outcomeAfterRetirement).toMatchObject({
+        accepted: "unknown",
+        turnId: "turn-1",
+      });
+    });
+
+    /**
+     * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+     * fence (Codex reopen, canonical 2026-10-03T23:31:57Z): against the
+     * REAL `voice.session.dialogue_snapshot_fence_version` column and the
+     * real `voice.dialogue_snapshot` unique index -- proves the fence this
+     * task adds is a genuine server-side barrier, not merely an in-memory
+     * flag some mock could agree to honor.
+     */
+    it("resolveDialogueSnapshotOutcome reports accepted:false and durably fences this exact version against the real schema -- a late insert attempt for it is then genuinely rejected", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const outcome = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-never-landed",
+      });
+      expect(outcome.accepted).toBe(false);
+
+      const fenced = await pool.query(
+        "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(fenced.rows[0].dialogue_snapshot_fence_version).toBe(
+        session!.sessionVersion,
+      );
+
+      // The exact write this adjudication call just voided tries to land
+      // "late" -- same version, same identifiers -- and is genuinely
+      // rejected, never silently inserted alongside whatever a successor
+      // turn already committed.
+      await expect(
+        service.persistDialogueSnapshot({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-never-landed",
+          content: validContent,
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_VOIDED" });
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.dialogue_snapshot WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(0);
+    });
+
+    it("resolveDialogueSnapshotOutcome reports accepted:true with the real decrypted content when the exact write already landed", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = buildSessionService(inst);
+      const session = await inst.sessionRepository.findSessionById(
+        f.request.voiceSessionId,
+      );
+
+      const persisted = await service.persistDialogueSnapshot({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-landed",
+        content: validContent,
+      });
+
+      const outcome = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-landed",
+      });
+      expect(outcome.accepted).toBe(true);
+      if (outcome.accepted === true && !("expired" in outcome)) {
+        expect(outcome.snapshot.snapshotId).toBe(persisted.snapshot.snapshotId);
+        expect(outcome.snapshot.content).toEqual(validContent);
+      }
+
+      // Confirming an already-landed write must never itself raise the
+      // fence -- a later retry at the SAME (already-accepted) version is
+      // still the safe dedup no-op `insertDialogueSnapshot` always was.
+      const fenced = await pool.query(
+        "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(fenced.rows[0].dialogue_snapshot_fence_version).toBe(0);
+    });
+
+    /**
+     * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention held-page
+     * starvation (Codex reopen, canonical 2026-10-04T03:36:06Z, "keyset
+     * timestamp truncation can repeat the original 200 held rows on EVERY
+     * page"): against the REAL `voice.dialogue_snapshot_purge_receipt`
+     * schema and the real `pg` driver's own `timestamptz` decoding (not a
+     * reimplementation of SQL) -- `purged_at`'s column default is `now()`,
+     * which genuinely carries microsecond precision; a cursor built by
+     * round-tripping that value through a JS `Date` (millisecond
+     * resolution only) truncates it DOWN below every row sharing that
+     * millisecond, so the next page's strict `>` comparison would match
+     * the SAME 200 rows again instead of advancing. A fixed, far-past
+     * `purgedBefore` cutoff (2020, vs. every other test's `now() - N
+     * days`, always 2024+) isolates this test from this suite's shared
+     * database regardless of execution order.
+     */
+    it("[F3 regression] a keyset cursor built from purged_at must preserve real microsecond precision across pg's own decoding, or the next page repeats the same 200 rows forever", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL voice.allow_retention_archival = 'on'");
+        for (let version = 1; version <= 200; version++) {
+          await client.query(
+            `
+              INSERT INTO voice.dialogue_snapshot_purge_receipt (
+                voice_session_id, session_version, input_epoch, media_epoch,
+                turn_id, retention_expires_at, purged_at
+              ) VALUES ($1, $2, 1, 1, $3, '2099-01-01T00:00:00Z', '2020-01-01 00:00:00.123456+00')
+            `,
+            [f.request.voiceSessionId, version, `page1-turn-${version}`],
+          );
+        }
+        // Strictly behind the 200 rows above in keyset order (later
+        // purged_at), but still well before the test's own purgedBefore
+        // cutoff -- the row this defect makes unreachable.
+        await client.query(
+          `
+            INSERT INTO voice.dialogue_snapshot_purge_receipt (
+              voice_session_id, session_version, input_epoch, media_epoch,
+              turn_id, retention_expires_at, purged_at
+            ) VALUES ($1, 201, 1, 1, 'page2-turn', '2099-01-01T00:00:00Z', '2020-01-01 00:00:01+00')
+          `,
+          [f.request.voiceSessionId],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      const purgedBefore = "2020-06-01T00:00:00Z";
+      const page1 =
+        await inst.sessionRepository.findExpiredDialogueSnapshotPurgeReceipts(
+          purgedBefore,
+          200,
+        );
+      expect(page1).toHaveLength(200);
+      expect(page1.map((r) => r.sessionVersion).sort((a, b) => a - b)).toEqual(
+        Array.from({ length: 200 }, (_, i) => i + 1),
+      );
+      const lastOfPage1 = page1[page1.length - 1]!;
+
+      const page2 =
+        await inst.sessionRepository.findExpiredDialogueSnapshotPurgeReceipts(
+          purgedBefore,
+          200,
+          {
+            purgedAtCursor: lastOfPage1.purgedAtCursor,
+            voiceSessionId: lastOfPage1.voiceSessionId,
+            sessionVersion: lastOfPage1.sessionVersion,
+          },
+        );
+      // Against the pre-fix, millisecond-truncated cursor, page2 would
+      // re-return the SAME 200 rows (their real purged_at .123456 is
+      // strictly greater than the truncated .123000 cursor) -- never
+      // reaching the 201st row within this or even many more pages.
+      expect(page2.map((r) => r.sessionVersion)).toEqual([201]);
+      expect(page2[0]!.turnId).toBe("page2-turn");
+
+      // dialogue_snapshot_purge_receipt is append-only (R4-retention
+      // ungoverned-lifetime fix); a raw DELETE on the shared `pool` client
+      // is rejected by the trigger. Use the same governed bypass the
+      // Suite 5 fixture cleanup above uses (SET LOCAL within the deleting
+      // transaction) so this test's 201 fixture rows do not leak into
+      // later tests' full-table scans/counts.
+      const cleanupClient = await pool.connect();
+      try {
+        await cleanupClient.query("BEGIN");
+        await cleanupClient.query(
+          "SET LOCAL voice.allow_retention_archival = 'on'",
+        );
+        await cleanupClient.query(
+          "DELETE FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        await cleanupClient.query("COMMIT");
+      } catch (error) {
+        await cleanupClient.query("ROLLBACK");
+        throw error;
+      } finally {
+        cleanupClient.release();
+      }
+    });
+  });
+
+  // =========================================================================
+  // SUITE 6: control_event_response_loss_dedup_evidence (R4-control, Codex
+  // reopen rounds 16-18: the exact previously-unrepairable "voice.session_event
+  // insert conflicted but no existing row could be located" throw that
+  // permanently wedged an attachment whenever a caller's retry after a lost
+  // `/events` HTTP response reused the same `(voiceSessionId, sequence)` slot
+  // under a fresh `sourceEventId` -- or, with the real NULL `providerAccountId`
+  // this worker always sends, even reused the SAME `sourceEventId`.)
+  // =========================================================================
+  describe("Suite 6: control_event_response_loss_dedup_evidence", () => {
+    it("Case 6.1: a retry with a fresh sourceEventId for an already-committed sequence dedupes against the real uq_voice_session_event_sequence index instead of throwing", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+
+      const first = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-original",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(first.deduped).toBe(false);
+
+      // The caller never saw the HTTP response for the write above, so its
+      // retry (correctly) carries a brand-new sourceEventId for the same
+      // logical sequence slot. Before the fix, the fallback lookup only
+      // searched by this NEW sourceEventId, found nothing (the stored row
+      // is keyed under "evt-original"), and threw instead of reconciling.
+      const retry = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-retry-after-lost-response",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(retry.deduped).toBe(true);
+      expect(retry.event.sourceEventId).toBe("evt-original");
+
+      const rows = await pool.query(
+        "SELECT source_event_id FROM voice.session_event WHERE voice_session_id = $1 AND sequence = 2",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0].source_event_id).toBe("evt-original");
+    });
+
+    it("Case 6.2: a literal retry of the same sourceEventId dedupes NULL-safely when providerAccountId is null, as every real call from this worker sends", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+
+      const first = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-same-retry",
+        occurredAt: new Date().toISOString(),
+        sequence: 3,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(first.deduped).toBe(false);
+
+      // Same sourceEventId, same NULL providerAccountId: the old
+      // `provider_account_id = $2` comparison is never true against a NULL
+      // parameter, so this previously fell through to "no existing row
+      // could be located" even though the dedup key matched exactly.
+      const retry = await inst.sessionRepository.insertControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        legId: null,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-same-retry",
+        occurredAt: new Date().toISOString(),
+        sequence: 3,
+        mediaEpoch: 0,
+        inputEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+        payload: null,
+        payloadRef: null,
+      });
+      expect(retry.deduped).toBe(true);
+      expect(retry.event.sourceEventId).toBe("evt-same-retry");
+
+      const rows = await pool.query(
+        "SELECT count(*)::int AS count FROM voice.session_event WHERE voice_session_id = $1 AND sequence = 3",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows[0].count).toBe(1);
+    });
+
+    it("Case 6.3: VoiceSessionService.recordControlEvent no longer permanently wedges the attachment after a lost-response retry; the already-applied watermark is reconciled instead of thrown away", async () => {
+      const f = await seedVoiceFixture();
+      const inst = createInstance();
+      const service = new VoiceSessionService(inst.sessionRepository);
+
+      const committed = await service.recordControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-6.3-original",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+      });
+      expect(committed.deduped).toBe(false);
+      expect(committed.applied).toBe(true);
+      expect(committed.gap).toBe(false);
+      expect(committed.appliedThroughSequence).toBe(2);
+      expect(committed.session.lastAppliedControlSequence).toBe(2);
+
+      // The worker never received the HTTP response for the commit above
+      // (Codex reopen round 18's exact probe) and retries with a fresh
+      // sourceEventId. A real coordinator reads `appliedThroughSequence`
+      // off this result to advance its own `controlSequence` counter --
+      // if this throws instead of resolving, every later speech-start for
+      // this attachment keeps retrying the same doomed sequence forever.
+      const retried = await service.recordControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-6.3-retry",
+        occurredAt: new Date().toISOString(),
+        sequence: 2,
+        mediaEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+      });
+      expect(retried.deduped).toBe(true);
+      expect(retried.gap).toBe(false);
+      expect(retried.appliedThroughSequence).toBe(2);
+      expect(retried.session.lastAppliedControlSequence).toBe(2);
+
+      // A legitimate next input (sequence 3) must still apply cleanly --
+      // the reconciled retry above must not have corrupted the watermark.
+      const next = await service.recordControlEvent({
+        voiceSessionId: f.request.voiceSessionId,
+        source: "voice_media_worker",
+        providerAccountId: null,
+        sourceEventId: "evt-6.3-next",
+        occurredAt: new Date().toISOString(),
+        sequence: 3,
+        mediaEpoch: 0,
+        leaseEpoch: 1,
+        eventType: "speech_start",
+      });
+      expect(next.deduped).toBe(false);
+      expect(next.applied).toBe(true);
+      expect(next.appliedThroughSequence).toBe(3);
+
+      const rows = await pool.query(
+        "SELECT sequence::int AS sequence, source_event_id FROM voice.session_event WHERE voice_session_id = $1 AND sequence IN (2,3) ORDER BY sequence",
+        [f.request.voiceSessionId],
+      );
+      expect(rows.rows).toEqual([
+        { sequence: 2, source_event_id: "evt-6.3-original" },
+        { sequence: 3, source_event_id: "evt-6.3-next" },
+      ]);
     });
   });
 });
