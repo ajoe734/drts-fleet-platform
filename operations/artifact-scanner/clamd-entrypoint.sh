@@ -14,11 +14,17 @@
 set -eu
 
 READY_MARKER="${CLAMAV_READY_MARKER:-/var/run/clamav-ready/ready}"
+# Sibling file: the exact on-disk signature file's own ClamAV-VDB version,
+# published alongside the marker so the gateway (readiness.ts#createIsReady)
+# can compare it against clamd's own live VERSION reply and require them to
+# match before reporting ready -- a fresh file write alone is not proof the
+# RUNNING engine has actually loaded it (R8, round 3).
+READY_VERSION_FILE="${CLAMAV_READY_VERSION_FILE:-${READY_MARKER}.version}"
 FRESHCLAM_INTERVAL_SECONDS="${FRESHCLAM_INTERVAL_SECONDS:-3600}"
 # Must track clamd.conf's DatabaseDirectory -- this is where the real
 # signature files freshclam writes (and clamd loads) actually live.
 CLAMAV_DB_DIR="${CLAMAV_DB_DIR:-/var/lib/clamav}"
-rm -f "$READY_MARKER"
+rm -f "$READY_MARKER" "$READY_VERSION_FILE"
 mkdir -p "$(dirname "$READY_MARKER")"
 
 # R8 (round 2): a freshclam exit code of 0 is not proof that signatures are
@@ -50,13 +56,41 @@ newest_signature_file() {
   printf '%s\n' "$newest"
 }
 
+
+# Extracts the ClamAV-VDB header's own version field -- the 3rd
+# colon-delimited field of the first 512 bytes, the public, always-plaintext
+# CVD/CLD header format libclamav/cvd.c itself parses -- directly from the
+# on-disk signature file. No tool beyond the freshclam/clamd/clamdscan
+# boundary this script already stubs in tests is required. A file that is
+# missing or does not start with the documented header is never trusted as
+# a real signature database (R8, round 3): readiness must never be
+# published for a file whose identity cannot be confirmed.
+cvd_version() {
+  header=$(head -c 512 "$1" 2>/dev/null) || return 1
+  case "$header" in
+    ClamAV-VDB:*) ;;
+    *) return 1 ;;
+  esac
+  version=$(printf '%s' "$header" | cut -d: -f3)
+  [ -n "$version" ] || return 1
+  printf '%s\n' "$version"
+}
+
 publish_marker_from_signatures() {
   reference_file=$(newest_signature_file)
   if [ -z "$reference_file" ]; then
     echo "No signature database files found in $CLAMAV_DB_DIR; marking not ready" >&2
-    rm -f "$READY_MARKER"
+    rm -f "$READY_MARKER" "$READY_VERSION_FILE"
     return 1
   fi
+  version=$(cvd_version "$reference_file") || {
+    echo "$reference_file has no recognizable ClamAV-VDB header; marking not ready" >&2
+    rm -f "$READY_MARKER" "$READY_VERSION_FILE"
+    return 1
+  }
+  # Version file first: the gateway must never observe a fresh marker
+  # mtime paired with a stale/missing expected-version file.
+  printf '%s\n' "$version" > "$READY_VERSION_FILE"
   touch -r "$reference_file" "$READY_MARKER"
   return 0
 }
@@ -95,7 +129,7 @@ done
       publish_marker_from_signatures || true
     else
       echo "freshclam refresh failed; marking not ready" >&2
-      rm -f "$READY_MARKER"
+      rm -f "$READY_MARKER" "$READY_VERSION_FILE"
     fi
   done
 ) &

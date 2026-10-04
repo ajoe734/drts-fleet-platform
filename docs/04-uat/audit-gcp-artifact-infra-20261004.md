@@ -506,3 +506,197 @@ worktrees on disk; CI checks out a single tree and does not hit it).
 unchanged 6 files/51 tests pass. This fix carries forward on the next
 candidate SHA handed off after this entry; it does not reopen or alter any
 R1/R5/R8/R9 finding above.
+
+## Codex review round 3: REJECTED (candidate `1a5ec2afb124934a65d9ec0d23cbc04c15946cf6`, PR #2307)
+
+Generation `4bbca8be8037498587a1bf0abd848766`; previous candidate
+`2d7ffb5ca0fd8dd96eb42533ceb4985a7e57686a`. Local HEAD and the live PR head
+both matched the locked SHA at start and closeout; `git status --porcelain`
+was empty. This dispatch forbade reviewer file edits, so the review carries
+through the lifecycle command rather than a direct artifact edit — preserved
+below in full, not replaced by a summary, then fixed in the next generation
+on top of this SHA.
+
+> R8 [P1, repeated incomplete freshness repair]: a new on-disk signature
+> mtime is still treated as proof of freshness of the RUNNING engine.
+> operations/artifact-scanner/clamd-entrypoint.sh:53-60,94-95 publishes
+> touch -r immediately after freshclam succeeds without verifying a loaded
+> database identity/version. gateway/server.ts:29-34 only checks that
+> marker's age plus PONG; handler.ts:135-158 can then emit HTTP 200 clean
+> from an old engine. SelfCheck 1800 in clamd.conf does not establish
+> successful reload: the official ClamAV 1.4.6 implementation schedules
+> asynchronous reload and explicitly retains the previous engine on
+> setup/load/compile failure (clamd/server-th.c:1636-1667). A stale engine
+> that is still answering PONG/OK becomes ready again as soon as freshclam
+> writes newer files, even if reload fails; at minimum there is also an
+> unchecked window before SelfCheck runs.
+> Primary source: https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/clamd/server-th.c#L1614-L1667 .
+> This is an observed production-boundary reproduction plus official
+> engine-source evidence, NOT a live engine failure.
+>
+> Minimal reproduction on BOTH adjacent SHAs: Python loaded each unmodified
+> production entrypoint via git show and fed it to real sh with external
+> commands mocked as shell functions. A temporary daily.cvd existence
+> fixture was used; stat returned timestamp 1000000000 at startup, 1000172800
+> after the second freshclam invocation; freshclam returned success,
+> clamdscan returned ping success, engine remained externally modeled as
+> old, touch printed the timestamp instead of writing a marker, and
+> kill/sleep bounded one watchdog cycle. Old candidate published fresh
+> timestamp on both cycles; current candidate published old timestamp
+> initially and NEW timestamp on update despite no loaded-engine
+> verification. Both probes exit 0. Initial probe using an invalid POSIX
+> shell function name failed setup (exit 2), was corrected, and is not
+> defect evidence.
+> Separate socket-free Node/TypeScript VM call-through loaded each SHA's
+> REAL server.ts, handler.ts, readiness.ts and parser, mocking only
+> http.createServer/listen, filesystem, transport and env. A fresh marker
+> plus external PONG/OK produced HTTP 200 clean on BOTH SHAs; marker age 7h
+> produced 503 with zero scan exchanges. Thus the marker gate works and
+> cooldown-with-unchanged-old-file is improved, but loaded freshness is
+> still unproven. Existing new tests stub clamdscan to always succeed and
+> the advance case only touches daily.cvd; they never exercise failed
+> reload.
+>
+> Fix boundary / required regressions: publish readiness only for a
+> confirmed usable loaded database whose freshness/current-version
+> verification succeeded; revoke or retain the old expiry while reload is
+> pending/failed. Do not use successful file write, a reload request,
+> PONG, or SelfCheck scheduling as proof of completed activation. Cover
+> cooldown-zero/old DB, genuine unchanged-but-up-to-date verification,
+> update with notify/reload failure, successful load, overdue/failed
+> refresh, plus clean/EICAR and stale-error through the real handler.
+> Official freshclam updatedb checks equal local/remote versions without
+> rewriting the database (https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/libfreshclam/libfreshclam_internal.c#L2130-L2147);
+> the current mtime-only scheme also cannot distinguish that healthy
+> positive from a no-op cooldown and will age it out at 6h. Preserve this
+> positive case while fixing freshness. Actual engine reload/update proof
+> remains hosted-only.
+>
+> R5 [P1 for incomplete cleanup, with P2 grant failure; partial repair]:
+> --all fixes one conditional removal, but the full reconciliation/grant
+> sequence still fails on real IAM policies.
+> (a) NEW regression in reconcile_invoker_policy,
+> provision-dev-artifact-backends.py:278-308: the loop iterates the
+> original bindings and removes each occurrence. If one unauthorized member
+> appears in unconditional and conditional roles/run.invoker bindings, the
+> first --all removes BOTH. The second occurrence then raises the real
+> SDK's IamPolicyBindingNotFound, aborting before later unauthorized
+> members or desired grants. main:374-384 already deployed the service
+> before this step. Probe policy ordered [old unconditional, old
+> conditional(expression=true), other unauthorized unconditional] left
+> other@example.iam.gserviceaccount.com as an invoker after the current
+> production helper failed on the second removal. Previous candidate
+> failed its first removal due to missing --all; current helper removes
+> the first principal but still leaves unauthorized access.
+> (b) grant_invoker, lines 312-326, still omits --condition=None. If
+> reconciliation preserves any legitimate condition (e.g. unrelated
+> roles/run.viewer binding, or a desired member's conditional binding), the
+> final add-iam-policy-binding raises IamPolicyBindingIncompleteError in
+> noninteractive mode. Current production reconcile+grant with [old
+> invoker, unrelated conditional viewer] successfully removes old, then
+> fails granting the desired runtime account. Previous candidate failed
+> during removal. The added test contains an unrelated condition but mocks
+> all grant commands as unconditional success, hiding this failure.
+>
+> Reproduction: PYTHONDONTWRITEBYTECODE=1 python3 stdin probe, exit 0,
+> imported the installed SDK 587.0.0 (/snap/google-cloud-cli/503) iam_util
+> and run_v1_messages; exec-loaded each SHA's REAL provisioning module
+> through git show. Mocked only mod.run and CanPrompt=False. get-iam-policy
+> serialized a real v3 Policy; actual emitted remove/add argv was routed
+> through real RemoveBindingFromIamPolicyWithCondition and
+> AddBindingToIamPolicyWithCondition. Current duplicate case:
+> get/remove/remove -> IamPolicyBindingNotFound -> ProvisioningError, other
+> unauthorized invoker survives. Current unrelated-condition case:
+> get/remove/add -> IamPolicyBindingIncompleteError -> ProvisioningError,
+> desired grant absent. No cloud API, service or IAM mutation. SDK
+> surface/run/services/{add,remove}_iam_policy_binding.yaml both enable
+> conditions/policy v3; iam_util.py:402-440 rejects unspecified add
+> condition, 659-670 rejects an already-removed member.
+>
+> Fix boundary: reconcile/grant/readback inside this provisioning file.
+> Deduplicate unauthorized principals before --all (or reconcile an
+> authoritative policy safely), explicitly specify intended grant
+> conditions, and validate final allowlist/check state. Keep service access
+> safe if reconciliation fails. Regression must run the COMPLETE production
+> reconcile+grant flow with real SDK semantics, covering duplicate
+> principal across mixed bindings with another stray after it, unrelated
+> condition, desired conditional member, public/unconditional/conditional
+> unauthorized members, legitimate desired success and idempotent second
+> run. Single helper tests plus always-success grant mocks are
+> insufficient.
+>
+> Confirmed fixes / retained earlier progress:
+> - R1: old real handler returned HTTP 200 infected for
+> Heuristics.Limits.Exceeded.MaxScanSize FOUND; current real handler
+> returns HTTP 502 scan_engine_indeterminate. Both retain OK -> clean and
+> Eicar-Signature FOUND -> infected with mocked engine replies. Current
+> suite covers the complete limit prefix family. Genuine engine
+> compressed/recursion-limit cases remain pending.
+> - R9: real SDK storage serialization call-through constructed
+> storage_v1_messages.Bucket + GcsBucketResource, used actual
+> get_display_dict_for_resource/resource_printer.Print with production
+> argv, then fed results to actual ensure_private_bucket. Old
+> valid-existing case emitted no project number and rejected. Current
+> --raw/projectNumber valid-existing case PASS (describe/update/versioning
+> describe); wrong owner rejects after only describe and before any
+> mutation. Location mismatch/new-create/versioning regressions also pass.
+> - R2 supported update/readback versioning, R3 declared build types, R4
+> bounded shared marker volume, R6 supported-line recipe and R7 explicit
+> resource bounds remain present. Exact pinned image build, actual Cloud
+> Run startup/readiness and runtime memory evidence remain
+> unexecuted/deferred. No claim that source review proves a live backend.
+>
+> Acceptance: private_resources_and_bounded_runtime and
+> immutable_authenticated_provisioning not established while R8/R5 remain;
+> live_backend_positive_negative_evidence unexecuted; same_sha_review_ci
+> has failed review and remaining hosted CI pending. Authorized split
+> continues to defer workflow hookup, real image builds/digests and live
+> positive/negative evidence; keep providers unprovisioned until
+> acceptance. Do not lower/delete those gates.
+
+### Fix evidence (round 3, same candidate lineage)
+
+| Finding | Source change | Old → new behavior | Command / evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| R8 | New `gateway/clamd-transport.ts#versionClamd`: real `zVERSION\0` idle command, parses the loaded database's own version from clamd's documented reply. New `gateway/readiness.ts#isEngineActivated`/`createIsReady`: readiness now requires BOTH marker freshness (unchanged age gate) AND the live `versionClamd` reply to equal the exact on-disk version `clamd-entrypoint.sh` published alongside the marker. `server.ts` rewired onto `createIsReady` (no more direct `pingClamd`+`existsSync`). `clamd-entrypoint.sh`: new `cvd_version()` parses the ClamAV-VDB header's own version field (3rd colon-delimited field of the first 512 bytes — the public CVD/CLD header format `libclamav/cvd.c` itself parses) from the newest on-disk signature file; `publish_marker_from_signatures` now writes that version to a new sibling `${READY_MARKER}.version` file *before* touching the marker, and withholds/removes both files together if the file has no recognizable header | Old: a fresh file write + `touch -r` + a live PONG was treated as proof of activation — the running engine's actual loaded database was never queried, so a reload that is pending, lost (failed notify()) or outright failed (clamd retains its previous engine, clamd/server-th.c) still read as ready. New: readiness requires the live engine's own reported version to match the exact on-disk version the marker's freshness was computed from — a stale/failed/pending reload now correctly reads not-ready instead of a fabricated "ready" | `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004` — PASS, 6 files/71 tests (was 51): `clamd-transport.test.ts` gains 4 `versionClamd` cases (parses the documented reply, writes the exact `zVERSION\0` command, resolves `null` on a malformed reply, resolves `null` on error/close/timeout); `readiness.test.ts` gains `isEngineActivated` (4 cases) and `createIsReady` (8 cases: ready on match, not-ready on missing marker/stale marker/missing version file/version mismatch/failed live query, ready across a genuine unchanged cooldown, never queries the live engine once already stale) plus 3 cases composing `createIsReady` through the REAL `handler.ts` for `/health` (200 on match, 503 on mismatch) and `/scan` (503 `scan_engine_not_ready`, `exchange` never called, on mismatch); `clamd-entrypoint.test.ts` rewritten against real ClamAV-VDB-shaped fixtures, adds a version-file assertion to every existing case plus a new case proving the marker/version file are never published for a file with no recognizable header. `node node_modules/typescript/bin/tsc --strict --noUncheckedIndexedAccess --target es2022 --module commonjs --moduleResolution node --types node --typeRoots ./node_modules/@types --noEmit operations/artifact-scanner/gateway/*.ts` — exit 0 | The real clamd binary's actual reload success/failure behavior (and the exact live `VERSION` reply format of a given deployed build) remain hosted-only, as the brief already requires for `live_backend_positive_negative_evidence` — this fix makes the gate correctly depend on that live query instead of file mtime alone, but does not itself run a real clamd. The `SelfCheck 1800` bound is unchanged (still the daemon's own backstop reload trigger); this fix does not add an explicit synchronous `RELOAD` request from the entrypoint, since the shell boundary this test harness stubs is deliberately limited to `freshclam`/`clamd`/`clamdscan` (matching the existing, reviewer-exercised reproduction boundary) and no such reload-trigger command is available through those three binaries alone — the activation gate (not the reload latency) is the fix boundary the review named |
+| R5(a) | `provision-dev-artifact-backends.py#reconcile_invoker_policy`: tracks a `removed_members` set and skips any member already removed by an earlier binding occurrence before issuing another `--all` removal call | Old: the loop issued one `--all` removal per binding *occurrence*; the real SDK's `_RemoveBindingFromIamPolicyAllConditions` (what `--all` maps to) has no `break` and clears every occurrence of that member/role across ALL bindings in its first call, so a member duplicated across an unconditional and a conditional binding triggered a second, now-redundant `--all` call that raises `IamPolicyBindingNotFound`, aborting before later unauthorized members or any grant. New: at most one `--all` removal is issued per distinct member, regardless of how many binding entries it appears in | Confirmed the OLD code fails exactly this way by loading `provision-dev-artifact-backends.py` at the previously-reviewed SHA `1a5ec2afb124934a65d9ec0d23cbc04c15946cf6` via `git show` into a standalone module and calling its real `reconcile_invoker_policy` against a duplicate-member policy with a trailing stray — raised `ProvisioningError` after the second (redundant) removal, never reaching the trailing stray, matching the review's reproduction. The NEW code, same scenario: `python3 /tmp/r5check/probe.py` — ran clean, both distinct members removed once each, trailing stray reached. Committed regression coverage: `tools/ci/test_dev_artifact_providers.py#test_reconcile_dedupes_a_member_duplicated_across_mixed_bindings_before_all_removal` runs the full `main()` reconcile+grant flow through a stateful mocked-subprocess simulator that faithfully reproduces the real SDK's `IamPolicyBindingNotFound`-on-redundant-removal semantics (so a regression fails this test for the real reason, not a relaxed stand-in); plus two new `RealGcloudSdkIamConditionBehaviorTest` cases (`test_removing_a_member_duplicated_across_conditions_clears_every_occurrence_at_once`, `test_removing_the_same_member_a_second_time_raises_not_found`) proving the underlying real-SDK semantics directly against the installed gcloud SDK (587.0.0, snap `google-cloud-cli/503`). `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS, 39/39 (was 34), all real-SDK cases executed, none skipped | Mocked `subprocess` boundary / real-but-offline SDK library import only, per this task's VM/GCP-access restriction — no live IAM policy was read or mutated. Not covered: a desired member that already holds a stray *conditional* `roles/run.invoker` grant from a prior run (the fix's `--condition=None` grant and dedup'd removal both remain correct in that shape by inspection, but no dedicated regression exercises it) |
+| R5(b) | `provision-dev-artifact-backends.py#grant_invoker`: the `add-iam-policy-binding` call now always passes `--condition=None` | Old: no `--condition` flag was ever passed; the real SDK's `AddBindingToIamPolicyWithCondition` raises `IamPolicyBindingIncompleteError` in noninteractive mode the moment the policy contains ANY condition anywhere (even on an unrelated role, or a leftover conditional binding from a prior run), leaving the desired grant ungranted after reconciliation had already removed the stray. New: `--condition=None` is always explicit, which the real SDK treats as "add an unconditional binding" regardless of whether the policy currently has any condition — never a gamble on absence | Confirmed the OLD code fails this way the same way as R5(a) above, against the same locked prior SHA's real `grant_invoker`, with a mocked `add-iam-policy-binding` that fails closed exactly like the real SDK does when `--condition` is missing from a conditioned policy — raised `ProvisioningError`. Committed regression coverage: `test_grant_invoker_always_passes_condition_none` (full `main()` flow, grant fails closed in the mock unless `--condition=None` is present) and the extended `test_reconcile_dedupes_a_member_duplicated_across_mixed_bindings_before_all_removal`/pre-existing `test_reconcile_removes_stray_invoker_members_before_granting_desired` (asserts `--condition=None` on the real grant call argv in a policy that already has an unrelated condition); real-SDK-level `test_add_binding_without_condition_raises_once_policy_has_any_condition` proves `AddBindingToIamPolicyWithCondition` raises with `condition=None` and succeeds (unconditionally) with the literal string `condition="None"` against a policy carrying only an unrelated-role condition, confirmed directly against the installed SDK's `iam_util.py:402-440`. `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS, 39/39, real-SDK cases executed, none skipped | Same mocked-subprocess/offline-SDK-import boundary as R5(a); no live grant was made |
+
+### Updated offline verification (supersedes the counts above for this generation)
+
+- `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004`:
+  **6 files, 71 tests pass**, exit 0 (was 6 files/51 tests).
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v`:
+  **39 tests pass**, exit 0 (was 34), including all real-SDK cases
+  (`RealGcloudSdkIamConditionBehaviorTest`), none skipped.
+- `node node_modules/typescript/bin/tsc --strict --noUncheckedIndexedAccess --target es2022 --module commonjs --moduleResolution node --types node --typeRoots ./node_modules/@types --noEmit operations/artifact-scanner/gateway/*.ts`:
+  exit 0.
+- `node node_modules/typescript/bin/tsc --strict --noUncheckedIndexedAccess --target es2022 --module esnext --moduleResolution node --esModuleInterop --skipLibCheck --noEmit tests/unit/audit-gcp-artifact-infra-20261004/{readiness,clamd-transport,clamd-entrypoint}.test.ts`:
+  exit 0 (standalone probe for the changed/new test files' own module shape,
+  same rationale as the round-2 entry above for `import.meta`).
+- `bash -n operations/artifact-scanner/clamd-entrypoint.sh`: exit 0 (this
+  VM's worker sandbox still refuses a direct `sh -n`/`sh --version`
+  invocation outright; the script's own shebang and the vitest-driven
+  execution above both still run it under real `sh`).
+- Full project `tsc -p tsconfig.json --noEmit` was not re-run this round;
+  the round-2 CI-caught regression entry above already established that
+  this VM's cross-worktree `packages/api-client` type-identity collision is
+  unrelated/pre-existing and out of `write_scopes`. Hosted CI on this exact
+  SHA's deploy-dev run is the authoritative full-typecheck signal per the
+  task brief's own completed-checks list.
+
+### Still deferred, unchanged from before this round
+
+Per the task brief's split-ownership note, these remain explicitly out of
+scope and are not claimed as passed: `deploy-dev.yml` workflow hookup, a
+real `docker build`/pinned image digest, and
+`live_backend_positive_negative_evidence` (genuine clean/EICAR/engine-
+failure/no-public-exposure checks against an actually deployed Cloud Run
+service, a real ClamAV reload success/failure cycle, and a real multi-run
+IAM policy reconciliation). `same_sha_review_ci`'s live-acceptance
+component is likewise still open pending a hosted run of whichever
+candidate SHA this generation is handed off at. No service, container,
+browser, GCP resource, or live `gcloud`/Docker command was run by this fix
+round; every assertion above is against either a mocked `subprocess.run`
+boundary, a fake in-memory socket/fs, or a real offline import of the
+installed gcloud SDK's own python library — never a live API call.

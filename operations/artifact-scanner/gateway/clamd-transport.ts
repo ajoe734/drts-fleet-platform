@@ -74,6 +74,55 @@ export function exchangeWithClamd(
 }
 
 /**
+ * clamd's documented `zVERSION\0` idle command, e.g. a reply of
+ * `ClamAV 1.4.6/27315/Fri Oct  3 07:33:03 2026`. The second slash-delimited
+ * field is the loaded database's own version number -- the only live proof
+ * that the RUNNING engine (not merely the on-disk signature file) has
+ * actually activated a given signature update (R8, round 3): the real
+ * clamd (clamd/server-th.c) retains its previous engine on a failed
+ * reload, so a successful freshclam write, a reload request, or
+ * `SelfCheck` merely being scheduled are never sufficient proof that
+ * activation completed. Resolves `null` on any malformed reply, transport
+ * error, close or timeout -- exactly like `pingClamd`, never throws.
+ */
+export function versionClamd(
+  config: ClamdTransportConfig,
+  connect: Connector = connectTcp,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let socket: Socket | undefined;
+    let response = Buffer.alloc(0);
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket?.destroy();
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), config.timeoutMs);
+    try {
+      socket = connect({ host: config.host, port: config.port }, () =>
+        socket!.write(Buffer.from("zVERSION\0")),
+      );
+      socket.on("error", () => finish(null));
+      socket.on("close", () => finish(null));
+      socket.on("data", (chunk: Buffer) => {
+        response = Buffer.concat([response, chunk]);
+        const end = response.indexOf(0);
+        if (end >= 0) {
+          const reply = response.subarray(0, end).toString("utf8");
+          const match = /^ClamAV [^/]+\/([^/]+)\//.exec(reply);
+          finish(match ? (match[1] ?? null) : null);
+        }
+      });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/**
  * clamd's documented `zPING\0` idle command. A real `PONG` is the only
  * accepted reply -- a clean socket close, a timeout or anything else means
  * the engine is not actually ready to serve scans, and `/health` must say

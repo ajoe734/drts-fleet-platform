@@ -275,11 +275,23 @@ def reconcile_invoker_policy(
         parsed = json.loads(policy.stdout or "{}")
     except json.JSONDecodeError as error:
         raise ProvisioningError(f"Unparseable IAM policy for {service}") from error
+    # The real SDK's `_RemoveBindingFromIamPolicyAllConditions` (the
+    # function `--all` maps to) removes EVERY occurrence of a member/role
+    # pair across ALL bindings in a single call -- it does not stop at the
+    # first match. The same unauthorized member can legitimately appear in
+    # more than one roles/run.invoker binding at once (e.g. one
+    # unconditional, one conditional), so a second `--all` removal for a
+    # member already cleared by an earlier occurrence's call finds nothing
+    # left and raises `IamPolicyBindingNotFound`, aborting before later
+    # unauthorized members (or the desired grants after this loop) are ever
+    # reached (R5 round 3). Track which members this run has already
+    # removed and issue at most one `--all` removal per member.
+    removed_members: set[str] = set()
     for binding in parsed.get("bindings", []):
         if binding.get("role") != "roles/run.invoker":
             continue
         for member in binding.get("members", []):
-            if member in desired:
+            if member in desired or member in removed_members:
                 continue
             # Cloud Run's IAM policy supports conditional bindings
             # (policy_version 3). Removing a role/member pair without
@@ -307,6 +319,7 @@ def reconcile_invoker_policy(
                 raise ProvisioningError(
                     f"Failed to remove stray invoker member {member} on {service}"
                 )
+            removed_members.add(member)
 
 
 def grant_invoker(project: str, region: str, service: str, member: str) -> None:
@@ -319,6 +332,15 @@ def grant_invoker(project: str, region: str, service: str, member: str) -> None:
             "--region", region,
             "--member", f"serviceAccount:{member}",
             "--role", "roles/run.invoker",
+            # The real SDK's `AddBindingToIamPolicyWithCondition` raises
+            # `IamPolicyBindingIncompleteError` in noninteractive mode the
+            # moment the policy contains ANY condition anywhere (even on an
+            # unrelated role, or a leftover conditional binding from a
+            # prior run) and no `--condition` was given (R5 round 3). This
+            # grant is always meant to be unconditional, so stating that
+            # explicitly is correct whether or not the policy currently has
+            # any condition, not merely a workaround for when it does.
+            "--condition=None",
         ],
         timeout=60,
     )

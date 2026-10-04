@@ -458,7 +458,7 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
             ["gcloud", "run", "services", "add-iam-policy-binding", "drts-dev-artifact-scanner",
              "--project", "drts-dev-devcc-20260825", "--region", "us-central1",
              "--member", "serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
-             "--role", "roles/run.invoker"],
+             "--role", "roles/run.invoker", "--condition=None"],
             argvs,
         )
         # The scanner's own identity never appears as a storage.objectAdmin member.
@@ -576,11 +576,106 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         grants = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "add-iam-policy-binding"]]
         self.assertEqual(len(grants), 1)
         self.assertEqual(grants[0][grants[0].index("--member") + 1], desired_sa)
+        # R5 round 3: the grant must always be explicit about having no
+        # condition, since this policy already has a conditional binding
+        # elsewhere -- omitting it raises IamPolicyBindingIncompleteError
+        # in the real SDK.
+        self.assertIn("--condition=None", grants[0])
         self.assertFalse(any(
             a[:4] == ["gcloud", "run", "services", "remove-iam-policy-binding"]
             and a[a.index("--member") + 1] == desired_sa
             for a in argvs
         ))
+
+    def test_reconcile_dedupes_a_member_duplicated_across_mixed_bindings_before_all_removal(self):
+        # R5 round 3: the real SDK's `--all` removal
+        # (_RemoveBindingFromIamPolicyAllConditions) clears EVERY
+        # occurrence of a member/role pair across all bindings in one
+        # call -- it does not stop at the first match. A second `--all`
+        # call for a member already cleared by an earlier occurrence's
+        # call finds nothing left and raises IamPolicyBindingNotFound.
+        # This simulator reproduces that exact real-SDK semantic (verified
+        # against the installed SDK in RealGcloudSdkIamConditionBehaviorTest
+        # below) so the old per-occurrence loop (no dedup) fails this test
+        # for the real reason, and a stray member AFTER the duplicate is
+        # still proven reachable and removed.
+        dup_sa = "serviceAccount:dup-caller@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+        trailing_stray_sa = "serviceAccount:trailing-stray@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+        desired_sa = "serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+        removed_so_far: set[str] = set()
+
+        def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                if "--format=value(versioning_enabled)" in args:
+                    return subprocess.CompletedProcess(args, 0, "True\n")
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
+            if args[:4] == ["gcloud", "run", "services", "get-iam-policy"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({
+                    "bindings": [
+                        # dup_sa appears in BOTH an unconditional binding...
+                        {"role": "roles/run.invoker", "members": [dup_sa]},
+                        # ...and a conditional one -- a single real --all
+                        # removal clears it from both at once.
+                        {"role": "roles/run.invoker", "members": [dup_sa],
+                         "condition": {"expression": "true", "title": "legacy"}},
+                        # A stray listed AFTER the duplicate must still be
+                        # reached and removed, proving the loop did not
+                        # abort on the (fixed) duplicate.
+                        {"role": "roles/run.invoker", "members": [trailing_stray_sa]},
+                        {"role": "roles/run.invoker", "members": [desired_sa]},
+                    ],
+                }))
+            if args[:4] == ["gcloud", "run", "services", "remove-iam-policy-binding"]:
+                member = args[args.index("--member") + 1]
+                if member in removed_so_far:
+                    # Faithful to the real SDK: a second --all removal for
+                    # an already-cleared member/role finds nothing and
+                    # raises IamPolicyBindingNotFound.
+                    return subprocess.CompletedProcess(
+                        args, 1, "", "IamPolicyBindingNotFound",
+                    )
+                removed_so_far.add(member)
+                return subprocess.CompletedProcess(args, 0, "")
+            return subprocess.CompletedProcess(args, 0, "")
+
+        code, output, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 0, output)
+        argvs = [call.args[0] for call in calls]
+        removals = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "remove-iam-policy-binding"]]
+        removed_members = [a[a.index("--member") + 1] for a in removals]
+        # Exactly one removal call per distinct unauthorized member -- the
+        # duplicate across mixed bindings must not generate a second call.
+        self.assertEqual(sorted(removed_members), sorted([dup_sa, trailing_stray_sa]))
+        self.assertEqual(len(removed_members), len(set(removed_members)))
+        grants = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "add-iam-policy-binding"]]
+        self.assertEqual(len(grants), 1)
+        self.assertEqual(grants[0][grants[0].index("--member") + 1], desired_sa)
+
+    def test_grant_invoker_always_passes_condition_none(self):
+        # R5 round 3: the grant call must state --condition=None
+        # unconditionally, not only when the current policy happens to
+        # already contain a condition -- the real SDK requires it the
+        # moment ANY condition exists anywhere in the policy, and this
+        # script must never gamble on that being absent.
+        def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                if "--format=value(versioning_enabled)" in args:
+                    return subprocess.CompletedProcess(args, 0, "True\n")
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
+            if args[:4] == ["gcloud", "run", "services", "get-iam-policy"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"bindings": []}))
+            if args[:4] == ["gcloud", "run", "services", "add-iam-policy-binding"]:
+                if "--condition=None" not in args:
+                    return subprocess.CompletedProcess(args, 1, "", "IamPolicyBindingIncompleteError")
+                return subprocess.CompletedProcess(args, 0, "")
+            return subprocess.CompletedProcess(args, 0, "")
+
+        code, output, _ = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 0, output)
 
     def test_public_invoker_member_rejected_before_any_cloud_call(self):
         args = [v if v != GOOD_ARGS[GOOD_ARGS.index("--invoker-member") + 1] else "allUsers" for v in GOOD_ARGS]
@@ -771,6 +866,100 @@ class RealGcloudSdkIamConditionBehaviorTest(unittest.TestCase):
             if binding.role == "roles/run.invoker"
         }
         self.assertEqual(remaining, {"serviceAccount:good@example.iam.gserviceaccount.com"})
+
+    def _policy_with_member_duplicated_across_conditions(self):
+        rm = self.run_v1_messages
+        member = "serviceAccount:dup@example.iam.gserviceaccount.com"
+        return rm.Policy(bindings=[
+            rm.Binding(role="roles/run.invoker", members=[member]),
+            rm.Binding(
+                role="roles/run.invoker",
+                members=[member],
+                condition=rm.Expr(expression="true", title="legacy"),
+            ),
+        ])
+
+    def test_removing_a_member_duplicated_across_conditions_clears_every_occurrence_at_once(self):
+        # R5 round 3: `_RemoveBindingFromIamPolicyAllConditions` has no
+        # `break` -- it loops every binding and removes the member from
+        # each one that matches the role, so ONE --all call clears a
+        # member that appears in both an unconditional and a conditional
+        # roles/run.invoker binding. This is exactly why the production
+        # per-binding-occurrence loop must dedupe members before issuing a
+        # second --all call for the same member.
+        policy = self._policy_with_member_duplicated_across_conditions()
+        self.iam_util.RemoveBindingFromIamPolicyWithCondition(
+            policy,
+            "serviceAccount:dup@example.iam.gserviceaccount.com",
+            "roles/run.invoker",
+            condition=None,
+            all_conditions=True,
+        )
+        remaining = {
+            member
+            for binding in policy.bindings
+            for member in binding.members
+            if binding.role == "roles/run.invoker"
+        }
+        self.assertEqual(remaining, set())
+
+    def test_removing_the_same_member_a_second_time_raises_not_found(self):
+        # The production bug (R5 round 3): calling --all removal AGAIN for
+        # a member already cleared by an earlier occurrence's call raises
+        # IamPolicyBindingNotFound, aborting reconciliation before later
+        # unauthorized members are reached.
+        policy = self._policy_with_member_duplicated_across_conditions()
+        self.iam_util.RemoveBindingFromIamPolicyWithCondition(
+            policy,
+            "serviceAccount:dup@example.iam.gserviceaccount.com",
+            "roles/run.invoker",
+            condition=None,
+            all_conditions=True,
+        )
+        with self.assertRaises(self.iam_util.IamPolicyBindingNotFound):
+            self.iam_util.RemoveBindingFromIamPolicyWithCondition(
+                policy,
+                "serviceAccount:dup@example.iam.gserviceaccount.com",
+                "roles/run.invoker",
+                condition=None,
+                all_conditions=True,
+            )
+
+    def test_add_binding_without_condition_raises_once_policy_has_any_condition(self):
+        # R5 round 3: `AddBindingToIamPolicyWithCondition` raises
+        # IamPolicyBindingIncompleteError in noninteractive mode the
+        # moment the policy contains ANY condition anywhere -- even on an
+        # unrelated role -- unless the caller explicitly specifies
+        # `condition="None"` (the literal string gcloud's `--condition=None`
+        # flag passes through, not Python's `None`, which means "not
+        # specified").
+        rm = self.run_v1_messages
+        policy = rm.Policy(bindings=[
+            rm.Binding(
+                role="roles/storage.objectViewer",
+                members=["serviceAccount:unrelated@example.iam.gserviceaccount.com"],
+                condition=rm.Expr(expression="true", title="unrelated"),
+            ),
+        ])
+        with self.assertRaises(self.iam_util.IamPolicyBindingIncompleteError):
+            self.iam_util.AddBindingToIamPolicyWithCondition(
+                rm.Binding, rm.Expr, policy,
+                "serviceAccount:good@example.iam.gserviceaccount.com",
+                "roles/run.invoker",
+                condition=None,
+            )
+        self.iam_util.AddBindingToIamPolicyWithCondition(
+            rm.Binding, rm.Expr, policy,
+            "serviceAccount:good@example.iam.gserviceaccount.com",
+            "roles/run.invoker",
+            condition="None",
+        )
+        added = [b for b in policy.bindings if b.role == "roles/run.invoker"]
+        self.assertEqual(len(added), 1)
+        self.assertEqual(
+            added[0].members, ["serviceAccount:good@example.iam.gserviceaccount.com"]
+        )
+        self.assertIsNone(added[0].condition)
 
 
 if __name__ == "__main__":

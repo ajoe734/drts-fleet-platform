@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   exchangeWithClamd,
   pingClamd,
+  versionClamd,
 } from "../../../operations/artifact-scanner/gateway/clamd-transport";
 
 /**
@@ -152,5 +153,40 @@ describe("pingClamd", () => {
 
     const silent = fakeConnect(() => {});
     await expect(pingClamd(CONFIG, silent.connect)).resolves.toBe(false);
+  });
+});
+
+describe("versionClamd", () => {
+  it("extracts the loaded database version from the documented reply format", async () => {
+    const { connect } = fakeConnect((socket) => {
+      socket.emit("data", Buffer.from("ClamAV 1.4.6/27315/Fri Oct  3 07:33:03 2026\0"));
+    });
+    await expect(versionClamd(CONFIG, connect)).resolves.toBe("27315");
+  });
+
+  it("writes the documented zVERSION command", async () => {
+    const { connect, socket } = fakeConnect((s) => {
+      s.emit("data", Buffer.from("ClamAV 1.4.6/27315/Fri Oct  3 07:33:03 2026\0"));
+    });
+    await versionClamd(CONFIG, connect);
+    expect(socket().written).toEqual([Buffer.from("zVERSION\0")]);
+  });
+
+  it("resolves null for a reply that does not match the documented format", async () => {
+    const { connect } = fakeConnect((socket) => {
+      socket.emit("data", Buffer.from("ERROR\0"));
+    });
+    await expect(versionClamd(CONFIG, connect)).resolves.toBeNull();
+  });
+
+  it("resolves null on socket error, close or timeout rather than throwing", async () => {
+    const error = fakeConnect((socket) => socket.emit("error", new Error("down")));
+    await expect(versionClamd(CONFIG, error.connect)).resolves.toBeNull();
+
+    const close = fakeConnect((socket) => socket.emit("close"));
+    await expect(versionClamd(CONFIG, close.connect)).resolves.toBeNull();
+
+    const silent = fakeConnect(() => {});
+    await expect(versionClamd(CONFIG, silent.connect)).resolves.toBeNull();
   });
 });
