@@ -3215,10 +3215,29 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(page2.map((r) => r.sessionVersion)).toEqual([201]);
       expect(page2[0]!.turnId).toBe("page2-turn");
 
-      await pool.query(
-        "DELETE FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
-        [f.request.voiceSessionId],
-      );
+      // dialogue_snapshot_purge_receipt is append-only (R4-retention
+      // ungoverned-lifetime fix); a raw DELETE on the shared `pool` client
+      // is rejected by the trigger. Use the same governed bypass the
+      // Suite 5 fixture cleanup above uses (SET LOCAL within the deleting
+      // transaction) so this test's 201 fixture rows do not leak into
+      // later tests' full-table scans/counts.
+      const cleanupClient = await pool.connect();
+      try {
+        await cleanupClient.query("BEGIN");
+        await cleanupClient.query(
+          "SET LOCAL voice.allow_retention_archival = 'on'",
+        );
+        await cleanupClient.query(
+          "DELETE FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+          [f.request.voiceSessionId],
+        );
+        await cleanupClient.query("COMMIT");
+      } catch (error) {
+        await cleanupClient.query("ROLLBACK");
+        throw error;
+      } finally {
+        cleanupClient.release();
+      }
     });
   });
 

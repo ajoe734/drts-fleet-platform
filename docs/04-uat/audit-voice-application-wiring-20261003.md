@@ -7240,3 +7240,93 @@ history-only case, which remains unchanged and covered by its own
 preserved test. No merge/deploy/live-provider claim is made by this section;
 those are recorded separately by the candidate lifecycle once CI and
 independent review land on this round's own `CANDIDATE_SHA`.
+
+## Round-34 (owner Claude2): hosted CI's first real execution of the F3 regression test, test-only cleanup defect fixed
+
+Round-33 pushed candidate `d9a1535f3` and explicitly recorded that the new
+F3 integration test ("[F3 regression] a keyset cursor built from purged_at
+must preserve real microsecond precision...") had never executed anywhere
+-- hosted CI running it for the first time was the pending proof. That CI
+run (`https://github.com/ajoe734/drts-fleet-platform/actions/runs/37175696640`,
+job `integration` id `111357877062`) completed and did run it for the
+first time; the `integration` job failed with:
+
+```
+error: dialogue_snapshot_purge_receipt is append-only; DELETE is not permitted
+ Failing line: tests/integration/unattended-voice-postgres.integration.test.ts:3218:7
+```
+
+**Diagnosis.** This is a defect in the Round-33 test's own cleanup code,
+not in the F1/F2/F3 production fixes it was verifying. The test's keyset-
+cursor assertions (page1/page2 at then lines 3190-3216) all passed -- the
+failure is strictly in the trailing cleanup at the old lines 3218-3221,
+which called `pool.query("DELETE FROM voice.dialogue_snapshot_purge_receipt
+WHERE voice_session_id = $1", ...)` directly on the shared `pool` client,
+with no transaction and no `SET LOCAL voice.allow_retention_archival =
+'on'`. `voice.dialogue_snapshot_purge_receipt` was made append-only by the
+Round-31 fix (the V0093-style trigger; `current_setting('voice.
+allow_retention_archival', true) = 'on'` is the only governed bypass); a
+bare DELETE outside that bypass is rejected by design, exactly as the
+earlier Suite-5 fixture cleanup at (then) lines 2924-2961 already
+demonstrates by wrapping its own DELETE in `BEGIN` / `SET LOCAL voice.
+allow_retention_archival = 'on'` / `COMMIT`. The new test simply didn't
+follow that established pattern for its own 201-row cleanup.
+
+**Fix.** `tests/integration/unattended-voice-postgres.integration.test.ts`:
+replaced the bare `pool.query(DELETE ...)` with a dedicated client,
+`BEGIN`, `SET LOCAL voice.allow_retention_archival = 'on'`, the same
+`DELETE`, `COMMIT` (rollback on error, release in `finally`) -- the
+identical shape to the existing Suite-5 governed-bypass cleanup. No
+production code (`voice-session.repository.ts`, `voice-session.service.ts`,
+`V0106__voice_dialogue_snapshot.sql`) changed this round; the F1/F2/F3
+fixes themselves are untouched from Round-33.
+
+### Verification (this round)
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts
+   tests/security/idempotency-regression-guard.test.ts --maxWorkers=1 --no-cache`:
+   exit 0, 37 files / 681 tests, 0 skips -- identical count to Round-33
+   (this round touches only the hosted-only integration test file, which
+   this glob does not include).
+2. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+   packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003
+   tests/unit/uv-exec-007.test.ts tests/integration/unattended-voice-postgres.integration.test.ts
+   apps/api/tests/integration/uv-exec-002.integration.test.ts --max-warnings=0`: exit 0.
+3. `pnpm exec tsc -p tsconfig.json --noEmit --incremental false`: exit 2, the
+   same 13 distinct pre-existing cross-worktree `ApiClient` identity errors
+   in `tests/unit/fleet-partner-list-envelope.test.ts` and
+   `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+   every prior round has recorded; zero errors in the file this round
+   touched.
+4. `git diff --check HEAD`: exit 0 (clean).
+5. The F3 integration test itself was **not** re-executed locally this
+   round (this VM is restricted from starting PostgreSQL/Docker Compose,
+   per dispatch guardrails, same as every prior round) -- the fix's
+   correctness is established by exact pattern-match against the already
+   hosted-CI-passing Suite-5 cleanup's governed-bypass shape, not a local
+   run. A fresh hosted CI run on this round's own `CANDIDATE_SHA`, with the
+   F3 test executing for the second time, is the pending proof.
+6. No product/browser/DB/Compose servers, `playwright`, package
+   installation/builds, predecessor-candidate execution, or mutation of any
+   file outside this task's `write_scopes` were performed this round.
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path` / `authority_epoch_consent_fences`:
+  unchanged from Round-33 (no production code touched this round).
+- `precise_unimplemented_and_external_boundaries`: unchanged from
+  Round-33's assessment of the F1/F2/F3 fixes themselves. This round's own
+  contribution is narrower: it repairs the test harness defect that hosted
+  CI's first real execution of the F3 regression surfaced, so that
+  execution can actually complete and report pass/fail on the fix Round-33
+  already made, rather than failing on unrelated test cleanup. This is not
+  a claim that the F3 production fix is newly verified by hosted PG -- that
+  remains pending the next CI run.
+- `same_sha_review_ci`: not claimed by this round. Hosted CI on this
+  round's own `CANDIDATE_SHA` (to be captured at handoff) and an
+  independent reviewer re-review are both pending and will be reported
+  separately by the candidate lifecycle, never fabricated here.
+
+No merge/deploy/live-provider claim is made by this section.
