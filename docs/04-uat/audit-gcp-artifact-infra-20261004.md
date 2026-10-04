@@ -925,3 +925,174 @@ execution of the unmodified production entrypoint against real temp
 fixtures, a real (not faked) composition of `readiness.ts`'s own exported
 functions, or a fake in-memory socket/fs — never a live engine, container
 or API call.
+
+## Codex review round 5: REJECTED (candidate `c15f29e1507fdceb50fbdf6915a48313938f3d3e`, PR #2307)
+
+Generation `6bca10e9255149d1a600e14fe3defb98`; previous/adjacent reviewed
+candidate `6c6df73ee81a8e4356d8144568a64f34f2c872c0`. Local detached HEAD
+and the live PR head both matched the locked SHA before and after checks;
+the worktree remained clean. Candidate files were unchanged by the
+reviewer. This dispatch forbade reviewer file edits, so the review carries
+through this lifecycle record rather than a direct artifact edit —
+preserved below in full, then fixed in the next generation on top of this
+SHA. Per Guide 0.7's repeated-rework localization: R8(b) is the identical
+healthy-verified-unchanged-database trigger failing on BOTH this and the
+adjacent prior candidate — a continuing same-defect retry, not a new
+finding.
+
+> R8(a) [P1] NEW CVD/CLD-selection regression, including a stale-loaded-
+> engine fail-open. `operations/artifact-scanner/clamd-entrypoint.sh:42-52`
+> `daily_reference_file` always prefers `daily.cld` when present. That is
+> not clamd's selection rule. Official ClamAV 1.4.6
+> `libclamav/readdb.c#cli_loaddbdir:5179-5199` selects the HIGHER header
+> version of daily.cvd/daily.cld; CLD wins only equal versions.
+> `libclamav/cvd.c#cli_cvdload:634-654` independently checks duplicate
+> versions. Source reviewed directly:
+> https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/libclamav/readdb.c#L5179-L5199
+> https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/libclamav/cvd.c#L634-L654
+> Thus a newer CVD alongside older CLD is a supported selection case, not
+> an assumption that CLD must always be current. The round-4 test at
+> `clamd-entrypoint.test.ts:329-345` covered only the opposite ordering.
+>
+> Actual path: initial/periodic freshclam -> daily_check_verified ->
+> publish_marker_from_signatures -> shared marker + .version ->
+> server.ts/createIsReady -> readiness.ts (isMarkerFresh/versionClamd) ->
+> handler.ts -> INSTREAM and verdict. The boolean verified flag did not
+> bind the confirmed filename/version to the selected database identity.
+>
+> Completed adjacent-SHA reproduction (node stdin probe, exit 0): each
+> SHA's complete unchanged production shell script was loaded with
+> `git show` and executed by real `sh`. Real temp CVD/CLD header files,
+> cp/touch/stat/head/cut and marker files; only freshclam/clamd/clamdscan
+> plus sleep/process-liveness/wait boundaries were shell functions. A
+> corrected periodic harness explicitly asserted TWO freshclam calls
+> (initial + one watchdog refresh); no actual engine or socket was
+> started. Initial daily.cvd and daily.cld both version 27315 with mtime
+> now-7h. Second freshclam call actually overwrote ONLY daily.cvd with
+> version 27316 and emitted the supported `daily.cvd updated (version:
+> 27316, ...)` outcome. Old CLD remains 27315.
+> - Engine reload pending/failed (live VERSION 27315): prior publishes
+>   expected 27316, marker age 0, /scan 503 scan_engine_not_ready, zero
+>   scan calls. Current publishes expected 27315, marker age 0 despite CLD
+>   age 7h, /scan 200 clean, ONE scan call. Expected 503: the verified
+>   update was 27316 but the old loaded engine was falsely accepted.
+> - Engine reload completed (live VERSION 27316): prior expected 27316 ->
+>   /scan 200 clean. Current expected 27315 -> /scan 503
+>   scan_engine_not_ready. Expected 200: healthy engine wrongly rejected.
+> Fix boundary: select daily identity using the engine's version-
+> order/tie rules, not mtime or extension alone; tie any freshness
+> confirmation to the same selected filename/version; preserve the
+> existing live activation comparison. Required regressions must compose
+> real shell publication + real VERSION parser/readiness/handler for
+> CVD>CLD, CLD>CVD, equal versions, reversed/equal mtimes, verified
+> refresh of the nonselected file, pending/failed/successful activation,
+> and stale CLD with a newly downloaded CVD.
+> The original R8(a) main/bytecode namespace bug IS FIXED and must not be
+> counted as a repeated failure — preserve those positives.
+>
+> R8(b) [P1, continuing same-trigger failure on adjacent candidates]
+> Recognize the ACTUAL supported freshclam up-to-date result.
+> `clamd-entrypoint.sh:86-87` accepted
+> `'^daily\.(cvd|cld) (is up to date|updated)'`. Official ClamAV 1.4.6
+> `libfreshclam/libfreshclam_internal.c#check_for_new_database_version:2191`
+> emits `"%s database is up-to-date (version: ...)"` and
+> `updatedb:2310-2312` takes the no-rewrite path. The normal success
+> includes "database" and hyphenated "up-to-date", so it NEVER matched
+> the prior unchanged-current branch. This is not a hypothetical
+> localization difference.
+> https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/libfreshclam/libfreshclam_internal.c#L2185-L2201
+> https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/libfreshclam/libfreshclam_internal.c#L2310-L2313
+>
+> Minimal repeated trigger: daily.cvd 27315, mtime now-7h; initial AND
+> periodic freshclam each exit 0 without rewriting and emit `daily.cvd
+> database is up-to-date (version: 27315, sigs: 1000, f-level: 90,
+> builder: raynman)`; live VERSION 27315. Completed corrected two-call
+> real-shell probe, then real versionClamd/createIsReady/handler: BOTH
+> SHAs preserved marker age 25200s and /scan 503 scan_engine_not_ready,
+> zero scan calls. The test at `clamd-entrypoint.test.ts:86` supplied an
+> invented output ("daily.cvd is up to date (...)") and `:350-389`
+> validated it — the test mocked away the exact external format being
+> claimed.
+> Fix boundary: use source-backed output/contract from the supported
+> image, with filename/version verification rather than a loose success
+> boolean; preserve distinctions between verified unchanged-current,
+> updated, failed, and unverified rate-limit cooldown. Regression
+> fixtures must match the supported binary's actual output and exercise
+> both initial and periodic paths beyond the six-hour file age. Preserve
+> rejection on old unverified exit 0, failed/overdue checks and
+> pending/failed activation.
+>
+> Confirmed retained repairs / scope: old unverified cooldown at 7h stays
+> 503 with no scan on both SHAs; single daily 27316/loaded 27315 remains
+> 503/no scan, changed daily 27316/loaded 27316 remains 200/clean; real
+> handler/parser EICAR -> infected, Heuristics.Limits.Exceeded.MaxScanSize
+> -> 502 scan_engine_indeterminate (mocked engine replies, not genuine
+> acceptance); R5 provisioner de-duplication/`--all`/`--condition=None`
+> and the 39-test Python suite untouched this round; R1/R2/R3/R4/R6/R7/R9
+> source repairs remain, live IAM/readback and shared-volume
+> startup/reload/memory behavior unproven.
+>
+> Completed checks on LOCKED `c15f29e1507fdceb50fbdf6915a48313938f3d3e`:
+> vitest 6 files/76 tests exit 0; Python provider suite 39/39 exit 0;
+> gateway `tsc --strict --noUncheckedIndexedAccess` exit 0 (Node 22.23.2,
+> TS 5.9.3, not the exact pinned Docker build); `sh -n`/`git diff --check`
+> exit 0; hosted same-SHA typecheck SUCCESS (run 37183129145); unit/
+> build/Product smoke acceptance/cross-surface-e2e/ui-route-e2e still
+> IN_PROGRESS at review time, orchestrator-tests SKIPPED, not claimed
+> passed.
+>
+> Acceptance mapping: `private_resources_and_bounded_runtime`/
+> `immutable_authenticated_provisioning` retain source progress pending
+> hosted verification, but scanner correctness fails above.
+> `live_backend_positive_negative_evidence` remains unexecuted.
+> `same_sha_review_ci` has rejected review and incomplete hosted checks.
+> No candidate edits, commits, pushes, branch switch, real product
+> engine/server/socket/browser/container, deploy, cloud resource or IAM
+> mutation by this reviewer.
+
+### Fix evidence (round 5, same candidate lineage)
+
+| Finding | Source change | Old → new behavior | Command / evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| R8(a) | `clamd-entrypoint.sh`: `daily_reference_file()` no longer unconditionally prefers `daily.cld`. It now parses BOTH files' own `ClamAV-VDB` header versions (via `cvd_version`, which now also rejects a non-numeric version field) when both exist, selects the strictly higher-version file, and falls back to `.cld` only on an exact version tie — matching `libclamav/readdb.c#cli_loaddbdir`'s documented rule rather than mtime/extension. `cvd_version` validates the version field is all-digits before it ever reaches a numeric `-gt` comparison or (R8(b)) a `grep -E` pattern | Old: `.cld` was selected whenever present, regardless of version, so a freshly downloaded higher-version `.cvd` alongside a stale lower-version `.cld` published the STALE version/mtime — a later-activated engine on the true (higher) version was wrongly read as still-pending/not-ready, and vice versa for a healthy already-loaded engine. New: selection follows the file with the higher header version; `.cld` only wins a genuine tie | `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004/clamd-entrypoint.test.ts` — two new cases in `describe("...daily-specific version identity (R8a, round 4/5)")`: (1) `daily.cvd` version 27316 vs. stale `daily.cld` version 27310, with the `.cld` given the NEWER mtime — published version/marker mtime both come from the `.cvd`, proving mtime does not drive selection; (2) equal versions (27315/27315) with `.cvd` given the newer mtime — published marker mtime still comes from the `.cld`, proving the tie is broken by file identity, not mtime. All 5 cases in this describe block + all 14 cases in the file pass | The real clamd binary's actual directory-load precedence for a coexisting `.cvd`/`.cld` pair remains hosted-only to directly observe; this fix matches the documented `cli_loaddbdir`/`cli_cvdload` source behavior the review cited, not a live clamd run |
+| R8(a)+R8(b) linkage | `clamd-entrypoint.sh`: new `refresh_daily_readiness()` resolves the selected reference file and its version ONCE per freshclam invocation, then calls the rewritten `daily_check_verified(output, expected_name, expected_version)` bound to THAT exact filename+version before calling `publish_marker_from_signatures`, which now takes the already-resolved reference file/version as explicit arguments instead of re-deriving them | Old: `daily_check_verified` matched ANY `daily.cvd`/`daily.cld` outcome line anywhere in freshclam's output, with no check that the confirmed file/version was the one actually selected/published. A verified confirmation of a stale, non-selected sibling file could be credited to the selected (different) file, wrongly advancing its marker to "now". New: a confirmation is only honored when its filename AND version match the selected reference exactly | `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004/clamd-entrypoint.test.ts` — new case "does not accept a verified confirmation naming a stale, non-selected sibling file...": selected reference is `daily.cld` v27316 (stale, 7h old); freshclam's output confirms only `daily.cvd` v27315 (also stale). Marker stays pinned to `daily.cld`'s own 7h-old mtime (not "now"), and real `readiness.ts#createIsReady` composed on top reads `isReady() === false` under a 1h bound | Same hosted-only limit as above for the real engine's own coexistence/reload behavior; this is a real `sh` execution + real `readiness.ts` composition, not a live engine |
+| R8(b) | `clamd-entrypoint.sh`: `daily_check_verified` now matches the REAL freshclam wording: `"<name> database is up-to-date (version: N..."` (hyphenated, includes "database") OR `"<name> updated (version: N..."` (no hyphen, no "database"), anchored to the expected filename (dot-escaped) and expected version, sourced from `libfreshclam_internal.c`'s `check_for_new_database_version` (lines 2191-2196) and `updatedb` (lines 2519-2520) | Old (round 4): the invented pattern `'^daily\.(cvd\|cld) (is up to date\|updated)'` could never match real freshclam output, since real output always says "database is up-to-date" (not "is up to date") for the no-rewrite case — so a genuinely healthy, actively-maintained daily database older than `MAX_SIGNATURE_AGE_MS` stayed permanently not-ready, exactly as the round-4/round-5 review reproduced on both adjacent SHAs. New: the real wording for both the up-to-date and updated outcomes is recognized | `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004/clamd-entrypoint.test.ts` — the existing round-4 "verified" test fixture itself was corrected from the invented `"daily.cvd is up to date (...)"` to the real `"daily.cvd database is up-to-date (...)"` default mock text (`startEntrypoint`'s `verified` mode), so that test now exercises the actual claimed external contract instead of mocking it away; a new case confirms the `"updated"` (non-hyphenated, no "database") wording is also recognized when bound to the selected file. All 3 cases in `describe("...verified-current freshness... (R8b, round 4/5)")` + all 14 cases in the file pass | The real freshclam binary's actual stdout text for these exact outcomes remains hosted-only to directly observe; the wording matched here is transcribed verbatim from the cited `libfreshclam_internal.c` source lines, not assumed |
+
+### Updated offline verification (supersedes the counts above for this generation)
+
+- `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004`:
+  **6 files, 80 tests pass**, exit 0 (was 6 files/76 tests).
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v`:
+  **39 tests pass**, exit 0, unchanged (R5 untouched this round).
+- `node node_modules/typescript/bin/tsc --strict --noUncheckedIndexedAccess --target es2022 --module commonjs --moduleResolution node --types node --typeRoots ./node_modules/@types --noEmit operations/artifact-scanner/gateway/*.ts`:
+  exit 0. `gateway/*.ts` sources are unchanged this round; only
+  `clamd-entrypoint.sh` and its test file changed.
+- `bash -n operations/artifact-scanner/clamd-entrypoint.sh`: exit 0 (this
+  VM's worker sandbox still refuses a direct `sh -n` invocation outright,
+  same as every prior round); the script's own shebang and the
+  vitest-driven execution above both still run it under real `sh`.
+- `git diff --check` against the round-5-reviewed SHA
+  `c15f29e1507fdceb50fbdf6915a48313938f3d3e`: exit 0, no whitespace errors.
+- Full project `tsc -p tsconfig.json --noEmit` was not re-run this round
+  for the same reason recorded in the round-4 entry above (unrelated
+  cross-worktree `packages/api-client` collision, out of `write_scopes`).
+  Hosted CI on this exact SHA remains the authoritative full-typecheck
+  signal.
+
+### Still deferred, unchanged from before this round
+
+Same scope as every prior round: `deploy-dev.yml` workflow hookup, a real
+`docker build`/pinned image digest, and
+`live_backend_positive_negative_evidence` (genuine clean/EICAR/engine-
+failure/no-public-exposure checks against an actually deployed Cloud Run
+service, a real ClamAV reload success/failure cycle, a real multi-run IAM
+policy reconciliation, direct observation of clamd's real `.cvd`/`.cld`
+coexistence load precedence, and a real freshclam binary's actual
+up-to-date/updated log wording). `same_sha_review_ci`'s live-acceptance
+component is likewise still open pending a hosted run of whichever
+candidate SHA this generation is handed off at. No service, container,
+browser, GCP resource, or live `gcloud`/Docker command was run by this fix
+round; every assertion above is against either a real `sh` execution of
+the unmodified production entrypoint against real temp fixtures, a real
+(not faked) composition of `readiness.ts`'s own exported functions, or a
+fake in-memory socket/fs — never a live engine, container or API call.

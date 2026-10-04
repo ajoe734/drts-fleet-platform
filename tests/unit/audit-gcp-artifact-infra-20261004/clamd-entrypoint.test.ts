@@ -34,6 +34,7 @@ interface Harness {
   readyVersionFile: string;
   modeFile: string;
   logFile: string;
+  verifiedMessageFile: string;
   child: ReturnType<typeof spawn>;
 }
 
@@ -61,6 +62,7 @@ function startEntrypoint(initialMode: FreshclamMode): Harness {
   const readyVersionFile = join(dir, "ready", "ready.version");
   const modeFile = join(dir, "freshclam-mode");
   const logFile = join(dir, "freshclam.log");
+  const verifiedMessageFile = join(dir, "verified-message");
   mkdirSync(binDir);
   mkdirSync(dbDir);
   writeFileSync(modeFile, initialMode);
@@ -72,9 +74,14 @@ function startEntrypoint(initialMode: FreshclamMode): Harness {
   // from a real check at the exit-code level alone); genuinely rewrite the
   // daily signature file with new content/version ("advance", simulating a
   // real signature update); fail outright ("fail"); or exit 0 without
-  // touching any file but print the real "is up to date" outcome line
-  // ("verified", simulating freshclam's genuine up-to-date verification --
-  // R8(b), round 4).
+  // touching any file but print a real per-database outcome line read from
+  // `FRESHCLAM_VERIFIED_MESSAGE_FILE` if a test has written one, else the
+  // real default `check_for_new_database_version` up-to-date wording for
+  // `daily.cvd` at version 27315 ("verified", simulating freshclam's
+  // genuine verification outcome -- R8(b), round 4/5). The exact wording
+  // (including which file/version it names) is test-controlled so the
+  // entrypoint's binding of a confirmation to the SELECTED database's own
+  // filename/version (round 5) can be exercised both ways.
   writeMock(
     join(binDir, "freshclam"),
     [
@@ -83,7 +90,13 @@ function startEntrypoint(initialMode: FreshclamMode): Harness {
       `case "$mode" in`,
       `  advance) cat "$FRESHCLAM_NEXT_SIGNATURE_FILE" > "$CLAMAV_DB_DIR/daily.cvd"; exit 0 ;;`,
       `  fail) exit 1 ;;`,
-      `  verified) echo "daily.cvd is up to date (version: 27315, sigs: 2000000, f-level: 90, builder: sanesecurity)"; exit 0 ;;`,
+      `  verified)`,
+      `    if [ -f "$FRESHCLAM_VERIFIED_MESSAGE_FILE" ]; then`,
+      `      cat "$FRESHCLAM_VERIFIED_MESSAGE_FILE"`,
+      `    else`,
+      `      echo "daily.cvd database is up-to-date (version: 27315, sigs: 2000000, f-level: 90, builder: sanesecurity)"`,
+      `    fi`,
+      `    exit 0 ;;`,
       `  *) exit 0 ;;`,
       `esac`,
     ].join("\n"),
@@ -106,16 +119,24 @@ function startEntrypoint(initialMode: FreshclamMode): Harness {
       FRESHCLAM_MODE_FILE: modeFile,
       FRESHCLAM_LOG: logFile,
       FRESHCLAM_NEXT_SIGNATURE_FILE: nextSignatureFile,
+      FRESHCLAM_VERIFIED_MESSAGE_FILE: verifiedMessageFile,
     },
     detached: true,
     stdio: "ignore",
   });
 
-  return { dir, dbDir, readyMarker, readyVersionFile, modeFile, logFile, child };
+  return { dir, dbDir, readyMarker, readyVersionFile, modeFile, logFile, verifiedMessageFile, child };
 }
 
 function setMode(harness: Harness, mode: FreshclamMode): void {
   writeFileSync(harness.modeFile, mode);
+}
+
+/** Overrides the exact line "verified" mode's freshclam mock prints, so a
+ * test can confirm a specific filename/version (matching or deliberately
+ * NOT matching the database `daily_reference_file()` actually selects). */
+function setVerifiedMessage(harness: Harness, message: string): void {
+  writeFileSync(harness.verifiedMessageFile, `${message}\n`);
 }
 
 function stop(harness: Harness): void {
@@ -270,7 +291,7 @@ describe("clamd-entrypoint.sh freshness provenance (R8, round 3)", () => {
   );
 });
 
-describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4)", () => {
+describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4/5)", () => {
   it(
     "publishes the daily database's own version even when main/bytecode signature files are newer",
     async () => {
@@ -327,7 +348,7 @@ describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4)", (
   );
 
   it(
-    "prefers daily.cld over a coexisting, older daily.cvd (incremental update supersedes the signed snapshot)",
+    "prefers a coexisting daily.cld over daily.cvd when the cld has the HIGHER header version (incremental update supersedes the signed snapshot)",
     async () => {
       const harness = startEntrypoint("noop");
       activeHarness = harness;
@@ -345,11 +366,62 @@ describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4)", (
     },
     15000,
   );
+
+  it(
+    "selects a newly downloaded, HIGHER-version daily.cvd over a stale, lower-version daily.cld even though the cld has the newer mtime (R8a, round 5)",
+    async () => {
+      // Official ClamAV selection (libclamav/readdb.c#cli_loaddbdir,
+      // clamav-1.4.6 lines 5179-5199) is driven by each file's own header
+      // version, never by mtime -- an always-prefer-.cld rule (round 4's
+      // fix) is wrong whenever a full .cvd download lands with a HIGHER
+      // version than a stale, previously-loaded .cld. Giving the stale cld
+      // the newer mtime here proves the selection really is version-driven.
+      const harness = startEntrypoint("noop");
+      activeHarness = harness;
+      const nowSec = Math.floor(Date.now() / 1000);
+      writeFileSync(join(harness.dbDir, "daily.cld"), cvdHeader("27310"));
+      utimesSync(join(harness.dbDir, "daily.cld"), nowSec - 5, nowSec - 5);
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27316"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), nowSec - 100, nowSec - 100);
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27316");
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      expect(markerMtimeSec).toBe(nowSec - 100);
+    },
+    15000,
+  );
+
+  it(
+    "ties an EQUAL-version daily.cvd/daily.cld pair to the cld by file identity, not mtime (R8a, round 5)",
+    async () => {
+      // cli_loaddbdir's documented tie rule: the .cld wins only when the
+      // versions are EQUAL. The .cvd here has the strictly newer mtime, so
+      // a marker mtime matching the .cld (not the .cvd) proves the tie was
+      // broken by file identity, not by whichever file happened to be
+      // touched more recently.
+      const harness = startEntrypoint("noop");
+      activeHarness = harness;
+      const nowSec = Math.floor(Date.now() / 1000);
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), nowSec - 5, nowSec - 5);
+      writeFileSync(join(harness.dbDir, "daily.cld"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cld"), nowSec - 100, nowSec - 100);
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27315");
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      expect(markerMtimeSec).toBe(nowSec - 100);
+    },
+    15000,
+  );
 });
 
-describe("clamd-entrypoint.sh verified-current freshness, composed with real readiness.ts (R8b, round 4)", () => {
+describe("clamd-entrypoint.sh verified-current freshness, composed with real readiness.ts (R8b, round 4/5)", () => {
   it(
-    "advances the marker to wall-clock now on a verified 'is up to date' confirmation, keeping readiness live past the file's own stale mtime",
+    "advances the marker to wall-clock now on a verified 'database is up-to-date' confirmation naming the selected file/version, keeping readiness live past the file's own stale mtime",
     async () => {
       // Real freshclam genuinely re-verifies the remote daily version on
       // every run and, when already current, never rewrites any database
@@ -357,6 +429,10 @@ describe("clamd-entrypoint.sh verified-current freshness, composed with real rea
       // file-mtime-only freshness rule cannot tell that outcome apart from
       // a stuck rate-limit cooldown, so a perfectly healthy daily database
       // older than the configured bound would stay permanently not-ready.
+      // The real wording (round 5) includes "database" and a hyphenated
+      // "up-to-date" -- an invented "is up to date" fixture would no
+      // longer match the production regex, so this relies on the mock's
+      // real default text rather than overriding it.
       const staleSec = Math.floor(Date.now() / 1000) - 7 * 60 * 60; // 7h old
       const harness = startEntrypoint("verified");
       activeHarness = harness;
@@ -416,6 +492,72 @@ describe("clamd-entrypoint.sh verified-current freshness, composed with real rea
         readMarkerMtimeMs: () => statSync(harness.readyMarker).mtimeMs,
         readExpectedVersion: () => readFileSync(harness.readyVersionFile, "utf8").trim(),
         queryLoadedVersion: async () => "27315",
+      });
+      await expect(isReady()).resolves.toBe(false);
+    },
+    15000,
+  );
+
+  it(
+    "recognizes the real 'updated' outcome wording (no 'database' word, no hyphen) bound to the selected file, not only the 'database is up-to-date' wording (R8b, round 5)",
+    async () => {
+      // libfreshclam_internal.c's updatedb() success path (clamav-1.4.6,
+      // lines 2519-2520) logs "<file> updated (version: N, ...)" -- with
+      // neither the word "database" nor a hyphen, unlike the up-to-date
+      // branch. The match must accept this wording too, still bound to the
+      // selected file's own name/version.
+      const staleSec = Math.floor(Date.now() / 1000) - 7 * 60 * 60; // 7h old
+      const harness = startEntrypoint("verified");
+      activeHarness = harness;
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), staleSec, staleSec);
+      setVerifiedMessage(harness, "daily.cvd updated (version: 27315, sigs: 1000, f-level: 90, builder: raynman)");
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      expect(Math.abs(markerMtimeSec - Math.floor(Date.now() / 1000))).toBeLessThan(10);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27315");
+    },
+    15000,
+  );
+
+  it(
+    "does not accept a verified confirmation naming a stale, non-selected sibling file as proof the selected database is current (R8a+R8b linkage, round 5)",
+    async () => {
+      // The selected reference is daily.cld (higher header version, 27316)
+      // -- but freshclam's captured output here only confirms the STALE,
+      // lower-version daily.cvd (27315). That confirmation must never be
+      // credited to the selected cld; the marker must stay pinned to cld's
+      // own (stale) mtime, and real readiness.ts must still read not-ready.
+      const staleSec = Math.floor(Date.now() / 1000) - 7 * 60 * 60; // 7h old
+      const harness = startEntrypoint("verified");
+      activeHarness = harness;
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), staleSec, staleSec);
+      writeFileSync(join(harness.dbDir, "daily.cld"), cvdHeader("27316"));
+      utimesSync(join(harness.dbDir, "daily.cld"), staleSec, staleSec);
+      setVerifiedMessage(
+        harness,
+        "daily.cvd database is up-to-date (version: 27315, sigs: 1000, f-level: 90, builder: raynman)",
+      );
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27316");
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      // Must stay pinned to daily.cld's own stale mtime -- never advanced
+      // to "now" by a confirmation that named a different file/version.
+      expect(markerMtimeSec).toBe(staleSec);
+
+      const maxAgeMs = 60 * 60 * 1000; // 1h, well under the 7h stale age
+      expect(isMarkerFresh(statSync(harness.readyMarker).mtimeMs, Date.now(), maxAgeMs)).toBe(false);
+      const isReady = createIsReady({
+        maxAgeMs,
+        now: () => Date.now(),
+        readMarkerMtimeMs: () => statSync(harness.readyMarker).mtimeMs,
+        readExpectedVersion: () => readFileSync(harness.readyVersionFile, "utf8").trim(),
+        queryLoadedVersion: async () => "27316",
       });
       await expect(isReady()).resolves.toBe(false);
     },

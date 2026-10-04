@@ -39,16 +39,60 @@ mkdir -p "$(dirname "$READY_MARKER")"
 # and /scan fail closed against a fully loaded, healthy daily engine. Only
 # the daily database's own identity is ever published here now.
 #
-# A freshclam update that lands as an incremental patch produces/refreshes
-# daily.cld from the prior daily.cvd+cdiffs; a full download instead
-# (re)writes daily.cvd and removes any now-superseded daily.cld. When both
-# exist, the .cld is the newer, currently-loaded local database -- the .cvd
-# is a stale signed snapshot left on disk, not what clamd actually loaded.
+# R8(a) (round 5): "prefer .cld whenever it exists" over-corrected again.
+# libclamav/readdb.c#cli_loaddbdir (clamav-1.4.6, lines 5179-5199) loads
+# whichever of daily.cvd/daily.cld carries the HIGHER ClamAV-VDB header
+# version; libclamav/cvd.c#cli_cvdload (lines 634-654) independently
+# rejects loading a duplicate/older version. A .cld only wins on an EQUAL
+# version against its sibling .cvd (the documented incremental-patch
+# case) -- a freshly downloaded full .cvd that is NEWER than a stale,
+# previously-loaded .cld is a supported case clamd actually loads, and
+# mtime never enters clamd's own selection rule at all. Selection is by
+# each file's own parsed header version, never by mtime or extension
+# preference alone.
 daily_reference_file() {
-  if [ -f "$CLAMAV_DB_DIR/daily.cld" ]; then
-    printf '%s\n' "$CLAMAV_DB_DIR/daily.cld"
-  elif [ -f "$CLAMAV_DB_DIR/daily.cvd" ]; then
-    printf '%s\n' "$CLAMAV_DB_DIR/daily.cvd"
+  cvd_file="$CLAMAV_DB_DIR/daily.cvd"
+  cld_file="$CLAMAV_DB_DIR/daily.cld"
+  have_cvd=0
+  have_cld=0
+  [ -f "$cvd_file" ] && have_cvd=1
+  [ -f "$cld_file" ] && have_cld=1
+  if [ "$have_cvd" = 1 ] && [ "$have_cld" = 1 ]; then
+    cvd_ver=$(cvd_version "$cvd_file" 2>/dev/null) || cvd_ver=
+    cld_ver=$(cvd_version "$cld_file" 2>/dev/null) || cld_ver=
+    if [ -n "$cvd_ver" ] && [ -n "$cld_ver" ]; then
+      # Equal versions: the .cld (incremental patch) wins, matching
+      # cli_loaddbdir's documented tie rule. Otherwise the strictly
+      # higher-version file wins, regardless of which extension it is.
+      if [ "$cvd_ver" -gt "$cld_ver" ]; then
+        printf '%s\n' "$cvd_file"
+      else
+        printf '%s\n' "$cld_file"
+      fi
+      return
+    fi
+    # One file's header could not be parsed/validated here -- prefer
+    # whichever one actually has a readable version so a corrupt sibling
+    # cannot hide a genuinely loadable database.
+    if [ -n "$cld_ver" ]; then
+      printf '%s\n' "$cld_file"
+      return
+    fi
+    if [ -n "$cvd_ver" ]; then
+      printf '%s\n' "$cvd_file"
+      return
+    fi
+    # Neither header is readable; fall through to the .cld default so the
+    # caller's own header check reports a clear "not recognizable" failure.
+    printf '%s\n' "$cld_file"
+    return
+  fi
+  if [ "$have_cld" = 1 ]; then
+    printf '%s\n' "$cld_file"
+    return
+  fi
+  if [ "$have_cvd" = 1 ]; then
+    printf '%s\n' "$cvd_file"
   fi
 }
 
@@ -71,20 +115,35 @@ daily_reference_file() {
 # to the file's mtime cannot tell that verified-current outcome apart from
 # a stuck rate-limit cooldown that also exits 0 without writing anything,
 # so a perfectly healthy, actively-maintained daily database older than
-# `MAX_SIGNATURE_AGE_MS` would stay permanently not-ready. `daily_check_verified`
-# greps freshclam's own captured output for ClamAV's documented per-database
-# outcome lines (freshclam/manager.c's `logg("%s is up to date (version: ...",
-# ...)` and `logg("%s updated (version: ...", ...)`) -- the only affirmative,
-# text-level proof (short of re-implementing freshclam's own remote version
-# check) that this particular invocation genuinely compared the daily
-# database against the remote version, rather than silently no-op'ing
-# through a remembered cooldown. Only that confirmed outcome is allowed to
-# advance the marker to wall-clock "now" without a file rewrite; an
-# unconfirmed exit 0 still falls back to the file's own (unchanged) mtime,
-# so `readiness.ts#isMarkerFresh`'s existing `MAX_SIGNATURE_AGE_MS` bound
+# `MAX_SIGNATURE_AGE_MS` would stay permanently not-ready. Only a confirmed
+# outcome naming the daily database is allowed to advance the marker to
+# wall-clock "now" without a file rewrite; an unconfirmed exit 0 still
+# falls back to the file's own (unchanged) mtime, so
+# `readiness.ts#isMarkerFresh`'s existing `MAX_SIGNATURE_AGE_MS` bound
 # still ages a genuinely stuck/unverified cooldown out.
+#
+# R8(b) (round 5): the prior match text ('^daily\.(cvd|cld) (is up to date|
+# updated)') was invented, not the real freshclam wording, and so could
+# never match genuine freshclam output. libfreshclam/libfreshclam_internal.c
+# (clamav-1.4.6) actually logs, verbatim: `check_for_new_database_version`'s
+# up-to-date branch (lines 2191-2196) emits
+# "<local filename> database is up-to-date (version: N, sigs: N, f-level: N,
+# builder: NAME)"; `updatedb` (lines 2519-2520) emits, on a genuine update,
+# "<new local filename> updated (version: N, sigs: N, f-level: N,
+# builder: NAME)". The up-to-date line includes the word "database" and a
+# hyphenated "up-to-date"; the updated line has neither "database" nor a
+# hyphen. Both lines name the actual local/new filename, so the match must
+# also be bound to the SAME file `daily_reference_file()` selected this
+# round (round 5's R8(a) fix) and its own parsed header version -- a
+# verified confirmation naming a stale, non-selected sibling file must
+# never be accepted as proof the selected database is current.
 daily_check_verified() {
-  printf '%s\n' "$1" | grep -Eq '^daily\.(cvd|cld) (is up to date|updated)'
+  output="$1"
+  expected_name="$2"
+  expected_version="$3"
+  [ -n "$expected_name" ] && [ -n "$expected_version" ] || return 1
+  name_pattern=$(printf '%s' "$expected_name" | sed 's/\./\\./g')
+  printf '%s\n' "$output" | grep -Eq "^${name_pattern} (database is up-to-date|updated) \\(version: ${expected_version}[,)]"
 }
 
 
@@ -93,9 +152,12 @@ daily_check_verified() {
 # CVD/CLD header format libclamav/cvd.c itself parses -- directly from the
 # on-disk signature file. No tool beyond the freshclam/clamd/clamdscan
 # boundary this script already stubs in tests is required. A file that is
-# missing or does not start with the documented header is never trusted as
-# a real signature database (R8, round 3): readiness must never be
-# published for a file whose identity cannot be confirmed.
+# missing or does not start with the documented header, or whose version
+# field is not the plain integer libclamav itself requires, is never
+# trusted as a real signature database (R8, round 3/5): readiness must
+# never be published for a file whose identity cannot be confirmed, and
+# an unvalidated version string must never reach a numeric comparison
+# (R8(a), round 5) or a freshness regex (R8(b), round 5) unescaped.
 cvd_version() {
   header=$(head -c 512 "$1" 2>/dev/null) || return 1
   case "$header" in
@@ -103,15 +165,21 @@ cvd_version() {
     *) return 1 ;;
   esac
   version=$(printf '%s' "$header" | cut -d: -f3)
-  [ -n "$version" ] || return 1
+  case "$version" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
   printf '%s\n' "$version"
 }
 
-publish_marker_from_signatures() {
-  # "1" only when this call's freshclam invocation affirmatively confirmed
-  # the daily database against the remote version this round (R8, round 4);
-  # empty/unset for the initial pre-clamd fetch or an unconfirmed exit 0.
-  verified="${1:-}"
+# Resolves the selected daily reference file and its version once per
+# freshclam invocation, checks whether THIS invocation's output
+# affirmatively confirmed THAT SAME file/version (R8(b), round 5's fix
+# boundary: bind the confirmation to the selected identity, not just any
+# daily.cvd/daily.cld mention), and publishes the marker/version file
+# accordingly. Returns non-zero (without publishing) when no recognizable
+# daily database is on disk at all.
+refresh_daily_readiness() {
+  freshclam_output="$1"
   reference_file=$(daily_reference_file)
   if [ -z "$reference_file" ]; then
     echo "No daily signature database found in $CLAMAV_DB_DIR; marking not ready" >&2
@@ -123,6 +191,23 @@ publish_marker_from_signatures() {
     rm -f "$READY_MARKER" "$READY_VERSION_FILE"
     return 1
   }
+  verified=""
+  if daily_check_verified "$freshclam_output" "$(basename "$reference_file")" "$version"; then
+    verified=1
+  fi
+  publish_marker_from_signatures "$verified" "$reference_file" "$version"
+}
+
+publish_marker_from_signatures() {
+  # "1" only when this call's freshclam invocation affirmatively confirmed
+  # the SELECTED daily database's own filename and version this round
+  # (R8(b), round 4/5); empty/unset for the initial pre-clamd fetch or an
+  # unconfirmed exit 0. $2/$3 are the reference file and version already
+  # resolved by refresh_daily_readiness, so publication always uses the
+  # exact same identity the verification check was bound to.
+  verified="${1:-}"
+  reference_file="$2"
+  version="$3"
   # Version file first: the gateway must never observe a fresh marker
   # mtime paired with a stale/missing expected-version file.
   printf '%s\n' "$version" > "$READY_VERSION_FILE"
@@ -145,11 +230,7 @@ CLAMD_PID=$!
 attempt=0
 while [ "$attempt" -lt 60 ]; do
   if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
-    initial_verified=""
-    if daily_check_verified "$initial_freshclam_output"; then
-      initial_verified=1
-    fi
-    publish_marker_from_signatures "$initial_verified" || echo "clamd is live but no signatures were found yet" >&2
+    refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2
     break
   fi
   attempt=$((attempt + 1))
@@ -171,11 +252,7 @@ done
     sleep "$FRESHCLAM_INTERVAL_SECONDS"
     if refresh_output=$(freshclam --stdout 2>&1); then
       printf '%s\n' "$refresh_output"
-      refresh_verified=""
-      if daily_check_verified "$refresh_output"; then
-        refresh_verified=1
-      fi
-      publish_marker_from_signatures "$refresh_verified" || true
+      refresh_daily_readiness "$refresh_output" || true
     else
       printf '%s\n' "$refresh_output"
       echo "freshclam refresh failed; marking not ready" >&2
