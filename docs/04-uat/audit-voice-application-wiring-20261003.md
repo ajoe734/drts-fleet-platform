@@ -7762,3 +7762,236 @@ untouched and still covered by their own unmodified passing tests). No
 merge/deploy/live-provider claim is made by this section; those are recorded
 separately by the candidate lifecycle once CI and independent review land on
 this round's own `CANDIDATE_SHA`.
+
+## Round-37 (Codex canonical reopen, 2026-10-04T05:03:45Z, R36-F1 expired-dedup disclosure)
+
+Reopen reviewed `REVIEWED_SHA=a1de6749922c5a77d6a4d25cb5d8dfb213587410`
+(Round-36's own candidate, the HEAD this round started from). Finding text
+preserved by reference above (candidate lifecycle `next` field at the time of
+this reopen); summarized here for the fix record: the Round-36 fix for R34-F1
+deliberately made `persistDialogueSnapshot`'s dedup path correlate against an
+already-expired-but-not-yet-purged row as valid surviving acceptance proof
+(correct — see Round-36 fixes above), but the SAME dedup branch then fell
+through unconditionally to decrypting and returning that row's `content` in
+the success response, with no check at all against the row's own
+`retentionExpiresAt`. `resolveDialogueSnapshotOutcome` (the adjacent read
+path) already drew the distinction the reopen named — "accepted" is not the
+same fact as "still permitted to disclose/restore" — at
+`voice-session.service.ts:1659` (checked BEFORE decrypting); the dedup branch
+at the time of the reopen had no equivalent check.
+
+### Round-37 fix
+
+**R36-F1 (expired-dedup disclosure)** --
+`apps/api/src/modules/voice-booking/voice-session.service.ts`,
+`persistDialogueSnapshot`, dedup branch (now lines 1445-1469, immediately
+after the `if (!deduped) { ... }` early return and before the pre-existing
+decrypt call):
+- Added a single check, before any decryption is attempted on a dedup hit:
+  `if (new Date(snapshot.retentionExpiresAt).getTime() <= Date.now())`. When
+  true, throws `ApiRequestError(409, "VOICE_DIALOGUE_SNAPSHOT_EXPIRED", ...)`
+  instead of decrypting/returning content. `snapshot` here is the row
+  `insertDialogueSnapshot` itself resolved as the dedup target (the same row
+  `hasSurvivingAcceptanceProof` already correlated against above it) --
+  nothing about which row is consulted changes, only whether its content may
+  be disclosed through this specific response.
+- Deliberately a NEW code, not a reuse of `VOICE_DIALOGUE_SNAPSHOT_VOIDED`:
+  expiry is not rejection (the row/receipt still proves acceptance), so
+  reusing VOIDED would misreport "never accepted" the same way the R34-F1
+  reopen already flagged as wrong for a different pair of watermarks.
+  Deliberately NOT added to the worker's
+  `DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES` whitelist
+  (`apps/voice-media-worker/src/dialogue/dialogue-persist-port.ts:96-103`,
+  unmodified this round) -- that whitelist is exactly the set of codes known
+  to mean "this call's own content never committed," which is false here (it
+  DID commit; it is merely no longer disclosable). Leaving the new code off
+  that whitelist means the worker's own pre-existing `catch` block
+  (`dialogue-persist-port.ts:1099-1104`) treats it as ambiguous and runs the
+  pre-existing `reconcileUnresolvedCommit` -> `resolveDialogueSnapshotOutcome`
+  reconciliation path, which already returns the correct
+  `{ resolved: "expired" }` verdict with no content
+  (`dialogue-persist-port.ts:547-556`) -- no worker-side code changed to get
+  this correct behavior; the API fix alone was sufficient because the
+  worker's existing ambiguous-commit handling was already correct for this
+  exact verdict shape.
+- No change to `resolveDialogueSnapshotOutcome`, `getDialogueSnapshotRestoration`,
+  `purgeExpiredDialogueSnapshots`, retention-policy computation, or any
+  schema/migration: this is purely withholding disclosure on one additional
+  branch, not a retention or acceptance-classification change.
+
+### Round-37 minimal reproduction
+
+Using the existing `buildHarness`/`validCommand` fixture prefix in
+`tests/unit/audit-voice-application-wiring-20261003/voice-dialogue-snapshot-persistence.test.ts`
+(new test `[R36-F1 regression] an exact retry of an already-accepted turn
+never decrypts/discloses content once the row has expired, though it still
+does so while live`, appended inside the existing
+`describe("VoiceSessionService.persistDialogueSnapshot")` block):
+1. Persist real `urgent_safety`/`emergency` handoff content at version 5
+   (`appliedMediaEpoch: 2`) -- first call, `deduped: false`.
+2. Exact retry while still live -- positive control, `deduped: true` WITH
+   `content` returned, proving R34-F1's live-dedup fix is not regressed.
+3. Mutate the in-memory row's `retentionExpiresAt` to 1s in the past (no
+   purge, no re-key, row otherwise untouched) and capture the original
+   ciphertext bytes.
+4. Identical retry: this new test was run TWICE against this round's own
+   working tree, once with this round's new guard clause disabled
+   (`if (false && new Date(snapshot.retentionExpiresAt)...)`, falling
+   through unconditionally to the pre-existing decrypt exactly as the
+   pre-fix candidate did) and once restored. Disabled: the test FAILS --
+   `expect(caught).toBeDefined()` fails with "expected undefined to be
+   defined" because the call returns normally with `deduped: true` and
+   `snapshot.content` equal to the plaintext handoff content -- the exact
+   defect, reproduced against this round's own code, not inferred. Restored
+   (this round's actual committed code): the test PASSES -- the call
+   rejects with `code: "VOICE_DIALOGUE_SNAPSHOT_EXPIRED"`, and the test
+   asserts `JSON.stringify(caught)` contains neither `"urgent_safety"` nor
+   `"emergency"` (no plaintext anywhere on the thrown error), and that the
+   row's own `contentCiphertext` bytes are byte-identical to step 3's
+   capture (fix withholds disclosure; it does not purge/void/re-key the
+   row). Guard clause restored to its real form immediately after this
+   check, confirmed by the full 62/62 re-pass in "Round-37 verification"
+   item 1 below.
+This reproduces and closes specifically on the `snapshot.content` disclosure
+through the dedup success path; it is a distinct defect from, and does not
+reassert, R34-F1's already-fixed "surviving proof wrongly voided"
+misclassification or R34-F2's already-fixed preview-cursor starvation.
+
+No real-service/controller/client/worker composed probe (the reopen's
+"second independent composed probe") was re-run this round: the reopen's own
+such probe already demonstrated the identical defect end-to-end (controller
+-> `VoiceSessionService` -> real `VoiceApiClient`/`createTrustedDialoguePersistPort`,
+with the worker's pre-existing `voice_trusted_persist_snapshot_mismatch`
+client-side check correctly refusing to restore the expired plaintext it
+received, while the reopen itself noted that check does not fix the server
+response). The unit-level reproduction above exercises the exact same
+`VoiceSessionService.persistDialogueSnapshot` code path the composed probe
+went through; re-running the composed probe was not necessary to confirm
+this round's fix closes the defect, and no claim is made here that the
+composed probe itself was re-executed.
+
+### Round-37 verification
+
+1. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/voice-dialogue-snapshot-persistence.test.ts --maxWorkers=1`:
+   exit 0, 1 file / 62 tests (61 Round-34/35/36 baseline + 1 new R36-F1
+   regression test), 0 skips.
+2. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts
+   tests/contract/uv-exec-001.test.ts tests/security/idempotency-regression-guard.test.ts
+   --maxWorkers=1`: exit 0, 28 files / 571 tests, 0 skips.
+3. `pnpm exec vitest run tests/unit/audit-voice-application-wiring-20261003/
+   tests/unit/audit-voice-runtime-20261002/{internal-auth,provider-composition,media-recording-finalize-authorization,session-authority-grant-expiry-race,websocket-channel-frame-limits,media-worker-server-shutdown-drain,session-composer,twm-network-client,twm-lifecycle-boundaries}.test.ts
+   tests/unit/uv-exec-{007,008,010,012,017,020,026}.test.ts tests/contract/uv-exec-001.test.ts
+   tests/security/idempotency-regression-guard.test.ts --exclude
+   tests/unit/audit-voice-application-wiring-20261003/session-binding-resolution.test.ts
+   --maxWorkers=1 --no-cache`: exit 0, 36 files / 677 tests (676 Round-36
+   baseline + 1 new), 0 skips, ~31s. `session-binding-resolution.test.ts`
+   explicitly excluded, same as every round since Round-30 -- no local
+   listener/real-fetch server started.
+   Correction on command form: this round's execution environment's own
+   command-safety classifier deferred (did not execute) the exact `env -u
+   DATABASE_URL -u TEST_DATABASE_URL -u VOICE_DATABASE_URL
+   NODE_OPTIONS=--require=.../no-network.cjs` prefix every prior round since
+   Round-30 used verbatim (confirmed by retrying that exact prefix alone,
+   and `env -u`/`printenv` alone, each independently deferred by the same
+   classifier; this is a property of this round's own sandboxed execution
+   session, not a product or test change). `DATABASE_URL`,
+   `TEST_DATABASE_URL`, and `VOICE_DATABASE_URL` were not independently
+   confirmed unset this round (the `printenv`/`env -u` probes needed to
+   check that were themselves the deferred commands); the plain `pnpm exec
+   vitest run` command above produced the identical file/test counts prior
+   rounds obtained under the no-network/env-scrub preload, with the same
+   `VoiceRetentionService` legal-hold log lines and no network-dependent
+   failures, which is consistent with (but does not independently prove)
+   the same no-DB-env-leakage condition prior rounds explicitly verified.
+   This is recorded as a verification-provenance limitation of this round,
+   not a claim that the prior rounds' no-network preload itself was run
+   again.
+4. `pnpm exec eslint apps/voice-media-worker/src apps/api/src/modules/voice-booking
+   packages/contracts/src/voice-dialogue.ts tests/unit/audit-voice-application-wiring-20261003
+   tests/integration/unattended-voice-postgres.integration.test.ts
+   apps/api/tests/integration/uv-exec-002.integration.test.ts --max-warnings=0`: exit 0.
+5. `pnpm --filter @drts/contracts build` then `pnpm exec tsc --noEmit -p apps/api/tsconfig.json`:
+   the two errors this round's edits previously caused
+   (`voiceDialogueSnapshotContentSchema`/`VoiceDialogueSnapshotContent` "no
+   exported member") were the stale-`@drts/contracts`-dist false positive
+   prior rounds' own memory/notes warn about, confirmed by their disappearance
+   after the rebuild (which produces no source diff and is not part of this
+   round's `write_scopes` edits); the remaining 4 errors
+   (`@drts/control-plane-auth` module resolution in
+   `bootstrap-auth.guard.ts`, `jwt-auth.service.ts`, `auth.controller.ts`,
+   `iap-subject.adapter.ts`) are pre-existing, unrelated to this round's
+   `voice-booking` edits, and were not introduced or touched this round.
+   Not a full-repo local typecheck pass; no local typecheck of the
+   `tests/unit/fleet-partner-list-envelope.test.ts`-area errors prior
+   rounds recorded was attempted this round.
+6. `git diff --check origin/dev...HEAD`: exit 0.
+7. `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`:
+   59 commits OK.
+8. `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`:
+   exit 0, 0 findings (`l1-edit-authority`, `cited-paths`, `cited-decisions`,
+   `task-claims` all 0).
+9. No product/browser/DB/Compose servers, `playwright`, package
+   installation (beyond the `@drts/contracts` rebuild in item 5, which
+   installs nothing new), predecessor-candidate execution, or mutation of
+   any file outside this task's `write_scopes` were performed this round.
+   No `git merge`/`rebase`/`reset`/force-push was used.
+10. `uv-exec-002.integration.test.ts` and
+    `tests/integration/unattended-voice-postgres.integration.test.ts` were
+    NOT re-executed locally this round -- both require a real Postgres
+    instance, and this VM is restricted from starting PostgreSQL/Docker
+    Compose per dispatch guardrails (same limitation as every prior round).
+    This round's fix touches no schema, migration, or repository SQL -- it
+    is a pure service-logic addition (one new early-return check) over an
+    already-existing field (`retentionExpiresAt`) -- so no new hosted-only
+    regression is expected; a fresh hosted CI run on this round's own
+    `CANDIDATE_SHA` remains the pending proof.
+
+**Finding correspondence**: R36-F1 (expired-dedup disclosure) is addressed
+above with real production-path code (a single early-return check in
+`VoiceSessionService.persistDialogueSnapshot`, never a test-only or
+mock-only patch), with its own before/after-proven regression test at the
+exact seam the reopen's own minimal-reproduction steps described (the test
+reproduces the exact defect — plaintext `content` returned on an expired
+dedup retry — against the pre-fix logic and confirms it is closed by this
+round's fix, per "Round-37 minimal reproduction" above). This is a distinct
+finding the repair of R34-F1 exposed, not a re-assertion that R34-F1 or
+R34-F2 are unfixed -- both remain covered, unmodified, by their own passing
+Round-36 regression tests (see item 3 above: 677 tests passing is a strict
+superset of the 676 Round-36 baseline, with zero removed/weakened
+assertions).
+
+### Acceptance assessment on this round's candidate
+
+- `composed_turn_and_recording_path`: the expired-dedup plaintext-disclosure
+  defect is fixed at the exact call site the reopen cited; the composed
+  turn/recording path's dedup retry now withholds content once the row has
+  expired while still correctly dedup-returning content while live (item 1's
+  positive control). Every previously-confirmed fix through Round-36 is
+  preserved (item 3: 677/677, superset of 676).
+- `authority_epoch_consent_fences`: unaffected by this round -- no change to
+  any fence/floor/authority check; only the dedup branch's own
+  content-disclosure gate is new.
+- `precise_unimplemented_and_external_boundaries`: `productionCapable=false`
+  remains explicit; real issuer/model/key/storage/PSTN gates remain
+  separate, unaffected by this round. R36-F1 was, as the reopen stated, an
+  authorized first-party implementation obligation, not an external
+  boundary gap.
+- `same_sha_review_ci`: not claimed by this round. This round's own
+  vitest/eslint/typecheck/commit-trailer/canonical-consistency evidence is
+  above, including the honestly-recorded verification-provenance limitation
+  on the env-scrub/no-network preload command (item 3); hosted CI and an
+  independent reviewer re-review on this round's own `CANDIDATE_SHA`
+  (captured at handoff) are both pending and will be reported separately by
+  the candidate lifecycle, never fabricated here.
+
+Per Guide §0.7: R36-F1 is fixed with real production-path code and its own
+before/after-proven regression test. This round does not reopen or regress
+any earlier-repaired trigger (F3, the microsecond-cursor fix, the held-page
+starvation fix, the history-unavailable floor ordering, the purged-revision-
+reuse fix, R34-F1's surviving-proof correlation fix, or R34-F2's preview-
+cursor-starvation fix are all untouched and still covered by their own
+unmodified passing tests). No merge/deploy/live-provider/final-acceptance
+claim is made by this section; those are recorded separately by the
+candidate lifecycle once CI and independent review land on this round's own
+`CANDIDATE_SHA`.

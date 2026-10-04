@@ -902,8 +902,17 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
     });
     expect(aResolveExpired).toMatchObject({ accepted: true, expired: true });
     expect(aResolveExpired).not.toHaveProperty("snapshot");
-    const persistAfterExpiry = await service.persistDialogueSnapshot(commandA);
-    expect(persistAfterExpiry.deduped).toBe(true);
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R36-F1 expired-dedup
+    // disclosure (Codex reopen, canonical 2026-10-04T05:03:45Z): a
+    // surviving expired row proves historical acceptance only -- the dedup
+    // retry must never decrypt/disclose its content, and must never be
+    // misreported as VOICE_DIALOGUE_SNAPSHOT_VOIDED (expiry is not
+    // rejection). It rejects with a dedicated, non-definitive code instead,
+    // routing the caller to resolveDialogueSnapshotOutcome's own
+    // already-correct accepted/expired-without-content fact.
+    await expect(
+      service.persistDialogueSnapshot(commandA),
+    ).rejects.toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_EXPIRED" });
 
     // 6. The governed sweep purges the expired row, preserving a bounded
     // receipt. Resolve still reports accepted/expired from the receipt;
@@ -965,6 +974,72 @@ describe("VoiceSessionService.persistDialogueSnapshot", () => {
     await expect(service.persistDialogueSnapshot(commandA)).rejects.toMatchObject(
       { code: "VOICE_DIALOGUE_SNAPSHOT_HISTORY_UNAVAILABLE" },
     );
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R36-F1 expired-dedup disclosure
+   * (Codex reopen, canonical 2026-10-04T05:03:45Z): "a surviving expired row
+   * proves historical acceptance, but must not authorize
+   * decryption/disclosure as an ordinary snapshot." On the SHA this reopen
+   * identified, an exact retry after expiry (but before governed purge)
+   * still reached the unconditional dedup decrypt and returned
+   * `deduped: true` with live plaintext `content`, even though the row's
+   * own `retentionExpiresAt` had already passed -- the same non-disclosure
+   * boundary `resolveDialogueSnapshotOutcome` already enforces (never
+   * decrypting an expired row) did not exist on this path. This minimal
+   * reproduction: (1) persists real urgent_safety/emergency content as a
+   * positive control -- an exact retry while still live must keep returning
+   * it, never regressing R34-F1's fix; (2) advances the clock past the
+   * row's own policy-derived `retentionExpiresAt` without altering it or
+   * purging the row; (3) asserts the identical retry now rejects without
+   * ever exposing `content` anywhere on the thrown error, and that the
+   * underlying repository row itself still physically holds the original
+   * ciphertext (proving the fix withholds disclosure rather than mutating/
+   * erasing accepted history).
+   */
+  it("[R36-F1 regression] an exact retry of an already-accepted turn never decrypts/discloses content once the row has expired, though it still does so while live", async () => {
+    const { service, snapshots } = buildHarness({ appliedMediaEpoch: 2 });
+    const urgentContent = {
+      ...validContent,
+      handoff: { reason: "urgent_safety", intent: "emergency" },
+    };
+    const command = validCommand({
+      turnId: "accepted-urgent",
+      content: urgentContent,
+    });
+
+    const first = await service.persistDialogueSnapshot(command);
+    expect(first.deduped).toBe(false);
+
+    // Positive control: still live, the exact retry safely dedups WITH
+    // content -- this must keep working; only the expired case changes.
+    const liveRetry = await service.persistDialogueSnapshot(command);
+    expect(liveRetry.deduped).toBe(true);
+    expect(liveRetry.snapshot.content).toEqual(urgentContent);
+
+    const row = snapshots.find(
+      (s) => s.voiceSessionId === VOICE_SESSION_ID && s.sessionVersion === 5,
+    )!;
+    const originalCiphertext = Buffer.from(row.contentCiphertext);
+    row.retentionExpiresAt = new Date(Date.now() - 1000).toISOString();
+
+    let caught: unknown;
+    try {
+      await service.persistDialogueSnapshot(command);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(caught).toMatchObject({ code: "VOICE_DIALOGUE_SNAPSHOT_EXPIRED" });
+    // The defect this guards against was disclosure through the success
+    // response's `snapshot.content` -- assert no decrypted content leaked
+    // anywhere onto the thrown error object either.
+    expect(JSON.stringify(caught)).not.toContain("urgent_safety");
+    expect(JSON.stringify(caught)).not.toContain("emergency");
+    // The row itself is untouched (not purged, not re-keyed, not voided) --
+    // this is a disclosure fix, not a retention/acceptance-classification
+    // change.
+    expect(row.contentCiphertext.equals(originalCiphertext)).toBe(true);
   });
 });
 

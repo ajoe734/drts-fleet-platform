@@ -1442,6 +1442,34 @@ export class VoiceSessionService {
         };
       }
 
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R36-F1 expired-dedup
+      // disclosure (Codex reopen, canonical 2026-10-04T05:03:45Z, "a
+      // surviving expired row proves historical acceptance, but must not
+      // authorize decryption/disclosure as an ordinary snapshot"): the
+      // `hasSurvivingAcceptanceProof` check above (and `insertDialogueSnapshot`
+      // itself) deliberately still correlates against an ALREADY-EXPIRED row
+      // -- same as `findDialogueSnapshotByVersion`'s own doc -- because a
+      // write that durably landed and only later expired still proves this
+      // exact commit was accepted. That is a different fact from "still
+      // permitted to disclose/restore," exactly as `resolveDialogueSnapshotOutcome`
+      // already distinguishes below (never decrypting an expired row). This
+      // dedup path must apply the SAME non-disclosure boundary -- never
+      // decrypt or return an expired row's content here, retry included --
+      // and must not synthesize `VOICE_DIALOGUE_SNAPSHOT_VOIDED` (a true
+      // later-reconciliation fence) either: expiry is not rejection. This
+      // code is deliberately excluded from
+      // `DEFINITIVE_DIALOGUE_SNAPSHOT_REJECTION_CODES` (worker side,
+      // `dialogue-persist-port.ts`) so a caller still routes through the
+      // existing ambiguous-commit reconciliation (`resolveDialogueSnapshotOutcome`),
+      // which already reports the accepted/expired fact without content.
+      if (new Date(snapshot.retentionExpiresAt).getTime() <= Date.now()) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_DIALOGUE_SNAPSHOT_EXPIRED",
+          "This exact content commit was already accepted but its retention window has since passed; the dedup read cannot disclose expired content. Use resolveDialogueSnapshotOutcome for the accepted/expired fact.",
+        );
+      }
+
       // Dedup hit: decrypt and return the row that is ACTUALLY persisted,
       // never this call's own freshly-submitted content -- the two must
       // match for this to be a safe retry/no-op.
