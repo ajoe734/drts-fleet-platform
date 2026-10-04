@@ -2149,6 +2149,19 @@ export class ApiClient {
     return this.get<TenantInvoiceListData>("/api/tenant/invoices");
   }
 
+  async sendInvoiceMail(invoiceId: string, idempotencyKey: string) {
+    return this.post<import("@drts/contracts").TenantInvoiceMailDelivery>(
+      `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail-deliveries`,
+      { idempotencyKey },
+    );
+  }
+
+  async listInvoiceMailDeliveries(invoiceId: string) {
+    return this.get<import("@drts/contracts").TenantInvoiceMailDelivery[]>(
+      `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail-deliveries`,
+    );
+  }
+
   async generateInvoice(command: GenerateTenantInvoiceCommand) {
     return this.post("/api/tenant/invoices/generate", { body: command });
   }

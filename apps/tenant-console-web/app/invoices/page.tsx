@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InvoiceMailPanel } from "./invoice-mail-panel";
 import type { CSSProperties } from "react";
 import type {
   BillingDocumentStatus,
@@ -1516,6 +1517,10 @@ export default async function InvoicesPage({
                         )}
                       </div>
                     </div>
+
+                    {selectedInvoice.status === "issued" || selectedInvoice.status === "paid" ? (
+                      <InvoiceMailPanel key={selectedInvoice.invoiceId} invoiceId={selectedInvoice.invoiceId} locale={locale} />
+                    ) : null}
 
                     <div>
                       <div style={fieldLabelStyle}>{t("invoices.selected.picker", locale)}</div>

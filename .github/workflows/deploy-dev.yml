@@ -934,6 +934,13 @@ jobs:
             env_vars="${env_vars}@NOTIFICATION_OUTBOX_TYPE=postgres"
           fi
           # End SMTP outbox selection.
+          # Invoice mail navigates to the authenticated tenant screen, never a
+          # bearer artifact URL. Leave unavailable on first-project bootstrap.
+          invoice_portal_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
+          invoice_portal_origin="${invoice_portal_origin:-$tenant_console_cloud_run_origin}"
+          if [[ -n "$invoice_portal_origin" ]]; then
+            env_vars="${env_vars}@TENANT_INVOICE_PORTAL_ORIGIN=${invoice_portal_origin}"
+          fi
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi

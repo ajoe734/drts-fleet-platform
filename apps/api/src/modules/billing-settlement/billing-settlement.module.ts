@@ -1,6 +1,10 @@
 import { Module } from "@nestjs/common";
 
-import { DatabaseModule } from "../../common/db";
+import { DatabaseModule, DatabaseService } from "../../common/db";
+import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
+import { TenantInvoiceMailController } from "./tenant-invoice-mail.controller";
+import { TenantInvoiceMailService } from "./tenant-invoice-mail.service";
 import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { ControlledDownloadModule } from "../controlled-download/controlled-download.module";
@@ -38,8 +42,19 @@ import {
     // by the controller that answers the signed link pointing at it.
     ControlledDownloadModule,
   ],
-  controllers: [BillingSettlementController, RemittanceProofDownloadController],
+  controllers: [
+    BillingSettlementController,
+    RemittanceProofDownloadController,
+    TenantInvoiceMailController,
+  ],
   providers: [
+    TenantInvoiceMailService,
+    {
+      provide: NotificationDeliveryService,
+      inject: [DatabaseService],
+      useFactory: (database: DatabaseService) =>
+        createNotificationDeliveryServiceFromEnv(process.env, database),
+    },
     BillingSettlementService,
     BillingSettlementRepository,
     PlatformManualPaymentRecoveryPort,
