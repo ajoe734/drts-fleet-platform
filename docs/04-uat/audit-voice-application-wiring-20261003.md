@@ -7995,3 +7995,41 @@ unmodified passing tests). No merge/deploy/live-provider/final-acceptance
 claim is made by this section; those are recorded separately by the
 candidate lifecycle once CI and independent review land on this round's own
 `CANDIDATE_SHA`.
+
+### Acceptance closure: same_sha_review_ci (2026-10-04)
+
+The pending item from the section above is now closed with same-SHA
+evidence independently re-verified against GitHub, not taken from the
+task-board snapshot alone:
+
+- `gh pr view 2303 --json state,mergeCommit,mergedAt,headRefOid`: `state:
+  MERGED`, `headRefOid: 2f263449a3b39a8c86f84ed8bbd4ee7e4a88ac8d` (this
+  round's own `CANDIDATE_SHA`), `mergeCommit.oid:
+  cbb677122d0b13d8ac4720c5332f0a5f76e8a073`, `mergedAt:
+  2026-10-04T05:42:25Z`.
+- `gh run view 37179588178 --json status,conclusion,headSha,workflowName`:
+  workflow `CI (integration trunk)`, `headSha:
+  2f263449a3b39a8c86f84ed8bbd4ee7e4a88ac8d`, `status: completed`,
+  `conclusion: success` -- this is the hosted run covering the
+  Postgres-backed `uv-exec-002.integration.test.ts` and
+  `tests/integration/unattended-voice-postgres.integration.test.ts` paths
+  this round's own evidence (item 10 above) could not execute locally on
+  this VM.
+- `git fetch origin dev` in this task's own worktree: `origin/dev` moved to
+  `cbb677122d0b13d8ac4720c5332f0a5f76e8a073`, exactly the `mergeCommit.oid`
+  above -- the merge is actually on trunk, not merely claimed by the task
+  board.
+- Reviewer evidence: task-board `worker_outcomes` records reviewer `Codex`'s
+  `approve` on `candidate_sha
+  2f263449a3b39a8c86f84ed8bbd4ee7e4a88ac8d` (the same SHA GitHub reports as
+  `headRefOid` and CI's `headSha` above), distinct from and after owner
+  `Claude2`'s `handoff` on that same SHA.
+
+All four of review, CI, merge and candidate SHA agree on
+`2f263449a3b39a8c86f84ed8bbd4ee7e4a88ac8d`. Combined with the unaffected-and-
+still-passing `composed_turn_and_recording_path`, `authority_epoch_consent_fences`
+and `precise_unimplemented_and_external_boundaries` assessments in the
+section above (none of which this closure note reopens or re-litigates),
+all four `required_acceptance` keys for this task now have real, independently-
+checked evidence. Recorded via `record-acceptance`, not claimed here as
+`done` -- that transition is derived by the candidate lifecycle.
