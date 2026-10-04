@@ -106,9 +106,18 @@ def ensure_private_bucket(project: str, project_number: str, bucket: str, region
     # project, so ownership/location must be checked from the returned
     # metadata before any mutation ever touches a bucket this script did
     # not itself just create (R9).
+    #
+    # `--format=json(...)` without `--raw` goes through gcloud's display
+    # projection (resource_util.get_display_dict_for_resource against
+    # BucketDisplayTitlesAndDefaults), whose field list includes `location`
+    # but never `project_number` -- every already-existing bucket would come
+    # back with an empty project number and get wrongly rejected as
+    # cross-project, even when it is correctly owned (R9 round 2). `--raw`
+    # bypasses that projection and returns the actual GCS JSON API bucket
+    # resource, whose field is the camelCase `projectNumber`.
     describe = run(
-        ["gcloud", "storage", "buckets", "describe", uri, "--project", project,
-         "--format=json(name,location,project_number)"]
+        ["gcloud", "storage", "buckets", "describe", uri, "--project", project, "--raw",
+         "--format=json(name,location,projectNumber)"]
     )
     if describe.returncode == 0 and describe.stdout.strip():
         try:
@@ -116,7 +125,7 @@ def ensure_private_bucket(project: str, project_number: str, bucket: str, region
         except json.JSONDecodeError as error:
             raise ProvisioningError(f"Unparseable bucket metadata for {uri}") from error
         existing_location = str(metadata.get("location") or "").lower()
-        existing_project_number = str(metadata.get("project_number") or "")
+        existing_project_number = str(metadata.get("projectNumber") or "")
         if existing_location != region.lower() or existing_project_number != project_number:
             raise ProvisioningError(
                 f"Refusing to reuse {uri}: owned by project_number="
@@ -272,6 +281,17 @@ def reconcile_invoker_policy(
         for member in binding.get("members", []):
             if member in desired:
                 continue
+            # Cloud Run's IAM policy supports conditional bindings
+            # (policy_version 3). Removing a role/member pair without
+            # `--condition` or `--all` makes the real SDK's
+            # `RemoveBindingFromIamPolicyWithCondition` raise
+            # `IamPolicyBindingIncompleteError` in noninteractive mode the
+            # moment the policy contains ANY condition anywhere, leaving an
+            # unauthorized member (conditional or not) in place (R5 round
+            # 2). `--all` removes every binding for this exact role/member
+            # regardless of condition, which is always correct here: a
+            # member excluded from `desired` has no legitimate reason to
+            # keep any roles/run.invoker grant, conditional or not.
             removal = run(
                 [
                     "gcloud", "run", "services", "remove-iam-policy-binding", service,
@@ -279,6 +299,7 @@ def reconcile_invoker_policy(
                     "--region", region,
                     "--member", member,
                     "--role", "roles/run.invoker",
+                    "--all",
                 ],
                 timeout=60,
             )

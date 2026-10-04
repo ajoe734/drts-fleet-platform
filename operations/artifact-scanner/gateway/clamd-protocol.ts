@@ -30,13 +30,33 @@ export function encodeInstream(bytes: Buffer): Buffer {
 export type ClamdVerdict = "clean" | "infected";
 
 /**
- * Only these two exact clamd replies are a definitive verdict. Everything
- * else -- size-limit `ERROR`, an out-of-date/unavailable engine, a
- * malformed or truncated reply -- must come back `null` so the caller can
- * never report `clean` or `infected` on anything but a real engine answer.
+ * clamd.conf's AlertExceedsMax turns an exceeded MaxFileSize/MaxScanSize/
+ * MaxFiles/MaxRecursion bound into a FOUND reply instead of a silent OK, but
+ * that FOUND only proves scanning stopped partway through -- it is not a
+ * real detection. The whole `Heuristics.Limits.Exceeded[.<Which>]` family
+ * (R1) must come back indeterminate (null), never a fabricated "infected"
+ * success, so the caller surfaces an error instead of a definitive verdict
+ * for content that was never fully inspected.
+ */
+const LIMIT_EXCEEDED_SIGNATURE = "Heuristics.Limits.Exceeded";
+
+function isLimitExceededSignature(signature: string): boolean {
+  return (
+    signature === LIMIT_EXCEEDED_SIGNATURE ||
+    signature.startsWith(`${LIMIT_EXCEEDED_SIGNATURE}.`)
+  );
+}
+
+/**
+ * Only a real "clean" or a real detection is a definitive verdict. Everything
+ * else -- size-limit `ERROR`, a partial scan that hit a resource limit, an
+ * out-of-date/unavailable engine, a malformed or truncated reply -- must come
+ * back `null` so the caller can never report `clean` or `infected` on
+ * anything but a complete, real engine answer.
  */
 export function parseInstreamReply(reply: string): ClamdVerdict | null {
   if (reply === "stream: OK") return "clean";
-  if (/^stream: [^\r\n\0]+ FOUND$/.test(reply)) return "infected";
+  const found = /^stream: ([^\r\n\0]+) FOUND$/.exec(reply);
+  if (found && !isLimitExceededSignature(found[1])) return "infected";
   return null;
 }

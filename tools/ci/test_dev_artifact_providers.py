@@ -6,7 +6,9 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -299,7 +301,17 @@ GOOD_REGION = "us-central1"
 
 
 def _owned_bucket_json(project_number=GOOD_PROJECT_NUMBER, region=GOOD_REGION):
-    return json.dumps({"location": region.upper(), "project_number": project_number})
+    # Matches the real `gcloud storage buckets describe --raw
+    # --format=json(name,location,projectNumber)` shape against the
+    # installed SDK (589.0.0 / google-cloud-cli 503): camelCase
+    # `projectNumber`, confirmed by a real call-through of
+    # `googlecloudsdk.command_lib.storage.resources.resource_util
+    # .get_display_dict_for_resource(..., display_raw_keys=True)` and
+    # `resource_printer.Print` against a real `storage_v1_messages.Bucket`.
+    # The non-raw/display projection used before this fix (R9 round 2) never
+    # carries this field under any name.
+    return json.dumps({"location": region.upper(), "name": "irrelevant-for-this-fixture",
+                        "projectNumber": project_number})
 
 
 def _good_provisioning_side_effect(args, **kwargs):
@@ -368,6 +380,17 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
             ["gcloud", "storage", "buckets", "create", "gs://drts-dev-devcc-20260825-remittance-proofs",
              "--project", "drts-dev-devcc-20260825", "--location", "us-central1",
              "--uniform-bucket-level-access", "--public-access-prevention"],
+            argvs,
+        )
+        # R9 round 2: the ownership-check describe call must use --raw and
+        # request the camelCase `projectNumber` raw API field -- the
+        # non-raw display projection never carries a project number under
+        # any key, which made every already-existing bucket (e.g. this
+        # already-owned remittance-proofs bucket) get wrongly rejected.
+        self.assertIn(
+            ["gcloud", "storage", "buckets", "describe", "gs://drts-dev-devcc-20260825-remittance-proofs",
+             "--project", "drts-dev-devcc-20260825", "--raw",
+             "--format=json(name,location,projectNumber)"],
             argvs,
         )
         for bucket in ("drts-dev-devcc-20260825-document-artifacts", "drts-dev-devcc-20260825-remittance-proofs"):
@@ -502,6 +525,12 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
     def test_reconcile_removes_stray_invoker_members_before_granting_desired(self):
         stray_public = "allUsers"
         stray_sa = "serviceAccount:old-caller@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+        # R5 round 2: an unauthorized invoker under a real IAM condition --
+        # the exact shape (`expression=true`) the review reproduced against
+        # the real SDK's RemoveBindingFromIamPolicyWithCondition, which
+        # raises IamPolicyBindingIncompleteError in noninteractive mode
+        # unless the removal call passes `--all` or `--condition`.
+        stray_conditional_sa = "serviceAccount:old-conditional@drts-dev-devcc-20260825.iam.gserviceaccount.com"
         desired_sa = "serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
 
         def side_effect(args, **kwargs):
@@ -514,7 +543,14 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
             if args[:4] == ["gcloud", "run", "services", "get-iam-policy"]:
                 return subprocess.CompletedProcess(args, 0, json.dumps({
                     "bindings": [
-                        {"role": "roles/run.invoker", "members": [stray_public, stray_sa, desired_sa]},
+                        {"role": "roles/run.invoker", "members": [stray_public, stray_sa]},
+                        {"role": "roles/run.invoker", "members": [stray_conditional_sa],
+                         "condition": {"expression": "true", "title": "legacy"}},
+                        # An unrelated conditional binding on a different role
+                        # must never be touched by invoker reconciliation.
+                        {"role": "roles/storage.objectViewer", "members": [desired_sa],
+                         "condition": {"expression": "true", "title": "unrelated"}},
+                        {"role": "roles/run.invoker", "members": [desired_sa]},
                     ],
                 }))
             return subprocess.CompletedProcess(args, 0, "")
@@ -524,13 +560,27 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         argvs = [call.args[0] for call in calls]
         removals = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "remove-iam-policy-binding"]]
         removed_members = {a[a.index("--member") + 1] for a in removals}
-        self.assertEqual(removed_members, {stray_public, stray_sa})
+        self.assertEqual(removed_members, {stray_public, stray_sa, stray_conditional_sa})
         for a in removals:
             self.assertEqual(a[a.index("--role") + 1], "roles/run.invoker")
-        # The desired member is granted, never removed.
+            # --all is required on every removal so a conditional stray
+            # binding is actually removed instead of raising
+            # IamPolicyBindingIncompleteError and leaving it in place (R5
+            # round 2) -- it is correct here regardless of whether this
+            # particular stray binding happens to carry a condition, since a
+            # member outside `desired` has no legitimate invoker grant to
+            # keep under any condition.
+            self.assertIn("--all", a)
+        # The desired member is granted, never removed; the unrelated
+        # conditional binding on a different role is never touched.
         grants = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "add-iam-policy-binding"]]
         self.assertEqual(len(grants), 1)
         self.assertEqual(grants[0][grants[0].index("--member") + 1], desired_sa)
+        self.assertFalse(any(
+            a[:4] == ["gcloud", "run", "services", "remove-iam-policy-binding"]
+            and a[a.index("--member") + 1] == desired_sa
+            for a in argvs
+        ))
 
     def test_public_invoker_member_rejected_before_any_cloud_call(self):
         args = [v if v != GOOD_ARGS[GOOD_ARGS.index("--invoker-member") + 1] else "allUsers" for v in GOOD_ARGS]
@@ -619,6 +669,108 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         _, _, calls = self.run_main(GOOD_ARGS, _good_provisioning_side_effect)
         for call in calls:
             self.assertNotIn("secrets", call.args[0])
+
+
+def _locate_gcloud_sdk_lib_dirs():
+    """Best-effort, offline resolution of the installed gcloud SDK's python
+    library directories -- never invokes the `gcloud` binary itself (this
+    VM's worker sandbox refuses that call outright). Snap installs resolve
+    `gcloud` to the snap dispatcher rather than the real binary, so the
+    `/snap/google-cloud-cli/current` symlink is checked directly first.
+    Returns [] when no local install is found, e.g. a CI runner without one."""
+    candidates = []
+    snap_current = Path("/snap/google-cloud-cli/current")
+    if snap_current.exists():
+        candidates.append(snap_current.resolve())
+    gcloud_path = shutil.which("gcloud")
+    if gcloud_path:
+        sdk_root = Path(os.path.realpath(gcloud_path)).parent
+        if sdk_root.name == "bin":
+            sdk_root = sdk_root.parent
+        candidates.append(sdk_root)
+    lib_dirs = []
+    for root in candidates:
+        for sub in ("lib", "lib/third_party"):
+            lib_dir = root / sub
+            if lib_dir.is_dir() and str(lib_dir) not in lib_dirs:
+                lib_dirs.append(str(lib_dir))
+    return lib_dirs
+
+
+class RealGcloudSdkIamConditionBehaviorTest(unittest.TestCase):
+    """R5 round 2: proves -- against the real installed gcloud SDK's own
+    `googlecloudsdk.command_lib.iam.iam_util
+    .RemoveBindingFromIamPolicyWithCondition` (the exact function the round-2
+    review traced this defect to, reading real surface/run/services
+    /remove_iam_policy_binding.yaml + iam_util.py) -- that removing a
+    conditional roles/run.invoker binding without `--all` or `--condition`
+    raises IamPolicyBindingIncompleteError in noninteractive mode, and that
+    the `--all` fix in `reconcile_invoker_policy`
+    (operations/deployment/provision-dev-artifact-backends.py) removes it
+    cleanly while leaving the desired unconditional member untouched. Only
+    the SDK's installed python library is imported; no `gcloud` process,
+    network call or real IAM policy is ever touched. Skips (does not fail)
+    when no local SDK install is found, rather than fabricate its behavior."""
+
+    @classmethod
+    def setUpClass(cls):
+        lib_dirs = _locate_gcloud_sdk_lib_dirs()
+        if not lib_dirs:
+            raise unittest.SkipTest(
+                "No local gcloud SDK install found; skipping real-SDK IAM condition probe"
+            )
+        for lib_dir in lib_dirs:
+            if lib_dir not in sys.path:
+                sys.path.insert(0, lib_dir)
+        try:
+            from googlecloudsdk.command_lib.iam import iam_util
+            from googlecloudsdk.generated_clients.apis.run.v1 import run_v1_messages
+        except ImportError as error:
+            raise unittest.SkipTest(f"gcloud SDK python modules not importable: {error}")
+        cls.iam_util = iam_util
+        cls.run_v1_messages = run_v1_messages
+
+    def _policy_with_conditional_stray(self):
+        rm = self.run_v1_messages
+        return rm.Policy(bindings=[
+            rm.Binding(
+                role="roles/run.invoker",
+                members=["serviceAccount:old@example.iam.gserviceaccount.com"],
+                condition=rm.Expr(expression="true", title="legacy"),
+            ),
+            rm.Binding(
+                role="roles/run.invoker",
+                members=["serviceAccount:good@example.iam.gserviceaccount.com"],
+            ),
+        ])
+
+    def test_removal_without_all_raises_on_a_conditional_policy(self):
+        policy = self._policy_with_conditional_stray()
+        with self.assertRaises(self.iam_util.IamPolicyBindingIncompleteError):
+            self.iam_util.RemoveBindingFromIamPolicyWithCondition(
+                policy,
+                "serviceAccount:old@example.iam.gserviceaccount.com",
+                "roles/run.invoker",
+                condition=None,
+                all_conditions=False,
+            )
+
+    def test_removal_with_all_succeeds_and_keeps_desired_member(self):
+        policy = self._policy_with_conditional_stray()
+        self.iam_util.RemoveBindingFromIamPolicyWithCondition(
+            policy,
+            "serviceAccount:old@example.iam.gserviceaccount.com",
+            "roles/run.invoker",
+            condition=None,
+            all_conditions=True,
+        )
+        remaining = {
+            member
+            for binding in policy.bindings
+            for member in binding.members
+            if binding.role == "roles/run.invoker"
+        }
+        self.assertEqual(remaining, {"serviceAccount:good@example.iam.gserviceaccount.com"})
 
 
 if __name__ == "__main__":

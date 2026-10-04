@@ -256,4 +256,22 @@ describe("createRequestHandler: POST /scan verdicts", () => {
     expect(res.statusCode).toBe(502);
     expect(JSON.parse(res.body)).toEqual({ error: "scan_engine_indeterminate" });
   });
+
+  it("never reports a definitive verdict when clamd's AlertExceedsMax reports Heuristics.Limits.Exceeded (R1 round 2)", async () => {
+    // A resource-limit exceeded reply proves the content was only partially
+    // scanned -- it must surface as the same indeterminate error as a
+    // transport failure, never as a 200 "infected" success.
+    const exchange = vi
+      .fn()
+      .mockResolvedValue("stream: Heuristics.Limits.Exceeded.MaxScanSize FOUND");
+    const res = await send(
+      baseConfig({ exchange }),
+      "POST",
+      "/scan",
+      { "content-type": "application/pdf", "x-content-sha256": sha256Hex(PDF_BYTES) },
+      PDF_BYTES,
+    );
+    expect(res.statusCode).toBe(502);
+    expect(JSON.parse(res.body)).toEqual({ error: "scan_engine_indeterminate" });
+  });
 });

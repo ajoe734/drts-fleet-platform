@@ -63,12 +63,32 @@ describe("parseInstreamReply", () => {
     expect(parseInstreamReply("stream: Eicar-Signature FOUND")).toBe("infected");
   });
 
-  it("treats clamd.conf's AlertExceedsMax FOUND reply as fail-closed infected, never clean", () => {
+  it("treats clamd.conf's AlertExceedsMax Heuristics.Limits.Exceeded family as indeterminate, never a definitive verdict", () => {
     // With AlertExceedsMax yes (clamd.conf), exceeding MaxFileSize/MaxScanSize/
-    // MaxRecursion on compressed/embedded content makes clamd report this
-    // exact signature name as FOUND instead of silently skipping to OK --
-    // this must never be treated as indeterminate/clean (R1).
-    expect(parseInstreamReply("stream: Heuristics.Limits.Exceeded FOUND")).toBe("infected");
+    // MaxFiles/MaxRecursion on compressed/embedded content makes clamd report
+    // this signature family as FOUND instead of silently skipping to OK, but
+    // that only proves the content was never fully scanned -- it is not a
+    // real detection. R1 (round 2): this must come back null/indeterminate,
+    // not a fabricated "infected" success; the handler then surfaces this as
+    // a 502 scan_engine_indeterminate error rather than a 200 verdict.
+    for (const reply of [
+      "stream: Heuristics.Limits.Exceeded FOUND",
+      "stream: Heuristics.Limits.Exceeded.MaxFileSize FOUND",
+      "stream: Heuristics.Limits.Exceeded.MaxScanSize FOUND",
+      "stream: Heuristics.Limits.Exceeded.MaxFiles FOUND",
+      "stream: Heuristics.Limits.Exceeded.MaxRecursion FOUND",
+    ]) {
+      expect(parseInstreamReply(reply)).toBeNull();
+    }
+  });
+
+  it("does not misclassify an unrelated signature that merely starts with the limit-exceeded prefix text", () => {
+    // Guards the startsWith(`${LIMIT_EXCEEDED_SIGNATURE}.`) boundary: a
+    // genuine detection name must not accidentally collide with the family
+    // prefix match and get swallowed as indeterminate.
+    expect(parseInstreamReply("stream: Heuristics.Limits.ExceededSomethingElse FOUND")).toBe(
+      "infected",
+    );
   });
 
   it("never returns a definitive verdict for an error, truncated or malformed reply", () => {
