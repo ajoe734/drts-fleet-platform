@@ -1,3 +1,4 @@
+import type { TenantInvoiceMailView } from "@drts/contracts";
 /**
  * @drts/api-client - Shared API client for DRTS client surfaces
  *
@@ -2139,6 +2140,19 @@ export class ApiClient {
 
   async getBillingProfile(): Promise<TenantBillingProfile> {
     return this.get<TenantBillingProfile>("/api/tenant/billing/profile");
+  }
+
+  async getInvoiceMail(invoiceId: string): Promise<TenantInvoiceMailView> {
+    return this.get(
+      `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail`,
+    );
+  }
+
+  async sendInvoiceMail(invoiceId: string): Promise<TenantInvoiceMailView> {
+    return this.post(
+      `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail`,
+      { body: {} },
+    );
   }
 
   async listInvoices(): Promise<TenantInvoiceRecord[]> {

@@ -12,11 +12,11 @@ Owner: Codex；Reviewer: Codex2。初始版本 `0e4b93191e039acabf71549495bd07c0
 
 ## Finding 與 acceptance 證據
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
-| --- | --- | --- | --- | --- |
-| F01 跨 tenant 可改帳務收件人 | BillingSettlementController.updateTenantBillingProfile | 舊版真 controller + service 接受 tenant A identity 改 tenant B 信箱；修復待驗 | `pnpm exec vitest run tests/unit/invoice-mail-20261004/authorization.test.ts`，初始 SHA，exit 1（預期 rejection 實際成功）；`.local/invoice-mail-20261004/baseline.log` | 本機不開 HTTP server |
-| tenant_authorized_invoice_mail_path | 新 mail API + profile／invoice 授權 | 待實作驗證 | 待補 | browser／hosted 驗證待驗 |
-| durable_idempotent_delivery_and_readback | 既有 outbox + invoice producer | 待實作驗證 | 待補 | PostgreSQL 正式 schema 與真實收件不得以 unit mock 宣稱通過 |
-| regression_and_same_sha_review_ci | contracts／client／UI／billing regression | 待實作驗證 | 待補 | review／CI／merge 由 candidate lifecycle 記錄 |
+| Finding／驗收項                          | 原始碼依據與修改位置                                   | 舊版重現 → 修正版結果                                                         | 命令、退出碼、執行版本與證據位置                                                                                                                                        | 未驗項與具體限制                                           |
+| ---------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| F01 跨 tenant 可改帳務收件人             | BillingSettlementController.updateTenantBillingProfile | 舊版真 controller + service 接受 tenant A identity 改 tenant B 信箱；修復待驗 | `pnpm exec vitest run tests/unit/invoice-mail-20261004/authorization.test.ts`，初始 SHA，exit 1（預期 rejection 實際成功）；`.local/invoice-mail-20261004/baseline.log` | 本機不開 HTTP server                                       |
+| tenant_authorized_invoice_mail_path      | 新 mail API + profile／invoice 授權                    | 待實作驗證                                                                    | 待補                                                                                                                                                                    | browser／hosted 驗證待驗                                   |
+| durable_idempotent_delivery_and_readback | 既有 outbox + invoice producer                         | 待實作驗證                                                                    | 待補                                                                                                                                                                    | PostgreSQL 正式 schema 與真實收件不得以 unit mock 宣稱通過 |
+| regression_and_same_sha_review_ci        | contracts／client／UI／billing regression              | 待實作驗證                                                                    | 待補                                                                                                                                                                    | review／CI／merge 由 candidate lifecycle 記錄              |
 
 VM 不啟動 product、browser、preview、Docker 或 PostgreSQL 服務。本機證據存 `.local/`；真 SMTP 與授權收件匣尚未驗收。

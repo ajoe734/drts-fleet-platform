@@ -560,6 +560,35 @@ export class BillingSettlementRepository {
     );
   }
 
+  /** Fresh tenant-scoped reads: never resolve mail recipients from process seeds. */
+  async findInvoiceForMail(tenantId: string, invoiceId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id = $1 AND invoice_id = $2`,
+      [tenantId, invoiceId],
+    );
+    if (!result.rows[0]) return null;
+    const invoice = this.parseRecord<StoredTenantInvoiceRecord>(
+      result.rows[0].record,
+      "billing.phase1_tenant_invoices",
+    );
+    return invoice.tenantId === tenantId && invoice.invoiceId === invoiceId
+      ? invoice
+      : null;
+  }
+
+  async findInvoiceMailBillingProfile(tenantId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_billing_profiles WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    if (!result.rows[0]) return null;
+    const profile = this.parseRecord<TenantBillingProfile>(
+      result.rows[0].record,
+      "billing.phase1_tenant_billing_profiles",
+    );
+    return profile.tenantId === tenantId ? profile : null;
+  }
+
   async loadState(): Promise<BillingSettlementState> {
     if (!this.isEnabled()) {
       return {
