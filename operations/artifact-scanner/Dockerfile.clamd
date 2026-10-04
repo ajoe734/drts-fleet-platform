@@ -8,7 +8,13 @@
 # already deployed. The tag here stays mutable so routine version-bump
 # tooling can still propose updates against it; the immutability guarantee
 # lives at the provisioning boundary, not in this file.
-FROM clamav/clamav:1.3
+#
+# 1.3 is EOL (database-download support ended 2026-02-07 per
+# https://docs.clamav.net/faq/faq-eol.html) and was rejected in review --
+# 1.4 is the current supported LTS line as of this fix. The hosted build
+# pipeline must re-check the official EOL matrix before accepting this tag's
+# resolved digest; this VM has no network access to re-verify it live.
+FROM clamav/clamav:1.4
 
 COPY clamd.conf /etc/clamav/clamd.conf
 COPY clamd-entrypoint.sh /usr/local/bin/clamd-entrypoint.sh

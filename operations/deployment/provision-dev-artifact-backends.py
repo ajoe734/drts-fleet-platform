@@ -36,6 +36,7 @@ once.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -86,16 +87,43 @@ def require_digest_image(label: str, image: str) -> str:
     return image
 
 
-def ensure_private_bucket(project: str, bucket: str, region: str) -> None:
+def resolve_project_number(project: str) -> str:
+    result = run(
+        ["gcloud", "projects", "describe", project, "--format=value(projectNumber)"]
+    )
+    number = result.stdout.strip()
+    if result.returncode != 0 or not number:
+        raise ProvisioningError(f"Failed to resolve project number for {project}")
+    return number
+
+
+def ensure_private_bucket(project: str, project_number: str, bucket: str, region: str) -> None:
     require_match("bucket name", BUCKET_RE, bucket)
     require_match("region", REGION_RE, region)
     uri = f"gs://{bucket}"
+    # Describe is scoped by --project for request billing only -- it does
+    # NOT prove this globally-named bucket is actually owned by that
+    # project, so ownership/location must be checked from the returned
+    # metadata before any mutation ever touches a bucket this script did
+    # not itself just create (R9).
     describe = run(
         ["gcloud", "storage", "buckets", "describe", uri, "--project", project,
-         "--format=value(name)"]
+         "--format=json(name,location,project_number)"]
     )
     if describe.returncode == 0 and describe.stdout.strip():
-        print(f"bucket {uri} already exists")
+        try:
+            metadata = json.loads(describe.stdout)
+        except json.JSONDecodeError as error:
+            raise ProvisioningError(f"Unparseable bucket metadata for {uri}") from error
+        existing_location = str(metadata.get("location") or "").lower()
+        existing_project_number = str(metadata.get("project_number") or "")
+        if existing_location != region.lower() or existing_project_number != project_number:
+            raise ProvisioningError(
+                f"Refusing to reuse {uri}: owned by project_number="
+                f"{existing_project_number!r} location={existing_location!r}, expected "
+                f"project_number={project_number!r} location={region!r}"
+            )
+        print(f"bucket {uri} already exists in {project} ({existing_location}); reusing")
     else:
         create = run(
             [
@@ -104,26 +132,34 @@ def ensure_private_bucket(project: str, bucket: str, region: str) -> None:
                 "--location", region,
                 "--uniform-bucket-level-access",
                 "--public-access-prevention",
-                "--versioning",
             ],
             timeout=120,
         )
         if create.returncode != 0:
             raise ProvisioningError(f"Failed to create bucket {uri}")
         print(f"created bucket {uri}")
-    # Re-assert privacy on every run, including a bucket this script did not
-    # create, so this is never a one-time guarantee.
+    # Re-assert privacy AND versioning on every run, including a bucket this
+    # script did not create, so this is never a one-time guarantee.
+    # `--versioning` is only accepted by `buckets update`, never `buckets
+    # create` (R2) -- it must live here, not in the create call above.
     update = run(
         [
             "gcloud", "storage", "buckets", "update", uri,
             "--project", project,
             "--uniform-bucket-level-access",
             "--public-access-prevention",
+            "--versioning",
         ],
         timeout=60,
     )
     if update.returncode != 0:
         raise ProvisioningError(f"Failed to enforce private access on {uri}")
+    verify = run(
+        ["gcloud", "storage", "buckets", "describe", uri, "--project", project,
+         "--format=value(versioning_enabled)"]
+    )
+    if verify.returncode != 0 or verify.stdout.strip().lower() != "true":
+        raise ProvisioningError(f"Versioning not confirmed enabled on {uri}")
 
 
 def grant_bucket_object_access(project: str, bucket: str, member: str) -> None:
@@ -142,6 +178,15 @@ def grant_bucket_object_access(project: str, bucket: str, member: str) -> None:
     )
     if result.returncode != 0:
         raise ProvisioningError(f"Failed to grant object access on gs://{bucket}")
+
+
+READY_VOLUME_NAME = "clamav-ready"
+READY_VOLUME_MOUNT_PATH = "/var/run/clamav-ready"
+GATEWAY_MEMORY = "512Mi"
+# ClamAV documents >1.2GiB just to load its engine and recommends 3-4GiB;
+# Cloud Run's 512MiB default is nowhere near enough for a fresh signature
+# set (R7).
+CLAMD_MEMORY = "4Gi"
 
 
 def deploy_scanner_service(
@@ -163,24 +208,84 @@ def deploy_scanner_service(
             "--project", project,
             "--region", region,
             "--service-account", service_account,
-            # IAM-only: no public ingress flag is ever passed here.
+            # IAM-only: no public ingress flag is ever passed here, and
+            # invoker IAM checks are explicitly re-enabled on every run so a
+            # service previously deployed with checks disabled can never
+            # stay publicly invocable (R5).
             "--no-allow-unauthenticated",
+            "--invoker-iam-check",
             "--concurrency", "1",
             "--min-instances", "0",
             "--max-instances", "1",
+            # An in-memory volume shared by both containers in this same
+            # instance -- the readiness marker clamd writes must actually
+            # be visible to the gateway's filesystem checks (R4).
+            "--add-volume", f"name={READY_VOLUME_NAME},type=in-memory,size-limit=1Mi",
             "--container", "gateway",
             "--image", gateway_image,
             "--port", "8080",
+            "--memory", GATEWAY_MEMORY,
+            "--add-volume-mount",
+            f"volume={READY_VOLUME_NAME},mount-path={READY_VOLUME_MOUNT_PATH}",
             "--set-env-vars",
             "CLAMD_HOST=127.0.0.1,CLAMD_PORT=3310,"
             "CLAMAV_READY_MARKER=/var/run/clamav-ready/ready",
             "--container", "clamd",
             "--image", clamd_image,
+            "--memory", CLAMD_MEMORY,
+            "--add-volume-mount",
+            f"volume={READY_VOLUME_NAME},mount-path={READY_VOLUME_MOUNT_PATH}",
         ],
         timeout=600,
     )
     if deploy.returncode != 0:
         raise ProvisioningError(f"Scanner Cloud Run deploy failed for {service}")
+
+
+def reconcile_invoker_policy(
+    project: str, region: str, service: str, desired_members: Sequence[str]
+) -> None:
+    """Remove any roles/run.invoker member not in desired_members -- a
+    stray allUsers/allAuthenticatedUsers grant, or a service account that
+    is no longer authorized, must never survive re-provisioning just
+    because this script only ever added bindings before (R5)."""
+    require_match("service name", SERVICE_NAME_RE, service)
+    desired = {f"serviceAccount:{member}" for member in desired_members}
+    policy = run(
+        [
+            "gcloud", "run", "services", "get-iam-policy", service,
+            "--project", project,
+            "--region", region,
+            "--format=json",
+        ],
+        timeout=60,
+    )
+    if policy.returncode != 0:
+        raise ProvisioningError(f"Failed to read IAM policy for {service}")
+    try:
+        parsed = json.loads(policy.stdout or "{}")
+    except json.JSONDecodeError as error:
+        raise ProvisioningError(f"Unparseable IAM policy for {service}") from error
+    for binding in parsed.get("bindings", []):
+        if binding.get("role") != "roles/run.invoker":
+            continue
+        for member in binding.get("members", []):
+            if member in desired:
+                continue
+            removal = run(
+                [
+                    "gcloud", "run", "services", "remove-iam-policy-binding", service,
+                    "--project", project,
+                    "--region", region,
+                    "--member", member,
+                    "--role", "roles/run.invoker",
+                ],
+                timeout=60,
+            )
+            if removal.returncode != 0:
+                raise ProvisioningError(
+                    f"Failed to remove stray invoker member {member} on {service}"
+                )
 
 
 def grant_invoker(project: str, region: str, service: str, member: str) -> None:
@@ -239,8 +344,9 @@ def main() -> int:
                 )
             require_match("invoker member", SERVICE_ACCOUNT_RE, member)
 
-        ensure_private_bucket(args.project, args.document_bucket, args.region)
-        ensure_private_bucket(args.project, args.remittance_bucket, args.region)
+        project_number = resolve_project_number(args.project)
+        ensure_private_bucket(args.project, project_number, args.document_bucket, args.region)
+        ensure_private_bucket(args.project, project_number, args.remittance_bucket, args.region)
         for bucket in (args.document_bucket, args.remittance_bucket):
             grant_bucket_object_access(args.project, bucket, args.runtime_service_account)
 
@@ -252,6 +358,7 @@ def main() -> int:
             gateway_image=args.gateway_image,
             clamd_image=args.clamd_image,
         )
+        reconcile_invoker_policy(args.project, args.region, args.scanner_service, args.invoker_members)
         for member in args.invoker_members:
             grant_invoker(args.project, args.region, args.scanner_service, member)
 

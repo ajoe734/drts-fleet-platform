@@ -12,6 +12,7 @@
 set -eu
 
 READY_MARKER="${CLAMAV_READY_MARKER:-/var/run/clamav-ready/ready}"
+FRESHCLAM_INTERVAL_SECONDS="${FRESHCLAM_INTERVAL_SECONDS:-3600}"
 rm -f "$READY_MARKER"
 mkdir -p "$(dirname "$READY_MARKER")"
 
@@ -31,5 +32,27 @@ while [ "$attempt" -lt 60 ]; do
   attempt=$((attempt + 1))
   sleep 1
 done
+
+# A long-lived instance must never keep serving verdicts against
+# definitions that have gone stale (R8): this refreshes signatures on a
+# bounded interval and only bumps the readiness marker's mtime on a
+# genuine freshclam success, so a failed or overdue refresh removes
+# readiness instead of silently continuing to scan. The gateway's
+# `readiness.ts#isMarkerFresh` independently rejects the marker once it is
+# older than `MAX_SIGNATURE_AGE_MS`, so this loop and that age check are
+# two bounded, fail-closed layers rather than one.
+(
+  while kill -0 "$CLAMD_PID" 2>/dev/null; do
+    sleep "$FRESHCLAM_INTERVAL_SECONDS"
+    if freshclam --stdout; then
+      touch "$READY_MARKER"
+    else
+      echo "freshclam refresh failed; marking not ready" >&2
+      rm -f "$READY_MARKER"
+    fi
+  done
+) &
+WATCHDOG_PID=$!
+trap 'kill "$WATCHDOG_PID" 2>/dev/null || true' EXIT
 
 wait "$CLAMD_PID"

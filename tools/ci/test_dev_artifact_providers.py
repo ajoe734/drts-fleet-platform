@@ -294,6 +294,28 @@ GOOD_ARGS = [
     "--clamd-image", "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/artifact-scanner-clamd@sha256:" + "b" * 64,
     "--invoker-member", "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com",
 ]
+GOOD_PROJECT_NUMBER = "123456789012"
+GOOD_REGION = "us-central1"
+
+
+def _owned_bucket_json(project_number=GOOD_PROJECT_NUMBER, region=GOOD_REGION):
+    return json.dumps({"location": region.upper(), "project_number": project_number})
+
+
+def _good_provisioning_side_effect(args, **kwargs):
+    """Every call succeeds and every bucket already exists under the
+    correct project/location -- used by tests that only care that no
+    unexpected (e.g. Secret Manager) call is ever made, not the
+    create-vs-update branch."""
+    if args[:3] == ["gcloud", "projects", "describe"]:
+        return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+    if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+        if "--format=value(versioning_enabled)" in args:
+            return subprocess.CompletedProcess(args, 0, "True\n")
+        return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
+    if args[:4] == ["gcloud", "run", "services", "get-iam-policy"]:
+        return subprocess.CompletedProcess(args, 0, json.dumps({"bindings": []}))
+    return subprocess.CompletedProcess(args, 0, "")
 
 
 class DevArtifactBackendsProvisioningTest(unittest.TestCase):
@@ -315,10 +337,16 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
 
     def test_success_creates_missing_bucket_updates_existing_deploys_and_grants_invoker(self):
         def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
             if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                if "--format=value(versioning_enabled)" in args:
+                    return subprocess.CompletedProcess(args, 0, "True\n")
                 if "document-artifacts" in args[4]:
                     return subprocess.CompletedProcess(args, 1, "", "not found")
-                return subprocess.CompletedProcess(args, 0, "drts-dev-devcc-20260825-remittance-proofs\n")
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
+            if args[:4] == ["gcloud", "run", "services", "get-iam-policy"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"bindings": []}))
             return subprocess.CompletedProcess(args, 0, "")
 
         code, _, calls = self.run_main(GOOD_ARGS, side_effect)
@@ -326,22 +354,34 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         argvs = [call.args[0] for call in calls]
 
         self.assertIn(
+            ["gcloud", "projects", "describe", "drts-dev-devcc-20260825",
+             "--format=value(projectNumber)"],
+            argvs,
+        )
+        self.assertIn(
             ["gcloud", "storage", "buckets", "create", "gs://drts-dev-devcc-20260825-document-artifacts",
              "--project", "drts-dev-devcc-20260825", "--location", "us-central1",
-             "--uniform-bucket-level-access", "--public-access-prevention", "--versioning"],
+             "--uniform-bucket-level-access", "--public-access-prevention"],
             argvs,
         )
         self.assertNotIn(
             ["gcloud", "storage", "buckets", "create", "gs://drts-dev-devcc-20260825-remittance-proofs",
              "--project", "drts-dev-devcc-20260825", "--location", "us-central1",
-             "--uniform-bucket-level-access", "--public-access-prevention", "--versioning"],
+             "--uniform-bucket-level-access", "--public-access-prevention"],
             argvs,
         )
         for bucket in ("drts-dev-devcc-20260825-document-artifacts", "drts-dev-devcc-20260825-remittance-proofs"):
+            # --versioning is only ever on the update call -- `buckets create`
+            # does not accept it (R2).
             self.assertIn(
                 ["gcloud", "storage", "buckets", "update", f"gs://{bucket}",
                  "--project", "drts-dev-devcc-20260825",
-                 "--uniform-bucket-level-access", "--public-access-prevention"],
+                 "--uniform-bucket-level-access", "--public-access-prevention", "--versioning"],
+                argvs,
+            )
+            self.assertIn(
+                ["gcloud", "storage", "buckets", "describe", f"gs://{bucket}",
+                 "--project", "drts-dev-devcc-20260825", "--format=value(versioning_enabled)"],
                 argvs,
             )
             self.assertIn(
@@ -357,12 +397,40 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         deploy_args = deploy_calls[0]
         self.assertIn("--no-allow-unauthenticated", deploy_args)
         self.assertNotIn("--allow-unauthenticated", deploy_args)
+        # Invoker IAM checks must be explicitly re-enabled on every deploy,
+        # not merely assumed from a prior deployment (R5).
+        self.assertIn("--invoker-iam-check", deploy_args)
+        self.assertNotIn("--no-invoker-iam-check", deploy_args)
         self.assertEqual(deploy_args.count("--container"), 2)
         self.assertIn("--min-instances", deploy_args)
         self.assertEqual(deploy_args[deploy_args.index("--min-instances") + 1], "0")
         self.assertEqual(deploy_args[deploy_args.index("--max-instances") + 1], "1")
         self.assertEqual(deploy_args[deploy_args.index("--concurrency") + 1], "1")
+        # A shared volume carries the readiness marker between the gateway
+        # and clamd containers (R4): one volume declared, mounted in both.
+        self.assertIn("--add-volume", deploy_args)
+        volume_decl = deploy_args[deploy_args.index("--add-volume") + 1]
+        self.assertIn("type=in-memory", volume_decl)
+        volume_name = dict(part.split("=", 1) for part in volume_decl.split(","))["name"]
+        mount_indices = [i for i, a in enumerate(deploy_args) if a == "--add-volume-mount"]
+        self.assertEqual(len(mount_indices), 2)
+        for i in mount_indices:
+            mount = dict(part.split("=", 1) for part in deploy_args[i + 1].split(","))
+            self.assertEqual(mount["volume"], volume_name)
+            self.assertEqual(mount["mount-path"], "/var/run/clamav-ready")
+        # Explicit, bounded memory on both containers -- never the Cloud Run
+        # 512MiB default for the signature-loading clamd sidecar (R7).
+        memory_indices = [i for i, a in enumerate(deploy_args) if a == "--memory"]
+        self.assertEqual(len(memory_indices), 2)
+        memory_values = {deploy_args[i + 1] for i in memory_indices}
+        self.assertIn("512Mi", memory_values)
+        self.assertIn("4Gi", memory_values)
 
+        self.assertIn(
+            ["gcloud", "run", "services", "get-iam-policy", "drts-dev-artifact-scanner",
+             "--project", "drts-dev-devcc-20260825", "--region", "us-central1", "--format=json"],
+            argvs,
+        )
         self.assertIn(
             ["gcloud", "run", "services", "add-iam-policy-binding", "drts-dev-artifact-scanner",
              "--project", "drts-dev-devcc-20260825", "--region", "us-central1",
@@ -374,6 +442,95 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         for a in argvs:
             if a[:4] == ["gcloud", "storage", "buckets", "add-iam-policy-binding"]:
                 self.assertNotIn("drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", a)
+
+    def test_versioning_not_confirmed_fails_closed(self):
+        def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                if "--format=value(versioning_enabled)" in args:
+                    return subprocess.CompletedProcess(args, 0, "False\n")
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
+            return subprocess.CompletedProcess(args, 0, "")
+
+        code, output, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 1)
+        self.assertIn("Versioning not confirmed enabled", output)
+        self.assertFalse(any(
+            call.args[0] and call.args[0][0] == str(provisioner.DEPLOY_CLOUD_RUN_SERVICE)
+            for call in calls
+        ))
+
+    def test_existing_bucket_location_mismatch_rejected_before_any_mutation(self):
+        def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json(region="europe-west1"))
+            raise AssertionError(f"unexpected call after ownership mismatch: {args}")
+
+        code, output, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing to reuse", output)
+        self.assertFalse(any(
+            call.args[0][:4] in (
+                ["gcloud", "storage", "buckets", "update"],
+                ["gcloud", "storage", "buckets", "add-iam-policy-binding"],
+            )
+            for call in calls
+        ))
+
+    def test_existing_bucket_project_mismatch_rejected_before_any_mutation(self):
+        def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json(project_number="999999999999"))
+            raise AssertionError(f"unexpected call after ownership mismatch: {args}")
+
+        code, output, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 1)
+        self.assertIn("Refusing to reuse", output)
+        self.assertFalse(any(
+            call.args[0][:4] in (
+                ["gcloud", "storage", "buckets", "update"],
+                ["gcloud", "storage", "buckets", "add-iam-policy-binding"],
+            )
+            for call in calls
+        ))
+
+    def test_reconcile_removes_stray_invoker_members_before_granting_desired(self):
+        stray_public = "allUsers"
+        stray_sa = "serviceAccount:old-caller@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+        desired_sa = "serviceAccount:drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+
+        def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
+            if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
+                if "--format=value(versioning_enabled)" in args:
+                    return subprocess.CompletedProcess(args, 0, "True\n")
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
+            if args[:4] == ["gcloud", "run", "services", "get-iam-policy"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps({
+                    "bindings": [
+                        {"role": "roles/run.invoker", "members": [stray_public, stray_sa, desired_sa]},
+                    ],
+                }))
+            return subprocess.CompletedProcess(args, 0, "")
+
+        code, _, calls = self.run_main(GOOD_ARGS, side_effect)
+        self.assertEqual(code, 0)
+        argvs = [call.args[0] for call in calls]
+        removals = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "remove-iam-policy-binding"]]
+        removed_members = {a[a.index("--member") + 1] for a in removals}
+        self.assertEqual(removed_members, {stray_public, stray_sa})
+        for a in removals:
+            self.assertEqual(a[a.index("--role") + 1], "roles/run.invoker")
+        # The desired member is granted, never removed.
+        grants = [a for a in argvs if a[:4] == ["gcloud", "run", "services", "add-iam-policy-binding"]]
+        self.assertEqual(len(grants), 1)
+        self.assertEqual(grants[0][grants[0].index("--member") + 1], desired_sa)
 
     def test_public_invoker_member_rejected_before_any_cloud_call(self):
         args = [v if v != GOOD_ARGS[GOOD_ARGS.index("--invoker-member") + 1] else "allUsers" for v in GOOD_ARGS]
@@ -408,6 +565,8 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
 
     def test_bucket_create_failure_stops_before_iam_and_deploy(self):
         def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
             if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
                 return subprocess.CompletedProcess(args, 1, "", "not found")
             if args[:4] == ["gcloud", "storage", "buckets", "create"]:
@@ -417,16 +576,28 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         code, output, calls = self.run_main(GOOD_ARGS, side_effect)
         self.assertEqual(code, 1)
         self.assertIn("Failed to create bucket", output)
-        kinds = {tuple(call.args[0][:4]) for call in calls}
+        kinds = set()
+        for call in calls:
+            a = call.args[0]
+            kinds.add(("gcloud", "projects", "describe") if a[:3] == ["gcloud", "projects", "describe"]
+                       else tuple(a[:4]))
         self.assertEqual(
             kinds,
-            {("gcloud", "storage", "buckets", "describe"), ("gcloud", "storage", "buckets", "create")},
+            {
+                ("gcloud", "projects", "describe"),
+                ("gcloud", "storage", "buckets", "describe"),
+                ("gcloud", "storage", "buckets", "create"),
+            },
         )
 
     def test_deploy_failure_stops_before_granting_invoker(self):
         def side_effect(args, **kwargs):
+            if args[:3] == ["gcloud", "projects", "describe"]:
+                return subprocess.CompletedProcess(args, 0, GOOD_PROJECT_NUMBER + "\n")
             if args[:4] == ["gcloud", "storage", "buckets", "describe"]:
-                return subprocess.CompletedProcess(args, 0, "exists\n")
+                if "--format=value(versioning_enabled)" in args:
+                    return subprocess.CompletedProcess(args, 0, "True\n")
+                return subprocess.CompletedProcess(args, 0, _owned_bucket_json())
             if args and args[0] == str(provisioner.DEPLOY_CLOUD_RUN_SERVICE):
                 return subprocess.CompletedProcess(args, 1, "", "deploy failed")
             if args[:4] == ["gcloud", "storage", "buckets", "update"] or \
@@ -438,14 +609,14 @@ class DevArtifactBackendsProvisioningTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Scanner Cloud Run deploy failed", output)
         self.assertFalse(any(
+            call.args[0][:4] == ["gcloud", "run", "services", "get-iam-policy"] for call in calls
+        ))
+        self.assertFalse(any(
             call.args[0][:4] == ["gcloud", "run", "services", "add-iam-policy-binding"] for call in calls
         ))
 
     def test_no_secret_manager_call_is_ever_made(self):
-        def side_effect(args, **kwargs):
-            return subprocess.CompletedProcess(args, 0, "exists\n")
-
-        _, _, calls = self.run_main(GOOD_ARGS, side_effect)
+        _, _, calls = self.run_main(GOOD_ARGS, _good_provisioning_side_effect)
         for call in calls:
             self.assertNotIn("secrets", call.args[0])
 

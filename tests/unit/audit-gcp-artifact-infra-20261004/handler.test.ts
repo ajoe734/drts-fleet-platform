@@ -172,6 +172,27 @@ describe("createRequestHandler: POST /scan input validation", () => {
   });
 });
 
+describe("createRequestHandler: POST /scan readiness gate", () => {
+  it("rejects a scan without ever contacting clamd when isReady resolves false", async () => {
+    // R8: a scan must fail closed on a not-ready engine (cold start, dead
+    // sidecar or stale signatures) exactly like /health does -- this must
+    // be checked on every scan request, not only at /health.
+    const isReady = vi.fn().mockResolvedValue(false);
+    const exchange = vi.fn();
+    const res = await send(
+      baseConfig({ isReady, exchange }),
+      "POST",
+      "/scan",
+      { "content-type": "application/pdf", "x-content-sha256": sha256Hex(PDF_BYTES) },
+      PDF_BYTES,
+    );
+    expect(res.statusCode).toBe(503);
+    expect(JSON.parse(res.body)).toEqual({ error: "scan_engine_not_ready" });
+    expect(isReady).toHaveBeenCalledTimes(1);
+    expect(exchange).not.toHaveBeenCalled();
+  });
+});
+
 describe("createRequestHandler: POST /scan verdicts", () => {
   it("returns a clean verdict with the real sha256 and size only after a definitive OK reply", async () => {
     const exchange = vi.fn().mockResolvedValue("stream: OK");

@@ -174,3 +174,103 @@ other `operations/` script in this repo).
 Independent review and hosted CI must bind the final candidate SHA recorded
 in the handoff; these owner results are not approval, deployment or live
 acceptance.
+
+## Codex review round 1: REJECTED (candidate `4014dc407811537346c7fa51e0777c91d94fff5a`, PR #2307)
+
+Generation `bd147b762e914a15aac8ee9580ae55bd`. Codex reviewed the locked
+candidate above without editing it and returned 9 findings (R1–R8 `P1`, R9
+`P2`), reproduced verbatim below for traceability, then fixed in this same
+generation on top of that SHA.
+
+> R1 [P1] Scan-limit exhaustion can become clean. `clamd.conf:23-27` sets
+> `MaxFileSize`/`MaxScanSize`/`MaxRecursion` without `AlertExceedsMax`
+> (default no); an allowed request exceeding those bounds can be
+> skipped/partially scanned while clamd still returns OK.
+>
+> R2 [P1] `provision-dev-artifact-backends.py:101-107` passes `--versioning`
+> to `gcloud storage buckets create`, which does not support it; the
+> `update` branch (116-122) never asserts versioning either, so new buckets
+> fail CLI parsing and existing buckets never get versioning enabled.
+>
+> R3 [P1] `Dockerfile.gateway:11-14` installs `typescript@5.7.3` but never
+> `@types/node`, even though the gateway sources import `node:http`/`net`/
+> `fs`/`crypto` and use `Buffer`/`process`; an isolated compiler probe
+> reproduced TS2307/TS2580 failures.
+>
+> R4 [P1] `provision-dev-artifact-backends.py:171-178` deploys the gateway
+> and clamd containers with no shared volume/mount; the readiness marker
+> `clamd-entrypoint.sh` writes in its own container filesystem is never
+> visible to `server.ts`'s own filesystem check, so `/health` stays 503
+> even once the sidecar is ready.
+>
+> R5 [P1] `provision-dev-artifact-backends.py:167` only ever supplies
+> `--no-allow-unauthenticated`; it never re-enables invoker IAM checks or
+> reconciles the existing IAM policy, so a service previously deployed with
+> invoker checks disabled (or with a stray `allUsers`/other grant) stays
+> publicly invocable after re-provisioning.
+>
+> R6 [P1] `Dockerfile.clamd:11` pins `clamav/clamav:1.3`, which the official
+> EOL matrix lists as EOL (database-download support ended 2026-02-07).
+>
+> R7 [P1] `provision-dev-artifact-backends.py:177-178` supplies no
+> `--memory` for the clamd container, leaving a fresh deploy at the Cloud
+> Run 512MiB default; ClamAV documents >1.2GiB just to load its engine.
+>
+> R8 [P1] `clamd-entrypoint.sh:19` runs `freshclam` exactly once; there is
+> no periodic refresh or signature-age expiry, and `handler.ts:131-149`
+> never calls `isReady` before a scan (only `/health` does), so a
+> long-lived instance can keep returning `clean` against stale definitions.
+>
+> R9 [P2] `provision-dev-artifact-backends.py:93-98` treats any bucket the
+> WIF identity can describe as reusable; `--project` scopes billing for the
+> request, not ownership of a globally-named `gs://` bucket, so a wrong
+> accessible bucket could receive the API data grant.
+
+### Fix evidence (this generation, same candidate lineage)
+
+| Finding | Source change | Old → new behavior | Command / evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| R1 | `clamd.conf`: added `AlertExceedsMax yes`; `clamd-protocol.test.ts` added a case for the literal `Heuristics.Limits.Exceeded FOUND` reply | Old: limit-exceeded config left `AlertExceedsMax` at its "no" default (silently skips to OK). New: `AlertExceedsMax yes` turns an exceeded limit into a definitive `FOUND`, which `parseInstreamReply` already treats as fail-closed `infected`, never a fabricated clean | `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004` — PASS, new case included in the 45/45 total below | No real ClamAV engine was run to observe an actual oversized/compressed-content exceedance; this is a config + parser-contract regression, not a hosted engine test (still required per the brief's deferred `live_backend_positive_negative_evidence`) |
+| R2 | `provision-dev-artifact-backends.py`: `--versioning` moved from `buckets create` (unsupported there) to `buckets update` (both new and existing buckets), plus a `buckets describe --format=value(versioning_enabled)` readback that fails closed if not `true` | Old: `buckets create --versioning` would fail CLI parsing; existing buckets never got versioning. New: create has no `--versioning`; update always asserts it; a readback verifies it stuck | `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS (`test_success_creates_missing_bucket_updates_existing_deploys_and_grants_invoker`, `test_versioning_not_confirmed_fails_closed`) | No real `gcloud` call was made (mocked subprocess boundary only, per this task's VM/GCP-access restriction); readback is proven against mocked stdout, not a live bucket |
+| R3 | `Dockerfile.gateway`: build stage now installs `@types/node@22.10.2` alongside `typescript@5.7.3` and passes `tsc --types node` | Old: isolated compiler probe failed TS2307/TS2580 (missing `node:*` module/global types). New: same probe passes | Isolated probe re-run with only `typescript` + a real `npm`-resolved `@types/node` (including its `undici-types` transitive dependency) on the build-context file set: `tsc --strict --target es2022 --module commonjs --moduleResolution node --types node --noEmit <gateway/*.ts>` — exit 0 | This VM does not run `docker build`; the probe emulates the Dockerfile's exact `npm install` package set and compiler flags but is not the real multi-stage image build (same limitation the prior candidate already declared for digest resolution) |
+| R4 | `provision-dev-artifact-backends.py`: added `--add-volume name=clamav-ready,type=in-memory,size-limit=1Mi` plus `--add-volume-mount volume=clamav-ready,mount-path=/var/run/clamav-ready` on both the `gateway` and `clamd` containers | Old: no volume flags were ever passed; the two containers' filesystems were fully isolated. New: one in-memory volume is declared once and mounted at the same path in both containers, so the marker clamd writes is visible to the gateway's `existsSync` check | `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS (`test_success_creates_missing_bucket_updates_existing_deploys_and_grants_invoker` asserts exactly one `--add-volume` and two matching `--add-volume-mount` entries) | No real Cloud Run multi-container deploy was started; the in-memory volume's "shared within one instance, not across instances" semantics are taken from `gcloud run deploy --help`'s documented flag description, not an observed live mount. Hosted positive cold-start evidence remains the deferred acceptance item |
+| R5 | `provision-dev-artifact-backends.py`: added `--invoker-iam-check` to the deploy call, and a new `reconcile_invoker_policy()` that reads the existing IAM policy (`get-iam-policy`) and removes (`remove-iam-policy-binding`) any `roles/run.invoker` member not in `--invoker-member`, before granting the desired members | Old: only `--no-allow-unauthenticated` was passed (ingress only); invoker-IAM-check state and any stray existing grant (including public ones) were left untouched across re-provisioning. New: the check is explicitly re-enabled every run, and every grant outside the desired list — public or not — is removed first | `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS (`test_reconcile_removes_stray_invoker_members_before_granting_desired` proves `allUsers` and an old service account are both removed while the desired member is granted, not removed) | Mocked subprocess boundary only; the real Cloud Run IAM API's exact JSON policy shape was not exercised live, only the SDK's own documented `get-iam-policy --format=json` / `remove-iam-policy-binding` contract |
+| R6 | `Dockerfile.clamd`: base image bumped `clamav/clamav:1.3` → `clamav/clamav:1.4` with a comment requiring the hosted pipeline to re-check the EOL matrix before accepting the resolved digest | Old: pinned to an EOL line whose database-download support had already ended. New: pinned to the current supported LTS line as of this fix | Source/comment change only; `git diff --check HEAD^ HEAD` — PASS | This VM has no network access to re-fetch `docs.clamav.net/faq/faq-eol.html` live; the hosted build pipeline must reconfirm the exact current supported patch tag before resolving/accepting a digest, exactly as this file already requires for the digest itself |
+| R7 | `provision-dev-artifact-backends.py`: added `--memory 512Mi` on the `gateway` container and `--memory 4Gi` on the `clamd` container | Old: no `--memory` flag; a fresh deploy defaulted to Cloud Run's 512MiB total, well under ClamAV's documented >1.2GiB engine-load floor. New: clamd gets an explicit 4GiB bound matching ClamAV's documented 3-4GiB recommendation | `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS (asserts exactly `{"512Mi", "4Gi"}` across the two `--memory` occurrences) | No live Cloud Run deploy or signature-load memory profiling was performed; this is the documented static floor, not an observed runtime measurement |
+| R8 | `clamd-entrypoint.sh`: added a bounded `freshclam` refresh loop that only bumps the readiness marker's mtime on success (and removes it on failure); new `gateway/readiness.ts#isMarkerFresh` pure age check wired into `server.ts`'s `isReady`; `handler.ts` now calls `config.isReady()` before every scan, not only at `/health` | Old: `freshclam` ran exactly once at startup; `isReady` only checked marker existence + a live ping, and `/scan` never called it at all. New: a stale or failed-refresh marker (age > `MAX_SIGNATURE_AGE_MS`, default 6h) fails `isReady`, and every `/scan` request is gated on it, not only `/health` | `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004` — PASS: `readiness.test.ts` (4 cases: fresh, exact boundary, stale, far-past) and `handler.test.ts`'s new "rejects a scan without ever contacting clamd when isReady resolves false" case (asserts `exchange` is never called) | The shell-side periodic refresh loop itself is exercised only by the hosted build/deploy pipeline per this file's existing header note, not by local unit tests — this VM runs no containers. Only the pure `isMarkerFresh` age-gating logic and the handler's pre-scan gate are unit-tested offline |
+| R9 | `provision-dev-artifact-backends.py`: `ensure_private_bucket` now resolves the target project's `projectNumber` once (`gcloud projects describe`) and, on an existing bucket, compares both `project_number` and `location` from `buckets describe --format=json(...)` before any update/IAM call, raising before mutation on a mismatch | Old: `--project` was assumed to prove ownership of a globally-named bucket; any bucket the identity could merely describe was silently reused and mutated. New: a location or project-number mismatch raises `ProvisioningError` before `buckets update` or `add-iam-policy-binding` is ever called | `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v` — PASS (`test_existing_bucket_location_mismatch_rejected_before_any_mutation`, `test_existing_bucket_project_mismatch_rejected_before_any_mutation`, both assert zero `update`/`add-iam-policy-binding` calls) | Mocked subprocess boundary only; GCS's real `projectNumber` field semantics were confirmed by reading the installed `gcloud` SDK's `storage_v1_messages.Bucket` definition and `GcsBucketResource`'s `project_number`/`location`/`versioning_enabled` attributes (SDK snap `503`), not by describing a live bucket |
+
+### Updated offline verification (supersedes the counts above for this generation)
+
+- `node node_modules/vitest/vitest.mjs run tests/unit/audit-gcp-artifact-infra-20261004`:
+  **5 files, 45 tests pass**, exit 0 (was 4 files/39 tests — adds
+  `readiness.test.ts` and the R1/R8 cases above).
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/test_dev_artifact_providers.py -v`:
+  **32 tests pass**, exit 0 (was 28 — adds the R2/R5/R9 provisioning-helper
+  regressions above).
+- `git diff --check HEAD^ HEAD`: PASS, exit 0.
+- Isolated gateway compiler probe (R3): exit 0 (was exit 2) against the
+  build stage's exact `typescript` + `@types/node` package set, described
+  above.
+- `node node_modules/typescript/bin/tsc --project tsconfig.json --noEmit`:
+  same pre-existing, unrelated 26 errors as before this change, all in
+  `tests/unit/fleet-partner-list-envelope.test.ts` and
+  `tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts`
+  from a cross-worktree `packages/api-client` type-identity collision
+  against the sibling `claude2-audit-artifact-durability-20261002`
+  worktree path; zero errors reference `operations/artifact-scanner/` or
+  any file touched by this task. Out of `write_scopes` and pre-existing;
+  not introduced or fixed by this change.
+
+### Still deferred, unchanged from before this round
+
+Per the task brief's split-ownership note, these remain explicitly out of
+scope and are not claimed as passed: `deploy-dev.yml` workflow hookup, a
+real `docker build`/pinned image digest, and
+`live_backend_positive_negative_evidence` (genuine clean/EICAR/engine-
+failure/no-public-exposure checks against an actually deployed Cloud Run
+service). `same_sha_review_ci`'s live-acceptance component is likewise
+still open pending a hosted run of whichever candidate SHA this generation
+is handed off at. No service, container, browser, GCP resource, or live
+`gcloud`/Docker command was run by this fix round; every provisioning-
+helper assertion above is against a mocked `subprocess.run` boundary.

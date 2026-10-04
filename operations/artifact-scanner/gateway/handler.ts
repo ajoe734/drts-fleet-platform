@@ -128,6 +128,15 @@ export function createRequestHandler(config: GatewayConfig) {
         return;
       }
 
+      // A scan must never be attempted against an engine that is not
+      // actually ready (cold start, dead sidecar, or signatures that have
+      // gone stale past the configured age) -- /health is not the only
+      // caller that needs this check (R8).
+      if (!(await config.isReady())) {
+        sendJson(res, 503, { error: "scan_engine_not_ready" });
+        return;
+      }
+
       let reply: string;
       try {
         reply = await config.exchange(config.clamd, encodeInstream(body));

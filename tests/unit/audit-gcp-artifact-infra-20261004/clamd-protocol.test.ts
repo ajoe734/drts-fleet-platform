@@ -63,6 +63,14 @@ describe("parseInstreamReply", () => {
     expect(parseInstreamReply("stream: Eicar-Signature FOUND")).toBe("infected");
   });
 
+  it("treats clamd.conf's AlertExceedsMax FOUND reply as fail-closed infected, never clean", () => {
+    // With AlertExceedsMax yes (clamd.conf), exceeding MaxFileSize/MaxScanSize/
+    // MaxRecursion on compressed/embedded content makes clamd report this
+    // exact signature name as FOUND instead of silently skipping to OK --
+    // this must never be treated as indeterminate/clean (R1).
+    expect(parseInstreamReply("stream: Heuristics.Limits.Exceeded FOUND")).toBe("infected");
+  });
+
   it("never returns a definitive verdict for an error, truncated or malformed reply", () => {
     for (const reply of [
       "stream: INSTREAM size limit exceeded. ERROR",
