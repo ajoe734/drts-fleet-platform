@@ -34,6 +34,7 @@ intended_services=(
   "drts-dev-referral-embed-web"
   "drts-dev-enterprise-dispatch-web"
   "drts-channel-partner-portal-web"
+  "drts-dev-scanner"
 )
 
 inventory_output="$(
@@ -66,7 +67,7 @@ if [[ "$actual_sorted" != "$expected_sorted" ]]; then
       <(printf '%s\n' "$actual_sorted")
   )"
 
-  echo "Cloud Run inventory does not exactly match the 9 active services plus ${retired_service}; refusing deletion." >&2
+  echo "Cloud Run inventory does not exactly match the intended active services plus ${retired_service}; refusing deletion." >&2
   if [[ -n "$missing" ]]; then
     echo "Missing services:" >&2
     printf '%s\n' "$missing" >&2

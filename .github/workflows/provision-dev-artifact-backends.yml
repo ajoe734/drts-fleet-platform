@@ -1,0 +1,108 @@
+name: Provision Dev Artifact Backends
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Immutable source SHA for the provisioning code (do not use branch names)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+  DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  DEV_GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  DEV_ARTIFACT_PROJECT_ID: ${{ vars.DEV_ARTIFACT_PROJECT_ID || vars.DEV_GCP_PROJECT_ID }}
+  DEV_ARTIFACT_REGION: ${{ vars.DEV_ARTIFACT_REGION || vars.DEV_GCP_REGION }}
+  DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY || 'drts' }}
+
+jobs:
+  provision-and-verify:
+    name: Provision and Verify Dev Backends
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker "${DEV_ARTIFACT_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and Push Images
+        id: build_push
+        run: |
+          set -euo pipefail
+          REGISTRY="${DEV_ARTIFACT_REGION}-docker.pkg.dev/${DEV_ARTIFACT_PROJECT_ID}/${DEV_ARTIFACT_REPOSITORY}"
+          SHA=$(git rev-parse --short HEAD)
+          
+          GATEWAY_IMAGE="${REGISTRY}/artifact-scanner-gateway:${SHA}"
+          CLAMD_IMAGE="${REGISTRY}/artifact-scanner-clamd:${SHA}"
+          
+          docker build -t "$GATEWAY_IMAGE" -f operations/artifact-scanner/Dockerfile.gateway operations/artifact-scanner/
+          docker build -t "$CLAMD_IMAGE" -f operations/artifact-scanner/Dockerfile.clamd operations/artifact-scanner/
+          
+          docker push "$GATEWAY_IMAGE"
+          docker push "$CLAMD_IMAGE"
+          
+          GATEWAY_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$GATEWAY_IMAGE")
+          CLAMD_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$CLAMD_IMAGE")
+          
+          echo "gateway_image=$GATEWAY_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "clamd_image=$CLAMD_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Provision Backends
+        run: |
+          set -euo pipefail
+          
+          DOCUMENT_BUCKET="${DEV_GCP_PROJECT_ID}-document-artifacts"
+          REMITTANCE_BUCKET="${DEV_GCP_PROJECT_ID}-remittance-proofs"
+          SCANNER_SERVICE="drts-dev-scanner"
+          SCANNER_SA="drts-dev-artifact-scanner@${DEV_GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          
+          python3 operations/deployment/provision-dev-artifact-backends.py \
+            --project "$DEV_GCP_PROJECT_ID" \
+            --region "$DEV_GCP_REGION" \
+            --document-bucket "$DOCUMENT_BUCKET" \
+            --remittance-bucket "$REMITTANCE_BUCKET" \
+            --runtime-service-account "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --scanner-service "$SCANNER_SERVICE" \
+            --scanner-service-account "$SCANNER_SA" \
+            --gateway-image "${{ steps.build_push.outputs.gateway_image }}" \
+            --clamd-image "${{ steps.build_push.outputs.clamd_image }}" \
+            --invoker-member "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --invoker-member "$DEV_WIF_SERVICE_ACCOUNT"
+
+      - name: Verify Hosted Backends
+        run: |
+          set -euo pipefail
+          
+          DOCUMENT_BUCKET="${DEV_GCP_PROJECT_ID}-document-artifacts"
+          REMITTANCE_BUCKET="${DEV_GCP_PROJECT_ID}-remittance-proofs"
+          SCANNER_SERVICE="drts-dev-scanner"
+          
+          SCANNER_URL=$(gcloud run services describe "$SCANNER_SERVICE" --region "$DEV_GCP_REGION" --project "$DEV_GCP_PROJECT_ID" --format 'value(status.url)')
+          
+          python3 operations/verification/verify-dev-artifact-backends.py \
+            --document-bucket "$DOCUMENT_BUCKET" \
+            --remittance-bucket "$REMITTANCE_BUCKET" \
+            --scanner-url "$SCANNER_URL"
