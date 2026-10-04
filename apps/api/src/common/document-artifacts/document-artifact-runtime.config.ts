@@ -1,4 +1,6 @@
 import type { S3ClientConfig } from "@aws-sdk/client-s3";
+import { GoogleCloudObjectClient } from "../google-cloud/google-cloud-object-client";
+import { GcsDocumentArtifactStoreAdapter } from "./gcs-document-artifact-store.adapter";
 
 import type {
   DocumentArtifactEntry,
@@ -78,9 +80,16 @@ export function createDocumentArtifactStore(
     }
     return new InMemoryDocumentArtifactStore();
   }
+  if (provider === "gcs") {
+    return new GcsDocumentArtifactStoreAdapter(
+      new GoogleCloudObjectClient(
+        required(env, "DOCUMENT_ARTIFACT_GCS_BUCKET"),
+      ),
+    );
+  }
   if (provider !== "s3")
     throw new Error(
-      "Document artifact storage must be s3; memory is test-only.",
+      "Document artifact storage must be s3 or gcs; memory is test-only.",
     );
 
   const clientConfig: S3ClientConfig = {
