@@ -1,3 +1,7 @@
+export type {
+  TenantInvoiceMailReceipt,
+  TenantInvoiceMailView,
+} from "./invoice-mail";
 import type {
   BookingRequirements,
   BookingQualification,
