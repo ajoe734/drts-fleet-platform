@@ -5047,6 +5047,23 @@ export interface TenantInvoiceRecord {
   updatedAt: string;
 }
 
+/** Invoice mail receipt. `sent` is provider acceptance, not confirmed inbox delivery. */
+export interface TenantInvoiceMailDelivery {
+  deliveryId: string;
+  status: "queued" | "sent" | "failed";
+  queuedAt: string;
+  sentAt: string | null;
+  nextAttemptAt: string | null;
+  attempts: Array<{
+    attemptNo: number;
+    startedAt: string;
+    finishedAt: string | null;
+    outcome: "started" | "sent" | "failed" | "uncertain";
+    errorCode: string | null;
+    retryable: boolean;
+  }>;
+}
+
 export type TenantPayableInvoiceStatus =
   | "draft"
   | "issued"

@@ -111,6 +111,28 @@ export class NotificationDeliveryService {
     });
   }
 
+  /** Safe receipts only; callers must authorize tenant and own the key namespace. */
+  async listByKeyPrefix(tenantId: string, prefix: string, limit = 20) {
+    if (!prefix || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error("notification_invalid_receipt_query");
+    }
+    return this.outbox.transaction((state) =>
+      Object.values(state.deliveries)
+        .filter(
+          (entry) =>
+            entry.receipt.tenantId === tenantId &&
+            entry.receipt.idempotencyKey.startsWith(prefix),
+        )
+        .map((entry) => entry.receipt)
+        .sort(
+          (a, b) =>
+            b.queuedAt.localeCompare(a.queuedAt) ||
+            b.deliveryId.localeCompare(a.deliveryId),
+        )
+        .slice(0, limit),
+    );
+  }
+
   async dispatch(tenantId: string, deliveryId: string) {
     const claim = await this.outbox.transaction((state) => {
       const entry = state.deliveries[deliveryId];

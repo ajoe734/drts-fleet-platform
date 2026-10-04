@@ -560,6 +560,36 @@ export class BillingSettlementRepository {
     );
   }
 
+  /** Fresh authority for mail: never use an instance's startup billing cache. */
+  async findTenantInvoiceMailContext(tenantId: string, invoiceId: string) {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{
+      invoice: unknown;
+      profile: unknown | null;
+    }>(
+      `SELECT i.record AS invoice, p.record AS profile
+       FROM billing.phase1_tenant_invoices i
+       LEFT JOIN billing.phase1_tenant_billing_profiles p ON p.tenant_id = i.tenant_id
+       WHERE i.tenant_id = $1 AND i.invoice_id = $2`,
+      [tenantId, invoiceId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      invoice: this.parseRecord<StoredTenantInvoiceRecord>(
+        row.invoice,
+        "billing.phase1_tenant_invoices",
+      ),
+      profile:
+        row.profile === null
+          ? null
+          : this.parseRecord<TenantBillingProfile>(
+              row.profile,
+              "billing.phase1_tenant_billing_profiles",
+            ),
+    };
+  }
+
   async loadState(): Promise<BillingSettlementState> {
     if (!this.isEnabled()) {
       return {
