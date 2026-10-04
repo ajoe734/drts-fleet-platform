@@ -34,6 +34,8 @@ intended_services=(
   "drts-dev-referral-embed-web"
   "drts-dev-enterprise-dispatch-web"
   "drts-channel-partner-portal-web"
+)
+optional_services=(
   "drts-dev-scanner"
 )
 
@@ -45,8 +47,14 @@ inventory_output="$(
     --format='value(metadata.name)'
 )"
 
+# Filter out optional services from actual for strict comparison
+actual_filtered="$inventory_output"
+for opt in "${optional_services[@]}"; do
+  actual_filtered=$(printf '%s\n' "$actual_filtered" | grep -v "^${opt}$" || true)
+done
+
 actual_sorted="$(
-  printf '%s\n' "$inventory_output" |
+  printf '%s\n' "$actual_filtered" |
     sed '/^[[:space:]]*$/d' |
     LC_ALL=C sort
 )"

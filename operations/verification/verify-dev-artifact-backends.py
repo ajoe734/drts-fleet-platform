@@ -19,16 +19,19 @@ def run(cmd, **kwargs):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
 
 def get_identity_token(audience):
-    result = run(["gcloud", "auth", "print-identity-token", f"--audiences={audience}"])
-    return result.stdout.strip()
+    import os
+    token = os.environ.get("SCANNER_ID_TOKEN")
+    if not token:
+        raise ValueError("SCANNER_ID_TOKEN environment variable is required")
+    return token
 
 def get_access_token():
     result = run(["gcloud", "auth", "print-access-token"])
     return result.stdout.strip()
 
-EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
-CLEAN = b"This is a clean file for testing."
-OVERSIZED = b"0" * (11 * 1024 * 1024) # 11 MiB (max is 10 MiB)
+CLEAN = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n200\n%%EOF\n"
+EICAR = CLEAN + b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\n"
+OVERSIZED = CLEAN + b"0" * (11 * 1024 * 1024) # 11 MiB (max is 10 MiB)
 
 def test_scanner(scanner_url):
     print(f"Testing scanner at {scanner_url}")
@@ -37,7 +40,7 @@ def test_scanner(scanner_url):
     def scan(content, sha256_header=None):
         req = urllib.request.Request(f"{scanner_url}/scan", data=content, method="POST")
         req.add_header("Authorization", f"Bearer {token}")
-        req.add_header("Content-Type", "application/octet-stream")
+        req.add_header("Content-Type", "application/pdf")
         if sha256_header:
             req.add_header("X-Content-SHA256", sha256_header)
         else:
@@ -53,57 +56,101 @@ def test_scanner(scanner_url):
                 body = e.read().decode()
             return e.code, body
 
+    def assert_receipt(body, content, expected_verdict=None, expected_error=None):
+        sha256 = hashlib.sha256(content).hexdigest()
+        assert body.get("sha256") == sha256, f"Expected sha256 {sha256}, got {body.get('sha256')}"
+        assert body.get("sizeBytes") == len(content), f"Expected size {len(content)}, got {body.get('sizeBytes')}"
+        if expected_verdict:
+            assert body.get("verdict") == expected_verdict, f"Expected verdict {expected_verdict}, got {body.get('verdict')}"
+        if expected_error:
+            assert body.get("error") == expected_error, f"Expected error {expected_error}, got {body.get('error')}"
+
     print("Test 1: Clean file")
     status, body = scan(CLEAN)
     assert status == 200, f"Expected 200, got {status}: {body}"
-    assert body.get("verdict") == "clean", f"Expected verdict clean, got {body}"
+    assert_receipt(body, CLEAN, expected_verdict="clean")
     
     print("Test 2: EICAR file")
     status, body = scan(EICAR)
     assert status == 200, f"Expected 200, got {status}: {body}"
-    assert body.get("verdict") == "infected", f"Expected verdict infected, got {body}"
+    assert_receipt(body, EICAR, expected_verdict="infected")
     
     print("Test 3: Hash mismatch")
     status, body = scan(CLEAN, sha256_header="0000000000000000000000000000000000000000000000000000000000000000")
     assert status == 400, f"Expected 400, got {status}: {body}"
+    assert body.get("error") == "hash_mismatch", f"Expected error hash_mismatch, got {body.get('error')}"
     
     print("Test 4: Oversized file")
     status, body = scan(OVERSIZED)
     assert status == 413 or status == 400, f"Expected 413 or 400, got {status}: {body}"
+    assert body.get("error") == "content_too_large" or body.get("error") == "oversized", f"Expected oversized error, got {body.get('error')}"
 
     print("Scanner tests passed.")
 
 def test_gcs(bucket_name):
     print(f"Testing GCS bucket: {bucket_name}")
-    # We will use gcloud storage for CAS/generation readback
-    test_file = f"gs://{bucket_name}/verify-test-{int(time.time())}.txt"
+    import uuid
+    import subprocess
     
-    with open("temp_test.txt", "w") as f:
-        f.write("test data")
+    test_key = f"verify-test-{int(time.time())}-{uuid.uuid4().hex[:8]}.txt"
+    test_file = f"gs://{bucket_name}/{test_key}"
+    temp_in = f"temp_in_{test_key}.txt"
+    temp_out = f"temp_out_{test_key}.txt"
+    
+    test_data = "test data v1"
+    test_data_v2 = "test data v2"
+    
+    with open(temp_in, "w") as f:
+        f.write(test_data)
         
-    print("Test 1: Upload (create)")
-    run(["gcloud", "storage", "cp", "temp_test.txt", test_file, "--if-generation-match=0"])
-    
-    print("Test 2: Read generation")
-    res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
-    gen = res.stdout.strip()
-    assert gen, "Expected a generation number"
-    
-    print("Test 3: Download with generation match")
-    run(["gcloud", "storage", "cp", f"{test_file}#{gen}", "temp_download.txt"])
-    
-    print("Test 4: Upload with mismatched generation (should fail)")
     try:
-        run(["gcloud", "storage", "cp", "temp_test.txt", test_file, "--if-generation-match=0"])
-        assert False, "Expected upload to fail with mismatched generation"
-    except subprocess.CalledProcessError:
-        pass # Expected
+        print("Test 1: Upload (create with if-generation-match=0)")
+        run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
         
-    print("Test 5: Cleanup test owned object")
-    run(["gcloud", "storage", "rm", test_file])
+        print("Test 2: Read generation")
+        res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
+        gen1 = res.stdout.strip()
+        assert gen1 and gen1.isdigit(), f"Expected numeric generation, got {gen1}"
+        
+        print("Test 3: Download with exact generation match")
+        run(["gcloud", "storage", "cp", f"{test_file}#{gen1}", temp_out])
+        with open(temp_out, "r") as f:
+            downloaded = f.read()
+        assert downloaded == test_data, f"Content mismatch: expected {test_data}, got {downloaded}"
+        
+        print("Test 4: Upload with mismatched generation (0 again, should fail Precondition Failed)")
+        try:
+            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
+            assert False, "Expected upload to fail with mismatched generation"
+        except subprocess.CalledProcessError as e:
+            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            
+        print("Test 5: Update with correct generation match")
+        with open(temp_in, "w") as f:
+            f.write(test_data_v2)
+        run(["gcloud", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
+        
+        print("Test 6: Read updated generation")
+        res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
+        gen2 = res.stdout.strip()
+        assert gen2 and gen2.isdigit(), f"Expected numeric generation, got {gen2}"
+        assert gen1 != gen2, "Generation did not change after update"
+        
+        print("Test 7: Download immutable prior generation")
+        run(["gcloud", "storage", "cp", f"{test_file}#{gen1}", temp_out])
+        with open(temp_out, "r") as f:
+            downloaded = f.read()
+        assert downloaded == test_data, f"Old generation content mismatch: expected {test_data}, got {downloaded}"
+        
+    finally:
+        print("Cleanup test owned object")
+        try:
+            run(["gcloud", "storage", "rm", test_file])
+        except:
+            pass
+        if os.path.exists(temp_in): os.remove(temp_in)
+        if os.path.exists(temp_out): os.remove(temp_out)
     
-    os.remove("temp_test.txt")
-    os.remove("temp_download.txt")
     print(f"GCS bucket {bucket_name} tests passed.")
 
 def main():
