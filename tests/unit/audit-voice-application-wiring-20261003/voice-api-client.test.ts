@@ -1446,7 +1446,15 @@ describe("createTrustedDialoguePersistPort", () => {
               inputEpoch: request.inputEpoch,
               mediaEpoch: 0,
               turnId: request.turnId,
-              content: { handoff: { reason: "urgent_safety" } },
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "urgent_safety", intent: "emergency" },
+              },
               createdAt: "2026-07-24T09:00:00.000Z",
               retentionExpiresAt: "2027-01-20T09:00:00.000Z",
             },
@@ -1479,9 +1487,21 @@ describe("createTrustedDialoguePersistPort", () => {
     // R4-persist (Codex reopen, canonical 2026-10-03T17:41:28Z): the
     // reconciled content is also restored directly into this
     // attachment's dialogue state, not only inferred from `persist()`
-    // resolving successfully.
+    // resolving successfully. The reconciled snapshot's content must be a
+    // real, schema-valid `VoiceDialogueSnapshotContent` record (AUDIT-
+    // VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+    // discriminated response validation, Codex reopen, canonical
+    // 2026-10-04T01:25:05Z) -- a bare `{handoff: ...}` stub would now
+    // correctly fail `voiceDialogueSnapshotContentSchema` and never reach
+    // this call at all.
     expect(restoreFromSnapshotContent).toHaveBeenCalledWith({
-      handoff: { reason: "urgent_safety" },
+      draftVersion: 0,
+      confirmationId: null,
+      slots: {},
+      slotHistory: [],
+      addressRepairs: { pickup: 0, dropoff: 0 },
+      addressHistory: [],
+      handoff: { reason: "urgent_safety", intent: "emergency" },
     });
   });
 
@@ -1559,7 +1579,15 @@ describe("createTrustedDialoguePersistPort", () => {
               inputEpoch: request.inputEpoch,
               mediaEpoch: 0,
               turnId: request.turnId,
-              content: { handoff: { reason: "urgent_safety" } },
+              content: {
+                draftVersion: 0,
+                confirmationId: null,
+                slots: {},
+                slotHistory: [],
+                addressRepairs: { pickup: 0, dropoff: 0 },
+                addressHistory: [],
+                handoff: { reason: "urgent_safety", intent: "emergency" },
+              },
               createdAt: "2026-07-24T09:00:00.000Z",
               retentionExpiresAt: "2027-01-20T09:00:00.000Z",
             },
@@ -1589,8 +1617,20 @@ describe("createTrustedDialoguePersistPort", () => {
     releasePost();
 
     await expect(pending).rejects.toThrow(/voice_trusted_persist_aborted/);
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+    // discriminated response validation (Codex reopen, canonical
+    // 2026-10-04T01:25:05Z): the reconciled snapshot's content must be a
+    // real, schema-valid `VoiceDialogueSnapshotContent` record -- a bare
+    // `{handoff: ...}` stub would now correctly fail
+    // `voiceDialogueSnapshotContentSchema` and never reach this call.
     expect(restoreFromSnapshotContent).toHaveBeenCalledWith({
-      handoff: { reason: "urgent_safety" },
+      draftVersion: 0,
+      confirmationId: null,
+      slots: {},
+      slotHistory: [],
+      addressRepairs: { pickup: 0, dropoff: 0 },
+      addressHistory: [],
+      handoff: { reason: "urgent_safety", intent: "emergency" },
     });
   });
 
@@ -1846,7 +1886,31 @@ describe("createTrustedDialoguePersistPort", () => {
         // otherwise collide, but ordering it first keeps this double
         // legible as the adjudication path.
         resolveCalls += 1;
-        return jsonResponse(200, { data: { accepted: false } });
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+        // discriminated response validation (Codex reopen, canonical
+        // 2026-10-04T01:25:05Z): the real server now echoes the adjudicated
+        // identity plus the fence it just raised -- a bare `{accepted:
+        // false}` no longer correlates and must classify as `"unknown"`,
+        // not a confirmed rejection. Echo this exact call's own body back,
+        // matching `VoiceSessionService.resolveDialogueSnapshotOutcome`'s
+        // real contract.
+        const body = JSON.parse(init.body as string) as {
+          expectedSessionVersion: number;
+          inputEpoch: number;
+          mediaEpoch: number;
+          turnId: string;
+        };
+        return jsonResponse(200, {
+          data: {
+            accepted: false,
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: body.expectedSessionVersion,
+            inputEpoch: body.inputEpoch,
+            mediaEpoch: body.mediaEpoch,
+            turnId: body.turnId,
+            fenceVersion: body.expectedSessionVersion,
+          },
+        });
       }
       if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
         // The double NEVER actually stores anything -- every attempt fails
@@ -2829,6 +2893,206 @@ describe("createTrustedDialoguePersistPort", () => {
     // The recovered emergency content must still be the attachment's own
     // authoritative state -- never overwritten by turn 2's stale clone.
     expect(attachmentState.committedSessionVersion).toBe(6);
+  });
+
+  describe("R4-persist incomplete discriminated response validation (Codex reopen, canonical 2026-10-04T01:25:05Z)", () => {
+    function harness() {
+      const binding: VoiceSessionBinding = {
+        voiceSessionId: "22222222-2222-2222-2222-222222222222",
+        resourceScopeId: "33333333-3333-3333-3333-333333333333",
+        routeProfileVersion: 1,
+        leaseEpoch: 1,
+        sessionVersion: 5,
+      };
+      return { binding };
+    }
+
+    function baseFetch(
+      binding: VoiceSessionBinding,
+      resolveResponseData: unknown,
+    ) {
+      return vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(url);
+        if (path.endsWith("/capabilities")) {
+          return jsonResponse(200, {
+            data: { token: "capability-token", tokenType: "Bearer", expiresIn: 120 },
+          });
+        }
+        if (init?.method === "POST" && path.endsWith("/input-resolutions")) {
+          return jsonResponse(200, {
+            data: {
+              session: {
+                voiceSessionId: binding.voiceSessionId,
+                sessionVersion: 6,
+                resourceScopeId: binding.resourceScopeId,
+                routeProfileVersion: binding.routeProfileVersion,
+                leaseEpoch: binding.leaseEpoch,
+                inputEpoch: request.inputEpoch,
+                pendingInput: false,
+              },
+            },
+          });
+        }
+        if (init?.method === "POST" && path.endsWith("/dialogue-snapshot")) {
+          throw new TypeError("simulated lost acknowledgement");
+        }
+        if (init?.method === "GET" && path.endsWith("/dialogue-snapshot")) {
+          // Authoritative truth shows nothing (yet) -- bounded polling
+          // exhausts truthfully, forcing the fallback to the atomic
+          // adjudication call this describe block is actually probing.
+          return jsonResponse(200, {
+            data: {
+              session: {
+                voiceSessionId: binding.voiceSessionId,
+                sessionVersion: 6,
+                resourceScopeId: binding.resourceScopeId,
+                routeProfileVersion: binding.routeProfileVersion,
+                leaseEpoch: binding.leaseEpoch,
+                inputEpoch: request.inputEpoch,
+                pendingInput: false,
+              },
+              snapshot: null,
+            },
+          });
+        }
+        if (init?.method === "POST" && path.endsWith("/dialogue-snapshot/resolve")) {
+          return jsonResponse(200, { data: resolveResponseData });
+        }
+        throw new Error(`unexpected request ${init?.method ?? "GET"} ${path}`);
+      });
+    }
+
+    it("[finding A] an accepted adjudication response whose content fails the shared schema (required `handoff` field omitted) is never installed -- the real attachment stays byte-for-byte unchanged and unresolvedCommit stays set", async () => {
+      const { binding } = harness();
+      const fetchImpl = baseFetch(binding, {
+        accepted: true,
+        snapshot: {
+          snapshotId: "snapshot-1",
+          voiceSessionId: binding.voiceSessionId,
+          sessionVersion: 6,
+          inputEpoch: request.inputEpoch,
+          mediaEpoch: 0,
+          turnId: request.turnId,
+          content: {
+            draftVersion: 0,
+            confirmationId: null,
+            slots: {},
+            slotHistory: [],
+            addressRepairs: { pickup: 0, dropoff: 0 },
+            addressHistory: [],
+            // `handoff` is REQUIRED by `voiceDialogueSnapshotContentSchema`
+            // (`.strict()`) -- omitted here on purpose.
+          },
+          createdAt: "2026-07-24T09:00:00.000Z",
+          retentionExpiresAt: "2027-01-20T09:00:00.000Z",
+        },
+      });
+      const client_ = new VoiceApiClient(
+        { baseUrl: "https://api.example.test", fetchImpl },
+        { getToken: vi.fn(async () => "workload-token") },
+      );
+      const port = createTrustedDialoguePersistPort(client_, () => binding);
+      const attachmentState = new VoiceDialogueState();
+
+      await expect(
+        port.persist(
+          {
+            toSnapshotContent: () => ({}),
+            committedSessionVersion: attachmentState.committedSessionVersion,
+          } as unknown as VoiceDialogueState,
+          request,
+          { attachmentState },
+        ),
+      ).rejects.toThrow(/simulated lost acknowledgement/);
+
+      // Never installed -- the real attachment is still at its pristine,
+      // freshly-constructed defaults.
+      expect(attachmentState.draftVersion).toBe(0);
+      expect(attachmentState.confirmationId).toBeNull();
+      expect(attachmentState.handoff).toBeNull();
+      expect(attachmentState.slots).toEqual({});
+      expect(attachmentState.slotHistory).toEqual([]);
+      expect(attachmentState.committedSessionVersion).toBeNull();
+      // Malformed content classifies as `"unknown"`, never a confirmed
+      // accept -- a later call must still retry this same reconciliation.
+      expect(attachmentState.unresolvedCommit).not.toBeNull();
+    });
+
+    it("[finding C] a bare, contradictory-identity `accepted:false` response is never trusted as a confirmed rejection -- only a response whose identity AND server-raised fenceVersion both correlate may clear unresolvedCommit", async () => {
+      const { binding } = harness();
+      const fetchImpl = baseFetch(binding, {
+        accepted: false,
+        voiceSessionId: "foreign-session",
+        sessionVersion: 999,
+        inputEpoch: 999,
+        mediaEpoch: 999,
+        turnId: "foreign-turn",
+        fenceVersion: 999,
+      });
+      const client_ = new VoiceApiClient(
+        { baseUrl: "https://api.example.test", fetchImpl },
+        { getToken: vi.fn(async () => "workload-token") },
+      );
+      const port = createTrustedDialoguePersistPort(client_, () => binding);
+      const attachmentState = new VoiceDialogueState();
+
+      await expect(
+        port.persist(
+          {
+            toSnapshotContent: () => ({}),
+            committedSessionVersion: attachmentState.committedSessionVersion,
+          } as unknown as VoiceDialogueState,
+          request,
+          { attachmentState },
+        ),
+      ).rejects.toThrow(/simulated lost acknowledgement/);
+
+      expect(attachmentState.committedSessionVersion).toBeNull();
+      expect(attachmentState.handoff).toBeNull();
+      // A contradictory/foreign body must never clear the marker -- the
+      // outcome of THIS pending write is still genuinely unknown.
+      expect(attachmentState.unresolvedCommit).not.toBeNull();
+    });
+
+    it("[finding D] an `expired:true` response with correct identity but no `retentionExpiresAt` evidence is never trusted -- well-formed expiry evidence is required, not the bare boolean alone", async () => {
+      const { binding } = harness();
+      const fetchImpl = baseFetch(binding, {
+        accepted: true,
+        expired: true,
+        voiceSessionId: binding.voiceSessionId,
+        sessionVersion: 6,
+        inputEpoch: request.inputEpoch,
+        mediaEpoch: 0,
+        turnId: request.turnId,
+        // `retentionExpiresAt` deliberately omitted -- there is no
+        // evidence the content has actually passed its own retention
+        // window, only the bare `expired: true` literal.
+      });
+      const client_ = new VoiceApiClient(
+        { baseUrl: "https://api.example.test", fetchImpl },
+        { getToken: vi.fn(async () => "workload-token") },
+      );
+      const port = createTrustedDialoguePersistPort(client_, () => binding);
+      const attachmentState = new VoiceDialogueState();
+
+      await expect(
+        port.persist(
+          {
+            toSnapshotContent: () => ({}),
+            committedSessionVersion: attachmentState.committedSessionVersion,
+          } as unknown as VoiceDialogueState,
+          request,
+          { attachmentState },
+        ),
+      ).rejects.toThrow(/simulated lost acknowledgement/);
+
+      expect(attachmentState.committedSessionVersion).toBeNull();
+      expect(attachmentState.handoff).toBeNull();
+      // Unproven expiry must not settle the outcome either way -- the
+      // marker stays set so a later call retries this reconciliation
+      // instead of wrongly treating this as a known-expired verdict.
+      expect(attachmentState.unresolvedCommit).not.toBeNull();
+    });
   });
 
   it("is mode 'trusted', distinct from the fixture port's mode 'fixture'", () => {

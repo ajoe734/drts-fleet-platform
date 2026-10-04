@@ -2799,6 +2799,48 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [f.request.voiceSessionId],
       );
       expect(afterPurge.rows[0].count).toBe(0);
+
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge
+      // loses accepted-history distinction (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): against the REAL schema -- the content row
+      // is genuinely gone, but `voice.dialogue_snapshot_purge_receipt`
+      // (written in the SAME transaction as the DELETE above, by the real
+      // `deleteDialogueSnapshot`) still proves this exact write was
+      // accepted. Resolving the SAME request must still report
+      // accepted:true, expired:true -- never a confirmed non-acceptance --
+      // and must never raise the fence.
+      const receiptRows = await pool.query(
+        "SELECT * FROM voice.dialogue_snapshot_purge_receipt WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(receiptRows.rows).toHaveLength(1);
+      expect(receiptRows.rows[0].turn_id).toBe("turn-1");
+
+      const outcomeAfterPurge = await service.resolveDialogueSnapshotOutcome({
+        voiceSessionId: f.request.voiceSessionId,
+        expectedSessionVersion: session!.sessionVersion,
+        expectedLeaseEpoch: session!.leaseEpoch,
+        expectedResourceScopeId: session!.resourceScopeId,
+        expectedRouteProfileVersion: session!.routeProfileVersion,
+        inputEpoch: session!.inputEpoch,
+        mediaEpoch: 0,
+        turnId: "turn-1",
+      });
+      expect(outcomeAfterPurge).toMatchObject({
+        accepted: true,
+        expired: true,
+        voiceSessionId: f.request.voiceSessionId,
+        sessionVersion: session!.sessionVersion,
+      });
+      expect(outcomeAfterPurge).not.toHaveProperty("snapshot");
+
+      const fencedAfterPurge = await pool.query(
+        "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
+      );
+      expect(fencedAfterPurge.rows[0].dialogue_snapshot_fence_version).toBe(
+        0,
+      );
     });
 
     /**

@@ -76,3 +76,33 @@ SELECT voice._make_append_only('voice.dialogue_snapshot');
 -- `assertWriteAuthorized` to catch it on its own.
 ALTER TABLE voice.session
   ADD COLUMN IF NOT EXISTS dialogue_snapshot_fence_version integer NOT NULL DEFAULT 0;
+
+-- AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge loses
+-- accepted-history distinction (Codex reopen, canonical
+-- 2026-10-04T01:25:05Z): `VoiceSessionService.purgeExpiredDialogueSnapshots`
+-- physically deletes an aged `voice.dialogue_snapshot` row once no legal
+-- hold applies (see `VoiceSessionRepository.deleteDialogueSnapshot`'s own
+-- doc) -- after that, `resolveDialogueSnapshotOutcome`'s exact-version
+-- lookup returns nothing, which the previous code could not distinguish
+-- from "this write never landed," and so falsely durably voided an
+-- adjudication for a request that WAS historically accepted.
+--
+-- This table is bounded, non-content acceptance metadata ONLY --
+-- identity, the row's own original `retention_expires_at`, and when it
+-- was purged -- never the dialogue content itself (purging that content is
+-- the whole point of the sweep this receipt records). One row per
+-- (voice_session_id, session_version), written in the SAME transaction as
+-- the `DELETE` it accompanies (see `deleteDialogueSnapshot`), so the two
+-- can never diverge. Append-only, like the table it survives.
+CREATE TABLE IF NOT EXISTS voice.dialogue_snapshot_purge_receipt (
+  voice_session_id uuid NOT NULL REFERENCES voice.session (voice_session_id),
+  session_version integer NOT NULL,
+  input_epoch integer NOT NULL,
+  media_epoch integer NOT NULL,
+  turn_id varchar(100) NOT NULL,
+  retention_expires_at timestamptz NOT NULL,
+  purged_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (voice_session_id, session_version)
+);
+
+SELECT voice._make_append_only('voice.dialogue_snapshot_purge_receipt');

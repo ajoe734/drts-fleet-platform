@@ -31,7 +31,12 @@ function harness() {
     }
     if (q.startsWith("UPDATE voice.session") && q.includes("dialogue_snapshot_fence_version")) {
       writes.push(Number(values[1]));
-      return { rows: [], rowCount: 1 };
+      // `raiseDialogueSnapshotFence` now reads back the monotonic fence
+      // value via `RETURNING` (AUDIT-VOICE-APPLICATION-WIRING-20261003
+      // R4-persist incomplete discriminated response validation, Codex
+      // reopen, canonical 2026-10-04T01:25:05Z) so it can be echoed in the
+      // `accepted: false` response's own correlation fields.
+      return { rows: [{ dialogue_snapshot_fence_version: Number(values[1]) }], rowCount: 1 };
     }
     throw new Error(`Unexpected database boundary: ${q}`);
   });

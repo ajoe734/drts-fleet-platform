@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { VoiceDialogueOutput } from "@drts/contracts";
+import {
+  voiceDialogueSnapshotContentSchema,
+  type VoiceDialogueOutput,
+} from "@drts/contracts";
 import {
   VoiceDialogueEngine,
   type VoiceDialogueTurnPorts,
@@ -644,11 +647,25 @@ export class VoiceCallTurnCoordinator {
         // snapshot installed here (e.g. a foreign handoff) would corrupt
         // this attachment's dialogue state before any turn ever runs.
         const snapshot = restoration.snapshot;
+        // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+        // discriminated response validation (Codex reopen, canonical
+        // 2026-10-04T01:25:05Z, "inspect other restoration/reconciliation
+        // consumers of the same record shape so an alternate read cannot
+        // bypass validation"): this attach-time restore reads the exact
+        // same unvalidated `PersistDialogueSnapshotResult["snapshot"]`
+        // shape `dialogue-persist-port.ts`'s reconciliation paths do, over
+        // an equally unvalidated HTTP response (`VoiceApiClient.request`
+        // casts `response.json()` with no runtime check at all) -- a
+        // structurally-malformed `content` must fail this correlation
+        // check and fall into the existing `restoreFailed` path below,
+        // never reach `restoreFromSnapshotContent`, which writes fields
+        // incrementally with no validation of its own.
         const snapshotCorrelates =
           snapshot.voiceSessionId === binding.voiceSessionId &&
           snapshot.sessionVersion <= restoration.session.sessionVersion &&
           snapshot.inputEpoch <= restoration.session.inputEpoch &&
-          new Date(snapshot.retentionExpiresAt).getTime() > Date.now();
+          new Date(snapshot.retentionExpiresAt).getTime() > Date.now() &&
+          voiceDialogueSnapshotContentSchema.safeParse(snapshot.content).success;
         if (!snapshotCorrelates) {
           throw new Error(
             "voice_restore_snapshot_mismatch: the restored dialogue-snapshot does not correlate with this session's authoritative revision, or has already expired.",

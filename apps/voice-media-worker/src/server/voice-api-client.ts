@@ -152,7 +152,24 @@ export type ResolveDialogueSnapshotOutcomeResult =
       turnId: string;
       retentionExpiresAt: string;
     }
-  | { accepted: false };
+  | {
+      accepted: false;
+      /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+       * discriminated response validation (Codex reopen, canonical
+       * 2026-10-04T01:25:05Z): mirrors `VoiceSessionService
+       * .resolveDialogueSnapshotOutcome`'s own doc -- a server-generated
+       * correlation token, never a caller-supplied echo. This client-side
+       * type is compile-time only (see `VoiceApiClient.request`'s own doc
+       * on zero runtime validation); `classifyResolveOutcome`
+       * (`dialogue-persist-port.ts`) is what actually enforces these
+       * fields correlate before trusting this as confirmed non-acceptance. */
+      voiceSessionId: string;
+      sessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      fenceVersion: number;
+    };
 
 export interface DialogueSnapshotRestorationResult {
   session: {

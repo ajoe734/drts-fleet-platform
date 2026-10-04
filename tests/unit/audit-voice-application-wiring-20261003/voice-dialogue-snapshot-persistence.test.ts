@@ -12,7 +12,10 @@ import {
 } from "../../../apps/api/src/modules/voice-booking/voice-session.service";
 import { VoiceRetentionService } from "../../../apps/api/src/modules/voice-booking/voice-retention.service";
 import type { VoiceSessionRecord } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
-import type { DialogueSnapshotRow } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
+import type {
+  DialogueSnapshotPurgeReceiptRow,
+  DialogueSnapshotRow,
+} from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: the versioned, encrypted
@@ -90,6 +93,7 @@ function buildHarness(
 ) {
   const session = createSessionRecord(options.sessionOverrides);
   const snapshots: DialogueSnapshotRow[] = [...(options.existingSnapshots ?? [])];
+  const purgeReceipts: DialogueSnapshotPurgeReceiptRow[] = [];
   const appliedMediaEpoch = options.appliedMediaEpoch ?? null;
 
   const repository = {
@@ -149,6 +153,13 @@ function buildHarness(
           version,
         );
       }
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+      // discriminated response validation (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): the real repository method now returns the
+      // resulting monotonic fence value via `RETURNING` so it can be
+      // echoed in the `accepted: false` response's own correlation
+      // fields.
+      return session.dialogueSnapshotFenceVersion ?? version;
     }),
     findExpiredDialogueSnapshots: vi.fn(async () =>
       snapshots.filter(
@@ -160,18 +171,54 @@ function buildHarness(
         (s) => s.voiceSessionId === id && s.sessionVersion === version,
       );
       if (index === -1) return false;
+      const row = snapshots[index]!;
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge
+      // loses accepted-history distinction (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): mirrors the real repository's own
+      // `deleteDialogueSnapshot` -- a bounded, non-content receipt is
+      // written in the SAME "transaction" as the deletion, from the
+      // row's own identity/retention, before the row disappears.
+      if (
+        !purgeReceipts.some(
+          (r) => r.voiceSessionId === id && r.sessionVersion === version,
+        )
+      ) {
+        purgeReceipts.push({
+          voiceSessionId: row.voiceSessionId,
+          sessionVersion: row.sessionVersion,
+          inputEpoch: row.inputEpoch,
+          mediaEpoch: row.mediaEpoch,
+          turnId: row.turnId,
+          retentionExpiresAt: row.retentionExpiresAt,
+          purgedAt: new Date().toISOString(),
+        });
+      }
       snapshots.splice(index, 1);
       return true;
     }),
+    findDialogueSnapshotPurgeReceipt: vi.fn(
+      async (id: string, version: number) =>
+        purgeReceipts.find(
+          (r) => r.voiceSessionId === id && r.sessionVersion === version,
+        ) ?? null,
+    ),
   };
 
+  const retentionService = new VoiceRetentionService();
   const service = new VoiceSessionService(
     repository as never,
     undefined,
     undefined,
-    new VoiceRetentionService(),
+    retentionService,
   );
-  return { session, repository, service, snapshots };
+  return {
+    session,
+    repository,
+    service,
+    snapshots,
+    purgeReceipts,
+    retentionService,
+  };
 }
 
 function validCommand(
@@ -550,6 +597,23 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
       5,
       undefined,
     );
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+    // discriminated response validation (Codex reopen, canonical
+    // 2026-10-04T01:25:05Z): a bare `{accepted: false}` carries no
+    // correlation field at all, so the worker's own validator
+    // (`classifyResolveOutcome`, `dialogue-persist-port.ts`) could not
+    // distinguish this exact adjudicated answer from a contradictory or
+    // foreign one. The server now echoes the adjudicated identity plus
+    // the fence value it just raised, under the same row lock.
+    expect(outcome).toMatchObject({
+      accepted: false,
+      voiceSessionId: VOICE_SESSION_ID,
+      sessionVersion: 5,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "turn-xyz",
+      fenceVersion: 5,
+    });
 
     // The exact write this adjudication just voided (same version/turn)
     // must never be allowed to land after the fact -- proving the fence
@@ -691,6 +755,116 @@ describe("VoiceSessionService.resolveDialogueSnapshotOutcome", () => {
     });
     expect(outcome).not.toHaveProperty("snapshot");
     expect(repository.raiseDialogueSnapshotFence).not.toHaveBeenCalled();
+  });
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge loses
+   * accepted-history distinction (Codex reopen, canonical
+   * 2026-10-04T01:25:05Z): a FULL persist -> expire -> hold -> release ->
+   * purge -> resolve regression through the real service, retention
+   * service and the repository's own `deleteDialogueSnapshot` (mocked at
+   * the DB boundary only, but modelling its real
+   * INSERT-receipt-then-DELETE contract -- see that mock's own doc).
+   * Before this fix, `resolveDialogueSnapshotOutcome` could not
+   * distinguish "this exact write was purged after being accepted" from
+   * "this write never landed," and falsely returned `{accepted: false}`
+   * for a request that WAS historically accepted -- and, worse, durably
+   * fenced it, exactly as if the server had just rejected it for the
+   * first time.
+   */
+  it("never relabels a governed-purged (but previously accepted) write as a confirmed non-acceptance -- it still reports accepted:true, expired:true from the bounded purge receipt, and never raises the fence", async () => {
+    const { service, repository, snapshots, retentionService } =
+      buildHarness({ appliedMediaEpoch: 2 });
+
+    // 1. Persist: the write lands for real.
+    const persisted = await service.persistDialogueSnapshot(validCommand());
+    expect(persisted.deduped).toBe(false);
+
+    // 2. Expire: push the row's own retention window into the past.
+    const row = snapshots.find(
+      (s) => s.snapshotId === persisted.snapshot.snapshotId,
+    )!;
+    row.retentionExpiresAt = new Date(Date.now() - 1000).toISOString();
+
+    // Sanity: before any hold/purge, the expired-but-present row still
+    // reports accepted:true, expired:true (the behavior Round-29 already
+    // fixed and this test must not regress).
+    await expect(
+      service.resolveDialogueSnapshotOutcome(validResolveCommand()),
+    ).resolves.toMatchObject({ accepted: true, expired: true });
+
+    // 3. Hold: a real legal hold blocks purge, same as every other
+    // evidence family's governed purge path.
+    const hold = retentionService.placeLegalHold({
+      caseNumber: "CASE-1",
+      evidenceFamily: "voice_transcript",
+      subjectRef: VOICE_SESSION_ID,
+      reasonCode: "regulatory_inquiry",
+      placedBy: "ops-1",
+    });
+    const heldPurge = await service.purgeExpiredDialogueSnapshots(
+      "operator-1",
+      false,
+    );
+    expect(heldPurge.report.skippedHeldCount).toBe(1);
+    expect(repository.deleteDialogueSnapshot).not.toHaveBeenCalled();
+    expect(snapshots).toHaveLength(1);
+
+    // 4. Release: only platform_admin may release (SD §9.2 / Runbook §4).
+    retentionService.releaseLegalHold({
+      holdId: hold.holdId,
+      releasedBy: "admin-1",
+      releasedByRole: "platform_admin",
+    });
+
+    // 5. Purge: now permitted -- the content row is actually deleted.
+    const { deletedCount } = await service.purgeExpiredDialogueSnapshots(
+      "operator-1",
+      false,
+    );
+    expect(deletedCount).toBe(1);
+    expect(snapshots).toHaveLength(0);
+
+    // 6. Resolve the SAME exact previously-accepted request. The content
+    // row is gone, but the bounded, non-content purge receipt still
+    // proves this exact write was accepted -- this must never be
+    // reported as a confirmed non-acceptance, and must never raise the
+    // fence (that would durably block a FUTURE write at this already-
+    // historically-accepted version for no reason).
+    const outcome = await service.resolveDialogueSnapshotOutcome(
+      validResolveCommand(),
+    );
+    expect(outcome).toMatchObject({
+      accepted: true,
+      expired: true,
+      voiceSessionId: VOICE_SESSION_ID,
+      sessionVersion: 5,
+      inputEpoch: 3,
+      mediaEpoch: 2,
+      turnId: "turn-xyz",
+    });
+    expect(outcome).not.toHaveProperty("snapshot");
+    expect(repository.raiseDialogueSnapshotFence).not.toHaveBeenCalled();
+  });
+
+  it("a genuinely never-attempted version (no row, no purge receipt) is still reported as a confirmed non-acceptance with the fence raised -- the purge-receipt check never masks a real rejection", async () => {
+    const { service, repository } = buildHarness({ appliedMediaEpoch: 2 });
+
+    const outcome = await service.resolveDialogueSnapshotOutcome(
+      validResolveCommand(),
+    );
+
+    expect(outcome).toMatchObject({ accepted: false });
+    expect(repository.findDialogueSnapshotPurgeReceipt).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      5,
+      undefined,
+    );
+    expect(repository.raiseDialogueSnapshotFence).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      5,
+      undefined,
+    );
   });
 });
 

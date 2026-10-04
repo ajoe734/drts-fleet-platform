@@ -222,7 +222,23 @@ export type ResolveDialogueSnapshotOutcomeResult =
       turnId: string;
       retentionExpiresAt: string;
     }
-  | { accepted: false };
+  | {
+      accepted: false;
+      /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+       * discriminated response validation (Codex reopen, canonical
+       * 2026-10-04T01:25:05Z): the adjudicated identity this exact command
+       * was checked against, plus the fence value just raised for it under
+       * the same row lock -- a server-generated correlation token, never a
+       * caller-supplied echo, so the worker can require this confirmed
+       * non-acceptance to actually answer its own pending write before
+       * clearing it. */
+      voiceSessionId: string;
+      sessionVersion: number;
+      inputEpoch: number;
+      mediaEpoch: number;
+      turnId: string;
+      fenceVersion: number;
+    };
 
 @Injectable()
 export class VoiceSessionService {
@@ -1395,6 +1411,41 @@ export class VoiceSessionService {
         row.inputEpoch === command.inputEpoch &&
         row.mediaEpoch === command.mediaEpoch &&
         row.turnId === command.turnId;
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge
+      // loses accepted-history distinction (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): a missing row is NOT, by itself, proof this
+      // exact write never landed -- `purgeExpiredDialogueSnapshots` governed
+      // physical deletion (see `VoiceSessionRepository.deleteDialogueSnapshot`'s
+      // own doc) can also be why nothing is found, and that case must never
+      // be reported as a confirmed non-acceptance. Only consulted when NO
+      // row exists at all for this version -- a row that exists but
+      // belongs to a different input/media epoch or turn is a genuinely
+      // different write occupying this version, not this one having been
+      // purged, and still falls through to the durable fence below.
+      if (row === null) {
+        const receipt = await this.repository.findDialogueSnapshotPurgeReceipt(
+          command.voiceSessionId,
+          command.expectedSessionVersion,
+          executor,
+        );
+        if (
+          receipt !== null &&
+          receipt.inputEpoch === command.inputEpoch &&
+          receipt.mediaEpoch === command.mediaEpoch &&
+          receipt.turnId === command.turnId
+        ) {
+          return {
+            accepted: true,
+            expired: true,
+            voiceSessionId: receipt.voiceSessionId,
+            sessionVersion: receipt.sessionVersion,
+            inputEpoch: receipt.inputEpoch,
+            mediaEpoch: receipt.mediaEpoch,
+            turnId: receipt.turnId,
+            retentionExpiresAt: receipt.retentionExpiresAt,
+          };
+        }
+      }
       if (correlates) {
         // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve expired-
         // content resurrection (Codex reopen, canonical
@@ -1464,12 +1515,29 @@ export class VoiceSessionService {
       // version now, before this transaction's lock on the session row
       // releases, so a write that is still genuinely in flight server-side
       // can never land after this point.
-      await this.repository.raiseDialogueSnapshotFence(
+      const fenceVersion = await this.repository.raiseDialogueSnapshotFence(
         command.voiceSessionId,
         command.expectedSessionVersion,
         executor,
       );
-      return { accepted: false };
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+      // discriminated response validation (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): a bare `{accepted: false}` carries no
+      // correlation field at all, so the worker could not tell this exact
+      // adjudication's own answer apart from a contradictory/foreign body.
+      // Echo this call's own adjudicated identity plus the fence value just
+      // raised under the SAME row lock -- never a caller-supplied echo --
+      // so the worker's validator can require both to correlate before
+      // ever trusting this as a confirmed non-acceptance.
+      return {
+        accepted: false,
+        voiceSessionId: command.voiceSessionId,
+        sessionVersion: command.expectedSessionVersion,
+        inputEpoch: command.inputEpoch,
+        mediaEpoch: command.mediaEpoch,
+        turnId: command.turnId,
+        fenceVersion,
+      };
     };
 
     return typeof this.repository.withTransaction === "function"

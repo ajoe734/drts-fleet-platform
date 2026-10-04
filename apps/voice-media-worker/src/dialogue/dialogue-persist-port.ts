@@ -1,3 +1,4 @@
+import { voiceDialogueSnapshotContentSchema } from "@drts/contracts";
 import type { VoiceDialogueState } from "./dialogue-state";
 import type { VoiceDialogueRequest } from "./voice-dialogue-provider";
 import type { VoiceSessionBinding } from "./voice-session-binding";
@@ -254,6 +255,24 @@ type UnresolvedCommitReconciliation =
  * already does for its own response shape -- never installs a mismatched
  * candidate, never fences on an uninterpretable body.
  */
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+ * discriminated response validation (Codex reopen, canonical
+ * 2026-10-04T01:25:05Z): previously validated `content` only as "a
+ * non-null object" -- a structurally-wrong-but-object-shaped body (a
+ * required field like `handoff` omitted, a field of the wrong type) still
+ * passed, and was then installed onto the real attachment via
+ * `restoreFromSnapshotContent`, which writes fields incrementally with no
+ * validation of its own (see that method's own doc). Reusing the exact
+ * shared schema every real persisted snapshot's content was already
+ * validated against server-side (`VoiceSessionService
+ * .resolveDialogueSnapshotOutcome`'s own `voiceDialogueSnapshotContentSchema
+ * .parse` on decrypt) closes that gap at the one client-side boundary that
+ * actually matters: `VoiceApiClient.request` casts `response.json()` with
+ * no runtime validation at all, so a malformed/truncated/foreign-shaped
+ * body is otherwise indistinguishable, at this call site, from a genuinely
+ * well-formed one.
+ */
 function isWellFormedSnapshotRecord(
   value: unknown,
 ): value is PersistDialogueSnapshotResult["snapshot"] {
@@ -268,8 +287,7 @@ function isWellFormedSnapshotRecord(
     typeof v.turnId === "string" &&
     typeof v.createdAt === "string" &&
     typeof v.retentionExpiresAt === "string" &&
-    v.content != null &&
-    typeof v.content === "object"
+    voiceDialogueSnapshotContentSchema.safeParse(v.content).success
   );
 }
 
@@ -298,6 +316,37 @@ function resolveOutcomeIdentityCorrelates(
   );
 }
 
+/**
+ * Single choke point for "is this an accepted-snapshot response this
+ * exact pending write may trust" -- well-formed shape (including schema-
+ * valid `content`), correlating identity, and not already past its own
+ * retention window. Shared by both `classifyResolveOutcome`'s atomic
+ * adjudication branch and `reconcileUnresolvedCommit`'s own bounded
+ * restoration-read polling below (AUDIT-VOICE-APPLICATION-WIRING-20261003
+ * R4-persist, canonical 2026-10-04T01:25:05Z, "inspect other
+ * restoration/reconciliation consumers of the same record shape so an
+ * alternate read cannot bypass validation") -- both read the exact same
+ * `PersistDialogueSnapshotResult["snapshot"]` shape over an equally
+ * unvalidated HTTP response, so a candidate that fails this check must
+ * never be installed via either path.
+ */
+export function isValidAcceptedSnapshotCandidate(
+  value: unknown,
+  voiceSessionId: string,
+  pending: {
+    expectedSessionVersion: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+  },
+): value is PersistDialogueSnapshotResult["snapshot"] {
+  return (
+    isWellFormedSnapshotRecord(value) &&
+    resolveOutcomeIdentityCorrelates(value, voiceSessionId, pending) &&
+    new Date(value.retentionExpiresAt).getTime() > Date.now()
+  );
+}
+
 type ResolveOutcomeVerdict =
   | {
       readonly kind: "accepted";
@@ -313,10 +362,25 @@ type ResolveOutcomeVerdict =
  * `"unknown"` is the safe default for anything this cannot positively
  * classify: a missing/non-boolean `accepted`, an `accepted: true` whose
  * `snapshot` is malformed or does not correlate with `pending` (foreign
- * session/version/input/media/turn, or already past its own retention
- * window), or an `expired` verdict whose own identity fields do not
- * correlate. Only `accepted === false` (exactly, never merely falsy) is
- * ever treated as `"rejected"`.
+ * session/version/input/media/turn, already past its own retention window,
+ * or whose content fails `voiceDialogueSnapshotContentSchema`), an
+ * `expired` verdict whose own identity fields do not correlate or whose
+ * `retentionExpiresAt` is missing/not actually in the past, or an
+ * `accepted: false` whose identity/fence fields do not correlate.
+ *
+ * Correction (Codex reopen, canonical 2026-10-04T01:25:05Z, "R4-persist
+ * incomplete discriminated response validation"): the previous version
+ * trusted a bare `{accepted: false}` -- the production contract this
+ * worker actually receives -- as an unconditional rejection with no
+ * correlation fields at all, so a contradictory/foreign body (wrong
+ * session, or no identity at all) could falsely clear `unresolvedCommit`
+ * for a write whose outcome was never actually adjudicated. The matching
+ * server-side fix (`VoiceSessionService.resolveDialogueSnapshotOutcome`)
+ * now echoes the exact adjudicated identity plus the fence value it just
+ * raised under the SAME row lock, generated server-side and never a
+ * caller-supplied echo; `expired: true` similarly now requires its own
+ * well-formed, actually-past `retentionExpiresAt` rather than trusting the
+ * bare boolean alone.
  */
 function classifyResolveOutcome(
   outcome: unknown,
@@ -332,14 +396,8 @@ function classifyResolveOutcome(
     return { kind: "unknown" };
   }
   const o = outcome as Record<string, unknown>;
-  if (o.accepted === false) {
-    return { kind: "rejected" };
-  }
-  if (o.accepted !== true) {
-    return { kind: "unknown" };
-  }
-  if (o.expired === true) {
-    return resolveOutcomeIdentityCorrelates(
+  const identityCorrelates = (): boolean =>
+    resolveOutcomeIdentityCorrelates(
       o as {
         voiceSessionId: unknown;
         sessionVersion: unknown;
@@ -349,18 +407,30 @@ function classifyResolveOutcome(
       },
       voiceSessionId,
       pending,
-    )
+    );
+  if (o.accepted === false) {
+    const fenceProven =
+      typeof o.fenceVersion === "number" &&
+      o.fenceVersion >= pending.expectedSessionVersion;
+    return identityCorrelates() && fenceProven
+      ? { kind: "rejected" }
+      : { kind: "unknown" };
+  }
+  if (o.accepted !== true) {
+    return { kind: "unknown" };
+  }
+  if (o.expired === true) {
+    const retentionProven =
+      typeof o.retentionExpiresAt === "string" &&
+      !Number.isNaN(new Date(o.retentionExpiresAt).getTime()) &&
+      new Date(o.retentionExpiresAt).getTime() <= Date.now();
+    return identityCorrelates() && retentionProven
       ? { kind: "expired" }
       : { kind: "unknown" };
   }
-  if (!isWellFormedSnapshotRecord(o.snapshot)) {
-    return { kind: "unknown" };
-  }
-  const candidate = o.snapshot;
-  const correlates =
-    resolveOutcomeIdentityCorrelates(candidate, voiceSessionId, pending) &&
-    new Date(candidate.retentionExpiresAt).getTime() > Date.now();
-  return correlates ? { kind: "accepted", snapshot: candidate } : { kind: "unknown" };
+  return isValidAcceptedSnapshotCandidate(o.snapshot, voiceSessionId, pending)
+    ? { kind: "accepted", snapshot: o.snapshot }
+    : { kind: "unknown" };
 }
 
 const unresolvedCommitRecoveries = new WeakMap<
@@ -393,15 +463,17 @@ async function reconcileUnresolvedCommit(
         recoverySignal(),
       );
       const candidate = reconciled?.snapshot;
-      const correlates =
-        candidate != null &&
-        candidate.voiceSessionId === voiceSessionId &&
-        candidate.sessionVersion === pending.expectedSessionVersion &&
-        candidate.inputEpoch === pending.inputEpoch &&
-        candidate.mediaEpoch === pending.mediaEpoch &&
-        candidate.turnId === pending.turnId &&
-        new Date(candidate.retentionExpiresAt).getTime() > Date.now();
-      if (correlates) {
+      // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+      // discriminated response validation (Codex reopen, canonical
+      // 2026-10-04T01:25:05Z): this polling path reads the exact same
+      // unvalidated `PersistDialogueSnapshotResult["snapshot"]` shape
+      // `classifyResolveOutcome`'s atomic adjudication branch does --
+      // reuse the SAME shared validator so a malformed/foreign body
+      // cannot bypass content-schema/correlation/retention validation by
+      // going through this read instead of that one.
+      if (
+        isValidAcceptedSnapshotCandidate(candidate, voiceSessionId, pending)
+      ) {
         if (attachmentState) {
           if (
             attachmentState.committedSessionVersion === null ||
