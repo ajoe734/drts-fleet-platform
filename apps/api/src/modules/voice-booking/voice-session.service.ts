@@ -1353,6 +1353,11 @@ export class VoiceSessionService {
     ): Promise<ResolveDialogueSnapshotOutcomeResult> => {
       // FOR UPDATE: see this method's own doc on why this lock is what
       // makes the check-then-fence sequence below atomic.
+      //
+      // (Independently reproduced and partially fixed -- the version-bound
+      // half only, via VOICE_DRAFT_STALE -- by Pi's contribution commit
+      // 1d86eae5c on this same task branch; this merge keeps this copy's
+      // fuller fix, which also re-verifies capability authority below.)
       const session = await this.requireSession(
         command.voiceSessionId,
         executor,

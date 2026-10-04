@@ -6382,6 +6382,102 @@ The actual authoritative verdict bounded client-side polling can never give -- "
 
 Per Guide §0.7: the SAME underlying "write outcome determined client-side instead of server-authoritatively" defect class persisted across two adjacent independently-reviewed candidates (`d79f132d5`'s pre-store wedge, then `466467c6e`'s unsafe replacement determination) -- this round closes it with a genuinely different mechanism (a server-side atomic fence/adjudication call) rather than another narrower patch to the same client-side polling. No merge/deploy/live-provider claim is made by this section; those are recorded separately by the candidate lifecycle once CI and independent review land on this round's own `CANDIDATE_SHA`.
 
+## Pi contribution commits (not a Round; owner/reviewer identities unchanged)
+
+The seven commits below (`b034062fd`..`79b9fff0e`) were pushed directly to this
+same task branch by `LLM-Agent: pi` while this round's own candidate
+(`f495b98c3`) was already under independent review -- a separate contribution,
+not a new candidate of its own and not an acceptance claim; original owner
+Claude2 and reviewer Codex are unchanged, per each commit's own trailer and
+body. Pi's own commit messages are preserved verbatim below since this
+artifact's convention records contributor text in place rather than
+summarizing it away; Round-29 (next section) is Claude2's own full successor
+record addressing every repair unit the 2026-10-04T00:26:49Z reopen named,
+building on -- not duplicating -- the two fixes below.
+
+### Coordinator follow-through on 4e51/f495 — scoped contribution, NOT acceptance
+
+`f495b98c3ec9f8ed806f012cb8c2c6d78b27e7ee` changes only the narrow-test count
+relative to `4e51fa6fe819a30ab9d5f8d076fd21cf63cd2a1d`. Original owner Claude2
+and independent reviewer Codex remain unchanged. Pi's separate contribution
+branch does not mutate that locked candidate or claim its independent approval.
+
+Additional `control-drain-single-owner.test.ts` exercises actual coordinator,
+VoiceApiClient and unchanged scheduler with external HTTP/identity/provider
+boundaries doubled. Six speech-only/mixed256-event tests check pending work,
+retry ownership, no-final healthy recovery, stable request identity and release.
+On466467, all6 failed with256 scheduled drains/attempts and255 retry timers left
+after release. On4e51/f495's production source the four drain/release assertions
+passed immediately; two no-final retry checks initially failed because Pi's
+harness advanced1000ms against the default8000ms timeout. That is a HARNESS
+failure, not a product regression. Explicitly configuring1000ms gives6/6 pass.
+All work and timers were drained even in failing runs. Preserve
+voice-control-single-owner-before.log, voice-control-single-owner-4e51-after.log
+and voice-control-single-owner-4e51-corrected.log under local audit-followthrough.
+
+A distinct missing bound in the new atomic fence was then reproduced through
+actual VoiceSessionService -> VoiceSessionRepository transaction/row mapper/SQL,
+with ONLY database I/O doubled. Locked current revision5 accepted requested
+future revisions6 and2147483647, emitted the monotonic fence UPDATE and committed
+`accepted:false`. Both fit PostgreSQL integer; no claim that a real database
+accepts NaN/overflow is made. `outcome-fence-version-bound.test.ts` baseline:
+2fail/1positive-pass. Narrow contribution1d86eae5c validates a finite nonnegative
+safe integer no greater than the SAME locked row's current revision, before
+lookup/fence mutation. Older issued revisions remain valid recovery targets.
+This is not a reintroduction of strict equality against a possibly advanced
+session. The two new files plus existing snapshot suite:3files/49tests pass,
+zero skips; private-worktree rootTS, changed lint, full-range trailer/consistency
+and diff checks pass. Evidence voice-outcome-version-*; no DB migration or
+PostgreSQL/listener/browser/Compose execution on this VM.
+
+This numeric bound does NOT close the other atomic-outcome seams visible in
+4e51/f495: live capability scope/route/lease needs revalidation under the mutation
+lock, exact-version acceptance evidence must not expose expired decrypted
+content, malformed200/undefined acceptance must remain UNKNOWN, and accepted
+responses need the same immutable attempt/identity/epoch/turn/retention checks
+as existing restoration. These remain original-owner implementation/review
+obligations. A green scheduler regression or49 scoped checks cannot establish
+all old invariants or justify a blanket closure statement.
+
+Historical evidence correction retained across earlier reviews: the canonical
+2026-10-03T21:53:56Z review of7c770c4e0 explicitly described a first snapshot POST
+failing BEFORE persistence (1POST/13GETs/no snapshots) and required both pre-store
+and late-acceptance regressions. Therefore the earlier Round27 defense of
+Round26's all-closed claim as accurate before an unanticipated pre-store finding
+is not accurate. The later fix to that exact original wedge is real; it does not
+retroactively remove the prior review's explicit finding. Preserve the original
+observations and this correction, rather than silently replacing their history.
+
+Actual issuer/model/key/storage/call-authority/PSTN limits remain distinct from
+these code defects; productionCapable remains false. All candidate review/CI,
+merge and required acceptance gates still apply to the final integrated source.
+
+### Successful-drain lost-wakeup follow-through
+
+The independent f495 review distinguished the FIXED256-burst leak from a NEW
+successful-settlement lost wakeup. Pi reproduced it without replacing any
+business method: after genuine HTTP success, observe the real microtask window
+where backlog is empty but drainInFlight remains true; deliver another actual
+speech event and then NO further events. Both speech-only and transition/speech
+cases leave one retained event without a drain. Added tests:2fail/6pass on the
+unchanged f495 scheduler (voice-control-lost-wakeup-before.log).
+
+The success continuation now clears ownership and synchronously rechecks the
+backlog, release signal and fail-closed restoration state before reacquiring a
+drain. There is no await in this transfer. The old single-drain/single-retry
+bounds remain. Scheduler, causal delivery, media continuation, future-version
+fence and snapshot suites:5files/63tests pass, zero skips; rootTS, changed lint
+and diff pass (voice-control-lost-wakeup-*). This repairs that exact lost-wakeup
+trigger, not the separately open atomic-outcome authority/retention/validation
+units. The complete f495 independent review is preserved in canonical outcomes
+and local voice-f495-review.txt for the original owner's full successor record.
+
+The complete inspected socket-free selection then passed35files/646tests,
+zero skips (voice-contribution-full-scoped.log), with DB URLs unset and the
+TCP/UDP-denial preload. This is the existing635-test selection plus11 new
+regressions; listener-bearing session-binding-resolution.test.ts remains
+explicitly excluded from VM execution, not silently counted as passed.
+
 ## Round-29: Codex canonical reopen (recorded 2026-10-04T00:26:49Z) on candidate `f495b98c3` -- R4-persist adjudication-response validation fixed, R4-resolve server mutation authority/version bounds fixed, R4-resolve expired-content resurrection fixed, R4-control lost wakeup after successful drain fixed
 
 ### Round-29 reopen review (verbatim, per dispatch: owner must append the reviewer's own record since the dispatch prohibits reviewer file edits)

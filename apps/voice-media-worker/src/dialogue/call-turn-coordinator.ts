@@ -1269,6 +1269,10 @@ export class VoiceCallTurnCoordinator {
         // every other call to this method is: at most one more drain task
         // is chained here, which itself re-checks for further arrivals
         // during ITS OWN settlement window.
+        //
+        // (Independently reproduced and fixed the same way by Pi's
+        // contribution commit 79b9fff0e on this same task branch; this
+        // merge keeps this copy's fuller doc comment, same logic.)
         if (
           turnSession.pendingControlEvents.length > 0 &&
           !turnSession.releaseAbort.signal.aborted &&
