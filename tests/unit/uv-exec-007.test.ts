@@ -356,6 +356,107 @@ describe("UV-EXEC-007: voice session state machine, ordered events, persistent c
       expect(fake.session.lastAppliedControlSequence).toBe(3);
     });
 
+    // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-control (media-epoch
+    // continuation, Codex reopen canonical 2026-10-03T19:24:15Z and
+    // 2026-10-03T20:13:00Z): the ONE eventType allowed to differ from
+    // `appliedEpoch` is `media_epoch_transition`, and only a strictly
+    // forward move. The test immediately above (eventType "clear") proves
+    // this new branch does not loosen the ordinary mismatch rule.
+    describe("media_epoch_transition: the one authoritative forward-epoch pin advance", () => {
+      it("accepts a strictly-forward transition and pins the new epoch for later events", async () => {
+        const transition = await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 4,
+            mediaEpoch: 3,
+            eventType: "media_epoch_transition",
+            sourceEventId: "transition-to-3",
+          }),
+        );
+        expect(transition).toMatchObject({
+          applied: true,
+          gap: false,
+          appliedThroughSequence: 4,
+        });
+        expect(fake.session.lastAppliedControlSequence).toBe(4);
+
+        // A new-epoch ordinary event now applies normally.
+        const nextOnNewEpoch = await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 5,
+            mediaEpoch: 3,
+            eventType: "clear",
+            sourceEventId: "clear-on-epoch-3",
+          }),
+        );
+        expect(nextOnNewEpoch).toMatchObject({ applied: true, gap: false });
+
+        // The OLD epoch is now correctly superseded -- a stale arrival at
+        // the former epoch 2 is rejected exactly like any other mismatch.
+        const staleOldEpoch = await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 6,
+            mediaEpoch: 2,
+            eventType: "clear",
+            sourceEventId: "stale-old-epoch",
+          }),
+        );
+        expect(staleOldEpoch).toMatchObject({ applied: false, gap: true });
+        expect(fake.session.lastAppliedControlSequence).toBe(5);
+      });
+
+      it("rejects a same-epoch transition attempt as a stale/superseded claim", async () => {
+        const sameEpoch = await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 4,
+            mediaEpoch: 2,
+            eventType: "media_epoch_transition",
+            sourceEventId: "stale-transition-same",
+          }),
+        );
+        expect(sameEpoch).toMatchObject({ applied: false, gap: true });
+        expect(fake.session.lastAppliedControlSequence).toBe(3);
+      });
+
+      it("rejects a backward transition attempt as a stale/superseded claim", async () => {
+        const backwardEpoch = await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 4,
+            mediaEpoch: 1,
+            eventType: "media_epoch_transition",
+            sourceEventId: "stale-transition-backward",
+          }),
+        );
+        expect(backwardEpoch).toMatchObject({ applied: false, gap: true });
+        expect(fake.session.lastAppliedControlSequence).toBe(3);
+      });
+
+      it("still obeys ordinary sequence contiguity -- a transition cannot skip a gap", async () => {
+        const skipsAhead = await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 6,
+            mediaEpoch: 3,
+            eventType: "media_epoch_transition",
+            sourceEventId: "transition-skips-gap",
+          }),
+        );
+        expect(skipsAhead).toMatchObject({ applied: false, gap: true });
+        expect(fake.session.lastAppliedControlSequence).toBe(3);
+      });
+
+      it("never opens pendingInput/inputEpoch -- a transition is a different authority axis than ASR input", async () => {
+        await service.recordControlEvent(
+          baseEventCommand({
+            sequence: 4,
+            mediaEpoch: 3,
+            eventType: "media_epoch_transition",
+            sourceEventId: "transition-not-speech",
+          }),
+        );
+        expect(fake.session.pendingInput).toBe(false);
+        expect(fake.session.inputEpoch).toBe(0);
+      });
+    });
+
     it("fails closed on a stale lease epoch instead of letting a superseded worker advance the watermark", async () => {
       // The session's lease has already moved on (e.g. handoff/reclaim), but
       // a stale worker still tries to push the next contiguous frame.

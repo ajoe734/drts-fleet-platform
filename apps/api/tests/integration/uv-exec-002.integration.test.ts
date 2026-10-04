@@ -260,6 +260,8 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       "callback_task",
       "command_receipt",
       "confirmation",
+      "dialogue_snapshot",
+      "dialogue_snapshot_purge_receipt",
       "draft_revision",
       "handoff",
       "intent",

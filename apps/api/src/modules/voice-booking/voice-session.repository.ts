@@ -79,6 +79,8 @@ type VoiceSessionRow = QueryResultRow & {
   pending_input: boolean;
   last_resolved_input_epoch: number;
   last_applied_control_sequence: number;
+  dialogue_snapshot_fence_version: number;
+  dialogue_snapshot_history_unavailable_floor: number;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -109,6 +111,9 @@ function mapSessionRow(row: VoiceSessionRow): VoiceSessionRecord {
     pendingInput: row.pending_input,
     lastResolvedInputEpoch: row.last_resolved_input_epoch,
     lastAppliedControlSequence: row.last_applied_control_sequence,
+    dialogueSnapshotFenceVersion: row.dialogue_snapshot_fence_version,
+    dialogueSnapshotHistoryUnavailableFloor:
+      row.dialogue_snapshot_history_unavailable_floor,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
@@ -151,6 +156,144 @@ function mapSessionEventRow(
     eventType: row.event_type,
     payload: row.payload,
     payloadRef: row.payload_ref,
+  };
+}
+
+export type InsertDialogueSnapshotInput = {
+  voiceSessionId: string;
+  sessionVersion: number;
+  resourceScopeId: string;
+  routeProfileVersion: number;
+  leaseEpoch: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  contentKeyVersion: string;
+  contentNonce: Buffer;
+  contentCiphertext: Buffer;
+  contentAuthTag: Buffer;
+  retentionExpiresAt: string;
+};
+
+export type DialogueSnapshotRow = {
+  snapshotId: string;
+  voiceSessionId: string;
+  sessionVersion: number;
+  resourceScopeId: string;
+  routeProfileVersion: number;
+  leaseEpoch: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  contentKeyVersion: string;
+  contentNonce: Buffer;
+  contentCiphertext: Buffer;
+  contentAuthTag: Buffer;
+  retentionExpiresAt: string;
+  createdAt: string;
+};
+
+type VoiceDialogueSnapshotRow = QueryResultRow & {
+  snapshot_id: string;
+  voice_session_id: string;
+  session_version: number;
+  resource_scope_id: string;
+  route_profile_version: number;
+  lease_epoch: number;
+  input_epoch: number;
+  media_epoch: number;
+  turn_id: string;
+  content_key_version: string;
+  content_nonce: Buffer;
+  content_ciphertext: Buffer;
+  content_auth_tag: Buffer;
+  retention_expires_at: Date | string;
+  created_at: Date | string;
+};
+
+function mapDialogueSnapshotRow(
+  row: VoiceDialogueSnapshotRow,
+): DialogueSnapshotRow {
+  return {
+    snapshotId: row.snapshot_id,
+    voiceSessionId: row.voice_session_id,
+    sessionVersion: row.session_version,
+    resourceScopeId: row.resource_scope_id,
+    routeProfileVersion: row.route_profile_version,
+    leaseEpoch: row.lease_epoch,
+    inputEpoch: row.input_epoch,
+    mediaEpoch: row.media_epoch,
+    turnId: row.turn_id,
+    contentKeyVersion: row.content_key_version,
+    contentNonce: row.content_nonce,
+    contentCiphertext: row.content_ciphertext,
+    contentAuthTag: row.content_auth_tag,
+    retentionExpiresAt: new Date(row.retention_expires_at).toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge loses
+ * accepted-history distinction (Codex reopen, canonical
+ * 2026-10-04T01:25:05Z): bounded, non-content proof that a given
+ * (voice_session_id, session_version, input_epoch, media_epoch, turn_id)
+ * write WAS accepted before its content/row was later governed-purged --
+ * see `V0106__voice_dialogue_snapshot.sql`'s own doc on this table. Never
+ * the dialogue content itself.
+ */
+export type DialogueSnapshotPurgeReceiptRow = {
+  voiceSessionId: string;
+  sessionVersion: number;
+  inputEpoch: number;
+  mediaEpoch: number;
+  turnId: string;
+  retentionExpiresAt: string;
+  purgedAt: string;
+};
+
+type VoiceDialogueSnapshotPurgeReceiptRow = QueryResultRow & {
+  voice_session_id: string;
+  session_version: number;
+  input_epoch: number;
+  media_epoch: number;
+  turn_id: string;
+  retention_expires_at: Date | string;
+  purged_at: Date | string;
+};
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged revision
+ * reuse (Codex reopen, canonical 2026-10-04T02:13:45Z): thrown by
+ * `insertDialogueSnapshot` instead of ever inserting a row at a
+ * `(voice_session_id, session_version)` key `voice.dialogue_snapshot_purge_receipt`
+ * already has a receipt for -- that key is an immutable accepted-then-
+ * governed-purged revision (see `deleteDialogueSnapshot`'s own doc), and
+ * must never be reused to store NEW content or have its retention window
+ * silently renewed by a resubmit/replacement write. Carries the existing
+ * receipt so the caller can report the correct historical identity rather
+ * than a bare conflict.
+ */
+export class DialogueSnapshotPurgeReceiptConflictError extends Error {
+  constructor(readonly receipt: DialogueSnapshotPurgeReceiptRow) {
+    super(
+      `voice.dialogue_snapshot insert refused: (voiceSessionId=${receipt.voiceSessionId}, sessionVersion=${receipt.sessionVersion}) is an already governed-purged, immutably accepted revision recorded in voice.dialogue_snapshot_purge_receipt; it can never be reused for a new or replacement write.`,
+    );
+    this.name = "DialogueSnapshotPurgeReceiptConflictError";
+  }
+}
+
+function mapDialogueSnapshotPurgeReceiptRow(
+  row: VoiceDialogueSnapshotPurgeReceiptRow,
+): DialogueSnapshotPurgeReceiptRow {
+  return {
+    voiceSessionId: row.voice_session_id,
+    sessionVersion: row.session_version,
+    inputEpoch: row.input_epoch,
+    mediaEpoch: row.media_epoch,
+    turnId: row.turn_id,
+    retentionExpiresAt: new Date(row.retention_expires_at).toISOString(),
+    purgedAt: new Date(row.purged_at).toISOString(),
   };
 }
 
@@ -279,9 +422,22 @@ export class VoiceSessionRepository {
     }
   }
 
+  /**
+   * `forUpdate` (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4, reviewer WIP
+   * feedback 2026-10-03T14:20Z): locks the row for the duration of the
+   * caller's transaction, so a concurrent `casUpdateSessionControl` cannot
+   * advance scope/route/lease/epoch state in between this read and a
+   * later write in the SAME transaction (`VoiceSessionService.
+   * persistDialogueSnapshot`'s own fence-check-then-insert). Only
+   * meaningful when `executor` is itself a transaction-scoped client
+   * (`withTransaction`'s own callback argument) -- `FOR UPDATE` outside an
+   * explicit transaction releases its lock immediately after the
+   * statement, same as any other single-statement implicit transaction.
+   */
   async findSessionById(
     voiceSessionId: string,
     executor?: VoiceQueryExecutor,
+    forUpdate = false,
   ): Promise<VoiceSessionRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -289,7 +445,9 @@ export class VoiceSessionRepository {
     const result = await (
       executor ?? this.requireDatabase()
     ).query<VoiceSessionRow>(
-      `SELECT * FROM voice.session WHERE voice_session_id = $1 LIMIT 1`,
+      `SELECT * FROM voice.session WHERE voice_session_id = $1 LIMIT 1${
+        forUpdate ? " FOR UPDATE" : ""
+      }`,
       [voiceSessionId],
     );
     const row = result.rows[0];
@@ -300,9 +458,35 @@ export class VoiceSessionRepository {
    * SD §9.1/§5.4 dedup: `(source, providerAccountId, sourceEventId)` covers a
    * provider resending the exact same event; `(voiceSessionId, sequence)`
    * (the DB's `uq_voice_session_event_sequence` index) covers a retry that
-   * omitted `sourceEventId`. Either conflict returns the pre-existing row
-   * with `deduped: true` instead of throwing, so a retried/duplicate HTTP
-   * delivery is always a safe no-op rather than a 500.
+   * omitted `sourceEventId`, lost process state across a restart, or
+   * otherwise arrives with a DIFFERENT `sourceEventId` for the same logical
+   * sequence slot than whatever attempt actually landed the row (R4-control,
+   * Codex reopen round 19, canonical 2026-10-03T17:41:28Z: an earlier version
+   * of this comment claimed a worker that never saw its own `/events` ack
+   * "has no way to know it already succeeded" and therefore "must" retry
+   * with a new identity -- that is not true. `call-turn-coordinator.ts`'s
+   * `TurnSession.pendingSpeechStarts`/`pendingMediaEpochTransitionId` are
+   * self-generated by the worker, not received from anywhere, so the worker
+   * always CAN retain and reuse one across retries of the same
+   * still-unapplied slot, and now does; this
+   * fallback lookup exists for the cases retention does not cover -- a
+   * process restart, a caller that never retains it, or the `sourceEventId`
+   * omitted entirely -- not because retry-with-a-fresh-id is unavoidable).
+   * `ON CONFLICT DO NOTHING` fires on EITHER unique index without telling us
+   * which one, so the fallback lookup must be able to find the row under
+   * either constraint: first by the caller's own
+   * (source, providerAccountId, sourceEventId) identity (the literal-retry
+   * case), and if that finds nothing, by (voiceSessionId, sequence) (the
+   * lost-response case, where the existing row's sourceEventId differs from
+   * the one just submitted). Skipping the second lookup is exactly the bug
+   * that previously threw "insert conflicted but no existing row could be
+   * located" and permanently wedged the attachment -- the caller's retry
+   * could never be told the sequence was already durably applied.
+   *
+   * `provider_account_id` is nullable (this worker never supplies it, see
+   * `voice-booking.controller.ts`'s `/events` handler) and ordinary SQL
+   * equality (`provider_account_id = $2`) is never true when $2 is NULL, so
+   * both lookups use `IS NOT DISTINCT FROM` to stay NULL-safe.
    */
   async insertControlEvent(
     input: InsertControlEventInput,
@@ -341,25 +525,32 @@ export class VoiceSessionRepository {
       return { event: mapSessionEventRow(insertedRow), deduped: false };
     }
 
-    const existing = input.sourceEventId
-      ? await exec.query<VoiceSessionEventRow>(
-          `
-            SELECT * FROM voice.session_event
-            WHERE source = $1 AND provider_account_id = $2 AND source_event_id = $3
-            LIMIT 1
-          `,
-          [input.source, input.providerAccountId ?? null, input.sourceEventId],
-        )
-      : await exec.query<VoiceSessionEventRow>(
-          `
-            SELECT * FROM voice.session_event
-            WHERE voice_session_id = $1 AND sequence = $2
-            LIMIT 1
-          `,
-          [input.voiceSessionId, input.sequence],
-        );
+    let existingRow: VoiceSessionEventRow | undefined;
+    if (input.sourceEventId) {
+      const bySourceEvent = await exec.query<VoiceSessionEventRow>(
+        `
+          SELECT * FROM voice.session_event
+          WHERE source = $1
+            AND provider_account_id IS NOT DISTINCT FROM $2
+            AND source_event_id = $3
+          LIMIT 1
+        `,
+        [input.source, input.providerAccountId ?? null, input.sourceEventId],
+      );
+      existingRow = bySourceEvent.rows[0];
+    }
+    if (!existingRow) {
+      const bySequence = await exec.query<VoiceSessionEventRow>(
+        `
+          SELECT * FROM voice.session_event
+          WHERE voice_session_id = $1 AND sequence = $2
+          LIMIT 1
+        `,
+        [input.voiceSessionId, input.sequence],
+      );
+      existingRow = bySequence.rows[0];
+    }
 
-    const existingRow = existing.rows[0];
     if (!existingRow) {
       throw new Error(
         "voice.session_event insert conflicted but no existing row could be located",
@@ -532,6 +723,444 @@ export class VoiceSessionRepository {
       [voiceSessionId],
     );
     return result.rows.map(mapCommandReceiptRow);
+  }
+
+  /**
+   * Dedup key is `(voice_session_id, session_version)` -- a snapshot is only
+   * ever written immediately after a `resolveInput` CAS advances the
+   * session's revision for the turn whose content this row records, so a
+   * retried write for the same already-advanced revision is a safe no-op
+   * (same convention as `insertControlEvent`'s `ON CONFLICT DO NOTHING`
+   * above), never a duplicate or a silently-discarded second attempt.
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged revision
+   * reuse (Codex reopen, canonical 2026-10-04T02:13:45Z, "purged revision
+   * remains writable, reintroducing content and losing acceptance
+   * identity"): the `ON CONFLICT` above only protects against a row that is
+   * STILL present -- once `deleteDialogueSnapshot` has governed-purged a
+   * version's row, that same unique index no longer blocks a brand new
+   * INSERT at the vacated key, which would silently reintroduce content (and
+   * a freshly-renewed `retention_expires_at`) at a key that is supposed to
+   * be an immutable, already-adjudicated accepted-then-purged revision. The
+   * `WHERE NOT EXISTS` guard makes the insert itself a no-op (0 rows,
+   * `RETURNING` empty, same shape as the existing unique-conflict path) the
+   * instant `voice.dialogue_snapshot_purge_receipt` already has a row for
+   * this exact key, in the SAME statement/transaction as the insert attempt
+   * -- never a separate, racy check-then-insert.
+   */
+  async insertDialogueSnapshot(
+    input: InsertDialogueSnapshotInput,
+    executor?: VoiceQueryExecutor,
+  ): Promise<{ snapshot: DialogueSnapshotRow; deduped: boolean }> {
+    const exec = executor ?? this.requireDatabase();
+    const insertResult = await exec.query<VoiceDialogueSnapshotRow>(
+      `
+        INSERT INTO voice.dialogue_snapshot (
+          voice_session_id, session_version, resource_scope_id,
+          route_profile_version, lease_epoch, input_epoch, media_epoch,
+          turn_id, content_key_version, content_nonce, content_ciphertext,
+          content_auth_tag, retention_expires_at
+        )
+        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+        WHERE NOT EXISTS (
+          SELECT 1 FROM voice.dialogue_snapshot_purge_receipt
+          WHERE voice_session_id = $1 AND session_version = $2
+        )
+        ON CONFLICT (voice_session_id, session_version) DO NOTHING
+        RETURNING *
+      `,
+      [
+        input.voiceSessionId,
+        input.sessionVersion,
+        input.resourceScopeId,
+        input.routeProfileVersion,
+        input.leaseEpoch,
+        input.inputEpoch,
+        input.mediaEpoch,
+        input.turnId,
+        input.contentKeyVersion,
+        input.contentNonce,
+        input.contentCiphertext,
+        input.contentAuthTag,
+        input.retentionExpiresAt,
+      ],
+    );
+
+    const insertedRow = insertResult.rows[0];
+    if (insertedRow) {
+      return { snapshot: mapDialogueSnapshotRow(insertedRow), deduped: false };
+    }
+
+    const existing = await exec.query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE voice_session_id = $1 AND session_version = $2
+        LIMIT 1
+      `,
+      [input.voiceSessionId, input.sessionVersion],
+    );
+    const existingRow = existing.rows[0];
+    if (existingRow) {
+      return { snapshot: mapDialogueSnapshotRow(existingRow), deduped: true };
+    }
+
+    const receipt = await exec.query<VoiceDialogueSnapshotPurgeReceiptRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot_purge_receipt
+        WHERE voice_session_id = $1 AND session_version = $2
+        LIMIT 1
+      `,
+      [input.voiceSessionId, input.sessionVersion],
+    );
+    const receiptRow = receipt.rows[0];
+    if (receiptRow) {
+      throw new DialogueSnapshotPurgeReceiptConflictError(
+        mapDialogueSnapshotPurgeReceiptRow(receiptRow),
+      );
+    }
+    throw new Error(
+      "voice.dialogue_snapshot insert conflicted but no existing row or purge receipt could be located",
+    );
+  }
+
+  /**
+   * Excludes a row whose `retention_expires_at` has already passed
+   * (reviewer WIP feedback 2026-10-03T14:20Z: "current latest-snapshot read
+   * ignores expiry") -- a restoration read must fail closed to "no
+   * snapshot" for content past its own retention window, not resurrect it,
+   * even if the append-only table has not been purged yet.
+   */
+  async findLatestDialogueSnapshot(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotRow | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE voice_session_id = $1 AND retention_expires_at > now()
+        ORDER BY session_version DESC
+        LIMIT 1
+      `,
+      [voiceSessionId],
+    );
+    const row = result.rows[0];
+    return row ? mapDialogueSnapshotRow(row) : null;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence: exact-version lookup (never "latest") for
+   * `VoiceSessionService.resolveDialogueSnapshotOutcome`'s own atomic
+   * adjudication -- distinct from `findLatestDialogueSnapshot` above,
+   * which answers "what is current" rather than "did THIS exact pending
+   * write already land." Deliberately includes an already-expired row
+   * (unlike `findLatestDialogueSnapshot`): a write that durably landed and
+   * only later expired still proves this exact commit was ACCEPTED, which
+   * is the only question this lookup answers.
+   */
+  async findDialogueSnapshotByVersion(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotRow | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE voice_session_id = $1 AND session_version = $2
+        LIMIT 1
+      `,
+      [voiceSessionId, sessionVersion],
+    );
+    const row = result.rows[0];
+    return row ? mapDialogueSnapshotRow(row) : null;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist late-acceptance
+   * fence: the only writer of `voice.session.dialogue_snapshot_fence_version`
+   * (see that column's own doc in `V0106__voice_dialogue_snapshot.sql`).
+   * Monotonic (`GREATEST`) so a concurrent call fencing an OLDER version
+   * can never un-fence a newer one a different call already raised.
+   * Callers must already hold this session row `FOR UPDATE` in the SAME
+   * transaction as whatever existence check preceded this (see
+   * `VoiceSessionService.resolveDialogueSnapshotOutcome`) -- this call's
+   * own `UPDATE` re-acquires that same row's write lock regardless, which
+   * is what makes the check-then-fence sequence atomic with respect to a
+   * concurrent `insertDialogueSnapshot` doing its own check-then-insert
+   * against the exact same row.
+   *
+   * Returns the resulting (monotonic) fence value so
+   * `resolveDialogueSnapshotOutcome` can echo it back to the caller as the
+   * "committed fence correlation" half of an authoritative rejection
+   * (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist incomplete
+   * discriminated response validation, Codex reopen, canonical
+   * 2026-10-04T01:25:05Z): a bare `{accepted: false}` carries no proof it
+   * answers THIS exact adjudication call rather than a foreign/contradictory
+   * body, so the worker-side validator now requires this server-generated
+   * value to correlate instead of trusting the literal alone.
+   */
+  async raiseDialogueSnapshotFence(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<number> {
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<{ dialogue_snapshot_fence_version: number }>(
+      `
+        UPDATE voice.session
+        SET dialogue_snapshot_fence_version =
+          GREATEST(dialogue_snapshot_fence_version, $2)
+        WHERE voice_session_id = $1
+        RETURNING dialogue_snapshot_fence_version
+      `,
+      [voiceSessionId, sessionVersion],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error(
+        `voice.session row ${voiceSessionId} vanished while raising its dialogue_snapshot_fence_version`,
+      );
+    }
+    return row.dialogue_snapshot_fence_version;
+  }
+
+  /**
+   * Governed purge candidate scan (reviewer WIP feedback 2026-10-03T14:20Z:
+   * "a retention_expires_at label alone is not bounded retention ... a
+   * governed purge path"). Returns rows past their own retention window for
+   * `VoiceSessionService.purgeExpiredDialogueSnapshots` to run through the
+   * existing `VoiceRetentionService.executePurge` legal-hold-aware policy
+   * engine before this repository ever deletes anything.
+   */
+  async findExpiredDialogueSnapshots(
+    asOf: string,
+    limit = 200,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotRow[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot
+        WHERE retention_expires_at <= $1
+        ORDER BY retention_expires_at ASC
+        LIMIT $2
+      `,
+      [asOf, limit],
+    );
+    return result.rows.map(mapDialogueSnapshotRow);
+  }
+
+  /**
+   * The only caller of this must be `VoiceSessionService.
+   * purgeExpiredDialogueSnapshots`, after `VoiceRetentionService.
+   * executePurge` has already decided (legal-hold-aware) that THIS exact
+   * row is eligible. `voice.dialogue_snapshot` is append-only
+   * (`voice._make_append_only`, V0106) -- `DELETE` is rejected by
+   * `voice.raise_append_only()` unless the SAME privileged session setting
+   * `V0093__voice_retention_and_legal_hold.sql` already defined for
+   * `voice.retention_execution_log`'s own lawful purge sweeps is set in
+   * THIS transaction boundary; `SET LOCAL` requires `executor` to be a
+   * transaction-scoped client, never the bare pool.
+   *
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-resolve governed purge loses
+   * accepted-history distinction (Codex reopen, canonical
+   * 2026-10-04T01:25:05Z): before the content row is ever deleted, this
+   * records a bounded, non-content receipt of its own identity and
+   * original `retention_expires_at` into `voice
+   * .dialogue_snapshot_purge_receipt` -- an `INSERT ... SELECT` from the
+   * about-to-be-deleted row itself, in the SAME transaction as the
+   * `DELETE` below, so the two can never diverge (a crash between them
+   * leaves either both committed or neither, never a deleted row with no
+   * receipt). `ON CONFLICT DO NOTHING` makes a retried purge attempt for
+   * an already-receipted row a safe no-op, same append-only-table
+   * dedup convention `voice.dialogue_snapshot`'s own unique index already
+   * uses.
+   */
+  async deleteDialogueSnapshot(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<boolean> {
+    const run = async (exec: VoiceQueryExecutor) => {
+      await exec.query(`SET LOCAL voice.allow_retention_archival = 'on'`);
+      await exec.query(
+        `
+          INSERT INTO voice.dialogue_snapshot_purge_receipt
+            (voice_session_id, session_version, input_epoch, media_epoch, turn_id, retention_expires_at)
+          SELECT voice_session_id, session_version, input_epoch, media_epoch, turn_id, retention_expires_at
+          FROM voice.dialogue_snapshot
+          WHERE voice_session_id = $1 AND session_version = $2
+          ON CONFLICT (voice_session_id, session_version) DO NOTHING
+        `,
+        [voiceSessionId, sessionVersion],
+      );
+      const result = await exec.query(
+        `DELETE FROM voice.dialogue_snapshot WHERE voice_session_id = $1 AND session_version = $2`,
+        [voiceSessionId, sessionVersion],
+      );
+      return (result.rowCount ?? 0) > 0;
+    };
+    if (executor) {
+      return run(executor);
+    }
+    return this.withTransaction((tx) => run(tx));
+  }
+
+  /**
+   * The only caller of this must be `VoiceSessionService.
+   * resolveDialogueSnapshotOutcome`, consulted ONLY when `
+   * findDialogueSnapshotByVersion` finds no row at all (never when a row
+   * exists but belongs to a different input/media epoch or turn -- that is
+   * a genuinely different write occupying this version, not this one
+   * having been purged). See `V0106__voice_dialogue_snapshot.sql`'s own
+   * doc on this table's bounded, non-content scope.
+   */
+  async findDialogueSnapshotPurgeReceipt(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotPurgeReceiptRow | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotPurgeReceiptRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot_purge_receipt
+        WHERE voice_session_id = $1 AND session_version = $2
+        LIMIT 1
+      `,
+      [voiceSessionId, sessionVersion],
+    );
+    const row = result.rows[0];
+    return row ? mapDialogueSnapshotPurgeReceiptRow(row) : null;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purge-receipt
+   * lifecycle (Codex reopen, canonical 2026-10-04T02:13:45Z): the only
+   * writer of `voice.session.dialogue_snapshot_history_unavailable_floor`
+   * -- see that column's own doc in `V0106__voice_dialogue_snapshot.sql`
+   * and `VoiceSessionRecord.dialogueSnapshotHistoryUnavailableFloor`.
+   * Monotonic (`GREATEST`), same convention as `raiseDialogueSnapshotFence`
+   * above, but a SEPARATE column: this one is raised only by
+   * `retireDialogueSnapshotPurgeReceipt` below, when a receipt's OWN
+   * governed metadata retention ages it out, never when a write is simply
+   * known to have never landed.
+   */
+  async raiseDialogueSnapshotHistoryUnavailableFloor(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<number> {
+    const exec = executor ?? this.requireDatabase();
+    const result = await exec.query<{
+      dialogue_snapshot_history_unavailable_floor: number;
+    }>(
+      `
+        UPDATE voice.session
+        SET dialogue_snapshot_history_unavailable_floor =
+          GREATEST(dialogue_snapshot_history_unavailable_floor, $2)
+        WHERE voice_session_id = $1
+        RETURNING dialogue_snapshot_history_unavailable_floor
+      `,
+      [voiceSessionId, sessionVersion],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error(
+        `voice.session row ${voiceSessionId} vanished while raising its dialogue_snapshot_history_unavailable_floor`,
+      );
+    }
+    return row.dialogue_snapshot_history_unavailable_floor;
+  }
+
+  /**
+   * Governed purge-receipt lifecycle scan (Codex reopen, canonical
+   * 2026-10-04T02:13:45Z, "new purge receipts have no governed lifetime").
+   * Returns receipts whose own `purged_at` is at or before `purgedBefore`
+   * (the caller derives this from the EXISTING approved
+   * `voice_booking_evidence` policy's `hotRetentionDays` -- see
+   * `VoiceSessionService.purgeExpiredDialogueSnapshotPurgeReceipts` -- never
+   * a new registered family) for that service to run through the SAME
+   * legal-hold-aware check every other evidence family's purge already
+   * uses before this repository ever deletes anything.
+   */
+  async findExpiredDialogueSnapshotPurgeReceipts(
+    purgedBefore: string,
+    limit = 200,
+    executor?: VoiceQueryExecutor,
+  ): Promise<DialogueSnapshotPurgeReceiptRow[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceDialogueSnapshotPurgeReceiptRow>(
+      `
+        SELECT * FROM voice.dialogue_snapshot_purge_receipt
+        WHERE purged_at <= $1
+        ORDER BY purged_at ASC
+        LIMIT $2
+      `,
+      [purgedBefore, limit],
+    );
+    return result.rows.map(mapDialogueSnapshotPurgeReceiptRow);
+  }
+
+  /**
+   * The only caller of this must be `VoiceSessionService.
+   * purgeExpiredDialogueSnapshotPurgeReceipts`, after
+   * `VoiceRetentionService.isSubjectUnderHold` has already decided (under
+   * the `voice_booking_evidence` family) that THIS exact receipt is
+   * eligible. Raises `dialogue_snapshot_history_unavailable_floor` to this
+   * exact `sessionVersion` BEFORE deleting the receipt, in the SAME
+   * transaction, so the two can never diverge (a crash between them leaves
+   * either both committed or neither, never a deleted receipt with no
+   * floor raised to replace it) -- see that column's own doc on why this
+   * is a SEPARATE watermark from `dialogue_snapshot_fence_version`. Same
+   * append-only privileged-bypass convention as `deleteDialogueSnapshot`.
+   */
+  async retireDialogueSnapshotPurgeReceipt(
+    voiceSessionId: string,
+    sessionVersion: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<boolean> {
+    const run = async (exec: VoiceQueryExecutor) => {
+      await this.raiseDialogueSnapshotHistoryUnavailableFloor(
+        voiceSessionId,
+        sessionVersion,
+        exec,
+      );
+      await exec.query(`SET LOCAL voice.allow_retention_archival = 'on'`);
+      const result = await exec.query(
+        `
+          DELETE FROM voice.dialogue_snapshot_purge_receipt
+          WHERE voice_session_id = $1 AND session_version = $2
+        `,
+        [voiceSessionId, sessionVersion],
+      );
+      return (result.rowCount ?? 0) > 0;
+    };
+    if (executor) {
+      return run(executor);
+    }
+    return this.withTransaction((tx) => run(tx));
   }
 
   private requireDatabase(): VoiceQueryExecutor {
