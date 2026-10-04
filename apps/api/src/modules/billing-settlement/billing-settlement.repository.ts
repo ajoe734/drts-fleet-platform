@@ -561,6 +561,21 @@ export class BillingSettlementRepository {
   }
 
   /** Fresh tenant-scoped reads: never resolve mail recipients from process seeds. */
+  async listInvoicesForTenant(tenantId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id = $1 ORDER BY created_at DESC`,
+      [tenantId],
+    );
+    return result.rows
+      .map((row) =>
+        this.parseRecord<StoredTenantInvoiceRecord>(
+          row.record,
+          "billing.phase1_tenant_invoices",
+        ),
+      )
+      .filter((invoice) => invoice.tenantId === tenantId);
+  }
+
   async findInvoiceForMail(tenantId: string, invoiceId: string) {
     const result = await this.databaseService!.query<JsonRecordRow>(
       `SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id = $1 AND invoice_id = $2`,

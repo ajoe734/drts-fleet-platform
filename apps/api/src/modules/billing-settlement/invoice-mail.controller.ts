@@ -31,10 +31,7 @@ export class InvoiceMailController {
     return toApiSuccessEnvelope(
       {
         ...(await this.mail.read(tenant, invoiceId)),
-        canSend: Boolean(
-          identity?.scopes.includes("billing:write") ||
-          identity?.scopes.includes("*"),
-        ),
+        canSend: Boolean(identity?.scopes.includes("billing:write")),
       },
       requestId,
     );

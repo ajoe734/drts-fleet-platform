@@ -225,9 +225,9 @@ describe("invoice mail producer with the real durable outbox and delivery core",
       delivery,
       config,
     );
-    await expect(mail.send(tenantId, invoiceId)).rejects.toThrow(
-      "storage is unavailable",
-    );
+    await expect(mail.send(tenantId, invoiceId)).rejects.toMatchObject({
+      code: "INVOICE_MAIL_UNAVAILABLE",
+    });
     const fresh = runtime(provider);
     expect(await fresh.mail.read(tenantId, invoiceId)).toMatchObject({
       status: "queued",
@@ -251,12 +251,16 @@ describe("invoice mail producer with the real durable outbox and delivery core",
   it("rejects cross-tenant and missing invoices before reading or writing mail", async () => {
     const provider = transport();
     const { mail } = runtime(provider);
-    await expect(mail.send("another-tenant", invoiceId)).rejects.toThrow(
-      "not found",
-    );
-    await expect(mail.read(tenantId, "missing")).rejects.toThrow("not found");
+    await expect(mail.send("another-tenant", invoiceId)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(mail.read(tenantId, "missing")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
     invoice!.tenantId = "another-tenant"; // corrupt JSON cannot override SQL ownership
-    await expect(mail.send(tenantId, invoiceId)).rejects.toThrow("not found");
+    await expect(mail.send(tenantId, invoiceId)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
     expect(provider.send).not.toHaveBeenCalled();
   });
 
@@ -267,7 +271,7 @@ describe("invoice mail producer with the real durable outbox and delivery core",
       const provider = transport();
       await expect(
         runtime(provider).mail.send(tenantId, invoiceId),
-      ).rejects.toThrow("billing contact email");
+      ).rejects.toMatchObject({ code: "INVOICE_BILLING_RECIPIENT_REQUIRED" });
       expect(provider.send).not.toHaveBeenCalled();
     },
   );
@@ -277,19 +281,19 @@ describe("invoice mail producer with the real durable outbox and delivery core",
     invoice!.status = "draft";
     await expect(
       runtime(provider).mail.send(tenantId, invoiceId),
-    ).rejects.toThrow("Only issued");
+    ).rejects.toMatchObject({ code: "INVOICE_NOT_ISSUED" });
     invoice!.status = "issued";
     await expect(
       runtime(provider, {
         portalOrigin: "http://tenant.example.test",
       }).mail.send(tenantId, invoiceId),
-    ).rejects.toThrow("portal is unavailable");
+    ).rejects.toMatchObject({ code: "INVOICE_MAIL_CONFIG_UNAVAILABLE" });
     await expect(
       new InvoiceMailService(repository, null, null, config).send(
         tenantId,
         invoiceId,
       ),
-    ).rejects.toThrow("storage is unavailable");
+    ).rejects.toMatchObject({ code: "INVOICE_MAIL_UNAVAILABLE" });
     expect(provider.send).not.toHaveBeenCalled();
   });
 
@@ -300,31 +304,31 @@ describe("invoice mail producer with the real durable outbox and delivery core",
     expect((await controller.read(invoiceId, readOnly)).data.canSend).toBe(
       false,
     );
-    await expect(controller.send(invoiceId, {}, readOnly)).rejects.toThrow(
-      "authority",
-    );
+    await expect(
+      controller.send(invoiceId, {}, readOnly),
+    ).rejects.toMatchObject({ code: "INVOICE_ACCESS_DENIED" });
     await expect(
       controller.send(
         invoiceId,
         { recipientEmail: "attacker@example.test" },
         financeIdentity,
       ),
-    ).rejects.toThrow("overrides");
+    ).rejects.toMatchObject({ code: "INVOICE_MAIL_BODY_NOT_ALLOWED" });
     await expect(
       controller.send(invoiceId, {}, financeIdentity, "another-tenant"),
-    ).rejects.toThrow("selector");
+    ).rejects.toMatchObject({ code: "TENANT_SCOPE_MISMATCH" });
     for (const identity of [
       null,
       { ...financeIdentity, tenantId: null },
       { ...financeIdentity, realm: "partner" as const },
       { ...financeIdentity, realm: "platform" as const },
     ]) {
-      await expect(controller.read(invoiceId, identity)).rejects.toThrow(
-        "authority",
-      );
-      await expect(controller.send(invoiceId, {}, identity)).rejects.toThrow(
-        "authority",
-      );
+      await expect(controller.read(invoiceId, identity)).rejects.toMatchObject({
+        code: "INVOICE_ACCESS_DENIED",
+      });
+      await expect(
+        controller.send(invoiceId, {}, identity),
+      ).rejects.toMatchObject({ code: "INVOICE_ACCESS_DENIED" });
     }
     expect(provider.send).not.toHaveBeenCalled();
   });

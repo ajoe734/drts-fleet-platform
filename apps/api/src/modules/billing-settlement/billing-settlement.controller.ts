@@ -247,26 +247,26 @@ export class BillingSettlementController {
   }
 
   @Get("tenant/invoices")
-  listTenantInvoices(
+  async listTenantInvoices(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
-    const data = this.billingSettlementService.listTenantInvoicesRuntime(
+    const data = await this.billingSettlementService.listTenantInvoicesFresh(
       authorizeInvoiceTenant(identity, tenantId, "billing:read"),
     );
     return toApiSuccessEnvelope(data, requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")
-  getTenantInvoice(
+  async getTenantInvoice(
     @Param("invoiceId") invoiceId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getTenantInvoice(
+      await this.billingSettlementService.getTenantInvoiceFresh(
         authorizeInvoiceTenant(identity, tenantId, "billing:read"),
         invoiceId,
       ),

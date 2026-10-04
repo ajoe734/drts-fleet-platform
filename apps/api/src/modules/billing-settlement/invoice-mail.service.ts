@@ -18,7 +18,7 @@ export function authorizeInvoiceTenant(
     !identity ||
     identity.realm !== "tenant" ||
     !identity.tenantId?.trim() ||
-    (!identity.scopes.includes(scope) && !identity.scopes.includes("*"))
+    !identity.scopes.includes(scope)
   ) {
     throw new ApiRequestError(
       403,
