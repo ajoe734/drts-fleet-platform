@@ -27,6 +27,31 @@ CLAMAV_DB_DIR="${CLAMAV_DB_DIR:-/var/lib/clamav}"
 rm -f "$READY_MARKER" "$READY_VERSION_FILE"
 mkdir -p "$(dirname "$READY_MARKER")"
 
+# R8(a) (round 4): clamd's own live `VERSION` reply (clamd/session.c
+# print_ver -> CL_ENGINE_DB_VERSION) only ever reports the DAILY database's
+# version -- libclamav/cvd.c#cli_cvdload assigns engine->dbversion solely
+# inside the daily filename branch; main and bytecode carry their own,
+# independent version numbers that clamd never exposes over the wire. The
+# round-3 fix picked whichever of main/daily/bytecode had the newest mtime,
+# which answers a different question (which file was touched most recently)
+# than the one readiness.ts actually needs to ask (what does clamd's own
+# VERSION reply mean) -- so a newer main/bytecode write made every /health
+# and /scan fail closed against a fully loaded, healthy daily engine. Only
+# the daily database's own identity is ever published here now.
+#
+# A freshclam update that lands as an incremental patch produces/refreshes
+# daily.cld from the prior daily.cvd+cdiffs; a full download instead
+# (re)writes daily.cvd and removes any now-superseded daily.cld. When both
+# exist, the .cld is the newer, currently-loaded local database -- the .cvd
+# is a stale signed snapshot left on disk, not what clamd actually loaded.
+daily_reference_file() {
+  if [ -f "$CLAMAV_DB_DIR/daily.cld" ]; then
+    printf '%s\n' "$CLAMAV_DB_DIR/daily.cld"
+  elif [ -f "$CLAMAV_DB_DIR/daily.cvd" ]; then
+    printf '%s\n' "$CLAMAV_DB_DIR/daily.cvd"
+  fi
+}
+
 # R8 (round 2): a freshclam exit code of 0 is not proof that signatures are
 # current. ClamAV's libfreshclam remembers a 403/429 rate-limit cooldown and
 # returns success without touching any database file while that cooldown is
@@ -34,26 +59,32 @@ mkdir -p "$(dirname "$READY_MARKER")"
 # update. Trusting the exit code (or `touch`ing the marker with wall-clock
 # "now") would let a stuck cooldown -- or a successful download clamd never
 # actually reloaded -- renew readiness forever even though no real signature
-# content changed. Instead, the marker's mtime is always derived from the
-# newest *actual* signature database file on disk, never from "now" or from
-# freshclam's exit status alone: a cooldown that reports success without
-# writing a new database file leaves the marker's effective age unchanged,
+# content changed. Instead, the marker's mtime is derived from the daily
+# database file's own on-disk mtime by default, never from "now" or from
+# freshclam's exit status alone.
+#
+# R8(b) (round 4): that file-mtime-only rule over-corrected. Real freshclam
+# genuinely re-verifies the remote daily version on every run and, when the
+# local copy is already current, takes an up-to-date path that -- correctly
+# -- never rewrites any database file (see libfreshclam_internal.c's
+# check_for_new_database_version up-to-date branch). Tying freshness solely
+# to the file's mtime cannot tell that verified-current outcome apart from
+# a stuck rate-limit cooldown that also exits 0 without writing anything,
+# so a perfectly healthy, actively-maintained daily database older than
+# `MAX_SIGNATURE_AGE_MS` would stay permanently not-ready. `daily_check_verified`
+# greps freshclam's own captured output for ClamAV's documented per-database
+# outcome lines (freshclam/manager.c's `logg("%s is up to date (version: ...",
+# ...)` and `logg("%s updated (version: ...", ...)`) -- the only affirmative,
+# text-level proof (short of re-implementing freshclam's own remote version
+# check) that this particular invocation genuinely compared the daily
+# database against the remote version, rather than silently no-op'ing
+# through a remembered cooldown. Only that confirmed outcome is allowed to
+# advance the marker to wall-clock "now" without a file rewrite; an
+# unconfirmed exit 0 still falls back to the file's own (unchanged) mtime,
 # so `readiness.ts#isMarkerFresh`'s existing `MAX_SIGNATURE_AGE_MS` bound
-# still ages it out once real signature content is genuinely stale.
-newest_signature_file() {
-  newest=""
-  newest_mtime=-1
-  for name in main.cvd main.cld daily.cvd daily.cld bytecode.cvd bytecode.cld; do
-    candidate="$CLAMAV_DB_DIR/$name"
-    if [ -f "$candidate" ]; then
-      candidate_mtime=$(stat -c %Y "$candidate" 2>/dev/null) || continue
-      if [ "$candidate_mtime" -gt "$newest_mtime" ]; then
-        newest_mtime="$candidate_mtime"
-        newest="$candidate"
-      fi
-    fi
-  done
-  printf '%s\n' "$newest"
+# still ages a genuinely stuck/unverified cooldown out.
+daily_check_verified() {
+  printf '%s\n' "$1" | grep -Eq '^daily\.(cvd|cld) (is up to date|updated)'
 }
 
 
@@ -77,9 +108,13 @@ cvd_version() {
 }
 
 publish_marker_from_signatures() {
-  reference_file=$(newest_signature_file)
+  # "1" only when this call's freshclam invocation affirmatively confirmed
+  # the daily database against the remote version this round (R8, round 4);
+  # empty/unset for the initial pre-clamd fetch or an unconfirmed exit 0.
+  verified="${1:-}"
+  reference_file=$(daily_reference_file)
   if [ -z "$reference_file" ]; then
-    echo "No signature database files found in $CLAMAV_DB_DIR; marking not ready" >&2
+    echo "No daily signature database found in $CLAMAV_DB_DIR; marking not ready" >&2
     rm -f "$READY_MARKER" "$READY_VERSION_FILE"
     return 1
   fi
@@ -91,12 +126,17 @@ publish_marker_from_signatures() {
   # Version file first: the gateway must never observe a fresh marker
   # mtime paired with a stale/missing expected-version file.
   printf '%s\n' "$version" > "$READY_VERSION_FILE"
-  touch -r "$reference_file" "$READY_MARKER"
+  if [ "$verified" = "1" ]; then
+    touch "$READY_MARKER"
+  else
+    touch -r "$reference_file" "$READY_MARKER"
+  fi
   return 0
 }
 
 echo "Fetching ClamAV signatures..."
-freshclam --stdout
+initial_freshclam_output=$(freshclam --stdout 2>&1)
+printf '%s\n' "$initial_freshclam_output"
 
 echo "Starting clamd..."
 clamd --config-file=/etc/clamav/clamd.conf &
@@ -105,7 +145,11 @@ CLAMD_PID=$!
 attempt=0
 while [ "$attempt" -lt 60 ]; do
   if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
-    publish_marker_from_signatures || echo "clamd is live but no signatures were found yet" >&2
+    initial_verified=""
+    if daily_check_verified "$initial_freshclam_output"; then
+      initial_verified=1
+    fi
+    publish_marker_from_signatures "$initial_verified" || echo "clamd is live but no signatures were found yet" >&2
     break
   fi
   attempt=$((attempt + 1))
@@ -125,9 +169,15 @@ done
 (
   while kill -0 "$CLAMD_PID" 2>/dev/null; do
     sleep "$FRESHCLAM_INTERVAL_SECONDS"
-    if freshclam --stdout; then
-      publish_marker_from_signatures || true
+    if refresh_output=$(freshclam --stdout 2>&1); then
+      printf '%s\n' "$refresh_output"
+      refresh_verified=""
+      if daily_check_verified "$refresh_output"; then
+        refresh_verified=1
+      fi
+      publish_marker_from_signatures "$refresh_verified" || true
     else
+      printf '%s\n' "$refresh_output"
       echo "freshclam refresh failed; marking not ready" >&2
       rm -f "$READY_MARKER" "$READY_VERSION_FILE"
     fi

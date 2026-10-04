@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createIsReady, isMarkerFresh } from "../../../operations/artifact-scanner/gateway/readiness";
+
 /**
  * Runs the real, unmodified production
  * `operations/artifact-scanner/clamd-entrypoint.sh` under its own `#!/bin/sh`
@@ -49,7 +51,9 @@ function cvdHeader(version: string): string {
   return `ClamAV-VDB:04 Oct 2026 10-00 -0000:${version}:1000:90:deadbeefdeadbeefdeadbeefdeadbeef:deadbeef:sanesecurity:1\n`;
 }
 
-function startEntrypoint(initialMode: "advance" | "noop" | "fail"): Harness {
+type FreshclamMode = "advance" | "noop" | "fail" | "verified";
+
+function startEntrypoint(initialMode: FreshclamMode): Harness {
   const dir = mkdtempSync(join(tmpdir(), "clamd-entrypoint-test-"));
   const binDir = join(dir, "bin");
   const dbDir = join(dir, "db");
@@ -62,10 +66,15 @@ function startEntrypoint(initialMode: "advance" | "noop" | "fail"): Harness {
   writeFileSync(modeFile, initialMode);
   writeFileSync(logFile, "");
 
-  // Mock freshclam: exit 0 without touching any file ("noop", simulating
-  // libfreshclam's remembered-cooldown success path), genuinely rewrite
-  // the newest signature file with new content/version ("advance",
-  // simulating a real signature update), or fail ("fail").
+  // Mock freshclam: exit 0 without touching any file and without printing
+  // ClamAV's documented per-database outcome line ("noop", simulating
+  // libfreshclam's remembered-cooldown success path -- indistinguishable
+  // from a real check at the exit-code level alone); genuinely rewrite the
+  // daily signature file with new content/version ("advance", simulating a
+  // real signature update); fail outright ("fail"); or exit 0 without
+  // touching any file but print the real "is up to date" outcome line
+  // ("verified", simulating freshclam's genuine up-to-date verification --
+  // R8(b), round 4).
   writeMock(
     join(binDir, "freshclam"),
     [
@@ -74,6 +83,7 @@ function startEntrypoint(initialMode: "advance" | "noop" | "fail"): Harness {
       `case "$mode" in`,
       `  advance) cat "$FRESHCLAM_NEXT_SIGNATURE_FILE" > "$CLAMAV_DB_DIR/daily.cvd"; exit 0 ;;`,
       `  fail) exit 1 ;;`,
+      `  verified) echo "daily.cvd is up to date (version: 27315, sigs: 2000000, f-level: 90, builder: sanesecurity)"; exit 0 ;;`,
       `  *) exit 0 ;;`,
       `esac`,
     ].join("\n"),
@@ -104,7 +114,7 @@ function startEntrypoint(initialMode: "advance" | "noop" | "fail"): Harness {
   return { dir, dbDir, readyMarker, readyVersionFile, modeFile, logFile, child };
 }
 
-function setMode(harness: Harness, mode: "advance" | "noop" | "fail"): void {
+function setMode(harness: Harness, mode: FreshclamMode): void {
   writeFileSync(harness.modeFile, mode);
 }
 
@@ -255,6 +265,159 @@ describe("clamd-entrypoint.sh freshness provenance (R8, round 3)", () => {
       await wait(1500);
       expect(existsSync(harness.readyMarker)).toBe(false);
       expect(existsSync(harness.readyVersionFile)).toBe(false);
+    },
+    15000,
+  );
+});
+
+describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4)", () => {
+  it(
+    "publishes the daily database's own version even when main/bytecode signature files are newer",
+    async () => {
+      // clamd's own VERSION reply only ever reflects the daily database
+      // (clamd/session.c#print_ver -> CL_ENGINE_DB_VERSION,
+      // libclamav/cvd.c#cli_cvdload's daily branch); main and bytecode carry
+      // independent version numbers clamd never exposes. Publishing
+      // whichever file merely has the newest mtime -- the round-3 behaviour
+      // -- would publish bytecode's version here, which the live engine's
+      // VERSION reply can never match, failing /health and /scan forever.
+      const nowSec = Math.floor(Date.now() / 1000);
+      const harness = startEntrypoint("noop");
+      activeHarness = harness;
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), nowSec - 20, nowSec - 20);
+      writeFileSync(join(harness.dbDir, "main.cvd"), cvdHeader("62"));
+      utimesSync(join(harness.dbDir, "main.cvd"), nowSec - 10, nowSec - 10);
+      writeFileSync(join(harness.dbDir, "bytecode.cvd"), cvdHeader("341"));
+      utimesSync(join(harness.dbDir, "bytecode.cvd"), nowSec - 5, nowSec - 5);
+
+      const appeared = await waitUntil(() => existsSync(harness.readyVersionFile), 5000);
+      expect(appeared).toBe(true);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27315");
+    },
+    15000,
+  );
+
+  it(
+    "publishes the daily database's own version when every signature file shares the same mtime",
+    async () => {
+      // The round-3 selection iterated main/daily/bytecode with a strict
+      // `>` comparison, so an exact mtime tie left main.cvd selected
+      // (first in iteration order) -- a second, independent way the
+      // namespace mismatch surfaced even without any file being genuinely
+      // newer than another.
+      const harness = startEntrypoint("noop");
+      activeHarness = harness;
+      const tieSec = Math.floor(Date.now() / 1000) - 30;
+      const files: Array<[string, string]> = [
+        ["main.cvd", "62"],
+        ["daily.cvd", "27315"],
+        ["bytecode.cvd", "341"],
+      ];
+      for (const [name, version] of files) {
+        writeFileSync(join(harness.dbDir, name), cvdHeader(version));
+        utimesSync(join(harness.dbDir, name), tieSec, tieSec);
+      }
+
+      const appeared = await waitUntil(() => existsSync(harness.readyVersionFile), 5000);
+      expect(appeared).toBe(true);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27315");
+    },
+    15000,
+  );
+
+  it(
+    "prefers daily.cld over a coexisting, older daily.cvd (incremental update supersedes the signed snapshot)",
+    async () => {
+      const harness = startEntrypoint("noop");
+      activeHarness = harness;
+      const nowSec = Math.floor(Date.now() / 1000);
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27310"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), nowSec - 100, nowSec - 100);
+      writeFileSync(join(harness.dbDir, "daily.cld"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cld"), nowSec - 10, nowSec - 10);
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27315");
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      expect(markerMtimeSec).toBe(nowSec - 10);
+    },
+    15000,
+  );
+});
+
+describe("clamd-entrypoint.sh verified-current freshness, composed with real readiness.ts (R8b, round 4)", () => {
+  it(
+    "advances the marker to wall-clock now on a verified 'is up to date' confirmation, keeping readiness live past the file's own stale mtime",
+    async () => {
+      // Real freshclam genuinely re-verifies the remote daily version on
+      // every run and, when already current, never rewrites any database
+      // file (libfreshclam_internal.c's up-to-date branch) -- a
+      // file-mtime-only freshness rule cannot tell that outcome apart from
+      // a stuck rate-limit cooldown, so a perfectly healthy daily database
+      // older than the configured bound would stay permanently not-ready.
+      const staleSec = Math.floor(Date.now() / 1000) - 7 * 60 * 60; // 7h old
+      const harness = startEntrypoint("verified");
+      activeHarness = harness;
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), staleSec, staleSec);
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      // The on-disk file itself is still 7h old -- the verified confirmation,
+      // not the file's own mtime, must be what advances the marker to "now".
+      expect(Math.abs(markerMtimeSec - Math.floor(Date.now() / 1000))).toBeLessThan(10);
+      expect(readFileSync(harness.readyVersionFile, "utf8").trim()).toBe("27315");
+
+      // Compose the real published marker with the real readiness.ts gate,
+      // using a bound shorter than the file's own 7h age: only the
+      // verified-now marker mtime -- never the stale file mtime -- can make
+      // this read as ready.
+      const maxAgeMs = 60 * 60 * 1000; // 1h, well under the file's 7h age
+      expect(isMarkerFresh(statSync(harness.readyMarker).mtimeMs, Date.now(), maxAgeMs)).toBe(true);
+      const isReady = createIsReady({
+        maxAgeMs,
+        now: () => Date.now(),
+        readMarkerMtimeMs: () => statSync(harness.readyMarker).mtimeMs,
+        readExpectedVersion: () => readFileSync(harness.readyVersionFile, "utf8").trim(),
+        queryLoadedVersion: async () => "27315",
+      });
+      await expect(isReady()).resolves.toBe(true);
+    },
+    15000,
+  );
+
+  it(
+    "never advances the marker on an unverified cooldown exit-0, so real readiness.ts eventually reads it as stale",
+    async () => {
+      const staleSec = Math.floor(Date.now() / 1000) - 7 * 60 * 60; // 7h old
+      const harness = startEntrypoint("noop");
+      activeHarness = harness;
+      writeFileSync(join(harness.dbDir, "daily.cvd"), cvdHeader("27315"));
+      utimesSync(join(harness.dbDir, "daily.cvd"), staleSec, staleSec);
+
+      const appeared = await waitUntil(() => existsSync(harness.readyMarker), 5000);
+      expect(appeared).toBe(true);
+      // Let a couple of periodic "noop" cycles run -- an unconfirmed exit 0
+      // must never be treated as proof the daily database is still current.
+      await wait(2500);
+      const markerMtimeSec = Math.floor(statSync(harness.readyMarker).mtimeMs / 1000);
+      expect(markerMtimeSec).toBe(staleSec);
+
+      // Composed with the real readiness.ts gate: a bound shorter than the
+      // genuinely-unverified 7h-old marker must read as not ready.
+      const maxAgeMs = 60 * 60 * 1000; // 1h
+      expect(isMarkerFresh(statSync(harness.readyMarker).mtimeMs, Date.now(), maxAgeMs)).toBe(false);
+      const isReady = createIsReady({
+        maxAgeMs,
+        now: () => Date.now(),
+        readMarkerMtimeMs: () => statSync(harness.readyMarker).mtimeMs,
+        readExpectedVersion: () => readFileSync(harness.readyVersionFile, "utf8").trim(),
+        queryLoadedVersion: async () => "27315",
+      });
+      await expect(isReady()).resolves.toBe(false);
     },
     15000,
   );
