@@ -10,6 +10,33 @@ export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
 }
 
 const en = {
+  "invoices.mail.title": "Invoice email",
+  "invoices.mail.recipient":
+    "Send to the billing contact saved for this tenant. Retries keep the original recipient.",
+  "invoices.mail.loading": "Loading delivery status…",
+  "invoices.mail.error":
+    "Unable to complete the request. Check your billing contact, permissions or mail availability, then refresh.",
+  "invoices.mail.send": "Send invoice email",
+  "invoices.mail.retry": "Retry pending delivery",
+  "invoices.mail.refresh": "Refresh status",
+  "invoices.mail.readOnly": "Billing write permission is required to send.",
+  "invoices.mail.acceptedAt": "Provider accepted at",
+  "invoices.mail.nextAttempt": "Next eligible attempt",
+  "invoices.mail.status.not_requested": "Not requested",
+  "invoices.mail.status.queued": "Queued / in progress",
+  "invoices.mail.status.sent":
+    "Accepted by mail provider; mailbox receipt is not confirmed",
+  "invoices.mail.status.failed": "Delivery attempt failed",
+  "invoices.mail.outcome.started": "In progress",
+  "invoices.mail.outcome.sent": "Provider accepted",
+  "invoices.mail.outcome.failed": "Failed",
+  "invoices.mail.outcome.uncertain": "Outcome unknown",
+  "invoices.mail.resend": "Send another copy",
+  "invoices.mail.confirm":
+    "Send a new copy to the current billing contact? The previous delivery and attempts remain recorded.",
+  "invoices.mail.history": "Recent delivery history",
+  "invoices.mail.uncertain":
+    "The result is unknown. Retry the same request to check or continue it without creating another delivery.",
   "app.title": "Tenant Console",
   "app.description": "Tenant administration workspace for DRTS Phase 1.",
   "shell.breadcrumb.home": "Home",
@@ -4084,6 +4111,32 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "invoices.mail.title": "帳單寄信",
+  "invoices.mail.recipient":
+    "寄送至此租戶已儲存的帳務聯絡信箱。重試沿用首次收件人。",
+  "invoices.mail.loading": "正在讀取寄送狀態…",
+  "invoices.mail.error":
+    "無法完成請求，請確認帳務信箱、權限或郵件服務狀態後重新整理。",
+  "invoices.mail.send": "寄送帳單信件",
+  "invoices.mail.retry": "重試待寄信件",
+  "invoices.mail.refresh": "更新寄送狀態",
+  "invoices.mail.readOnly": "需帳務寫入權限才能寄送。",
+  "invoices.mail.acceptedAt": "供應商接受時間",
+  "invoices.mail.nextAttempt": "下次可重試時間",
+  "invoices.mail.status.not_requested": "尚未要求寄送",
+  "invoices.mail.status.queued": "排程中／寄送中",
+  "invoices.mail.status.sent": "郵件供應商已接受，尚未確認收件匣收件",
+  "invoices.mail.status.failed": "寄送嘗試失敗",
+  "invoices.mail.outcome.started": "寄送中",
+  "invoices.mail.outcome.sent": "供應商已接受",
+  "invoices.mail.outcome.failed": "失敗",
+  "invoices.mail.outcome.uncertain": "結果未確認",
+  "invoices.mail.resend": "再寄一份",
+  "invoices.mail.confirm":
+    "確定要寄送新的一份至目前帳務信箱？先前寄送與嘗試紀錄會保留。",
+  "invoices.mail.history": "近期寄送紀錄",
+  "invoices.mail.uncertain":
+    "目前無法確認結果。請重試同一請求以查詢或繼續寄送，不會另建寄送紀錄。",
   "app.title": "租戶後台",
   "app.description": "DRTS Phase 1 租戶管理工作台。",
   "shell.breadcrumb.home": "首頁",

@@ -129,7 +129,9 @@ describe("invoice mail producer with the real durable outbox and delivery core",
     expect(provider.send.mock.calls[0]![0]).toMatchObject({
       recipientEmail: profile!.email,
       tenantId,
-      idempotencyKey: `tenant-invoice-mail:v1:${invoiceId}`,
+      idempotencyKey: expect.stringMatching(
+        /^tenant-invoice-mail:v2:[a-f0-9]{64}:default$/,
+      ),
     });
     expect(provider.send.mock.calls[0]![0].body).toContain(
       `https://tenant.example.test/invoices?invoiceId=${invoiceId}`,
@@ -192,7 +194,7 @@ describe("invoice mail producer with the real durable outbox and delivery core",
     );
   });
 
-  it("does not bypass terminal failure or max attempts with repeated send requests", async () => {
+  it("does not bypass terminal failure with repeated send requests", async () => {
     const provider = transport();
     provider.send.mockRejectedValue(
       new DeliveryTransportError("recipient_rejected", false),
@@ -203,6 +205,51 @@ describe("invoice mail producer with the real durable outbox and delivery core",
     clock += 100000;
     expect(await mail.send(tenantId, invoiceId)).toEqual(first);
     expect(provider.send).toHaveBeenCalledOnce();
+  });
+
+  it("stops a retryable operation at its attempt limit without allowing same-key bypass", async () => {
+    const { mail, delivery } = runtime(null, { maxAttempts: 2 });
+    const first = await mail.send(tenantId, invoiceId, "operation-exhaust");
+    clock += 1000;
+    await delivery.drain();
+    clock += 10000;
+    const exhausted = await mail.send(tenantId, invoiceId, "operation-exhaust");
+    expect(exhausted.deliveryId).toBe(first.deliveryId);
+    expect(exhausted).toMatchObject({ status: "failed", nextAttemptAt: null });
+    expect(exhausted.attempts).toHaveLength(2);
+  });
+
+  it("allows an intentional new send while preserving each operation's recipient and safe failure history", async () => {
+    const provider = transport();
+    provider.send.mockRejectedValueOnce(
+      new DeliveryTransportError("recipient_rejected", false),
+    );
+    const { mail } = runtime(provider);
+    const first = await mail.send(tenantId, invoiceId, "operation-first");
+    profile!.email = "corrected@example.test";
+    clock += 1000;
+    const retry = await mail.send(tenantId, invoiceId, "operation-first");
+    expect(retry.deliveryId).toBe(first.deliveryId);
+    expect(provider.send).toHaveBeenCalledOnce();
+    const second = await mail.send(tenantId, invoiceId, "operation-second");
+    expect(second.deliveryId).not.toBe(first.deliveryId);
+    expect(provider.send).toHaveBeenCalledTimes(2);
+    expect(provider.send.mock.calls[1]![0].recipientEmail).toBe(
+      "corrected@example.test",
+    );
+    const read = await runtime(provider).mail.read(tenantId, invoiceId);
+    expect(read.deliveries.map((entry) => entry.status)).toEqual([
+      "sent",
+      "failed",
+    ]);
+    expect(read.deliveries[1]!.attempts[0]!.errorCode).toBe(
+      "recipient_rejected",
+    );
+    expect(JSON.stringify(read)).not.toContain("@example.test");
+    await expect(
+      mail.send(tenantId, invoiceId, "bad key"),
+    ).rejects.toMatchObject({ code: "INVALID_IDEMPOTENCY_KEY" });
+    expect(provider.send).toHaveBeenCalledTimes(2);
   });
 
   it("leaves an uncertain lease recoverable if receipt persistence fails after provider acceptance", async () => {

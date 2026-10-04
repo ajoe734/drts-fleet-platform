@@ -2148,10 +2148,13 @@ export class ApiClient {
     );
   }
 
-  async sendInvoiceMail(invoiceId: string): Promise<TenantInvoiceMailView> {
+  async sendInvoiceMail(
+    invoiceId: string,
+    operationKey?: string,
+  ): Promise<TenantInvoiceMailView> {
     return this.post(
       `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail`,
-      { body: {} },
+      { body: {}, ...(operationKey ? { idempotencyKey: operationKey } : {}) },
     );
   }
 

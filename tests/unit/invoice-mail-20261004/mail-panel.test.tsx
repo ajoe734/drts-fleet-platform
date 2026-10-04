@@ -20,6 +20,7 @@ vi.mock("../../../apps/tenant-console-web/app/invoices/mail-actions", () => ({
 }));
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.resetAllMocks();
 });
 const view: TenantInvoiceMailView = {
@@ -31,9 +32,80 @@ const view: TenantInvoiceMailView = {
   sentAt: null,
   nextAttemptAt: null,
   attempts: [],
+  deliveries: [],
 };
 
 describe("invoice mail controls", () => {
+  it("fences double clicks, reuses an ambiguous request key and confirms a new copy", async () => {
+    vi.mocked(readInvoiceMail).mockResolvedValue({ ok: true, view });
+    let resolveSend!: (value: { ok: false }) => void;
+    vi.mocked(sendInvoiceMail).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const accepted = { ...view, status: "sent" as const, deliveryId: "sent-1" };
+    vi.mocked(sendInvoiceMail).mockResolvedValue({ ok: true, view: accepted });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<InvoiceMailPanel invoiceId="invoice-1" locale="en" />);
+    await screen.findByText("Not requested");
+    const send = screen.getByRole("button", { name: "Send invoice email" });
+    fireEvent.click(send);
+    fireEvent.click(send);
+    expect(sendInvoiceMail).toHaveBeenCalledTimes(1);
+    resolveSend({ ok: false });
+    await screen.findByRole("alert");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry pending delivery" }),
+    );
+    await screen.findByText(
+      "Accepted by mail provider; mailbox receipt is not confirmed",
+    );
+    expect(vi.mocked(sendInvoiceMail).mock.calls[1]).toEqual(
+      vi.mocked(sendInvoiceMail).mock.calls[0],
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send another copy" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(sendInvoiceMail).toHaveBeenCalledTimes(2);
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send another copy" }));
+    await waitFor(() => expect(sendInvoiceMail).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(sendInvoiceMail).mock.calls[2]![1]).not.toBe(
+      vi.mocked(sendInvoiceMail).mock.calls[0]![1],
+    );
+  });
+
+  it("shows previous failures after an intentional resend without exposing mail payloads", async () => {
+    vi.mocked(readInvoiceMail).mockResolvedValue({
+      ok: true,
+      view: {
+        ...view,
+        status: "sent",
+        deliveries: [
+          {
+            ...view,
+            deliveryId: "failed-first",
+            status: "failed",
+            attempts: [
+              {
+                attemptNo: 1,
+                startedAt: "2026-10-04T10:00:00Z",
+                finishedAt: "2026-10-04T10:00:01Z",
+                outcome: "failed",
+                errorCode: "recipient_rejected",
+                retryable: false,
+                acceptedAt: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    render(<InvoiceMailPanel invoiceId="invoice-1" locale="en" />);
+    await screen.findByText(/recipient_rejected/);
+    expect(screen.getByText("Recent delivery history")).toBeTruthy();
+  });
   it("submits the selected invoice without arbitrary recipient and shows provider acceptance", async () => {
     vi.mocked(readInvoiceMail).mockResolvedValue({ ok: true, view });
     vi.mocked(sendInvoiceMail).mockResolvedValue({
@@ -51,14 +123,17 @@ describe("invoice mail controls", () => {
     await screen.findByText(
       "Accepted by mail provider; mailbox receipt is not confirmed",
     );
-    expect(sendInvoiceMail).toHaveBeenCalledExactlyOnceWith("invoice-1");
+    expect(sendInvoiceMail).toHaveBeenCalledExactlyOnceWith(
+      "invoice-1",
+      expect.any(String),
+    );
     expect(
       (
         screen.getByRole("button", {
-          name: "Retry pending delivery",
+          name: "Send another copy",
         }) as HTMLButtonElement
       ).disabled,
-    ).toBe(true);
+    ).toBe(false);
   });
   it("keeps read-only users from sending, and refreshes actual failure history", async () => {
     vi.mocked(readInvoiceMail)

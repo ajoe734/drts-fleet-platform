@@ -49,6 +49,7 @@ export class InvoiceMailController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") operationKey?: string,
   ) {
     const tenant = authorizeInvoiceTenant(
       identity,
@@ -69,7 +70,10 @@ export class InvoiceMailController {
       );
     }
     return toApiSuccessEnvelope(
-      { ...(await this.mail.send(tenant, invoiceId)), canSend: true },
+      {
+        ...(await this.mail.send(tenant, invoiceId, operationKey)),
+        canSend: true,
+      },
       requestId,
     );
   }

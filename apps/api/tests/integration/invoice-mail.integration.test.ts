@@ -152,8 +152,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const a = runtime(provider);
       const b = runtime(provider);
       const [first, second] = await Promise.all([
-        a.controller.send(invoice.invoiceId, {}, identity),
-        b.controller.send(invoice.invoiceId, {}, identity),
+        a.controller.send(
+          invoice.invoiceId,
+          {},
+          identity,
+          undefined,
+          undefined,
+          "operation-concurrent",
+        ),
+        b.controller.send(
+          invoice.invoiceId,
+          {},
+          identity,
+          undefined,
+          undefined,
+          "operation-concurrent",
+        ),
       ]);
       expect(first.data.deliveryId).toBe(second.data.deliveryId);
       expect(provider.send).toHaveBeenCalledOnce();
@@ -162,7 +176,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       });
       const fresh = runtime(provider);
       const receipt = (
-        await fresh.controller.send(invoice.invoiceId, {}, identity)
+        await fresh.controller.send(
+          invoice.invoiceId,
+          {},
+          identity,
+          undefined,
+          undefined,
+          "operation-concurrent",
+        )
       ).data;
       expect(receipt).toMatchObject({
         status: "sent",
@@ -181,6 +202,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
         [tenantId],
       );
       expect(rows.rows).toHaveLength(1);
+      clock += 1000;
+      const resent = await fresh.mail.send(
+        tenantId,
+        invoice.invoiceId,
+        "operation-resend",
+      );
+      expect(resent.deliveryId).not.toBe(first.data.deliveryId);
+      expect(provider.send).toHaveBeenCalledTimes(2);
+      expect(provider.send.mock.calls[1]![0].recipientEmail).toBe(
+        "changed@example.test",
+      );
+      expect(
+        (await runtime(provider).mail.read(tenantId, invoice.invoiceId))
+          .deliveries,
+      ).toHaveLength(2);
     });
 
     it("retains failure and backoff across pools and recovers through the existing dispatcher", async () => {

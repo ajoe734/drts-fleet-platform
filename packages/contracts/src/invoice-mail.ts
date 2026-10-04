@@ -1,7 +1,6 @@
 /** sent = provider acceptance; recipient mailbox delivery is verified separately. */
-export interface TenantInvoiceMailView {
+export interface TenantInvoiceMailReceipt {
   invoiceId: string;
-  canSend: boolean;
   deliveryId: string | null;
   status: "not_requested" | "queued" | "sent" | "failed";
   queuedAt: string | null;
@@ -16,4 +15,10 @@ export interface TenantInvoiceMailView {
     retryable: boolean;
     acceptedAt: string | null;
   }[];
+}
+
+export interface TenantInvoiceMailView extends TenantInvoiceMailReceipt {
+  canSend: boolean;
+  /** Latest 20 intentional sends, each with its own immutable retry history. */
+  deliveries: TenantInvoiceMailReceipt[];
 }

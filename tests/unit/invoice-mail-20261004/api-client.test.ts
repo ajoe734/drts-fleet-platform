@@ -17,7 +17,7 @@ it("uses authenticated tenant endpoints and sends no recipient/content overrides
     "tenant-1",
   );
   await client.getInvoiceMail("invoice/1");
-  await client.sendInvoiceMail("invoice/1");
+  await client.sendInvoiceMail("invoice/1", "intentional-send-1");
   const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
   expect(calls[0]![0]).toBe(
     "https://api.example.test/api/tenant/invoices/invoice%2F1/mail",
@@ -27,4 +27,5 @@ it("uses authenticated tenant endpoints and sends no recipient/content overrides
   const headers = new Headers(calls[1]![1].headers);
   expect(headers.get("Authorization")).toBe("Bearer test-token");
   expect(headers.get("x-tenant-id")).toBe("tenant-1");
+  expect(headers.get("Idempotency-Key")).toBe("intentional-send-1");
 });

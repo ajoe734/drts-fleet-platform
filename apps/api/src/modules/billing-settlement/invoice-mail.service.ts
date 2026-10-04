@@ -1,4 +1,8 @@
-import type { TenantInvoiceMailView } from "@drts/contracts";
+import { createHash } from "node:crypto";
+import type {
+  TenantInvoiceMailReceipt,
+  TenantInvoiceMailView,
+} from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ApiRequestError } from "../../common/api-envelope";
 import { BillingSettlementRepository } from "./billing-settlement.repository";
@@ -36,8 +40,10 @@ export function authorizeInvoiceTenant(
   return identity.tenantId;
 }
 
-const keyForInvoice = (invoiceId: string) =>
-  `tenant-invoice-mail:v1:${invoiceId}`;
+const keyPrefix = (invoiceId: string) =>
+  `tenant-invoice-mail:v2:${createHash("sha256").update(invoiceId).digest("hex")}:`;
+const keyForInvoice = (invoiceId: string, operationKey = "default") =>
+  `${keyPrefix(invoiceId)}${operationKey}`;
 
 export class InvoiceMailService {
   constructor(
@@ -55,16 +61,28 @@ export class InvoiceMailService {
     invoiceId: string,
   ): Promise<TenantInvoiceMailView> {
     await this.requireInvoice(tenantId, invoiceId);
-    return this.toView(invoiceId, await this.findReceipt(tenantId, invoiceId));
+    const receipts = await this.findReceipts(tenantId, invoiceId);
+    return this.toView(invoiceId, receipts[0] ?? null, receipts);
   }
 
   async send(
     tenantId: string,
     invoiceId: string,
+    operationKey?: string,
   ): Promise<TenantInvoiceMailView> {
+    if (
+      operationKey !== undefined &&
+      !/^[A-Za-z0-9_-]{8,100}$/.test(operationKey)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_IDEMPOTENCY_KEY",
+        "Use an 8-100 character key for an intentional send.",
+      );
+    }
     const invoice = await this.requireInvoice(tenantId, invoiceId);
     // Retries reuse the original authorized recipient/content across restart.
-    let receipt = await this.findReceipt(tenantId, invoiceId);
+    let receipt = await this.findReceipt(tenantId, invoiceId, operationKey);
     if (!receipt) {
       if (invoice.status !== "issued" && invoice.status !== "paid") {
         throw new ApiRequestError(
@@ -103,7 +121,7 @@ export class InvoiceMailService {
       try {
         receipt = await this.delivery!.enqueue({
           tenantId,
-          idempotencyKey: keyForInvoice(invoiceId),
+          idempotencyKey: keyForInvoice(invoiceId, operationKey),
           recipientEmail,
           fromEmail,
           subject: "DRTS monthly invoice",
@@ -121,7 +139,7 @@ export class InvoiceMailService {
           error.message === "notification_idempotency_conflict"
         ) {
           // A concurrent request won the invoice key; retain its immutable payload.
-          receipt = await this.findReceipt(tenantId, invoiceId);
+          receipt = await this.findReceipt(tenantId, invoiceId, operationKey);
           if (!receipt) throw this.unavailable();
         } else {
           throw this.unavailable();
@@ -134,7 +152,11 @@ export class InvoiceMailService {
         receipt.deliveryId,
       );
       if (!current) throw this.unavailable();
-      return this.toView(invoiceId, current);
+      return this.toView(
+        invoiceId,
+        current,
+        await this.findReceipts(tenantId, invoiceId),
+      );
     } catch {
       // Never fabricate success/failure when persistence fails after acceptance.
       // The existing lease/drain own recovery of the uncertain attempt.
@@ -160,7 +182,11 @@ export class InvoiceMailService {
     return invoice;
   }
 
-  private async findReceipt(tenantId: string, invoiceId: string) {
+  private async findReceipt(
+    tenantId: string,
+    invoiceId: string,
+    operationKey?: string,
+  ) {
     if (!this.outbox || !this.delivery) throw this.unavailable();
     try {
       return await this.outbox.transaction(
@@ -168,8 +194,32 @@ export class InvoiceMailService {
           Object.values(state.deliveries).find(
             (entry) =>
               entry.receipt.tenantId === tenantId &&
-              entry.receipt.idempotencyKey === keyForInvoice(invoiceId),
+              entry.receipt.idempotencyKey ===
+                keyForInvoice(invoiceId, operationKey),
           )?.receipt ?? null,
+      );
+    } catch {
+      throw this.unavailable();
+    }
+  }
+
+  private async findReceipts(tenantId: string, invoiceId: string) {
+    if (!this.outbox || !this.delivery) throw this.unavailable();
+    try {
+      return await this.outbox.transaction((state) =>
+        Object.values(state.deliveries)
+          .map((entry) => entry.receipt)
+          .filter(
+            (receipt) =>
+              receipt.tenantId === tenantId &&
+              receipt.idempotencyKey.startsWith(keyPrefix(invoiceId)),
+          )
+          .sort(
+            (a, b) =>
+              b.queuedAt.localeCompare(a.queuedAt) ||
+              b.deliveryId.localeCompare(a.deliveryId),
+          )
+          .slice(0, 20),
       );
     } catch {
       throw this.unavailable();
@@ -196,10 +246,21 @@ export class InvoiceMailService {
   private toView(
     invoiceId: string,
     receipt: DeliveryReceipt | null,
+    receipts: DeliveryReceipt[],
   ): TenantInvoiceMailView {
     return {
-      invoiceId,
+      ...this.toReceipt(invoiceId, receipt),
       canSend: false,
+      deliveries: receipts.map((entry) => this.toReceipt(invoiceId, entry)),
+    };
+  }
+
+  private toReceipt(
+    invoiceId: string,
+    receipt: DeliveryReceipt | null,
+  ): TenantInvoiceMailReceipt {
+    return {
+      invoiceId,
       deliveryId: receipt?.deliveryId ?? null,
       status: receipt?.status ?? "not_requested",
       queuedAt: receipt?.queuedAt ?? null,
