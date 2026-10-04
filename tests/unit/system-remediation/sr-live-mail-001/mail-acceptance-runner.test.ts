@@ -99,6 +99,32 @@ describe("validateMailRunnerInputs", () => {
     expect(config.pollIntervalMs).toBe(3_000);
   });
 
+  it.each([
+    "person+approve@workspace-mail.org",
+    "person+other@workspace-mail.org",
+    "person@workspace-mail.org",
+    "person+invite@example.com",
+    "person+invite@EXAMPLE.NET",
+    "person+invite@sub.example.org",
+    "person+invite@fixture-mail.org",
+    "person+invite@demo.mail.org",
+    "person+invite@workspace.test",
+    "person+invite@workspace.invalid",
+    "person+invite@workspace.localhost",
+    "person+invite@-mail.org",
+    "person+invite@bad..org",
+    "person+invite@mail.org,other@mail.org",
+  ])(
+    "rejects an unauthorized alias or placeholder/malformed domain: %s",
+    (recipient) => {
+      expect(() =>
+        validateMailRunnerInputs(
+          baseEnv({ DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT: recipient }),
+        ),
+      ).toThrow(MailRunnerInputError);
+    },
+  );
+
   it("fails closed when DRTS_CANDIDATE_SHA is missing", () => {
     const env = baseEnv({ DRTS_CANDIDATE_SHA: undefined });
     expect(() => validateMailRunnerInputs(env)).toThrow(MailRunnerInputError);

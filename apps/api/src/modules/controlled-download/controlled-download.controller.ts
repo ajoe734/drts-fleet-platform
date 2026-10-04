@@ -13,9 +13,11 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { verifyControlledDownloadSignature } from "../../common/controlled-download";
 import { OpenRoute } from "../../common/auth";
 import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
   resolveDocumentArtifact,
+  type DocumentArtifactRebuildRegistry,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
 
@@ -52,6 +54,9 @@ export class ControlledDownloadController {
     @Optional()
     @Inject(DOCUMENT_ARTIFACT_STORE)
     private readonly artifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    private readonly rebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {}
 
   // Declared open on purpose. A signed URL is its own credential, and the IAM
@@ -63,7 +68,7 @@ export class ControlledDownloadController {
   // returned -- see `resolveDocumentArtifact`.
   @OpenRoute()
   @Get(":kind/:subjectId")
-  resolve(
+  async resolve(
     @Param("kind") kind: string,
     @Param("subjectId") subjectId: string,
     @Query("signed_at") signedAt?: string,
@@ -128,11 +133,73 @@ export class ControlledDownloadController {
     // The link is genuine and unexpired. Whether there is actually a file
     // behind it -- and whether it is still the same file the link named --
     // is a separate question the store answers.
-    const resolution = resolveDocumentArtifact(this.artifactStore, {
+    let resolution = await resolveDocumentArtifact(this.artifactStore, {
       kind,
       subjectId,
       manifestHash: manifestHash!,
     });
+
+    if (resolution.status === "not_found") {
+      // This instance's own store may simply never have seen these bytes --
+      // a sibling Cloud Run instance rendered them, or this instance
+      // restarted since. The signature and expiry are already verified
+      // above, so asking this kind's producer to deterministically
+      // re-derive the same file from its own durably persisted source
+      // record (and re-checking the result against the link's manifest
+      // hash before trusting it, exactly as a first-time resolution would)
+      // closes that gap without treating the verified link as blanket
+      // authorization to serve whatever a rebuild happens to produce. A
+      // kind with no registered rebuilder -- or one whose own source data
+      // has no such subjectId either -- answers exactly as before.
+      //
+      // This hash-less form is deliberately never used for "content_mismatch"
+      // below: an object already exists at this (kind, subjectId), and
+      // asking for a plain current-state re-render here could legitimately
+      // disagree with it for entirely innocent reasons, overwriting a real
+      // object other still-valid links depend on. The separate
+      // "content_mismatch" branch below asks for this link's own EXACT hash
+      // instead, which is a different, narrower, and safe operation -- see
+      // its own comment.
+      const rebuilt =
+        (await this.rebuildRegistry?.rebuild(kind, subjectId)) ?? null;
+      if (rebuilt) {
+        resolution = await resolveDocumentArtifact(this.artifactStore, {
+          kind,
+          subjectId,
+          manifestHash: manifestHash!,
+        });
+      }
+    }
+
+    if (resolution.status === "content_mismatch") {
+      // Unlike the `not_found` rebuild above, this must never ask the
+      // producer to re-derive bytes from CURRENT state: an object already
+      // exists here, and a current-state re-render could legitimately
+      // disagree with it for entirely innocent reasons (a stale link, or a
+      // sibling instance's own already-correct restoration) -- overwriting
+      // it would risk severing other still-valid links (see R4-followthrough
+      // UAT). What IS safe -- and closes a real gap (the retained
+      // cross-instance-restart finding: a rejected stale writer's late
+      // object write landing after a winner finalized, with no live caller
+      // left to run its own in-process repair) -- is asking the producer for
+      // EXACTLY the bytes this link's own verified manifest hash names, from
+      // its own durable, content-addressed record of that one publication,
+      // never a re-derivation. A producer with no such notion (or no durable
+      // row that still agrees this hash is canonical) returns null here,
+      // same as having nothing registered at all; see
+      // `DocumentArtifactRebuilder`'s own doc for why passing the hash is
+      // what makes this different from the `not_found` call above.
+      const restored =
+        (await this.rebuildRegistry?.rebuild(kind, subjectId, manifestHash!)) ??
+        null;
+      if (restored) {
+        resolution = await resolveDocumentArtifact(this.artifactStore, {
+          kind,
+          subjectId,
+          manifestHash: manifestHash!,
+        });
+      }
+    }
 
     if (resolution.status === "ok") {
       return new StreamableFile(resolution.bytes, {
