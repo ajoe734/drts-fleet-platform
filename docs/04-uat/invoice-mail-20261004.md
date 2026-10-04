@@ -4,7 +4,7 @@
 
 ## 依據與修正邊界
 
-- PRD §租戶管理（billing profile / invoice 收件）、service contracts Billing Service、SC-030 與 SC-047 財務權限；C079 `source/capabilities.json` 要求帳單連結、寄信與失敗追蹤。原指定文件不存在，於本任務建立並持續累積證據。
+- PRD §租戶管理（billing profile / invoice 收件）、service contracts Billing Service、SC-030 與 SC-047 財務權限；C079 `docs/04-uat/system-remediation-20260906/source/capabilities.json` 要求帳單連結、寄信與失敗追蹤。原指定文件不存在，於本任務建立並持續累積證據。
 - `BillingSettlementController.updateTenantBillingProfile` 只信任 `x-tenant-id`；`BillingSettlementService.generateTenantInvoice` 只寫站內通知。原帳務收件人與帳單真值為 `billing.phase1_tenant_billing_profiles` / `billing.phase1_tenant_invoices`（V0012 的 record JSONB），不能以種子預設信箱寄信。
 - 新寄送／回讀入口以已驗證租戶 identity、billing scope 與帳單歸屬授權；同步修補帳務 profile／invoice 讀寫入口，避免改寫其他租戶收件人或經郵件頁讀出其他租戶帳單。
 - 使用既有 `PostgresMailOutbox` / `NotificationDeliveryService`（V0103），每次明確寄送採 invoice namespace + operation key；該次內容與收件人不可變，同 key retry 不新增信件。既有排程 drain 處理 crash／backoff；手動重試也遵循同一 lease、次數與退避。初期 anchors 採每張帳單單一 key，後依 Pi 交接加入明確重送，詳見續作表。
@@ -65,3 +65,32 @@ Supervisor 已核對 scope 衝突並加入 `tests/unit/multi-tenant-header-routi
 | F07 翻譯 guard 拒絕 inline bilingual map | `mail-translations.ts` 改讀正式 `lib/translations.ts` catalog                                                                                                 | 舊 inline `{en,zh}` 觸發 i18n guard；移入 catalog 後通過                                                                                 | `pnpm i18n:guard` exit 1 `i18n-initial.log` → exit 0 `i18n-after.log`                                                                                | 無 browser 宣稱                                                                                                                                                                                                   |
 
 沿用本分支 `INVOICE_MAIL_PORTAL_ORIGIN`（已有 prepare origin／Cloud Run fallback，且位於 SMTP selection markers 之外），不另外採用 Pi 的第二個 env 名稱。仍使用同一 V0103 outbox、既有 scheduler，沒有新 migration 或排程；`sent` 只代表 provider acceptance。加強的正式 PG 測試仍待 hosted CI。
+
+## Owner closeout evidence（2026-10-04）
+
+最後產品實作 anchor `944542f521267bcef0546ea3224ede664445fcdf`。其後 typecheck 找出新 `TenantInvoiceMailReceipt` 漏掉 barrel export，已補齊 `packages/contracts/src/index.ts` 並重建 contracts，root/API/tenant/test typechecks 全部重跑通過。最終 closeout commit 僅含此 export 修正與本文件；最終 candidate SHA／branch／PR 以 owner `handoff` machine truth 為準，不能把 anchors 或 Pi PR 當成 candidate。Pi 最新文件 checkpoint `f1b6aaaad4c7c117b368c1959f57d28077d39712` 亦已核對，僅補 contribution ownership 與 operator-local 引用說明。
+
+| Finding／驗收項                                          | 原始碼依據與修改位置                                                                                                                         | 舊版重現 → 修正版結果                                                                                                                                     | 命令、退出碼、執行版本與證據位置                                                                                                                                                                                                    | 未驗項與具體限制                                                                                                                                                 |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F01、F02、F04、F05 / tenant_authorized_invoice_mail_path | 真實 billing/mail controllers、正式 role scopes、fresh repository、client、server actions、實際 panel                                        | 舊跨租戶寫入、錯誤 role scope、stale replica 均有前述失敗重現；目前合法操作與無身分/跨 tenant/錯 realm/read-only 拒絕全回歸通過；舊 header fixture 已修復 | 下列 29 files / 320 tests exit 0，`regression-final.log`（944542f52）；root/API/tenant typechecks 在 barrel fix 後 exit 0                                                                                                           | 未做 HTTP server／hosted browser 的已登入租戶流程；不把直接 controller 或 jsdom 當作 E2E                                                                         |
+| F06 / durable_idempotent_delivery_and_readback           | InvoiceMailService + FileMailOutbox / PostgresMailOutbox + 原 delivery core，per-operation immutable recipient/content、bounded safe history | 同 key 並發/重試/instance recreation、backoff、terminal failure、max attempts、acceptance 後 commit fault、明確新寄送、failure history 通過               | `regression-final.log` exit 0；新增正式 PostgreSQL 3 tests 收錄既有 integration workflow，`test-types.log` exit 0                                                                                                                   | PG runtime **未執行**（local suite 3 skipped）；非 OS restart；SMTP provider acceptance/DB commit 跨 crash 仍可能重送，但保留同一 Message-ID。真 SMTP/信箱另驗收 |
+| F03、F07 / regression_and_same_sha_review_ci             | deploy-dev origin injection、translation catalog、contracts barrel、既有回歸                                                                 | SMTP selection／workflow、i18n、lint、source/test types 通過；初次 barrel error 保留後已修复                                                              | lint exit 0 `lint-final.log`；i18n exit 0 `i18n-after.log`；39 Python tests exit 0 `workflow-final.log`；root/API/tenant `*-typecheck-final.log` exit 0；`test-types.log` exit 0；classification／test discovery／diff check exit 0 | 同 candidate reviewer、hosted CI／PG、merge 尚待 lifecycle；未執行部署，不能宣稱已上 shared dev                                                                  |
+
+最終相關回歸命令（已等待結束、讀取結果，exit 0，29 files / 320 passed）：
+
+```bash
+pnpm exec vitest run tests/unit/invoice-mail-20261004 tests/unit/multi-tenant-header-routing.test.ts tests/unit/billing-settlement.test.ts tests/unit/billing-settlement.repository.test.ts tests/unit/billing-settlement.service.test.ts tests/unit/system-remediation/sr-invoice-001 tests/unit/system-remediation/sr-qa-finance-001 tests/unit/system-remediation/sr-notify-001 tests/unit/notification-delivery tests/unit/system-remediation/sr-mail-001 tests/unit/audit-artifact-durability-20261002.test.ts tests/unit/audit-artifact-durability-s3-20261003.test.ts
+pnpm exec tsc -p tsconfig.json --noEmit
+pnpm --filter @drts/api typecheck
+pnpm --filter @drts/tenant-console-web typecheck
+pnpm exec tsc -p .local/invoice-mail-20261004/test-types.json --noEmit
+pnpm i18n:guard
+python3 -m unittest tools/ci/test_dev_artifact_providers.py
+python3 tools/ci/check_test_coverage.py
+pnpm classification:check
+git diff --check
+```
+
+`test-types.json` 是機器 evidence 下的配置：延伸 root tsconfig，include 本 task 的 unit `.ts/.tsx` 與 API integration test，將 workspace aliases 指到本 worktree；不改正式 tsconfig。Lint 為相對初始 SHA 全部 task-changed `.ts/.tsx` 執行 `pnpm exec eslint <files> --max-warnings=0`。最初錯誤另存 `root-typecheck-receipt-export-before.log`、`api-typecheck-receipt-export-before.log`（exit 2），未覆蓋成通過。`next-env.d.ts` 原有 generated diff 留在本機且未 stage。
+
+待驗收清單維持原三個 acceptance keys，不另造完成狀態：Codex2 review exact candidate；GitHub bus 收錄 matching CI（其中 PostgreSQL suite 不得 skipped）、merge；授權 shared-dev browser/mailbox 測試記錄實際 source SHA、登入租戶與 allowlisted inbox receipt。真收件不由任何 mock 或 `sent` 狀態推導。Owner 不呼叫 `done`。
