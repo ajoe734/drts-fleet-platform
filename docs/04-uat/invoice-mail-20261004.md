@@ -3,9 +3,9 @@
 ## Authority and scope
 
 User 2026-10-04: finish currently actionable incomplete work. Source gap:
-`docs/04-uat/full-system-inventory-20261004/REPORT.md` §6 C079 and
-`SR-LIVE-MAIL-001.integration_notes`: invitation/approval mail does not implement
-invoice mail. Base: `0e4b93191e039acabf71549495bd07c0cfa618ee`.
+operator-local October 4 full-system inventory §6 C079 (not published in this
+checkout) and `SR-LIVE-MAIL-001.integration_notes`: invitation/approval mail does
+not implement invoice mail. Base: `0e4b93191e039acabf71549495bd07c0cfa618ee`.
 
 Implement explicit send/resend from the tenant invoice detail, using the persisted
 invoice and billing profile, the existing durable notification outbox and existing
@@ -32,6 +32,16 @@ failures and leases across restarts.
   on the locked candidate. No self-approval.
 
 ## Evidence / limits
+
+Coordination update: the supervisor reassigned implementation to Codex / Codex2
+while this direct Pi session was working. This branch and draft PR #2310 are a
+**contribution, not the canonical candidate**. The current owner must reconcile
+useful changes into one branch while retaining the parallel billing-profile
+authorization and multi-replica fixes. Do not merge both implementations or
+transfer tests/review evidence across their SHAs. Pi's owner handoff was correctly
+rejected by the lifecycle guard; no impersonated handoff or self-approval occurred.
+The first hosted canonical-consistency check exposed the unpublished inventory
+path citation above; it is now accurately described as operator-local evidence.
 
 Implemented `TenantInvoiceMailService` + dedicated controller, authoritative
 repository read, billing-module DI, API client, selected-invoice UI and English /
