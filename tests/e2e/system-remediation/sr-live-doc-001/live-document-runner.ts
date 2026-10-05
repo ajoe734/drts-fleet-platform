@@ -1,8 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 export async function getGoogleIdToken(
   audience: string,
