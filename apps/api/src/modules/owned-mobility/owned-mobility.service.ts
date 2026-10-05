@@ -5489,28 +5489,32 @@ export class OwnedMobilityService
           reason: order.cancelReason,
         }),
       );
-      const outbox: ConsumerNotificationOutboxRecord = {
-        outboxId: randomUUID(),
-        orderId: order.orderId,
-        passengerSubjectRef: resolvePassengerSubjectRef(order.passenger),
-        eventType: "trip_cancelled",
-        assignmentVersion: bundle.assignmentVersion ?? 1,
-        payload: {
-          cancelReason: order.cancelReason,
-        },
-        status: "pending",
-        attemptCount: 0,
-        nextAttemptAt: now,
-        createdAt: now,
-        deliveredAt: null,
-      };
+      let consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
+      if (order.runtimeProfileCode === "multi_taxi_direct") {
+        const outbox: ConsumerNotificationOutboxRecord = {
+          outboxId: randomUUID(),
+          orderId: order.orderId,
+          passengerSubjectRef: resolvePassengerSubjectRef(order.passenger),
+          eventType: "trip_cancelled",
+          assignmentVersion: bundle.assignmentVersion ?? 1,
+          payload: {
+            cancelReason: "passenger_cancelled",
+          },
+          status: "pending",
+          attemptCount: 0,
+          nextAttemptAt: now,
+          createdAt: now,
+          deliveredAt: null,
+        };
+        consumerNotificationOutbox.push(outbox);
+      }
       return {
         order,
         assignment,
         task,
         dispatchJobs,
         traceLogs,
-        consumerNotificationOutbox: [outbox],
+        consumerNotificationOutbox,
       };
     };
     const repository = this.ownedMobilityRepository;
