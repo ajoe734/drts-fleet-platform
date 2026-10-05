@@ -38,13 +38,13 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
 
 ## 驗收與證據（持續更新）
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版 | 命令／版本／證據 | 未驗項與限制 |
-| --- | --- | --- | --- | --- |
-| 租戶後台可用Google帳號經PKCE登入 | oidc-pkce.service.ts、tenant BFF | 尚未執行 | Base cf263f02f | 真實 OAuth client 尚待 operator 建立 |
-| Google ID token以輪替金鑰驗證且不偽造MFA | verifier、claims merge | 靜態確認預設 MFA 與 kid fallback | 尚未執行回歸 | 需測 rotation、錯誤 issuer/aud/nonce、缺 MFA |
-| 外部Google帳號可依邀請綁定租戶使用者 | invitation acceptance、canonical identity | 靜態確認未綁定 | 待 scope 協調 | PG 需 hosted 正式 schema 驗證 |
-| 企業派車共用租戶登入 | enterprise session、host-local auth route | 尚未執行 | canvas ent-states.jsx | 本 VM 禁止 browser/server |
-| 同候選SHA CI通過且獨立reviewer審查 | candidate lifecycle | 尚未建立候選 | reviewer Claude2 | owner 不結案 |
+| Finding／驗收項                          | 原始碼依據與修改位置                      | 舊版重現 → 修正版                | 命令／版本／證據      | 未驗項與限制                                 |
+| ---------------------------------------- | ----------------------------------------- | -------------------------------- | --------------------- | -------------------------------------------- |
+| 租戶後台可用Google帳號經PKCE登入         | oidc-pkce.service.ts、tenant BFF          | 尚未執行                         | Base cf263f02f        | 真實 OAuth client 尚待 operator 建立         |
+| Google ID token以輪替金鑰驗證且不偽造MFA | verifier、claims merge                    | 靜態確認預設 MFA 與 kid fallback | 尚未執行回歸          | 需測 rotation、錯誤 issuer/aud/nonce、缺 MFA |
+| 外部Google帳號可依邀請綁定租戶使用者     | invitation acceptance、canonical identity | 靜態確認未綁定                   | 待 scope 協調         | PG 需 hosted 正式 schema 驗證                |
+| 企業派車共用租戶登入                     | enterprise session、host-local auth route | 尚未執行                         | canvas ent-states.jsx | 本 VM 禁止 browser/server                    |
+| 同候選SHA CI通過且獨立reviewer審查       | candidate lifecycle                       | 尚未建立候選                     | reviewer Claude2      | owner 不結案                                 |
 
 本 VM 僅執行 repository checks，不啟動產品服務、瀏覽器或 Docker。
 
@@ -77,3 +77,60 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
   既有 tenant callback 回歸 6 pass。擴大 identity 回歸 89 pass / 3 fail：
   舊 MFA 測試仍指向已移走的 controller verifier／未注入 PKCE service，
   正在更新測試裝配並補邀請與實際 Google token 測試；尚不交審。
+
+## Operator：建立 Google OAuth client（文件步驟，尚未執行）
+
+1. 先讀 `.github/workflows/deploy-dev.yml`、`docs/ops/branch-strategy.md` 與
+   `docs/03-runbooks/smarttransport-tw-custom-domains.md`。用 `gh variable list`
+   核對當次 `DEV_GCP_PROJECT_ID`、`DEV_GCP_REGION`；歷史 suspended project
+   不可使用。本任務不建立 client、secret、public exposure 或觸發部署。
+2. 在正確 GCP project 的 Google Auth Platform 設定 Branding，Audience 選
+   **External**；testing 狀態加入實際測試帳號。只請求 `openid profile email`，
+   不限制 Workspace hosted domain。External consent 不等於任意帳號有租戶權限。
+3. Clients → Create client → **Web application**。加入精確 redirect URI：
+   `https://tenant.smarttransport.tw/api/auth/tenant/callback` 與
+   `https://dispatch.smarttransport.tw/api/auth/tenant/callback`；再以現行兩個
+   Cloud Run service 的 `status.url` 各接 `/api/auth/tenant/callback` 加入
+   run.app fallback。不得使用 wildcard、舊 project hostname 或前端 root URL。
+4. 把 client ID 設為 repository variable `DEV_OIDC_CLIENT_ID`。把 client secret
+   由 operator 建入現行 project 的 Secret Manager `drts-dev-oidc-client-secret`，
+   建立 enabled version，給 runtime service account `secretAccessor`。
+   不放入 Git、文件、issue 或日誌。部署 runner 只 describe，從不讀取 secret 值。
+5. 核對 `DEV_TENANT_CONSOLE_ORIGIN`、`DEV_ENTERPRISE_DISPATCH_ORIGIN` 與實際
+   domain mappings。workflow 將兩個 public origin 與 run.app origin 加入
+   `AUTH_ALLOWED_ORIGINS`，並把邀請信連結設到 tenant 的既有登入路由。
+6. 兩份設定皆不存在時，OIDC 關閉；只有一份存在時 workflow 在部署前失敗；
+   全部存在才啟用 Google 端點、secret mount、兩個 BFF state secret 與
+   明示的 `DRTS_DEV_MFA_WAIVED=true`。BFF state secret 使用既有 JWT secret
+   mount，Google client secret 只進 API。重新部署使用完整 `--set-env-vars` /
+   `--set-secrets`，不保留半套舊 OAuth 設定。
+7. 透過既有授權 deploy workflow，使用 immutable release/publish ref 或完整 SHA。
+   在共享 Cloud Run 驗證：外部帳號邀請 → email 對應 → Google 登入 → 一次綁定，
+   相同 sub 後續登入、錯誤帳號拒絕、重放／撤銷拒絕、派車登入、logout-all。
+   未有實際部署 source SHA/run 證據前不可宣稱上線。
+
+邀請信的 token 由 BFF 以 POST body 傳至 API，雜湊只存於加密 state；
+不傳給 Google。回覆加 `Referrer-Policy: no-referrer` 與 `Cache-Control: no-store`。
+兩個入口共用會員、角色與 session API；各自 logout 清除自己的 cookie，
+logout-all 透過 API 撤銷所有 session。企業派車的登入按鈕維持 canvas，僅接上路由。
+
+### 修復單元 3：session 實際消耗與部署 gate
+
+- 新增 `JwtAuthService.verifyAccessToken` 實際消耗測試：原有 guard 對空
+  amr/acr 拒絕（1 fail / 6 pass），修正後 7 pass；原有 identity session
+  suite 另 10 pass。現在合法缺少 MFA assertion 的 durable session 可用，
+  撤銷後立即拒絕；不改任何 step-up 的 trusted MFA 判定。
+- 最新範圍回歸：13 files / 126 tests pass；API auth-bootstrap 101 pass；
+  ordinary-login + step-up 15 pass。PostgreSQL 新增 3 cases 本機 skip，
+  由現有 CI Product smoke acceptance 在正式 migrations 後執行，測並發消耗、
+  錯誤 email/tenant 不耗 proof、重複 `(issuer, sub)` 全部回滾。
+- API、root、tenant-console、enterprise-dispatch typecheck exit 0；兩個 web
+  typecheck 僅產生型別，沒有啟動服務。BFF-only import gate exit 0。
+- deployment 的 5-case 測試直接執行 workflow 的 OIDC shell 區段，mock
+  Secret Manager describe，驗證全缺／全有／任一缺／錯誤 client ID。
+  YAML parse 9 jobs；沒有呼叫任何 deploy 或建立 OAuth 資源。
+- 2026-10-05 read-only `gh variable list`：現行 dev target 為
+  `drts-dev-devcc-20260825` / `us-central1`；兩個 origin 目前是 run.app。
+  未列出 `DEV_OIDC_CLIENT_ID`，真實 OAuth acceptance 仍待 operator 設定。
+- 上述 machine-specific logs 在 `.local/entry-tenant-google-oidc/`。
+  CI／review／merge／真實 Google 登入均不可由 scoped pass 推導。

@@ -242,6 +242,13 @@ export class OidcPkceService {
       invitationToken?: string;
     },
   ): OidcLoginUrlResult {
+    if (process.env.OIDC_ENABLED === "false") {
+      throw new ApiRequestError(
+        503,
+        "AUTH_OIDC_UNAVAILABLE",
+        "OIDC login is not configured on this deployment.",
+      );
+    }
     const validatedRedirectUri = this.validateRedirectUri(options?.redirectUri);
     const state = this.base64UrlEncode(randomBytes(24));
     const nonce = this.base64UrlEncode(randomBytes(24));
@@ -262,7 +269,13 @@ export class OidcPkceService {
       redirectUri: validatedRedirectUri,
       tenantId: options?.tenantId?.trim() || null,
       partnerId: options?.partnerId?.trim() || null,
-      ...(realm === "tenant" && options?.invitationToken ? { invitationTokenHash: createHash("sha256").update(options.invitationToken).digest("hex") } : {}),
+      ...(realm === "tenant" && options?.invitationToken
+        ? {
+            invitationTokenHash: createHash("sha256")
+              .update(options.invitationToken)
+              .digest("hex"),
+          }
+        : {}),
       createdAt: now,
       expiresAt,
     };
@@ -317,33 +330,64 @@ export class OidcPkceService {
       meta,
     );
 
-    return this.issueVerifiedTenantSession(claims, {
-      tenantId: stateRecord.tenantId || command.tenantId?.trim() || null,
-      invitationTokenHash: stateRecord.invitationTokenHash,
-    }, meta);
+    return this.issueVerifiedTenantSession(
+      claims,
+      {
+        tenantId: stateRecord.tenantId || command.tenantId?.trim() || null,
+        invitationTokenHash: stateRecord.invitationTokenHash,
+      },
+      meta,
+    );
   }
 
   public async exchangeTenantIdTokenSession(
     command: { idToken: string; tenantId?: string | null },
     meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<TenantBootstrapSession> {
-    const claims = await this.idTokenVerifier.verify(command.idToken, undefined, true);
-    return this.issueVerifiedTenantSession(claims as unknown as OidcClaims, { tenantId: command.tenantId }, meta);
+    const claims = await this.idTokenVerifier.verify(
+      command.idToken,
+      undefined,
+      true,
+    );
+    return this.issueVerifiedTenantSession(
+      claims as unknown as OidcClaims,
+      { tenantId: command.tenantId },
+      meta,
+    );
   }
 
   private async issueVerifiedTenantSession(
     claims: OidcClaims,
-    options: { tenantId?: string | null | undefined; invitationTokenHash?: string | undefined },
+    options: {
+      tenantId?: string | null | undefined;
+      invitationTokenHash?: string | undefined;
+    },
     meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
   ): Promise<TenantBootstrapSession> {
     // Shared with ENTRY-IAP: never interpret the flag as an MFA assertion.
     const waiverConfigured = process.env.DRTS_DEV_MFA_WAIVED === "true";
     const environment = detectAuthEnvironment();
-    if (waiverConfigured && (environment === "staging" || environment === "production")) {
-      throw new ApiRequestError(503, "AUTH_CONFIGURATION_INVALID", "DRTS_DEV_MFA_WAIVED is forbidden in staging and production.");
+    if (
+      waiverConfigured &&
+      (environment === "staging" || environment === "production")
+    ) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_CONFIGURATION_INVALID",
+        "DRTS_DEV_MFA_WAIVED is forbidden in staging and production.",
+      );
     }
-    if (typeof claims.email !== "string" || !claims.email.trim() || typeof claims.sub !== "string" || !claims.sub.trim()) {
-      throw new ApiRequestError(403, "AUTH_SESSION_EXCHANGE_DENIED", "OIDC subject and email are required.");
+    if (
+      typeof claims.email !== "string" ||
+      !claims.email.trim() ||
+      typeof claims.sub !== "string" ||
+      !claims.sub.trim()
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "OIDC subject and email are required.",
+      );
     }
 
     // Enforce email_verified === true for tenant session exchange
@@ -374,13 +418,31 @@ export class OidcPkceService {
     // Resolve tenant user identity strictly by immutable subject binding primary key
     const subjectId = claims.sub.trim();
     const normalizedEmail = claims.email.trim().toLowerCase();
-    const requestedTenantId = options.tenantId?.trim() || claims.tenant_id?.trim();
-    const proof = { issuer: claims.iss, subject: subjectId, email: normalizedEmail, tenantId: requestedTenantId || null };
+    const requestedTenantId =
+      options.tenantId?.trim() || claims.tenant_id?.trim();
+    const proof = {
+      issuer: claims.iss,
+      subject: subjectId,
+      email: normalizedEmail,
+      tenantId: requestedTenantId || null,
+    };
     if (options.invitationTokenHash) {
-      await this.tenantPartnerService.acceptTenantOidcInvitation(options.invitationTokenHash, proof, meta?.requestId);
-      this.recordSecurityEvent({ eventType: "tenant_oidc_invitation.bound", outcome: "success", realm: "tenant", tenantId: requestedTenantId || null, subjectId, meta });
+      await this.tenantPartnerService.acceptTenantOidcInvitation(
+        options.invitationTokenHash,
+        proof,
+        meta?.requestId,
+      );
+      this.recordSecurityEvent({
+        eventType: "tenant_oidc_invitation.bound",
+        outcome: "success",
+        realm: "tenant",
+        tenantId: requestedTenantId || null,
+        subjectId,
+        meta,
+      });
     }
-    const existingUser = await this.tenantPartnerService.findTenantUserByOidcIdentity(proof);
+    const existingUser =
+      await this.tenantPartnerService.findTenantUserByOidcIdentity(proof);
     const targetTenantId = existingUser?.tenantId || requestedTenantId || "";
 
     if (
@@ -477,12 +539,33 @@ export class OidcPkceService {
     const acr = claims.acr ?? "";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
     const mfaVerified = hasTrustedMfa({ amr, acr });
-    const mfaRequired = isOrdinaryLoginMfaRequired() || ["tenant_admin", "tenant_ops_admin"].includes(existingUser.roleCode);
+    const mfaRequired =
+      isOrdinaryLoginMfaRequired() ||
+      ["tenant_admin", "tenant_ops_admin"].includes(existingUser.roleCode);
     const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
     const mfaWaived = mfaRequired && !mfaVerified && waiverConfigured;
     if (mfaWaived) {
-      if (!this.securityEventsService) throw new ApiRequestError(503, "AUTH_AUDIT_UNAVAILABLE", "Security events are required for a dev MFA waiver.");
-      this.recordSecurityEvent({ eventType: "tenant_oidc_session.mfa_waived", outcome: "success", realm: "tenant", tenantId: targetTenantId, actorId: existingUser.userId, subjectId, reasonCode: "DEV_MFA_WAIVED", afterSummary: { flag: "DRTS_DEV_MFA_WAIVED", environment, mfaVerified: false }, meta });
+      if (!this.securityEventsService)
+        throw new ApiRequestError(
+          503,
+          "AUTH_AUDIT_UNAVAILABLE",
+          "Security events are required for a dev MFA waiver.",
+        );
+      this.recordSecurityEvent({
+        eventType: "tenant_oidc_session.mfa_waived",
+        outcome: "success",
+        realm: "tenant",
+        tenantId: targetTenantId,
+        actorId: existingUser.userId,
+        subjectId,
+        reasonCode: "DEV_MFA_WAIVED",
+        afterSummary: {
+          flag: "DRTS_DEV_MFA_WAIVED",
+          environment,
+          mfaVerified: false,
+        },
+        meta,
+      });
     }
 
     if (mfaRequired && !mfaVerified && !mfaWaived) {
@@ -561,7 +644,7 @@ export class OidcPkceService {
       tenantId: targetTenantId,
       actorId: existingUser.userId,
       subjectId: claims.sub,
-      tokenId: token,
+      tokenId: issuedTokenId ?? null,
       afterSummary: {
         sub: claims.sub,
         email: normalizedEmail,
@@ -1321,7 +1404,10 @@ export class OidcPkceService {
         }
       }
 
-      if (Object.keys(userinfoClaims).length > 0 && userinfoClaims.sub !== claimsFromToken.sub) {
+      if (
+        Object.keys(userinfoClaims).length > 0 &&
+        userinfoClaims.sub !== claimsFromToken.sub
+      ) {
         throw new ApiRequestError(
           400,
           "AUTH_SESSION_EXCHANGE_DENIED",

@@ -202,15 +202,33 @@ export class AuthController {
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("tenant/invitation-login")
   getTenantInvitationLoginUrl(
-    @Body() command: { invitationToken: string; redirectUri: string; tenantId?: string },
+    @Body()
+    command: {
+      invitationToken: string;
+      redirectUri: string;
+      tenantId?: string;
+    },
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (typeof command.invitationToken !== "string" || !command.invitationToken.trim() || command.invitationToken.length > 512) {
-      throw new ApiRequestError(400, "FIELD_REQUIRED", "Invitation token is required.");
+    if (
+      typeof command.invitationToken !== "string" ||
+      !command.invitationToken.trim() ||
+      command.invitationToken.length > 512
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
     }
-    const result = this.requireOidcPkceService().generateLoginParameters("tenant", {
-      redirectUri: command.redirectUri, tenantId: command.tenantId || null, invitationToken: command.invitationToken.trim(),
-    });
+    const result = this.requireOidcPkceService().generateLoginParameters(
+      "tenant",
+      {
+        redirectUri: command.redirectUri,
+        tenantId: command.tenantId || null,
+        invitationToken: command.invitationToken.trim(),
+      },
+    );
     return toApiSuccessEnvelope(result, requestId);
   }
 
@@ -927,7 +945,11 @@ export class AuthController {
     @Headers("x-request-id") requestId?: string,
   ) {
     try {
-      const session = await this.requireOidcPkceService().exchangeTenantIdTokenSession(command, this.buildMeta(forwardedFor, realIp, userAgent, requestId));
+      const session =
+        await this.requireOidcPkceService().exchangeTenantIdTokenSession(
+          command,
+          this.buildMeta(forwardedFor, realIp, userAgent, requestId),
+        );
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
       throw toPublicTenantAuthError(error);

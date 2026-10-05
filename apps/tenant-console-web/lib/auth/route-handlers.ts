@@ -19,7 +19,10 @@ import {
 } from "./session";
 import { verifyTenantSession } from "./verified-tenant-session.server";
 
-import { tenantAuthFetch, resolveTenantApiUrl as resolveApiUrl } from "./api-fetch";
+import {
+  tenantAuthFetch,
+  resolveTenantApiUrl as resolveApiUrl,
+} from "./api-fetch";
 
 function validateCsrfAndOrigin(request: NextRequest): NextResponse | null {
   if (!verifySameOrigin(request)) {
@@ -75,11 +78,18 @@ async function getAuth(
     try {
       const invitationToken = request.nextUrl.searchParams.get("token")?.trim();
       const res = invitationToken
-        ? await tenantAuthFetch(`${resolveApiUrl()}/api/auth/tenant/invitation-login`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ invitationToken, redirectUri: callbackUrl, tenantId: tenantId || undefined }),
-          })
+        ? await tenantAuthFetch(
+            `${resolveApiUrl()}/api/auth/tenant/invitation-login`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                invitationToken,
+                redirectUri: callbackUrl,
+                tenantId: tenantId || undefined,
+              }),
+            },
+          )
         : await tenantAuthFetch(backendUrl.toString(), { cache: "no-store" });
       const data = await res.json().catch(() => null);
       const payload = data && data.data ? data.data : data;
@@ -451,7 +461,10 @@ async function postAuth(
  * Only the host-local error screen differs; cookies never get a Domain. */
 export function createTenantAuthHandlers(loginFailurePath = "/login") {
   return {
-    GET: (request: NextRequest, context: { params: Promise<{ auth: string[] }> }) => getAuth(request, context, loginFailurePath),
+    GET: (
+      request: NextRequest,
+      context: { params: Promise<{ auth: string[] }> },
+    ) => getAuth(request, context, loginFailurePath),
     POST: postAuth,
   };
 }

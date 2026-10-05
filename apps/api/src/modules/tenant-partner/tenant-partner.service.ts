@@ -4553,39 +4553,78 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findTenantUserByOidcIdentity(proof: TenantOidcProof) {
-    const user = await this.identityRepository?.findTenantUserByOidcSubject(proof);
+    const user =
+      await this.identityRepository?.findTenantUserByOidcSubject(proof);
     if (user) return this.cacheAuthenticatedTenantUser(user);
     // Only the existing offline fixture path may use seed subjects without an
     // issuer binding. Deployed Google and generic providers always fail closed.
     const environment = detectAuthEnvironment();
-    if ((environment === "local" || environment === "test") && process.env.OIDC_MOCK_MODE === "true") {
-      const fixture = this.findTenantUserBySubject(proof.subject) as OidcBoundTenantUser | null;
-      if (fixture && (!proof.tenantId || fixture.tenantId === proof.tenantId)
-        && (!fixture.oidcIssuer || fixture.oidcIssuer === proof.issuer)) return fixture;
+    if (
+      (environment === "local" || environment === "test") &&
+      process.env.OIDC_MOCK_MODE === "true"
+    ) {
+      const fixture = this.findTenantUserBySubject(
+        proof.subject,
+      ) as OidcBoundTenantUser | null;
+      if (
+        fixture &&
+        (!proof.tenantId || fixture.tenantId === proof.tenantId) &&
+        (!fixture.oidcIssuer || fixture.oidcIssuer === proof.issuer)
+      )
+        return fixture;
     }
     return null;
   }
 
   async findTenantUserForAuthentication(tenantId: string, userId: string) {
-    if (!this.identityRepository?.isEnabled()) return this.findTenantUser(tenantId, userId);
-    const user = await this.identityRepository.findTenantUserForAuthentication(tenantId, userId);
+    if (!this.identityRepository?.isEnabled())
+      return this.findTenantUser(tenantId, userId);
+    const user = await this.identityRepository.findTenantUserForAuthentication(
+      tenantId,
+      userId,
+    );
     return user ? this.cacheAuthenticatedTenantUser(user) : null;
   }
 
   private cacheAuthenticatedTenantUser(user: TenantUserRoleRecord) {
-    const index = this.userRoles.findIndex((entry) => entry.userId === user.userId && entry.tenantId === user.tenantId);
+    const index = this.userRoles.findIndex(
+      (entry) =>
+        entry.userId === user.userId && entry.tenantId === user.tenantId,
+    );
     if (index < 0) this.userRoles.push(this.cloneUserRole(user));
     else this.userRoles[index] = this.cloneUserRole(user);
     return this.cloneUserRole(user);
   }
 
-  async acceptTenantOidcInvitation(tokenHash: string, proof: TenantOidcProof, requestId?: string) {
-    const accepted = await this.identityRepository?.acceptTenantOidcInvitation(tokenHash, proof);
-    if (!accepted) throw new ApiRequestError(403, "TENANT_INVITATION_ACCEPTANCE_DENIED", "The invitation cannot be accepted.");
+  async acceptTenantOidcInvitation(
+    tokenHash: string,
+    proof: TenantOidcProof,
+    requestId?: string,
+  ) {
+    const accepted = await this.identityRepository?.acceptTenantOidcInvitation(
+      tokenHash,
+      proof,
+    );
+    if (!accepted)
+      throw new ApiRequestError(
+        403,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+      );
     this.cacheAuthenticatedTenantUser(accepted.user);
-    this.recordTenantAudit({ actorId: accepted.user.userId, actorType: "tenant_admin", tenantId: accepted.user.tenantId,
-      moduleName: "tenant-partner", actionName: "accept_tenant_oidc_invitation", resourceType: "tenant_user_role", resourceId: accepted.user.userId,
-      newValuesSummary: this.buildTenantUserAuditSummary(accepted.user) }, requestId);
+    this.recordTenantAudit(
+      {
+        actorId: accepted.user.userId,
+        actorType: "tenant_admin",
+        tenantId: accepted.user.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "accept_tenant_oidc_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: accepted.user.userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(accepted.user),
+      },
+      requestId,
+    );
     return accepted.user;
   }
 
@@ -7147,8 +7186,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: AcceptTenantInvitationCommand,
     requestId?: string,
   ): Promise<AcceptTenantInvitationResult> {
-    if (["https://accounts.google.com", "accounts.google.com"].includes(process.env.OIDC_ISSUER?.trim() ?? "")) {
-      throw new ApiRequestError(403, "TENANT_INVITATION_ACCEPTANCE_DENIED", "Sign in with Google through the invitation link to accept this invitation.");
+    if (
+      ["https://accounts.google.com", "accounts.google.com"].includes(
+        process.env.OIDC_ISSUER?.trim() ?? "",
+      )
+    ) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "Sign in with Google through the invitation link to accept this invitation.",
+      );
     }
     this.assertNonBlank(command.invitationToken, "invitationToken");
     const invitation = await this.identityRepository?.consumeInvitationToken(

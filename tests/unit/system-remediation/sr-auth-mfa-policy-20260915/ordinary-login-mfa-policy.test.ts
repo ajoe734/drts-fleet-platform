@@ -7,6 +7,7 @@ import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-pa
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { SecurityEventsService } from "../../../../apps/api/src/modules/security-events/security-events.service";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
+import { IdentityRepository, type OidcBoundTenantUser } from "../../../../apps/api/src/modules/identity/identity.repository";
 import {
   buildAuthStartupConfigReport,
   isOrdinaryLoginMfaRequired,
@@ -69,10 +70,11 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
     let originalFetch: typeof fetch;
     const secret = "test_jwt_secret_key_32_characters_long_min!";
 
-    beforeEach(() => {
+    beforeEach(async () => {
+      const repository = new IdentityRepository();
       jwtAuthService = new JwtAuthService();
       tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
+        new AuditNotificationService(), undefined, undefined, undefined, undefined, undefined, undefined, repository, repository,
       );
       securityEventsService = new SecurityEventsService();
       oidcService = new OidcPkceService(
@@ -90,14 +92,16 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
       process.env.OIDC_USERINFO_ENDPOINT =
         "https://auth.staging.drts.internal/oauth2/v1/userinfo";
       process.env.OIDC_MOCK_MODE = "false";
+      const user = tenantPartnerService.findTenantUserBySubject("sub_oidc_viewer_acme")!;
+      await repository.syncLegacyTenantUserRole({ ...user, oidcIssuer: process.env.OIDC_ISSUER, subjectId: "sub_oidc_viewer_acme" } as OidcBoundTenantUser);
     });
 
     afterEach(() => {
       globalThis.fetch = originalFetch;
     });
 
-    // sub_oidc_admin_acme is a pre-bound, active tenant fixture user
-    // (email admin@acme.example) — this exercises the real HTTP OIDC
+    // sub_oidc_viewer_acme is a pre-bound, active tenant fixture user
+    // (email viewer@acme.example) — this exercises the real HTTP OIDC
     // exchange path with a genuine bound subject, not the unbound synthetic
     // "no_mfa" test double, so a policy denial can only come from the MFA
     // gate itself.
@@ -111,17 +115,17 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
 
       const idToken = jwt.sign(
         {
-          sub: "sub_oidc_admin_acme",
+          sub: "sub_oidc_viewer_acme",
           iss: "https://auth.staging.drts.internal",
           aud: "drts-bff-client",
-          email: "admin@acme.example",
+          email: "viewer@acme.example",
           amr,
           acr: "urn:mace:incommon:iap:bronze",
           auth_time: Math.floor(Date.now() / 1000),
           nonce,
         },
         secret,
-        { algorithm: "HS256" },
+        { algorithm: "HS256", expiresIn: "5m" },
       );
 
       globalThis.fetch = (async (url: string | URL | Request) => {
@@ -140,8 +144,8 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
         if (urlStr.includes("/oauth2/v1/userinfo")) {
           return new Response(
             JSON.stringify({
-              sub: "sub_oidc_admin_acme",
-              email: "admin@acme.example",
+              sub: "sub_oidc_viewer_acme",
+              email: "viewer@acme.example",
               email_verified: true,
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
