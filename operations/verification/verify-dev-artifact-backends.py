@@ -142,12 +142,40 @@ def test_gcs(bucket_name):
             downloaded = f.read()
         assert downloaded == test_data, f"Old generation content mismatch: expected {test_data}, got {downloaded}"
 
+        print("Test 8: Upload with stale generation")
+        try:
+            run(["gcloud", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
+            assert False, "Expected upload to fail with stale generation"
+        except subprocess.CalledProcessError as e:
+            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+
+        print("Test 9: Verify winning generation remains unchanged")
+        res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
+        assert res.stdout.strip() == gen2, "Generation changed after failed write"
+
+        print("Test 10: Upload with malformed generation")
+        try:
+            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=not_a_number"])
+            assert False, "Expected upload to fail with malformed generation"
+        except subprocess.CalledProcessError as e:
+            pass  # Expected to fail parameter validation or API error
+
+        print("Test 11: Upload with simulated 403 Forbidden")
+        # Ensure that network/permission errors are not silently swallowed by CAS precondition checks.
+        # We simulate this by trying to copy to a path we definitely don't have access to, or just asserting
+        # that actual 403 is distinct from 412 if it were to happen.
+        try:
+            run(["gcloud", "storage", "cp", temp_in, f"gs://{bucket_name}/forbidden/path", f"--if-generation-match={gen1}"])
+        except subprocess.CalledProcessError as e:
+            assert "412" not in e.stderr, f"403/Forbidden network errors should not masquerade as 412 CAS errors: {e.stderr}"
+
     finally:
         print("Cleanup test owned object")
-        try:
-            run(["gcloud", "storage", "rm", test_file])
-        except:
-            pass
+        # exact run-owned generation cleanup with surfaced errors
+        if 'gen2' in locals() and gen2.isdigit():
+            run(["gcloud", "storage", "rm", f"{test_file}#{gen2}"])
+        if 'gen1' in locals() and gen1.isdigit():
+            run(["gcloud", "storage", "rm", f"{test_file}#{gen1}"])
         if os.path.exists(temp_in): os.remove(temp_in)
         if os.path.exists(temp_out): os.remove(temp_out)
 

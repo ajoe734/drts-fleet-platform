@@ -113,12 +113,11 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_gcs_success(self, mock_run):
-        describe_counter = {"count": 0}
+        state = {"generation": 12346}
         def side_effect(cmd, **kwargs):
             res = MagicMock()
             if "describe" in cmd:
-                describe_counter["count"] += 1
-                res.stdout = str(12345 + describe_counter["count"])
+                res.stdout = str(state["generation"])
             else:
                 res.stdout = "12345"
 
@@ -132,6 +131,20 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 if len(mock_run.call_args_list) > 3:
                     err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
                     raise err
+                state["generation"] = 12346
+            elif "cp" in cmd and any("--if-generation-match=" in arg and arg != "--if-generation-match=0" for arg in cmd):
+                match_arg = next(arg for arg in cmd if arg.startswith("--if-generation-match="))
+                if match_arg == f"--if-generation-match={state['generation'] - 1}":
+                    err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
+                    raise err
+                if match_arg == "--if-generation-match=not_a_number":
+                    err = subprocess.CalledProcessError(1, cmd, stderr="Invalid argument")
+                    raise err
+                state["generation"] += 1
+
+            elif "cp" in cmd and "forbidden/path" in cmd[4]:
+                err = subprocess.CalledProcessError(1, cmd, stderr="403 Forbidden")
+                raise err
             return res
 
         mock_run.side_effect = side_effect
