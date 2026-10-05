@@ -1,4 +1,4 @@
-import { createPublicKey } from "node:crypto";
+import { createPublicKey } from "crypto";
 import jwt from "jsonwebtoken";
 import { getIamActorScopePreset } from "@drts/contracts";
 
