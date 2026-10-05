@@ -19,10 +19,10 @@ The implementation has remediated findings over multiple rounds:
 |---|---|---|---|---|
 | **R5a (MIME/Hash/Size Rejection)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Includes modeled tests for rejection and mock assertions. |
 | **R5b.3 (Engine-limit contract)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Asserts `502 scan_engine_indeterminate` for limit-exhausted scans. |
-| **R5b.2 (Genuine Transitions)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PASS in CI mock (exit 0). All required lifecycle transitions and network timeout scenarios are now fully implemented for genuine live execution. |
-| **R6 (GCS Generation CAS/Limits)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Tests generation CAS using test-owned objects. Test 12 (network fault) is implemented-but-unexecuted live, tested by CI mock. |
+| **R5b.2 (Genuine Transitions)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Pending Hosted | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. CI mock simulates transitions but lacks genuine bounded hosted lifecycle/transport harness for live execution. |
+| **R6 (GCS Generation CAS/Limits)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PASS in CI mock (exit 0). Implemented bounded hosted negative and recovery path for Test 12 (network fault/permission denial) using invalid credential negation. |
 | **R5b.4b (Restoration Fidelity)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Captures exact mutated gateway env vars and completely restores them, followed by readiness/EICAR asserts. |
-| **R8-doc (UAT Schemas/Readback)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired | Manual readback/documentation | PASS. Readback fully repaired with actual product app-session procedures and stage/scan endpoints. |
+| **R8-doc (UAT Schemas/Readback)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Pending Doc | Manual readback/documentation | PENDING. Requires actual session issuance (DB/existing rails), exact producer paths, and envelope extraction updates. |
 | **R9 (Commit Trailers/Whitespaces)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 -B tools/ci/git/check_commit_trailers.py` | PASS (offline branch checks). Whitespaces and trailers fixed. |
 | **1. immutable_hosted_workflow_review_ci** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending CI | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. Final CI pass pending on PR. |
 | **2. private_resources_iam_and_image_provenance** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted | Hosted runbacks | Exact assertions prepared for bucket IAM/versioning, service policy, anonymous denial, container digests, min0/max1. |
@@ -76,18 +76,18 @@ The implementation has remediated findings over multiple rounds:
   - Assert explicit runtime source SHA and selected deployed env/config by checking the deployment workflow logs and the Cloud Run environment variables (`gcloud run services describe`), NOT via the product `/health` endpoint which intentionally does not expose backend artifact configuration.
   - Execute a coordinated, authenticated runtime readback using real product app-session procedures via the `deploy-dev.yml` registered token issuance rails:
     - **Remittance Proofs (Driver & Ops):**
-      - Issue an actual permitted driver fixture identity/session (`realm=driver`) with appropriate scopes (`driver:write`) via the pipeline's driver issuance rail.
+      - Issue an actual permitted driver fixture identity/session (`realm=driver`) with appropriate scopes (`driver:write`) by seeding a driver fixture directly in the database (as the pipeline rail only issues tenant_admin/tenant_ops_admin).
       - Setup an owned `batchId` for the driver.
       - As the driver identity, execute `POST /api/reimbursements/proofs/staged-content` containing actual test-owned fixture bytes (`contentBase64`, `contentType`, and required `Idempotency-Key: <stage-uuid>`) to receive a `stagedContentRef`.
       - Execute `POST /api/reimbursements/proofs` with an `UploadRemittanceProofCommand` payload (including `batchId`, `originalFilename`, `contentType`, `sizeBytes`, and the `stagedContentRef`) and required header `Idempotency-Key: <upload-uuid>` to persist and scan the bytes.
       - Issue a system/platform/ops identity session (`realm=tenant` or `realm=system`) with `billing:write` role via the pipeline's ops issuance rail.
-      - For system/ops readback, execute `POST /api/reimbursements/proofs/:proofId/readback` to obtain a signed URL manifest (`manifest_hash`, `signed_at`, `expires_at`, `key_id`, `sig`, `sig_v`).
-      - Use the issued signed URL via `GET /api/reimbursements/proof-downloads/remittance-proof/:proofId?...` to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
+      - For system/ops readback, execute `POST /api/reimbursements/proofs/:proofId/readback` to obtain an API envelope containing `data.readbackUrl` (which includes the signed URL manifest fields: `manifest_hash`, `signed_at`, `expires_at`, `key_id`, `sig`, `sig_v`).
+      - Use the issued `readbackUrl` directly to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
       - Execute the same staging/scanning procedure as the driver using a known EICAR fixture. Assert that the endpoint persists a `scanState: "rejected"` with `rejectionReason: "MALWARE_DETECTED"`, and that controlled-download via readback is denied for the infected content.
     - **Document Artifacts (Producer & Ops):**
-      - Document an authorized identity issuance with correct roles for the document producer path.
-      - As the producer identity, execute the document upload staging endpoint (providing its required `Idempotency-Key`), receive the staging ref, and commit the document payload to the domain persistence.
-      - Issue a system/platform/ops identity session with appropriate read roles.
-      - Execute the document readback endpoint to obtain a controlled-download signed URL.
-      - Use the signed URL to download the document and assert the retrieved bytes, hash, and length exactly match the test fixture.
+      - Document an authorized identity issuance (e.g. `realm=tenant` tenant_ops_admin) with correct roles for the Platform Admin placard producer path.
+      - As this authorized identity, execute `POST /api/platform-admin/placards` with a `GeneratePlacardVersionCommand` payload containing test fixture parameters. This natively delegates to the document artifact store.
+      - The endpoint will return an API envelope containing the published placard metadata.
+      - Execute the document readback via `GET /api/downloads/placard/:placardVersionId` (resolved by `controlled-download.controller.ts`) to obtain the controlled-download signed URL in the envelope `data.url`.
+      - Use the returned URL to download the document and assert the retrieved bytes, hash, and length exactly match the test fixture.
   - Check the backend logs to confirm the Cloud Run gateway processed the file scan (`verdict: clean` and `verdict: infected`) and GCS successfully stored/rejected them under the expected IDs/generations. Download the files directly using `gcloud storage cat` with the runtime identity to independently confirm storage bytes.

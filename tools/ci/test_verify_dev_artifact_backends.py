@@ -253,10 +253,15 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     raise err
                 state["generation"] += 1
 
+            elif "cp" in cmd and "--access-token-file=/dev/null" in cmd:
+                err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
+                raise err
+
             return res
 
         mock_run.side_effect = side_effect
-        self.mod.test_gcs("fake-bucket", "fake-sa")
+        result = self.mod.test_gcs("fake-bucket", "fake-sa")
+        self.assertTrue(result, "test_gcs should return True when all scenarios pass")
 
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main(self):
