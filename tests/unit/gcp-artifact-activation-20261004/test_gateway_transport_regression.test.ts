@@ -21,11 +21,7 @@ describe("Gateway Transport Regression (R5b.2)", () => {
   it("wrong-port scenario should yield 503 scan_engine_not_ready, not 502", async () => {
     // If the port is wrong, connect will throw an error immediately, or timeout.
     // Let's simulate a connection error on connect.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const connectFail = (
-      _options: { host: string; port: number },
-      _onConnect: () => void,
-    ) => {
+    const connectFail = () => {
       const socket = new MockSocket();
       setTimeout(() => socket.emit("error", new Error("CONNECT_ERROR3311")), 0);
       return socket as unknown as Socket;
@@ -57,7 +53,7 @@ describe("Gateway Transport Regression (R5b.2)", () => {
     req.headers = {
       "content-type": "application/pdf",
       "x-content-sha256":
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     };
 
     const res = {
@@ -71,7 +67,7 @@ describe("Gateway Transport Regression (R5b.2)", () => {
     } as any;
 
     const handlerPromise = handler(req, res);
-    req.emit("data", Buffer.alloc(0));
+    req.emit("data", Buffer.from("test"));
     req.emit("end");
     await handlerPromise;
 
