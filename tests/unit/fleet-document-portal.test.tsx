@@ -109,7 +109,7 @@ describe("C125 actual portal file interactions", () => {
     const file = new File(["evidence"], "evidence.pdf", {
       type: "application/pdf",
     });
-    fireEvent.change(screen.getByLabelText("選擇案件附件"), {
+    fireEvent.change(screen.getByLabelText("檔名"), {
       target: { files: [file] },
     });
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
@@ -149,7 +149,7 @@ describe("C125 actual portal file interactions", () => {
     const file = new File(["evidence"], "evidence.pdf", {
       type: "application/pdf",
     });
-    fireEvent.change(screen.getByLabelText("選擇案件附件"), {
+    fireEvent.change(screen.getByLabelText("檔名"), {
       target: { files: [file] },
     });
     await waitFor(() => expect(screen.getByText("上傳失敗")).toBeDefined());

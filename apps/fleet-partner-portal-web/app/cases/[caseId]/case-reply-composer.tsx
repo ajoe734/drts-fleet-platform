@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { useTranslation } from "../../../lib/i18n";
 import {
   CanvasBanner,
   CanvasCard,
@@ -31,6 +32,7 @@ export function CaseReplyComposer({
   initialAttachments,
 }: CaseReplyComposerProps) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [replyState, setReplyState] = useState<
     "idle" | "submitting" | "sent" | "failed"
@@ -533,7 +535,7 @@ export function CaseReplyComposer({
           <input
             ref={fileInput}
             type="file"
-            aria-label="選擇案件附件"
+            aria-label={t("supply.table.fileName")}
             style={{ display: "none" }}
             onChange={(event) => {
               const file = event.target.files?.[0];
