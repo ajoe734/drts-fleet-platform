@@ -211,9 +211,10 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             logs = json.loads(res.stdout) if res.stdout.strip() else []
             assert len(logs) > 0, "Could not find 'Fetching ClamAV signatures' in logs for exact revision"
 
+            # Bound daily confirmation
             res_fresh = run([
                 "gcloud", "logging", "read",
-                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_7}" AND (textPayload:"database is up-to-date" OR textPayload:"updated (version:")',
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_7}" AND (textPayload:"daily.cvd database is up-to-date" OR textPayload:"daily.cld database is up-to-date" OR textPayload:"daily.cld updated (version:" OR textPayload:"daily.cvd updated (version:")',
                 "--project", project,
                 "--limit=1", "--format=json"
             ])
@@ -266,7 +267,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
 
             res_success = run([
                 "gcloud", "logging", "read",
-                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10b}" AND (textPayload:"database is up-to-date" OR textPayload:"updated (version:")',
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10b}" AND (textPayload:"daily.cvd database is up-to-date" OR textPayload:"daily.cld database is up-to-date" OR textPayload:"daily.cld updated (version:" OR textPayload:"daily.cvd updated (version:")',
                 "--project", project,
                 "--limit=1", "--format=json"
             ])
@@ -283,6 +284,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             print("Ensuring service is restored to healthy state")
             try:
                 # restore original env exactly for both containers
+                restore_errors = []
                 for c_name in ["gateway", "clamd"]:
                     c_orig = original_env_by_container.get(c_name, {})
                     to_remove = []
@@ -304,7 +306,13 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                     if updates:
                         cmd.extend(["--update-env-vars", ",".join([f"{k}={v}" for k, v in updates.items()])])
 
-                    subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    try:
+                        subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    except subprocess.CalledProcessError as e:
+                        restore_errors.append(f"Container {c_name} restore failed: {e.stderr}")
+
+                if restore_errors:
+                    raise subprocess.CalledProcessError(1, "restore", stderr="\n".join(restore_errors))
 
                 # wait for readiness
                 ready = False
@@ -446,7 +454,7 @@ def test_gcs(bucket_name, runtime_sa):
 
         print("Test 12: Network fault / permission denial regressions")
         print("  [UNEXECUTED] Manual fault-injection scenario omitted (requires network/firewall fault injection)")
-
+        return False
 
     finally:
         print("Cleanup test owned object")
@@ -459,6 +467,7 @@ def test_gcs(bucket_name, runtime_sa):
         if os.path.exists(temp_out): os.remove(temp_out)
 
     print(f"GCS bucket {bucket_name} tests passed.")
+    return True
 
 def main():
     parser = argparse.ArgumentParser()
@@ -472,11 +481,11 @@ def main():
     args = parser.parse_args()
 
     engine_tested = test_scanner(args.scanner_url, args.scanner_service, args.project, args.region)
-    test_gcs(args.document_bucket, args.runtime_sa)
-    test_gcs(args.remittance_bucket, args.runtime_sa)
+    doc_tested = test_gcs(args.document_bucket, args.runtime_sa)
+    rem_tested = test_gcs(args.remittance_bucket, args.runtime_sa)
 
-    if not engine_tested:
-        print("Scanner tests passed (with unexecuted manual genuine-engine scenarios).")
+    if not (engine_tested and doc_tested and rem_tested):
+        print("Tests passed, but incomplete (unexecuted manual genuine-engine or network fault scenarios).")
         sys.exit(1)
 
     print("All dev artifact backend verification tests passed.")

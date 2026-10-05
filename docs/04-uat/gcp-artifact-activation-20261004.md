@@ -74,11 +74,20 @@ The implementation has remediated findings over multiple rounds:
     - `DEV_REMITTANCE_PROOF_SCANNER_URL`: `<private scanner origin>`
   - Dispatch the immutable `.github/workflows/deploy-dev.yml` using the authorized runtime SHA.
   - Assert explicit runtime source SHA and selected deployed env/config by checking the deployment workflow logs and the Cloud Run environment variables (`gcloud run services describe`), NOT via the product `/health` endpoint which intentionally does not expose backend artifact configuration.
-  - Execute a coordinated, authenticated runtime readback using real product app-session procedures via the `deploy-dev.yml` registered tenant tuple token issuance rail (do not invent a driver principal or use bare gcloud tokens):
-    - Document and issue an actual permitted fixture identity/session (TENANT tuples) with appropriate roles (`driver` scope for upload, `billing:write` for ops readback).
-    - As the permitted identity, execute `POST /api/reimbursements/proofs/staged-content` containing actual test-owned fixture bytes (`contentBase64`, `contentType`, and required `Idempotency-Key`) to receive a `stagedContentRef`.
-    - Execute `POST /api/reimbursements/proofs` with an `UploadRemittanceProofCommand` payload (including `batchId`, `originalFilename`, `contentType`, `sizeBytes`, and the `stagedContentRef`) to persist and scan the bytes.
-    - For system/ops readback (`billing:write`), execute `POST /api/reimbursements/proofs/:proofId/readback` to obtain a signed URL manifest (`manifest_hash`, `signed_at`, `expires_at`, `key_id`, `sig`, `sig_v`).
-    - Use the issued signed URL via `GET /api/reimbursements/proof-downloads/remittance-proof/:proofId?...` to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
-    - Execute the same staging/scanning procedure using a known EICAR fixture. Instead of an upload/scan error, assert that the endpoint persists a rejected `scanState` with an `infected` verdict and returns it (e.g. `scanState: "REJECTED_INFECTED"`).
+  - Execute a coordinated, authenticated runtime readback using real product app-session procedures via the `deploy-dev.yml` registered token issuance rails:
+    - **Remittance Proofs (Driver & Ops):**
+      - Issue an actual permitted driver fixture identity/session (`realm=driver`) with appropriate scopes (`driver:write`) via the pipeline's driver issuance rail.
+      - Setup an owned `batchId` for the driver.
+      - As the driver identity, execute `POST /api/reimbursements/proofs/staged-content` containing actual test-owned fixture bytes (`contentBase64`, `contentType`, and required `Idempotency-Key: <stage-uuid>`) to receive a `stagedContentRef`.
+      - Execute `POST /api/reimbursements/proofs` with an `UploadRemittanceProofCommand` payload (including `batchId`, `originalFilename`, `contentType`, `sizeBytes`, and the `stagedContentRef`) and required header `Idempotency-Key: <upload-uuid>` to persist and scan the bytes.
+      - Issue a system/platform/ops identity session (`realm=tenant` or `realm=system`) with `billing:write` role via the pipeline's ops issuance rail.
+      - For system/ops readback, execute `POST /api/reimbursements/proofs/:proofId/readback` to obtain a signed URL manifest (`manifest_hash`, `signed_at`, `expires_at`, `key_id`, `sig`, `sig_v`).
+      - Use the issued signed URL via `GET /api/reimbursements/proof-downloads/remittance-proof/:proofId?...` to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
+      - Execute the same staging/scanning procedure as the driver using a known EICAR fixture. Assert that the endpoint persists a `scanState: "rejected"` with `rejectionReason: "MALWARE_DETECTED"`, and that controlled-download via readback is denied for the infected content.
+    - **Document Artifacts (Producer & Ops):**
+      - Document an authorized identity issuance with correct roles for the document producer path.
+      - As the producer identity, execute the document upload staging endpoint (providing its required `Idempotency-Key`), receive the staging ref, and commit the document payload to the domain persistence.
+      - Issue a system/platform/ops identity session with appropriate read roles.
+      - Execute the document readback endpoint to obtain a controlled-download signed URL.
+      - Use the signed URL to download the document and assert the retrieved bytes, hash, and length exactly match the test fixture.
   - Check the backend logs to confirm the Cloud Run gateway processed the file scan (`verdict: clean` and `verdict: infected`) and GCS successfully stored/rejected them under the expected IDs/generations. Download the files directly using `gcloud storage cat` with the runtime identity to independently confirm storage bytes.

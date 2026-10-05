@@ -141,8 +141,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     mock_res.stdout = '[{"textPayload": "Fetching ClamAV signatures"}]'
                 elif "freshclam refresh failed" in cmd[3]:
                     mock_res.stdout = '[{"textPayload": "freshclam refresh failed; marking not ready"}]'
-                elif "database is up-to-date" in cmd[3]:
-                    mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 5)"}]'
+                elif "daily.cvd database is up-to-date" in cmd[3] or "daily.cld database is up-to-date" in cmd[3] or "daily.cld updated (version:" in cmd[3] or "daily.cvd updated (version:" in cmd[3]:
+                    mock_res.stdout = '[{"textPayload": "daily.cvd database is up-to-date (version: 5, sigs: 1234, f-level: 90, builder: tests)"}]'
                 else:
                     mock_res.stdout = '[]'
             else:
@@ -263,18 +263,18 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:
             mock_scanner.return_value = True
+            mock_gcs.return_value = True
             self.mod.main()
             mock_scanner.assert_called_once_with("s", "ss", "p", "rg")
             mock_gcs.assert_any_call("d", "sa")
             mock_gcs.assert_any_call("r", "sa")
 
-
-
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main_rejects_incomplete(self):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:
-            mock_scanner.return_value = False
+            mock_scanner.return_value = True
+            mock_gcs.side_effect = [True, False]
             with self.assertRaises(SystemExit) as cm:
                 self.mod.main()
             self.assertEqual(cm.exception.code, 1)
