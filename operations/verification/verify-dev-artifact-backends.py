@@ -445,7 +445,17 @@ def test_gcs(bucket_name, runtime_sa):
             assert "412" in e.stderr or "Precondition Failed" in e.stderr, f"Absent object with CAS should return 412 Precondition Failed, got: {e.stderr}"
 
         print("Test 12: Network fault / permission denial regressions")
-        print("  [UNEXECUTED] Manual fault-injection scenario omitted (requires network/firewall fault injection)")
+        try:
+            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0", "--access-token=ya29.invalidtoken123456"])
+            assert False, "Expected upload to fail with invalid token"
+        except subprocess.CalledProcessError as e:
+            assert "401" in e.stderr or "403" in e.stderr or "Unauthorized" in e.stderr or "Authentication required" in e.stderr, f"Expected external denial (401/403/Unauthorized), got: {e.stderr}"
+
+        print("Test 12b: Post-fault recovery readback")
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", f"{test_file}#{gen2}", temp_out])
+        with open(temp_out, "r") as f:
+            downloaded = f.read()
+        assert downloaded == test_data_v2, f"Gen2 content mismatch after fault: expected {test_data_v2}, got {downloaded}"
 
 
     finally:

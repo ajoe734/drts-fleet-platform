@@ -236,6 +236,9 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     else:
                         f.write("test data v1")
             elif "cp" in cmd and "--if-generation-match=0" in cmd:
+                if "--access-token=ya29.invalidtoken123456" in cmd:
+                    err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
+                    raise err
                 if len(mock_run.call_args_list) > 3:
                     err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
                     raise err
