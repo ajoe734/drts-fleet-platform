@@ -1,5 +1,13 @@
 import type { BrowserContext, Page, APIRequestContext } from "@playwright/test";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 type BrowserTest = (fixtures: {
   page: Page;
@@ -21,10 +29,13 @@ vi.mock("@playwright/test", () => ({
     registered.body = body;
   },
 }));
-vi.mock("../../../e2e/system-remediation/sr-live-map-001/live-map-config", async (original) => ({
-  ...(await original<object>()),
-  writeEvidence: save,
-}));
+vi.mock(
+  "../../../e2e/system-remediation/sr-live-map-001/live-map-config",
+  async (original) => ({
+    ...(await original<object>()),
+    writeEvidence: save,
+  }),
+);
 
 const token = "unit-only.ops-invoker.signature";
 const env = {
@@ -40,7 +51,11 @@ const env = {
 };
 
 function transport() {
-  const cdp = { send: vi.fn().mockResolvedValue({}), on: vi.fn(), detach: vi.fn() };
+  const cdp = {
+    send: vi.fn().mockResolvedValue({}),
+    on: vi.fn(),
+    detach: vi.fn().mockResolvedValue(undefined),
+  };
   const page = { on: vi.fn() };
   const context = {
     newCDPSession: vi.fn().mockResolvedValue(cdp),
@@ -50,8 +65,16 @@ function transport() {
     get: vi.fn().mockResolvedValue({ ok: () => false, status: () => 403 }),
   };
   return {
-    cdp, page, context, request,
-    run: () => registered.body!({ page, request, context } as unknown as Parameters<BrowserTest>[0]),
+    cdp,
+    page,
+    context,
+    request,
+    run: () =>
+      registered.body!({
+        page,
+        request,
+        context,
+      } as unknown as Parameters<BrowserTest>[0]),
   };
 }
 
