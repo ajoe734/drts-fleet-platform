@@ -7,7 +7,7 @@ import sys
 import time
 
 from provision_drill_sa import SA
-from restore_drill import PREFIX, DrillError, context, gc, iso, obj, require, utcnow, write
+from restore_drill import PREFIX, CommandTimeout, DrillError, context, gc, iso, obj, require, timestamp, utcnow, write
 
 
 def destination(entry):
@@ -22,13 +22,17 @@ def destination(entry):
 def sweep(target, evidence_file, output):
     evidence = context(target)
     evidence["status"] = "sweep_failed"
-    evidence["audit_window_start"] = iso(utcnow() - dt.timedelta(days=400))
     evidence["audit_window_end"] = iso(utcnow())
     write(output, evidence)
     try:
         prior = obj(Path(evidence_file).read_text()) if Path(evidence_file).exists() else {}
         for key in ("target", "candidate_sha", "run_url", "run_attempt"):
             require(not prior or prior.get(key) == evidence[key], "sweep_evidence_mismatch")
+        # Include the whole restore/cleanup duration, plus a short clock/dispatch
+        # margin. If restore never began, inspect the preflight margin instead.
+        started = timestamp(prior.get("started_at") if prior else evidence["started_at"])
+        require(dt.timedelta(0) <= timestamp(evidence["audit_window_end"]) - started <= dt.timedelta(minutes=95), "invalid_sweep_run_window")
+        evidence["audit_window_start"] = iso(started - dt.timedelta(minutes=15))
         instances = obj(gc("sql", "instances", "list"))
         require(isinstance(instances, list), "inventory_missing")
         require(all(isinstance(i.get("name"), str) for i in instances), "inventory_name_missing")
@@ -40,8 +44,18 @@ def sweep(target, evidence_file, output):
                  '(protoPayload.methodName="cloudsql.instances.clone" OR protoPayload.methodName="cloudsql.instances.create") '
                  f'timestamp>="{evidence["audit_window_start"]}" timestamp<="{evidence["audit_window_end"]}"')
         records = []
+        evidence["audit_read_attempts"] = []
         for attempt in range(4):
-            records = obj(gc("logging", "read", query, "--limit=1000", "--order=asc"))
+            # 90s inventory + 4*25s reads + 3*20s waits fits the 5m step.
+            # Timeout output may contain raw payloads; only record the outcome.
+            try:
+                records = obj(gc("logging", "read", query, "--limit=1000", "--order=asc", timeout=25))
+            except CommandTimeout:
+                evidence["audit_read_attempts"].append("timeout")
+                require(attempt < 3, "audit_read_timeout")
+                time.sleep(20)
+                continue
+            evidence["audit_read_attempts"].append("read")
             require(isinstance(records, list) and len(records) < 1000, "audit_missing_or_truncated")
             if not prior.get("clone_operation_id") or any(destination(r) == target for r in records):
                 break
