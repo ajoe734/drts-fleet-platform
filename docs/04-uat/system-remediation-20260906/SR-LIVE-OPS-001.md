@@ -1,6 +1,44 @@
 # SR-LIVE-OPS-001 — restore drill evidence
 
-## Hosted failure repair (2026-10-05, current)
+## CI declaration repair (2026-10-05, current)
+
+Owner **Codex**, reviewer **Claude2**. PR #2322 candidate
+`6d39b9b294338b87d695ae5ac30544bdd07ccc34` failed both hosted typecheck and
+product smoke on the same missing declaration. The fetched `origin/dev` baseline
+remains `a7b406dcacff1588fb41119605e61a71837587a6`. This follow-up adds only
+`infra/gcp/dev/ops-drill/db_credentials.d.mts` and this evidence section;
+runtime parser, tests, workflow and shared TypeScript configuration are unchanged.
+
+| Finding / trigger                                    | Source / change                                                                                                                                             | Old → corrected result                                                             | Command / evidence                                                                                                                                                                                                                                                                | Remaining                                                                                                             |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| H5: strict root typecheck rejects the new ESM import | `restore-drill.test.ts:5` imports `db_credentials.mjs:credentials`; adjacent `.d.mts` declares the string argument and user/password/database string result | Old candidate: TS7016, exit 2; scoped strict compilation after declaration: exit 0 | [typecheck job 111806185685](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37322701240/job/111806185685), [product smoke job 111805830533](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37322701041/job/111805830533); local before/after logs below | Final runtime regression and root check results to be recorded before handoff; same-new-SHA hosted CI/review required |
+
+Machine evidence: `.local/sr-live-ops-001/ci-repair-20261005/`.
+Both hosted logs were retrieved with `gh api --allow-escape-sequences
+repos/ajoe734/drts-fleet-platform/actions/jobs/<job-id>/logs` (exit 0).
+The local `typecheck-scoped.json` extends the unchanged root configuration,
+selects the real `restore-drill.test.ts`, disables incremental caching and points
+`typeRoots` at this worktree's `node_modules/@types`. It changes no compiler
+strictness or production configuration. Command:
+`pnpm exec tsc -p .local/sr-live-ops-001/ci-repair-20261005/typecheck-scoped.json --noEmit`.
+`typecheck-scoped-before.log` records TS7016/exit 2;
+`typecheck-scoped-after.log` records exit 0. The first scratch-config attempt
+could not resolve Node types (TS2688/exit 2); it is not the defect reproduction.
+
+`pnpm run typecheck:root` on the old candidate also reproduced TS7016, plus 13
+TS2345 errors in unrelated fleet-list tests: shared dependency symlinks resolve
+`ApiClient` through both the canonical checkout and this isolated worktree.
+Those extra errors do not appear in either hosted failure log. This environment
+limitation is tracked separately and must not be represented as a full local
+typecheck pass.
+
+H1–H4 and the five required acceptance keys in the next section remain in force.
+This declaration repair supplies no new live evidence; operator readiness at
+the newly promoted main SHA and Supervisor dispatch remain prerequisites for
+the real restore. No cloud resources, deployments or workflow dispatches are
+performed by this worker.
+
+## Hosted failure repair (2026-10-05)
 
 Owner **Codex**, reviewer **Claude2**. This section supersedes the historical
 readiness, query-window and operator instructions below. Dispatch baseline:
