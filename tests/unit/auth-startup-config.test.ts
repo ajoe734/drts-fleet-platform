@@ -59,6 +59,82 @@ function buildValidProductionEnv(): Record<string, string> {
   };
 }
 
+function buildGoogleOidcEnv(environment: string): Record<string, string> {
+  const env: Record<string, string> = {
+    ...buildValidProductionEnv(),
+    APP_ENV: environment,
+    OIDC_ISSUER: "https://accounts.google.com",
+    OIDC_CLIENT_ID: "drts-startup-test.apps.googleusercontent.com",
+    OIDC_AUTHORIZATION_ENDPOINT: "https://accounts.google.com/o/oauth2/v2/auth",
+    OIDC_TOKEN_ENDPOINT: "https://oauth2.googleapis.com/token",
+    OIDC_JWKS_URI: "https://www.googleapis.com/oauth2/v3/certs",
+  };
+  delete env.TENANT_OIDC_ISSUER;
+  delete env.TENANT_OIDC_AUDIENCE;
+  delete env.TENANT_OIDC_JWT_SECRET;
+  return env;
+}
+
+// ENTRY-TENANT-GOOGLE-OIDC-20261005: exercise the real startup validator;
+// no server, provider HTTP request, or authentication-policy mock is needed.
+describe.each(["staging", "production"])(
+  "Google OIDC startup in %s",
+  (environment) => {
+    it("accepts the rotating Google JWKS provider without legacy tenant static credentials", () => {
+      const report = buildAuthStartupConfigReport(
+        buildGoogleOidcEnv(environment),
+      );
+
+      expect(report.environment).toBe(environment);
+      expect(report.isStrictEnvironment).toBe(true);
+      expect(report.issues).toEqual([]);
+      expect(report.valid).toBe(true);
+    });
+
+    it("still rejects a missing Google client ID", () => {
+      const env = buildGoogleOidcEnv(environment);
+      delete env.OIDC_CLIENT_ID;
+      const report = buildAuthStartupConfigReport(env);
+
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({
+          control: "OIDC_CLIENT_ID",
+          code: "MISSING_CONTROL",
+        }),
+      );
+    });
+
+    it("still rejects mock authentication with the Google provider configured", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.OIDC_MOCK_MODE = "true";
+      const report = buildAuthStartupConfigReport(env);
+
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({
+          control: "OIDC_MOCK_MODE",
+          code: "FORBIDDEN_MODE",
+        }),
+      );
+    });
+  },
+);
+
+it("classifies shared dev Google OIDC by DRTS_ENV despite NODE_ENV=production", () => {
+  const report = buildAuthStartupConfigReport({
+    ...buildGoogleOidcEnv("production"),
+    NODE_ENV: "production",
+    DRTS_ENV: "development",
+    AUTH_MODE: "explicit",
+  });
+
+  expect(report.environment).toBe("local");
+  expect(report.isStrictEnvironment).toBe(false);
+  expect(report.issues).toEqual([]);
+  expect(report.valid).toBe(true);
+});
+
 describe("detectAuthEnvironment", () => {
   it("prefers DRTS_ENV over NODE_ENV for runtime classification", () => {
     expect(
