@@ -10,6 +10,10 @@ export const DOCUMENT_ARTIFACT_KINDS = [
   "tenant-invoice",
   "placard",
   "report",
+  "fleet-upload-intent",
+  "fleet-upload-content",
+  "fleet-upload-scan",
+  "fleet-case-attachments",
 ] as const;
 
 export type DocumentArtifactKind = (typeof DOCUMENT_ARTIFACT_KINDS)[number];
