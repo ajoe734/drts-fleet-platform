@@ -272,6 +272,14 @@ jobs:
       PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      # This job runs as a non-strict (CI/"test") auth environment. The
+      # platform/ops workforce step-up MFA gate denies by default
+      # (ENTRY-IAP-WORKFORCE-AUTH-20261005); the bootstrap dev fixture no
+      # longer fabricates verified_iap_workforce/aal2, so tests exercising
+      # platform_admin/ops_user privileged actions need this explicit,
+      # audited dev waiver. isDevWorkforceMfaWaiverEnabled rejects it
+      # outright in staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

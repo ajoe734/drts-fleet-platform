@@ -252,7 +252,7 @@ describe("ENTRY-IAP-WORKFORCE-AUTH-20261005 dev MFA waiver", () => {
 
   it("refuses the privileged action with no waiver flag and no real MFA evidence (default-safe)", () => {
     const service = new StepUpProofService();
-    const identity = iapWorkforceIdentity({ amr: [], acr: undefined });
+    const identity = iapWorkforceIdentity({ amr: [], acr: null });
 
     expectApiError(
       () => service.createProof(identity, { actionId: TENANT_CREATE_ACTION }),
@@ -263,7 +263,7 @@ describe("ENTRY-IAP-WORKFORCE-AUTH-20261005 dev MFA waiver", () => {
   it("lets a platform workforce identity through with DRTS_DEV_MFA_WAIVED=true and no real MFA evidence, without fabricating amr/acr on the identity itself", () => {
     process.env.DRTS_DEV_MFA_WAIVED = "true";
     const service = new StepUpProofService();
-    const identity = iapWorkforceIdentity({ amr: [], acr: undefined });
+    const identity = iapWorkforceIdentity({ amr: [], acr: null });
 
     const proof = service.createProof(identity, {
       actionId: TENANT_CREATE_ACTION,
@@ -274,14 +274,14 @@ describe("ENTRY-IAP-WORKFORCE-AUTH-20261005 dev MFA waiver", () => {
     // The source identity's own amr/acr are untouched -- the waiver is
     // recorded on the issued proof, not faked onto the caller's evidence.
     expect(identity.amr).toEqual([]);
-    expect(identity.acr).toBeUndefined();
+    expect(identity.acr).toBeNull();
   });
 
   it("records the dev MFA waiver on a distinct, truthful amr marker and as a security event, never as verified_iap_workforce", () => {
     process.env.DRTS_DEV_MFA_WAIVED = "true";
     const securityEventsService = new SecurityEventsService();
     const service = new StepUpProofService(securityEventsService);
-    const identity = iapWorkforceIdentity({ amr: [], acr: undefined });
+    const identity = iapWorkforceIdentity({ amr: [], acr: null });
 
     service.createProof(identity, { actionId: TENANT_CREATE_ACTION });
 
@@ -302,7 +302,7 @@ describe("ENTRY-IAP-WORKFORCE-AUTH-20261005 dev MFA waiver", () => {
     const identity = iapWorkforceIdentity({
       realm: "tenant" as BootstrapRequestIdentity["realm"],
       amr: [],
-      acr: undefined,
+      acr: null,
     });
 
     expectApiError(
@@ -318,7 +318,7 @@ describe("ENTRY-IAP-WORKFORCE-AUTH-20261005 dev MFA waiver", () => {
     process.env.DRTS_ENV = "staging";
     process.env.DRTS_DEV_MFA_WAIVED = "true";
     const service = new StepUpProofService();
-    const identity = iapWorkforceIdentity({ amr: [], acr: undefined });
+    const identity = iapWorkforceIdentity({ amr: [], acr: null });
 
     expectApiError(
       () => service.createProof(identity, { actionId: TENANT_CREATE_ACTION }),
@@ -333,7 +333,7 @@ describe("ENTRY-IAP-WORKFORCE-AUTH-20261005 dev MFA waiver", () => {
     // evidence must still require the explicit flag to pass -- confirm by
     // turning the flag off and seeing the same identity get rejected.
     delete process.env.DRTS_DEV_MFA_WAIVED;
-    const identity = iapWorkforceIdentity({ amr: [DEV_MFA_WAIVED_AMR], acr: undefined });
+    const identity = iapWorkforceIdentity({ amr: [DEV_MFA_WAIVED_AMR], acr: null });
 
     expectApiError(
       () => service.createProof(identity, { actionId: TENANT_CREATE_ACTION }),
