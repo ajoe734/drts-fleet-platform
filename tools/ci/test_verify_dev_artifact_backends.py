@@ -93,6 +93,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (502, {"error": "scan_engine_unavailable"}), # Test 9 final scan transport failure
             (503, {"error": "scan_engine_not_ready"}), # Test 10 failed refresh
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 10 successful refresh
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # polling readiness
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally health check
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally health check EICAR
         ]
@@ -111,16 +112,67 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
         mock_urlopen.side_effect = urlopen_side_effect
 
-        def run_side_effect(*args, **kwargs):
+        def run_side_effect(cmd, *args, **kwargs):
             mock_res = MagicMock()
-            mock_res.stdout = '[{"textPayload": "Fetching ClamAV signatures"}, {"textPayload": "database is up-to-date"}]'
+            mock_res.returncode = 0
+            if "describe" in cmd and "services" in cmd:
+                if "--format=value(status.latestCreatedRevisionName)" in cmd:
+                    mock_res.stdout = "rev-123"
+                else:
+                    mock_res.stdout = json.dumps([{
+                        "spec": {
+                            "template": {
+                                "spec": {
+                                    "containers": [
+                                        {"name": "gateway", "env": [{"name": "MAX_SIGNATURE_AGE_MS", "value": "old_age"}, {"name": "CLAMD_PORT", "value": "3310"}]},
+                                        {"name": "clamd", "env": [{"name": "FRESHCLAM_INTERVAL_SECONDS", "value": "old_interval"}, {"name": "http_proxy", "value": "old_proxy"}]}
+                                    ]
+                                }
+                            }
+                        }
+                    }])
+            elif "update" in cmd and "services" in cmd:
+                # Capture updates for verification
+                if not isinstance(getattr(mock_run, "update_cmds", None), list): mock_run.update_cmds = []
+                mock_run.update_cmds.append(cmd)
+                mock_res.stdout = "ok"
+            elif "logging" in cmd and "read" in cmd:
+                if "Fetching ClamAV signatures" in cmd[3]:
+                    mock_res.stdout = '[{"textPayload": "Fetching ClamAV signatures"}]'
+                elif "freshclam refresh failed" in cmd[3]:
+                    mock_res.stdout = '[{"textPayload": "freshclam refresh failed; marking not ready"}]'
+                elif "database is up-to-date" in cmd[3]:
+                    mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 5)"}]'
+                else:
+                    mock_res.stdout = '[]'
+            else:
+                mock_res.stdout = '[]'
             return mock_res
 
         mock_run.side_effect = run_side_effect
 
         self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
-        # Call counts might vary, let's just use assertGreaterEqual
-        self.assertGreaterEqual(mock_run.call_count, 12)
+
+        # Verify container targeting
+        updates = getattr(mock_run, "update_cmds", [])
+        gateway_updates = [c for c in updates if "--container" in c and "gateway" in c[c.index("--container") + 1]]
+        clamd_updates = [c for c in updates if "--container" in c and "clamd" in c[c.index("--container") + 1]]
+        self.assertGreater(len(gateway_updates), 0, "No gateway container updates found")
+        self.assertGreater(len(clamd_updates), 0, "No clamd container updates found")
+
+        # Verify restoration exact match
+        final_gateway_update = gateway_updates[-1]
+        final_clamd_update = clamd_updates[-1]
+        self.assertIn("--update-env-vars", final_gateway_update)
+        # Should restore MAX_SIGNATURE_AGE_MS=old_age and CLAMD_PORT=3310
+        idx = final_gateway_update.index("--update-env-vars")
+        self.assertIn("MAX_SIGNATURE_AGE_MS=old_age", final_gateway_update[idx+1])
+        self.assertIn("CLAMD_PORT=3310", final_gateway_update[idx+1])
+
+        idx2 = final_clamd_update.index("--update-env-vars")
+        self.assertIn("FRESHCLAM_INTERVAL_SECONDS=old_interval", final_clamd_update[idx2+1])
+        self.assertIn("http_proxy=old_proxy", final_clamd_update[idx2+1])
+
 
 
 
@@ -215,6 +267,18 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             mock_scanner.assert_called_once_with("s", "ss", "p", "rg")
             mock_gcs.assert_any_call("d", "sa")
             mock_gcs.assert_any_call("r", "sa")
+
+
+
+    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
+    def test_main_rejects_incomplete(self):
+        with patch.object(self.mod, "test_scanner") as mock_scanner, \
+             patch.object(self.mod, "test_gcs") as mock_gcs:
+            mock_scanner.return_value = False
+            with self.assertRaises(SystemExit) as cm:
+                self.mod.main()
+            self.assertEqual(cm.exception.code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

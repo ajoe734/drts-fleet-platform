@@ -108,44 +108,36 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             "--format=json"
         ])
         service_desc = json.loads(res.stdout)
-        env_vars = {}
+        original_env_by_container = {}
         if isinstance(service_desc, list): service_desc = service_desc[0] if service_desc else {}
         if "template" in service_desc.get("spec", {}):
             containers = service_desc["spec"]["template"].get("spec", {}).get("containers", [])
-            gateway_container = next((c for c in containers if c.get("name") == "gateway"), None)
-            if not gateway_container and containers:
-                gateway_container = containers[0]
-            if gateway_container and "env" in gateway_container:
-                for env in gateway_container["env"]:
+            for c in containers:
+                c_name = c.get("name")
+                if not c_name: continue
+                c_env = {}
+                for env in c.get("env", []):
                     if "value" in env:
-                        env_vars[env["name"]] = env["value"]
+                        c_env[env["name"]] = env["value"]
+                original_env_by_container[c_name] = c_env
 
-        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE"]
-        original_env = {}
-        for key in mutated_keys:
-            if key in env_vars:
-                original_env[key] = env_vars[key]
+        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_TIMEOUT_MS", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "INJECT_TRANSPORT_FAULT"]
+        original_max_age = original_env_by_container.get("gateway", {}).get("MAX_SIGNATURE_AGE_MS", "")
+        original_clamd_port = original_env_by_container.get("gateway", {}).get("CLAMD_PORT", "")
 
-        original_max_age = env_vars.get("MAX_SIGNATURE_AGE_MS", "")
-        original_clamd_port = env_vars.get("CLAMD_PORT", "")
-
-        def update_service_env(remove=False, **kwargs):
+        def update_service_env(container="gateway", remove=False, **kwargs):
+            cmd = [
+                "gcloud", "run", "services", "update", scanner_service,
+                "--project", project, "--region", region,
+                "--container", container
+            ]
             if remove:
                 keys = ",".join(kwargs.keys())
-                cmd = [
-                    "gcloud", "run", "services", "update", scanner_service,
-                    "--project", project, "--region", region,
-                    "--remove-env-vars", keys
-                ]
+                cmd.extend(["--remove-env-vars", keys])
             else:
                 env_vars_str = ",".join([f"{k}={v}" for k, v in kwargs.items()])
-                cmd = [
-                    "gcloud", "run", "services", "update", scanner_service,
-                    "--project", project, "--region", region,
-                    "--update-env-vars", env_vars_str
-                ]
+                cmd.extend(["--update-env-vars", env_vars_str])
             res = run(cmd)
-            # get the new revision name
             out = run(["gcloud", "run", "services", "describe", scanner_service, "--project", project, "--region", region, "--format=value(status.latestCreatedRevisionName)"])
             return out.stdout.strip()
 
@@ -154,7 +146,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
 
         try:
             print("Test 5: Readiness rejection (stale signatures)")
-            rev_5 = update_service_env(MAX_SIGNATURE_AGE_MS="1")
+            rev_5 = update_service_env(container="gateway", MAX_SIGNATURE_AGE_MS="1")
             time.sleep(5)
             status, body = scan(CLEAN)
             assert status == 503, f"Expected 503, got {status}: {body}"
@@ -163,10 +155,10 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             print("Test 6: Readiness failure due to unavailable port")
             # Clear MAX_SIGNATURE_AGE_MS so it's not the cause of failure
             if original_max_age:
-                update_service_env(CLAMD_PORT="9999", MAX_SIGNATURE_AGE_MS=original_max_age)
+                update_service_env(container="gateway", CLAMD_PORT="9999", MAX_SIGNATURE_AGE_MS=original_max_age)
             else:
-                update_service_env(remove=True, MAX_SIGNATURE_AGE_MS="")
-                update_service_env(CLAMD_PORT="9999")
+                update_service_env(container="gateway", remove=True, MAX_SIGNATURE_AGE_MS="")
+                update_service_env(container="gateway", CLAMD_PORT="9999")
             time.sleep(5)
             status, body = scan(CLEAN)
             assert status == 503, f"Expected 503 for broken readiness, got {status}: {body}"
@@ -179,9 +171,9 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             if original_clamd_port:
                 update_env["CLAMD_PORT"] = original_clamd_port
             else:
-                update_service_env(remove=True, CLAMD_PORT="")
+                update_service_env(container="gateway", remove=True, CLAMD_PORT="")
 
-            rev_7 = update_service_env(**update_env)
+            rev_7 = update_service_env(container="gateway", **update_env)
 
             # Observe pending state
             print("  Polling for readiness...")
@@ -229,35 +221,27 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
             print("Test 9: Transport failure after successful readiness")
-            # We need to cause exchange to fail while isReady succeeds.
-            # Setting CLAMD_TIMEOUT_MS to 1ms will likely allow the tiny VERSION command to succeed (readiness)
-            # but cause the much larger/slower INSTREAM scan to timeout (transport failure).
-            rev_9 = update_service_env(CLAMD_TIMEOUT_MS="1")
-            time.sleep(5)
-            # We poll until readiness is true (which means VERSION succeeded within 1ms)
+            # We use our INJECT_TRANSPORT_FAULT on gateway to deterministically fail the exchange only
+            rev_9 = update_service_env(container="gateway", INJECT_TRANSPORT_FAULT="true")
             max_attempts = 30
             ready = False
             for i in range(max_attempts):
                 status, body = scan(CLEAN)
-                if status == 200:
-                    ready = True
-                    break
-                elif status == 502:
-                    # Readiness succeeded (so it didn't return 503), but the scan timed out!
+                if status == 502:
                     ready = True
                     break
                 time.sleep(2)
-            
-            assert ready, "Service did not become ready (or VERSION could not beat 1ms timeout)"
+
+            assert ready, "Service did not become ready (or fault did not trigger)"
             status, body = scan(CLEAN)
-            assert status == 502, f"Expected 502 transport failure due to timeout, got {status}: {body}"
+            assert status == 502, f"Expected 502 transport failure due to injected fault, got {status}: {body}"
             assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
             print("Test 10: Verified-unchanged daily freshness renewal / actual update / failed refresh / reload")
-            # Set FRESHCLAM_INTERVAL_SECONDS=5 so freshclam runs repeatedly.
-            # Set http_proxy to a blackhole so freshclam fails.
-            update_service_env(remove=True, CLAMD_TIMEOUT_MS="")
-            rev_10 = update_service_env(FRESHCLAM_INTERVAL_SECONDS="5", http_proxy="http://127.0.0.1:9999")
+            # Set FRESHCLAM_INTERVAL_SECONDS=5 so freshclam runs repeatedly on the clamd container
+            # Set http_proxy to a blackhole on clamd container so freshclam fails.
+            update_service_env(container="gateway", remove=True, INJECT_TRANSPORT_FAULT="")
+            rev_10 = update_service_env(container="clamd", FRESHCLAM_INTERVAL_SECONDS="5", http_proxy="http://127.0.0.1:9999")
             time.sleep(15) # Wait for freshclam to run and fail
             status, body = scan(CLEAN)
             assert status == 503, f"Expected 503 after failed refresh, got {status}: {body}"
@@ -273,12 +257,13 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_failed) > 0, "Could not find 'freshclam refresh failed' in logs for exact revision"
 
             # Now restore network so it succeeds, and expect "database is up-to-date" or "updated"
-            update_service_env(remove=True, http_proxy="")
-            rev_10b = update_service_env(FRESHCLAM_INTERVAL_SECONDS="5")
+            # Note we also have to test that the exact daily database version is present
+            rev_10b = update_service_env(container="clamd", remove=True, http_proxy="")
+            # FRESHCLAM_INTERVAL_SECONDS is still 5
             time.sleep(15)
             status, body = scan(CLEAN)
             assert status == 200, f"Expected 200 after successful refresh, got {status}: {body}"
-            
+
             res_success = run([
                 "gcloud", "logging", "read",
                 f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10b}" AND (textPayload:"database is up-to-date" OR textPayload:"updated (version:")',
@@ -288,32 +273,49 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             logs_success = json.loads(res_success.stdout) if res_success.stdout.strip() else []
             assert len(logs_success) > 0, "Could not find confirmed daily database version/freshness in logs after successful refresh"
 
+            # verify hash/size/verdict correlation for a successful scan here too
+            assert_receipt(body, CLEAN, expected_verdict="clean")
+
         except Exception as e:
             print(f"Hosted scenario failed: {e}")
             raise
         finally:
             print("Ensuring service is restored to healthy state")
             try:
-                # restore original env exactly
-                to_remove = []
-                updates = {}
-                for key in mutated_keys:
-                    if key in original_env:
-                        updates[key] = original_env[key]
-                    else:
-                        to_remove.append(key)
+                # restore original env exactly for both containers
+                for c_name in ["gateway", "clamd"]:
+                    c_orig = original_env_by_container.get(c_name, {})
+                    to_remove = []
+                    updates = {}
+                    for key in mutated_keys:
+                        if key in c_orig:
+                            updates[key] = c_orig[key]
+                        else:
+                            to_remove.append(key)
 
-                cmd = [
-                    "gcloud", "run", "services", "update", scanner_service,
-                    "--project", project, "--region", region
-                ]
-                if to_remove:
-                    cmd.extend(["--remove-env-vars", ",".join(to_remove)])
+                    cmd = [
+                        "gcloud", "run", "services", "update", scanner_service,
+                        "--project", project, "--region", region,
+                        "--container", c_name
+                    ]
+                    if to_remove:
+                        cmd.extend(["--remove-env-vars", ",".join(to_remove)])
 
-                if updates:
-                    cmd.extend(["--update-env-vars", ",".join([f"{k}={v}" for k, v in updates.items()])])
+                    if updates:
+                        cmd.extend(["--update-env-vars", ",".join([f"{k}={v}" for k, v in updates.items()])])
 
-                res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+                # wait for readiness
+                ready = False
+                for _ in range(60):
+                    status, _ = scan(CLEAN)
+                    if status == 200:
+                        ready = True
+                        break
+                    time.sleep(2)
+                if not ready:
+                    raise Exception("Service not healthy (timed out waiting for readiness) after restore")
 
                 # verify healthy and assert receipts
                 status, body = scan(CLEAN)

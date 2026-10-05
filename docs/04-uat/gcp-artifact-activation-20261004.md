@@ -51,7 +51,7 @@ The implementation has remediated findings over multiple rounds:
     - Get discovered URL: `export SCANNER_URL=$(gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format='value(status.url)')`.
     - Execute `gcloud run services get-iam-policy drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format=json` and verify the bindings contain `roles/run.invoker` exclusively mapped to the authorized service account(s), with no `allUsers` binding.
     - Execute `curl -I $SCANNER_URL/health`, `curl -I https://storage.googleapis.com/$DEV_GCP_PROJECT_ID-document-artifacts`, and `curl -I https://storage.googleapis.com/$DEV_GCP_PROJECT_ID-remittance-proofs` to assert HTTP 401/403 anonymous denial.
-    - Confirm the effective invoker IAM check succeeds by using the reviewed first-hop auth@v2 scanner audience token rail: `curl -H "Authorization: Bearer $(gcloud auth print-identity-token --audiences=$SCANNER_URL)" $SCANNER_URL/health`.
+    - Confirm the effective invoker IAM check succeeds by using the reviewed first-hop auth@v2 scanner audience token rail in CI (passing the `id_token` output to curl), not a local gcloud credential.
   - Image/Resource Assertions:
     - Execute `gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format="value(spec.template.spec.containers[0].image, spec.template.spec.containers[1].image)"` to identify BOTH `gateway` and `clamd` container deployed digests. Ensure they match exact step outputs from build.
     - Execute `gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID` to assert memory/cpu boundaries, concurrency=1, and `min-instances=0` / `max-instances=1`.
@@ -74,11 +74,11 @@ The implementation has remediated findings over multiple rounds:
     - `DEV_REMITTANCE_PROOF_SCANNER_URL`: `<private scanner origin>`
   - Dispatch the immutable `.github/workflows/deploy-dev.yml` using the authorized runtime SHA.
   - Assert explicit runtime source SHA and selected deployed env/config by checking the deployment workflow logs and the Cloud Run environment variables (`gcloud run services describe`), NOT via the product `/health` endpoint which intentionally does not expose backend artifact configuration.
-  - Execute a coordinated, authenticated runtime readback using real product app-session procedures (e.g. via the `deploy-dev.yml` token issuance rail, NOT a bare gcloud ID token):
-    - Issue an app-session token for a test driver (`driver` realm, `driver:write` role).
-    - As the driver, execute a `POST /v1/driver/billing/remittance/stage` request containing actual test-owned fixture bytes (e.g., test PDF `contentBase64`) to receive a `stagedContentRef`.
-    - As the driver, execute a `POST /v1/driver/billing/remittance/scan` request with the `stagedContentRef` to scan and commit the bytes.
-    - Issue an app-session token for an ops/system user (`system` realm, `billing:write` role).
-    - As the ops user, execute a `GET /v1/system/billing/remittance/download` (or use the controlled signed-link contract) to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
-    - Execute the same staging/scanning procedure using a known EICAR fixture and assert the expected rejected cases (e.g., HTTP 400/403 or specific `infected` domain error).
+  - Execute a coordinated, authenticated runtime readback using real product app-session procedures via the `deploy-dev.yml` registered tenant tuple token issuance rail (do not invent a driver principal or use bare gcloud tokens):
+    - Document and issue an actual permitted fixture identity/session (TENANT tuples) with appropriate roles (`driver` scope for upload, `billing:write` for ops readback).
+    - As the permitted identity, execute `POST /api/reimbursements/proofs/staged-content` containing actual test-owned fixture bytes (`contentBase64`, `contentType`, and required `Idempotency-Key`) to receive a `stagedContentRef`.
+    - Execute `POST /api/reimbursements/proofs` with an `UploadRemittanceProofCommand` payload (including `batchId`, `originalFilename`, `contentType`, `sizeBytes`, and the `stagedContentRef`) to persist and scan the bytes.
+    - For system/ops readback (`billing:write`), execute `POST /api/reimbursements/proofs/:proofId/readback` to obtain a signed URL manifest (`manifest_hash`, `signed_at`, `expires_at`, `key_id`, `sig`, `sig_v`).
+    - Use the issued signed URL via `GET /api/reimbursements/proof-downloads/remittance-proof/:proofId?...` to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
+    - Execute the same staging/scanning procedure using a known EICAR fixture. Instead of an upload/scan error, assert that the endpoint persists a rejected `scanState` with an `infected` verdict and returns it (e.g. `scanState: "REJECTED_INFECTED"`).
   - Check the backend logs to confirm the Cloud Run gateway processed the file scan (`verdict: clean` and `verdict: infected`) and GCS successfully stored/rejected them under the expected IDs/generations. Download the files directly using `gcloud storage cat` with the runtime identity to independently confirm storage bytes.
