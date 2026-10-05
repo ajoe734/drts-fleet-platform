@@ -17,6 +17,7 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+import { ensureLiveMapFixture } from "./live-map-fixture";
 
 type JsonRecordRow = {
   record: unknown;
@@ -241,6 +242,10 @@ export class RegulatoryRegistryRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async ensureLiveMapTestDriver() {
+    return ensureLiveMapFixture(this.databaseService);
   }
 
   async loadState(): Promise<RegulatoryRegistryState> {

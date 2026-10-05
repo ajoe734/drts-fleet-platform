@@ -56,6 +56,7 @@ describe("dev live-map fixture provisioning", () => {
               has_task: false,
               has_binding: false,
               has_profile_binding: false,
+              has_pending_invitation: false,
               has_tracking_context: false,
             },
           ],

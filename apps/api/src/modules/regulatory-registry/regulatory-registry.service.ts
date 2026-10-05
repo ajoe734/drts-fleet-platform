@@ -64,6 +64,10 @@ import type {
 import { PHASE1_SERVICE_BUCKETS } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  LIVE_MAP_FIXTURE_DRIVER_ID,
+  LiveMapFixtureProvisioningError,
+} from "./live-map-fixture";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
@@ -646,6 +650,8 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         this.runInMemoryIdempotentBackfill();
       }
 
+      const liveMapFixture =
+        await this.regulatoryRegistryRepository.ensureLiveMapTestDriver?.();
       const persistedState =
         await this.regulatoryRegistryRepository.loadState();
       const hasPersistedState =
@@ -687,6 +693,17 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         this.supplyPairs = persistedState.supplyPairs.map((pair) => ({
           ...pair,
         }));
+      }
+      if (
+        persistedState.supplyPairs.length === 0 &&
+        (liveMapFixture?.status === "created" ||
+          liveMapFixture?.status === "unchanged")
+      ) {
+        // The durable check proved this fixture has no supply pair. Do not
+        // invent one from the demo fallback when the stored pair list is empty.
+        this.supplyPairs = this.supplyPairs.filter(
+          (pair) => pair.driverId !== LIVE_MAP_FIXTURE_DRIVER_ID,
+        );
       }
       if (persistedState.contracts.length > 0) {
         this.contracts = persistedState.contracts.map((contract) =>
@@ -745,6 +762,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         this.startExpiryReconciliationLoop();
       }
     } catch (error) {
+      if (error instanceof LiveMapFixtureProvisioningError) throw error;
       this.regulatoryRegistryRepository.reportPersistenceFailure?.(
         error,
         "module init",
