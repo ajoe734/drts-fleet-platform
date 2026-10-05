@@ -16,6 +16,7 @@ import {
 } from "../../apps/tenant-console-web/app/control-plane-proxy/[...path]/route";
 import { GET as platformGet } from "../../apps/platform-admin-web/app/control-plane-proxy/[...path]/route";
 import { GET as opsGet } from "../../apps/ops-console-web/app/control-plane-proxy/[...path]/route";
+import { requireControlledDownloadUrl } from "../../apps/platform-admin-web/app/platform-admin/p5/records/records-operations-model";
 import { middleware as tenantMiddleware } from "../../apps/tenant-console-web/middleware";
 import { TENANT_SESSION_COOKIE_NAME } from "../../apps/tenant-console-web/lib/auth/constants";
 
@@ -119,7 +120,7 @@ function connectApi(controller: ControlledDownloadController) {
         headers: {
           "content-type": headers.type!,
           ...(headers.disposition
-            ? { "content-disposition": headers.disposition }
+            ? { "content-disposition": String(headers.disposition) }
             : {}),
         },
       });
@@ -164,6 +165,20 @@ async function followLink(console: (typeof consoles)[number], link: string) {
 }
 
 describe.each(consoles)("$name controlled download routing", (console) => {
+  it("reaches the API's explicit 501 for metadata-only filing packages", async () => {
+    connectApi(new ControlledDownloadController());
+    const metadata = createControlledDownloadMetadata({
+      kind: "filing-pdf",
+      subjectId: "package-42",
+      manifestHash: "0".repeat(64),
+    });
+    const response = await followLink(console, metadata.downloadUrl);
+    expect(response.status).toBe(501);
+    expect((await response.json()).error.code).toBe(
+      "ARTIFACT_NOT_MATERIALISED",
+    );
+  });
+
   it.each(["https://api.example.test", "https://routing-api.a.run.app"])(
     "downloads exact bytes through the runtime API origin %s",
     async (origin) => {
@@ -204,6 +219,39 @@ describe.each(consoles)("$name controlled download routing", (console) => {
     const response = await followLink(console, `${url.pathname}${url.search}`);
     expect(response.status).toBe(status);
     expect((await response.json()).error.code).toBe(code);
+  });
+});
+
+describe("platform P5 download URL guard", () => {
+  it("accepts the API's signed relative URL and reaches its download route", async () => {
+    connectApi(new ControlledDownloadController());
+    const metadata = createControlledDownloadMetadata({
+      kind: "multi-taxi-trip-records",
+      subjectId: "export-42",
+      manifestHash: "0".repeat(64),
+    });
+    const href = requireControlledDownloadUrl(metadata.downloadUrl);
+    expect(href).toBe(metadata.downloadUrl);
+    // This kind is metadata-only in DOCUMENT_ARTIFACT_KINDS. Routing must not
+    // invent bytes or conceal the existing API rejection with a UI URL error.
+    const response = await followLink(consoles[1], href);
+    expect(response.status).toBe(501);
+    expect((await response.json()).error.code).toBe(
+      "ARTIFACT_NOT_MATERIALISED",
+    );
+  });
+
+  it.each([
+    "//untrusted.example/downloads/report/id",
+    "/control-plane-proxy/platform/tenants",
+    "/downloads/report/../admin",
+    "/downloads/report/%2e%2e",
+    "/downloads/report/nested%2fid",
+    "/downloads/report/nested%5cid",
+    "/downloads/report/id/extra",
+    "/downloads/report/",
+  ])("rejects unsafe relative URL %s", (url) => {
+    expect(() => requireControlledDownloadUrl(url)).toThrow();
   });
 });
 
