@@ -5,7 +5,7 @@ This document captures the User Acceptance Testing for the `SR-GCP-ARTIFACT-ACTI
 ## Review Findings (Codex - PR 2313)
 
 The initial implementation of `2fa1f87dd402e6d41e4844275ef93c1e74c4ff93` received several findings that have since been remediated:
-- **R1:** The provisioning workflow accepted a mutable tag as `source_ref` instead of enforcing a full 40-character SHA. Now enforces regex and validates `94cfa11b9`.
+- **R1:** The provisioning workflow accepted a mutable tag as `source_ref` instead of enforcing a full 40-character SHA. Now enforces regex and validates exact candidate SHA.
 - **R2:** Identity tokens for the WIF runtime were using `external_account` credentials (impersonation). Now securely passes token via `SCANNER_ID_TOKEN` and uses `id_token` token_format.
 - **R3:** The scanner verification script was using `application/octet-stream`, violating the product MIME policy. Now sends valid PDF EICAR and clean PDF files with `application/pdf`.
 - **R4:** The modified retired cleanup scripts broke deployment health guards by making the scanner presence strictly required instead of optional. Now explicitly allowed as an optional inventory entry.
@@ -14,16 +14,14 @@ The initial implementation of `2fa1f87dd402e6d41e4844275ef93c1e74c4ff93` receive
 
 ### Guide 0.7 Resolution Table for Remaining Findings & Gates
 
-| Finding / Gate | Adjacent SHA | Command | Result / Artifacts | Pending Limits |
+| Finding / Gate | Adjacent SHA | Current Candidate SHA | Command / Assertion | Result / Artifacts |
 |---|---|---|---|---|
-| **R5a (Gateway Errors)** | `94cfa11b9` | `python3 -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS. `content_sha256_mismatch` and `payload_too_large` correctly expected. | Offline verified. Requires hosted API hit. |
-| **R5b (Genuine Engine)** | `94cfa11b9` | Manual offline checks | Acceptance boundary defined. Implemented executable hosted genuine engine fault/recovery tests using gcloud run services update (fault injection/recovery). Tests use genuine engine only in hosted authorized environment. | Needs execution of manual fault/recovery scenarios in shared dev after merge. |
-| **R6 (GCS Robustness)** | `94cfa11b9` | `python3 -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS. Added gen2 byte download, unchanged winner validation, stale write, malformed gen, network error and exact gen cleanup. Helper executes as runtime SA via explicit impersonation. | Execution required against live GCS via hosted verification workflow. |
-| **R8 (Prerequisites)** | `94cfa11b9` | Checked workflow | `.github/workflows/provision-dev-artifact-backends.yml` validates and bootstraps Scanner SA, and explicitly verifies actAs/TokenCreator prerequisites for runtime SA before provisioning. | Pending verification of IAM policies/readbacks during provisioning. |
-| **1. immutable_hosted_workflow_review_ci** | `94cfa11b9` | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. | Pending reviewer approval and final CI pass on PR. |
-| **2. private_resources_iam_and_image_provenance** | `94cfa11b9` | Offline scripts | Scripts configured for private buckets and IAM policies. | Pending readback of runtime SA ownership/access, `imageDigest`, memory limits in hosted environment. |
-| **3. genuine_scan_storage_positive_negative** | `94cfa11b9` | Unit tests | `verify-dev-artifact-backends.py` completes tests for clean, EICAR, mismatch, oversize, CAS handling. | Pending hosted verification using genuine `clamd` sidecar. |
-| **4. shared_dev_provider_activation_readback** | `94cfa11b9` | Offline prep | N/A | Update `DEV_DOCUMENT_ARTIFACT_STORAGE_PROVIDER`, `DEV_DOCUMENT_ARTIFACT_GCS_BUCKET`, `DEV_REMITTANCE_PROOF_STORAGE_PROVIDER`, `DEV_REMITTANCE_PROOF_GCS_BUCKET`, `DEV_REMITTANCE_PROOF_SCANNER_PROVIDER`, `DEV_REMITTANCE_PROOF_SCANNER_URL` variables. |
+| **R5a/R5b/R6 (Gateway/Engine/GCS)** | `94cfa11b9` | `658824e059fbbe0f49d358a7af275879d0ba0c32` | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Includes real `scan_engine_not_ready` regression assertions, `Heuristics.Limits.Exceeded` (archive >10MB uncompressed) engine limit rejection payload, and genuine Cloud Run readiness transition orchestrations. |
+| **R8 (Prerequisites)** | `94cfa11b9` | `658824e059fbbe0f49d358a7af275879d0ba0c32` | Checked `.github/workflows/provision-dev-artifact-backends.yml` | Redundant grant removed. Explicit `NOT_FOUND` condition checked before SA creation. |
+| **1. immutable_hosted_workflow_review_ci** | `94cfa11b9` | `658824e059fbbe0f49d358a7af275879d0ba0c32` | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. Final CI pass pending on PR. |
+| **2. private_resources_iam_and_image_provenance** | `94cfa11b9` | `658824e059fbbe0f49d358a7af275879d0ba0c32` | Hosted runbacks | `gcloud storage buckets get-iam-policy gs://$DEV_GCP_PROJECT_ID-document-artifacts`, `gcloud run services get-iam-policy drts-dev-scanner` and curl anonymous tests |
+| **3. genuine_scan_storage_positive_negative** | `94cfa11b9` | `658824e059fbbe0f49d358a7af275879d0ba0c32` | Hosted verification run | Workflow automatically runs `verify-dev-artifact-backends.py` in live GCP environment |
+| **4. shared_dev_provider_activation_readback** | `94cfa11b9` | `658824e059fbbe0f49d358a7af275879d0ba0c32` | Live deployment | Configure the 6 `DEV_*_PROVIDER`, `*_BUCKET`, `*_SCANNER_URL` variables. |
 
 ## Acceptance Criteria
 
@@ -38,11 +36,11 @@ The initial implementation of `2fa1f87dd402e6d41e4844275ef93c1e74c4ff93` receive
 - **Pending Hosted Checks:**
   - Dispatch workflow with valid SHA.
   - Verify scanner SA exists and workflow identity can `actAs` it.
-  - Execute `gcloud storage buckets get-iam-policy` to read back IAM and verify concrete runtime SA ownership.
-  - Execute anonymous readback on buckets/service to prove denial (effective IAM-check).
+  - Execute `gcloud storage buckets get-iam-policy gs://$DEV_GCP_PROJECT_ID-document-artifacts` to read back IAM and verify concrete runtime SA ownership.
   - Execute `gcloud run services get-iam-policy drts-dev-scanner` to verify it denies unauthenticated access.
-  - Read back both container digests, project/runtime ownership bounds, and post-gate3 immutable deployment/runtime SHA/config/authenticated producer/proof evidence.
-  - Record the actual `imageDigest` deployed, memory (512Mi/4Gi), min(0), max(1) and concurrency(1).
+  - Execute `curl -I https://drts-dev-scanner-...` and `curl -I https://storage.googleapis.com/$DEV_GCP_PROJECT_ID-document-artifacts` to assert HTTP 401/403 anonymous denial.
+  - Execute `gcloud run services describe drts-dev-scanner --format='value(image)'` to read back exact deployed `gateway` and `clamd` digests, ensuring they match step output.
+  - Execute `gcloud run services describe drts-dev-scanner` to assert memory limits (512Mi/4Gi) and concurrency limit (1).
 
 ### 3. genuine_scan_storage_positive_negative
 - **Requirement:** Actual clean/EICAR, hash/size/limit/error/freshness rejection, authenticated GCS CAS/generation readback using test-owned objects only.

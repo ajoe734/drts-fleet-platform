@@ -52,7 +52,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}),
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
             (400, {"sha256": "wrong", "sizeBytes": -1, "error": "content_sha256_mismatch"}),
-            (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"})
+            (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"}),
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.ENGINE_LIMIT_PAYLOAD).hexdigest(), "sizeBytes": len(self.mod.ENGINE_LIMIT_PAYLOAD), "verdict": "infected"})
         ]
         def side_effect(req, timeout=30):
             status, body = responses.pop(0)
@@ -69,6 +70,41 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
         mock_urlopen.side_effect = side_effect
         self.mod.test_scanner("http://fake")
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    @patch("os.environ.get")
+    def test_scanner_hosted(self, mock_env, mock_urlopen, mock_sleep, mock_run):
+        mock_env.return_value = "fake-token"
+
+        responses = [
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}),
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
+            (400, {"sha256": "wrong", "sizeBytes": -1, "error": "content_sha256_mismatch"}),
+            (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"}),
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.ENGINE_LIMIT_PAYLOAD).hexdigest(), "sizeBytes": len(self.mod.ENGINE_LIMIT_PAYLOAD), "verdict": "infected"}), # Test 4b Engine limit
+            (503, {"error": "scan_engine_not_ready"}), # Test 5 port
+            (503, {"error": "scan_engine_not_ready"}), # Test 6 marker
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}) # Test 7/8 recovery
+        ]
+        def side_effect(req, timeout=30):
+            status, body = responses.pop(0)
+            if status >= 400:
+                mock_err = urllib.error.HTTPError(req.full_url, status, "Error", hdrs={}, fp=None)
+                mock_err.read = MagicMock(return_value=json.dumps(body).encode())
+                raise mock_err
+            mock_resp = MagicMock()
+            mock_resp.status = status
+            mock_resp.read = MagicMock(return_value=json.dumps(body).encode())
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = mock_resp
+            return mock_cm
+
+        mock_urlopen.side_effect = side_effect
+        self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
+        self.assertEqual(mock_run.call_count, 4) # 3 updates (port, marker, default), 1 restore in finally
+
 
     @patch("urllib.request.urlopen")
     @patch("os.environ.get")

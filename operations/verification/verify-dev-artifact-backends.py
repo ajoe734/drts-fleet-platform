@@ -33,6 +33,12 @@ CLEAN = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\
 EICAR = CLEAN + b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\n"
 OVERSIZED = CLEAN + b"0" * (11 * 1024 * 1024) # 11 MiB (max is 10 MiB)
 
+import zipfile, io
+out = io.BytesIO()
+with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("large.txt", b"0" * (11 * 1024 * 1024))
+ENGINE_LIMIT_PAYLOAD = out.getvalue()
+
 def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
     print(f"Testing scanner at {scanner_url}")
     token = get_identity_token(scanner_url)
@@ -85,6 +91,11 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
     assert status == 413, f"Expected 413, got {status}: {body}"
     assert body.get("error") == "payload_too_large", f"Expected payload_too_large error, got {body.get('error')}"
 
+    print("Test 4b: Engine-limit rejection (archive >10MiB uncompressed)")
+    status, body = scan(ENGINE_LIMIT_PAYLOAD)
+    assert status == 200, f"Expected 200, got {status}: {body}"
+    assert_receipt(body, ENGINE_LIMIT_PAYLOAD, expected_verdict="infected")
+
     if scanner_service and project and region:
         import time
         def update_service_env(clamd_port="3310", ready_marker="/var/run/clamav-ready/ready"):
@@ -94,19 +105,19 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                 "--set-env-vars", f"CLAMD_HOST=127.0.0.1,CLAMD_PORT={clamd_port},CLAMAV_READY_MARKER={ready_marker}"
             ])
             time.sleep(5)
-            
+
         try:
-            print("Test 5: Genuine-engine unavailable/indeterminate (break port)")
+            print("Test 5: Readiness rejection (break port)")
             update_service_env(clamd_port="9999")
             status, body = scan(CLEAN)
             assert status == 503, f"Expected 503, got {status}: {body}"
-            assert isinstance(body, dict) and body.get("error") in ("scan_engine_unavailable", "not_ready"), f"Expected unavailable error, got {body}"
+            assert isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", f"Expected scan_engine_not_ready error, got {body}"
 
-            print("Test 6: Stale/failed/pending signature activation (break marker)")
+            print("Test 6: Readiness rejection (break marker)")
             update_service_env(ready_marker="/invalid/marker")
             status, body = scan(CLEAN)
             assert status == 503, f"Expected 503, got {status}: {body}"
-            assert isinstance(body, dict) and body.get("error") in ("scan_engine_unavailable", "not_ready"), f"Expected not_ready error, got {body}"
+            assert isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", f"Expected scan_engine_not_ready error, got {body}"
 
             print("Test 7/8: Recovery and verified freshness")
             update_service_env() # restore to defaults
@@ -118,13 +129,11 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             print("Ensuring service is restored to healthy state")
             update_service_env()
     else:
-        print("Test 5: Genuine-engine unavailable/indeterminate")
-        print("  [UNEXECUTED] Manual fault injection required in hosted environment (e.g., kill clamd)")
-        print("Test 6: Stale/failed/pending signature activation")
-        print("  [UNEXECUTED] Manual fault injection required in hosted environment (e.g., block freshclam)")
-        print("Test 7: Verified-unchanged freshness")
-        print("  [UNEXECUTED] Manual verification required in hosted environment")
-        print("Test 8: Actual freshclam/reload or cold-start")
+        print("Test 5: Readiness rejection (break port)")
+        print("  [UNEXECUTED] Manual fault injection required in hosted environment")
+        print("Test 6: Readiness rejection (break marker)")
+        print("  [UNEXECUTED] Manual fault injection required in hosted environment")
+        print("Test 7/8: Recovery and verified freshness")
         print("  [UNEXECUTED] Manual verification required in hosted environment")
         return False
     return True
@@ -244,7 +253,7 @@ def main():
     engine_tested = test_scanner(args.scanner_url, args.scanner_service, args.project, args.region)
     test_gcs(args.document_bucket, args.runtime_sa)
     test_gcs(args.remittance_bucket, args.runtime_sa)
-    
+
     if not engine_tested:
         print("Scanner tests passed (with unexecuted manual genuine-engine scenarios).")
         sys.exit(1)
