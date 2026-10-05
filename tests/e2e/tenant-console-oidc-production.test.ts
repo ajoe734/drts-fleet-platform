@@ -805,9 +805,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const urlStr = input.toString();
       if (urlStr.includes("/api/auth/logout-all")) {
-        const authHeader =
-          (init?.headers as any)?.["Authorization"] ||
-          (init?.headers as any)?.["authorization"];
+        const authHeader = new Headers(init?.headers).get("authorization");
         const token = authHeader?.replace("Bearer ", "");
         const payload = token
           ? await jwtAuthService.verifyAccessToken(token)
