@@ -1254,3 +1254,152 @@ or assume `4b9531ac` is still the runtime. If only the harness changed, the
 runtime must still contain the previously accepted auth repair; any deployment
 decision remains with Supervisor. All four acceptance keys stay pending until
 that new hosted run supplies their evidence. The owner does not call `done`.
+
+## Missing durable fixture: third hosted run and dev-only repair (2026-10-05)
+
+[Run 37309412151](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37309412151)
+used candidate `5af4e2497ba928cd4cd298b6b05e9e7f7aa7760e` and observed API
+runtime `cf263f02ffb962979402c73a01ecd8b6576b9362`. Job `111760872268` failed.
+All five artifact files and the failure log were downloaded and read. Artifact
+`11344952961` zip SHA256
+`84eaa0cc6e30f1b820315228bf726e95910069f864b1246556b62476732dba59`
+matches GitHub's digest.
+
+- Deployment SHA/backend and the least-scope observer session passed.
+- The new diagnostic reported `driver_missing`, `found=false`, valid
+  `registry_shape=data.items`, and missing work-state/eligibility. The full
+  registry endpoint has no pagination or filtering. No actual DB cause was
+  inferred from this worker's read-only artifact inspection.
+- `F-DRIVER-ISOLATION-DIAGNOSTICS` and `F-EMPTY-TEARDOWN` now have live evidence
+  for that candidate: cleanup passed with `recovery=not-required`,
+  `revoked=false`, and no invitation attempt.
+- Provider, service-area/freshness and Chromium steps were skipped. The final
+  gate failed correctly. None of the four required acceptance keys is closed.
+
+Supervisor subsequently reopened implementation and expanded scope to the
+regulatory-registry module. Its new decision supersedes the manual operator
+proposal above for this missing fixture: no operator session is available on
+dev, so use the already-enabled dev-only `DRTS_E2E_PROVISIONING` hook. Keep
+`drv-demo-002`, registry grant D and `DRTS_LIVE_MAP_TEST_DRIVER_ID` unchanged.
+The owner does not perform a dev data write, deployment or live dispatch.
+
+### Source and safety boundaries
+
+`RegulatoryRegistryService.onModuleInit` now awaits
+`RegulatoryRegistryRepository.ensureLiveMapTestDriver` before hydrating its
+snapshot. `live-map-fixture.ts::ensureLiveMapFixture` requires the literal
+flag `true`, uses the existing `detectAuthEnvironment` precedence, and refuses
+staging/production before accessing the database. This permits documented
+shared dev's `DRTS_ENV=development` with `NODE_ENV=production`; it does not
+enable provisioning in production. Missing DB configuration cannot pretend
+to have persisted a fixture.
+
+The fixed fixture is created **offline**, non-dispatchable and without bindings
+directly; there is no intermediate available state. It has a synthetic name,
+the standard-taxi bucket, and no personal/payment data. It does not create a
+profile, vehicle, assignment, invitation, device binding or notification.
+
+The helper reads the existing driver and durable isolation authorities:
+
+| Authority                              | Formal source / reason for checking                                                                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry driver and vehicle pairs      | V0012, `reg.phase1_registry_drivers` and `reg.phase1_registry_supply_pairs`; both normalized work-state and JSON must be safe                  |
+| Tasks and dispatch assignments         | V0011, `ops.phase1_driver_tasks` and `ops.phase1_dispatch_assignments`; their production records own `driverId`                                |
+| Profile binding summary                | V0018A, `ops.phase1_driver_profiles`; prevents ignoring a binding preserved in a profile                                                       |
+| Device binding / unconsumed invitation | V0078, `iam.driver_device_bindings` / `iam.driver_device_invitations`; a registry snapshot alone cannot establish absence of an active session |
+| Operational telemetry context          | V0034, `telemetry.driver_location_events`; no prior vehicle/task/on-duty telemetry may be repurposed as an isolated fixture                    |
+
+This is deliberately conservative about historical tasks/assignments and
+on-duty telemetry. It does not erase history or turn a used identity into a
+test fixture. Existing isolated rows are returned unchanged, including their
+timestamps, name and revoked-binding history. Online, dispatchable, bound,
+assigned, malformed or otherwise unsafe rows are never overwritten.
+
+Creation uses a transaction, a fixture-specific advisory lock between startup
+hooks, and `INSERT ... ON CONFLICT DO NOTHING`. A concurrent insert winner is
+read and checked again rather than overwritten. Failure rolls back and exposes
+only `LIVE_MAP_FIXTURE_PERSISTENCE_FAILED`. Diagnostic logs contain only fixed
+`LIVE_MAP_FIXTURE_*` codes. The opted-in dev startup throws on an unsafe fixture
+or durable error instead of falling back to in-memory seed data. After ensure,
+startup also requires a safe durable readback of exactly one fixture and no
+persisted vehicle pair; disappearance, conflicting state or a failed read
+stops startup with a fixed error. Forbidden
+staging/prod provisioning leaves the normal startup behavior unchanged.
+
+The service's existing hydration retained demo supply pairs when the persisted
+pair list was empty. After a successful durable isolation check, the new hook
+removes only the reserved fixture's **seed-only** pair in that empty-list case.
+It preserves every persisted pair, including one observed after the check.
+Other demo seeds and all existing stored records remain untouched. The fixture
+lock is not a lease against unrelated operational writers: deployment and live
+acceptance still require Supervisor's existing no-overlap coordination, and
+the harness continues to enforce its unchanged isolation gates.
+
+### Finding-level verification
+
+The minimal production-startup repro is anchored at
+`b1942e409` over production base `5673ddebd` (the relevant registry files are
+unchanged from `5af4e249`). It failed **one behavior assertion**, exit 1:
+with another persisted driver, startup left `drv-demo-002` missing. The same
+test passed after the insert-only hook (`8ea5acff2`), exit 0. The expanded
+implementation/tests are anchored at `a40affd42990f27c0625f5733b562e541ed96acd`;
+the final readback guard and verified code are anchored at
+`a310dddf5b202a1dc38d95d24d1ac7198f1e3f2b`. The handoff commit adds the updated
+evidence ledger.
+
+| Finding / required acceptance                                       | Repair or retained source                                     | Before → current result                                                                                                              | Remaining verification                                      |
+| ------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| F-MISSING-DURABLE-FIXTURE                                           | `onModuleInit`, repository ensure, `live-map-fixture.ts`      | Hosted `driver_missing`; actual startup repro fails → passes                                                                         | New deployment and hosted map run                           |
+| Existing identity overwrite / assignment / binding                  | Insert-only transaction and durable authority checks          | Unsafe rows and orphaned references refuse; existing isolated row remains byte-for-byte unchanged in unit boundary tests             | Real PostgreSQL cases run in hosted CI                      |
+| Environment and failure fallback                                    | Existing auth-environment resolver; fixed-code startup errors | Literal flag, all staging/prod aliases, production Node/shared-dev positive, transaction failure and unsafe startup regressions pass | Hosted deployment must use the accepted new code            |
+| F-DRIVER-ISOLATION-DIAGNOSTICS / F-EMPTY-TEARDOWN                   | Previous candidate's strict diagnostics/cleanup unchanged     | Both confirmed in run 37309412151; existing map regression suite retained                                                            | New candidate's final live chain still required             |
+| F-OBSERVER-SEED / F-WIF-PRINCIPAL-REWRITE / F-GOOGLE-DURABLE-DENIAL | Accepted auth repair unchanged                                | Observer verified live in run 37309412151; prior positive/negative auth regressions retained                                         | New-candidate hosted regression                             |
+| service_area_live_decisions_for_real_taiwan_addresses               | V0049 oracle / existing coverage runner                       | Skipped in latest run                                                                                                                | Address, coordinate and evaluate-response evidence pending  |
+| location_freshness_live_states                                      | Real elapsed-time wait / existing isolated tracking           | Skipped in latest run                                                                                                                | Fresh, stale, low-accuracy and restoration evidence pending |
+| browser_map_render_live                                             | Existing ready/decoded-imagery Chromium checks                | Skipped in latest run                                                                                                                | Render/screenshot/runtime evidence pending                  |
+| authorization_gate_and_allowed_targets_enforced                     | Existing hosted/SHA/authorization/allowlist gates             | Preflight passed and final skipped-step rejection worked on prior candidate                                                          | Complete new-candidate chain pending                        |
+
+Node `22.23.2`, pnpm `10.33.0`, Vitest `4.1.4`; evidence under the assigned
+worktree's `.local/c114/acceptance-followup-20261005T122644Z/`:
+
+- Focused API registry/controller/profile/fixture regression: **5 files,
+  69 tests passed**, zero skips, exit 0 (`api-regression-final.log`).
+- Map suite, explicitly excluding the hosted PostgreSQL file: **11 files,
+  200 tests passed**, zero skips, exit 0 (`map-regression-final.log`). This includes
+  the 35 new fixture safeguards via the root CI discovery entry and all prior
+  map evidence/auth/bootstrap/cleanup regressions.
+- Scoped ESLint: exit 0 (`fixture-lint-final.log`). API TypeScript: exit 0
+  (`api-typecheck-readback-final.log`). Its initial attempt lacked the workspace
+  `@drts/control-plane-auth` build; building that package exited 0 and resolved
+  the missing declarations without source/manifest changes.
+- Root TypeScript: exit 0 (`root-typecheck-final.log`). Its first run failed
+  from 22 cross-worktree `node_modules` symlinks mixing private `ApiClient`
+  types. Only this worktree's links were detached, preserving all target
+  directories; offline frozen installation with scripts disabled exited 0.
+  The isolated check then caught a new test's explicit-undefined optional
+  fixture type, which was corrected before the final passing check. The map
+  suite was repeated successfully after dependency isolation. No lockfile or
+  manifest changes were made.
+- CI test discovery and commit-trailer checks passed; no new test is orphaned
+  from root CI discovery. All local checks above completed and were read.
+- The fixture unit tests mock only database I/O and notification boundaries;
+  production startup, repository and ensure logic execute. They are not PG
+  concurrency or live acceptance evidence.
+- `fixture-provisioning.postgres.test.ts` is discovered by the existing hosted
+  `ci-integ.yml` **unit** job. It creates its own randomly named database,
+  applies the full official migration ledger with `db-apply.sh`, and exercises
+  the actual repository and startup against PostgreSQL: concurrent creation,
+  restart idempotence, online-row preservation, orphaned vehicle pairs and
+  authoritative IAM bindings. Missing DB/schema fails that hosted job. It is
+  excluded from this VM's scoped run and remains **pending hosted CI**, not a
+  local pass. No new workflow or secret/variable is required.
+
+The owner verified the earlier candidate's PR #2305 as merged and read its
+28 successful CI checks plus skipped `orchestrator-tests`. Those results do
+not certify this repair. This candidate requires Claude2's independent review,
+same-SHA CI (including the new PG cases), merge, and then an authorized shared
+dev deployment containing the new API hook. Supervisor rechecks the complete
+current API/ops runtime SHA and dispatches map-only acceptance on r2 with the
+new candidate SHA. The historical `cf263f02` runtime predates this hook and
+cannot satisfy its deployment requirement. All four live acceptance keys stay
+pending; the owner does not call `done`.
