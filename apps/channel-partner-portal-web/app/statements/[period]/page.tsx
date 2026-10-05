@@ -41,6 +41,7 @@ export default async function ReferralStatementDetailPage({
           statement ? (
             <a
               href={`/control-plane-proxy/partner/referral/statements/${encodeURIComponent(period)}/artifact`}
+              download={`referral-statement-${period}.csv`}
               data-drt-operation="channel-statement-download"
               style={{
                 alignItems: "center",

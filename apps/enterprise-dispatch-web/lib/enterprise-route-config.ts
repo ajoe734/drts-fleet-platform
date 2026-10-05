@@ -42,7 +42,7 @@ export function getEnterpriseGate(kind: EnterpriseGateKind, locale: Locale) {
         actions: [
           {
             label: t("gate.authRequired.action.primary", undefined, locale),
-            href: "/api/auth/tenant/login",
+            href: "/",
           },
           {
             label: t("gate.authRequired.action.secondary", undefined, locale),

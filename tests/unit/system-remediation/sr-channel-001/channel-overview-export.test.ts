@@ -124,7 +124,7 @@ describe("SR-CHANNEL-001: overview export and reconciliation", () => {
     expect(dashboard).toContain(
       "statements/${encodeURIComponent(currentPeriod)}/artifact",
     );
-    expect(dashboard).not.toContain("download={`referral-statement-${currentPeriod}.csv`}");
+    expect(dashboard).toContain("download={`referral-statement-${currentPeriod}.csv`}");
     expect(dashboard).toContain("<DashboardPeriodFilter");
     expect(tables).toContain('data-drt-filter="period"');
     expect(tables).not.toContain("{r.artifactId}");

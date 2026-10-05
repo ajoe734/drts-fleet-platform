@@ -584,11 +584,9 @@ export class JwtAuthService {
       Number.isFinite(payload.tokenVersion) &&
       typeof payload.auth_time === "number" &&
       payload.auth_time > 0 &&
-      // Google authenticates without asserting amr/acr. Empty, well-typed
-      // assurance is valid for a durable session; step-up checks MFA separately.
-      Array.isArray(payload.amr) &&
-      payload.amr.every((method) => typeof method === "string") &&
-      typeof payload.acr === "string" &&
+      payload.amr &&
+      payload.amr.length > 0 &&
+      payload.acr &&
       payload.policyVersion &&
       payload.iss &&
       payload.aud,
@@ -1015,17 +1013,10 @@ export class JwtAuthService {
         return false;
       }
 
-      let user =
-        typeof this.tenantPartnerService.findTenantUserForAuthentication ===
-        "function"
-          ? await this.tenantPartnerService.findTenantUserForAuthentication(
-              payload.tenantId,
-              tenantUserId,
-            )
-          : this.tenantPartnerService.findTenantUser(
-              payload.tenantId,
-              tenantUserId,
-            );
+      let user = this.tenantPartnerService.findTenantUser(
+        payload.tenantId,
+        tenantUserId,
+      );
       if (!user && payload.sub) {
         const bySubject = this.tenantPartnerService.findTenantUserBySubject(payload.sub);
         if (bySubject && bySubject.tenantId === payload.tenantId) {

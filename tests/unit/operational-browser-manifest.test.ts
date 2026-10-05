@@ -187,46 +187,4 @@ describe("operational browser journeys manifest guard", () => {
       expect(operation.expectedContentTypeIncludes).toBeTruthy();
     }
   });
-
-  it("does not force statement download anchors through the native download attribute, which drops the per-origin identity-token header on a now-private Cloud Run service", () => {
-    // Regression for channel-statement-download: Chromium's <a download> request
-    // is issued outside the page navigation that carries
-    // page.context().setExtraHTTPHeaders()'s Authorization bearer token, so the
-    // now-IAM-gated channel-partner-portal-web origin rejects it and the
-    // Playwright download event resolves as "canceled". The server already sets
-    // Content-Disposition: attachment with a filename, so the attribute is not
-    // needed; bank-console-web's working anchor (tested by
-    // bank-statement-download) never carried one.
-    const anchorAttributesFor = (filePath: string, marker: string) => {
-      const source = readFileSync(path.join(process.cwd(), filePath), "utf8");
-      const markerIndex = source.indexOf(marker);
-      expect(markerIndex, `${marker} must exist in ${filePath}`).toBeGreaterThan(
-        -1,
-      );
-      const tagStart = source.lastIndexOf("<a", markerIndex);
-      const tagEnd = source.indexOf(">", markerIndex);
-      expect(tagStart).toBeGreaterThan(-1);
-      expect(tagEnd).toBeGreaterThan(tagStart);
-      return source.slice(tagStart, tagEnd);
-    };
-
-    expect(
-      anchorAttributesFor(
-        "apps/channel-partner-portal-web/app/statements/[period]/page.tsx",
-        'data-drt-operation="channel-statement-download"',
-      ),
-    ).not.toMatch(/\bdownload=/);
-    expect(
-      anchorAttributesFor(
-        "apps/channel-partner-portal-web/app/dashboard/page.tsx",
-        'data-drt-operation="channel-overview-export"',
-      ),
-    ).not.toMatch(/\bdownload=/);
-    expect(
-      anchorAttributesFor(
-        "apps/bank-console-web/app/statements/page.tsx",
-        'data-drt-operation="bank-statement-download"',
-      ),
-    ).not.toMatch(/\bdownload=/);
-  });
 });

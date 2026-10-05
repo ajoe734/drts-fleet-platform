@@ -119,6 +119,7 @@ export default async function ReferralDashboardPage(props: {
       />
       <a
         href={`/control-plane-proxy/partner/referral/statements/${encodeURIComponent(currentPeriod)}/artifact`}
+        download={`referral-statement-${currentPeriod}.csv`}
         data-drt-operation="channel-overview-export"
         data-drt-intent="channel-statement-download"
         style={{

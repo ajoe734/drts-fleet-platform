@@ -10,8 +10,6 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../src/modules/auth/auth.controller";
-import { OidcPkceService } from "../../src/modules/auth/oidc-pkce.service";
-import type { OidcBoundTenantUser } from "../../src/modules/identity/identity.repository";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
 import { GoogleWorkloadIdentityAdapter } from "../../src/modules/auth/google-workload-identity.adapter";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
@@ -95,40 +93,6 @@ function createAuthFixture() {
     jwtAuthService,
     regulatoryRegistryService,
     tenantPartnerService,
-  };
-}
-
-async function createOidcAuthFixture() {
-  const repo = new IdentityRepository();
-  const tenant = new TenantPartnerService(
-    new AuditNotificationService(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    repo,
-    repo,
-  );
-  const user = tenant.findTenantUserBySubject("sub_oidc_admin_acme")!;
-  await repo.syncLegacyTenantUserRole({
-    ...user,
-    oidcIssuer: process.env.TENANT_OIDC_ISSUER!,
-    subjectId: "sub_oidc_admin_acme",
-  } as OidcBoundTenantUser);
-  const signer = new JwtAuthService(repo, tenant);
-  return {
-    controller: new AuthController(
-      signer,
-      tenant,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      repo,
-      new OidcPkceService(signer, tenant),
-    ),
   };
 }
 
@@ -515,6 +479,7 @@ describe("auth token issuance", () => {
     );
 
     const {
+      controller,
       jwtAuthService,
       tenantPartnerService,
       identityRepository,
@@ -2386,10 +2351,10 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.TENANT_OIDC_ISSUER = "https://tenant-idp.tests";
     process.env.TENANT_OIDC_AUDIENCE = "tenant-portal-tests";
     process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
-    const { controller } = await createOidcAuthFixture();
+    const { controller } = createAuthFixture();
     const idToken = jwt.sign(
       {
-        sub: "sub_oidc_admin_acme",
+        sub: "oidc-user-001",
         email: "admin@acme.example",
         email_verified: true,
         amr: ["pwd", "webauthn"],
@@ -2417,7 +2382,7 @@ describe("tenant bootstrap-session auth controller", () => {
       profile: { email: "admin@acme.example", roleCode: "tenant_admin" },
     });
     const decoded = jwt.decode(response.data.accessToken) as jwt.JwtPayload;
-    expect(decoded.amr).toEqual(expect.arrayContaining(["webauthn"]));
+    expect(decoded.amr).toEqual(expect.arrayContaining(["oidc", "webauthn"]));
     expect(decoded.acr).toBe("aal2");
 
     delete process.env.JWT_SECRET;
@@ -2432,10 +2397,10 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.TENANT_OIDC_ISSUER = "https://tenant-idp.tests";
     process.env.TENANT_OIDC_AUDIENCE = "tenant-portal-tests";
     process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
-    const { controller } = await createOidcAuthFixture();
+    const { controller } = createAuthFixture();
     const idToken = jwt.sign(
       {
-        sub: "sub_oidc_admin_acme",
+        sub: "oidc-user-002",
         email: "admin@acme.example",
         email_verified: true,
         amr: ["pwd"],

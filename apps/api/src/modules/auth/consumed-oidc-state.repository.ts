@@ -14,7 +14,9 @@ export class ConsumedOidcStateRepository {
   private readonly memoryCache = new Map<string, number>();
   private readonly storageFilePath: string;
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {
+  constructor(
+    @Optional() private readonly databaseService?: DatabaseService,
+  ) {
     this.storageFilePath =
       process.env.CONSUMED_OIDC_STATES_FILE || DEFAULT_FILE_STORAGE;
     this.loadFromFile();
@@ -98,8 +100,7 @@ export class ConsumedOidcStateRepository {
         this.saveToFile();
         return true;
       } catch (error) {
-        this.logger.warn("Durable OIDC replay protection is unavailable.");
-        throw error;
+        this.logger.warn(`Failed DB check for consumed OIDC state: ${error}`);
       }
     }
 

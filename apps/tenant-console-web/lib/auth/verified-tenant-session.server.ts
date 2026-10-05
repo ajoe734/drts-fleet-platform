@@ -1,5 +1,3 @@
-import { tenantAuthFetch } from "./api-fetch";
-
 export interface VerifiedTenantSession {
   accessToken: string;
   tenantId: string;
@@ -25,7 +23,7 @@ export async function verifyTenantSession(
   accessToken: string,
   apiBaseUrl: string,
 ): Promise<TenantSessionVerification> {
-  const response = await tenantAuthFetch(`${apiBaseUrl}/api/auth/session`, {
+  const response = await fetch(`${apiBaseUrl}/api/auth/session`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });

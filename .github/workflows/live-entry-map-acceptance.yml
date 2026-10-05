@@ -309,27 +309,9 @@ jobs:
         id: chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      # The ops Cloud Run service is private. Use the existing deployer WIF
-      # invoker, with an audience distinct from the API/realm assertions above.
-      - name: Mint private ops console invoker identity
-        id: ops-invoker-wif
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
-          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
-          token_format: id_token
-          id_token_audience: ${{ env.DRTS_LIVE_MAP_TEST_ORIGIN }}
-          id_token_include_email: true
-          create_credentials_file: false
-          export_environment_variables: false
-
       - name: Render the deployed ops maps in Chromium
         id: browser
-        env:
-          DRTS_LIVE_MAP_OPS_CONSOLE_ID_TOKEN: ${{ steps.ops-invoker-wif.outputs.id_token }}
-        run: |
-          echo "::add-mask::${DRTS_LIVE_MAP_OPS_CONSOLE_ID_TOKEN}"
-          pnpm exec playwright test -c playwright.google-map-live.config.ts
+        run: pnpm exec playwright test -c playwright.google-map-live.config.ts
 
       - name: Refresh WIF assertion for cleanup if provisioning session expired
         if: always() && env.DRTS_LIVE_MAP_INVITE_CODE != ''

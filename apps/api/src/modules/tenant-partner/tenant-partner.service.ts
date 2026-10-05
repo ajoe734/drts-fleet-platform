@@ -235,7 +235,7 @@ import {
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
 import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
-import { IdentityRepository, type TenantOidcProof, type OidcBoundTenantUser } from "../identity/identity.repository";
+import { IdentityRepository } from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   ReferralEmbedHandoffRepository,
@@ -4552,91 +4552,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
-  async findTenantUserByOidcIdentity(proof: TenantOidcProof) {
-    const user =
-      await this.identityRepository?.findTenantUserByOidcSubject(proof);
-    if (user) return this.cacheAuthenticatedTenantUser(user);
-    if (!this.identityRepository?.isEnabled()) {
-      const bound = this.userRoles.filter((entry) => {
-        const candidate = entry as OidcBoundTenantUser;
-        return candidate.oidcIssuer === proof.issuer && candidate.subjectId === proof.subject
-          && (!proof.tenantId || candidate.tenantId === proof.tenantId);
-      });
-      if (bound.length === 1) return this.cloneUserRole(bound[0]!);
-    }
-    // Only the existing offline fixture path may use seed subjects without an
-    // issuer binding. Deployed Google and generic providers always fail closed.
-    const environment = detectAuthEnvironment();
-    if (
-      (environment === "local" || environment === "test") &&
-      process.env.OIDC_MOCK_MODE === "true" &&
-      !["https://accounts.google.com", "accounts.google.com"].includes(proof.issuer)
-    ) {
-      const fixture = this.findTenantUserBySubject(
-        proof.subject,
-      ) as OidcBoundTenantUser | null;
-      if (
-        fixture &&
-        (!proof.tenantId || fixture.tenantId === proof.tenantId) &&
-        (!fixture.oidcIssuer || fixture.oidcIssuer === proof.issuer)
-      )
-        return fixture;
-    }
-    return null;
-  }
-
-  async findTenantUserForAuthentication(tenantId: string, userId: string) {
-    if (!this.identityRepository?.isEnabled())
-      return this.findTenantUser(tenantId, userId);
-    const user = await this.identityRepository.findTenantUserForAuthentication(
-      tenantId,
-      userId,
-    );
-    return user ? this.cacheAuthenticatedTenantUser(user) : null;
-  }
-
-  private cacheAuthenticatedTenantUser(user: TenantUserRoleRecord) {
-    const index = this.userRoles.findIndex(
-      (entry) =>
-        entry.userId === user.userId && entry.tenantId === user.tenantId,
-    );
-    if (index < 0) this.userRoles.push(this.cloneUserRole(user));
-    else this.userRoles[index] = this.cloneUserRole(user);
-    return this.cloneUserRole(user);
-  }
-
-  async acceptTenantOidcInvitation(
-    tokenHash: string,
-    proof: TenantOidcProof,
-    requestId?: string,
-  ) {
-    const accepted = await this.identityRepository?.acceptTenantOidcInvitation(
-      tokenHash,
-      proof,
-    );
-    if (!accepted)
-      throw new ApiRequestError(
-        403,
-        "TENANT_INVITATION_ACCEPTANCE_DENIED",
-        "The invitation cannot be accepted.",
-      );
-    this.cacheAuthenticatedTenantUser(accepted.user);
-    this.recordTenantAudit(
-      {
-        actorId: accepted.user.userId,
-        actorType: "tenant_admin",
-        tenantId: accepted.user.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "accept_tenant_oidc_invitation",
-        resourceType: "tenant_user_role",
-        resourceId: accepted.user.userId,
-        newValuesSummary: this.buildTenantUserAuditSummary(accepted.user),
-      },
-      requestId,
-    );
-    return accepted.user;
-  }
-
   bindTenantUserSubject(
     tenantId: string | null | undefined,
     userId: string,
@@ -4658,19 +4573,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    const boundUser = userRole as OidcBoundTenantUser;
-    const configuredIssuer = process.env.OIDC_ISSUER?.trim();
-    const issuer = configuredIssuer === "accounts.google.com" ? "https://accounts.google.com" : configuredIssuer;
-    if (!issuer || (boundUser.subjectId && boundUser.subjectId !== trimmedSubject)
-      || (boundUser.oidcIssuer && boundUser.oidcIssuer !== issuer)) {
-      throw new ApiRequestError(403, "TENANT_IDENTITY_BINDING_DENIED", "An existing identity binding cannot be replaced.");
-    }
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),
     );
 
-    boundUser.oidcIssuer = issuer;
-    boundUser.subjectId = trimmedSubject;
+    (userRole as any).subjectId = trimmedSubject;
     (userRole as any).subject = trimmedSubject;
 
     try {
@@ -7203,17 +7110,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: AcceptTenantInvitationCommand,
     requestId?: string,
   ): Promise<AcceptTenantInvitationResult> {
-    if (
-      ["https://accounts.google.com", "accounts.google.com"].includes(
-        process.env.OIDC_ISSUER?.trim() ?? "",
-      )
-    ) {
-      throw new ApiRequestError(
-        403,
-        "TENANT_INVITATION_ACCEPTANCE_DENIED",
-        "Sign in with Google through the invitation link to accept this invitation.",
-      );
-    }
     this.assertNonBlank(command.invitationToken, "invitationToken");
     const invitation = await this.identityRepository?.consumeInvitationToken(
       createHash("sha256").update(command.invitationToken).digest("hex"),
