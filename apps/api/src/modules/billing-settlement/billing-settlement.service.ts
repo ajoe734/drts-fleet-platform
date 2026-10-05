@@ -1943,6 +1943,38 @@ export class BillingSettlementService implements OnModuleInit {
     return buildSettlementMatrix();
   }
 
+  /** Mail links may land on any replica; resolve the register from shared state. */
+  async listTenantInvoicesFresh(tenantId: string) {
+    if (this.billingSettlementRepository?.isEnabled()) {
+      const invoices =
+        await this.billingSettlementRepository.listInvoicesForTenant(tenantId);
+      this.tenantInvoices = [
+        ...this.tenantInvoices.filter(
+          (invoice) => invoice.tenantId !== tenantId,
+        ),
+        ...invoices,
+      ];
+    }
+    return this.listTenantInvoicesRuntime(tenantId);
+  }
+
+  async getTenantInvoiceFresh(tenantId: string, invoiceId: string) {
+    if (this.billingSettlementRepository?.isEnabled()) {
+      const invoice = await this.billingSettlementRepository.findInvoiceForMail(
+        tenantId,
+        invoiceId,
+      );
+      if (!invoice)
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Tenant invoice not found.",
+        );
+      return this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice));
+    }
+    return this.getTenantInvoice(tenantId, invoiceId);
+  }
+
   getTenantInvoice(tenantId: string, invoiceId: string) {
     const invoice = this.tenantInvoices.find(
       (candidate) =>
