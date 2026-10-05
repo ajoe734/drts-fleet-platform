@@ -188,4 +188,35 @@ describe.each([
     );
     expect(forbidden.status).toBe(403);
   });
+
+  it.each(["http", "network"])(
+    "does not claim global logout when revocation fails (%s)",
+    async (failure) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string | URL) => {
+          if (url.toString().includes("metadata.google.internal"))
+            return new Response("cloud-run-proof");
+          if (failure === "network") throw new Error("API unavailable");
+          return new Response("Unavailable", { status: 503 });
+        }),
+      );
+      const response = await handlers.POST(
+        new NextRequest(`${origin}/api/auth/logout-all`, {
+          method: "POST",
+          headers: {
+            origin,
+            cookie: `${TENANT_SESSION_COOKIE_NAME}=session; ${TENANT_CSRF_COOKIE_NAME}=csrf`,
+            "x-csrf-token": "csrf",
+          },
+        }),
+        context("logout-all"),
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "AUTH_LOGOUT_ALL_UNAVAILABLE",
+      });
+      expect(response.headers.getSetCookie()).toEqual([]);
+    },
+  );
 });

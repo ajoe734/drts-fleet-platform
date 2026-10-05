@@ -74,11 +74,12 @@ export class OidcIdTokenVerifier {
       const algorithms: jwt.Algorithm[] = google
         ? ["RS256"]
         : staticSecret
-          ? ["HS256"]
+          ? ["RS256", "ES256", "HS256"]
           : ["RS256", "ES256"];
       if (!algorithms.includes(alg as jwt.Algorithm))
         throw new Error("Algorithm not allowed");
-      let key: jwt.Secret | jwt.PublicKey = staticKey || staticSecret || "";
+      let key: jwt.Secret | jwt.PublicKey =
+        alg === "HS256" ? staticSecret || "" : staticKey || "";
       if (!key) {
         if (!kid || typeof kid !== "string") throw new Error("Missing key id");
         const uri =

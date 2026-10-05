@@ -4556,12 +4556,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const user =
       await this.identityRepository?.findTenantUserByOidcSubject(proof);
     if (user) return this.cacheAuthenticatedTenantUser(user);
+    if (!this.identityRepository?.isEnabled()) {
+      const bound = this.userRoles.filter((entry) => {
+        const candidate = entry as OidcBoundTenantUser;
+        return candidate.oidcIssuer === proof.issuer && candidate.subjectId === proof.subject
+          && (!proof.tenantId || candidate.tenantId === proof.tenantId);
+      });
+      if (bound.length === 1) return this.cloneUserRole(bound[0]!);
+    }
     // Only the existing offline fixture path may use seed subjects without an
     // issuer binding. Deployed Google and generic providers always fail closed.
     const environment = detectAuthEnvironment();
     if (
       (environment === "local" || environment === "test") &&
-      process.env.OIDC_MOCK_MODE === "true"
+      process.env.OIDC_MOCK_MODE === "true" &&
+      !["https://accounts.google.com", "accounts.google.com"].includes(proof.issuer)
     ) {
       const fixture = this.findTenantUserBySubject(
         proof.subject,
@@ -4649,11 +4658,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
+    const boundUser = userRole as OidcBoundTenantUser;
+    const configuredIssuer = process.env.OIDC_ISSUER?.trim();
+    const issuer = configuredIssuer === "accounts.google.com" ? "https://accounts.google.com" : configuredIssuer;
+    if (!issuer || (boundUser.subjectId && boundUser.subjectId !== trimmedSubject)
+      || (boundUser.oidcIssuer && boundUser.oidcIssuer !== issuer)) {
+      throw new ApiRequestError(403, "TENANT_IDENTITY_BINDING_DENIED", "An existing identity binding cannot be replaced.");
+    }
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),
     );
 
-    (userRole as any).subjectId = trimmedSubject;
+    boundUser.oidcIssuer = issuer;
+    boundUser.subjectId = trimmedSubject;
     (userRole as any).subject = trimmedSubject;
 
     try {

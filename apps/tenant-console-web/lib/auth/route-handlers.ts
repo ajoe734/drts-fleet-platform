@@ -414,16 +414,24 @@ async function postAuth(
 
     if (token) {
       try {
-        await tenantAuthFetch(`${resolveApiUrl()}/api/auth/logout-all`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
+        const revoked = await tenantAuthFetch(
+          `${resolveApiUrl()}/api/auth/logout-all`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            cache: "no-store",
           },
-          cache: "no-store",
-        });
+        );
+        if (!revoked.ok) throw new Error("Session revocation failed.");
       } catch {
-        // Ignore upstream errors
+        // Keep the current session so the user can retry global revocation.
+        return NextResponse.json(
+          { error: "AUTH_LOGOUT_ALL_UNAVAILABLE" },
+          { status: 503 },
+        );
       }
     }
 

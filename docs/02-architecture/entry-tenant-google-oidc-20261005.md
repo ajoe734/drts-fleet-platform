@@ -40,11 +40,12 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
 
 | Finding／驗收項                          | 原始碼依據與修改位置                      | 舊版重現 → 修正版                | 命令／版本／證據      | 未驗項與限制                                 |
 | ---------------------------------------- | ----------------------------------------- | -------------------------------- | --------------------- | -------------------------------------------- |
-| 租戶後台可用Google帳號經PKCE登入         | oidc-pkce.service.ts、tenant BFF          | 尚未執行                         | Base cf263f02f        | 真實 OAuth client 尚待 operator 建立         |
-| Google ID token以輪替金鑰驗證且不偽造MFA | verifier、claims merge                    | 靜態確認預設 MFA 與 kid fallback | 尚未執行回歸          | 需測 rotation、錯誤 issuer/aud/nonce、缺 MFA |
-| 外部Google帳號可依邀請綁定租戶使用者     | invitation acceptance、canonical identity | 靜態確認未綁定                   | 待 scope 協調         | PG 需 hosted 正式 schema 驗證                |
-| 企業派車共用租戶登入                     | enterprise session、host-local auth route | 尚未執行                         | canvas ent-states.jsx | 本 VM 禁止 browser/server                    |
-| 同候選SHA CI通過且獨立reviewer審查       | candidate lifecycle                       | 尚未建立候選                     | reviewer Claude2      | owner 不結案                                 |
+| 租戶後台可用Google帳號經PKCE登入 | `OidcPkceService`、tenant BFF | 正式 service 使用簽署 RSA token + mock provider HTTP 通過 | Google/PKCE/邀請 45 pass，exit 0；`waiver-regression.log` | 真實 OAuth client 尚待 operator 建立；strict startup 設定待擴充 scope |
+| Google ID token以輪替金鑰驗證且不偽造MFA | `OidcIdTokenVerifier`、claims merge、session guard | 舊 9d191f5ac：6 fail / 3 pass → 修正後 9 pass；session 舊 1 fail → 修正後 7 pass | `{baseline,core,session-claims-before,session-regression,waiver-regression}.log` | PG／真實 Google 不能由 HTTP mock 推導；staging/production 拒絕 dev waiver 已測 |
+| 外部Google帳號可依邀請綁定租戶使用者 | `IdentityRepository.acceptTenantOidcInvitation`、tenant service | 未綁定拒絕、verified email、錯 tenant、重放、撤銷、並發一次性皆通過 | 邀請 suite 7 pass；API PG suite 3 skip；`api-regression.log` | PG 必須由 hosted workflow 使用正式 migrations 驗證 |
+| 企業派車共用租戶登入 | 共用 BFF factory、企業派車 session verifier | custom tenant／dispatch／run.app 登入與 session／logout-all／CSRF 通過 | BFF 12 pass + replay store 1 pass，exit 0；`logout-replay.log`；canvas `ent-states.jsx` | 本 VM 禁止 browser/server；真實跨主機登入待共享 dev |
+| deploy-dev 全有或全無啟用 | workflow 的 `api_secrets` 與 deploy steps | 實際 shell 區段 5 cases pass | `deploy-dev-google-oidc.test.ts`；YAML parse 9 jobs；operator 步驟如下 | 未建立 OAuth client、未讀 secret 值、未部署 |
+| 同候選SHA CI通過且獨立reviewer審查 | candidate lifecycle | 尚未鎖定候選 | reviewer Claude2；已發布 anchor 9d191f5ac → 43facf4ac → b5cf35d29 → ed6c34bbb | 完成實作後鎖 SHA；CI/review/merge pending；owner 不結案 |
 
 本 VM 僅執行 repository checks，不啟動產品服務、瀏覽器或 Docker。
 
@@ -60,10 +61,10 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
   本機 evidence：`.local/entry-tenant-google-oidc/{baseline,core}.log`。
 - 現有 provider fixture 補入強制要求的 `exp`；callback 恢復 state 內 tenant，
   callback 若嘗試改寫已指定 tenant/partner 則拒絕。
-- legacy `/tenant/oidc-session`、邀請綁定、dev waiver、BFF 與部署尚待下一單元；
-  以上 scoped pass 不代表完整交付。
+- 後续單元已接通 legacy `/tenant/oidc-session`、邀請綁定、dev waiver、BFF
+  與部署 gate；scoped pass 不代表真實 OAuth 或部署驗收。
 
-### 修復單元 2：共同登入與原子邀請（實作中）
+### 修復單元 2：共同登入與原子邀請
 
 - Supervisor 已核准 `identity.repository.ts` / `tenant-partner.service.ts` scope。
   `acceptTenantOidcInvitation` 在同一交易內鎖邀請、會員、principal、userRole，
@@ -73,10 +74,10 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
   `DRTS_DEV_MFA_WAIVED` 僅非 staging/production 可用，使用時必須記安全事件。
 - 租戶／派車共用 BFF handler；各 host 自己持有 state、session、CSRF cookie。
   新 server transport 補入私有 Cloud Run 的 caller identity。
-- API typecheck 已 pass（exit 0）；先建置 control-plane-auth 的型別輸出。
-  既有 tenant callback 回歸 6 pass。擴大 identity 回歸 89 pass / 3 fail：
-  舊 MFA 測試仍指向已移走的 controller verifier／未注入 PKCE service，
-  正在更新測試裝配並補邀請與實際 Google token 測試；尚不交審。
+- 舊 MFA 測試仍指向已移走的 controller verifier／未注入 PKCE service，
+  已修正裝配並使用明確綁定身分，保留正向及拒絕案例；最新 126 項範圍回歸
+  與 API auth-bootstrap 101 項皆通過。先建置 control-plane-auth 型別輸出後，
+  API typecheck pass（exit 0）。
 
 ## Operator：建立 Google OAuth client（文件步驟，尚未執行）
 
@@ -134,3 +135,19 @@ logout-all 透過 API 撤銷所有 session。企業派車的登入按鈕維持 c
   未列出 `DEV_OIDC_CLIENT_ID`，真實 OAuth acceptance 仍待 operator 設定。
 - 上述 machine-specific logs 在 `.local/entry-tenant-google-oidc/`。
   CI／review／merge／真實 Google 登入均不可由 scoped pass 推導。
+
+### 修復單元 4：擴大相容性與失敗邊界
+
+- 一般 provider 同時設定 OAuth client secret 與 RSA JWKS 時，舊 selector
+  錯誤只允許 HS256；改為依 token alg 選擇對應 key，Google 仍固定 RS256。
+  dev waiver 的 `recordEventRequired` 寫入失敗必須拒絕 session，45 項回歸通過。
+- 既有 strict hermetic fixture 透過 `bindTenantUserSubject` 裝配，現在 helper
+  寫入不可替換的 issuer/sub；不容許 Google seed 或 email 自動成為會員。
+- logout-all 遇 API HTTP／network 失敗回傳 503，保留 session 供重試，不宣稱
+  全部登出成功；三種 host 各有正向與拒絕測試。configured DB outage 不可
+  將 OIDC state consume 退回 process-local storage。兩個 suite 共 13 pass。
+- 待修：`tests/integ/oidc-pkce-bff.test.ts` 最後一個 real-provider fixture
+  仍缺明確 issuer/sub 綁定（擴大 hermetic 回歸 15 pass / 1 fail）；以及
+  `auth-startup-config.ts` strict validation 仍強制 tenant static key，須允許
+  正式 Google JWKS 設定。兩者已透過原 task progress 請 Supervisor 核對 scope，
+  尚未改動未授權檔案；不以此版本宣稱可交審。

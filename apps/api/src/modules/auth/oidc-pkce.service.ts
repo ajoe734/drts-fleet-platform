@@ -551,8 +551,9 @@ export class OidcPkceService {
           "AUTH_AUDIT_UNAVAILABLE",
           "Security events are required for a dev MFA waiver.",
         );
-      this.recordSecurityEvent({
+      await this.recordSecurityEvent({
         eventType: "tenant_oidc_session.mfa_waived",
+        requirePersistence: true,
         outcome: "success",
         realm: "tenant",
         tenantId: targetTenantId,
@@ -1425,8 +1426,10 @@ export class OidcPkceService {
         email: claimsFromToken.email || userinfoClaims.email || "",
         email_verified:
           claimsFromToken.email_verified ??
-          userinfoClaims.email_verified ??
-          false,
+          (!claimsFromToken.email ||
+          userinfoClaims.email === claimsFromToken.email
+            ? (userinfoClaims.email_verified ?? false)
+            : false),
         amr: claimsFromToken.amr ?? [],
         acr: claimsFromToken.acr,
         auth_time: claimsFromToken.auth_time || Math.floor(Date.now() / 1000),
@@ -1482,6 +1485,7 @@ export class OidcPkceService {
 
   private recordSecurityEvent(params: {
     eventType: string;
+    requirePersistence?: boolean;
     outcome: "success" | "denied";
     realm: AuthRealm;
     tenantId?: string | null;
@@ -1518,7 +1522,14 @@ export class OidcPkceService {
           : "tenant_admin"
         : "system");
 
-    this.securityEventsService?.recordEvent({
+    const write = params.requirePersistence
+      ? this.securityEventsService?.recordEventRequired.bind(
+          this.securityEventsService,
+        )
+      : this.securityEventsService?.recordEvent.bind(
+          this.securityEventsService,
+        );
+    return write?.({
       actorId: params.actorId ?? null,
       actorType: resolvedActorType,
       subjectId: params.subjectId ?? null,

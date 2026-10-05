@@ -49,7 +49,7 @@ async function fixture() {
     roleCode: "tenant_viewer",
   });
   const security = new SecurityEventsService();
-  const events = vi.spyOn(security, "recordEvent");
+  const events = vi.spyOn(security, "recordEventRequired");
   const signer = new JwtAuthService(repo, tenant);
   const oidc = new OidcPkceService(signer, tenant, security);
   const controller = new AuthController(
@@ -156,7 +156,9 @@ describe("Google invitation binding and shared tenant authorization", () => {
     const decoded = jwt.decode(session.accessToken) as jwt.JwtPayload;
     expect(decoded.amr).toEqual([]);
     expect(decoded.acr).toBe("");
-    expect(await f.signer.verifyAccessToken(session.accessToken)).not.toBeNull();
+    expect(
+      await f.signer.verifyAccessToken(session.accessToken),
+    ).not.toBeNull();
     await f.signer.revokeCurrentSession(decoded.sid as string);
     expect(await f.signer.verifyAccessToken(session.accessToken)).toBeNull();
     expect(
@@ -268,6 +270,8 @@ describe("Google invitation binding and shared tenant authorization", () => {
       }),
     );
     expect(session.profile.roleCode).toBe("tenant_viewer");
+    f.events.mockRejectedValueOnce(new Error("audit storage unavailable"));
+    await expect(f.callback()).rejects.toThrow("audit storage unavailable");
   });
 
   it.each(["staging", "production"])(

@@ -7,7 +7,10 @@ import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-pa
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { SecurityEventsService } from "../../../../apps/api/src/modules/security-events/security-events.service";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
-import { IdentityRepository, type OidcBoundTenantUser } from "../../../../apps/api/src/modules/identity/identity.repository";
+import {
+  IdentityRepository,
+  type OidcBoundTenantUser,
+} from "../../../../apps/api/src/modules/identity/identity.repository";
 import {
   buildAuthStartupConfigReport,
   isOrdinaryLoginMfaRequired,
@@ -74,7 +77,15 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
       const repository = new IdentityRepository();
       jwtAuthService = new JwtAuthService();
       tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(), undefined, undefined, undefined, undefined, undefined, undefined, repository, repository,
+        new AuditNotificationService(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        repository,
+        repository,
       );
       securityEventsService = new SecurityEventsService();
       oidcService = new OidcPkceService(
@@ -92,8 +103,14 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
       process.env.OIDC_USERINFO_ENDPOINT =
         "https://auth.staging.drts.internal/oauth2/v1/userinfo";
       process.env.OIDC_MOCK_MODE = "false";
-      const user = tenantPartnerService.findTenantUserBySubject("sub_oidc_viewer_acme")!;
-      await repository.syncLegacyTenantUserRole({ ...user, oidcIssuer: process.env.OIDC_ISSUER, subjectId: "sub_oidc_viewer_acme" } as OidcBoundTenantUser);
+      const user = tenantPartnerService.findTenantUserBySubject(
+        "sub_oidc_viewer_acme",
+      )!;
+      await repository.syncLegacyTenantUserRole({
+        ...user,
+        oidcIssuer: process.env.OIDC_ISSUER,
+        subjectId: "sub_oidc_viewer_acme",
+      } as OidcBoundTenantUser);
     });
 
     afterEach(() => {
@@ -110,8 +127,7 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
       const loginParams = oidcService.generateLoginParameters("tenant", {
         tenantId: defaultTenantId,
       });
-      const nonce = oidcService.verifyStateToken(loginParams.stateToken)!
-        .nonce;
+      const nonce = oidcService.verifyStateToken(loginParams.stateToken)!.nonce;
 
       const idToken = jwt.sign(
         {
@@ -331,7 +347,8 @@ describe("SR-AUTH-MFA-POLICY-20260915: ordinary tenant/partner login MFA policy"
       expect(report.valid).toBe(false);
       expect(
         report.issues.some(
-          (issue) => issue.control === "AUTH_MODE" && issue.code === "FORBIDDEN_MODE",
+          (issue) =>
+            issue.control === "AUTH_MODE" && issue.code === "FORBIDDEN_MODE",
         ),
       ).toBe(true);
     });
