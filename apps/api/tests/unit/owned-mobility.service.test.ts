@@ -39,7 +39,6 @@ function defaultReservationWindowEnd(offsetHours = 3): string {
   return new Date(Date.now() + offsetHours * 3600_000).toISOString();
 }
 
-
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
   "veh-demo-001": "multi_purpose_taxi",
@@ -7362,7 +7361,12 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
       {} as any, // regulatoryRegistryService
       { recordAuditLog: vi.fn() } as any, // auditNotificationService
       {} as any, // callcenterService
-      { appendDispatchTraceLog: vi.fn(), emitOpsEvent: vi.fn(), notifyPartnerOfSystemEvent: vi.fn(), publishTaskUpdated: vi.fn() } as any, // taskEventsService
+      {
+        appendDispatchTraceLog: vi.fn(),
+        emitOpsEvent: vi.fn(),
+        notifyPartnerOfSystemEvent: vi.fn(),
+        publishTaskUpdated: vi.fn(),
+      } as any, // taskEventsService
       {} as any, // opsDispatchEventsService
       repository, // ownedMobilityRepository
       { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
@@ -7371,30 +7375,40 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
     // inject state directly
     const orderId = "order-arv-1";
     const taskId = "task-arv-1";
-    service["orders"] = [buildOrderFixture({
-      orderId,
-      status: "enroute_pickup",
-    })] as any;
-    service["driverTasks"] = [{
-      taskId,
-      orderId,
-      status: "enroute_pickup",
-    }] as any;
+    service["orders"] = [
+      buildOrderFixture({
+        orderId,
+        status: "enroute_pickup",
+      }),
+    ] as any;
+    service["driverTasks"] = [
+      {
+        taskId,
+        orderId,
+        status: "enroute_pickup",
+      },
+    ] as any;
 
     // Call first time
     try {
-      await service.arrivedPickup(taskId, { arrivedAt: new Date().toISOString() });
+      await service.arrivedPickup(taskId, {
+        arrivedAt: new Date().toISOString(),
+      });
     } catch (e) {
       console.error(e);
       throw e;
     }
     expect(persistedChanges).toHaveLength(1);
     expect(persistedChanges[0].consumerNotificationOutbox).toHaveLength(1);
-    expect(persistedChanges[0].consumerNotificationOutbox[0].eventType).toBe("driver_arrived");
+    expect(persistedChanges[0].consumerNotificationOutbox[0].eventType).toBe(
+      "driver_arrived",
+    );
 
     // Call second time
-    await service.arrivedPickup(taskId, { arrivedAt: new Date().toISOString() });
-    
+    await service.arrivedPickup(taskId, {
+      arrivedAt: new Date().toISOString(),
+    });
+
     // The second call shouldn't trigger another persistChanges with outbox
     expect(persistedChanges).toHaveLength(1);
     expect(service["driverTasks"][0].status).toBe("arrived_pickup");
@@ -7415,7 +7429,12 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
       {} as any, // regulatoryRegistryService
       { recordAuditLog: vi.fn() } as any, // auditNotificationService
       {} as any, // callcenterService
-      { appendDispatchTraceLog: vi.fn(), emitOpsEvent: vi.fn(), notifyPartnerOfSystemEvent: vi.fn(), publishTaskUpdated: vi.fn() } as any, // taskEventsService
+      {
+        appendDispatchTraceLog: vi.fn(),
+        emitOpsEvent: vi.fn(),
+        notifyPartnerOfSystemEvent: vi.fn(),
+        publishTaskUpdated: vi.fn(),
+      } as any, // taskEventsService
       {} as any, // opsDispatchEventsService
       repository, // ownedMobilityRepository
       { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
@@ -7423,16 +7442,20 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
 
     const orderId = "order-eta-1";
     const taskId = "task-eta-1";
-    service["orders"] = [buildOrderFixture({
-      orderId,
-      status: "enroute_pickup",
-      etaSnapshot: { etaMinutes: 10, calculatedAt: new Date().toISOString() },
-    })] as any;
-    service["driverTasks"] = [{
-      taskId,
-      orderId,
-      status: "enroute_pickup",
-    }] as any;
+    service["orders"] = [
+      buildOrderFixture({
+        orderId,
+        status: "enroute_pickup",
+        etaSnapshot: { etaMinutes: 10, calculatedAt: new Date().toISOString() },
+      }),
+    ] as any;
+    service["driverTasks"] = [
+      {
+        taskId,
+        orderId,
+        status: "enroute_pickup",
+      },
+    ] as any;
 
     // Small change < 3 minutes
     await service.updateDriverTaskEta(taskId, 12);
@@ -7443,6 +7466,111 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
     await service.updateDriverTaskEta(taskId, 15);
     expect(persistedChanges).toHaveLength(2);
     expect(persistedChanges[1].consumerNotificationOutbox).toHaveLength(1); // outbox generated
-    expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe("eta_changed");
+    expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe(
+      "eta_changed",
+    );
+  });
+
+  it("completeTask produces receipt_ready outbox", async () => {
+    let persistedWorkflow: any = null;
+    const repository = {
+      isEnabled: () => true,
+      persistOrderWorkflow: vi.fn(async (tx, changes) => {
+        persistedWorkflow = changes;
+      }),
+      withTransaction: vi.fn(async (work) => work({})),
+      reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn().mockResolvedValue({
+        order: buildOrderFixture({
+          orderId: "order-cmp-1",
+          status: "enroute_dropoff",
+        }),
+        task: {
+          taskId: "task-cmp-1",
+          orderId: "order-cmp-1",
+          assignmentId: "assign-cmp-1",
+          dispatchJobId: "job-1",
+          driverId: "dr-1",
+          vehicleId: "veh-1",
+          status: "on_trip",
+          fare: { amountMinor: 1500, currency: "TWD" },
+        },
+        assignment: {
+          assignmentId: "assign-cmp-1",
+          orderId: "order-cmp-1",
+          driverId: "dr-1",
+          vehicleId: "veh-1",
+          taskId: "task-cmp-1",
+          dispatchJobId: "job-1",
+          status: "accepted",
+        },
+        dispatchJob: {
+          jobId: "job-1",
+          orderId: "order-cmp-1",
+          status: "active",
+        },
+        consumerNotificationOutbox: null,
+      }),
+    } as any;
+
+    const service = new OwnedMobilityService(
+      {} as any, // regulatoryRegistryService
+      { recordAuditLog: vi.fn() } as any, // auditNotificationService
+      { completeCallcenterOrder: vi.fn() } as any, // callcenterService
+      {
+        appendDispatchTraceLog: vi.fn(),
+        emitOpsEvent: vi.fn(),
+        notifyPartnerOfSystemEvent: vi.fn(),
+        publishTaskUpdated: vi.fn(),
+      } as any, // taskEventsService
+      { emitCompletionFailed: vi.fn() } as any, // opsDispatchEventsService
+      repository, // ownedMobilityRepository
+      { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
+    );
+
+    const orderId = "order-cmp-1";
+    const taskId = "task-cmp-1";
+    const assignmentId = "assign-cmp-1";
+    service["orders"] = [
+      buildOrderFixture({
+        orderId,
+        status: "enroute_dropoff",
+      }),
+    ] as any;
+    service["driverTasks"] = [
+      {
+        taskId,
+        orderId,
+        status: "enroute_dropoff",
+        fare: { amountMinor: 1500, currency: "TWD" },
+      },
+    ] as any;
+    service["dispatchAssignments"] = [
+      {
+        assignmentId,
+        orderId,
+        driverId: "dr-1",
+        taskId,
+        status: "active",
+      },
+    ] as any;
+
+    await service.completeDriverTask(taskId, {
+      completedAt: new Date().toISOString(),
+      fare: { amountMinor: 1500, currency: "TWD" },
+    } as any);
+
+    expect(persistedWorkflow).not.toBeNull();
+    expect(persistedWorkflow.consumerNotificationOutbox).toHaveLength(1);
+    expect(persistedWorkflow.consumerNotificationOutbox[0].eventType).toBe(
+      "receipt_ready",
+    );
+    expect(
+      persistedWorkflow.consumerNotificationOutbox[0].payload,
+    ).toMatchObject({
+      taskId,
+      fareTotal: 1500,
+    });
   });
 });
