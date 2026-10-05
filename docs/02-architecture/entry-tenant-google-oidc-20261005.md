@@ -62,3 +62,18 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
   callback 若嘗試改寫已指定 tenant/partner 則拒絕。
 - legacy `/tenant/oidc-session`、邀請綁定、dev waiver、BFF 與部署尚待下一單元；
   以上 scoped pass 不代表完整交付。
+
+### 修復單元 2：共同登入與原子邀請（實作中）
+
+- Supervisor 已核准 `identity.repository.ts` / `tenant-partner.service.ts` scope。
+  `acceptTenantOidcInvitation` 在同一交易內鎖邀請、會員、principal、userRole，
+  驗證收件者及 tenant，再同時啟用與寫入 `(oidcIssuer, subjectId)`。
+  `syncLegacyTenantUserRole` 保留新身分，Google 模式停用純邀請碼入口。
+- legacy ID-token 入口委派給 PKCE service 的同一 subject/MFA 授權路徑；
+  `DRTS_DEV_MFA_WAIVED` 僅非 staging/production 可用，使用時必須記安全事件。
+- 租戶／派車共用 BFF handler；各 host 自己持有 state、session、CSRF cookie。
+  新 server transport 補入私有 Cloud Run 的 caller identity。
+- API typecheck 已 pass（exit 0）；先建置 control-plane-auth 的型別輸出。
+  既有 tenant callback 回歸 6 pass。擴大 identity 回歸 89 pass / 3 fail：
+  舊 MFA 測試仍指向已移走的 controller verifier／未注入 PKCE service，
+  正在更新測試裝配並補邀請與實際 Google token 測試；尚不交審。

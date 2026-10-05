@@ -15,6 +15,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
 import type { AuthActorType, AuthRealm } from "../../common/auth/auth.types";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
@@ -42,6 +43,7 @@ export interface OidcStateRecord {
   redirectUri: string | null;
   tenantId: string | null;
   partnerId: string | null;
+  invitationTokenHash?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -237,6 +239,7 @@ export class OidcPkceService {
       redirectUri?: string | null;
       tenantId?: string | null;
       partnerId?: string | null;
+      invitationToken?: string;
     },
   ): OidcLoginUrlResult {
     const validatedRedirectUri = this.validateRedirectUri(options?.redirectUri);
@@ -259,6 +262,7 @@ export class OidcPkceService {
       redirectUri: validatedRedirectUri,
       tenantId: options?.tenantId?.trim() || null,
       partnerId: options?.partnerId?.trim() || null,
+      ...(realm === "tenant" && options?.invitationToken ? { invitationTokenHash: createHash("sha256").update(options.invitationToken).digest("hex") } : {}),
       createdAt: now,
       expiresAt,
     };
@@ -313,12 +317,39 @@ export class OidcPkceService {
       meta,
     );
 
+    return this.issueVerifiedTenantSession(claims, {
+      tenantId: stateRecord.tenantId || command.tenantId?.trim() || null,
+      invitationTokenHash: stateRecord.invitationTokenHash,
+    }, meta);
+  }
+
+  public async exchangeTenantIdTokenSession(
+    command: { idToken: string; tenantId?: string | null },
+    meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession> {
+    const claims = await this.idTokenVerifier.verify(command.idToken, undefined, true);
+    return this.issueVerifiedTenantSession(claims as unknown as OidcClaims, { tenantId: command.tenantId }, meta);
+  }
+
+  private async issueVerifiedTenantSession(
+    claims: OidcClaims,
+    options: { tenantId?: string | null | undefined; invitationTokenHash?: string | undefined },
+    meta?: { sourceIp?: string; userAgent?: string; requestId?: string },
+  ): Promise<TenantBootstrapSession> {
+    // Shared with ENTRY-IAP: never interpret the flag as an MFA assertion.
+    const waiverConfigured = process.env.DRTS_DEV_MFA_WAIVED === "true";
+    const environment = detectAuthEnvironment();
+    if (waiverConfigured && (environment === "staging" || environment === "production")) {
+      throw new ApiRequestError(503, "AUTH_CONFIGURATION_INVALID", "DRTS_DEV_MFA_WAIVED is forbidden in staging and production.");
+    }
+    if (typeof claims.email !== "string" || !claims.email.trim() || typeof claims.sub !== "string" || !claims.sub.trim()) {
+      throw new ApiRequestError(403, "AUTH_SESSION_EXCHANGE_DENIED", "OIDC subject and email are required.");
+    }
+
     // Enforce email_verified === true for tenant session exchange
     if (claims.email_verified !== true) {
       const fallbackTenant =
-        command.tenantId?.trim() ||
-        claims.tenant_id?.trim() ||
-        this.tenantPartnerService.getDefaultTenantId();
+        options.tenantId?.trim() || claims.tenant_id?.trim() || null;
       this.recordSecurityEvent({
         eventType: "tenant_oidc_session.denied",
         outcome: "denied",
@@ -343,31 +374,14 @@ export class OidcPkceService {
     // Resolve tenant user identity strictly by immutable subject binding primary key
     const subjectId = claims.sub.trim();
     const normalizedEmail = claims.email.trim().toLowerCase();
-    const requestedTenantId =
-      stateRecord.tenantId ||
-      command.tenantId?.trim() ||
-      claims.tenant_id?.trim();
-
-    // 1. Immutable subject binding resolution ONLY (no email lookup or auto-binding)
-    let existingUser = requestedTenantId
-      ? (this.tenantPartnerService
-          .listTenantUsers(requestedTenantId)
-          .find(
-            (user) =>
-              (user as any).subjectId === subjectId ||
-              (user as any).subject === subjectId,
-          ) ?? null)
-      : null;
-
-    if (!existingUser) {
-      existingUser =
-        this.tenantPartnerService.findTenantUserBySubject(subjectId);
+    const requestedTenantId = options.tenantId?.trim() || claims.tenant_id?.trim();
+    const proof = { issuer: claims.iss, subject: subjectId, email: normalizedEmail, tenantId: requestedTenantId || null };
+    if (options.invitationTokenHash) {
+      await this.tenantPartnerService.acceptTenantOidcInvitation(options.invitationTokenHash, proof, meta?.requestId);
+      this.recordSecurityEvent({ eventType: "tenant_oidc_invitation.bound", outcome: "success", realm: "tenant", tenantId: requestedTenantId || null, subjectId, meta });
     }
-
-    const targetTenantId =
-      existingUser?.tenantId ||
-      requestedTenantId ||
-      this.tenantPartnerService.getDefaultTenantId();
+    const existingUser = await this.tenantPartnerService.findTenantUserByOidcIdentity(proof);
+    const targetTenantId = existingUser?.tenantId || requestedTenantId || "";
 
     if (
       existingUser &&
@@ -462,20 +476,16 @@ export class OidcPkceService {
     const amr = claims.amr ?? [];
     const acr = claims.acr ?? "";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
-    const mfaVerified = amr.some((m) =>
-      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(
-        m.toLowerCase(),
-      ),
-    );
-    // Named, auditable policy switch — see isOrdinaryLoginMfaRequired in
-    // auth-startup-config.ts. v1 product decision (2026-09-15): ordinary
-    // tenant login does not require an MFA-bearing amr claim. This gate is
-    // distinct from, and does not weaken, the tenant_admin/tenant_ops_admin
-    // trusted-MFA requirement enforced separately in auth.controller.ts.
-    const mfaRequired = isOrdinaryLoginMfaRequired();
+    const mfaVerified = hasTrustedMfa({ amr, acr });
+    const mfaRequired = isOrdinaryLoginMfaRequired() || ["tenant_admin", "tenant_ops_admin"].includes(existingUser.roleCode);
     const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
+    const mfaWaived = mfaRequired && !mfaVerified && waiverConfigured;
+    if (mfaWaived) {
+      if (!this.securityEventsService) throw new ApiRequestError(503, "AUTH_AUDIT_UNAVAILABLE", "Security events are required for a dev MFA waiver.");
+      this.recordSecurityEvent({ eventType: "tenant_oidc_session.mfa_waived", outcome: "success", realm: "tenant", tenantId: targetTenantId, actorId: existingUser.userId, subjectId, reasonCode: "DEV_MFA_WAIVED", afterSummary: { flag: "DRTS_DEV_MFA_WAIVED", environment, mfaVerified: false }, meta });
+    }
 
-    if (mfaRequired && !mfaVerified) {
+    if (mfaRequired && !mfaVerified && !mfaWaived) {
       this.recordSecurityEvent({
         eventType: "tenant_oidc_session.denied",
         outcome: "denied",
@@ -498,6 +508,7 @@ export class OidcPkceService {
       actorType: "tenant_admin" as const,
       actorId: existingUser.userId,
       principalId: existingUser.userId,
+      subject: claims.sub,
       realm: "tenant" as const,
       tenantId: targetTenantId,
       roleFamilies: ["tenant" as const],
@@ -1310,7 +1321,7 @@ export class OidcPkceService {
         }
       }
 
-      if (userinfoClaims.sub && userinfoClaims.sub !== claimsFromToken.sub) {
+      if (Object.keys(userinfoClaims).length > 0 && userinfoClaims.sub !== claimsFromToken.sub) {
         throw new ApiRequestError(
           400,
           "AUTH_SESSION_EXCHANGE_DENIED",
@@ -1325,10 +1336,10 @@ export class OidcPkceService {
           process.env.OIDC_ISSUER ||
           "https://auth.staging.drts.internal",
         aud: claimsFromToken.aud || clientId,
-        email: userinfoClaims.email || claimsFromToken.email || "",
+        email: claimsFromToken.email || userinfoClaims.email || "",
         email_verified:
-          userinfoClaims.email_verified ??
           claimsFromToken.email_verified ??
+          userinfoClaims.email_verified ??
           false,
         amr: claimsFromToken.amr ?? [],
         acr: claimsFromToken.acr,

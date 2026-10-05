@@ -1013,10 +1013,9 @@ export class JwtAuthService {
         return false;
       }
 
-      let user = this.tenantPartnerService.findTenantUser(
-        payload.tenantId,
-        tenantUserId,
-      );
+      let user = typeof this.tenantPartnerService.findTenantUserForAuthentication === "function"
+        ? await this.tenantPartnerService.findTenantUserForAuthentication(payload.tenantId, tenantUserId)
+        : this.tenantPartnerService.findTenantUser(payload.tenantId, tenantUserId);
       if (!user && payload.sub) {
         const bySubject = this.tenantPartnerService.findTenantUserBySubject(payload.sub);
         if (bySubject && bySubject.tenantId === payload.tenantId) {
