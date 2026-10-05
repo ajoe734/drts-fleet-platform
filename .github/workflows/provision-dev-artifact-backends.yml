@@ -200,3 +200,7 @@ jobs:
             --scanner-service "drts-dev-scanner" \
             --project "$DEV_GCP_PROJECT_ID" \
             --region "$DEV_GCP_REGION"
+
+      - name: Verify Genuine Clamd Lifecycle
+        run: |
+          python3 tests/unit/gcp-artifact-activation-20261004/test_genuine_clamd_lifecycle.py "${{ steps.build_push.outputs.clamd_image }}"

@@ -221,28 +221,31 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
             print("Test 9: Transport failure after successful readiness")
-            # We use CLAMD_PORT on gateway to deterministically fail the exchange only
-            rev_9 = update_service_env(container="gateway", CLAMD_PORT="3311")
+            # We use a short CLAMD_TIMEOUT_MS on gateway with a large payload to deterministically timeout the exchange but pass readiness
+            rev_9 = update_service_env(container="gateway", CLAMD_TIMEOUT_MS="15")
+            
+            # 5MB payload to ensure it takes >15ms to stream over VPC connector
+            # The payload must be < 10MB to avoid gateway's payload_too_large
+            large_content = b"a" * (5 * 1024 * 1024)
+            LARGE_PAYLOAD = {"file": ("large.txt", large_content, "text/plain")}
+            
             max_attempts = 30
             ready = False
             for i in range(max_attempts):
-                status, body = scan(CLEAN)
+                status, body = scan(LARGE_PAYLOAD)
                 if status == 502:
                     ready = True
                     break
                 time.sleep(2)
 
             assert ready, "Service did not become ready (or fault did not trigger)"
-            status, body = scan(CLEAN)
+            status, body = scan(LARGE_PAYLOAD)
             assert status == 502, f"Expected 502 transport failure due to injected fault, got {status}: {body}"
             assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
-            print("Test 10: Verified-unchanged daily freshness renewal / actual update / failed refresh / reload")
-            # We will use a local test script for this to properly test the shell script boundaries
-            # without breaking Cloud Run startup.
-            subprocess.run([sys.executable, "tests/unit/gcp-artifact-activation-20261004/test_clamd_lifecycle.py"], check=True)
-            update_service_env(container="gateway", remove=True, CLAMD_PORT="")
-            # Test 10 is handled by the local subprocess above.
+            # We use a separate authorized hosted genuine-engine harness for this to properly test the genuine lifecycle
+            print("  (Genuine engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
+            update_service_env(container="gateway", remove=True, CLAMD_TIMEOUT_MS="")
 
         except Exception as e:
             print(f"Hosted scenario failed: {e}")

@@ -76,17 +76,17 @@ The implementation has remediated findings over multiple rounds:
   - Assert explicit runtime source SHA and selected deployed env/config by checking the deployment workflow logs and the Cloud Run environment variables (`gcloud run services describe`), NOT via the product `/health` endpoint which intentionally does not expose backend artifact configuration.
   - Execute a coordinated, authenticated runtime readback using real product app-session procedures via the `deploy-dev.yml` registered token issuance rails:
     - **Fixture Preparation & Session Issuance:**
-      - The `deploy-dev.yml` pipeline only natively issues `realm=tenant` admin sessions. To test driver uploads, seed an explicit test-owned driver identity and `driver_write` scope session in the application database via a direct DB SQL fixture, or using the internal test seeding endpoint if available on dev. Seed an associated batch.
+      - The `deploy-dev.yml` pipeline only natively issues `realm=tenant` admin sessions. To test driver uploads, seed an explicit test-owned driver identity and `driver:write` scope session in the application database via a direct DB SQL fixture, or using the internal test seeding endpoint if available on dev. Seed an associated batch.
       - Seed a public-info fixture required for placards.
-      - Prepare a tenant ops admin session (`realm=tenant` with `tenant_ops_admin`) for the operations download paths.
+      - Prepare a platform ops admin session (`realm=platform` with `billing:write` and `foundation:write`) for the operations download paths and placard production.
     - **Remittance Proofs (Driver & Ops):**
       - As the explicitly seeded driver identity (`realm=driver`), execute `POST /api/reimbursements/proofs/staged-content` containing actual test-owned fixture bytes (`contentBase64`, `contentType`) and the required header `Idempotency-Key: <stage-uuid>` to receive a `stagedContentRef`.
       - Execute `POST /api/reimbursements/proofs` with an `UploadRemittanceProofCommand` payload (including `batchId`, `originalFilename`, `contentType`, `sizeBytes`, and the `stagedContentRef`) and required header `Idempotency-Key: <upload-uuid>` to persist and scan the bytes.
-      - For system/ops readback of the scanned proof, execute `POST /api/reimbursements/proof-downloads` (as a tenant admin with read roles) specifying the `proofId` to obtain an API envelope containing `data.readbackUrl`.
-      - Use the issued `readbackUrl` (which already includes the signed URL manifest parameters) to download the stored proof. Assert the retrieved bytes, hash, and length exactly match the test fixture.
+      - For system/ops readback of the scanned proof, execute `POST /api/reimbursements/proofs/:proofId/readback` (as the platform ops admin with `billing:write`) to obtain an API envelope containing `data.readbackUrl`.
+      - Use the issued `readbackUrl` (which already includes the signed URL manifest parameters for `GET /api/reimbursements/proof-downloads/remittance-proof/:proofId`) to download the stored proof. Assert the retrieved bytes, hash, and length exactly match the test fixture.
       - Execute the same staging/scanning procedure as the driver using a known EICAR fixture. Assert that the endpoint persists a `scanState: "rejected"` with `rejectionReason: "MALWARE_DETECTED"`, and that controlled-download via readback is denied for the infected content.
     - **Document Artifacts (Producer & Ops):**
-      - As the authorized platform identity (tenant ops admin), execute `POST /api/platform-admin/placards` with a `GeneratePlacardVersionCommand` payload containing test fixture parameters (`versionCode`, `publicInfoVersionId`, `templateName`). This natively delegates to the document artifact store.
+      - As the authorized platform identity (platform ops admin with `foundation:write`), execute `POST /api/platform-admin/placards` with a `GeneratePlacardVersionCommand` payload containing test fixture parameters (`versionCode`, `publicInfoVersionId`, `templateName`). This natively delegates to the document artifact store.
       - The endpoint will return an API envelope containing the published placard metadata, which should include `artifactDownloadUrl` and `downloadMetadata.downloadUrl`.
       - Execute the document readback via `GET /api/downloads/placard/:placardVersionId?...` (resolving the exact query parameters provided in `downloadMetadata.downloadUrl`) to obtain the controlled-download.
       - Assert the retrieved bytes, hash, and length exactly match the test fixture.
