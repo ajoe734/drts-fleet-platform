@@ -101,6 +101,7 @@ env:
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
   DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
   DEV_TENANT_CONSOLE_ORIGIN: ${{ vars.DEV_TENANT_CONSOLE_ORIGIN }}
+  DEV_OIDC_CLIENT_ID: ${{ vars.DEV_OIDC_CLIENT_ID }}
   DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
   DEV_CHANNEL_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ORIGIN }}
   DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME: ${{ vars.DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME }}
@@ -785,6 +786,29 @@ jobs:
             exit 1
           fi
 
+          # Google tenant OIDC is all-or-nothing. Never read the OAuth secret
+          # into the runner; Cloud Run mounts the reference at runtime.
+          oidc_enabled=false
+          tenant_auth_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          oidc_secret_present=false
+          if gcloud secrets describe drts-dev-oidc-client-secret --project "$project_id" >/dev/null 2>&1; then
+            oidc_secret_present=true
+          fi
+          if [[ "$oidc_secret_present" == true && -n "${DEV_OIDC_CLIENT_ID:-}" ]]; then
+            if [[ ! "$DEV_OIDC_CLIENT_ID" =~ ^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$ ]]; then
+              echo "::error::DEV_OIDC_CLIENT_ID must be a Google OAuth client ID."
+              exit 1
+            fi
+            oidc_enabled=true
+            secret_args="${secret_args},OIDC_CLIENT_SECRET=drts-dev-oidc-client-secret:latest"
+            tenant_auth_secret_args="${tenant_auth_secret_args},BFF_STATE_SECRET=${secret_prefix}-jwt-secret:latest"
+          elif [[ "$oidc_secret_present" == true || -n "${DEV_OIDC_CLIENT_ID:-}" ]]; then
+            echo "::error::Google OIDC configuration is partial: DEV_OIDC_CLIENT_ID and drts-dev-oidc-client-secret must both exist."
+            exit 1
+          fi
+          echo "oidc_enabled=${oidc_enabled}" >> "$GITHUB_OUTPUT"
+          echo "tenant_auth=${tenant_auth_secret_args}" >> "$GITHUB_OUTPUT"
+
           # Remote SMTP is opt-in and fail-closed. Mount secret references only;
           # never access or print SMTP credentials in the deployment runner.
           # Dev mail secrets deliberately use the drts-dev- namespace.
@@ -851,6 +875,12 @@ jobs:
             fi
           fi
 
+          bank_signing_mounts="$(operations/deployment/resolve-bank-signing-secrets.sh "$secret_prefix" "$project_id")"
+          bank_console_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest,BANK_SESSION_SECRET=${secret_prefix}-jwt-secret:latest"
+          if [[ -n "$bank_signing_mounts" ]]; then
+            bank_console_secret_args="${bank_console_secret_args},${bank_signing_mounts}"
+          fi
+
           echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
           echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
           secret_args="${secret_args}${ARTIFACT_PROVIDER_SECRET_SUFFIX}"
@@ -858,6 +888,7 @@ jobs:
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
           echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "bank_console=${bank_console_secret_args}" >> "$GITHUB_OUTPUT"
           echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
           echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
@@ -900,8 +931,12 @@ jobs:
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)' 2>/dev/null || true)"
 
+          enterprise_dispatch_cloud_run_origin="$(gcloud run services describe "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)' 2>/dev/null || true)"
           auth_allowed_origins=""
-          for origin in "${{ needs.prepare.outputs.tenant_console_origin }}" "$tenant_console_cloud_run_origin"; do
+          for origin in "${{ needs.prepare.outputs.tenant_console_origin }}" "$tenant_console_cloud_run_origin" "${{ needs.prepare.outputs.enterprise_dispatch_origin }}" "$enterprise_dispatch_cloud_run_origin"; do
             [[ -n "$origin" ]] || continue
             case "$origin" in
               https://*) ;;
@@ -925,6 +960,18 @@ jobs:
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
+          if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
+            tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
+            tenant_login_origin="${tenant_login_origin:-$tenant_console_cloud_run_origin}"
+            dispatch_login_origin="${{ needs.prepare.outputs.enterprise_dispatch_origin }}"
+            dispatch_login_origin="${dispatch_login_origin:-$enterprise_dispatch_cloud_run_origin}"
+            if [[ -z "$tenant_login_origin" || -z "$dispatch_login_origin" ]]; then
+              echo "::error::Google OIDC needs both tenant and dispatch HTTPS origins before it can be enabled."
+              exit 1
+            fi
+            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@DRTS_DEV_MFA_WAIVED=true@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
+          fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
           # or shared web env vars; Google proof is still required for issuance.
@@ -1142,7 +1189,7 @@ jobs:
             --port 3004 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.tenant_auth }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.tenant_console_exposure_flag }} \
             --cpu 1 \
@@ -1163,7 +1210,7 @@ jobs:
             --port 3008 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,BANK_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.bank_console }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},BANK_CONSOLE_DEMO_LOGIN=true" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
             --cpu 1 \
@@ -1205,7 +1252,7 @@ jobs:
             --port 3010 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.tenant_auth }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.enterprise_dispatch_exposure_flag }} \
             --cpu 1 \

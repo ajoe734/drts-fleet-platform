@@ -20,7 +20,6 @@ export interface AuthConfigurationIssue {
   code: AuthIssueCode;
 }
 
-
 export interface AuthStartupConfig {
   environment: AuthEnvironment;
   isStrictEnvironment: boolean;
@@ -200,7 +199,9 @@ export type OrdinaryLoginMfaPolicy = "v1_not_required" | "required";
  *   `step-up-proof.service.ts`, which continue to reject
  *   `tenant_bootstrap_fixture` in production/staging regardless of this flag
  */
-export function isOrdinaryLoginMfaRequired(env: EnvLike = process.env): boolean {
+export function isOrdinaryLoginMfaRequired(
+  env: EnvLike = process.env,
+): boolean {
   const override = normalizeString(
     env.AUTH_REQUIRE_ORDINARY_LOGIN_MFA,
   )?.toLowerCase();
@@ -510,12 +511,27 @@ export function buildAuthStartupConfigReport(
   // Do not let a strict deployment start with only the legacy fixture login
   // available (fixture login is separately forbidden outside local/test).
   if (isStrictEnvironment) {
-    const tenantOidcIssuer = normalizeString(env.TENANT_OIDC_ISSUER);
-    const tenantOidcAudience = normalizeString(env.TENANT_OIDC_AUDIENCE);
+    const configuredTenantIssuer = normalizeString(env.TENANT_OIDC_ISSUER);
+    const effectiveTenantIssuer = configuredTenantIssuer ?? oidcIssuer;
+    const googleTenantProvider =
+      effectiveTenantIssuer === "https://accounts.google.com" ||
+      effectiveTenantIssuer === "accounts.google.com";
+    // Match the tenant verifier's Google issuer/audience fallback. Google always
+    // verifies against rotating JWKS and deliberately ignores legacy static keys.
+    // Keep the existing non-Google tenant-provider requirements independent.
+    const tenantOidcIssuer = googleTenantProvider
+      ? effectiveTenantIssuer
+      : configuredTenantIssuer;
+    const tenantOidcAudience =
+      normalizeString(env.TENANT_OIDC_AUDIENCE) ??
+      (googleTenantProvider ? oidcClientId : undefined);
     const tenantOidcKey =
       normalizeString(env.TENANT_OIDC_JWT_PUBLIC_KEY) ??
       normalizeString(env.TENANT_OIDC_JWT_SECRET);
-    if (!tenantOidcIssuer || !tenantOidcIssuer.startsWith("https://")) {
+    if (
+      !googleTenantProvider &&
+      (!tenantOidcIssuer || !tenantOidcIssuer.startsWith("https://"))
+    ) {
       issues.push({
         control: "TENANT_OIDC_ISSUER",
         issue:
@@ -531,7 +547,20 @@ export function buildAuthStartupConfigReport(
         code: tenantOidcAudience ? "UNSAFE_VALUE" : "MISSING_CONTROL",
       });
     }
-    if (!tenantOidcKey) {
+    const googleJwksUri = normalizeString(env.OIDC_JWKS_URI);
+    if (
+      googleTenantProvider &&
+      googleJwksUri &&
+      !isStrictOidcUrl(googleJwksUri)
+    ) {
+      issues.push({
+        control: "OIDC_JWKS_URI",
+        issue:
+          "Unsafe control value: Google JWKS override must be an absolute HTTPS provider URL without localhost, placeholders, credentials, query, or fragment in staging/production",
+        code: "UNSAFE_VALUE",
+      });
+    }
+    if (!googleTenantProvider && !tenantOidcKey) {
       issues.push({
         control: "TENANT_OIDC_JWT_PUBLIC_KEY / TENANT_OIDC_JWT_SECRET",
         issue:

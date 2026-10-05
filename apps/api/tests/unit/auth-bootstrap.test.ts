@@ -10,6 +10,8 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../src/modules/auth/auth.controller";
+import { OidcPkceService } from "../../src/modules/auth/oidc-pkce.service";
+import type { OidcBoundTenantUser } from "../../src/modules/identity/identity.repository";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
 import { GoogleWorkloadIdentityAdapter } from "../../src/modules/auth/google-workload-identity.adapter";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
@@ -93,6 +95,40 @@ function createAuthFixture() {
     jwtAuthService,
     regulatoryRegistryService,
     tenantPartnerService,
+  };
+}
+
+async function createOidcAuthFixture() {
+  const repo = new IdentityRepository();
+  const tenant = new TenantPartnerService(
+    new AuditNotificationService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    repo,
+    repo,
+  );
+  const user = tenant.findTenantUserBySubject("sub_oidc_admin_acme")!;
+  await repo.syncLegacyTenantUserRole({
+    ...user,
+    oidcIssuer: process.env.TENANT_OIDC_ISSUER!,
+    subjectId: "sub_oidc_admin_acme",
+  } as OidcBoundTenantUser);
+  const signer = new JwtAuthService(repo, tenant);
+  return {
+    controller: new AuthController(
+      signer,
+      tenant,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      repo,
+      new OidcPkceService(signer, tenant),
+    ),
   };
 }
 
@@ -468,18 +504,18 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
     const {
-      controller,
       jwtAuthService,
       tenantPartnerService,
       identityRepository,
@@ -587,18 +623,23 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
-    const { jwtAuthService, tenantPartnerService, identityRepository, driverDeviceSessionService } =
-      createAuthFixture();
+    const {
+      jwtAuthService,
+      tenantPartnerService,
+      identityRepository,
+      driverDeviceSessionService,
+    } = createAuthFixture();
     const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
       identityRepository,
     );
@@ -711,13 +752,14 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
@@ -833,8 +875,10 @@ describe("auth token issuance", () => {
     delete process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED;
 
     const audience = "https://api.dev.drts.internal";
-    const registeredEmail = "some-other-caller@dev-project.iam.gserviceaccount.com";
-    const unregisteredEmail = "not-yet-onboarded@dev-project.iam.gserviceaccount.com";
+    const registeredEmail =
+      "some-other-caller@dev-project.iam.gserviceaccount.com";
+    const unregisteredEmail =
+      "not-yet-onboarded@dev-project.iam.gserviceaccount.com";
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
     });
@@ -854,18 +898,23 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
-    const { jwtAuthService, tenantPartnerService, identityRepository, driverDeviceSessionService } =
-      createAuthFixture();
+    const {
+      jwtAuthService,
+      tenantPartnerService,
+      identityRepository,
+      driverDeviceSessionService,
+    } = createAuthFixture();
     const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
       identityRepository,
     );
@@ -943,7 +992,10 @@ describe("auth token issuance", () => {
 
     const { controller, identityRepository } = createAuthFixture();
 
-    vi.spyOn(identityRepository, "findMembershipsByPrincipalId").mockResolvedValue([
+    vi.spyOn(
+      identityRepository,
+      "findMembershipsByPrincipalId",
+    ).mockResolvedValue([
       {
         membershipId: "mem-platform-123",
         principalId: "platform-admin-001",
@@ -1840,11 +1892,14 @@ describe("bootstrap auth guard: Cloud Scheduler OIDC token reuse on idempotent s
     const kid = `scheduler-test-key-${schedulerKidCounter++}`;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }] }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
     const now = Math.floor(Date.now() / 1000);
@@ -1895,7 +1950,10 @@ describe("bootstrap auth guard: Cloud Scheduler OIDC token reuse on idempotent s
     expect(first.principalId).toBe(SCHEDULER_PRINCIPAL_ID);
 
     await expect(
-      adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, context),
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        context,
+      ),
     ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
   });
 
@@ -2351,10 +2409,10 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.TENANT_OIDC_ISSUER = "https://tenant-idp.tests";
     process.env.TENANT_OIDC_AUDIENCE = "tenant-portal-tests";
     process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
-    const { controller } = createAuthFixture();
+    const { controller } = await createOidcAuthFixture();
     const idToken = jwt.sign(
       {
-        sub: "oidc-user-001",
+        sub: "sub_oidc_admin_acme",
         email: "admin@acme.example",
         email_verified: true,
         amr: ["pwd", "webauthn"],
@@ -2382,7 +2440,7 @@ describe("tenant bootstrap-session auth controller", () => {
       profile: { email: "admin@acme.example", roleCode: "tenant_admin" },
     });
     const decoded = jwt.decode(response.data.accessToken) as jwt.JwtPayload;
-    expect(decoded.amr).toEqual(expect.arrayContaining(["oidc", "webauthn"]));
+    expect(decoded.amr).toEqual(expect.arrayContaining(["webauthn"]));
     expect(decoded.acr).toBe("aal2");
 
     delete process.env.JWT_SECRET;
@@ -2397,10 +2455,10 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.TENANT_OIDC_ISSUER = "https://tenant-idp.tests";
     process.env.TENANT_OIDC_AUDIENCE = "tenant-portal-tests";
     process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
-    const { controller } = createAuthFixture();
+    const { controller } = await createOidcAuthFixture();
     const idToken = jwt.sign(
       {
-        sub: "oidc-user-002",
+        sub: "sub_oidc_admin_acme",
         email: "admin@acme.example",
         email_verified: true,
         amr: ["pwd"],

@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createRequestHandler } from "../../../operations/artifact-scanner/gateway/handler";
 import { createIsReady } from "../../../operations/artifact-scanner/gateway/readiness";
-import { exchangeWithClamd, versionClamd } from "../../../operations/artifact-scanner/gateway/clamd-transport";
+import {
+  exchangeWithClamd,
+  versionClamd,
+} from "../../../operations/artifact-scanner/gateway/clamd-transport";
 import type { Socket } from "node:net";
 import { EventEmitter } from "node:events";
 
@@ -18,7 +21,11 @@ describe("Gateway Transport Regression (R5b.2)", () => {
   it("wrong-port scenario should yield 503 scan_engine_not_ready, not 502", async () => {
     // If the port is wrong, connect will throw an error immediately, or timeout.
     // Let's simulate a connection error on connect.
-    const connectFail = (options: { host: string; port: number }, onConnect: () => void) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const connectFail = (
+      _options: { host: string; port: number },
+      _onConnect: () => void,
+    ) => {
       const socket = new MockSocket();
       setTimeout(() => socket.emit("error", new Error("CONNECT_ERROR3311")), 0);
       return socket as unknown as Socket;
@@ -37,7 +44,8 @@ describe("Gateway Transport Regression (R5b.2)", () => {
     const handler = createRequestHandler({
       clamd: clamdConfig,
       isReady,
-      exchange: (config, payload) => exchangeWithClamd(config, payload, connectFail),
+      exchange: (config, payload) =>
+        exchangeWithClamd(config, payload, connectFail),
       log: () => {},
     });
 
@@ -48,12 +56,17 @@ describe("Gateway Transport Regression (R5b.2)", () => {
     req.url = "/scan";
     req.headers = {
       "content-type": "application/pdf",
-      "x-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "x-content-sha256":
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     };
 
     const res = {
-      writeHead: (s: number) => { status = s; },
-      end: (b: string) => { bodyStr = b; },
+      writeHead: (s: number) => {
+        status = s;
+      },
+      end: (b: string) => {
+        bodyStr = b;
+      },
       headersSent: false,
     } as any;
 
