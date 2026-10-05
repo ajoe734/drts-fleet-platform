@@ -38,14 +38,14 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
 
 ## 驗收與證據（持續更新）
 
-| Finding／驗收項                          | 原始碼依據與修改位置                      | 舊版重現 → 修正版                | 命令／版本／證據      | 未驗項與限制                                 |
-| ---------------------------------------- | ----------------------------------------- | -------------------------------- | --------------------- | -------------------------------------------- |
-| 租戶後台可用Google帳號經PKCE登入 | `OidcPkceService`、tenant BFF | 正式 service 使用簽署 RSA token + mock provider HTTP 通過 | Google/PKCE/邀請 45 pass，exit 0；`waiver-regression.log` | 真實 OAuth client 尚待 operator 建立；strict startup 設定待擴充 scope |
-| Google ID token以輪替金鑰驗證且不偽造MFA | `OidcIdTokenVerifier`、claims merge、session guard | 舊 9d191f5ac：6 fail / 3 pass → 修正後 9 pass；session 舊 1 fail → 修正後 7 pass | `{baseline,core,session-claims-before,session-regression,waiver-regression}.log` | PG／真實 Google 不能由 HTTP mock 推導；staging/production 拒絕 dev waiver 已測 |
-| 外部Google帳號可依邀請綁定租戶使用者 | `IdentityRepository.acceptTenantOidcInvitation`、tenant service | 未綁定拒絕、verified email、錯 tenant、重放、撤銷、並發一次性皆通過 | 邀請 suite 7 pass；API PG suite 3 skip；`api-regression.log` | PG 必須由 hosted workflow 使用正式 migrations 驗證 |
-| 企業派車共用租戶登入 | 共用 BFF factory、企業派車 session verifier | custom tenant／dispatch／run.app 登入與 session／logout-all／CSRF 通過 | BFF 12 pass + replay store 1 pass，exit 0；`logout-replay.log`；canvas `ent-states.jsx` | 本 VM 禁止 browser/server；真實跨主機登入待共享 dev |
-| deploy-dev 全有或全無啟用 | workflow 的 `api_secrets` 與 deploy steps | 實際 shell 區段 5 cases pass | `deploy-dev-google-oidc.test.ts`；YAML parse 9 jobs；operator 步驟如下 | 未建立 OAuth client、未讀 secret 值、未部署 |
-| 同候選SHA CI通過且獨立reviewer審查 | candidate lifecycle | 尚未鎖定候選 | reviewer Claude2；已發布 anchor 9d191f5ac → 43facf4ac → b5cf35d29 → ed6c34bbb | 完成實作後鎖 SHA；CI/review/merge pending；owner 不結案 |
+| Finding／驗收項                          | 原始碼依據與修改位置                                            | 舊版重現 → 修正版                                                                | 命令／版本／證據                                                                                | 未驗項與限制                                                                     |
+| ---------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 租戶後台可用Google帳號經PKCE登入         | `OidcPkceService`、tenant BFF、`buildAuthStartupConfigReport`   | 正式 service 使用簽署 RSA token + mock provider HTTP 通過；strict startup 已修正 | 最新合併後 164 pass，exit 0；`final-regression.log`，下方修復單元 5                             | 真實 OAuth client 尚待 operator 建立                                             |
+| Google ID token以輪替金鑰驗證且不偽造MFA | `OidcIdTokenVerifier`、claims merge、session guard              | 舊 9d191f5ac：6 fail / 3 pass → 修正後 9 pass；session 舊 1 fail → 修正後 7 pass | `{baseline,core,session-claims-before,session-regression,waiver-regression}.log`                | PG／真實 Google 不能由 HTTP mock 推導；staging/production 拒絕 dev waiver 已測   |
+| 外部Google帳號可依邀請綁定租戶使用者     | `IdentityRepository.acceptTenantOidcInvitation`、tenant service | 未綁定拒絕、verified email、錯 tenant、重放、撤銷、並發一次性皆通過              | 邀請 suite 7 pass；API PG suite 3 skip；`api-regression.log`                                    | PG 必須由 hosted workflow 使用正式 migrations 驗證                               |
+| 企業派車共用租戶登入                     | 共用 BFF factory、企業派車 session verifier                     | custom tenant／dispatch／run.app 登入與 session／logout-all／CSRF 通過           | BFF 12 pass + replay store 1 pass，exit 0；`logout-replay.log`；canvas `ent-states.jsx`         | 本 VM 禁止 browser/server；真實跨主機登入待共享 dev                              |
+| deploy-dev 全有或全無啟用                | workflow 的 `api_secrets` 與 deploy steps                       | 實際 shell 區段 5 cases pass                                                     | `deploy-dev-google-oidc.test.ts`；YAML parse 9 jobs；operator 步驟如下                          | 未建立 OAuth client、未讀 secret 值、未部署                                      |
+| 同候選SHA CI通過且獨立reviewer審查       | candidate lifecycle、PR #2320                                   | 舊 checkpoint CI 四個 failure 的三個修復單元已完成                               | reviewer Claude2；candidate 完整 SHA／branch 與後續 hosted 結果寫入 PR 及 handoff machine truth | CI/review/merge pending；owner 不結案；不能以 draft skipped integration 代替通過 |
 
 本 VM 僅執行 repository checks，不啟動產品服務、瀏覽器或 Docker。
 
@@ -187,10 +187,10 @@ logout-all 透過 API 撤銷所有 session。企業派車的登入按鈕維持 c
   `AUTH_MODE=explicit` 設定可通過。不能把此 strict startup 缺陷描述為已證明
   共享 dev 啟動失敗。Google 缺 client ID、啟用 mock mode 的拒絕情境各兩項皆通過。
 
-| Finding | 原始碼與修正邊界 | 本輪重現／驗證 | 待辦 |
-| --- | --- | --- | --- |
-| Google JWKS 被要求另設 static tenant credentials | `auth-startup-config.ts` 的 tenant workforce verification 區段；應與 `OidcIdTokenVerifier.verify` 的 issuer/audience 與遠端 JWKS 路徑一致，不以 JWT session secret 代替 provider key | `586d93d2b8c61bf58c513e3e9ebaf9b5786097c6` 產品碼 + 新回歸：staging／production 各 1 fail，精確回報三個 `TENANT_OIDC_*` missing controls | 加入 config 檔 scope；保留 generic PKCE 必填／mock 拒絕，以及 IAP lane 的 MFA waiver 政策 |
-| real-provider 正向 fixture 缺 issuer/sub | `tests/integ/oidc-pkce-bff.test.ts` 最後一項刪除 `OIDC_MOCK_MODE` 後，seed 只有 sub；`findTenantUserByOidcIdentity` 正確拒絕未綁定 issuer 的身分 | 原檔 baseline 與本輪均 4 pass / 1 fail；`issueVerifiedTenantSession` 回 `AUTH_SESSION_EXCHANGE_DENIED` | 加入該 test scope；以既有 `bindTenantUserSubject` 明確装配測試身分，不放寬正式登入或恢復按 email 登入 |
+| Finding                                          | 原始碼與修正邊界                                                                                                                                                                     | 本輪重現／驗證                                                                                                                           | 待辦                                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Google JWKS 被要求另設 static tenant credentials | `auth-startup-config.ts` 的 tenant workforce verification 區段；應與 `OidcIdTokenVerifier.verify` 的 issuer/audience 與遠端 JWKS 路徑一致，不以 JWT session secret 代替 provider key | `586d93d2b8c61bf58c513e3e9ebaf9b5786097c6` 產品碼 + 新回歸：staging／production 各 1 fail，精確回報三個 `TENANT_OIDC_*` missing controls | 加入 config 檔 scope；保留 generic PKCE 必填／mock 拒絕，以及 IAP lane 的 MFA waiver 政策             |
+| real-provider 正向 fixture 缺 issuer/sub         | `tests/integ/oidc-pkce-bff.test.ts` 最後一項刪除 `OIDC_MOCK_MODE` 後，seed 只有 sub；`findTenantUserByOidcIdentity` 正確拒絕未綁定 issuer 的身分                                     | 原檔 baseline 與本輪均 4 pass / 1 fail；`issueVerifiedTenantSession` 回 `AUTH_SESSION_EXCHANGE_DENIED`                                   | 加入該 test scope；以既有 `bindTenantUserSubject` 明確装配測試身分，不放寬正式登入或恢復按 email 登入 |
 
 本輪命令與結果（Node 22.23.2／pnpm 10.33.0／Vitest 4.1.4）：
 
@@ -207,3 +207,48 @@ logout-all 透過 API 撤銷所有 session。企業派車的登入按鈕維持 c
 - 下一步仍是 Supervisor 擴充兩檔 scope → 原 owner 修復 → 同一命令應達
   48 pass → 受影響整體回歸 → 鎖定並 handoff 同一 SHA。
   未執行服務、瀏覽器、Docker、OAuth client 建立或部署；CI／獨立 review／真實登入仍待驗。
+
+### 修復單元 5：2026-10-05 scope 擴充後修復與候選準備
+
+Supervisor 已於原 task 的 integration_notes／write_scopes 核准三條修復路徑。
+上述「待擴充 scope」段落保留為歷史 checkpoint；目前沒有 scope blocker。
+前一版本為 `6caff9b119d42162c7739d6b6688ad8e0bf4f43f`，完整 findings 來源為
+[PR #2320](https://github.com/ajoe734/drts-fleet-platform/pull/2320) 原始 checkpoint
+說明與 [CI 37320413674](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37320413674)。
+尚未發生獨立 reviewer 退修；不把 owner 自查當成 reviewer approval。
+
+| Finding／驗收項                                                                           | 原始碼依據與修改位置                                                                                                                                                                                                                                                   | 舊版重現 → 修正版結果                                                                                                                          | 命令、版本與證據                                                                                                                                                                    | 未驗項與限制                                                                                                                                          |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1：完整 Google JWKS 設定在 strict startup 被要求 static tenant credentials               | `auth-startup-config.ts:buildAuthStartupConfigReport` 的 tenant verification block；以 verifier 相同的有效 issuer 判別 Google，audience 使用 tenant override／OIDC client，Google 使用遠端 JWKS 預設或 HTTPS override                                                  | 舊版 staging／production 各失敗；修正版 51 startup cases pass，含缺 client、mock mode、非 Google override、wildcard audience、不安全 JWKS 拒絕 | `scoped-repair-before.log` exit 1 → `startup-repair.log` exit 0；修正 anchor `6944cdca7`                                                                                            | 不改 generic PKCE 必填及 IAP/MFA policy；沒有啟動 API，不能宣稱真實 provider 驗收                                                                     |
+| F2：real-provider 正向 fixture 只有 seed sub、缺 issuer binding                           | `tests/integ/oidc-pkce-bff.test.ts` 呼叫既有 `TenantPartnerService.bindTenantUserSubject` 明確綁定，正式 `findTenantUserByOidcIdentity` 拒絕規則保持                                                                                                                   | 舊版 4 pass／1 fail → provider＋strict negative suites 8 pass                                                                                  | `provider-fixture-repair.log` exit 0；anchor `eda06d314`                                                                                                                            | 僅 mock token HTTP；真實簽章、PKCE、會員授權皆執行；unbound／inactive 拒絕保留                                                                        |
+| F3：logout-all harness 丟失 Headers，且用過時 principal／version／scopes 建立無效 session | `tests/e2e/tenant-console-oidc-production.test.ts`；Fetch headers 轉 HTTP/Nest header record；取 beforeEach 建立的 active user、`updatedAt`、正式 `getTenantRoleScopes`；`JwtAuthService.verifyAccessToken`／`AuthController.logoutAll`／`IdentityRepository` 實際執行 | 舊版 503≠200；只改 Headers 仍 401；定位到 `.toBeDefined()` 放過 null。修正版先驗證兩個非空有效 session，呼叫真实 logoutAll，再確認兩者皆 null  | `logout-fixture-trace.log`、`logout-session-trace.log`；最終三 suites 58 pass：`three-repairs-final.log` exit 0；產品及 fixture 最終實作 `c15da7cacdb2b687589bc499791db75ca065d9f2` | 模擬 HTTP 傳輸，無 server/browser；兩 session 撤銷與 BFF backend-failure 保留 cookie 案例皆保留；單獨篩選時的 skip 不列驗收                           |
+| 先前三項實作／Google JWKS、邀請綁定、派車共用登入回歸                                     | verifier、PKCE、invitation repository、兩個 BFF、session/replay/deploy gate、ordinary/admin MFA suites                                                                                                                                                                 | 合併後 root 16 files／164 pass；API auth-bootstrap 101 pass；PG 3 skip                                                                         | `final-regression.log`、`final-api-tests.log`，皆 exit 0                                                                                                                            | 本機沒有 PG；必須以同候選 hosted CI 的正式 migration／repository 測試補 PG evidence；真實 Google 及跨主機 browser acceptance 仍待 operator/shared dev |
+
+本輪檢查版本：Node 22.23.2、pnpm 10.33.0、Vitest 4.1.4。
+所有本機 logs 位於本 worker `.local/entry-tenant-google-oidc/`。
+主命令（已結束並讀取結果）：
+
+```sh
+pnpm exec vitest run tests/unit/auth-startup-config.test.ts tests/integ/oidc-pkce-bff.test.ts tests/e2e/tenant-console-oidc-production.test.ts
+pnpm exec vitest run tests/unit/auth-startup-config.test.ts tests/unit/entry-tenant-google-oidc.test.ts tests/unit/auth-oidc-pkce.test.ts tests/unit/tenant-google-invitation.test.ts tests/unit/tenant-google-bff.test.ts tests/unit/tenant-oidc-replay-store.test.ts tests/unit/deploy-dev-google-oidc.test.ts tests/unit/identity-session.test.ts tests/unit/identity-session-context.test.ts tests/unit/tenant-invitation-lifecycle.test.ts tests/unit/system-remediation/sr-auth-mfa-policy-20260915/ordinary-login-mfa-policy.test.ts tests/unit/system-remediation/sr-auth-admin-mfa-env-20260915/admin-mfa-gate-environment-aware.test.ts tests/integ/oidc-pkce-bff.test.ts tests/integ/oidc-pkce-bff-route.test.ts tests/e2e/tenant-console-oidc-production.test.ts tests/security/iam-oidc-strict-negative.test.ts
+pnpm --filter @drts/api exec vitest run tests/unit/auth-bootstrap.test.ts tests/unit/tenant-google-invitation.pg.test.ts
+pnpm run typecheck:root
+pnpm --filter @drts/api typecheck
+pnpm --filter @drts/tenant-console-web typecheck
+pnpm --filter @drts/enterprise-dispatch-web typecheck
+pnpm exec eslint apps/api/src/config/auth-startup-config.ts tests/unit/auth-startup-config.test.ts tests/integ/oidc-pkce-bff.test.ts tests/e2e/tenant-console-oidc-production.test.ts --max-warnings=0
+```
+
+四個 typecheck、scoped lint 均 exit 0（`final-*-typecheck.log`、`final-eslint.log`）。
+web 檢查只產生型別，沒有啟動服務；已還原其自動修改的 `next-env.d.ts`。
+本輪中共享 node_modules symlink 被外部變更破壞後，在本 isolated worktree
+移除**自己的 symlink**並依既有 lockfile 安裝獨立 dependencies（`--ignore-scripts`）；
+沒有修改 canonical root 或 lockfile。該次 `MODULE_NOT_FOUND` 不當作產品失敗證據。
+
+依 Supervisor 要求以普通 merge 保留 `origin/dev` 的
+`89502f7fc0ebf920db5143ef9568b9ad3d03a04d`，merge commit
+`54efbcfac` 完整保留 dev 的 private-console 與 live-ops changes；沒有 rebase、amend、
+force push。上列完整回歸及 typechecks 均在合併後實作執行。
+交接候選只新增此證據文件，產品碼與上述 `c15da7cac` 相同；其完整 SHA 由 PR head
+及 `CANDIDATE_SHA` handoff 一致鎖定，獨立 reviewer 為 Claude2。
+同 SHA hosted CI／review／merge 及真實 Google acceptance 各自待寫入，不由本機 pass 推導。
