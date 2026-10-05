@@ -6484,12 +6484,108 @@ export class OwnedMobilityService
     return this.cloneTask(task);
   }
 
+  async updateDriverTaskEta(
+    taskId: string,
+    etaMinutes: number,
+    requestId?: string,
+  ) {
+    const task = this.requireTask(taskId);
+    const order = this.requireOrder(task.orderId);
+
+    // Only allow updating ETA for active tasks
+    if (
+      task.status !== "pending_acceptance" &&
+      task.status !== "accepted" &&
+      task.status !== "enroute_pickup" &&
+      task.status !== "arrived_pickup"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TASK_NOT_ACTIVE",
+        "Driver task is not in a valid state to update ETA.",
+        { status: task.status },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const oldEta = order.etaSnapshot?.etaMinutes ?? 0;
+    const lastNotifiedEta = order.etaSnapshot?.notifiedEtaMinutes ?? oldEta;
+
+    order.etaSnapshot = {
+      etaMinutes,
+      calculatedAt: now,
+      notifiedEtaMinutes: lastNotifiedEta,
+    };
+    order.updatedAt = now;
+
+    const traceLog = this.appendTrace(order.orderId, "driver.eta_updated", {
+      taskId,
+      oldEtaMinutes: oldEta,
+      newEtaMinutes: etaMinutes,
+    });
+
+    const changes: any = {
+      orders: [order],
+      dispatchTraceLogs: [traceLog],
+    };
+
+    // Prevent spamming: only notify if ETA change is 3 minutes or more.
+    if (Math.abs(etaMinutes - lastNotifiedEta) >= 3) {
+      order.etaSnapshot.notifiedEtaMinutes = etaMinutes;
+      const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+      const etaChangedOutbox: ConsumerNotificationOutboxRecord = {
+        outboxId: randomUUID(),
+        orderId: order.orderId,
+        passengerSubjectRef,
+        eventType: "eta_changed",
+        assignmentVersion: null,
+        payload: { taskId, etaMinutes, oldEtaMinutes: lastNotifiedEta },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        deliveredAt: null,
+      };
+      changes.consumerNotificationOutbox = [etaChangedOutbox];
+    }
+
+    await this.persistChangesRequired(changes, "update_eta");
+
+    await this.recordAudit(
+      {
+        actorId: task.driverId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "driver-task",
+        actionName: "update_eta",
+        resourceType: "driver_task",
+        resourceId: taskId,
+        newValuesSummary: {
+          etaMinutes,
+        },
+      },
+      requestId,
+    );
+
+    await this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
+      requestId,
+    );
+    await this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+
+    return task;
+  }
+
   async arrivedPickup(
     taskId: string,
     command: DriverArrivedPickupCommand,
     requestId?: string,
   ) {
     const task = this.requireTask(taskId);
+    if (task.status === "arrived_pickup") {
+      return this.cloneTask(task);
+    }
     const order = this.requireOrder(task.orderId);
     this.assertDriverTaskTransition(task, "arrived_pickup");
     task.status = "arrived_pickup";
@@ -6499,11 +6595,27 @@ export class OwnedMobilityService
     const traceLog = this.appendTrace(order.orderId, "driver.arrived_pickup", {
       taskId,
     });
+    const now = new Date().toISOString();
+    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+    const driverArrivedOutbox: ConsumerNotificationOutboxRecord = {
+      outboxId: randomUUID(),
+      orderId: order.orderId,
+      passengerSubjectRef,
+      eventType: "driver_arrived",
+      assignmentVersion: null,
+      payload: { taskId },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: now,
+      createdAt: now,
+      deliveredAt: null,
+    };
     await this.persistChangesRequired(
       {
         orders: [order],
         driverTasks: [task],
         dispatchTraceLogs: [traceLog],
+        consumerNotificationOutbox: [driverArrivedOutbox],
       },
       "arrived_pickup",
     );
@@ -7035,11 +7147,27 @@ export class OwnedMobilityService
       },
     );
 
+    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+    const receiptReadyOutbox: ConsumerNotificationOutboxRecord = {
+      outboxId: randomUUID(),
+      orderId: order.orderId,
+      passengerSubjectRef,
+      eventType: "receipt_ready",
+      assignmentVersion: null,
+      payload: { taskId: task.taskId, fareTotal: task.fare?.amountMinor ?? 0 },
+      status: "pending",
+      attemptCount: 0,
+      nextAttemptAt: now,
+      createdAt: now,
+      deliveredAt: null,
+    };
+
     await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
       orders: [this.cloneOrder(order)],
       dispatchAssignments: [{ ...assignment }],
       driverTasks: [this.cloneTask(task)],
       dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
+      consumerNotificationOutbox: [receiptReadyOutbox],
     });
     // SD §7.6: a valid completion releases the shared reservation, in the
     // same transaction as the completion write.
@@ -10795,6 +10923,8 @@ export class OwnedMobilityService
       dispatchAssignments?: readonly DispatchAssignmentRecord[];
       driverTasks?: readonly DriverTaskRecord[];
       dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
+      passengerDisclosureSnapshots?: readonly PassengerDispatchDisclosureSnapshot[];
+      consumerNotificationOutbox?: readonly ConsumerNotificationOutboxRecord[];
     },
     context: string,
   ) {
@@ -10809,6 +10939,8 @@ export class OwnedMobilityService
       dispatchAssignments?: DispatchAssignmentRecord[];
       driverTasks?: DriverTaskRecord[];
       dispatchTraceLogs?: DispatchTraceLogRecord[];
+      passengerDisclosureSnapshots?: PassengerDispatchDisclosureSnapshot[];
+      consumerNotificationOutbox?: ConsumerNotificationOutboxRecord[];
     } = {};
 
     if (changes.orders) {
@@ -10842,6 +10974,19 @@ export class OwnedMobilityService
       persistPayload.dispatchTraceLogs = changes.dispatchTraceLogs.map(
         (traceLog) => this.cloneTraceLog(traceLog),
       );
+    }
+    if (changes.passengerDisclosureSnapshots) {
+      persistPayload.passengerDisclosureSnapshots =
+        changes.passengerDisclosureSnapshots.map((snapshot) =>
+          this.clonePassengerDisclosureSnapshot(snapshot),
+        );
+    }
+    if (changes.consumerNotificationOutbox) {
+      persistPayload.consumerNotificationOutbox =
+        changes.consumerNotificationOutbox.map((outbox) => ({
+          ...outbox,
+          payload: { ...outbox.payload },
+        }));
     }
 
     const pending = this.ownedMobilityRepository.persistChanges(persistPayload);
@@ -10863,6 +11008,8 @@ export class OwnedMobilityService
       dispatchAssignments?: readonly DispatchAssignmentRecord[];
       driverTasks?: readonly DriverTaskRecord[];
       dispatchTraceLogs?: readonly DispatchTraceLogRecord[];
+      passengerDisclosureSnapshots?: readonly PassengerDispatchDisclosureSnapshot[];
+      consumerNotificationOutbox?: readonly ConsumerNotificationOutboxRecord[];
     },
     context: string,
   ) {
@@ -10877,6 +11024,8 @@ export class OwnedMobilityService
       dispatchAssignments?: DispatchAssignmentRecord[];
       driverTasks?: DriverTaskRecord[];
       dispatchTraceLogs?: DispatchTraceLogRecord[];
+      passengerDisclosureSnapshots?: PassengerDispatchDisclosureSnapshot[];
+      consumerNotificationOutbox?: ConsumerNotificationOutboxRecord[];
     } = {};
 
     if (changes.orders) {
@@ -10910,6 +11059,19 @@ export class OwnedMobilityService
       persistPayload.dispatchTraceLogs = changes.dispatchTraceLogs.map(
         (traceLog) => this.cloneTraceLog(traceLog),
       );
+    }
+    if (changes.passengerDisclosureSnapshots) {
+      persistPayload.passengerDisclosureSnapshots =
+        changes.passengerDisclosureSnapshots.map((snapshot) =>
+          this.clonePassengerDisclosureSnapshot(snapshot),
+        );
+    }
+    if (changes.consumerNotificationOutbox) {
+      persistPayload.consumerNotificationOutbox =
+        changes.consumerNotificationOutbox.map((outbox) => ({
+          ...outbox,
+          payload: { ...outbox.payload },
+        }));
     }
 
     try {
@@ -13234,8 +13396,10 @@ export class OwnedMobilityService
     return nextOrder;
   }
 
-
-  async getOrderAsync(orderId: string, identity?: BootstrapRequestIdentity | null) {
+  async getOrderAsync(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
     const order = this.requireOrder(orderId);
     await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.cloneOrder(order);
@@ -13256,7 +13420,8 @@ export class OwnedMobilityService
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
       (identity.partnerId || null) !== (order.partnerId || null) ||
-      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
+      (identity.partnerProgramId || null) !==
+        (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&
@@ -13307,7 +13472,8 @@ export class OwnedMobilityService
       !order.partnerEntrySlug ||
       (identity.tenantId && identity.tenantId !== order.tenantId) ||
       (identity.partnerId || null) !== (order.partnerId || null) ||
-      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
+      (identity.partnerProgramId || null) !==
+        (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&
@@ -13750,7 +13916,7 @@ export class OwnedMobilityService
 
     const passengerOrders: OwnedOrderRecord[] = [];
     for (const o of Array.from(this.orders.values()).sort((a, b) =>
-      (b.createdAt || "").localeCompare(a.createdAt || "")
+      (b.createdAt || "").localeCompare(a.createdAt || ""),
     )) {
       if (
         o.partnerEntrySlug !== identity.partnerEntrySlug ||
