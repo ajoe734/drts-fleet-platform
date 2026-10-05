@@ -252,3 +252,27 @@ force push。上列完整回歸及 typechecks 均在合併後實作執行。
 交接候選只新增此證據文件，產品碼與上述 `c15da7cac` 相同；其完整 SHA 由 PR head
 及 `CANDIDATE_SHA` handoff 一致鎖定，獨立 reviewer 為 Claude2。
 同 SHA hosted CI／review／merge 及真實 Google acceptance 各自待寫入，不由本機 pass 推導。
+
+### 修復單元 6：hosted PG fixture 使用正式 delivery status
+
+- 前候選 `c93c9a934d20c1b9f29dd3e4201e33ebdb274799` 已獲 Claude2 獨立審查，
+  但 [CI 37330026292](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37330026292)
+  最終 failure。完整讀取 Product smoke acceptance：lint、typecheck、正式 migrations
+  及 root tests（5517 pass／44 skip）成功；API tests 1538 pass／3 fail。
+- 三個 fail 都是 `tenant-google-invitation.pg.test.ts:fixture` 寫入
+  `deliveryStatus: "sent"`，違反 `V0068__canonical_identity_authority.sql` 的
+  `chk_identity_invitations_delivery_status`，尚未進入被驗證的邀請交易。
+  這是 fixture 裝配缺陷，不能算三個業務行為的舊版失敗重現。
+- 正式契約 `CANONICAL_INVITATION_DELIVERY_STATUSES` 使用 `delivered`；
+  `TenantPartnerService.issueTenantInvitation` 也明確把 delivery adapter 的 `sent`
+  轉成 `delivered`。本次只修 fixture 使用相同 canonical 值，保留正式 schema、
+  production repository 及原本三項交易斷言，沒有新增／放寬 migration 或 mock DB。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、版本與證據 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| F4：PG 邀請 fixture 在交易前違反 delivery status constraint | `apps/api/tests/unit/tenant-google-invitation.pg.test.ts:fixture`；migration V0068、canonical invitation contract、`issueTenantInvitation` | 舊候選 hosted 3 fail 均停在 fixture；修正後須由新 SHA hosted CI 驗證 | `pnpm --filter @drts/api test -- --no-file-parallelism --maxConcurrency=1`；舊 run 完整結果已讀；本機 `.local/entry-tenant-google-oidc/ci-37330026292-{failed,product}.log` | 本 VM 無 PG 且禁止啟動服務；本機 skip 不算通過，hosted 結果另記 PR／machine truth |
+| 外部 Google 帳號依邀請綁定：並發一次性、錯 email／tenant 不耗 proof、subject 衝突全回滾 | `IdentityRepository.acceptTenantOidcInvitation`、正式 migrations、原三個 PG tests | 原斷言全部保留；等待正式 PG 環境執行結果 | 新候選完整 SHA 由 PR head 與 handoff 鎖定 | 真實 OAuth、跨主機 browser acceptance 仍待 operator／共享 dev |
+| 同候選 SHA CI／獨立 review | 前候選 Claude2 approval；CI failure 已讀 | 新 fixture commit 必須重新取得同 SHA CI 與 Claude2 review | PR #2320，禁止沿用舊 SHA approval 當新候選證據 | draft integration 37330026268 跳過產品 gates，不列驗收；owner 不結案 |
+
+本輪沒有修改產品碼／UI／部署設定，沒有啟動本機服務、瀏覽器或 Docker，
+沒有建立 OAuth client 或部署。修正以普通 commit／push 保留已發布歷史。

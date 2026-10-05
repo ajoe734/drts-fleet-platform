@@ -41,7 +41,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await repository.upsertInvitationRecord({
         ...snapshot.invitation!,
         tokenHash,
-        deliveryStatus: "sent",
+        // Canonical invitation state after the delivery adapter reports "sent".
+        deliveryStatus: "delivered",
         expiresAt: new Date(Date.now() + 300_000).toISOString(),
       });
       const proof = {
