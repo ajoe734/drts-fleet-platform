@@ -84,6 +84,32 @@ jobs:
           echo "gateway_image=$GATEWAY_DIGEST" >> "$GITHUB_OUTPUT"
           echo "clamd_image=$CLAMD_DIGEST" >> "$GITHUB_OUTPUT"
 
+      - name: Preflight and Bootstrap Service Account
+        run: |
+          set -euo pipefail
+          
+          SCANNER_SA="drts-dev-artifact-scanner@${DEV_GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          DEPLOYER="${DEV_WIF_SERVICE_ACCOUNT}"
+          
+          echo "Verifying scanner service account: $SCANNER_SA"
+          if ! gcloud iam service-accounts describe "$SCANNER_SA" --project "$DEV_GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo "Scanner SA does not exist. Attempting to create it..."
+            if ! gcloud iam service-accounts create drts-dev-artifact-scanner --project "$DEV_GCP_PROJECT_ID" --display-name="Artifact Scanner Identity"; then
+               echo "::error::Failed to create Scanner SA. IAM/billing denial? Check roles/iam.serviceAccountCreator."
+               exit 1
+            fi
+          fi
+          
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs on Scanner SA..."
+          if ! gcloud iam service-accounts add-iam-policy-binding "$SCANNER_SA" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None >/dev/null 2>&1; then
+             echo "::error::Failed to grant actAs on $SCANNER_SA to $DEPLOYER. Ensure the WIF identity has roles/iam.serviceAccountAdmin."
+             exit 1
+          fi
+
       - name: Provision Backends
         run: |
           set -euo pipefail

@@ -51,8 +51,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         responses = [
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}),
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
-            (400, {"sha256": "wrong", "sizeBytes": -1, "error": "hash_mismatch"}),
-            (413, {"sha256": "x", "sizeBytes": -1, "error": "content_too_large"})
+            (400, {"sha256": "wrong", "sizeBytes": -1, "error": "content_sha256_mismatch"}),
+            (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"})
         ]
         def side_effect(req, timeout=30):
             status, body = responses.pop(0)

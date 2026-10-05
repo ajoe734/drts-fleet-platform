@@ -78,12 +78,12 @@ def test_scanner(scanner_url):
     print("Test 3: Hash mismatch")
     status, body = scan(CLEAN, sha256_header="0000000000000000000000000000000000000000000000000000000000000000")
     assert status == 400, f"Expected 400, got {status}: {body}"
-    assert body.get("error") == "hash_mismatch", f"Expected error hash_mismatch, got {body.get('error')}"
+    assert body.get("error") == "content_sha256_mismatch", f"Expected error content_sha256_mismatch, got {body.get('error')}"
 
     print("Test 4: Oversized file")
     status, body = scan(OVERSIZED)
-    assert status == 413 or status == 400, f"Expected 413 or 400, got {status}: {body}"
-    assert body.get("error") == "content_too_large" or body.get("error") == "oversized", f"Expected oversized error, got {body.get('error')}"
+    assert status == 413, f"Expected 413, got {status}: {body}"
+    assert body.get("error") == "payload_too_large", f"Expected payload_too_large error, got {body.get('error')}"
 
     print("Scanner tests passed.")
 
