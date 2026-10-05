@@ -91,11 +91,13 @@ def test_gcs(bucket_name):
     print(f"Testing GCS bucket: {bucket_name}")
     import uuid
     import subprocess
+    import tempfile
 
     test_key = f"verify-test-{int(time.time())}-{uuid.uuid4().hex[:8]}.txt"
     test_file = f"gs://{bucket_name}/{test_key}"
-    temp_in = f"temp_in_{test_key}.txt"
-    temp_out = f"temp_out_{test_key}.txt"
+    temp_dir = tempfile.gettempdir()
+    temp_in = os.path.join(temp_dir, f"temp_in_{test_key}")
+    temp_out = os.path.join(temp_dir, f"temp_out_{test_key}")
 
     test_data = "test data v1"
     test_data_v2 = "test data v2"

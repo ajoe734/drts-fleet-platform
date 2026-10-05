@@ -123,7 +123,11 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
             if "cp" in cmd and "#" in cmd[3] and cmd[3].startswith("gs://"):
                 with open(cmd[4], "w") as f:
-                    if "test data v2" in open("temp_in_" + cmd[3].split("gs://fake-bucket/")[1].split("#")[0] + ".txt", "r").read():
+                    import tempfile
+                    temp_dir = tempfile.gettempdir()
+                    test_key = cmd[3].split("gs://fake-bucket/")[1].split("#")[0]
+                    temp_in_path = os.path.join(temp_dir, "temp_in_" + test_key)
+                    if "test data v2" in open(temp_in_path, "r").read():
                         f.write("test data v1") # It tests old generation download, so it expects v1
                     else:
                         f.write("test data v1")
