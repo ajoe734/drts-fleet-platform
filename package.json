@@ -72,6 +72,7 @@
     ]
   },
   "devDependencies": {
+    "google-auth-library": "^9.14.1",
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.59.1",
     "@testing-library/dom": "^10.4.2",
