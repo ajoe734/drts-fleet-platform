@@ -105,6 +105,44 @@ describe.each(["staging", "production"])(
       );
     });
 
+    it("accepts the verifier's default Google JWKS endpoint", () => {
+      const env = buildGoogleOidcEnv(environment);
+      delete env.OIDC_JWKS_URI;
+      expect(buildAuthStartupConfigReport(env).issues).toEqual([]);
+    });
+
+    it("rejects an insecure Google JWKS override even with a legacy static key", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.OIDC_JWKS_URI = "http://www.googleapis.com/oauth2/v3/certs";
+      env.TENANT_OIDC_JWT_SECRET = VALID_STRONG_SECRET;
+      const report = buildAuthStartupConfigReport(env);
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({ control: "OIDC_JWKS_URI", code: "UNSAFE_VALUE" }),
+      );
+    });
+
+    it("does not bypass a non-Google tenant override's verification requirements", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.TENANT_OIDC_ISSUER = "https://tenant-idp.drts.internal";
+      const report = buildAuthStartupConfigReport(env);
+      expect(report.valid).toBe(false);
+      expect(report.issues.map((issue) => issue.control)).toEqual([
+        "TENANT_OIDC_AUDIENCE",
+        "TENANT_OIDC_JWT_PUBLIC_KEY / TENANT_OIDC_JWT_SECRET",
+      ]);
+    });
+
+    it("rejects a wildcard tenant audience instead of falling back to the Google client", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.TENANT_OIDC_AUDIENCE = "*";
+      const report = buildAuthStartupConfigReport(env);
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({ control: "TENANT_OIDC_AUDIENCE", code: "UNSAFE_VALUE" }),
+      );
+    });
+
     it("still rejects mock authentication with the Google provider configured", () => {
       const env = buildGoogleOidcEnv(environment);
       env.OIDC_MOCK_MODE = "true";
