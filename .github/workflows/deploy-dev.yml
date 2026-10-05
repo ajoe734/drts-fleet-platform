@@ -851,6 +851,12 @@ jobs:
             fi
           fi
 
+          bank_signing_mounts="$(operations/deployment/resolve-bank-signing-secrets.sh "$secret_prefix" "$project_id")"
+          bank_console_secret_args="$web_secret_args,BANK_SESSION_SECRET=${secret_prefix}-jwt-secret:latest"
+          if [[ -n "$bank_signing_mounts" ]]; then
+            bank_console_secret_args="${bank_console_secret_args},${bank_signing_mounts}"
+          fi
+
           echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
           echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
           secret_args="${secret_args}${ARTIFACT_PROVIDER_SECRET_SUFFIX}"
@@ -858,6 +864,7 @@ jobs:
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
           echo "ops=${ops_secret_args}" >> "$GITHUB_OUTPUT"
+          echo "bank_console=${bank_console_secret_args}" >> "$GITHUB_OUTPUT"
           echo "map_provider_mode=${map_provider_mode}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
           echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
@@ -1163,7 +1170,7 @@ jobs:
             --port 3008 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,BANK_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.bank_console }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},BANK_CONSOLE_DEMO_LOGIN=true" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
             --cpu 1 \
