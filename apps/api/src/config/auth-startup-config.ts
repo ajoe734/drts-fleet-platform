@@ -527,7 +527,10 @@ export function buildAuthStartupConfigReport(
     const tenantOidcKey =
       normalizeString(env.TENANT_OIDC_JWT_PUBLIC_KEY) ??
       normalizeString(env.TENANT_OIDC_JWT_SECRET);
-    if (!googleTenantProvider && (!tenantOidcIssuer || !tenantOidcIssuer.startsWith("https://"))) {
+    if (
+      !googleTenantProvider &&
+      (!tenantOidcIssuer || !tenantOidcIssuer.startsWith("https://"))
+    ) {
       issues.push({
         control: "TENANT_OIDC_ISSUER",
         issue:
@@ -544,7 +547,11 @@ export function buildAuthStartupConfigReport(
       });
     }
     const googleJwksUri = normalizeString(env.OIDC_JWKS_URI);
-    if (googleTenantProvider && googleJwksUri && !isStrictOidcUrl(googleJwksUri)) {
+    if (
+      googleTenantProvider &&
+      googleJwksUri &&
+      !isStrictOidcUrl(googleJwksUri)
+    ) {
       issues.push({
         control: "OIDC_JWKS_URI",
         issue:

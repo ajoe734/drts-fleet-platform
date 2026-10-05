@@ -118,7 +118,10 @@ describe.each(["staging", "production"])(
       const report = buildAuthStartupConfigReport(env);
       expect(report.valid).toBe(false);
       expect(report.issues).toContainEqual(
-        expect.objectContaining({ control: "OIDC_JWKS_URI", code: "UNSAFE_VALUE" }),
+        expect.objectContaining({
+          control: "OIDC_JWKS_URI",
+          code: "UNSAFE_VALUE",
+        }),
       );
     });
 
@@ -139,7 +142,10 @@ describe.each(["staging", "production"])(
       const report = buildAuthStartupConfigReport(env);
       expect(report.valid).toBe(false);
       expect(report.issues).toContainEqual(
-        expect.objectContaining({ control: "TENANT_OIDC_AUDIENCE", code: "UNSAFE_VALUE" }),
+        expect.objectContaining({
+          control: "TENANT_OIDC_AUDIENCE",
+          code: "UNSAFE_VALUE",
+        }),
       );
     });
 

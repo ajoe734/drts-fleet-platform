@@ -759,7 +759,9 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
   it("executes logout-all and invalidates all active sessions for the principal", async () => {
     const tenantId = "tenant-demo-001";
-    const activeAdmin = tenantPartnerService.findTenantUserBySubject("sub_oidc_admin_acme")!;
+    const activeAdmin = tenantPartnerService.findTenantUserBySubject(
+      "sub_oidc_admin_acme",
+    )!;
     expect(activeAdmin.status).toBe("active");
     const scopes = [...getTenantRoleScopes(activeAdmin.roleCode)!];
 
@@ -801,41 +803,58 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     // Both sessions are initially valid
+    expect(jwtAuthService.verify(session1.token)).toMatchObject({
+      principalId: activeAdmin.userId,
+      roles: [activeAdmin.roleCode],
+      scopes,
+      tokenVersion: Date.parse(activeAdmin.updatedAt),
+    });
+    expect(
+      await tenantPartnerService.findTenantUserForAuthentication(
+        tenantId,
+        activeAdmin.userId,
+      ),
+    ).toMatchObject(activeAdmin);
+    expect(
+      await identityRepository.getSession(session1.sessionId),
+    ).toMatchObject({ status: "active", tokenVersion: session1.tokenVersion });
     expect(
       await jwtAuthService.verifyAccessToken(session1.token),
-    ).toMatchObject({ actorId: activeAdmin.userId, tenantId });
+    ).toMatchObject({ principalId: activeAdmin.userId, tenantId });
     expect(
       await jwtAuthService.verifyAccessToken(session2.token),
-    ).toMatchObject({ actorId: activeAdmin.userId, tenantId });
+    ).toMatchObject({ principalId: activeAdmin.userId, tenantId });
 
-    const apiFetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const urlStr = input.toString();
-      if (urlStr.includes("/api/auth/logout-all")) {
-        // Model HTTP's conversion from Fetch Headers to Nest's lower-case
-        // header record, including the controller's bearer/CSRF check.
-        const requestHeaders = Object.fromEntries(new Headers(init?.headers));
-        const authHeader = requestHeaders.authorization;
-        const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
-        if (!payload) {
-          return new Response(
-            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
-            { status: 401 },
+    const apiFetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const urlStr = input.toString();
+        if (urlStr.includes("/api/auth/logout-all")) {
+          // Model HTTP's conversion from Fetch Headers to Nest's lower-case
+          // header record, including the controller's bearer/CSRF check.
+          const requestHeaders = Object.fromEntries(new Headers(init?.headers));
+          const authHeader = requestHeaders.authorization;
+          const token = authHeader?.replace("Bearer ", "");
+          const payload = token
+            ? await jwtAuthService.verifyAccessToken(token)
+            : null;
+          if (!payload) {
+            return new Response(
+              JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
+              { status: 401 },
+            );
+          }
+          const identity = jwtAuthService.toRequestIdentity(payload);
+          const res = await authController.logoutAll(
+            identity,
+            { reason: "self_logout_all" },
+            { headers: requestHeaders } as any,
+            "req-e2e-logout-all-001",
           );
+          return new Response(JSON.stringify(res), { status: 200 });
         }
-        const identity = jwtAuthService.toRequestIdentity(payload);
-        const res = await authController.logoutAll(
-          identity,
-          { reason: "self_logout_all" },
-          { headers: requestHeaders } as any,
-          "req-e2e-logout-all-001",
-        );
-        return new Response(JSON.stringify(res), { status: 200 });
-      }
-      return new Response("Not found", { status: 404 });
-    });
+        return new Response("Not found", { status: 404 });
+      });
 
     const csrfToken = generateCsrfToken();
     const logoutAllReq = new NextRequest(
@@ -855,7 +874,10 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     expect(apiFetchSpy).toHaveBeenCalledTimes(1);
-    await expect(apiFetchSpy.mock.results[0]!.value).resolves.toHaveProperty("status", 200);
+    await expect(apiFetchSpy.mock.results[0]!.value).resolves.toHaveProperty(
+      "status",
+      200,
+    );
     expect(logoutAllRes.status).toBe(200);
     const logoutAllData = await logoutAllRes.json();
     expect(logoutAllData.success).toBe(true);
