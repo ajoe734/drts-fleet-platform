@@ -1018,8 +1018,10 @@ export class OwnedMobilityController {
   async updateDriverTaskEta(
     @Param("taskId") taskId: string,
     @Body() command: DriverUpdateEtaCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.updateDriverTaskEta(
       taskId,
       command.etaMinutes,

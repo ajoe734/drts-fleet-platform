@@ -6580,6 +6580,9 @@ export class OwnedMobilityService
     requestId?: string,
   ) {
     const task = this.requireTask(taskId);
+    if (task.status === "arrived_pickup") {
+      return this.cloneTask(task);
+    }
     const order = this.requireOrder(task.orderId);
     this.assertDriverTaskTransition(task, "arrived_pickup");
     task.status = "arrived_pickup";

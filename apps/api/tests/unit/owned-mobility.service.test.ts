@@ -7345,3 +7345,104 @@ describe("UV-EXEC-004: owned-order UoW / CAS transaction primitives", () => {
     expect(service.getOrder(seededOrder.orderId).status).toBe(beforeStatus);
   });
 });
+
+describe("OwnedMobilityService arrival and ETA producers", () => {
+  it("duplicate arrivedPickup call produces only one driver_arrived outbox row", async () => {
+    const persistedChanges: any[] = [];
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async (changes) => {
+        persistedChanges.push(changes);
+      }),
+      withTransaction: vi.fn(async (work) => work({})),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new OwnedMobilityService(
+      {} as any, // regulatoryRegistryService
+      { recordAuditLog: vi.fn() } as any, // auditNotificationService
+      {} as any, // callcenterService
+      { appendDispatchTraceLog: vi.fn(), emitOpsEvent: vi.fn(), notifyPartnerOfSystemEvent: vi.fn(), publishTaskUpdated: vi.fn() } as any, // taskEventsService
+      {} as any, // opsDispatchEventsService
+      repository, // ownedMobilityRepository
+      { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
+    );
+
+    // inject state directly
+    const orderId = "order-arv-1";
+    const taskId = "task-arv-1";
+    service["orders"] = [buildOrderFixture({
+      orderId,
+      status: "enroute_pickup",
+    })] as any;
+    service["driverTasks"] = [{
+      taskId,
+      orderId,
+      status: "enroute_pickup",
+    }] as any;
+
+    // Call first time
+    try {
+      await service.arrivedPickup(taskId, { arrivedAt: new Date().toISOString() });
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+    expect(persistedChanges).toHaveLength(1);
+    expect(persistedChanges[0].consumerNotificationOutbox).toHaveLength(1);
+    expect(persistedChanges[0].consumerNotificationOutbox[0].eventType).toBe("driver_arrived");
+
+    // Call second time
+    await service.arrivedPickup(taskId, { arrivedAt: new Date().toISOString() });
+    
+    // The second call shouldn't trigger another persistChanges with outbox
+    expect(persistedChanges).toHaveLength(1);
+    expect(service["driverTasks"][0].status).toBe("arrived_pickup");
+  });
+
+  it("updateDriverTaskEta respects the debounce threshold (>=3min)", async () => {
+    const persistedChanges: any[] = [];
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async (changes) => {
+        persistedChanges.push(changes);
+      }),
+      withTransaction: vi.fn(async (work) => work({})),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new OwnedMobilityService(
+      {} as any, // regulatoryRegistryService
+      { recordAuditLog: vi.fn() } as any, // auditNotificationService
+      {} as any, // callcenterService
+      { appendDispatchTraceLog: vi.fn(), emitOpsEvent: vi.fn(), notifyPartnerOfSystemEvent: vi.fn(), publishTaskUpdated: vi.fn() } as any, // taskEventsService
+      {} as any, // opsDispatchEventsService
+      repository, // ownedMobilityRepository
+      { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
+    );
+
+    const orderId = "order-eta-1";
+    const taskId = "task-eta-1";
+    service["orders"] = [buildOrderFixture({
+      orderId,
+      status: "enroute_pickup",
+      etaSnapshot: { etaMinutes: 10, calculatedAt: new Date().toISOString() },
+    })] as any;
+    service["driverTasks"] = [{
+      taskId,
+      orderId,
+      status: "enroute_pickup",
+    }] as any;
+
+    // Small change < 3 minutes
+    await service.updateDriverTaskEta(taskId, 12);
+    expect(persistedChanges).toHaveLength(1);
+    expect(persistedChanges[0].consumerNotificationOutbox).toBeUndefined(); // no outbox for 2 min change
+
+    // Large change >= 3 minutes
+    await service.updateDriverTaskEta(taskId, 15);
+    expect(persistedChanges).toHaveLength(2);
+    expect(persistedChanges[1].consumerNotificationOutbox).toHaveLength(1); // outbox generated
+    expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe("eta_changed");
+  });
+});
