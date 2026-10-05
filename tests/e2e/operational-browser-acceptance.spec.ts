@@ -148,6 +148,42 @@ function getIdentityToken(baseUrlEnv?: string): string | undefined {
       process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
     );
   }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL" ||
+    baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN ||
+      process.env.DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_OPS_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_OPS_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_OPS_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL" ||
+    baseUrlEnv === "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN ||
+      process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL" ||
+    baseUrlEnv === "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN ||
+      process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN
+    );
+  }
   return undefined;
 }
 
