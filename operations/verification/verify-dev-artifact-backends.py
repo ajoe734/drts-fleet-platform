@@ -125,7 +125,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
         for key in mutated_keys:
             if key in env_vars:
                 original_env[key] = env_vars[key]
-        
+
         original_max_age = env_vars.get("MAX_SIGNATURE_AGE_MS", "")
         original_clamd_port = env_vars.get("CLAMD_PORT", "")
 
@@ -189,10 +189,15 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             ready = False
             pending_observed = False
             for i in range(max_attempts):
-                status, _ = scan(CLEAN)
+                status, body = scan(CLEAN)
                 if status == 503:
-                    pending_observed = True
+                    if isinstance(body, dict) and body.get("error") == "scan_engine_not_ready":
+                        pending_observed = True
+                    elif pending_observed:
+                        # Already saw pending, this might be another pending or an error
+                        pass
                 elif status == 200:
+                    assert_receipt(body, CLEAN, expected_verdict="clean")
                     ready = True
                     break
                 time.sleep(2)
@@ -222,6 +227,14 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             ])
             logs_fresh = json.loads(res_fresh.stdout) if res_fresh.stdout.strip() else []
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
+
+            print("Test 9: Transport failure after successful readiness")
+            print("  [UNEXECUTED] Genuine transport failure scenario omitted (requires network fault injection after readiness)")
+            unexecuted = True
+
+            print("Test 10: Verified-unchanged daily freshness renewal / actual update / failed refresh / reload")
+            print("  [UNEXECUTED] Daily freshness and update lifecycle scenarios omitted (requires long-running observation or explicit clock/DNS mocks)")
+            unexecuted = True
 
         except Exception as e:
             print(f"Hosted scenario failed: {e}")
@@ -377,16 +390,8 @@ def test_gcs(bucket_name, runtime_sa):
         except subprocess.CalledProcessError as e:
             assert "412" in e.stderr or "Precondition Failed" in e.stderr, f"Absent object with CAS should return 412 Precondition Failed, got: {e.stderr}"
 
-        print("Test 12: Upload with simulated network error")
-        try:
-            # We simulate a network error using a specific flag that the offline test will mock as a 403 error
-            # In hosted mode, we do not want to hit a real non-owned bucket/path.
-            # We'll just run against the real object, but we'll use a mocked network error flag in the test if we could,
-            # or we just rely on the test_gcs_success mock to inject a 403.
-            # But the helper is live. The reviewer said: "exercise 403/network as controlled offline boundary failures in real CAS assertions"
-            pass
-        except Exception:
-            pass
+        print("Test 12: Network fault / permission denial regressions")
+        print("  [UNEXECUTED] Manual fault-injection scenario omitted (requires network/firewall fault injection)")
 
 
     finally:
