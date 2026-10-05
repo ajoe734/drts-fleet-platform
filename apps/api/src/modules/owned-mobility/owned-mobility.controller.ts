@@ -69,6 +69,10 @@ import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
+export class DriverUpdateEtaCommand {
+  etaMinutes!: number;
+}
+
 @Controller()
 export class OwnedMobilityController {
   constructor(
@@ -445,7 +449,10 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.getReferralPassengerReceipt(
+        orderId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -458,7 +465,10 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.getReferralPassengerReceipt(orderId, identity),
+      await this.ownedMobilityService.getReferralPassengerReceipt(
+        orderId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -1000,6 +1010,28 @@ export class OwnedMobilityController {
       requestId,
     );
     return toApiSuccessEnvelope(task, requestId);
+  }
+
+  @Post("driver/tasks/:taskId/update-eta")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
+  async updateDriverTaskEta(
+    @Param("taskId") taskId: string,
+    @Body() command: DriverUpdateEtaCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const task = await this.ownedMobilityService.updateDriverTaskEta(
+      taskId,
+      command.etaMinutes,
+      requestId,
+    );
+    return {
+      status: "success",
+      data: {
+        taskId: task.taskId,
+        status: task.status,
+      },
+    };
   }
 
   @Post("driver/tasks/:taskId/arrived_pickup")
