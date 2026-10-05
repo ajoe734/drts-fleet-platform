@@ -24,18 +24,30 @@ policy_json="$(
     --format=json
 )"
 
-if printf '%s' "$policy_json" | jq -e '
+# `jq -e` exits 0 when the filter's last output is present/true and 1 when
+# it is false/null/absent, but it also exits with other nonzero codes
+# (2, 4, 5, ...) on a compile, parse or runtime error. The policy-is-public
+# check below must tell those apart: a nonzero exit that is NOT "evaluated
+# to false" is a failure to read the policy, not a verified absence, and
+# must fail closed rather than silently skip removal.
+jq_exit=0
+printf '%s' "$policy_json" | jq -e '
       any(.bindings[]?;
         .role == "roles/run.invoker" and
         (.members // [] | any(. == "allUsers"))
       )
-    ' >/dev/null; then
+    ' >/dev/null || jq_exit=$?
+
+if [[ "$jq_exit" -eq 0 ]]; then
   echo "Removing public allUsers run.invoker binding from ${service}."
   gcloud run services remove-iam-policy-binding "$service" \
     --region "$region" \
     --project "$project" \
     --member allUsers \
     --role roles/run.invoker
-else
+elif [[ "$jq_exit" -eq 1 ]]; then
   echo "allUsers run.invoker binding on roles/run.invoker is already absent for ${service}; nothing to remove."
+else
+  echo "Failed to evaluate the IAM policy for ${service} (jq exit ${jq_exit}); refusing to treat this as a verified absence." >&2
+  exit "$jq_exit"
 fi

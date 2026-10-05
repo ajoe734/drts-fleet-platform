@@ -38,6 +38,9 @@ const policyWithoutPublicBinding = JSON.stringify({
 
 const policyWithNoBindingsAtAll = JSON.stringify({ etag: "etag-3", version: 1 });
 
+const malformedPolicyJson = '{"bindings":[';
+const emptyPolicyJson = "";
+
 function runEnforce(options: {
   policyJson: string;
   getIamPolicyExitCode?: number;
@@ -187,6 +190,30 @@ describe("CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005: enforce-no-public-access.sh",
     expect(result.commands).toEqual([
       "run services get-iam-policy drts-dev-platform-admin-web --region us-central1 --project nodal-alloy-503700-s3 --format=json",
       "run services remove-iam-policy-binding drts-dev-platform-admin-web --region us-central1 --project nodal-alloy-503700-s3 --member allUsers --role roles/run.invoker",
+    ]);
+  });
+
+  it("fails closed when the IAM policy JSON is malformed, instead of reporting a verified absence", () => {
+    const result = runEnforce({ policyJson: malformedPolicyJson });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("refusing to treat this as a verified absence");
+    // Must not fall through to the "already absent" success branch, and
+    // must not attempt a removal against an unparseable policy.
+    expect(result.stdout).not.toContain("already absent");
+    expect(result.commands).toEqual([
+      "run services get-iam-policy drts-dev-platform-admin-web --region us-central1 --project nodal-alloy-503700-s3 --format=json",
+    ]);
+  });
+
+  it("fails closed when the IAM policy JSON is empty, instead of reporting a verified absence", () => {
+    const result = runEnforce({ policyJson: emptyPolicyJson });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("refusing to treat this as a verified absence");
+    expect(result.stdout).not.toContain("already absent");
+    expect(result.commands).toEqual([
+      "run services get-iam-policy drts-dev-platform-admin-web --region us-central1 --project nodal-alloy-503700-s3 --format=json",
     ]);
   });
 
