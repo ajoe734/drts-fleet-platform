@@ -9,9 +9,9 @@ remains `a7b406dcacff1588fb41119605e61a71837587a6`. This follow-up adds only
 `infra/gcp/dev/ops-drill/db_credentials.d.mts` and this evidence section;
 runtime parser, tests, workflow and shared TypeScript configuration are unchanged.
 
-| Finding / trigger                                    | Source / change                                                                                                                                             | Old → corrected result                                                             | Command / evidence                                                                                                                                                                                                                                                                | Remaining                                                                                                             |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| H5: strict root typecheck rejects the new ESM import | `restore-drill.test.ts:5` imports `db_credentials.mjs:credentials`; adjacent `.d.mts` declares the string argument and user/password/database string result | Old candidate: TS7016, exit 2; scoped strict compilation after declaration: exit 0 | [typecheck job 111806185685](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37322701240/job/111806185685), [product smoke job 111805830533](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37322701041/job/111805830533); local before/after logs below | Final runtime regression and root check results to be recorded before handoff; same-new-SHA hosted CI/review required |
+| Finding / trigger                                    | Source / change                                                                                                                                             | Old → corrected result                                                                          | Command / evidence                                                                                                                                                                                                                                                                | Remaining                                                                                                       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| H5: strict root typecheck rejects the new ESM import | `restore-drill.test.ts:5` imports `db_credentials.mjs:credentials`; adjacent `.d.mts` declares the string argument and user/password/database string result | Old candidate: TS7016, exit 2; scoped strict compilation after declaration: exit 0; Vitest: 2/2 | [typecheck job 111806185685](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37322701240/job/111806185685), [product smoke job 111805830533](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37322701041/job/111805830533); local before/after logs below | Full local root check still has 13 unrelated worktree-resolution errors; same-new-SHA hosted CI/review required |
 
 Machine evidence: `.local/sr-live-ops-001/ci-repair-20261005/`.
 Both hosted logs were retrieved with `gh api --allow-escape-sequences
@@ -31,6 +31,30 @@ TS2345 errors in unrelated fleet-list tests: shared dependency symlinks resolve
 Those extra errors do not appear in either hosted failure log. This environment
 limitation is tracked separately and must not be represented as a full local
 typecheck pass.
+
+Final checks on the declaration committed in `8f9005afb` (TypeScript 5.9.3,
+Vitest 4.1.4); subsequent changes affect this document only:
+
+- Scoped strict `tsc` above: **exit 0**, `typecheck-scoped-after.log`.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts`:
+  **exit 0, 2/2**, 30.64s, `vitest-after.log`. This executes the same Python
+  orchestration regression and real pg-driver credential comparison documented
+  below, without cloud, database or browser connections.
+- `pnpm run typecheck:root`: **exit 2**, `typecheck-root-after.log`. A comparison
+  of actual diagnostic lines confirms that TS7016 was removed and the remaining
+  13 TS2345 diagnostics are identical before/after; comparison **exit 0**,
+  `typecheck-comparison.txt`. Full repository typecheck is not claimed passed.
+- `pnpm exec prettier --check infra/gcp/dev/ops-drill/db_credentials.d.mts
+docs/04-uat/system-remediation-20260906/SR-LIVE-OPS-001.md`,
+  `git diff --check`, and commit-trailer validation: **exit 0**.
+- `git fetch origin && git merge origin/dev`: **exit 0**, already up to date
+  with the baseline above. Published commits are preserved.
+
+Old candidate CI: main CI run `37322701041` completed **failure**; integration
+run `37322701240` has the confirmed typecheck failure, with unit, build,
+integration, IAM and cross-surface jobs successful. Its UI-route job was still
+pending when evidence was collected and is not claimed passed. New-candidate
+hosted CI is tracked independently through the existing PR/GitHub bus.
 
 H1–H4 and the five required acceptance keys in the next section remain in force.
 This declaration repair supplies no new live evidence; operator readiness at
