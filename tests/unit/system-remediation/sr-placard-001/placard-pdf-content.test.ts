@@ -69,10 +69,7 @@ function extractPdfTextLines(bytes: Buffer): string[] {
   while ((match = tjPattern.exec(content)) !== null) {
     const raw = match[1] ?? "";
     lines.push(
-      raw
-        .replace(/\\\(/g, "(")
-        .replace(/\\\)/g, ")")
-        .replace(/\\\\/g, "\\"),
+      raw.replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\\\\/g, "\\"),
     );
   }
   return lines;
@@ -104,7 +101,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     );
 
     // Generate a placard linked to this disclosure
-    const placard = platformAdminService.generatePlacardVersion({
+    const placard = await platformAdminService.generatePlacardVersion({
       versionCode: "placard-2026-hualien-q3",
       publicInfoVersionId: publicInfo.versionId,
       templateName: "seatback-hualien-standard",
@@ -115,12 +112,12 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
 
     // Verify round-trip download via ControlledDownloadController
     const controller = new ControlledDownloadController(store);
-    const file = resolve(
+    const file = (await resolve(
       controller,
       "placard",
       placard.placardVersionId,
       paramsOf(placard.artifactDownloadUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
 
     expect(file.getHeaders().type).toBe("application/pdf");
     const bytes = await drain(file.getStream());
@@ -146,9 +143,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     expect(pdfLines.join("\n")).toContain(
       `Placard ID: ${placard.placardVersionId}`,
     );
-    expect(pdfLines.join("\n")).toContain(
-      `Template: ${placard.templateName}`,
-    );
+    expect(pdfLines.join("\n")).toContain(`Template: ${placard.templateName}`);
     expect(pdfLines.join("\n")).toContain(
       `Public Info Source: Hualien County DRTS Public Service (${publicInfo.versionId})`,
     );
@@ -199,13 +194,13 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
       "platform-admin-test",
     );
 
-    const placard = platformAdminService.generatePlacardVersion({
+    const placard = await platformAdminService.generatePlacardVersion({
       versionCode: "placard-2026-cjk-001",
       publicInfoVersionId: publicInfo.versionId,
       templateName: "seatback-cjk-default",
     });
 
-    const stored = store.get("placard", placard.placardVersionId);
+    const stored = await store.get("placard", placard.placardVersionId);
     expect(stored).not.toBeNull();
 
     // Ensure all bytes are single-byte Latin-1 code points [0x20, 0x7e] or newline
@@ -216,9 +211,15 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
 
     const pdfLines = extractPdfTextLines(stored!.bytes);
     // Non-ASCII characters are replaced with '?' rather than corrupting PDF literal strings
-    expect(pdfLines.join("\n")).toContain(`Version Code: ${placard.versionCode}`);
-    expect(pdfLines.join("\n")).toContain("Booking / Dispatch Phone: 0800-888-999");
-    expect(pdfLines.join("\n")).toContain("Customer Complaint Hotline: 0800-111-222");
+    expect(pdfLines.join("\n")).toContain(
+      `Version Code: ${placard.versionCode}`,
+    );
+    expect(pdfLines.join("\n")).toContain(
+      "Booking / Dispatch Phone: 0800-888-999",
+    );
+    expect(pdfLines.join("\n")).toContain(
+      "Customer Complaint Hotline: 0800-111-222",
+    );
     expect(pdfLines.join("\n")).toContain(
       `Effective Period: 2026-07-01T00:00:00.000Z to indefinite`,
     );
@@ -227,8 +228,12 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
   it("preserves seed placard bytes in store so demo placard is immediately downloadable", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
+    // Seed placards are materialised in onModuleInit (not the constructor,
+    // which cannot await the now-async DOCUMENT_ARTIFACT_STORE) -- exactly
+    // what a real Nest app boot always runs before serving any request.
+    await platformAdminService.onModuleInit();
 
-    const placards = platformAdminService.listPlacardVersions();
+    const placards = await platformAdminService.listPlacardVersions();
     const demoPlacard = placards.find(
       (p) => p.placardVersionId === "placard-demo-001",
     );
@@ -236,12 +241,12 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     expect(demoPlacard?.artifactDownloadUrl).toBeTruthy();
 
     const controller = new ControlledDownloadController(store);
-    const file = resolve(
+    const file = (await resolve(
       controller,
       "placard",
       demoPlacard!.placardVersionId,
       paramsOf(demoPlacard!.artifactDownloadUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
 
     expect(file.getHeaders().type).toBe("application/pdf");
     const bytes = await drain(file.getStream());

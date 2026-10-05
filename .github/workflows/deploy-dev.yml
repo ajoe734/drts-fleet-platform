@@ -644,8 +644,22 @@ jobs:
         with:
           project_id: ${{ needs.prepare.outputs.project_id }}
 
+      - name: Resolve configured artifact providers
+        id: artifact_providers
+        env:
+          DEV_PROVIDER_CONFIG_JSON: ${{ toJSON(vars) }}
+          PROVIDER_PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          PROVIDER_SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+        run: |
+          python3 operations/deployment/resolve-dev-artifact-providers.py \
+            --project "$PROVIDER_PROJECT_ID" \
+            --secret-prefix "$PROVIDER_SECRET_PREFIX" \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Resolve API secret mounts
         id: api_secrets
+        env:
+          ARTIFACT_PROVIDER_SECRET_SUFFIX: ${{ steps.artifact_providers.outputs.secret_suffix }}
         run: |
           set -euo pipefail
 
@@ -839,6 +853,7 @@ jobs:
 
           echo "jwt_issuer=${jwt_issuer}" >> "$GITHUB_OUTPUT"
           echo "jwt_audience=${jwt_audience}" >> "$GITHUB_OUTPUT"
+          secret_args="${secret_args}${ARTIFACT_PROVIDER_SECRET_SUFFIX}"
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
           echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "referral_embed=${referral_embed_secret_args}" >> "$GITHUB_OUTPUT"
@@ -869,6 +884,8 @@ jobs:
 
       - name: Build API env vars
         id: api_env
+        env:
+          ARTIFACT_PROVIDER_ENV_SUFFIX: ${{ steps.artifact_providers.outputs.env_suffix }}
         run: |
           set -euo pipefail
 
@@ -908,11 +925,21 @@ jobs:
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          # Dev API only: seed the fixed live-map-observer principal and its
+          # read-only ops_observer membership. Never enable in staging/prod
+          # or shared web env vars; Google proof is still required for issuance.
+          env_vars="${env_vars}@DRTS_E2E_PROVISIONING=true"
           # Enable the durable SMTP outbox only with the complete secret set.
           if [[ "${{ steps.api_secrets.outputs.notification_outbox_type }}" == "postgres" ]]; then
             env_vars="${env_vars}@NOTIFICATION_OUTBOX_TYPE=postgres"
           fi
           # End SMTP outbox selection.
+          # Mail links lead to the authenticated console, never signed artifacts.
+          invoice_mail_portal_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
+          invoice_mail_portal_origin="${invoice_mail_portal_origin:-$tenant_console_cloud_run_origin}"
+          if [[ -n "$invoice_mail_portal_origin" ]]; then
+            env_vars="${env_vars}@INVOICE_MAIL_PORTAL_ORIGIN=${invoice_mail_portal_origin}"
+          fi
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -929,6 +956,7 @@ jobs:
             fi
           fi
 
+          env_vars="${env_vars}${ARTIFACT_PROVIDER_ENV_SUFFIX}"
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
@@ -1028,6 +1056,24 @@ jobs:
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
+      # `gcloud run deploy --no-allow-unauthenticated` controls whether this
+      # deploy *grants* the allUsers run.invoker binding; it does not
+      # reliably retract a binding a prior deploy (or a manual grant) already
+      # added. Make the retraction explicit so a future accidental or
+      # temporary flip of this service's *_ALLOW_UNAUTHENTICATED variable
+      # back to true cannot leave it silently public after the flag is
+      # turned false again. `gcloud run services remove-iam-policy-binding`
+      # is NOT idempotent: it exits non-zero (IamPolicyBindingNotFound) when
+      # the binding is already absent, so enforce-no-public-access.sh checks
+      # the policy first and only removes a binding that is actually present.
+      - name: Enforce no public access — platform-admin-web
+        if: ${{ needs.prepare.outputs.platform_admin_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.platform_admin_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
       - name: Deploy — ops-console-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
@@ -1049,6 +1095,14 @@ jobs:
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
+      - name: Enforce no public access — ops-console-web
+        if: ${{ needs.prepare.outputs.ops_console_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.ops_console_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
       - name: Deploy — fleet-partner-portal-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
@@ -1069,6 +1123,14 @@ jobs:
             --min-instances 0 \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Enforce no public access — fleet-partner-portal-web
+        if: ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — tenant-console-web
         run: |
@@ -1174,6 +1236,14 @@ jobs:
             --min-instances 0 \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Enforce no public access — channel-partner-portal-web
+        if: ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
 
   paused-partner-booking-cleanup:
     name: Enforce Partner Booking paused state
@@ -1365,17 +1435,69 @@ jobs:
           id_token_audience: ${{ steps.urls.outputs.enterprise_dispatch }}
           id_token_include_email: true
 
+      - name: Mint identity token — platform admin
+        id: id_token_platform_admin
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.platform_admin }}
+          id_token_include_email: true
+
+      - name: Mint identity token — ops console
+        id: id_token_ops_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.ops_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — fleet partner portal
+        id: id_token_fleet_partner_portal
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.fleet_partner_portal }}
+          id_token_include_email: true
+
+      - name: Mint identity token — channel partner portal
+        id: id_token_channel_partner_portal
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.channel_partner_portal }}
+          id_token_include_email: true
+
       - name: Verify dev endpoints
         env:
           TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
           BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}
           ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}
+          PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
+          OPS_CONSOLE_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_fleet_partner_portal.outputs.id_token }}
+          CHANNEL_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_channel_partner_portal.outputs.id_token }}
         run: |
           echo "::add-mask::${TENANT_CONSOLE_ID_TOKEN}"
           echo "::add-mask::${BANK_CONSOLE_ID_TOKEN}"
           echo "::add-mask::${ENTERPRISE_DISPATCH_ID_TOKEN}"
+          echo "::add-mask::${PLATFORM_ADMIN_ID_TOKEN}"
+          echo "::add-mask::${OPS_CONSOLE_ID_TOKEN}"
+          echo "::add-mask::${FLEET_PARTNER_PORTAL_ID_TOKEN}"
+          echo "::add-mask::${CHANNEL_PARTNER_PORTAL_ID_TOKEN}"
 
-          for name in TENANT_CONSOLE_ID_TOKEN BANK_CONSOLE_ID_TOKEN ENTERPRISE_DISPATCH_ID_TOKEN; do
+          for name in TENANT_CONSOLE_ID_TOKEN BANK_CONSOLE_ID_TOKEN ENTERPRISE_DISPATCH_ID_TOKEN PLATFORM_ADMIN_ID_TOKEN OPS_CONSOLE_ID_TOKEN FLEET_PARTNER_PORTAL_ID_TOKEN CHANNEL_PARTNER_PORTAL_ID_TOKEN; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is empty; identity token minting failed upstream." >&2
               exit 1
@@ -1398,9 +1520,9 @@ jobs:
           }
 
           curl_ready "${{ steps.urls.outputs.api }}/health" >/dev/null
-          curl_ready "${{ steps.urls.outputs.platform_admin }}" >/dev/null
-          curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
-          curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.platform_admin }}" "${PLATFORM_ADMIN_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.ops_console }}" "${OPS_CONSOLE_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.fleet_partner_portal }}" "${FLEET_PARTNER_PORTAL_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.tenant_console }}" "${TENANT_CONSOLE_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.bank_console }}" "${BANK_CONSOLE_ID_TOKEN}" >/dev/null
           referral_embed_path="/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
@@ -1413,7 +1535,7 @@ jobs:
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
-          curl_ready "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.channel_partner_portal }}" "${CHANNEL_PARTNER_PORTAL_ID_TOKEN}" >/dev/null
 
       - name: Re-authenticate to GCP (restore access-token credentials)
         uses: google-github-actions/auth@v2
@@ -1924,6 +2046,50 @@ jobs:
           id_token_audience: ${{ needs.health-check.outputs.enterprise_dispatch }}
           id_token_include_email: true
 
+      - name: Mint identity token — platform admin (operational candidate)
+        id: id_token_platform_admin
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.platform_admin }}
+          id_token_include_email: true
+
+      - name: Mint identity token — ops console (operational candidate)
+        id: id_token_ops_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.ops_console }}
+          id_token_include_email: true
+
+      - name: Mint identity token — fleet partner portal (operational candidate)
+        id: id_token_fleet_partner_portal
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.fleet_partner_portal }}
+          id_token_include_email: true
+
+      - name: Mint identity token — channel partner portal (operational candidate)
+        id: id_token_channel_partner_portal
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.channel_partner_portal }}
+          id_token_include_email: true
+
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
@@ -1948,6 +2114,10 @@ jobs:
           DRTS_DEV_TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
           DRTS_DEV_BANK_CONSOLE_ID_TOKEN: ${{ steps.id_token_bank_console.outputs.id_token }}
           DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}
+          DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
+          DRTS_DEV_OPS_CONSOLE_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_fleet_partner_portal.outputs.id_token }}
+          DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_channel_partner_portal.outputs.id_token }}
         run: |
           set -euo pipefail
           # Deleted Cloud Run services retain their service hostname; the control

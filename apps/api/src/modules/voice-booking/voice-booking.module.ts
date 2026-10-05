@@ -6,6 +6,7 @@ import { VoiceBookingDraftService } from "./voice-booking-draft.service";
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { IdempotencyModule } from "../../common/idempotency";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
@@ -28,6 +29,10 @@ import { VoiceRetentionService } from "./voice-retention.service";
 import { VoiceUsageService } from "./voice-usage.service";
 import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 import { VoiceBookingController } from "./voice-booking.controller";
+import {
+  VoiceCapabilityService,
+  VoiceCapabilityGuard,
+} from "../../common/auth";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -38,9 +43,11 @@ import { VoiceBookingController } from "./voice-booking.controller";
  * (SD §7.4/§7.5).
  */
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule, IdempotencyModule],
   controllers: [VoiceBookingController],
   providers: [
+    VoiceCapabilityService,
+    VoiceCapabilityGuard,
     OwnedMobilityRepository,
     VoiceBookingCommandService,
     VoiceCommandRunnerService,

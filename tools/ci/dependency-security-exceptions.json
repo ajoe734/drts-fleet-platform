@@ -1,0 +1,232 @@
+[
+  {
+    "advisory_id": "1117015",
+    "module_name": "postcss",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "8.4.49"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro-config>postcss"
+    ]
+  },
+  {
+    "advisory_id": "1119441",
+    "module_name": "uuid",
+    "reason": "exceljs uses uuid v4 which is unaffected by this v3/v5/v6 vulnerability. Mobile expo path is build-time only.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "7.0.3",
+      "8.3.2"
+    ],
+    "paths": [
+      "apps__api>exceljs>uuid",
+      "apps__driver-app>expo>@expo/config-plugins>xcode>uuid"
+    ]
+  },
+  {
+    "advisory_id": "1120422",
+    "module_name": "shell-quote",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.8.3"
+    ],
+    "paths": [
+      "apps__driver-app>react-native>react-devtools-core>shell-quote"
+    ]
+  },
+  {
+    "advisory_id": "1123260",
+    "module_name": "ws",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "7.5.10"
+    ],
+    "paths": [
+      "apps__driver-app>react-native>@react-native/community-cli-plugin>metro>ws"
+    ]
+  },
+  {
+    "advisory_id": "1123261",
+    "module_name": "ws",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "6.2.3"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/cli>@react-native/dev-middleware>ws"
+    ]
+  },
+  {
+    "advisory_id": "1123492",
+    "module_name": "protobufjs",
+    "reason": "Google GenAI SDK dependency (internal tooling/codegen, not runtime parsing untrusted protos)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "7.6.2"
+    ],
+    "paths": [
+      "apps__api>openclaw>@google/genai>protobufjs"
+    ]
+  },
+  {
+    "advisory_id": "1123528",
+    "module_name": "@babel/core",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "7.29.0"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/cli>@expo/image-utils>@expo/require-utils>@babel/core"
+    ]
+  },
+  {
+    "advisory_id": "1123944",
+    "module_name": "shell-quote",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.8.3"
+    ],
+    "paths": [
+      "apps__driver-app>react-native>react-devtools-core>shell-quote"
+    ]
+  },
+  {
+    "advisory_id": "1123964",
+    "module_name": "protobufjs",
+    "reason": "Google GenAI SDK dependency (internal tooling/codegen, not runtime parsing untrusted protos)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "7.6.2"
+    ],
+    "paths": [
+      "apps__api>openclaw>@google/genai>protobufjs"
+    ]
+  },
+  {
+    "advisory_id": "1123976",
+    "module_name": "body-parser",
+    "reason": "Vulnerability requires an invalid supplied limit. NestJS defaults to platform-express defaults (100kb), without limit override, rendering this unreachable.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "2.2.2"
+    ],
+    "paths": [
+      "apps__api>@nestjs/platform-express>express>body-parser"
+    ]
+  },
+  {
+    "advisory_id": "1124252",
+    "module_name": "postcss",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "8.4.49"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro-config>postcss"
+    ]
+  },
+  {
+    "advisory_id": "1130709",
+    "module_name": "postcss",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "8.4.49"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro-config>postcss"
+    ]
+  },
+  {
+    "advisory_id": "1139322",
+    "module_name": "@hono/node-server",
+    "reason": "Windows serve-static specific path traversal. API docker image is node:22-alpine. Not applicable to deployed Linux container.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.19.14"
+    ],
+    "paths": [
+      "apps__api>openclaw>@modelcontextprotocol/sdk>@hono/node-server"
+    ]
+  },
+  {
+    "advisory_id": "1139510",
+    "module_name": "postcss",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "8.4.49"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro-config>postcss"
+    ]
+  },
+  {
+    "advisory_id": "1147955",
+    "module_name": "decode-uri-component",
+    "reason": "Graph inclusion only. Expo-router's getStateFromPath-forks.js replaces queryString.parse with new URL().searchParams. Vulnerable code path is commented out and unreachable.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "0.2.2"
+    ],
+    "paths": [
+      "apps__driver-app>expo-router>query-string>decode-uri-component"
+    ]
+  },
+  {
+    "advisory_id": "1239765",
+    "module_name": "image-size",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.2.1"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro>metro>image-size"
+    ]
+  },
+  {
+    "advisory_id": "1239766",
+    "module_name": "image-size",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.2.1"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro>metro>image-size"
+    ]
+  },
+  {
+    "advisory_id": "1240912",
+    "module_name": "node-forge",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.4.0"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/cli>node-forge"
+    ]
+  },
+  {
+    "advisory_id": "1240992",
+    "module_name": "braces",
+    "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "3.0.3"
+    ],
+    "paths": [
+      "apps__driver-app>expo>@expo/metro>metro-file-map>micromatch>braces"
+    ]
+  }
+]

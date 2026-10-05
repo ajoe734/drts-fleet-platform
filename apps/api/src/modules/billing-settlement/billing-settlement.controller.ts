@@ -56,6 +56,7 @@ import {
   IdempotencyService,
 } from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { authorizeInvoiceTenant } from "./invoice-mail.service";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -129,24 +130,26 @@ export class BillingSettlementController {
   getTenantBillingProfile(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.getTenantBillingProfile(
-        this.requireTenantId(tenantId),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
       ),
       requestId,
     );
   }
 
   @Post("tenant/billing/profile")
-  updateTenantBillingProfile(
+  async updateTenantBillingProfile(
     @Body() command: UpdateTenantBillingProfileCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.updateTenantBillingProfile(
-        this.requireTenantId(tenantId),
+      await this.billingSettlementService.updateTenantBillingProfile(
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:write"),
         command,
         requestId,
       ),
@@ -159,10 +162,11 @@ export class BillingSettlementController {
     @Body() command: GenerateTenantInvoiceCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
       await this.billingSettlementService.generateTenantInvoice(
-        this.requireTenantId(tenantId),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:write"),
         command,
         requestId,
       ),
@@ -243,25 +247,27 @@ export class BillingSettlementController {
   }
 
   @Get("tenant/invoices")
-  listTenantInvoices(
+  async listTenantInvoices(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
-    const data = this.billingSettlementService.listTenantInvoicesRuntime(
-      this.requireTenantId(tenantId),
+    const data = await this.billingSettlementService.listTenantInvoicesFresh(
+      authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
     );
     return toApiSuccessEnvelope(data, requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")
-  getTenantInvoice(
+  async getTenantInvoice(
     @Param("invoiceId") invoiceId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getTenantInvoice(
-        this.requireTenantId(tenantId),
+      await this.billingSettlementService.getTenantInvoiceFresh(
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
         invoiceId,
       ),
       requestId,
@@ -631,11 +637,15 @@ export class BillingSettlementController {
   }
 
   @Post("reimbursements/:batchId/pay")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
   async markReimbursementPaid(
     @Param("batchId") batchId: string,
     @Body() command: MarkReimbursementPaidCommand,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     const scope = `billing:reimbursement_batch:${batchId}:pay`;
     const result = await this.idempotencyService.execute({
@@ -652,6 +662,8 @@ export class BillingSettlementController {
           batchId,
           command,
           requestId,
+          idempotencyKey,
+          identity ?? null,
         );
         return {
           data,
@@ -758,18 +770,37 @@ export class BillingSettlementController {
         stagedContentRef: command.stagedContentRef,
       },
       execute: async () => {
-        const data = await this.billingSettlementService.uploadRemittanceProof(
-          command,
+        const uploaded =
+          await this.billingSettlementService.uploadRemittanceProof(
+            command,
+            identity ?? null,
+            requestId,
+          );
+        // Scan actual persisted bytes. Failure keeps the committed upload and
+        // pending state, rather than losing its ID or fabricating a clean result.
+        const data = await this.billingSettlementService.scanRemittanceProof(
+          uploaded.proofId,
           identity ?? null,
           requestId,
+          true,
         );
-        return {
-          data,
-          statusCode: 200,
-        };
+        return { data, statusCode: 200 };
       },
     });
     return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Get("reimbursements/:batchId/proof")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:read")
+  async getReimbursementProof(
+    @Param("batchId") batchId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.getReimbursementProof(batchId),
+      requestId,
+    );
   }
 
   @Get("reimbursements/proofs/:proofId")
@@ -801,6 +832,26 @@ export class BillingSettlementController {
         requestId,
       );
     return toApiSuccessEnvelope(data, requestId);
+  }
+
+  /** Explicit, retryable real-scanner execution; a caller cannot submit a verdict. */
+  @Post("reimbursements/proofs/:proofId/scan")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async scanRemittanceProof(
+    @Param("proofId") proofId: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.scanRemittanceProof(
+        proofId,
+        identity ?? null,
+        requestId,
+      ),
+      requestId,
+    );
   }
 
   @Post("reimbursements/:batchId/pay-with-proof")

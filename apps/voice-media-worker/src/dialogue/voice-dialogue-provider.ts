@@ -7,6 +7,19 @@ export interface VoiceDialogueRequest {
   sessionId: string;
   turnId: string;
   inputEpoch: number;
+  /** The session's media-authority epoch (SD §5.4) at the moment this
+   * turn's triggering transcript was captured -- distinct from
+   * `inputEpoch` (Codex reopen round 2/3, R2): `inputEpoch` only tracks
+   * ASR-input supersession (a newer final, a barge-in), never a
+   * handoff/reconnect media-authority change, which can land mid-turn
+   * without ever touching `inputEpoch`. Checked alongside it at every
+   * commit/tool-execution gate so an obsolete proposal can never mutate
+   * state or run tools under a media owner it was never captured for.
+   * Optional: a caller with no media-authority concept of its own (e.g.
+   * an existing unit test driving `VoiceDialogueEngine` directly) may
+   * omit it, which skips this specific check -- see `currentMediaEpoch`
+   * on `runVoiceDialogue`/`VoiceDialogueEngine.turn`. */
+  mediaEpoch?: number;
   segmentIds: readonly string[];
   transcript: string;
   verifiedContext: Readonly<Record<string, unknown>>;
@@ -20,12 +33,17 @@ export interface VoiceDialogueProvider {
   propose(request: VoiceDialogueRequest): Promise<unknown>;
 }
 
-/** Bounds even transports that ignore AbortSignal; late results never escape. */
+/** Bounds even transports that ignore AbortSignal; late results never escape.
+ * `currentMediaEpoch`, when supplied, fences a media-authority change the
+ * same way `currentEpoch` fences ASR-input supersession (Codex reopen
+ * round 2/3, R2) -- optional so an existing caller with no media-authority
+ * concept of its own is unaffected. */
 export async function runVoiceDialogue(
   provider: VoiceDialogueProvider,
   request: VoiceDialogueRequest,
   currentEpoch: () => number,
   production: boolean,
+  currentMediaEpoch?: () => number,
 ): Promise<VoiceDialogueOutput> {
   if (production && provider.mode !== "live")
     throw new Error("voice_fixture_forbidden");
@@ -54,7 +72,11 @@ export async function runVoiceDialogue(
         return provider.propose({ ...request, signal: controller.signal });
       }),
     ]);
-    if (controller.signal.aborted || request.inputEpoch !== currentEpoch())
+    if (
+      controller.signal.aborted ||
+      request.inputEpoch !== currentEpoch() ||
+      (currentMediaEpoch && request.mediaEpoch !== currentMediaEpoch())
+    )
       throw new Error("voice_stale_epoch");
     const output = voiceDialogueOutputSchema.parse(result);
     for (const slot of output.slots) {

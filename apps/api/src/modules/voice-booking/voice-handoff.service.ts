@@ -75,6 +75,15 @@ export interface InitiateHandoffCommand {
   callerPhone?: string;
 }
 
+/** Internal turn authority, not a caller-supplied HTTP command. The signal is
+ * bounded by the gateway's deadline and must reach the final pre-CAS boundary. */
+export interface HandoffTurnAdmission {
+  readonly signal: AbortSignal;
+  readonly inputEpoch: number;
+  readonly resourceScopeId: string;
+  readonly routeProfileVersion: number;
+}
+
 export interface InitiateHandoffResult {
   session: VoiceSessionRecord;
   handoffId: string;
@@ -178,15 +187,35 @@ export class VoiceHandoffService {
    */
   async initiateHandoff(
     command: InitiateHandoffCommand,
+    admission?: HandoffTurnAdmission,
   ): Promise<InitiateHandoffResult> {
+    admission?.signal.throwIfAborted();
     const session = await this.sessionRepository.findSessionById(
       command.voiceSessionId,
     );
+    // Promise.race in the gateway does not cancel this continuation. Check
+    // after the actual repository await, not merely in the caller's port.
+    admission?.signal.throwIfAborted();
     if (!session) {
       throw new ApiRequestError(
         404,
         "VOICE_SESSION_NOT_FOUND",
         `Voice session '${command.voiceSessionId}' not found.`,
+      );
+    }
+
+    if (admission && (
+      session.voiceSessionId !== command.voiceSessionId ||
+      session.resourceScopeId !== admission.resourceScopeId ||
+      session.routeProfileVersion !== admission.routeProfileVersion ||
+      session.inputEpoch !== admission.inputEpoch ||
+      session.controlOwner !== "ai" ||
+      session.dialogState === "closed"
+    )) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_DRAFT_STALE",
+        "The admitted handoff turn no longer owns this session input.",
       );
     }
 
@@ -219,6 +248,11 @@ export class VoiceHandoffService {
 
     const nextLeaseEpoch = session.leaseEpoch + 1;
 
+    // Last cancellable boundary: no await between this check and starting CAS.
+    // Once CAS has been sent, abort cannot prove rollback. A successful CAS
+    // must still complete its handoff/queue result; never drop accepted work
+    // merely because the gateway has stopped awaiting this operation.
+    admission?.signal.throwIfAborted();
     // Atomic CAS transfer of controlOwner to coordinator with new leaseEpoch
     const updatedSession = await this.sessionRepository.casUpdateSessionControl(
       session.voiceSessionId,

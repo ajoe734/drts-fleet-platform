@@ -63,8 +63,11 @@ import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
+  DOCUMENT_ARTIFACT_REBUILD_REGISTRY,
   DOCUMENT_ARTIFACT_STORE,
   InMemoryDocumentArtifactStore,
+  type DocumentArtifactRebuildRegistry,
+  type DocumentArtifactRecord,
   type DocumentArtifactStore,
 } from "../../common/document-artifacts";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -750,7 +753,23 @@ export class BillingSettlementService implements OnModuleInit {
     private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
     @Optional()
     private readonly remittanceProofService: RemittanceProofService = new RemittanceProofService(),
-  ) {}
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
+    documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
+  ) {
+    // Registered unconditionally (not gated on a repository being present):
+    // `this.tenantInvoices` / `this.driverStatements` are populated either
+    // way -- from seed data, from a prior `generate*` call in this process,
+    // or (see `onModuleInit`) from the shared repository -- and a rebuilder
+    // must answer "no such subjectId on this instance" rather than throw
+    // when there genuinely is none, which it already does below.
+    documentArtifactRebuildRegistry?.register("tenant-invoice", (subjectId) =>
+      this.rebuildTenantInvoiceArtifact(subjectId),
+    );
+    documentArtifactRebuildRegistry?.register("report", (subjectId) =>
+      this.rebuildDriverStatementArtifact(subjectId),
+    );
+  }
 
   async getMultiTaxiPaymentException(
     orderId: string,
@@ -1368,7 +1387,7 @@ export class BillingSettlementService implements OnModuleInit {
     const now = new Date().toISOString();
     const invoiceId = `invoice-${randomUUID()}`;
     const billingProfile = this.requireTenantBillingProfile(command.tenantId);
-    const artifactRecord = this.documentArtifactStore.put({
+    const artifactRecord = await this.documentArtifactStore.put({
       kind: "tenant-invoice",
       subjectId: invoiceId,
       mimeType: "application/pdf",
@@ -1610,58 +1629,39 @@ export class BillingSettlementService implements OnModuleInit {
   /**
    * Makes a stored invoice's download link trustworthy before it is handed
    * back to a caller: reissues the signed link if its time window has
-   * lapsed, and re-renders + re-stores the PDF from this invoice's own
-   * persisted snapshot if `DocumentArtifactStore` no longer has bytes
-   * matching the link's manifest hash (the store is in-memory only per
-   * SR-ARTIFACT-001, so a process restart empties it while the invoice
-   * record itself survives via the repository).
+   * lapsed. `DOCUMENT_ARTIFACT_STORE` is now a durable, shared backend (see
+   * `document-artifact-runtime.config.ts`): the exact bytes `put` there at
+   * issuance survive a restart and are visible from every instance, so
+   * there is no need to re-check the store on every read, and -- critically
+   * -- no need to ever re-render from this tenant's *current* billing
+   * profile just to answer a list/get call. `invoice.artifactDownloadMetadata
+   * .manifestHash` is the permanent proof of what was actually stored; only
+   * the signature/expiry window is ever recomputed here, over that same
+   * unchanged hash.
    *
-   * Only the link is ever recomputed here -- `createdAt` (the invoice's
-   * actual issuance date), `lines`, and `amount` are read, never
-   * recalculated, so viewing this invoice on a later date can never change
-   * what it says was issued or owed.
+   * If the durable store genuinely lost the bytes behind this hash (not a
+   * restart -- an actual deletion), `ControlledDownloadController`'s own
+   * registered rebuilder (`rebuildTenantInvoiceArtifact`) is the fallback,
+   * and it re-renders from the CURRENT billing profile on purpose: a
+   * mismatch against this invoice's immutable manifest hash is then reported
+   * as a genuine content mismatch, not silently served.
+   *
+   * `createdAt` (the invoice's actual issuance date), `lines`, and `amount`
+   * are read, never recalculated, so viewing this invoice on a later date
+   * can never change what it says was issued or owed.
    */
   private ensureTenantInvoiceArtifact(
     invoice: StoredTenantInvoice,
   ): StoredTenantInvoice {
-    const stored = this.documentArtifactStore.get(
-      "tenant-invoice",
-      invoice.invoiceId,
-    );
-    const materialised =
-      stored?.record.sha256 === invoice.artifactDownloadMetadata.manifestHash;
     const expired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
-
-    if (materialised && !expired) {
+    if (!expired) {
       return invoice;
     }
-
-    const record = materialised
-      ? stored!.record
-      : this.documentArtifactStore.put({
-          kind: "tenant-invoice",
-          subjectId: invoice.invoiceId,
-          mimeType: "application/pdf",
-          bytes: buildMinimalPdf(
-            buildTenantInvoicePdfRows({
-              invoiceId: invoice.invoiceId,
-              tenantId: invoice.tenantId,
-              billingProfile: this.requireTenantBillingProfile(
-                invoice.tenantId,
-              ),
-              periodStart: invoice.periodStart,
-              periodEnd: invoice.periodEnd,
-              amount: invoice.amount,
-              lines: invoice.lines,
-              generatedAt: invoice.createdAt,
-            }),
-          ),
-        });
 
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "tenant-invoice",
       subjectId: invoice.invoiceId,
-      manifestHash: record.sha256,
+      manifestHash: invoice.artifactDownloadMetadata.manifestHash,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
       signingSecret: this.downloadSigningSecret,
@@ -1684,6 +1684,69 @@ export class BillingSettlementService implements OnModuleInit {
     );
 
     return refreshed;
+  }
+
+  /**
+   * Used ONLY by `rebuildTenantInvoiceArtifact`, the recovery fallback for a
+   * verified link whose object is genuinely missing -- never by issuance,
+   * which writes its own bytes directly. `putIfAbsent` (not `put`) matters
+   * here specifically because this path races a sibling instance's own
+   * concurrent recovery of the exact same (kind, subjectId): an unconditional
+   * overwrite could clobber bytes a sibling already correctly restored with
+   * this instance's independently re-rendered (and not necessarily
+   * byte-identical, if the current billing profile has since changed) copy.
+   */
+  private async renderTenantInvoiceArtifact(
+    invoice: StoredTenantInvoice,
+  ): Promise<DocumentArtifactRecord> {
+    const { record } = await this.documentArtifactStore.putIfAbsent({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(
+        buildTenantInvoicePdfRows({
+          invoiceId: invoice.invoiceId,
+          tenantId: invoice.tenantId,
+          billingProfile: this.requireTenantBillingProfile(invoice.tenantId),
+          periodStart: invoice.periodStart,
+          periodEnd: invoice.periodEnd,
+          amount: invoice.amount,
+          lines: invoice.lines,
+          generatedAt: invoice.createdAt,
+        }),
+      ),
+    });
+    return record;
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind
+   * "tenant-invoice": lets `ControlledDownloadController` recover a
+   * verified, unexpired link whose bytes are genuinely missing from the
+   * durable store (not the common case -- that is served directly from the
+   * shared store without ever reaching this fallback) by re-deriving a file
+   * from this invoice's own durably persisted record. Returns null -- not a
+   * thrown error -- when this instance's own invoice list genuinely has no
+   * such id, which the registry contract treats as "nothing to rebuild", not
+   * a rebuild failure.
+   */
+  private async rebuildTenantInvoiceArtifact(
+    invoiceId: string,
+  ): Promise<DocumentArtifactRecord | null> {
+    const invoice = this.tenantInvoices.find(
+      (candidate) => candidate.invoiceId === invoiceId,
+    );
+    if (!invoice) {
+      return null;
+    }
+    try {
+      return await this.renderTenantInvoiceArtifact(invoice);
+    } catch {
+      // A billing profile or other precondition `requireTenantBillingProfile`
+      // enforces could have been removed since this invoice was issued; the
+      // caller treats a null rebuild the same as "nothing to rebuild".
+      return null;
+    }
   }
 
   listTenantInvoices(tenantId: string) {
@@ -1880,6 +1943,38 @@ export class BillingSettlementService implements OnModuleInit {
     return buildSettlementMatrix();
   }
 
+  /** Mail links may land on any replica; resolve the register from shared state. */
+  async listTenantInvoicesFresh(tenantId: string) {
+    if (this.billingSettlementRepository?.isEnabled()) {
+      const invoices =
+        await this.billingSettlementRepository.listInvoicesForTenant(tenantId);
+      this.tenantInvoices = [
+        ...this.tenantInvoices.filter(
+          (invoice) => invoice.tenantId !== tenantId,
+        ),
+        ...invoices,
+      ];
+    }
+    return this.listTenantInvoicesRuntime(tenantId);
+  }
+
+  async getTenantInvoiceFresh(tenantId: string, invoiceId: string) {
+    if (this.billingSettlementRepository?.isEnabled()) {
+      const invoice = await this.billingSettlementRepository.findInvoiceForMail(
+        tenantId,
+        invoiceId,
+      );
+      if (!invoice)
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Tenant invoice not found.",
+        );
+      return this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice));
+    }
+    return this.getTenantInvoice(tenantId, invoiceId);
+  }
+
   getTenantInvoice(tenantId: string, invoiceId: string) {
     const invoice = this.tenantInvoices.find(
       (candidate) =>
@@ -2063,7 +2158,7 @@ export class BillingSettlementService implements OnModuleInit {
         updatedAt: now,
       };
 
-      const artifactRecord = this.documentArtifactStore.put({
+      const artifactRecord = await this.documentArtifactStore.put({
         kind: "report",
         subjectId: statementId,
         mimeType: "application/pdf",
@@ -2183,37 +2278,29 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
+  /**
+   * Same rationale as `ensureTenantInvoiceArtifact`: `DOCUMENT_ARTIFACT_STORE`
+   * is now durable and shared, so the only thing that can legitimately make
+   * an already-issued statement's link stale is the signature/expiry
+   * window, not the bytes behind it. Only the link is ever recomputed here,
+   * over the unchanged `artifactDownloadMetadata.manifestHash`.
+   */
   private ensureDriverStatementArtifact(
     statement: DriverStatementRecord,
   ): DriverStatementRecord {
-    const stored = this.documentArtifactStore.get(
-      "report",
-      statement.statementId,
-    );
-    const materialised =
-      Boolean(statement.artifactDownloadMetadata) &&
-      stored?.record.sha256 ===
-        statement.artifactDownloadMetadata?.manifestHash;
-    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
-
-    if (materialised && !expired) {
+    if (!statement.artifactDownloadMetadata) {
       return statement;
     }
-
-    const record = materialised
-      ? stored!.record
-      : this.documentArtifactStore.put({
-          kind: "report",
-          subjectId: statement.statementId,
-          mimeType: "application/pdf",
-          bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
-        });
+    const expired = this.isInvoiceArtifactExpired(statement.artifactUrl ?? "");
+    if (!expired) {
+      return statement;
+    }
 
     const now = new Date().toISOString();
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "report",
       subjectId: statement.statementId,
-      manifestHash: record.sha256,
+      manifestHash: statement.artifactDownloadMetadata.manifestHash,
       createdAt: now,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
@@ -2237,6 +2324,52 @@ export class BillingSettlementService implements OnModuleInit {
     );
 
     return refreshed;
+  }
+
+  /**
+   * Used ONLY by `rebuildDriverStatementArtifact`, the recovery fallback for
+   * a verified link whose object is genuinely missing -- never by issuance.
+   * `putIfAbsent`, not `put`: see `renderTenantInvoiceArtifact`'s comment for
+   * why an unconditional write here could clobber a sibling's concurrent
+   * recovery of a genuinely good object.
+   */
+  private async renderDriverStatementArtifact(
+    statement: DriverStatementRecord,
+  ): Promise<DocumentArtifactRecord> {
+    const { record } = await this.documentArtifactStore.putIfAbsent({
+      kind: "report",
+      subjectId: statement.statementId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+    });
+    return record;
+  }
+
+  /**
+   * Registered with `DocumentArtifactRebuildRegistry` for kind "report": lets
+   * `ControlledDownloadController` recover a verified, unexpired link whose
+   * bytes are genuinely missing from the durable store (not the common
+   * case -- that is served directly from the shared store without ever
+   * reaching this fallback) by re-deriving a file from this driver
+   * statement's own durably persisted record. Returns null -- not a thrown
+   * error -- when this instance's own statement list genuinely has no such
+   * id, which the registry contract treats as "nothing to rebuild", not a
+   * rebuild failure.
+   */
+  private async rebuildDriverStatementArtifact(
+    statementId: string,
+  ): Promise<DocumentArtifactRecord | null> {
+    const statement = this.driverStatements.find(
+      (candidate) => candidate.statementId === statementId,
+    );
+    if (!statement) {
+      return null;
+    }
+    try {
+      return await this.renderDriverStatementArtifact(statement);
+    } catch {
+      return null;
+    }
   }
 
   listDriverStatements(periodMonth?: string, driverId?: string) {
@@ -2713,104 +2846,28 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReimbursementBatch(batch);
   }
 
-  markReimbursementPaid(
+  /** Compatibility response shape, NOT a separate payment-validation path. */
+  async markReimbursementPaid(
     batchId: string,
     command: MarkReimbursementPaidCommand,
     requestId?: string,
+    idempotencyKey?: string,
+    identity: BootstrapRequestIdentity | null = null,
   ) {
-    const batch = this.requireReimbursementBatch(batchId);
-    if (!batch.approvedAt) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "REIMBURSEMENT_NOT_APPROVED",
-        "Reimbursement batch must be approved before it can be marked as paid.",
-        {
-          batchId,
-        },
-      );
-    }
-
-    if (batch.status === "paid") {
-      return this.cloneReimbursementBatch(batch);
-    }
-
-    const remittanceProofId =
-      command.remittanceProofId?.trim() || batch.remittanceProofId;
-    if (!remittanceProofId) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "remittanceProofId is required to mark reimbursement paid.",
-        {
-          batchId,
-        },
-      );
-    }
-
-    const paidAt = command.paidAt?.trim() || new Date().toISOString();
-    if (Number.isNaN(new Date(paidAt).getTime())) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        "paidAt must be a valid ISO timestamp.",
-        {
-          batchId,
-          paidAt,
-        },
-      );
-    }
-
-    batch.status = "paid";
-    batch.paidAt = paidAt;
-    batch.remittanceProofId = remittanceProofId;
-
-    const relatedStatement = this.driverStatements.find(
-      (statement) => statement.statementId === batch.statementId,
-    );
-    if (relatedStatement) {
-      relatedStatement.payoutStatus = "paid";
-      relatedStatement.updatedAt = paidAt;
-    }
-
-    this.persistChanges(
+    await this.markReimbursementPaidWithProof(
+      batchId,
       {
-        reimbursementBatches: [this.cloneReimbursementBatch(batch)],
-        ...(relatedStatement
-          ? {
-              driverStatements: [this.cloneStatement(relatedStatement)],
-            }
-          : {}),
+        batchId,
+        proofId: command.remittanceProofId ?? "",
+        idempotencyKey: idempotencyKey ?? "",
+        ...(command.paidAt ? { paidAt: command.paidAt } : {}),
       },
-      "mark_reimbursement_paid",
-    );
-    this.auditNotificationService.recordNotification({
-      tenantId: null,
-      channel: "ops_notice",
-      title: "Reimbursement batch paid",
-      message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${remittanceProofId}.`,
-      status: "unread",
-    });
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "billing-settlement",
-        actionName: "mark_reimbursement_paid",
-        resourceType: "driver_reimbursement_batch",
-        resourceId: batch.batchId,
-        newValuesSummary: {
-          driverId: batch.driverId,
-          statementId: batch.statementId,
-          remittanceProofId,
-          paidAt,
-          status: batch.status,
-        },
-      },
+      identity,
       requestId,
     );
-
-    return this.cloneReimbursementBatch(batch);
+    return this.cloneReimbursementBatch(
+      this.requireReimbursementBatch(batchId),
+    );
   }
 
   getReimbursementBatch(batchId: string) {
@@ -2818,25 +2875,9 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneReimbursementBatch(batch);
   }
 
-  // ── Remittance Proof (SR-PROOF-001) ──
-  //
-  // `markReimbursementPaid` above stays untouched: it is exercised by an
-  // existing regression (`tests/unit/billing-settlement.test.ts`, outside
-  // this task's write_scopes) that marks a batch paid with a bare,
-  // never-uploaded `remittanceProofId` string, so gating it on a real proof
-  // record here would break out-of-scope, already-passing coverage. The
-  // proof-backed gate this task delivers is the new
-  // `markReimbursementPaidWithProof` method/`/pay-with-proof` route below --
-  // see `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` for the
-  // explicit boundary this records.
+  // ── Remittance Proof: both payment routes share the gate below. ──
 
-  /**
-   * Test-only escape hatch onto the underlying `RemittanceProofService` --
-   * used to drive `attemptScan`/`markPaidWithProof` directly in unit tests,
-   * since neither is reachable over HTTP (no scan-completion callback route
-   * exists in this task's locked OpenAPI paths; see
-   * `docs/04-uat/system-remediation-20260906/SR-PROOF-001.md`).
-   */
+  /** Test seam for scripted scan outcomes; HTTP callers cannot submit verdicts. */
   get remittanceProofServiceForTest(): RemittanceProofService {
     return this.remittanceProofService;
   }
@@ -2903,6 +2944,72 @@ export class BillingSettlementService implements OnModuleInit {
     return proof;
   }
 
+  async scanRemittanceProof(
+    proofId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+    bestEffort = false,
+  ): Promise<RemittanceProofRecord> {
+    let proof: RemittanceProofRecord;
+    let scanUnavailable = false;
+    try {
+      proof = await this.remittanceProofService.attemptScan(proofId);
+    } catch {
+      scanUnavailable = true;
+      proof = await this.remittanceProofService.getProof(proofId);
+    }
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : (identity?.actorType ?? "system"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "billing-settlement",
+        actionName: "scan_remittance_proof",
+        resourceType: "remittance_proof",
+        resourceId: proofId,
+        newValuesSummary: {
+          scanState: proof.scanState,
+          scanCompletedAt: proof.scanCompletedAt,
+          scanUnavailable,
+        },
+      },
+      requestId,
+    );
+    if (!bestEffort && proof.scanState === "pending_scan") {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "REMITTANCE_PROOF_SCANNER_UNAVAILABLE",
+        "No definitive scan verdict is available; retry scanning later.",
+      );
+    }
+    return proof;
+  }
+
+  async getReimbursementProof(
+    batchId: string,
+  ): Promise<RemittanceProofRecord | null> {
+    const batch = this.requireReimbursementBatch(batchId);
+    // Before payment there is no payment foreign reference yet. Resolve the
+    // uploaded proof by its authoritative batch binding, not a guessed ID.
+    if (batch.status === "paid" && batch.remittanceProofId) {
+      const proof = await this.remittanceProofService.getProof(
+        batch.remittanceProofId,
+      );
+      if (proof.batchId !== batchId || proof.driverId !== batch.driverId) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REMITTANCE_PROOF_BATCH_MISMATCH",
+          "Recorded payment proof does not belong to this batch.",
+        );
+      }
+      return proof;
+    }
+    return this.remittanceProofService.getLatestForBatch(batchId);
+  }
+
   async getRemittanceProof(proofId: string): Promise<RemittanceProofRecord> {
     return this.remittanceProofService.getProof(proofId);
   }
@@ -2960,6 +3067,18 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
+    if (
+      batch.status === "paid" &&
+      batch.remittanceProofId !== command.proofId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REMITTANCE_PROOF_PAYMENT_CONFLICT",
+        "An already-paid batch cannot be rebound to another proof.",
+        { batchId },
+      );
+    }
+
     const receipt = await this.remittanceProofService.markPaidWithProof({
       batchId: batch.batchId,
       proofId: command.proofId,
@@ -2970,27 +3089,35 @@ export class BillingSettlementService implements OnModuleInit {
     });
 
     if (batch.status !== "paid") {
-      batch.status = "paid";
-      batch.paidAt = receipt.paidAt;
-      batch.remittanceProofId = receipt.proofId;
-
+      const updatedBatch = this.cloneReimbursementBatch(batch);
+      updatedBatch.status = "paid";
+      updatedBatch.paidAt = receipt.paidAt;
+      updatedBatch.remittanceProofId = receipt.proofId;
       const relatedStatement = this.driverStatements.find(
         (statement) => statement.statementId === batch.statementId,
       );
-      if (relatedStatement) {
-        relatedStatement.payoutStatus = "paid";
-        relatedStatement.updatedAt = receipt.paidAt;
+      const updatedStatement = relatedStatement
+        ? this.cloneStatement(relatedStatement)
+        : null;
+      if (updatedStatement) {
+        updatedStatement.payoutStatus = "paid";
+        updatedStatement.updatedAt = receipt.paidAt;
       }
 
+      // Publish in-memory state only after persistence succeeds. A durable
+      // receipt can then recover a failed batch write on an idempotent retry.
       await this.persistChanges(
         {
-          reimbursementBatches: [this.cloneReimbursementBatch(batch)],
-          ...(relatedStatement
-            ? { driverStatements: [this.cloneStatement(relatedStatement)] }
-            : {}),
+          reimbursementBatches: [updatedBatch],
+          ...(updatedStatement ? { driverStatements: [updatedStatement] } : {}),
         },
         "mark_reimbursement_paid_with_proof",
       );
+      if (this.requireReimbursementBatch(batchId).status === "paid")
+        return receipt;
+      Object.assign(batch, updatedBatch);
+      if (relatedStatement && updatedStatement)
+        Object.assign(relatedStatement, updatedStatement);
       this.auditNotificationService.recordNotification({
         tenantId: null,
         channel: "ops_notice",

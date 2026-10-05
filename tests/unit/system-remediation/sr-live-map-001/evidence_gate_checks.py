@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -18,11 +20,11 @@ class EvidenceGateTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.write("evidence-deployment.json", {"candidate_sha": SHA, "deployed_sha": SHA, "effective_backend": "google", "status": "passed"})
-        self.write("evidence-sessions.json", {"candidate_sha": SHA, "status": "passed", "sessions": [
+        self.write("evidence-sessions.json", {"candidate_sha": SHA, "deployed_sha": SHA, "status": "passed", "sessions": [
             {"realm": "driver", "actor_type": "driver_user", "actor_id": "drv-demo-002", "scopes": ["dispatch:read", "driver:read", "driver:write"]},
             {"realm": "ops", "actor_type": "ops_observer", "actor_id": "live-map-observer", "scopes": ["regulatory:read"]},
         ]})
-        self.write("evidence-cleanup.json", {"candidate_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True})
+        self.write("evidence-cleanup.json", {"candidate_sha": SHA, "deployed_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True})
         self.write("evidence-map.json", {"candidateSha": SHA, "status": "passed"})
         self.write("evidence-coverage.json", {
             "candidate_sha": SHA, "deployed_sha": SHA, "status": "passed",
@@ -88,8 +90,15 @@ class EvidenceGateTests(unittest.TestCase):
         for change in [{"candidate_sha": "b" * 40}, {"status": "failed"},
                        {"revoked": False}, {"driver_id": "drv-demo-001"}, {"recovery": "skipped"}]:
             with self.subTest(change=change):
-                self.write("evidence-cleanup.json", {"candidate_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True, **change})
+                self.write("evidence-cleanup.json", {"candidate_sha": SHA, "deployed_sha": SHA, "status": "passed", "driver_id": "drv-demo-002", "recovery": "consumed-invitation", "revoked": True, **change})
                 self.reject()
+
+    def test_clean_noop_is_not_full_acceptance(self):
+        self.change("evidence-cleanup.json", lambda value: value.update(
+            status="passed", recovery="not-required", revoked=False))
+        # Even otherwise complete/green evidence must prove a real invitation
+        # and confirmed revocation. No-op teardown only avoids a false error.
+        self.reject()
 
     def test_skip_cannot_pass(self):
         with self.assertRaises(ValueError):
@@ -104,10 +113,41 @@ class EvidenceGateTests(unittest.TestCase):
         self.reject()
 
     def test_other_runtime_cannot_pass_even_when_all_evidence_agrees(self):
-        for filename in ["evidence-deployment.json", "evidence-coverage.json", "evidence-browser.json"]:
+        for filename in ["evidence-deployment.json", "evidence-coverage.json", "evidence-browser.json", "evidence-sessions.json", "evidence-cleanup.json"]:
             self.change(filename, lambda value: value.update(deployed_sha="b" * 40))
         with self.assertRaises(ValueError):
-            gate.verify(self.root, SHA, OUTCOMES, "b" * 40)
+            gate.verify(self.root, SHA, OUTCOMES, SHA)
+
+    def test_explicit_separate_runtime_passes(self):
+        for filename in ["evidence-deployment.json", "evidence-coverage.json", "evidence-browser.json", "evidence-sessions.json", "evidence-cleanup.json"]:
+            self.change(filename, lambda value: value.update(deployed_sha="b" * 40))
+        gate.verify(self.root, SHA, OUTCOMES, "b" * 40)
+
+    def test_session_and_cleanup_runtime_must_match(self):
+        for filename in ["evidence-sessions.json", "evidence-cleanup.json"]:
+            with self.subTest(filename=filename):
+                self.change(filename, lambda value: value.update(deployed_sha="b" * 40))
+                self.reject()
+                self.change(filename, lambda value: value.update(deployed_sha=SHA))
+
+    def test_main_uses_dispatch_expectation_not_artifact_as_authority(self):
+        runtime = "b" * 40
+        for filename in ["evidence-deployment.json", "evidence-coverage.json", "evidence-browser.json", "evidence-sessions.json", "evidence-cleanup.json"]:
+            self.change(filename, lambda value: value.update(deployed_sha=runtime))
+        parent = self.root / "job"
+        evidence_dir = parent / ".artifacts/live-map-acceptance"
+        evidence_dir.mkdir(parents=True)
+        for path in self.root.glob("*.*"):
+            (evidence_dir / path.name).write_bytes(path.read_bytes())
+        for expected, code in [(runtime, 0), (SHA, 1), ("dev", 1), ("", 1)]:
+            with self.subTest(expected=expected):
+                run = subprocess.run(["python3", str(SCRIPT)], cwd=parent, capture_output=True, text=True,
+                    env={**os.environ, **OUTCOMES, "CANDIDATE_SHA": SHA, "WORKFLOW_SHA": SHA,
+                         "DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA": expected})
+                self.assertEqual(run.returncode, code, run.stderr)
+                status = json.loads((evidence_dir / "run-status.json").read_text())
+                self.assertEqual(status["candidate_sha"], SHA)
+                self.assertEqual(status["status"], "passed" if code == 0 else "failed")
 
     def test_missing_health(self):
         (self.root / "evidence-deployment.json").unlink()

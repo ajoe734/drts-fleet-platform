@@ -19,7 +19,12 @@ const env = {
   DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN: "cached-session",
 };
 function harness(
-  options: { expired?: boolean; fail?: boolean; wrongSha?: boolean } = {},
+  options: {
+    expired?: boolean;
+    fail?: boolean;
+    wrongSha?: boolean;
+    deployedSha?: string;
+  } = {},
 ) {
   const readGoogleIdToken = vi.fn(() => "fresh-google-assertion");
   const mask = vi.fn();
@@ -33,12 +38,14 @@ function harness(
       Response.json(data, {
         status,
         headers: {
-          "x-drts-candidate-sha": options.wrongSha ? "b".repeat(40) : sha,
+          "x-drts-candidate-sha": options.wrongSha
+            ? "b".repeat(40)
+            : (options.deployedSha ?? sha),
         },
       });
     if (url.pathname === "/api/health")
       return reply({
-        candidateSha: sha,
+        candidateSha: options.deployedSha ?? sha,
         mapProvider: { effectiveBackend: "google" },
       });
     if (url.pathname === "/api/auth/token") {
@@ -92,6 +99,23 @@ it("revokes the invite and bound device using the existing restricted session", 
   );
   expect(JSON.stringify(deps.save.mock.calls)).not.toContain("private-code");
 });
+it("revokes on the separately pinned deployment after refreshing WIF and retains both SHAs", async () => {
+  const deployedSha = "c".repeat(40);
+  const deps = harness({ deployedSha, expired: true });
+  await teardownMapSessions(
+    { ...env, DRTS_LIVE_MAP_EXPECTED_DEPLOYED_SHA: deployedSha },
+    deps,
+  );
+  expect(deps.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      candidate_sha: sha,
+      deployed_sha: deployedSha,
+      status: "passed",
+      revoked: true,
+    }),
+  );
+});
+
 it("uses fresh WIF after expiry, without reading a secret or issuing a workforce session", async () => {
   const deps = harness({ expired: true });
   await teardownMapSessions(env, deps);
@@ -106,13 +130,51 @@ it.each([{ fail: true }, { wrongSha: true }])(
     );
   },
 );
-it("fails closed without an API call when there is no invite to clean up", async () => {
-  const deps = harness();
-  await expect(
-    teardownMapSessions({ ...env, DRTS_LIVE_MAP_INVITE_CODE: "" }, deps),
-  ).rejects.toThrow();
-  expect(deps.fetch).not.toHaveBeenCalled();
-});
+it.each([undefined, ""])(
+  "records clean no-op without HTTP or WIF when no invitation was attempted: %s",
+  async (code) => {
+    const deps = harness();
+    await teardownMapSessions(
+      { ...env, DRTS_LIVE_MAP_INVITE_CODE: code },
+      deps,
+    );
+    expect(deps.fetch).not.toHaveBeenCalled();
+    expect(deps.readGoogleIdToken).not.toHaveBeenCalled();
+    expect(deps.save).toHaveBeenCalledWith({
+      candidate_sha: sha,
+      deployed_sha: sha,
+      driver_id: "drv-demo-002",
+      status: "passed",
+      recovery: "not-required",
+      revoked: false,
+    });
+  },
+);
+it.each([
+  { DRTS_LIVE_MAP_INVITATION_ATTEMPTED: "true" },
+  { DRTS_LIVE_MAP_INVITATION_ATTEMPTED: "unknown" },
+  { DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN: "private-driver-token" },
+  { DRTS_LIVE_MAP_DRIVER_DEVICE_ID: "live-map-run-123" },
+])(
+  "does not mistake missing recovery data for no mutation: %j",
+  async (override) => {
+    const deps = harness();
+    await expect(
+      teardownMapSessions(
+        { ...env, DRTS_LIVE_MAP_INVITE_CODE: "", ...override },
+        deps,
+      ),
+    ).rejects.toThrow("Map session cleanup failed");
+    expect(deps.fetch).not.toHaveBeenCalled();
+    expect(deps.readGoogleIdToken).not.toHaveBeenCalled();
+    expect(deps.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed", revoked: false }),
+    );
+    expect(JSON.stringify(deps.save.mock.calls)).not.toContain(
+      "private-driver-token",
+    );
+  },
+);
 it("checks hosted authorization before cleanup", async () => {
   const deps = harness();
   await expect(

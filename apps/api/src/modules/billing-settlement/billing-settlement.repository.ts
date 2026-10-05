@@ -560,6 +560,50 @@ export class BillingSettlementRepository {
     );
   }
 
+  /** Fresh tenant-scoped reads: never resolve mail recipients from process seeds. */
+  async listInvoicesForTenant(tenantId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id = $1 ORDER BY created_at DESC`,
+      [tenantId],
+    );
+    return result.rows
+      .map((row) =>
+        this.parseRecord<StoredTenantInvoiceRecord>(
+          row.record,
+          "billing.phase1_tenant_invoices",
+        ),
+      )
+      .filter((invoice) => invoice.tenantId === tenantId);
+  }
+
+  async findInvoiceForMail(tenantId: string, invoiceId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_invoices WHERE tenant_id = $1 AND invoice_id = $2`,
+      [tenantId, invoiceId],
+    );
+    if (!result.rows[0]) return null;
+    const invoice = this.parseRecord<StoredTenantInvoiceRecord>(
+      result.rows[0].record,
+      "billing.phase1_tenant_invoices",
+    );
+    return invoice.tenantId === tenantId && invoice.invoiceId === invoiceId
+      ? invoice
+      : null;
+  }
+
+  async findInvoiceMailBillingProfile(tenantId: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM billing.phase1_tenant_billing_profiles WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    if (!result.rows[0]) return null;
+    const profile = this.parseRecord<TenantBillingProfile>(
+      result.rows[0].record,
+      "billing.phase1_tenant_billing_profiles",
+    );
+    return profile.tenantId === tenantId ? profile : null;
+  }
+
   async loadState(): Promise<BillingSettlementState> {
     if (!this.isEnabled()) {
       return {
@@ -1504,6 +1548,19 @@ export class BillingSettlementRepository {
     return this.mapRemittanceProof(result.rows[0]!);
   }
 
+  async findLatestRemittanceProofForBatch(
+    batchId: string,
+  ): Promise<RemittanceProofRecord | null> {
+    if (!this.isEnabled())
+      throw new Error("Remittance proof persistence is unavailable.");
+    const result = await this.databaseService!.query<RemittanceProofRow>(
+      `SELECT * FROM billing.phase1_remittance_proofs
+       WHERE batch_id = $1 ORDER BY created_at DESC, proof_id DESC LIMIT 1`,
+      [batchId],
+    );
+    return result.rows[0] ? this.mapRemittanceProof(result.rows[0]) : null;
+  }
+
   async findRemittanceProofById(
     proofId: string,
   ): Promise<RemittanceProofRecord | null> {
@@ -1579,14 +1636,19 @@ export class BillingSettlementRepository {
     try {
       await client.query("BEGIN");
 
-      const existing =
-        await client.query<RemittanceProofPaymentReceiptRow>(
-          `
+      // Serialise the *batch*, not just one proof/key. Two instances using
+      // different clean proofs/intent keys cannot create conflicting receipts.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`remittance-proof-payment:${input.batchId}`],
+      );
+      const existing = await client.query<RemittanceProofPaymentReceiptRow>(
+        `
             SELECT * FROM billing.phase1_remittance_proof_payment_receipts
-            WHERE batch_id = $1 AND idempotency_key = $2
+            WHERE batch_id = $1 ORDER BY created_at, receipt_id LIMIT 1
           `,
-          [input.batchId, input.idempotencyKey],
-        );
+        [input.batchId],
+      );
       if (existing.rows[0]) {
         await client.query("COMMIT");
         return {
@@ -1605,7 +1667,10 @@ export class BillingSettlementRepository {
         await client.query("ROLLBACK");
         return { outcome: "proof_not_found" };
       }
-      if (proof.batch_id !== input.batchId) {
+      if (
+        proof.batch_id !== input.batchId ||
+        proof.driver_id !== input.driverId
+      ) {
         await client.query("ROLLBACK");
         return { outcome: "proof_batch_mismatch" };
       }
@@ -1614,9 +1679,8 @@ export class BillingSettlementRepository {
         return { outcome: "proof_not_clean" };
       }
 
-      const inserted =
-        await client.query<RemittanceProofPaymentReceiptRow>(
-          `
+      const inserted = await client.query<RemittanceProofPaymentReceiptRow>(
+        `
             INSERT INTO billing.phase1_remittance_proof_payment_receipts (
               batch_id, proof_id, idempotency_key, driver_id,
               amount_minor, currency, paid_at
@@ -1624,16 +1688,16 @@ export class BillingSettlementRepository {
             ON CONFLICT (batch_id, idempotency_key) DO NOTHING
             RETURNING *
           `,
-          [
-            input.batchId,
-            input.proofId,
-            input.idempotencyKey,
-            input.driverId,
-            input.amount.amountMinor,
-            input.amount.currency,
-            input.paidAt,
-          ],
-        );
+        [
+          input.batchId,
+          input.proofId,
+          input.idempotencyKey,
+          input.driverId,
+          input.amount.amountMinor,
+          input.amount.currency,
+          input.paidAt,
+        ],
+      );
       if (inserted.rows[0]) {
         await client.query("COMMIT");
         return {

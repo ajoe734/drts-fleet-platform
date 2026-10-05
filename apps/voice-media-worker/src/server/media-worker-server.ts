@@ -25,6 +25,10 @@ import {
   type VoiceCallAuthorityVerifier,
 } from "./call-authority";
 import type { VoiceSessionComposer } from "./session-composer";
+import type {
+  VoiceSessionBinding,
+  VoiceSessionBindingResolver,
+} from "../dialogue/voice-session-binding";
 
 /** Default cap on a single HTTP control-plane request body (`/sessions`,
  * `/recording/finalize`). These carry JSON metadata, never raw audio, so this
@@ -74,6 +78,11 @@ export interface MediaWorkerServerConfig {
    * admits sessions and negotiates the WebSocket, but nothing ever
    * transcribes or synthesizes anything for them. */
   sessionComposer?: VoiceSessionComposer | undefined;
+  /** Resolves this admitted session's trusted `VoiceSessionBinding`
+   * (AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry) -- without one,
+   * `POST /sessions` admission behaves exactly as before: every attached
+   * session stays on the fixture-only persistence path. */
+  sessionBindingResolver?: VoiceSessionBindingResolver | undefined;
 }
 
 export interface MediaSessionRecord {
@@ -81,6 +90,22 @@ export interface MediaSessionRecord {
   connectedAt: string;
   channel?: WebSocketServerChannel | undefined;
   metadata?: Record<string, unknown> | undefined;
+  /** Resolved during `POST /sessions` admission, before the WebSocket
+   * upgrade ever reaches `sessionComposer.attach` -- `undefined` whenever
+   * no `sessionBindingResolver` is configured, or it rejected for this
+   * session id (see that resolver's own doc for why that must never fail
+   * admission itself). */
+  binding?: VoiceSessionBinding | undefined;
+  /** R12 (Codex reopen, canonical 2026-10-03T17:41:28Z): the
+   * call-authority epoch THIS record was admitted under, set as soon as
+   * `issueGrant` accepts it. `grant.expired`'s listener uses this to
+   * confirm the activeSessions entry it is about to reap is still the
+   * exact reservation that specific (sessionId, epoch) grant belongs to
+   * -- never a later admission that has since reused the same session
+   * id with a strictly higher epoch. `undefined` for a record admitted
+   * outside the HTTP/authority flow (programmatic `admitSession` with no
+   * grant at all). */
+  epoch?: number | undefined;
 }
 
 export class MediaWorkerServer extends EventEmitter {
@@ -101,6 +126,7 @@ export class MediaWorkerServer extends EventEmitter {
   private readonly server: Server;
   private readonly activeSessions = new Map<string, MediaSessionRecord>();
   private readonly sessionAuthority: VoiceMediaSessionAuthority;
+  private readonly sessionGrantTtlMs: number;
   private isDraining = false;
   private totalAdmitted = 0;
   private isRunning = false;
@@ -109,15 +135,24 @@ export class MediaWorkerServer extends EventEmitter {
     | VoiceCallAuthorityVerifier
     | undefined;
   private readonly sessionComposer: VoiceSessionComposer | undefined;
+  private readonly sessionBindingResolver:
+    | VoiceSessionBindingResolver
+    | undefined;
 
   constructor(config?: MediaWorkerServerConfig) {
     super();
     this.recordingAdapter = config?.recordingAdapter;
     this.callAuthorityVerifier = config?.callAuthorityVerifier;
     this.sessionComposer = config?.sessionComposer;
-    this.sessionAuthority = new VoiceMediaSessionAuthority(
+    this.sessionBindingResolver = config?.sessionBindingResolver;
+    this.sessionComposer?.on("session.event", (event: unknown) => {
+      this.emit("session.event", event);
+    });
+    this.sessionGrantTtlMs =
       config?.sessionGrantTtlMs ??
-        Number(process.env.VOICE_MEDIA_SESSION_GRANT_TTL_MS ?? 30_000),
+      Number(process.env.VOICE_MEDIA_SESSION_GRANT_TTL_MS ?? 30_000);
+    this.sessionAuthority = new VoiceMediaSessionAuthority(
+      this.sessionGrantTtlMs,
     );
     // A grant that is never consumed before its TTL (expired, never
     // attached, or a failed handshake that never retries) must not hold its
@@ -125,9 +160,18 @@ export class MediaWorkerServer extends EventEmitter {
     // it, so a replacement session can be admitted.
     this.sessionAuthority.on(
       "grant.expired",
-      ({ sessionId }: { sessionId: string; epoch: number }) => {
+      ({ sessionId, epoch }: { sessionId: string; epoch: number }) => {
         const session = this.activeSessions.get(sessionId);
-        if (session && !session.channel) {
+        // R12 (Codex reopen, canonical 2026-10-03T17:41:28Z): this
+        // listener fires asynchronously, after the grant's own TTL
+        // elapses -- by then a REPLACEMENT admission can already have
+        // reused this same `sessionId` with a strictly higher epoch
+        // (`VoiceMediaSessionAuthority.issueGrant` permits exactly that).
+        // Reaping purely on `!session.channel` would then delete the
+        // replacement's still-pending reservation instead of the actual
+        // expired one. Only reap the record this specific expired grant
+        // actually belongs to.
+        if (session && session.epoch === epoch && !session.channel) {
           this.activeSessions.delete(sessionId);
           this.emit("session.closed", {
             sessionId,
@@ -263,6 +307,10 @@ export class MediaWorkerServer extends EventEmitter {
       }
     }
 
+    // Receive final ASR events while the peer channel can still carry them.
+    // Provider cleanup has its own bounded EOS window; the subsequent timeout
+    // governs how long to wait for peers to finish/acknowledge shutdown.
+    await this.sessionComposer?.drain();
     let timedOut = false;
     if (this.activeSessions.size > 0) {
       timedOut = await new Promise<boolean>((resolve) => {
@@ -293,6 +341,8 @@ export class MediaWorkerServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.isDraining = true;
+    await this.sessionComposer?.drain();
     for (const session of this.activeSessions.values()) {
       if (session.channel && !session.channel.destroyed) {
         session.channel.close(1000, "Server stopping");
@@ -359,6 +409,84 @@ export class MediaWorkerServer extends EventEmitter {
     this.totalAdmitted++;
     this.emit("session.admitted", session);
     return session;
+  }
+
+  /**
+   * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry: the real production
+   * attempt to resolve this admitted session's `VoiceSessionBinding` --
+   * `sessionComposer.attach()`'s `binding` parameter previously had no
+   * caller at all outside tests.
+   *
+   * No `sessionBindingResolver` configured at all is the explicit,
+   * separate fixture-only isolation decision (see `./dialogue/
+   * voice-session-binding.ts`'s own doc) and returns `undefined` without
+   * ever calling a resolver. Once one IS configured, a rejection is a real
+   * trusted-admission failure and is now propagated to the caller (Codex
+   * reopen round 18: previously this swallowed every rejection and
+   * returned `undefined`, which let `POST /sessions` fall back to
+   * unbound fixture persistence behind a successful `201` -- exactly the
+   * "configured trusted admission failure must block, not no-op" defect
+   * this task's acceptance forbids).
+   */
+  private async resolveSessionBinding(
+    voiceSessionId: string,
+  ): Promise<VoiceSessionBinding | undefined> {
+    if (!this.sessionBindingResolver) return undefined;
+    // R12 (Codex reopen, canonical 2026-10-03T17:41:28Z): this resolver
+    // call previously passed no signal/deadline at all even though the
+    // interface supports one -- an uncooperative/hung upstream call could
+    // hold this admission attempt open indefinitely, well past its own
+    // grant's TTL, which is exactly what let a replacement admission for
+    // the same session id race ahead of it. Bound it to the same TTL the
+    // grant this attempt holds is already fenced by, so a hang here is
+    // cancelled on the same timescale instead of staying outstanding
+    // forever.
+    //
+    // R11/R12 boundedness residual (Codex reopen, canonical
+    // 2026-10-03T19:24:15Z): merely aborting `controller.signal` and
+    // trusting `this.sessionBindingResolver.resolve` to actually respect
+    // it is not a bound at all against an uncooperative implementation --
+    // an `await` only ever settles when the awaited promise itself
+    // settles, and a resolver that ignores (or never checks) `signal`
+    // leaves this call pending forever regardless of the timer firing.
+    // Race the resolver call against this same signal's own `abort`
+    // event, exactly like `VoiceDialogueEngine.boundedStage` already does
+    // for the engine's own stages, so this settles on schedule whether or
+    // not the resolver cooperates. The orphaned resolver promise (if any)
+    // keeps running harmlessly in the background -- never awaited again,
+    // never allowed to mutate anything after this point.
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.sessionGrantTtlMs,
+    );
+    let onAbort: () => void = () => {};
+    try {
+      return await new Promise<VoiceSessionBinding | undefined>(
+        (resolve, reject) => {
+          onAbort = () =>
+            reject(
+              new Error(
+                "voice_session_binding_resolution_timed_out: resolver did not settle within sessionGrantTtlMs.",
+              ),
+            );
+          if (controller.signal.aborted) {
+            onAbort();
+            return;
+          }
+          controller.signal.addEventListener("abort", onAbort, {
+            once: true,
+          });
+          this.sessionBindingResolver!.resolve(
+            voiceSessionId,
+            controller.signal,
+          ).then(resolve, reject);
+        },
+      );
+    } finally {
+      clearTimeout(timer);
+      controller.signal.removeEventListener("abort", onAbort);
+    }
   }
 
   closeSession(
@@ -650,23 +778,120 @@ export class MediaWorkerServer extends EventEmitter {
               this.activeSessions.delete(claims.sessionId);
               throw err;
             }
+            // R12: tags this exact reservation with the epoch it was just
+            // granted under, so every later check in this handler (and
+            // the `grant.expired` listener above) can tell this record
+            // apart from any later admission that reuses the same
+            // `sessionId` with a strictly higher epoch.
+            session.epoch = grant.epoch;
+            // Computed from `session` before `resolveSessionBinding` below
+            // can attach a `binding` to that same record -- this response's
+            // wire shape is unrelated to, and must not change because of,
+            // this worker's own internal admission bookkeeping.
+            const responseBody = JSON.stringify({
+              status: "admitted",
+              session,
+              grant: {
+                token: grant.token,
+                epoch: grant.epoch,
+                expiresAt: grant.expiresAt,
+              },
+            });
+            // Awaited here, before responding, so the WebSocket upgrade
+            // this response's caller sends next (which reads
+            // `session.binding` synchronously, see `handleUpgrade`) never
+            // races an admission that is still resolving it (AUDIT-VOICE-
+            // APPLICATION-WIRING-20261003 R4-entry). A resolver configured
+            // but rejecting is now a fail-closed admission failure --
+            // never a silent fixture-only downgrade behind a `201` -- and
+            // cleans up the grant/session this attempt already reserved,
+            // same as the `issueGrant` failure above.
+            let binding: VoiceSessionBinding | undefined;
+            try {
+              binding = await this.resolveSessionBinding(claims.sessionId);
+              // R4-entry (Codex reopen, canonical 2026-10-03T17:41:28Z): a
+              // resolver can return successfully while still handing back
+              // a binding for a DIFFERENT session/scope than the one the
+              // verified `claims` just admitted -- nothing upstream of
+              // this point checks that, and `VoiceCallTurnCoordinator`'s
+              // own restoration later trusts whatever binding it was
+              // attached with, not the authority-admitted session. Treat
+              // a mismatch exactly like a resolver rejection: fail the
+              // admission closed rather than silently attach a foreign
+              // binding behind a successful `201`.
+              if (binding && binding.voiceSessionId !== claims.sessionId) {
+                throw new Error(
+                  `resolved VoiceSessionBinding.voiceSessionId '${binding.voiceSessionId}' does not match the authority-admitted session '${claims.sessionId}'`,
+                );
+              }
+              if (
+                binding &&
+                claims.scope &&
+                binding.resourceScopeId !== claims.scope.brandId
+              ) {
+                throw new Error(
+                  `resolved VoiceSessionBinding.resourceScopeId '${binding.resourceScopeId}' does not match the authority-admitted scope '${claims.scope.brandId}'`,
+                );
+              }
+            } catch (err) {
+              // R12 (Codex reopen, canonical 2026-10-03T17:41:28Z): only
+              // clean up THIS attempt's own reservation/grant. While the
+              // `resolveSessionBinding` await above was in flight, this
+              // grant could already have expired and been reaped, with a
+              // replacement admission reusing the same `sessionId` under
+              // a strictly higher epoch -- that replacement's reservation
+              // and grant are a different attempt entirely and must never
+              // be torn down just because THIS attempt is now failing.
+              if (this.activeSessions.get(claims.sessionId) === session) {
+                this.activeSessions.delete(claims.sessionId);
+                this.sessionAuthority.release(claims.sessionId);
+              }
+              throw new VoiceMediaSessionAuthorityError(
+                "VOICE_MEDIA_SESSION_BINDING_FAILED",
+                `Could not resolve a trusted VoiceSessionBinding for session '${claims.sessionId}': ` +
+                  `${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            // R12 (Codex reopen round 18): the grant issued above has a TTL
+            // and can be reaped (`grant.expired`, see the constructor's
+            // listener) or drained away while the await above was in
+            // flight. Sending the already-built `responseBody` at that
+            // point would hand the caller a `201` for a grant/session that
+            // no longer exists -- the immediate WS upgrade it triggers
+            // would then always fail. Re-validate the session is still
+            // live and the grant still exactly what was issued before
+            // declaring success; the caller cannot have made this request
+            // since, since it is still awaiting this very POST's response.
+            // R12 (Codex reopen, canonical 2026-10-03T17:41:28Z):
+            // identity, not mere existence -- a REPLACEMENT admission can
+            // have reused this `sessionId` (after this attempt's own
+            // grant expired and was reaped) while the binding resolution
+            // above was in flight. `activeSessions.get` returning some
+            // record is not proof it is THIS attempt's own reservation;
+            // only an exact object-identity match is. A mismatch must
+            // fail this attempt closed WITHOUT touching the replacement's
+            // reservation or grant -- releasing by id here previously
+            // tore down a live, unrelated admission that owns that id now.
+            const stillLive = this.activeSessions.get(claims.sessionId);
+            if (stillLive !== session) {
+              if (!stillLive) {
+                this.sessionAuthority.release(claims.sessionId);
+              }
+              throw new VoiceMediaSessionAuthorityError(
+                "VOICE_MEDIA_SESSION_ADMISSION_EXPIRED",
+                "Session admission expired or was withdrawn while resolving trusted binding; retry admission.",
+              );
+            }
+            stillLive.binding = binding;
             res.statusCode = 201;
-            res.end(
-              JSON.stringify({
-                status: "admitted",
-                session,
-                grant: {
-                  token: grant.token,
-                  epoch: grant.epoch,
-                  expiresAt: grant.expiresAt,
-                },
-              }),
-            );
+            res.end(responseBody);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             res.statusCode =
               err instanceof VoiceMediaSessionAuthorityError &&
-              err.code === "VOICE_MEDIA_SESSION_EPOCH_STALE"
+              (err.code === "VOICE_MEDIA_SESSION_EPOCH_STALE" ||
+                err.code === "VOICE_MEDIA_SESSION_BINDING_FAILED" ||
+                err.code === "VOICE_MEDIA_SESSION_ADMISSION_EXPIRED")
                 ? 409
                 : err instanceof VoiceMediaSessionAuthorityError
                   ? 400
@@ -676,7 +901,14 @@ export class MediaWorkerServer extends EventEmitter {
                     : errorMsg.includes("CONFLICT")
                       ? 409
                       : 400;
-            res.end(JSON.stringify({ error: errorMsg }));
+            res.end(
+              JSON.stringify({
+                error: errorMsg,
+                ...(err instanceof VoiceMediaSessionAuthorityError
+                  ? { code: err.code }
+                  : {}),
+              }),
+            );
           }
         })
         .catch((err) => {
@@ -1000,7 +1232,7 @@ export class MediaWorkerServer extends EventEmitter {
     // reporting not-ready) -- that must close the channel, never crash the
     // worker or leave the socket silently unattended.
     try {
-      this.sessionComposer?.attach(sessionId, channel);
+      this.sessionComposer?.attach(sessionId, channel, session.binding);
     } catch (err) {
       // The channel's own "close" listener (registered above) performs the
       // actual activeSessions/session.closed cleanup once this reaches the

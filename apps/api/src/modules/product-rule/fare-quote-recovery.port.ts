@@ -25,6 +25,17 @@ export interface FareQuoteRecoveryPort {
   ): Promise<FareQuoteRecoveryResult>;
 }
 
+/**
+ * `retry_quote` would need to re-run the fare computation that produced the
+ * anomaly. That computation lives outside this module (`OwnedMobilityService
+ * .buildFareQuoteSnapshot`) and -- for the `fixedPrice` case this port's
+ * only retryable "quote_provider_unavailable" reason guards -- is itself a
+ * hardcoded placeholder (`DEFAULT_PLATFORM_QUOTED_FARE`), not a confirmed
+ * external quoting provider. There is no accepted fare-quote vendor contract
+ * anywhere in this repository to wire a real adapter against (see the
+ * inventory in docs/04-uat/audit-recovery-providers-20261002.md), so this
+ * stays unavailable rather than inventing one.
+ */
 @Injectable()
 export class UnavailableFareQuoteRecoveryPort implements FareQuoteRecoveryPort {
   isAvailable() {

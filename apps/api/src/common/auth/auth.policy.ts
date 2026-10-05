@@ -865,6 +865,21 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  // Only driver proof creation uses driver authority. Keep all payment,
+  // readback and scan routes under the billing policy below.
+  if (
+    upperMethod === "POST" &&
+    (routePath === "reimbursements/proofs/staged-content" ||
+      routePath === "reimbursements/proofs")
+  ) {
+    return {
+      routeKey: "billing:driver:proof:create",
+      requiredScopes: ["driver:write"],
+      allowedRealms: ["driver"],
+      description: "Driver proof staging and upload; batch ownership enforced by service",
+    };
+  }
+
   if (
     routePath === "driver-fee-plans" ||
     routePath.startsWith("driver-statements") ||

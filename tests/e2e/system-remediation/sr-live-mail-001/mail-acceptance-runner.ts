@@ -7,7 +7,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget, verifyDeployedCandidate } from "./preflight";
-import { observeInvitationMailbox } from "./mailbox-observer";
+import { deriveAliasRecipient } from "./session-bootstrap";
+import {
+  MailboxObservationError,
+  observeInvitationMailbox,
+} from "./mailbox-observer";
 import { observeBackgroundRetry } from "./retry-profile";
 import {
   prepareTaskInvitation,
@@ -74,10 +78,20 @@ export function validateMailRunnerInputs(env: MailRunnerEnv): MailRunnerConfig {
     env,
     "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT",
   );
-  if (!/^[a-zA-Z0-9._-]+\+invite@gmail\.com$/.test(authorizedRecipient))
+  try {
+    const [local = "", domain = "", ...extra] = authorizedRecipient.split("@");
+    if (
+      extra.length ||
+      !local.endsWith("+invite") ||
+      deriveAliasRecipient(`${local.slice(0, -7)}@${domain}`, "invite") !==
+        authorizedRecipient
+    )
+      throw new Error();
+  } catch {
     throw new MailRunnerInputError(
-      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT must be the dedicated Gmail sender invite alias; fixture/demo/example or malformed addresses are rejected",
+      "DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT must be the dedicated sender invite alias; fixture/demo/example or malformed addresses are rejected",
     );
+  }
   const nonAllowlistedRecipient = required(
     env,
     "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT",
@@ -427,6 +441,13 @@ export async function realPollDeliveryReceipt(
   }
   throw new Error("Delivery readback timed out without a terminal receipt");
 }
+export function mailExecutionErrorMessage(error: unknown): string {
+  if (error instanceof MailRunnerInputError) return error.message;
+  if (error instanceof MailboxObservationError)
+    return new MailboxObservationError(error.stage).message;
+  return "Live mail execution failed; see recorded HTTP status and pending prerequisites.";
+}
+
 async function main(): Promise<void> {
   const outputPath = resolve(
     process.env.DRTS_LIVE_MAIL_EVIDENCE_PATH?.trim() ||
@@ -481,11 +502,7 @@ async function main(): Promise<void> {
   } catch (error) {
     // Network/server errors may contain credentials; HTTP status is separately
     // recorded, but arbitrary error strings and response bodies are not retained.
-    recorder.recordError(
-      error instanceof MailRunnerInputError
-        ? error.message
-        : "Live mail execution failed; see recorded HTTP status and pending prerequisites.",
-    );
+    recorder.recordError(mailExecutionErrorMessage(error));
     evidence = recorder.finalize("failed");
   }
   mkdirSync(dirname(outputPath), { recursive: true });

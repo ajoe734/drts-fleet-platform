@@ -12,6 +12,12 @@ import {
 } from "./live-map-config";
 import { revokeMapInvitation } from "./session-cleanup";
 import { normalizeApiResponse } from "./wire-response";
+import {
+  assertMapDriverIsolation,
+  DriverIsolationError,
+  inspectMapDriverIsolation,
+  type DriverIsolationEvidence,
+} from "./driver-isolation";
 
 export const MAP_DRIVER_SCOPES = [
   "dispatch:read",
@@ -37,9 +43,11 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
   );
   const evidence = {
     candidate_sha: config.candidateSha,
+    deployed_sha: config.deployedSha,
     status: "failed",
     stage: "google-workload-identity",
     cleanup: "not-required",
+    driver_isolation: undefined as DriverIsolationEvidence | undefined,
     sessions: [] as Array<{
       realm: string;
       actor_type: string;
@@ -117,25 +125,14 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
     // Check the reserved driver's live isolation before creating any invitation
     // or replacing its device binding, not only before telemetry writes.
     evidence.stage = "driver:isolation";
-    const registry = await request<{
-      data: {
-        items: Array<{
-          driverId: string;
-          workState: string;
-          dispatchEligible: boolean;
-        }>;
-      };
-    }>("regulatory-registry/drivers", {
+    const registry = await request<unknown>("regulatory-registry/drivers", {
       headers: { authorization: `Bearer ${observerIssued.token}` },
     });
-    const driver = registry.data.items.find(
-      (item) => item.driverId === config.driverId,
+    evidence.driver_isolation = inspectMapDriverIsolation(
+      registry,
+      config.driverId,
     );
-    assert(
-      driver &&
-        driver.workState === "offline" &&
-        driver.dispatchEligible === false,
-    );
+    assertMapDriverIsolation(evidence.driver_isolation);
 
     // Exchange a separate assertion for the fixed-driver service grant.
     evidence.stage = "driver:invite-setup";
@@ -150,6 +147,10 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
       provisioner.token,
     );
     evidence.stage = `driver:issue-invite`;
+    // Persist intent before the first mutation. A lost issuance response must
+    // not be mistaken by always() teardown for "nothing was created".
+    deps.exportSession("DRTS_LIVE_MAP_INVITATION_ATTEMPTED", "true");
+    evidence.cleanup = "unconfirmed";
     const invite = await request<{ data: { registrationCode: string } }>(
       "auth/driver/device/invite",
       {
@@ -248,9 +249,9 @@ export async function bootstrapMapSessions(env: LiveEnv, deps: BootstrapDeps) {
 
     evidence.status = "passed";
     evidence.stage = "complete";
-  } catch {
+  } catch (error) {
     throw new Error(
-      `Map session bootstrap failed at ${evidence.stage}; no credential details retained`,
+      `Map session bootstrap failed at ${evidence.stage}; ${error instanceof DriverIsolationError ? error.message : "no credential details retained"}`,
     );
   } finally {
     deps.save("sessions", evidence);
@@ -284,7 +285,7 @@ export function createMapSessionRequest(
     assert(response.ok);
     assert.equal(
       response.headers.get("x-drts-candidate-sha"),
-      config.candidateSha,
+      config.deployedSha,
     );
     return normalizeApiResponse(await response.json()) as T;
   };

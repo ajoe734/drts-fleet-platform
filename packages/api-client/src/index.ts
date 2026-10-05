@@ -1,3 +1,4 @@
+import type { TenantInvoiceMailView } from "@drts/contracts";
 /**
  * @drts/api-client - Shared API client for DRTS client surfaces
  *
@@ -2141,6 +2142,22 @@ export class ApiClient {
     return this.get<TenantBillingProfile>("/api/tenant/billing/profile");
   }
 
+  async getInvoiceMail(invoiceId: string): Promise<TenantInvoiceMailView> {
+    return this.get(
+      `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail`,
+    );
+  }
+
+  async sendInvoiceMail(
+    invoiceId: string,
+    operationKey?: string,
+  ): Promise<TenantInvoiceMailView> {
+    return this.post(
+      `/api/tenant/invoices/${encodeURIComponent(invoiceId)}/mail`,
+      { body: {}, ...(operationKey ? { idempotencyKey: operationKey } : {}) },
+    );
+  }
+
   async listInvoices(): Promise<TenantInvoiceRecord[]> {
     return this.getList<TenantInvoiceRecord>("/api/tenant/invoices");
   }
@@ -2488,6 +2505,86 @@ export class ApiClient {
       ...options,
       body: command,
     });
+  }
+
+  async getReimbursementProof(
+    batchId: string,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofRecord | null> {
+    return this.get<RemittanceProofRecord | null>(
+      `/api/reimbursements/${encodeURIComponent(batchId)}/proof`,
+      options,
+    );
+  }
+
+  async scanRemittanceProof(
+    proofId: string,
+    options?: RequestOptions,
+  ): Promise<RemittanceProofRecord> {
+    return this.post<RemittanceProofRecord>(
+      `/api/reimbursements/proofs/${encodeURIComponent(proofId)}/scan`,
+      options,
+    );
+  }
+
+  /** Fetch bytes through the configured API/BFF, never resolve a grant on the UI origin. */
+  async downloadRemittanceProof(
+    grant: RemittanceProofReadbackGrant,
+    options?: RequestOptions,
+  ): Promise<Blob> {
+    const reference = new URL(grant.readbackUrl, "https://proof.invalid");
+    const expectedPath = `/api/reimbursements/proof-downloads/remittance-proof/${encodeURIComponent(grant.proofId)}`;
+    if (
+      reference.origin !== "https://proof.invalid" ||
+      reference.pathname !== expectedPath ||
+      reference.hash ||
+      !grant.readbackUrl.startsWith(`${expectedPath}?`)
+    ) {
+      throw new Error("Invalid proof readback path.");
+    }
+    const path = `${reference.pathname}${reference.search}`;
+    const requestPath = this.pathTransform ? this.pathTransform(path) : path;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const response = await fetch(`${this.baseUrl}${requestPath}`, {
+        method: "GET",
+        cache: "no-store",
+        redirect: "error",
+        headers: {
+          ...this.defaultHeaders,
+          ...options?.headers,
+          "X-Request-Id": createRequestToken(),
+        },
+        signal: options?.signal
+          ? AbortSignal.any([controller.signal, options.signal])
+          : controller.signal,
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        const error = parseApiErrorEnvelope(body);
+        throw new ApiClientError({
+          statusCode: response.status,
+          code: error?.code ?? `HTTP_${response.status}`,
+          message: error?.message ?? "Proof download failed.",
+          retryable: error?.retryable ?? false,
+          rawBody: body,
+        });
+      }
+      const content = await response.blob();
+      if (
+        !["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(
+          content.type,
+        ) ||
+        content.size === 0 ||
+        content.size > 10 * 1024 * 1024
+      ) {
+        throw new Error("Invalid proof download content.");
+      }
+      return content;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async getRemittanceProof(

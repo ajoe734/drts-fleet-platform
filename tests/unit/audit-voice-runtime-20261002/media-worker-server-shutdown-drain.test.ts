@@ -13,8 +13,7 @@ import type { VoiceSessionComposer } from "../../../apps/voice-media-worker/src/
  * shutdown had already finished.
  *
  * These tests exercise `stop()`/`drain()` directly against a minimal
- * `VoiceSessionComposer` double exposing exactly the one method this
- * server actually calls on it for this path (`awaitPendingCloses`) --
+ * `VoiceSessionComposer` boundary double exposing the drain/event API --
  * `VoiceSessionComposer.awaitPendingCloses` itself is covered against a
  * real ASR adapter double in `session-composer.test.ts`. The HTTP listener
  * is deliberately never started (`server.start()` is never called) --
@@ -33,6 +32,8 @@ function pendingCloseComposer(): {
   const composer = {
     attach: () => undefined,
     get: () => undefined,
+    on: () => undefined,
+    drain: () => pending,
     awaitPendingCloses: () => pending,
   } as unknown as VoiceSessionComposer;
   return { composer, resolveClose: resolveClose! };
