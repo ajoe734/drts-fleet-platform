@@ -1,15 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { createControlledDownloadMetadata } from "../../apps/api/src/common/controlled-download";
 import { InMemoryDocumentArtifactStore } from "../../apps/api/src/common/document-artifacts";
 import type { DocumentArtifactKind } from "../../apps/api/src/common/document-artifacts/document-artifact-kinds";
 import { ControlledDownloadController } from "../../apps/api/src/modules/controlled-download/controlled-download.controller";
-import tenantConfig from "../../apps/tenant-console-web/next.config";
-import platformConfig from "../../apps/platform-admin-web/next.config";
-import opsConfig from "../../apps/ops-console-web/next.config";
 import {
   GET as tenantGet,
   POST as tenantPost,
@@ -20,21 +16,44 @@ import { requireControlledDownloadUrl } from "../../apps/platform-admin-web/app/
 import { middleware as tenantMiddleware } from "../../apps/tenant-console-web/middleware";
 import { TENANT_SESSION_COOKIE_NAME } from "../../apps/tenant-console-web/lib/auth/constants";
 
+// Load the real Next modules without importing NextConfig's global ProcessEnv
+// augmentation into every API/Node test in the root TypeScript program. Each
+// app separately typechecks its complete config; this is the routing contract.
+type RoutingConfig = {
+  rewrites?: () => Promise<{ source: string; destination: string }[]>;
+};
+const { unstable_getResponseFromNextConfig } = await vi.importActual<{
+  unstable_getResponseFromNextConfig: (input: {
+    url: string;
+    nextConfig: RoutingConfig;
+  }) => Promise<Response>;
+}>("next/experimental/testing/server");
+const [tenantConfig, platformConfig, opsConfig] = await Promise.all(
+  ["tenant-console-web", "platform-admin-web", "ops-console-web"].map(
+    async (app) =>
+      (
+        await vi.importActual<{ default: RoutingConfig }>(
+          `../../apps/${app}/next.config`,
+        )
+      ).default,
+  ),
+);
+
 const consoles = [
   {
     name: "tenant",
-    config: tenantConfig,
+    config: tenantConfig!,
     get: tenantGet,
     kind: "tenant-invoice",
   },
   {
     name: "platform",
-    config: platformConfig,
+    config: platformConfig!,
     get: platformGet,
     kind: "placard",
   },
   // Driver statement PDFs are materialised under the report kind.
-  { name: "ops", config: opsConfig, get: opsGet, kind: "report" },
+  { name: "ops", config: opsConfig!, get: opsGet, kind: "report" },
 ] as const;
 const bytes = Buffer.from(
   "%PDF-1.4 controlled download routing fixture\n%%EOF",
