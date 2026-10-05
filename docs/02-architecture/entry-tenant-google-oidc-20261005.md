@@ -151,3 +151,23 @@ logout-all 透過 API 撤銷所有 session。企業派車的登入按鈕維持 c
   `auth-startup-config.ts` strict validation 仍強制 tenant static key，須允許
   正式 Google JWKS 設定。兩者已透過原 task progress 請 Supervisor 核對 scope，
   尚未改動未授權檔案；不以此版本宣稱可交審。
+
+### 最新 checkpoint：合併 dev 後的狀態
+
+- 已保留所有已推送歷史，合併 `origin/dev` 的 `07081d0f1` 至
+  `4ee8a738b646e6d9ba23023cf82e091ab76735fd`；平行 live-map 變更完整保留，
+  沒有 rebase、amend 或 force push。此為 checkpoint，不是鎖定候選。
+- 該 SHA 的 `merged-regression.log`：10 files / 94 pass，exit 0，涵蓋 Google、
+  PKCE、邀請、BFF、replay store、deployment、identity session 與 MFA policy。
+  `merged-api-typecheck.log` 與 `merged-eslint.log` 均 exit 0。
+  Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4；所有啟動的檢查已結束並讀取結果。
+- `startup-probe.ts` 使用既有 `buildValidProductionEnv` fixture，移除 tenant
+  static controls 後加入正式 Google issuer/client/endpoints/JWKS，再直接呼叫
+  `buildAuthStartupConfigReport`。`startup-before.log` exit 1，精確重現三個
+  `TENANT_OIDC_*` missing controls；沒有執行服務啟動。首次缺少 tsx 的錯誤
+  不列重現，最後以已安裝 TypeScript 的 CommonJS/ES2022 transpiler 執行成功。
+- Supervisor 待擴充原 task write scopes：
+  `apps/api/src/config/auth-startup-config.ts`（只改 tenant provider verification
+  區段，不碰 IAP 的 waiver guard），以及 `tests/integ/oidc-pkce-bff.test.ts`
+  （只補 real-provider 正向 fixture 的明確 issuer/sub binding）。擴充後先修這兩项、
+  重跑受影響 checks，再建立 PR 並 handoff；本 checkpoint 不聲稱 CI／review 通過。
