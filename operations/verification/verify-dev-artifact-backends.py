@@ -270,7 +270,12 @@ def test_gcs(bucket_name, runtime_sa):
             assert False, "Expected upload to fail with malformed generation"
         except subprocess.CalledProcessError as e:
             pass  # Expected to fail parameter validation or API error
-
+            
+        print("Test 11: Upload with simulated 403 Forbidden")
+        try:
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, f"gs://{bucket_name}/forbidden/path", f"--if-generation-match={gen1}"])
+        except subprocess.CalledProcessError as e:
+            assert "412" not in e.stderr, f"403/Forbidden network errors should not masquerade as 412 CAS errors: {e.stderr}"
 
     finally:
         print("Cleanup test owned object")
