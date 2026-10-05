@@ -146,7 +146,7 @@ interface OrderPartnerNotificationRoute {
 
 舊資料無法唯一回溯時：route_missing／route_ambiguous，保持未交付、進待處理；不能憑同一手機、email、tenant，或唯一現存 endpoint 猜測收件人。entry 更換 tenantId 後，既存通知遇 owner_changed 暫停並審核，不自動移轉。
 
-## 5. 五種事件、次序、時效
+## 5. 六種事件、次序、時效
 
 | 內部 eventType              | 外部 event（含 major 版）                | 內容／設計預設有效期        |
 | --------------------------- | ---------------------------------------- | --------------------------- |
@@ -165,7 +165,7 @@ interface OrderPartnerNotificationRoute {
 
 ETA：同 order + assignmentVersion 至多每 60 秒一筆，變動至少 2 分鐘才生成；未送出的舊 ETA 可標記 superseded，不顯示 delivered。已送出未知結果仍沿原 ID／payload 重試或依效期結束，不能換內容冒稱同一事件。
 
-送出前重查事件是否仍有通知意義：已取消／已結束的「司機已抵達」、已被新指派取代的舊指派／ETA 停送。receipt_ready 可在完成後送。夥伴收到亂序事件，要去重、依序更新；點擊時一律讀最新正式行程，而非呈現通知內的舊狀態。
+送出前重查事件是否仍有通知意義：已取消／已結束的「司機已抵達」、已被新指派取代的舊指派／ETA 停送。receipt_ready 與 trip_cancelled 可在完成／取消後送。夥伴收到亂序事件，要去重、依序更新；點擊時一律讀最新正式行程，而非呈現通知內的舊狀態。
 
 ## 6. 酬載與隱私
 
