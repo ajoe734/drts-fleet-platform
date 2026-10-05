@@ -202,5 +202,7 @@ jobs:
             --region "$DEV_GCP_REGION"
 
       - name: Verify Genuine Clamd Lifecycle
+        env:
+          CLAMD_IMAGE: "${{ steps.build_push.outputs.clamd_image }}"
         run: |
-          python3 tests/unit/gcp-artifact-activation-20261004/test_genuine_clamd_lifecycle.py "${{ steps.build_push.outputs.clamd_image }}"
+          python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_genuine_clamd_lifecycle.py -v

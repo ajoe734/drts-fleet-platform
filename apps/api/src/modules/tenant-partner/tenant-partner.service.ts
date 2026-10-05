@@ -235,7 +235,11 @@ import {
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
 import { computeEndpointFingerprint } from "./partner-notification-fingerprint";
-import { IdentityRepository } from "../identity/identity.repository";
+import {
+  IdentityRepository,
+  type TenantOidcProof,
+  type OidcBoundTenantUser,
+} from "../identity/identity.repository";
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   ReferralEmbedHandoffRepository,
@@ -4552,6 +4556,96 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole ? this.cloneUserRole(userRole) : null;
   }
 
+  async findTenantUserByOidcIdentity(proof: TenantOidcProof) {
+    const user =
+      await this.identityRepository?.findTenantUserByOidcSubject(proof);
+    if (user) return this.cacheAuthenticatedTenantUser(user);
+    if (!this.identityRepository?.isEnabled()) {
+      const bound = this.userRoles.filter((entry) => {
+        const candidate = entry as OidcBoundTenantUser;
+        return (
+          candidate.oidcIssuer === proof.issuer &&
+          candidate.subjectId === proof.subject &&
+          (!proof.tenantId || candidate.tenantId === proof.tenantId)
+        );
+      });
+      if (bound.length === 1) return this.cloneUserRole(bound[0]!);
+    }
+    // Only the existing offline fixture path may use seed subjects without an
+    // issuer binding. Deployed Google and generic providers always fail closed.
+    const environment = detectAuthEnvironment();
+    if (
+      (environment === "local" || environment === "test") &&
+      process.env.OIDC_MOCK_MODE === "true" &&
+      !["https://accounts.google.com", "accounts.google.com"].includes(
+        proof.issuer,
+      )
+    ) {
+      const fixture = this.findTenantUserBySubject(
+        proof.subject,
+      ) as OidcBoundTenantUser | null;
+      if (
+        fixture &&
+        (!proof.tenantId || fixture.tenantId === proof.tenantId) &&
+        (!fixture.oidcIssuer || fixture.oidcIssuer === proof.issuer)
+      )
+        return fixture;
+    }
+    return null;
+  }
+
+  async findTenantUserForAuthentication(tenantId: string, userId: string) {
+    if (!this.identityRepository?.isEnabled())
+      return this.findTenantUser(tenantId, userId);
+    const user = await this.identityRepository.findTenantUserForAuthentication(
+      tenantId,
+      userId,
+    );
+    return user ? this.cacheAuthenticatedTenantUser(user) : null;
+  }
+
+  private cacheAuthenticatedTenantUser(user: TenantUserRoleRecord) {
+    const index = this.userRoles.findIndex(
+      (entry) =>
+        entry.userId === user.userId && entry.tenantId === user.tenantId,
+    );
+    if (index < 0) this.userRoles.push(this.cloneUserRole(user));
+    else this.userRoles[index] = this.cloneUserRole(user);
+    return this.cloneUserRole(user);
+  }
+
+  async acceptTenantOidcInvitation(
+    tokenHash: string,
+    proof: TenantOidcProof,
+    requestId?: string,
+  ) {
+    const accepted = await this.identityRepository?.acceptTenantOidcInvitation(
+      tokenHash,
+      proof,
+    );
+    if (!accepted)
+      throw new ApiRequestError(
+        403,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "The invitation cannot be accepted.",
+      );
+    this.cacheAuthenticatedTenantUser(accepted.user);
+    this.recordTenantAudit(
+      {
+        actorId: accepted.user.userId,
+        actorType: "tenant_admin",
+        tenantId: accepted.user.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "accept_tenant_oidc_invitation",
+        resourceType: "tenant_user_role",
+        resourceId: accepted.user.userId,
+        newValuesSummary: this.buildTenantUserAuditSummary(accepted.user),
+      },
+      requestId,
+    );
+    return accepted.user;
+  }
+
   bindTenantUserSubject(
     tenantId: string | null | undefined,
     userId: string,
@@ -4573,11 +4667,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
+    const boundUser = userRole as OidcBoundTenantUser;
+    const configuredIssuer = process.env.OIDC_ISSUER?.trim();
+    const issuer =
+      configuredIssuer === "accounts.google.com"
+        ? "https://accounts.google.com"
+        : configuredIssuer;
+    if (
+      !issuer ||
+      (boundUser.subjectId && boundUser.subjectId !== trimmedSubject) ||
+      (boundUser.oidcIssuer && boundUser.oidcIssuer !== issuer)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_IDENTITY_BINDING_DENIED",
+        "An existing identity binding cannot be replaced.",
+      );
+    }
     const previousUserRoles = this.userRoles.map((entry) =>
       this.cloneUserRole(entry),
     );
 
-    (userRole as any).subjectId = trimmedSubject;
+    boundUser.oidcIssuer = issuer;
+    boundUser.subjectId = trimmedSubject;
     (userRole as any).subject = trimmedSubject;
 
     try {
@@ -4941,85 +5053,85 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
         throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PARTNER_ENTRY_CONFLICT",
-        "A partner entry with this slug already exists.",
-        {
-          entrySlug,
-        },
-      );
-    }
+          HttpStatus.CONFLICT,
+          "PARTNER_ENTRY_CONFLICT",
+          "A partner entry with this slug already exists.",
+          {
+            entrySlug,
+          },
+        );
+      }
 
-    const record: PartnerChannelEntryRecord = {
-      partnerId: `partner_${randomUUID()}`,
-      partnerCode,
-      partnerType: this.requireNonBlank(command.partnerType, "partnerType"),
-      programId,
-      programCode: this.normalizeNullableText(command.programCode),
-      tenantId,
-      bankCode: this.normalizeNullableText(command.bankCode),
-      entrySlug,
-      displayName: this.requireNonBlank(command.displayName, "displayName"),
-      businessDispatchSubtype: command.businessDispatchSubtype,
-      authMode: command.authMode,
-      eligibilityMode: command.eligibilityMode,
-      entryHost: this.normalizeNullableText(command.entryHost),
-      entryPath: this.normalizeNullableText(command.entryPath),
-      themeAccent: this.normalizeNullableText(command.themeAccent),
-      brandingMetadata: this.buildBrandingMetadata(
-        command.displayName,
-        command.themeAccent,
-        command.brandingMetadata ?? null,
-      ),
-      eligibilityContract: null,
-      status: command.status ?? "active",
-      activeFlag:
-        command.activeFlag ?? (command.status ?? "active") === "active",
-      revokedAt: null,
-      revokedBy: null,
-      revokeReason: null,
-      createdAt: now,
-      updatedAt: now,
-      auditMetadata: {
-        source: "platform_admin_console",
-        requestId: this.normalizeNullableText(requestId),
-        createdBy: "platform_admin",
-        updatedBy: "platform_admin",
-      },
-    };
-
-    const newEntry = this.clonePartnerEntry(record);
-
-    await this.persistChangesRequired(
-      {
-        partnerEntries: [newEntry],
-      },
-      "create_platform_partner_entry",
-    );
-
-    this.partnerEntries = [
-      newEntry,
-      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
-    ];
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
+      const record: PartnerChannelEntryRecord = {
+        partnerId: `partner_${randomUUID()}`,
+        partnerCode,
+        partnerType: this.requireNonBlank(command.partnerType, "partnerType"),
+        programId,
+        programCode: this.normalizeNullableText(command.programCode),
         tenantId,
-        moduleName: "tenant-partner",
-        actionName: "create_partner_entry",
-        resourceType: "partner_entry",
-        resourceId: record.entrySlug,
-        newValuesSummary: this.clonePartnerEntry(record) as unknown as Record<
-          string,
-          unknown
-        >,
-      },
-      requestId,
-    );
+        bankCode: this.normalizeNullableText(command.bankCode),
+        entrySlug,
+        displayName: this.requireNonBlank(command.displayName, "displayName"),
+        businessDispatchSubtype: command.businessDispatchSubtype,
+        authMode: command.authMode,
+        eligibilityMode: command.eligibilityMode,
+        entryHost: this.normalizeNullableText(command.entryHost),
+        entryPath: this.normalizeNullableText(command.entryPath),
+        themeAccent: this.normalizeNullableText(command.themeAccent),
+        brandingMetadata: this.buildBrandingMetadata(
+          command.displayName,
+          command.themeAccent,
+          command.brandingMetadata ?? null,
+        ),
+        eligibilityContract: null,
+        status: command.status ?? "active",
+        activeFlag:
+          command.activeFlag ?? (command.status ?? "active") === "active",
+        revokedAt: null,
+        revokedBy: null,
+        revokeReason: null,
+        createdAt: now,
+        updatedAt: now,
+        auditMetadata: {
+          source: "platform_admin_console",
+          requestId: this.normalizeNullableText(requestId),
+          createdBy: "platform_admin",
+          updatedBy: "platform_admin",
+        },
+      };
 
-    return this.clonePartnerEntry(record);
+      const newEntry = this.clonePartnerEntry(record);
+
+      await this.persistChangesRequired(
+        {
+          partnerEntries: [newEntry],
+        },
+        "create_platform_partner_entry",
+      );
+
+      this.partnerEntries = [
+        newEntry,
+        ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
+      ];
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "create_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: record.entrySlug,
+          newValuesSummary: this.clonePartnerEntry(record) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        requestId,
+      );
+
+      return this.clonePartnerEntry(record);
     });
   }
 
@@ -5033,135 +5145,135 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const before = this.clonePartnerEntry(originalEntry);
       const entry = this.clonePartnerEntry(originalEntry);
 
-    const lifecycleStatus = this.resolveLifecycleStatus(command.status);
-    const lifecycleActiveFlag =
-      command.activeFlag !== undefined ? command.activeFlag : undefined;
+      const lifecycleStatus = this.resolveLifecycleStatus(command.status);
+      const lifecycleActiveFlag =
+        command.activeFlag !== undefined ? command.activeFlag : undefined;
 
-    if (
-      entry.status === "revoked" &&
-      ((lifecycleStatus && lifecycleStatus !== "revoked") ||
-        lifecycleActiveFlag === true)
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PARTNER_ENTRY_REVOKED",
-        "Revoked partner entries cannot be reactivated or re-opened.",
+      if (
+        entry.status === "revoked" &&
+        ((lifecycleStatus && lifecycleStatus !== "revoked") ||
+          lifecycleActiveFlag === true)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PARTNER_ENTRY_REVOKED",
+          "Revoked partner entries cannot be reactivated or re-opened.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+
+      if (typeof command.tenantId === "string") {
+        entry.tenantId = this.requireNonBlank(command.tenantId, "tenantId");
+      }
+      if (typeof command.partnerCode === "string") {
+        entry.partnerCode = this.normalizePartnerCode(command.partnerCode);
+      }
+      if (typeof command.partnerType === "string") {
+        entry.partnerType = this.requireNonBlank(
+          command.partnerType,
+          "partnerType",
+        );
+      }
+      if (typeof command.programId === "string") {
+        entry.programId = this.requireNonBlank(command.programId, "programId");
+      }
+      if (command.programCode !== undefined) {
+        entry.programCode = this.normalizeNullableText(command.programCode);
+      }
+      if (command.bankCode !== undefined) {
+        entry.bankCode = this.normalizeNullableText(command.bankCode);
+      }
+      if (typeof command.displayName === "string") {
+        entry.displayName = this.requireNonBlank(
+          command.displayName,
+          "displayName",
+        );
+      }
+      if (command.businessDispatchSubtype) {
+        entry.businessDispatchSubtype = command.businessDispatchSubtype;
+      }
+      if (command.authMode) {
+        entry.authMode = command.authMode;
+      }
+      if (command.eligibilityMode) {
+        entry.eligibilityMode = command.eligibilityMode;
+      }
+      if (command.entryHost !== undefined) {
+        entry.entryHost = this.normalizeNullableText(command.entryHost);
+      }
+      if (command.entryPath !== undefined) {
+        entry.entryPath = this.normalizeNullableText(command.entryPath);
+      }
+      if (command.themeAccent !== undefined) {
+        entry.themeAccent = this.normalizeNullableText(command.themeAccent);
+      }
+      if (lifecycleStatus) {
+        entry.status = lifecycleStatus;
+        entry.activeFlag = lifecycleStatus === "active";
+        if (lifecycleStatus !== "revoked") {
+          entry.revokedAt = null;
+          entry.revokedBy = null;
+          entry.revokeReason = null;
+        }
+      }
+      if (lifecycleActiveFlag !== undefined) {
+        entry.activeFlag = lifecycleActiveFlag;
+        entry.status = lifecycleActiveFlag ? "active" : "inactive";
+        if (lifecycleActiveFlag) {
+          entry.revokedAt = null;
+          entry.revokedBy = null;
+          entry.revokeReason = null;
+        }
+      }
+
+      entry.brandingMetadata = this.buildBrandingMetadata(
+        entry.displayName,
+        entry.themeAccent,
+        command.brandingMetadata,
+        entry.brandingMetadata,
+      );
+      entry.updatedAt = new Date().toISOString();
+      entry.auditMetadata = {
+        ...entry.auditMetadata,
+        source: "platform_admin_console",
+        requestId: this.normalizeNullableText(requestId),
+        updatedBy: "platform_admin",
+      };
+
+      const newEntry = this.clonePartnerEntry(entry);
+
+      await this.persistChangesRequired(
         {
-          entrySlug: entry.entrySlug,
+          partnerEntries: [newEntry],
         },
+        "update_platform_partner_entry",
       );
-    }
 
-    if (typeof command.tenantId === "string") {
-      entry.tenantId = this.requireNonBlank(command.tenantId, "tenantId");
-    }
-    if (typeof command.partnerCode === "string") {
-      entry.partnerCode = this.normalizePartnerCode(command.partnerCode);
-    }
-    if (typeof command.partnerType === "string") {
-      entry.partnerType = this.requireNonBlank(
-        command.partnerType,
-        "partnerType",
+      this.partnerEntries = this.partnerEntries.map((e) =>
+        e.entrySlug === entry.entrySlug ? newEntry : e,
       );
-    }
-    if (typeof command.programId === "string") {
-      entry.programId = this.requireNonBlank(command.programId, "programId");
-    }
-    if (command.programCode !== undefined) {
-      entry.programCode = this.normalizeNullableText(command.programCode);
-    }
-    if (command.bankCode !== undefined) {
-      entry.bankCode = this.normalizeNullableText(command.bankCode);
-    }
-    if (typeof command.displayName === "string") {
-      entry.displayName = this.requireNonBlank(
-        command.displayName,
-        "displayName",
+
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: entry.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "update_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: entry.entrySlug,
+          oldValuesSummary: before as unknown as Record<string, unknown>,
+          newValuesSummary: this.clonePartnerEntry(entry) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        requestId,
       );
-    }
-    if (command.businessDispatchSubtype) {
-      entry.businessDispatchSubtype = command.businessDispatchSubtype;
-    }
-    if (command.authMode) {
-      entry.authMode = command.authMode;
-    }
-    if (command.eligibilityMode) {
-      entry.eligibilityMode = command.eligibilityMode;
-    }
-    if (command.entryHost !== undefined) {
-      entry.entryHost = this.normalizeNullableText(command.entryHost);
-    }
-    if (command.entryPath !== undefined) {
-      entry.entryPath = this.normalizeNullableText(command.entryPath);
-    }
-    if (command.themeAccent !== undefined) {
-      entry.themeAccent = this.normalizeNullableText(command.themeAccent);
-    }
-    if (lifecycleStatus) {
-      entry.status = lifecycleStatus;
-      entry.activeFlag = lifecycleStatus === "active";
-      if (lifecycleStatus !== "revoked") {
-        entry.revokedAt = null;
-        entry.revokedBy = null;
-        entry.revokeReason = null;
-      }
-    }
-    if (lifecycleActiveFlag !== undefined) {
-      entry.activeFlag = lifecycleActiveFlag;
-      entry.status = lifecycleActiveFlag ? "active" : "inactive";
-      if (lifecycleActiveFlag) {
-        entry.revokedAt = null;
-        entry.revokedBy = null;
-        entry.revokeReason = null;
-      }
-    }
 
-    entry.brandingMetadata = this.buildBrandingMetadata(
-      entry.displayName,
-      entry.themeAccent,
-      command.brandingMetadata,
-      entry.brandingMetadata,
-    );
-    entry.updatedAt = new Date().toISOString();
-    entry.auditMetadata = {
-      ...entry.auditMetadata,
-      source: "platform_admin_console",
-      requestId: this.normalizeNullableText(requestId),
-      updatedBy: "platform_admin",
-    };
-
-    const newEntry = this.clonePartnerEntry(entry);
-
-    await this.persistChangesRequired(
-      {
-        partnerEntries: [newEntry],
-      },
-      "update_platform_partner_entry",
-    );
-
-    this.partnerEntries = this.partnerEntries.map((e) =>
-      e.entrySlug === entry.entrySlug ? newEntry : e,
-    );
-
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: entry.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "update_partner_entry",
-        resourceType: "partner_entry",
-        resourceId: entry.entrySlug,
-        oldValuesSummary: before as unknown as Record<string, unknown>,
-        newValuesSummary: this.clonePartnerEntry(entry) as unknown as Record<
-          string,
-          unknown
-        >,
-      },
-      requestId,
-    );
-
-    return this.clonePartnerEntry(entry);
+      return this.clonePartnerEntry(entry);
     });
   }
 
@@ -5228,10 +5340,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
 
       const updatedKeyIds = new Set(updatedCredentials.map((c) => c.keyId));
-      this.partnerIngressCredentials = this.partnerIngressCredentials.map((c) =>
-        updatedKeyIds.has(c.keyId)
-          ? updatedCredentials.find((u) => u.keyId === c.keyId)!
-          : c,
+      this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+        (c) =>
+          updatedKeyIds.has(c.keyId)
+            ? updatedCredentials.find((u) => u.keyId === c.keyId)!
+            : c,
       );
 
       this.recordTenantAudit(
@@ -5301,7 +5414,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ]);
       const updatedCredentialsList = this.partnerIngressCredentials.map(
         (credential) => {
-          if (credential.entrySlug !== entry.entrySlug || credential.revokedAt) {
+          if (
+            credential.entrySlug !== entry.entrySlug ||
+            credential.revokedAt
+          ) {
             return credential;
           }
 
@@ -5310,8 +5426,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.reconcileStoredPartnerIngressCredential(updated, rotatedAt);
           if (
             !preservedOverlap &&
-            (updated.status === "active" ||
-              updated.status === "overlap_active")
+            (updated.status === "active" || updated.status === "overlap_active")
           ) {
             preservedOverlap = true;
             revokedCredentialId = updated.keyId;
@@ -5332,8 +5447,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
           updated.revokedAt = rotatedAt;
           updated.revokedBy = "platform_admin";
-          updated.revokeReason =
-            command.rotationReason ?? "credential_rotated";
+          updated.revokeReason = command.rotationReason ?? "credential_rotated";
           updated.status = "revoked";
           updated.overlapEndsAt = null;
           return updated;
@@ -5343,8 +5457,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         issued.storedCredential,
         ...updatedCredentialsList,
       ];
-      const persistedCredentials = finalCredentialsList.filter(
-        (credential) => mutatedCredentialIds.has(credential.keyId),
+      const persistedCredentials = finalCredentialsList.filter((credential) =>
+        mutatedCredentialIds.has(credential.keyId),
       );
 
       await this.persistChangesRequired(
@@ -5407,7 +5521,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         keyId,
       );
 
-      const credential = this.cloneStoredPartnerIngressCredential(originalCredential);
+      const credential =
+        this.cloneStoredPartnerIngressCredential(originalCredential);
       this.reconcileStoredPartnerIngressCredential(credential);
       if (credential.revokedAt) {
         return this.toPartnerIngressCredentialResponse(credential);
@@ -5430,8 +5545,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         "revoke_platform_partner_ingress_credential",
       );
 
-      this.partnerIngressCredentials = this.partnerIngressCredentials.map((c) =>
-        c.keyId === credential.keyId ? credential : c
+      this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+        (c) => (c.keyId === credential.keyId ? credential : c),
       );
 
       this.recordTenantAudit(
@@ -5596,7 +5711,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     void this.runWithEntryMutex(entry.entrySlug, async () => {
       const current = this.partnerIngressCredentials.find(
-        (c) => c.entrySlug === entry.entrySlug && c.keyId === matchingCredential.keyId
+        (c) =>
+          c.entrySlug === entry.entrySlug &&
+          c.keyId === matchingCredential.keyId,
       );
       if (!current) return;
 
@@ -5692,7 +5809,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     void this.runWithEntryMutex(entry.entrySlug, async () => {
       const current = this.partnerIngressCredentials.find(
-        (c) => c.entrySlug === entry.entrySlug && c.keyId === credential.keyId
+        (c) => c.entrySlug === entry.entrySlug && c.keyId === credential.keyId,
       );
       if (!current) return;
 
@@ -5910,10 +6027,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (!result.session.identityActive) {
-        const latestConsent = await this.referralEmbedHandoffRepository.findLatestConsent(
-          result.session.partnerEntrySlug,
-          result.session.drtsPassengerId,
-        );
+        const latestConsent =
+          await this.referralEmbedHandoffRepository.findLatestConsent(
+            result.session.partnerEntrySlug,
+            result.session.drtsPassengerId,
+          );
         if (latestConsent) {
           result.session.identityActive = true;
           result.session.consent.bundleVersion = latestConsent.bundleVersion;
@@ -5985,10 +6103,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "The partner entry ownership has changed.",
         );
       }
-      const link = await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
-        session.partnerEntrySlug,
-        session.drtsPassengerId,
-      );
+      const link =
+        await this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+          session.partnerEntrySlug,
+          session.drtsPassengerId,
+        );
       if (!link || link.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -5998,8 +6117,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
     };
 
-    const result =
-      await this.referralEmbedHandoffRepository.recordConsent(command, validateFn);
+    const result = await this.referralEmbedHandoffRepository.recordConsent(
+      command,
+      validateFn,
+    );
 
     if (result.outcome === "recorded" || result.outcome === "replayed") {
       return result.session;
@@ -7110,6 +7231,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: AcceptTenantInvitationCommand,
     requestId?: string,
   ): Promise<AcceptTenantInvitationResult> {
+    if (
+      ["https://accounts.google.com", "accounts.google.com"].includes(
+        process.env.OIDC_ISSUER?.trim() ?? "",
+      )
+    ) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_INVITATION_ACCEPTANCE_DENIED",
+        "Sign in with Google through the invitation link to accept this invitation.",
+      );
+    }
     this.assertNonBlank(command.invitationToken, "invitationToken");
     const invitation = await this.identityRepository?.consumeInvitationToken(
       createHash("sha256").update(command.invitationToken).digest("hex"),

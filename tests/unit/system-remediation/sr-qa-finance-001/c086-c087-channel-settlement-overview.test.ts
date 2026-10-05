@@ -39,7 +39,9 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       );
 
       expect(statement.channelKey).toBe(PARTNER_REFERRAL_CHANNEL_KEY);
-      expect(statement.direction).toBe(REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER);
+      expect(statement.direction).toBe(
+        REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+      );
       expect(statement.totals.tripCount).toBe(2);
       expect(statement.totals.activeRiderCount).toBe(2);
       expect(statement.totals.gmv.amountMinor).toBe(150000); // 1500 NTD
@@ -75,12 +77,16 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       const auditNotifications = new AuditNotificationService();
       const service = new BillingSettlementService(auditNotifications);
 
-      const statements = await service.listReferralStatements("referral-demo-community");
+      const statements = await service.listReferralStatements(
+        "referral-demo-community",
+      );
       expect(statements.length).toBeGreaterThanOrEqual(1);
       expect(statements.map((s) => s.period)).toContain("2026-06");
-      expect(statements.every((s) => s.partnerEntrySlug === "referral-demo-community")).toBe(
-        true,
-      );
+      expect(
+        statements.every(
+          (s) => s.partnerEntrySlug === "referral-demo-community",
+        ),
+      ).toBe(true);
     });
   });
 
@@ -103,7 +109,9 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       expect(dashboard.period).toBe("2026-06");
       expect(dashboard.tripCount).toBe(statement.totals.tripCount);
       expect(dashboard.gmv).toEqual(statement.totals.gmv);
-      expect(dashboard.estimatedShareAmount).toEqual(statement.totals.shareTotal);
+      expect(dashboard.estimatedShareAmount).toEqual(
+        statement.totals.shareTotal,
+      );
     });
 
     it("verifies portal UI binds channel-overview-export to real report endpoint with query filters", async () => {
@@ -112,9 +120,15 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
         "utf8",
       );
 
-      expect(dashboardSource).toContain('data-drt-operation="channel-overview-export"');
-      expect(dashboardSource).toContain("statements/${encodeURIComponent(currentPeriod)}/artifact");
-      expect(dashboardSource).toContain("download={`referral-statement-${currentPeriod}.csv`}");
+      expect(dashboardSource).toContain(
+        'data-drt-operation="channel-overview-export"',
+      );
+      expect(dashboardSource).toContain(
+        "statements/${encodeURIComponent(currentPeriod)}/artifact",
+      );
+      expect(dashboardSource).not.toContain(
+        "download={`referral-statement-${currentPeriod}.csv`}",
+      );
     });
   });
 });

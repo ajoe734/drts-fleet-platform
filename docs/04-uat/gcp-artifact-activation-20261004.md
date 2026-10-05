@@ -5,6 +5,7 @@ This document captures the User Acceptance Testing for the `SR-GCP-ARTIFACT-ACTI
 ## Review Findings (Codex - PR 2313 / 2324)
 
 The implementation has remediated findings over multiple rounds:
+
 - **R1:** Workflow accepts full 40-character SHAs and enforces regex.
 - **R2:** Identity tokens for WIF use `id_token` format.
 - **R3:** MIME policy uses `application/pdf`.
@@ -15,29 +16,31 @@ The implementation has remediated findings over multiple rounds:
 
 ### Guide 0.7 Resolution Table for Remaining Findings & Gates
 
-| Finding / Gate | Original Finding SHA | New Candidate Result | Command / Assertion | Result / Artifacts / Unexecuted |
-|---|---|---|---|---|
-| **R5a (MIME/Hash/Size Rejection)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Includes modeled tests for rejection and mock assertions. |
-| **R5b.3 (Engine-limit contract)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Asserts `502 scan_engine_indeterminate` for limit-exhausted scans. |
-| **R5b.2 (Genuine Transitions)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PASS in CI mock (exit 0). All required lifecycle transitions and network timeout scenarios are now fully implemented for genuine live execution. |
-| **R6 (GCS Generation CAS/Limits)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Tests generation CAS using test-owned objects. Test 12 (network fault) is implemented-but-unexecuted live, tested by CI mock. |
-| **R5b.4b (Restoration Fidelity)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Captures exact mutated gateway env vars and completely restores them, followed by readiness/EICAR asserts. |
-| **R8-doc (UAT Schemas/Readback)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired | Manual readback/documentation | PASS. Readback fully repaired with actual product app-session procedures and stage/scan endpoints. |
-| **R9 (Commit Trailers/Whitespaces)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 -B tools/ci/git/check_commit_trailers.py` | PASS (offline branch checks). Whitespaces and trailers fixed. |
-| **1. immutable_hosted_workflow_review_ci** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending CI | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. Final CI pass pending on PR. |
-| **2. private_resources_iam_and_image_provenance** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted | Hosted runbacks | Exact assertions prepared for bucket IAM/versioning, service policy, anonymous denial, container digests, min0/max1. |
-| **3. genuine_scan_storage_positive_negative** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted | Hosted verification run | Workflow automatically runs `verify-dev-artifact-backends.py` in live GCP environment to confirm storage controls and engine recovery. |
-| **4. shared_dev_provider_activation_readback** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Deployment | Live deployment | Coordinated immutable deployment configuring 6 provider variables, followed by runtime readback. |
+| Finding / Gate                                    | Original Finding SHA                       | New Candidate Result | Command / Assertion                                                 | Result / Artifacts / Unexecuted                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------ | -------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **R5a (MIME/Hash/Size Rejection)**                | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired             | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Includes modeled tests for rejection and mock assertions.                                                               |
+| **R5b.3 (Engine-limit contract)**                 | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired             | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Asserts `502 scan_engine_indeterminate` for limit-exhausted scans.                                                      |
+| **R5b.2 (Genuine Transitions)**                   | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired             | `python3 operations/verification/verify-dev-artifact-backends.py`   | PENDING. All required lifecycle transitions and network timeout scenarios are implemented for genuine live execution.                  |
+| **R6 (GCS Generation CAS/Limits)**                | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired             | `python3 operations/verification/verify-dev-artifact-backends.py`   | PENDING. Tests generation CAS using test-owned objects. Test 12 (network fault) is implemented-but-unexecuted live, tested by CI mock. |
+| **R5b.4b (Restoration Fidelity)**                 | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired             | `python3 operations/verification/verify-dev-artifact-backends.py`   | PENDING. Captures exact mutated gateway env vars and completely restores them, followed by readiness/EICAR asserts.                    |
+| **R8-doc (UAT Schemas/Readback)**                 | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired             | Manual readback/documentation                                       | PENDING. Executable authorized hosted fixture/session recipe prepared using real schema and identity authority.                        |
+| **R9 (Commit Trailers/Whitespaces)**              | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired             | `python3 -B tools/ci/git/check_commit_trailers.py`                  | PASS (offline branch checks). Whitespaces and trailers fixed.                                                                          |
+| **1. immutable_hosted_workflow_review_ci**        | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending CI           | Git / CI Checks                                                     | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. Final CI pass pending on PR.                         |
+| **2. private_resources_iam_and_image_provenance** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted       | Hosted runbacks                                                     | Exact assertions prepared for bucket IAM/versioning, service policy, anonymous denial, container digests, min0/max1.                   |
+| **3. genuine_scan_storage_positive_negative**     | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted       | Hosted verification run                                             | Workflow automatically runs `verify-dev-artifact-backends.py` in live GCP environment to confirm storage controls and engine recovery. |
+| **4. shared_dev_provider_activation_readback**    | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Deployment   | Live deployment                                                     | Coordinated immutable deployment configuring 6 provider variables, followed by runtime readback.                                       |
 
 ## Acceptance Criteria
 
 ### 1. immutable_hosted_workflow_review_ci
+
 - **Requirement:** Independently reviewed exact SHA and CI, no mutable code dispatch.
 - **Pending Hosted Checks:**
   - Verify CI passes on the final candidate PR.
   - Reviewer approval must be granted before the workflow is dispatched via exact SHA.
 
 ### 2. private_resources_iam_and_image_provenance
+
 - **Requirement:** Real digests, project/region/runtime ownership, private buckets/versioning and least-privilege IAM/readback, scanner not anonymous; bounded support instance.
 - **Pending Hosted Checks:**
   - Dispatch workflow with valid SHA.
@@ -57,12 +60,14 @@ The implementation has remediated findings over multiple rounds:
     - Execute `gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID` to assert memory/cpu boundaries, concurrency=1, and `min-instances=0` / `max-instances=1`.
 
 ### 3. genuine_scan_storage_positive_negative
+
 - **Requirement:** Actual clean/EICAR, hash/size/limit/error/freshness rejection, authenticated GCS CAS/generation readback using test-owned objects only.
 - **Pending Hosted Checks:**
   - The provisioning workflow's "Verify Hosted Backends" step automatically runs `verify-dev-artifact-backends.py` against the live infrastructure, minting its own valid ID token.
   - Ensure the pipeline logs confirm actual transitions: verified-unchanged/update/failed refresh/reload, pending/failed -> activated, transport failure after successful readiness, and genuine cold-start recovery with real scan receipts for both clean and EICAR files.
 
 ### 4. shared_dev_provider_activation_readback
+
 - **Requirement:** Configure reviewed GCS/scanner provider refs through authorized rails, coordinate an immutable shared dev deployment only after gate3 passes.
 - **Pending Hosted Checks:**
   - Configure exactly the following 6 GitHub Variables on the shared dev repository environment:
@@ -76,9 +81,31 @@ The implementation has remediated findings over multiple rounds:
   - Assert explicit runtime source SHA and selected deployed env/config by checking the deployment workflow logs and the Cloud Run environment variables (`gcloud run services describe`), NOT via the product `/health` endpoint which intentionally does not expose backend artifact configuration.
   - Execute a coordinated, authenticated runtime readback using real product app-session procedures via the `deploy-dev.yml` registered token issuance rails:
     - **Fixture Preparation & Session Issuance:**
-      - The `deploy-dev.yml` pipeline only natively issues `realm=tenant` admin sessions. To test driver uploads, seed an explicit test-owned driver identity and `driver:write` scope session in the application database via a direct DB SQL fixture, or using the internal test seeding endpoint if available on dev. Seed an associated batch.
-      - Seed a public-info fixture required for placards.
-      - Prepare a platform ops admin session (`realm=platform` with `billing:write` and `foundation:write`) for the operations download paths and placard production.
+      - Generate a driver session and test fixtures using the authorized Cloud SQL proxy and `deploy-dev.yml` session generation tools:
+
+        ```bash
+        # 1. Connect to Cloud SQL
+        gcloud sql connect drts-dev-pg --user=drts_dev_admin --quiet <<'EOF'
+        -- Seed Driver
+        INSERT INTO public.drts_identities (id, realm, status, created_at, updated_at)
+        VALUES ('id-test-driver-001', 'driver', 'active', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;
+        INSERT INTO public.drts_driver_profiles (identity_id, name, created_at, updated_at)
+        VALUES ('id-test-driver-001', 'Test Driver', NOW(), NOW()) ON CONFLICT (identity_id) DO NOTHING;
+        -- Seed Batch
+        INSERT INTO public.drts_reimbursement_batches (id, driver_identity_id, status, created_at, updated_at)
+        VALUES ('batch-test-001', 'id-test-driver-001', 'open', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;
+        -- Seed Public Info for Placards
+        INSERT INTO public.drts_public_info (id, version_code, content, created_at, updated_at)
+        VALUES ('info-test-001', 'v1', '{"test":true}', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;
+        EOF
+
+        # 2. Issue driver session (realm=driver, scope=driver:write)
+        DRIVER_TOKEN=$(pnpm exec tsx tools/development-orchestrator/bin/issue-test-token.ts --realm driver --subject id-test-driver-001 --scope "driver:write")
+
+        # 3. Issue platform ops admin session (realm=platform, scope=billing:write foundation:write)
+        OPS_TOKEN=$(pnpm exec tsx tools/development-orchestrator/bin/issue-test-token.ts --realm platform --subject sys-ops-admin --scope "billing:write foundation:write")
+        ```
+
     - **Remittance Proofs (Driver & Ops):**
       - As the explicitly seeded driver identity (`realm=driver`), execute `POST /api/reimbursements/proofs/staged-content` containing actual test-owned fixture bytes (`contentBase64`, `contentType`) and the required header `Idempotency-Key: <stage-uuid>` to receive a `stagedContentRef`.
       - Execute `POST /api/reimbursements/proofs` with an `UploadRemittanceProofCommand` payload (including `batchId`, `originalFilename`, `contentType`, `sizeBytes`, and the `stagedContentRef`) and required header `Idempotency-Key: <upload-uuid>` to persist and scan the bytes.
@@ -90,4 +117,5 @@ The implementation has remediated findings over multiple rounds:
       - The endpoint will return an API envelope containing the published placard metadata, which should include `artifactDownloadUrl` and `downloadMetadata.downloadUrl`.
       - Execute the document readback via `GET /api/downloads/placard/:placardVersionId?...` (resolving the exact query parameters provided in `downloadMetadata.downloadUrl`) to obtain the controlled-download.
       - Assert the retrieved bytes, hash, and length exactly match the test fixture.
+
   - Check the backend logs to confirm the Cloud Run gateway processed the file scan (`verdict: clean` and `verdict: infected`) and GCS successfully stored/rejected them under the expected IDs/generations. Download the files directly using `gcloud storage cat` with the runtime identity to independently confirm storage bytes.

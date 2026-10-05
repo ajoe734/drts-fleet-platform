@@ -49,7 +49,9 @@ function deltaOf(
 export default async function ReferralDashboardPage(props: {
   searchParams?: Promise<{ period?: string }>;
 }) {
-  const searchParams = props.searchParams ? await props.searchParams : undefined;
+  const searchParams = props.searchParams
+    ? await props.searchParams
+    : undefined;
   const requestedPeriod = searchParams?.period?.trim();
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
@@ -119,7 +121,6 @@ export default async function ReferralDashboardPage(props: {
       />
       <a
         href={`/control-plane-proxy/partner/referral/statements/${encodeURIComponent(currentPeriod)}/artifact`}
-        download={`referral-statement-${currentPeriod}.csv`}
         data-drt-operation="channel-overview-export"
         data-drt-intent="channel-statement-download"
         style={{

@@ -97,6 +97,18 @@ export interface ConsumeWorkloadIdentityAssertionInput {
 
 const LEGACY_TENANT_USER_ISSUER = "legacy_tenant_email";
 
+export interface TenantOidcProof {
+  issuer: string;
+  subject: string;
+  email: string;
+  tenantId?: string | null;
+}
+
+export type OidcBoundTenantUser = TenantUserRoleRecord & {
+  oidcIssuer?: string;
+  subjectId?: string;
+};
+
 export function hashIdentitySecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
@@ -104,6 +116,7 @@ export function hashIdentitySecret(secret: string): string {
 @Injectable()
 export class IdentityRepository implements OnModuleInit {
   private readonly logger = new Logger(IdentityRepository.name);
+  private readonly fallbackTenantUsers = new Map<string, OidcBoundTenantUser>();
 
   private readonly fallbackPrincipals = new Map<
     string,
@@ -318,7 +331,8 @@ export class IdentityRepository implements OnModuleInit {
     };
 
     const membershipDraft: CanonicalIdentityMembershipRecord = {
-      membershipId: existingMembership?.membershipId ?? `membership_ops_${randomUUID()}`,
+      membershipId:
+        existingMembership?.membershipId ?? `membership_ops_${randomUUID()}`,
       sourceRef: "live_map_observer:membership:ops",
       principalId: principalDraft.principalId,
       realm: "ops",
@@ -389,6 +403,7 @@ export class IdentityRepository implements OnModuleInit {
   async syncLegacyTenantUserRole(
     userRole: TenantUserRoleRecord,
   ): Promise<CanonicalTenantUserIdentitySnapshot> {
+    const oidcUser = userRole as OidcBoundTenantUser;
     const normalizedEmail = userRole.email.trim().toLowerCase();
     const principalStatus = this.mapLegacyTenantStatus(userRole.status);
     const membershipStatus = this.mapLegacyTenantStatus(userRole.status);
@@ -402,14 +417,14 @@ export class IdentityRepository implements OnModuleInit {
     const principalDraft: CanonicalIdentityPrincipalRecord = {
       principalId: `principal_${randomUUID()}`,
       sourceRef: `${sourcePrefix}:principal`,
-      issuer: LEGACY_TENANT_USER_ISSUER,
-      subject: this.buildLegacyTenantSubject(
-        userRole.tenantId,
-        normalizedEmail,
-      ),
+      issuer: oidcUser.oidcIssuer || LEGACY_TENANT_USER_ISSUER,
+      subject:
+        oidcUser.oidcIssuer && oidcUser.subjectId
+          ? oidcUser.subjectId
+          : this.buildLegacyTenantSubject(userRole.tenantId, normalizedEmail),
       principalType: "human",
       email: normalizedEmail,
-      emailVerified: false,
+      emailVerified: Boolean(oidcUser.oidcIssuer && oidcUser.subjectId),
       displayName: userRole.displayName,
       status: principalStatus,
       createdAt: userRole.invitedAt,
@@ -466,6 +481,7 @@ export class IdentityRepository implements OnModuleInit {
     };
 
     if (!this.isEnabled()) {
+      this.fallbackTenantUsers.set(userRole.userId, { ...userRole });
       const principal = this.upsertFallbackPrincipal(principalDraft);
       const membership = this.upsertFallbackMembership({
         ...membershipDraft,
@@ -687,6 +703,263 @@ export class IdentityRepository implements OnModuleInit {
     const client = await this.databaseService!.connect();
     try {
       return await this.upsertInvitation(client, invitation);
+    } finally {
+      client.release();
+    }
+  }
+
+  async findTenantUserForAuthentication(
+    tenantId: string,
+    userId: string,
+  ): Promise<OidcBoundTenantUser | null> {
+    if (!this.isEnabled()) {
+      const user = this.fallbackTenantUsers.get(userId);
+      return user?.tenantId === tenantId ? { ...user } : null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_user_roles WHERE tenant_id = $1 AND user_id = $2`,
+      [tenantId, userId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<OidcBoundTenantUser>(
+          result.rows[0].record,
+          "admin.phase1_tenant_user_roles",
+        )
+      : null;
+  }
+
+  async findTenantUserByOidcSubject(
+    proof: Pick<TenantOidcProof, "issuer" | "subject" | "tenantId">,
+  ): Promise<OidcBoundTenantUser | null> {
+    if (!this.isEnabled()) {
+      const matches = [...this.fallbackTenantUsers.values()].filter(
+        (user) =>
+          user.oidcIssuer === proof.issuer &&
+          user.subjectId === proof.subject &&
+          (!proof.tenantId || user.tenantId === proof.tenantId),
+      );
+      return matches.length === 1 ? { ...matches[0]! } : null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_user_roles
+        WHERE record->>'oidcIssuer' = $1 AND record->>'subjectId' = $2
+          AND ($3::text IS NULL OR tenant_id = $3) LIMIT 2`,
+      [proof.issuer, proof.subject, proof.tenantId || null],
+    );
+    return result.rows.length === 1
+      ? this.parseRecord<OidcBoundTenantUser>(
+          result.rows[0]!.record,
+          "admin.phase1_tenant_user_roles",
+        )
+      : null;
+  }
+
+  /** One transaction owns invitation consumption, identity binding and activation.
+   * A failed check never burns the proof. The (issuer, subject) principal unique
+   * constraint also prevents two invitations from binding the same identity. */
+  async acceptTenantOidcInvitation(
+    tokenHash: string,
+    proof: TenantOidcProof,
+  ): Promise<{
+    user: OidcBoundTenantUser;
+    invitation: CanonicalIdentityInvitationRecord;
+  } | null> {
+    const now = new Date().toISOString();
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined,
+    ) =>
+      invitation &&
+      invitation.realm === "tenant" &&
+      !invitation.acceptedAt &&
+      !invitation.revokedAt &&
+      Date.parse(invitation.expiresAt) > Date.parse(now) &&
+      invitation.email.toLowerCase() === proof.email.toLowerCase() &&
+      (!proof.tenantId || proof.tenantId === invitation.tenantId);
+    const validUser = (
+      user: OidcBoundTenantUser | undefined,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      user &&
+      user.status === "invited" &&
+      !user.oidcIssuer &&
+      !user.subjectId &&
+      user.tenantId === invitation.tenantId &&
+      user.email.toLowerCase() === proof.email.toLowerCase() &&
+      user.roleCode === invitation.roleCode;
+    const activateUser = (user: OidcBoundTenantUser): OidcBoundTenantUser => ({
+      ...user,
+      status: "active",
+      oidcIssuer: proof.issuer,
+      subjectId: proof.subject,
+      updatedAt: now,
+    });
+    if (!proof.issuer || !proof.subject || !proof.email) return null;
+    if (!this.isEnabled()) {
+      // No await before all checks and writes: the offline repository preserves
+      // the same one-shot semantics for concurrent unit-test consumers.
+      const invitation = [...this.fallbackInvitations.values()].find(
+        (entry) => entry.tokenHash === tokenHash,
+      );
+      if (!invitation || !validInvitation(invitation)) return null;
+      const membership = this.fallbackMemberships.get(invitation.membershipId);
+      const principal =
+        membership && this.fallbackPrincipals.get(membership.principalId);
+      const user = [...this.fallbackTenantUsers.values()].find(
+        (entry) =>
+          membership?.sourceRef ===
+          `tenant_user_role:${entry.userId}:membership`,
+      );
+      if (
+        !membership ||
+        membership.status !== "invited" ||
+        membership.realm !== "tenant" ||
+        membership.scopeRef !== invitation.scopeRef ||
+        membership.tenantId !== invitation.tenantId ||
+        !principal ||
+        principal.status !== "invited" ||
+        principal.issuer !== LEGACY_TENANT_USER_ISSUER ||
+        !user ||
+        principal.sourceRef !== `tenant_user_role:${user.userId}:principal` ||
+        !validUser(user, invitation) ||
+        [...this.fallbackPrincipals.values()].some(
+          (entry) =>
+            entry.issuer === proof.issuer && entry.subject === proof.subject,
+        )
+      )
+        return null;
+      const activated = activateUser(user);
+      this.upsertFallbackPrincipal({
+        ...principal,
+        issuer: proof.issuer,
+        subject: proof.subject,
+        status: "active",
+        emailVerified: true,
+        updatedAt: now,
+      });
+      this.upsertFallbackMembership({
+        ...membership,
+        status: "active",
+        updatedAt: now,
+      });
+      const accepted = this.upsertFallbackInvitation({
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      this.fallbackTenantUsers.set(user.userId, activated);
+      return { user: { ...activated }, invitation: accepted };
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations WHERE token_hash = $1
+          AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $2::timestamptz FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation =
+        invitationRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityInvitationRecord>(
+          invitationRows.rows[0].record,
+          "iam.identity_invitations",
+        );
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership =
+        membershipRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityMembershipRecord>(
+          membershipRows.rows[0].record,
+          "iam.identity_memberships",
+        );
+      if (
+        !membership ||
+        membership.status !== "invited" ||
+        membership.realm !== "tenant" ||
+        membership.scopeRef !== invitation.scopeRef ||
+        membership.tenantId !== invitation.tenantId
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal =
+        principalRows.rows[0] &&
+        this.parseRecord<CanonicalIdentityPrincipalRecord>(
+          principalRows.rows[0].record,
+          "iam.identity_principals",
+        );
+      const userId = /^tenant_user_role:(.+):membership$/.exec(
+        membership.sourceRef ?? "",
+      )?.[1];
+      if (
+        !principal ||
+        principal.status !== "invited" ||
+        principal.issuer !== LEGACY_TENANT_USER_ISSUER ||
+        !userId
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const userRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_tenant_user_roles WHERE user_id = $1 FOR UPDATE`,
+        [userId],
+      );
+      const user =
+        userRows.rows[0] &&
+        this.parseRecord<OidcBoundTenantUser>(
+          userRows.rows[0].record,
+          "admin.phase1_tenant_user_roles",
+        );
+      if (
+        !user ||
+        principal.sourceRef !== `tenant_user_role:${user.userId}:principal` ||
+        !validUser(user, invitation)
+      ) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activated = activateUser(user);
+      await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          issuer: proof.issuer,
+          subject: proof.subject,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      const accepted = await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query(
+        `UPDATE admin.phase1_tenant_user_roles SET status = 'active', updated_at = $2::timestamptz, record = $3::jsonb WHERE user_id = $1`,
+        [user.userId, now, JSON.stringify(activated)],
+      );
+      await client.query("COMMIT");
+      return { user: activated, invitation: accepted };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
     } finally {
       client.release();
     }

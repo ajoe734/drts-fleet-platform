@@ -221,32 +221,28 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
             print("Test 9: Transport failure after successful readiness")
-            # We use a short CLAMD_TIMEOUT_MS on gateway with a large payload to deterministically timeout the exchange but pass readiness
-            rev_9 = update_service_env(container="gateway", CLAMD_TIMEOUT_MS="15")
-            
-            # 5MB payload to ensure it takes >15ms to stream over VPC connector
-            # The payload must be < 10MB to avoid gateway's payload_too_large
-            large_content = b"a" * (5 * 1024 * 1024)
-            LARGE_PAYLOAD = {"file": ("large.txt", large_content, "text/plain")}
-            
+            # We use a dedicated fault injection flag to deterministically fail transport without breaking readiness
+            rev_9 = update_service_env(container="gateway", FAULT_INJECT_TRANSPORT="1")
+
+            # We can now use a normal clean payload, the fault is injected at the transport boundary
             max_attempts = 30
             ready = False
             for i in range(max_attempts):
-                status, body = scan(LARGE_PAYLOAD)
+                status, body = scan(CLEAN)
                 if status == 502:
                     ready = True
                     break
                 time.sleep(2)
 
             assert ready, "Service did not become ready (or fault did not trigger)"
-            status, body = scan(LARGE_PAYLOAD)
+            status, body = scan(CLEAN)
             assert status == 502, f"Expected 502 transport failure due to injected fault, got {status}: {body}"
             assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
-            # We use a separate authorized hosted genuine-engine harness for this to properly test the genuine lifecycle
+            # Recovery after fault
+            update_service_env(container="gateway", remove=True, FAULT_INJECT_TRANSPORT="")
+            
             print("  (Genuine engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
-            update_service_env(container="gateway", remove=True, CLAMD_TIMEOUT_MS="")
-
         except Exception as e:
             print(f"Hosted scenario failed: {e}")
             raise
