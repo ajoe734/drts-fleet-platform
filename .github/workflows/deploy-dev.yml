@@ -852,7 +852,7 @@ jobs:
           fi
 
           bank_signing_mounts="$(operations/deployment/resolve-bank-signing-secrets.sh "$secret_prefix" "$project_id")"
-          bank_console_secret_args="$web_secret_args,BANK_SESSION_SECRET=${secret_prefix}-jwt-secret:latest"
+          bank_console_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest,BANK_SESSION_SECRET=${secret_prefix}-jwt-secret:latest"
           if [[ -n "$bank_signing_mounts" ]]; then
             bank_console_secret_args="${bank_console_secret_args},${bank_signing_mounts}"
           fi
