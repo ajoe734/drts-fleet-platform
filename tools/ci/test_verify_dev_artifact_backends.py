@@ -91,11 +91,9 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}), # Test 7 EICAR
             (502, {"error": "scan_engine_unavailable"}), # Test 9 polling transport failure
             (502, {"error": "scan_engine_unavailable"}), # Test 9 final scan transport failure
-            (503, {"error": "scan_engine_not_ready"}), # Test 10 failed refresh
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 10 successful refresh
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # polling readiness
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally health check
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally health check EICAR
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally polling readiness
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally scan CLEAN
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally scan EICAR
         ]
         def urlopen_side_effect(req, timeout=30):
             status, body = responses.pop(0)
@@ -236,7 +234,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     else:
                         f.write("test data v1")
             elif "cp" in cmd and "--if-generation-match=0" in cmd:
-                if "--access-token=ya29.invalidtoken123456" in cmd:
+                if "--access-token-file=/dev/null" in cmd:
                     err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
                     raise err
                 if len(mock_run.call_args_list) > 3:
