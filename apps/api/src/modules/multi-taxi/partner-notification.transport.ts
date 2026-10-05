@@ -28,6 +28,7 @@ const messages = {
   eta_changed: "預計抵達時間已更新，請回行程查看。",
   driver_arrived: "司機已抵達，請回行程查看。",
   receipt_ready: "乘車證明已備妥，請回行程查看。",
+  trip_cancelled: "行程已取消，請回行程查看。",
 } as const;
 
 export function notificationExpiresAt(message: PassengerPushMessage): string {

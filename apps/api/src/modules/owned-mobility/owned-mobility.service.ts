@@ -5432,6 +5432,7 @@ export class OwnedMobilityService
     const now = new Date().toISOString();
     const prepare = (bundle: {
       order: OwnedOrderRecord;
+      assignmentVersion?: number;
       assignment: DispatchAssignmentRecord | null | undefined;
       task: DriverTaskRecord | null;
       dispatchJobs: DispatchJobRecord[];
@@ -5488,7 +5489,29 @@ export class OwnedMobilityService
           reason: order.cancelReason,
         }),
       );
-      return { order, assignment, task, dispatchJobs, traceLogs };
+      const outbox: ConsumerNotificationOutboxRecord = {
+        outboxId: randomUUID(),
+        orderId: order.orderId,
+        passengerSubjectRef: resolvePassengerSubjectRef(order.passenger),
+        eventType: "trip_cancelled",
+        assignmentVersion: bundle.assignmentVersion ?? 1,
+        payload: {
+          cancelReason: order.cancelReason,
+        },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        deliveredAt: null,
+      };
+      return {
+        order,
+        assignment,
+        task,
+        dispatchJobs,
+        traceLogs,
+        consumerNotificationOutbox: [outbox],
+      };
     };
     const repository = this.ownedMobilityRepository;
     if (repository?.isEnabled()) {
@@ -5510,6 +5533,7 @@ export class OwnedMobilityService
               : [],
             driverTasks: prepared.task ? [prepared.task] : [],
             dispatchTraceLogs: prepared.traceLogs,
+            consumerNotificationOutbox: prepared.consumerNotificationOutbox,
           });
           if (prepared.assignment) {
             await repository.releaseDispatchResourceReservations(
@@ -5560,7 +5584,14 @@ export class OwnedMobilityService
           }),
           quotaRelease: null,
         };
-    const { order, assignment, task, dispatchJobs, traceLogs } = committed;
+    const {
+      order,
+      assignment,
+      task,
+      dispatchJobs,
+      traceLogs,
+      consumerNotificationOutbox,
+    } = committed;
     if (
       repository?.isEnabled() &&
       committed.quotaRelease &&
@@ -5625,6 +5656,12 @@ export class OwnedMobilityService
         ),
       ];
     this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+    if (consumerNotificationOutbox?.length) {
+      this.consumerNotificationOutbox = [
+        ...consumerNotificationOutbox,
+        ...this.consumerNotificationOutbox,
+      ];
+    }
     this.recordAudit(
       {
         actorId: null,
@@ -13234,8 +13271,10 @@ export class OwnedMobilityService
     return nextOrder;
   }
 
-
-  async getOrderAsync(orderId: string, identity?: BootstrapRequestIdentity | null) {
+  async getOrderAsync(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
     const order = this.requireOrder(orderId);
     await this.assertPartnerOrderIdentityAsync(identity, order);
     return this.cloneOrder(order);
@@ -13256,7 +13295,8 @@ export class OwnedMobilityService
         identity.actorType !== "referral_passenger") ||
       !order.partnerEntrySlug ||
       (identity.partnerId || null) !== (order.partnerId || null) ||
-      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
+      (identity.partnerProgramId || null) !==
+        (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&
@@ -13307,7 +13347,8 @@ export class OwnedMobilityService
       !order.partnerEntrySlug ||
       (identity.tenantId && identity.tenantId !== order.tenantId) ||
       (identity.partnerId || null) !== (order.partnerId || null) ||
-      (identity.partnerProgramId || null) !== (order.partnerProgramId || null) ||
+      (identity.partnerProgramId || null) !==
+        (order.partnerProgramId || null) ||
       identity.partnerEntrySlug !== order.partnerEntrySlug ||
       (identity.actorType === "referral_passenger" &&
         passengerId &&
@@ -13750,7 +13791,7 @@ export class OwnedMobilityService
 
     const passengerOrders: OwnedOrderRecord[] = [];
     for (const o of Array.from(this.orders.values()).sort((a, b) =>
-      (b.createdAt || "").localeCompare(a.createdAt || "")
+      (b.createdAt || "").localeCompare(a.createdAt || ""),
     )) {
       if (
         o.partnerEntrySlug !== identity.partnerEntrySlug ||
