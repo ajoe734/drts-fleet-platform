@@ -637,6 +637,8 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
   describe("Live storage/signing acceptance (real deployed target -- only runs when explicitly dispatched with live env)", () => {
     const liveTargetOrigin = process.env.SR_LIVE_DOC_LIVE_TARGET_ORIGIN;
     const apiOrigin = process.env.SR_LIVE_DOC_LIVE_API_ORIGIN;
+    const tenantConsoleOrigin =
+      process.env.SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN;
 
     it.runIf(Boolean(liveTargetOrigin))(
       "checks for missing evidence sessions and requires non-zero exit if any are missing without injecting identity",
@@ -653,13 +655,26 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         if (!process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN)
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN");
 
+        if (!process.env.SR_LIVE_DOC_LIVE_API_ORIGIN)
+          missing.push("SR_LIVE_DOC_LIVE_API_ORIGIN");
+        if (!process.env.SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN)
+          missing.push("SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN");
+        if (!process.env.SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN)
+          missing.push("SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN");
+        if (!process.env.SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH)
+          missing.push("SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH");
+        if (!process.env.SR_LIVE_DOC_LIVE_PLACARD_PATH)
+          missing.push("SR_LIVE_DOC_LIVE_PLACARD_PATH");
+        if (!process.env.SR_LIVE_DOC_LIVE_REPORT_PATH)
+          missing.push("SR_LIVE_DOC_LIVE_REPORT_PATH");
+
         if (missing.length > 0) {
           console.error(
-            "Missing required session cookies (must not inject identity):",
+            "Missing required session cookies/inputs (must not inject identity):",
             missing.join(", "),
           );
           throw new Error(
-            "Missing required live sessions: " + missing.join(", "),
+            "Missing required live sessions/inputs: " + missing.join(", "),
           );
         }
       },
@@ -728,123 +743,141 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           { headers },
         );
         expect(outcome.status).toBe(403);
-      },
-    );
-
-    it.runIf(Boolean(apiOrigin))(
-      "downloads a tenant invoice artifact",
-      async () => {
-        const invoicePath = process.env.SR_LIVE_DOC_LIVE_INVOICE_PATH;
-        expect(
-          invoicePath,
-          "SR_LIVE_DOC_LIVE_INVOICE_PATH is required",
-        ).toBeTruthy();
-
-        const { getGoogleIdToken } = await import("./live-document-runner");
-        const idToken = await getGoogleIdToken(apiOrigin!);
-        const headers: Record<string, string> = {};
-        if (idToken) headers["authorization"] = `Bearer ${idToken}`;
-
-        const outcome = await downloadArtifact(`${apiOrigin}${invoicePath}`, {
-          headers,
-        });
-        expect(outcome.status).toBe(200);
         expect(outcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+        expect(outcome.errorCode).toBeTruthy();
       },
     );
 
     it.runIf(Boolean(apiOrigin))(
-      "rejects an expired controlled-download link (410 GONE)",
+      "tenant invoice download/reissue via authorized metadata",
       async () => {
         const expiredPath = process.env.SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH;
+        const tenantCookie = process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT;
+        const crossTenantCookie =
+          process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT;
+
         expect(
           expiredPath,
-          "SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH is required",
+          "SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH required",
         ).toBeTruthy();
+        expect(tenantCookie).toBeTruthy();
+        expect(crossTenantCookie).toBeTruthy();
 
-        const { getGoogleIdToken } = await import("./live-document-runner");
+        const { getGoogleIdToken, sha256Hex } =
+          await import("./live-document-runner");
         const idToken = await getGoogleIdToken(apiOrigin!);
         const headers: Record<string, string> = {};
         if (idToken) headers["authorization"] = `Bearer ${idToken}`;
 
-        const outcome = await downloadArtifact(`${apiOrigin}${expiredPath}`, {
-          headers,
-        });
-        expect(outcome.status).toBe(410);
-      },
-    );
-
-    it.runIf(Boolean(apiOrigin))(
-      "rejects reusing a link for a cross-tenant attempt",
-      async () => {
-        const crossTenantPath =
-          process.env.SR_LIVE_DOC_LIVE_CROSS_TENANT_INVOICE_PATH;
-        expect(
-          crossTenantPath,
-          "SR_LIVE_DOC_LIVE_CROSS_TENANT_INVOICE_PATH is required",
-        ).toBeTruthy();
-
-        const { getGoogleIdToken } = await import("./live-document-runner");
-        const idToken = await getGoogleIdToken(apiOrigin!);
-        const headers: Record<string, string> = {};
-        if (idToken) headers["authorization"] = `Bearer ${idToken}`;
-
-        const outcome = await downloadArtifact(
-          `${apiOrigin}${crossTenantPath}`,
+        // 1. Expired link rejects with 410
+        const expiredOutcome = await downloadArtifact(
+          `${apiOrigin}${expiredPath}`,
           { headers },
         );
-        expect(outcome.status).toBe(403);
+        expect(expiredOutcome.status).toBe(410);
+
+        // 2. Fetch fresh metadata from BFF using authorized tenant cookie
+        const tenantHeaders = { cookie: `drts_tenant_session=${tenantCookie}` };
+        const bffRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices`,
+          { headers: tenantHeaders },
+        );
+        expect(bffRes.status).toBe(200);
+        const { data: invoices } = await bffRes.json();
+        expect(invoices.length).toBeGreaterThan(0);
+
+        const invoiceId = invoices[0].id;
+        const detailRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices/${invoiceId}`,
+          { headers: tenantHeaders },
+        );
+        expect(detailRes.status).toBe(200);
+        const { data: detail } = await detailRes.json();
+
+        const freshUrl = detail.downloadUrl;
+        const manifestHash = detail.manifestHash;
+        expect(freshUrl).toBeTruthy();
+        expect(manifestHash).toBeTruthy();
+
+        // 3. Successful download of expected bytes
+        const freshOutcome = await downloadArtifact(`${apiOrigin}${freshUrl}`, {
+          headers,
+        });
+        expect(freshOutcome.status).toBe(200);
+        expect(freshOutcome.bytes).not.toBeNull();
+        expect(freshOutcome.bytes!.length).toBeGreaterThan(0);
+        expect(sha256Hex(freshOutcome.bytes!)).toBe(manifestHash);
+        expect(freshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // 4. Role negative: cross-tenant attempt on the same invoice detail BFF endpoint
+        const crossTenantHeaders = {
+          cookie: `drts_tenant_session=${crossTenantCookie}`,
+        };
+        const crossRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices/${invoiceId}`,
+          { headers: crossTenantHeaders },
+        );
+        expect(crossRes.status).toBe(403);
+        const crossData = await crossRes.json();
+        expect(crossData.error).toBeTruthy();
+        expect(crossRes.headers.get("x-drts-candidate-sha")).toBe(
+          process.env.CANDIDATE_SHA,
+        );
       },
     );
 
     it.runIf(Boolean(apiOrigin))(
-      "downloads a placard and checks version match",
+      "placard and report download via authorized metadata",
       async () => {
         const placardPath = process.env.SR_LIVE_DOC_LIVE_PLACARD_PATH;
+        const reportPath = process.env.SR_LIVE_DOC_LIVE_REPORT_PATH;
+
         expect(
           placardPath,
-          "SR_LIVE_DOC_LIVE_PLACARD_PATH is required",
+          "SR_LIVE_DOC_LIVE_PLACARD_PATH required",
+        ).toBeTruthy();
+        expect(
+          reportPath,
+          "SR_LIVE_DOC_LIVE_REPORT_PATH required",
         ).toBeTruthy();
 
-        const { getGoogleIdToken } = await import("./live-document-runner");
+        const { getGoogleIdToken, sha256Hex } =
+          await import("./live-document-runner");
         const idToken = await getGoogleIdToken(apiOrigin!);
         const headers: Record<string, string> = {};
         if (idToken) headers["authorization"] = `Bearer ${idToken}`;
 
-        const outcome = await downloadArtifact(`${apiOrigin}${placardPath}`, {
-          headers,
-        });
-        // Depending on C097 implementation, it might be 200 or 501. The task says "標章下載與版本一致" so it should succeed.
-        // If it's a real download, we check SHA
-        if (outcome.status === 200) {
-          expect(outcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
-        } else {
-          expect(outcome.status).toBe(501);
-        }
+        const reportOutcome = await downloadArtifact(
+          `${apiOrigin}${reportPath}`,
+          { headers },
+        );
+        expect(reportOutcome.status).toBe(200);
+        expect(reportOutcome.bytes).not.toBeNull();
+        expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
+        expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        const metadataRes = await fetch(
+          `${apiOrigin}/api/platform-admin/placards`,
+          { headers },
+        );
+        expect(metadataRes.status).toBe(200);
+        const { data: placards } = await metadataRes.json();
+        const placard = placards.items.find((p: any) => p.downloadMetadata);
+        expect(placard, "No placard with downloadMetadata found").toBeTruthy();
+
+        const freshUrl = placard.downloadMetadata.downloadUrl;
+        const manifestHash = placard.downloadMetadata.manifestHash;
+
+        const placardOutcome = await downloadArtifact(
+          `${apiOrigin}${freshUrl}`,
+          { headers },
+        );
+        expect(placardOutcome.status).toBe(200);
+        expect(placardOutcome.bytes).not.toBeNull();
+        expect(placardOutcome.bytes!.length).toBeGreaterThan(0);
+        expect(sha256Hex(placardOutcome.bytes!)).toBe(manifestHash);
+        expect(placardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
       },
     );
-
-    it.runIf(Boolean(apiOrigin))("downloads a report", async () => {
-      const reportPath = process.env.SR_LIVE_DOC_LIVE_REPORT_PATH;
-      expect(
-        reportPath,
-        "SR_LIVE_DOC_LIVE_REPORT_PATH is required",
-      ).toBeTruthy();
-
-      const { getGoogleIdToken } = await import("./live-document-runner");
-      const idToken = await getGoogleIdToken(apiOrigin!);
-      const headers: Record<string, string> = {};
-      if (idToken) headers["authorization"] = `Bearer ${idToken}`;
-
-      const outcome = await downloadArtifact(`${apiOrigin}${reportPath}`, {
-        headers,
-      });
-      // Depending on C097/C125 implementation.
-      if (outcome.status === 200) {
-        expect(outcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
-      } else {
-        expect(outcome.status).toBe(501);
-      }
-    });
   });
 });

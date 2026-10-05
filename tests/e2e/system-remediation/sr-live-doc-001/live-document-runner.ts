@@ -11,15 +11,31 @@ let googleAuthInstance: GoogleAuth | null = null;
 export async function getGoogleIdToken(
   audience: string,
 ): Promise<string | null> {
+  // Use injected ID tokens minted by the GitHub action directly
   if (
-    !process.env.GOOGLE_APPLICATION_CREDENTIALS &&
-    !process.env.GOOGLE_GHA_CREDS_PATH
+    audience === process.env.SR_LIVE_DOC_LIVE_TARGET_ORIGIN &&
+    process.env.SR_LIVE_DOC_ID_TOKEN_TARGET
+  ) {
+    return process.env.SR_LIVE_DOC_ID_TOKEN_TARGET;
+  }
+  if (
+    audience === process.env.SR_LIVE_DOC_LIVE_API_ORIGIN &&
+    process.env.SR_LIVE_DOC_ID_TOKEN_API
+  ) {
+    return process.env.SR_LIVE_DOC_ID_TOKEN_API;
+  }
+
+  // Fallback to error if running under WIF in the action but token wasn't injected
+  if (
+    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+    process.env.GOOGLE_GHA_CREDS_PATH
   ) {
     throw new Error(
-      "Missing WIF credentials in environment (GOOGLE_APPLICATION_CREDENTIALS). Cannot authenticate to live targets.",
+      `Missing injected WIF ID token for audience ${audience}. The workflow must mint it via auth@v2 and pass it via environment variables.`,
     );
   }
 
+  // Fallback for non-WIF environments (e.g. local ADC)
   if (authCache.has(audience)) {
     return authCache.get(audience)!;
   }
@@ -28,18 +44,10 @@ export async function getGoogleIdToken(
     googleAuthInstance = new GoogleAuth();
   }
 
-  try {
-    const client = await googleAuthInstance.getIdTokenClient(audience);
-    const token = await client.idTokenProvider.fetchIdToken(audience);
-    authCache.set(audience, token);
-    return token;
-  } catch (err) {
-    console.warn(
-      `Failed to fetch Google ID token for audience ${audience}:`,
-      err,
-    );
-    return null;
-  }
+  const client = await googleAuthInstance.getIdTokenClient(audience);
+  const token = await client.idTokenProvider.fetchIdToken(audience);
+  authCache.set(audience, token);
+  return token;
 }
 
 /**
