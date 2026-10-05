@@ -247,9 +247,9 @@ function startControlledDownloadServer(
   });
 }
 
-function generateTestRsaKeyPair() {
-  return generateKeyPairSync("rsa", {
-    modulusLength: 2048,
+function generateTestEcdsaKeyPair() {
+  return generateKeyPairSync("ec", {
+    namedCurve: "P-256",
     publicKeyEncoding: { type: "spki", format: "pem" },
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
   });
@@ -283,7 +283,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
   describe("Runner validation (test doubles only -- no external network, matches SR-LIVE-DOC-001's VM scope)", () => {
     describe("Bank artifact track: authenticated remote download -> independent SR-BANK-003 verifier", () => {
       it("SIGNED + correct authorized public key clears the live signing gate", async () => {
-        const keyPair = generateTestRsaKeyPair();
+        const keyPair = generateTestEcdsaKeyPair();
         const { baseUrl } = await withBankServer({
           signingConfig: {
             privateKeyPem: keyPair.privateKey,
@@ -335,8 +335,8 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
       });
 
       it("rejects verification against the wrong authorized public key", async () => {
-        const keyPair = generateTestRsaKeyPair();
-        const wrongKeyPair = generateTestRsaKeyPair();
+        const keyPair = generateTestEcdsaKeyPair();
+        const wrongKeyPair = generateTestEcdsaKeyPair();
         const { baseUrl } = await withBankServer({
           signingConfig: {
             privateKeyPem: keyPair.privateKey,
@@ -364,7 +364,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
       });
 
       it("rejects a downloaded artifact whose bytes were altered after download (1-byte tamper)", async () => {
-        const keyPair = generateTestRsaKeyPair();
+        const keyPair = generateTestEcdsaKeyPair();
         const { baseUrl } = await withBankServer({
           signingConfig: {
             privateKeyPem: keyPair.privateKey,
@@ -671,6 +671,21 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           missing.push("SR_LIVE_DOC_LIVE_REPORT_PATH");
 
         if (missing.length > 0) {
+          if (process.env.SR_LIVE_DOC_RUNNER_EVIDENCE) {
+            writeFileSync(
+              process.env.SR_LIVE_DOC_RUNNER_EVIDENCE,
+              JSON.stringify(
+                {
+                  status: "failed",
+                  missing,
+                  runtimeSha: resolveRuntimeShaBinding().runtimeSha,
+                  workflowSha: resolveRuntimeShaBinding().workflowSha,
+                },
+                null,
+                2,
+              ) + "\n",
+            );
+          }
           console.error(
             "Missing required session cookies/inputs (must not inject identity):",
             missing.join(", "),
