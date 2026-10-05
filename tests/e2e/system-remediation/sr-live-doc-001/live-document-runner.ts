@@ -3,10 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { GoogleAuth } from "google-auth-library";
-
-const authCache = new Map<string, string>();
-let googleAuthInstance: GoogleAuth | null = null;
 
 export async function getGoogleIdToken(
   audience: string,
@@ -47,19 +43,7 @@ export async function getGoogleIdToken(
     );
   }
 
-  // Fallback for non-WIF environments (e.g. local ADC)
-  if (authCache.has(audience)) {
-    return authCache.get(audience)!;
-  }
-
-  if (!googleAuthInstance) {
-    googleAuthInstance = new GoogleAuth();
-  }
-
-  const client = await googleAuthInstance.getIdTokenClient(audience);
-  const token = await client.idTokenProvider.fetchIdToken(audience);
-  authCache.set(audience, token);
-  return token;
+  throw new Error(`Missing injected WIF ID token for audience ${audience}.`);
 }
 
 /**
@@ -110,7 +94,9 @@ export async function downloadArtifact(
   let errorCode: string | null = null;
   let errorMessage: string | null = null;
   try {
-    const body = (await res.json()) as { error?: { code?: string; message?: string } };
+    const body = (await res.json()) as {
+      error?: { code?: string; message?: string };
+    };
     errorCode = body?.error?.code ?? null;
     errorMessage = body?.error?.message ?? null;
   } catch {
