@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
+  isControlPlaneIapEnabled,
   isStrictControlPlaneIapEnvironment,
   issueControlPlaneRequestAuth,
   stripControlPlaneAuthQueryParams,
@@ -124,12 +125,13 @@ async function applyUpstreamAuth(
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const controlPlaneAuth = issueControlPlaneRequestAuth({
+  const controlPlaneAuth = await issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: request.headers,
     defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
     requestId: request.headers.get("x-request-id"),
     strictIapMode,
+    iapEnabled: isControlPlaneIapEnabled(),
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),

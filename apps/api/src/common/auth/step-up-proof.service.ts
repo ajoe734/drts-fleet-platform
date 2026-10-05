@@ -14,7 +14,11 @@ import {
   resolveRouteStepUpPolicy,
   resolveStepUpActionPolicy,
 } from "./step-up.policy";
-import { hasTrustedMfa } from "./trusted-mfa.policy";
+import {
+  DEV_MFA_WAIVED_AMR,
+  hasTrustedMfa,
+  isDevWorkforceMfaWaiverEnabled,
+} from "./trusted-mfa.policy";
 
 const MAX_STORED_PROOFS = 1000;
 
@@ -115,7 +119,17 @@ export class StepUpProofService {
     }
 
     const authTimeMs = parseTimestamp(identity.authTime);
-    if (authTimeMs === null || !hasTrustedMfa(identity)) {
+    const mfaTrusted = hasTrustedMfa(identity);
+    // Dev-only, explicitly flagged, audited waiver (ENTRY-IAP-WORKFORCE-AUTH-20261005,
+    // product decision 2026-10-05): lets a platform/ops workforce identity clear
+    // this gate in dev without a real MFA signal. Scoped to platform/ops realms
+    // only -- it never applies to tenant/driver/partner step-up -- and
+    // `isDevWorkforceMfaWaiverEnabled` always returns false in staging/production.
+    const devWaiverApplies =
+      !mfaTrusted &&
+      (identity.realm === "platform" || identity.realm === "ops") &&
+      isDevWorkforceMfaWaiverEnabled();
+    if (authTimeMs === null || (!mfaTrusted && !devWaiverApplies)) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
@@ -184,7 +198,13 @@ export class StepUpProofService {
       issuedAt,
       expiresAt: new Date(expiresAtMs).toISOString(),
       authTime: identity.authTime!,
-      amr: [...(identity.amr ?? [])],
+      // Truthfully reflect a dev waiver in the proof's own evidence instead
+      // of inheriting whatever (possibly empty) amr the identity carried --
+      // a proof minted under the waiver must never look like it came from a
+      // real MFA signal.
+      amr: devWaiverApplies
+        ? [...(identity.amr ?? []), DEV_MFA_WAIVED_AMR]
+        : [...(identity.amr ?? [])],
       acr: identity.acr ?? null,
     };
 
@@ -195,6 +215,7 @@ export class StepUpProofService {
       outcome: "success",
       requestId,
       tokenId: proof.stepUpReference,
+      ...(devWaiverApplies ? { reasonCode: "dev_mfa_waived" } : {}),
       afterSummary: {
         expiresAt: proof.expiresAt,
         issuedAt: proof.issuedAt,

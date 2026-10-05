@@ -1,6 +1,7 @@
 import { ApiClient } from "@drts/api-client";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
+  isControlPlaneIapEnabled,
   isStrictControlPlaneIapEnvironment,
   issueControlPlaneRequestAuth,
 } from "@drts/control-plane-auth";
@@ -52,12 +53,13 @@ export async function getServerOpsClient(): Promise<ApiClient> {
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const controlPlaneAuth = issueControlPlaneRequestAuth({
+  const controlPlaneAuth = await issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: requestHeaders,
     defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
     requestId: requestHeaders.get("x-request-id"),
     strictIapMode,
+    iapEnabled: isControlPlaneIapEnabled(),
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),

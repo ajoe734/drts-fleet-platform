@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
+  isControlPlaneIapEnabled,
   isStrictControlPlaneIapEnvironment,
   issueControlPlaneRequestAuth,
 } from "@drts/control-plane-auth";
@@ -19,12 +20,13 @@ export async function getServerPlatformAdminAuthority(): Promise<PlatformAdminAu
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const auth = issueControlPlaneRequestAuth({
+  const auth = await issueControlPlaneRequestAuth({
     actorType: "platform_admin",
     headers: requestHeaders,
     defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.platform_admin,
     requestId: requestHeaders.get("x-request-id"),
     strictIapMode,
+    iapEnabled: isControlPlaneIapEnabled(),
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),
