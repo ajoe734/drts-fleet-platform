@@ -51,8 +51,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         responses = [
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}),
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
-            (400, {"sha256": "wrong", "sizeBytes": -1, "error": "hash_mismatch"}),
-            (413, {"sha256": "x", "sizeBytes": -1, "error": "content_too_large"})
+            (400, {"sha256": "wrong", "sizeBytes": -1, "error": "content_sha256_mismatch"}),
+            (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"})
         ]
         def side_effect(req, timeout=30):
             status, body = responses.pop(0)
@@ -113,38 +113,51 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
     @patch("subprocess.run")
     def test_gcs_success(self, mock_run):
-        describe_counter = {"count": 0}
+        state = {"generation": 12346}
         def side_effect(cmd, **kwargs):
             res = MagicMock()
             if "describe" in cmd:
-                describe_counter["count"] += 1
-                res.stdout = str(12345 + describe_counter["count"])
+                res.stdout = str(state["generation"])
             else:
                 res.stdout = "12345"
 
-            if "cp" in cmd and "#" in cmd[3] and cmd[3].startswith("gs://"):
-                with open(cmd[4], "w") as f:
-                    if "test data v2" in open("temp_in_" + cmd[3].split("gs://fake-bucket/")[1].split("#")[0] + ".txt", "r").read():
-                        f.write("test data v1") # It tests old generation download, so it expects v1
+            cp_idx = cmd.index("cp") if "cp" in cmd else -1
+            if "cp" in cmd and "#" in cmd[cp_idx+1] and cmd[cp_idx+1].startswith("gs://"):
+                with open(cmd[cp_idx+2], "w") as f:
+                    requested_gen = cmd[cp_idx+1].split("#")[1]
+                    if requested_gen == "12347":
+                        f.write("test data v2")
                     else:
                         f.write("test data v1")
             elif "cp" in cmd and "--if-generation-match=0" in cmd:
                 if len(mock_run.call_args_list) > 3:
                     err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
                     raise err
+                state["generation"] = 12346
+            elif "cp" in cmd and any("--if-generation-match=" in arg and arg != "--if-generation-match=0" for arg in cmd):
+                match_arg = next(arg for arg in cmd if arg.startswith("--if-generation-match="))
+                if match_arg == f"--if-generation-match={state['generation'] - 1}":
+                    err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
+                    raise err
+                if match_arg == "--if-generation-match=not_a_number":
+                    err = subprocess.CalledProcessError(1, cmd, stderr="Invalid argument")
+                    raise err
+                state["generation"] += 1
+
             return res
 
         mock_run.side_effect = side_effect
-        self.mod.test_gcs("fake-bucket")
+        self.mod.test_gcs("fake-bucket", "fake-sa")
 
-    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s"])
+    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main(self):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:
+            mock_scanner.return_value = True
             self.mod.main()
-            mock_scanner.assert_called_once_with("s")
-            mock_gcs.assert_any_call("d")
-            mock_gcs.assert_any_call("r")
+            mock_scanner.assert_called_once_with("s", "ss", "p", "rg")
+            mock_gcs.assert_any_call("d", "sa")
+            mock_gcs.assert_any_call("r", "sa")
 
 if __name__ == "__main__":
     unittest.main()

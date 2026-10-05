@@ -84,6 +84,74 @@ jobs:
           echo "gateway_image=$GATEWAY_DIGEST" >> "$GITHUB_OUTPUT"
           echo "clamd_image=$CLAMD_DIGEST" >> "$GITHUB_OUTPUT"
 
+      - name: Preflight and Bootstrap Service Account
+        run: |
+          set -euo pipefail
+
+          SCANNER_SA="drts-dev-artifact-scanner@${DEV_GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          DEPLOYER="${DEV_WIF_SERVICE_ACCOUNT}"
+
+                    echo "Verifying scanner service account: $SCANNER_SA"
+          if ! err_out=$(gcloud iam service-accounts describe "$SCANNER_SA" --project "$DEV_GCP_PROJECT_ID" 2>&1 >/dev/null); then
+            if echo "$err_out" | grep -q "PERMISSION_DENIED"; then
+              echo "::error::Permission denied describing SA: $err_out"
+              exit 1
+            fi
+            echo "Scanner SA does not exist. Attempting to create it..."
+            if ! err_create=$(gcloud iam service-accounts create drts-dev-artifact-scanner --project "$DEV_GCP_PROJECT_ID" --display-name="Artifact Scanner Identity" 2>&1); then
+               echo "::error::Failed to create Scanner SA: $err_create"
+               exit 1
+            fi
+          fi
+
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs on Scanner SA..."
+          if ! err_out=$(gcloud iam service-accounts add-iam-policy-binding "$SCANNER_SA" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None 2>&1 >/dev/null); then
+             echo "::error::Failed to grant actAs on $SCANNER_SA to $DEPLOYER: $err_out"
+             exit 1
+          fi
+
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs and TokenCreator on Runtime SA ($DEV_GCP_RUNTIME_SERVICE_ACCOUNT)..."
+          if ! err_out=$(gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None 2>&1 >/dev/null); then
+             echo "::error::Failed to grant actAs on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER: $err_out"
+             exit 1
+          fi
+
+          if ! err_out=$(gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountTokenCreator" \
+              --condition=None 2>&1 >/dev/null); then
+             echo "::error::Failed to grant TokenCreator on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER: $err_out"
+             exit 1
+          fi
+
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs and TokenCreator on Runtime SA ($DEV_GCP_RUNTIME_SERVICE_ACCOUNT)..."
+          if ! gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None >/dev/null 2>&1; then
+             echo "::error::Failed to grant actAs on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER."
+             exit 1
+          fi
+
+          if ! gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountTokenCreator" \
+              --condition=None >/dev/null 2>&1; then
+             echo "::error::Failed to grant TokenCreator on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER for verification impersonation."
+             exit 1
+          fi
+
       - name: Provision Backends
         run: |
           set -euo pipefail
@@ -144,4 +212,8 @@ jobs:
           python3 operations/verification/verify-dev-artifact-backends.py \
             --document-bucket "$DOCUMENT_BUCKET" \
             --remittance-bucket "$REMITTANCE_BUCKET" \
-            --scanner-url "${{ steps.scanner_url.outputs.url }}"
+            --scanner-url "${{ steps.scanner_url.outputs.url }}" \
+            --runtime-sa "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --scanner-service "drts-dev-scanner" \
+            --project "$DEV_GCP_PROJECT_ID" \
+            --region "$DEV_GCP_REGION"
