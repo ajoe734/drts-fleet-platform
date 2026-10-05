@@ -110,7 +110,7 @@ export async function downloadArtifact(
   let errorCode: string | null = null;
   let errorMessage: string | null = null;
   try {
-    const body = (await res.json()) as { error?: { code?: string } };
+    const body = (await res.json()) as { error?: { code?: string; message?: string } };
     errorCode = body?.error?.code ?? null;
     errorMessage = body?.error?.message ?? null;
   } catch {
