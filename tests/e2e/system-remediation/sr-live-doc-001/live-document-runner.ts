@@ -24,6 +24,18 @@ export async function getGoogleIdToken(
   ) {
     return process.env.SR_LIVE_DOC_ID_TOKEN_API;
   }
+  if (
+    audience === process.env.SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN &&
+    process.env.SR_LIVE_DOC_ID_TOKEN_TENANT
+  ) {
+    return process.env.SR_LIVE_DOC_ID_TOKEN_TENANT;
+  }
+  if (
+    audience === process.env.SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN &&
+    process.env.SR_LIVE_DOC_ID_TOKEN_PLATFORM
+  ) {
+    return process.env.SR_LIVE_DOC_ID_TOKEN_PLATFORM;
+  }
 
   // Fallback to error if running under WIF in the action but token wasn't injected
   if (
@@ -66,6 +78,7 @@ export interface DownloadOutcome {
   bytes: Buffer | null;
   contentType: string | null;
   errorCode: string | null;
+  errorMessage: string | null;
   candidateSha: string | null;
 }
 
@@ -90,13 +103,16 @@ export async function downloadArtifact(
       bytes,
       contentType,
       errorCode: null,
+      errorMessage: null,
       candidateSha,
     };
   }
   let errorCode: string | null = null;
+  let errorMessage: string | null = null;
   try {
     const body = (await res.json()) as { error?: { code?: string } };
     errorCode = body?.error?.code ?? null;
+    errorMessage = body?.error?.message ?? null;
   } catch {
     errorCode = null;
   }
@@ -105,6 +121,7 @@ export async function downloadArtifact(
     bytes: null,
     contentType,
     errorCode,
+    errorMessage,
     candidateSha,
   };
 }

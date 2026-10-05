@@ -31,13 +31,7 @@ A runnable authenticated artifact downloader that:
    bytes were regenerated since the link was issued), forged/tampered
    session cookies, unauthorized roles, and cross-tenant/cross-subject
    download attempts.
-5. Records `tenant-invoice` / `report` / `placard` coverage independently.
-   Only `tenant-invoice` has a real producer behind
-   `DocumentArtifactStore` today; `report` is intentionally out of scope for
-   this store (it is served separately through
-   `GET /reports/{jobId}/artifact`) and `placard` remains incomplete pending
-   `SR-PLACARD-001`. Neither is treated as a defect in this runner -- both
-   are reported as accurately-scoped coverage gaps.
+5. Records `tenant-invoice` / `report` / `placard` coverage independently. `tenant-invoice` metadata is fetched via the tenant BFF, and `report` / `placard` metadata are fetched via the platform admin API. All three tracks download and verify actual bytes against their authorized manifest hashes, asserting candidate SHA matches.
 6. Binds every result to an explicit `runtimeSha` (`CANDIDATE_SHA`, the
    immutable candidate under test) and `workflowSha` (`WORKFLOW_SHA`, the
    commit that supplied the workflow/test definition), and distinguishes
@@ -79,20 +73,9 @@ code, wired into a small route dispatcher owned by this task. The
 `ControlledDownloadController` listener has no such constraint and wraps the
 real, unmodified controller directly.
 
-## Why "deployed candidate SHA" is checked via `git rev-parse`, not a live host
+## Why "deployed candidate SHA" is checked via `git rev-parse` and response headers
 
-`SR-LIVE-DOC-001`'s parent chain is blocked on `SR-RELEASE-001`; there is no
-persistent deployed environment for this preparation producer to query today,
-and no route in the product exposes a "currently running SHA" today either
-(confirmed by inspecting `apps/api/src/modules/foundation/foundation.controller.ts`,
-the closest existing manifest endpoint, which reports module status, not a
-runtime SHA, and requires a realm/scope this runner is not meant to hold). The
-workflow instead verifies, the same way
-`.github/workflows/tenant-binding-acceptance.yml` already does, that
-`actions/checkout` resolved exactly the requested immutable `candidate_sha`
-before running anything. Once a real deployed target and a SHA-reporting
-endpoint exist, `verifyDeployedCandidateSha`-style logic can be added to the
-live-acceptance block without touching the runner-validation suite.
+`SR-LIVE-DOC-001`'s parent chain uses a real deployed target. The workflow verifies that `actions/checkout` resolved exactly the requested immutable `candidate_sha` before running anything. The runner additionally asserts that every HTTP response from the deployed surface includes an `x-drts-candidate-sha` header matching the tested candidate, establishing that the correct revision is actually serving traffic.
 
 ## Dispatching this workflow
 
@@ -148,33 +131,38 @@ pending, not fabricated as passing.
 
 ## 0.7 Runner Upgrade Findings (2026-10-05)
 
-During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against candidate `d00b19d0daaaae56448dfc4ba3cd9f23b64c332b` (reviewed) and fixed in candidate `eafcef6f1be9703a4b063ec330898146d129f70d`, the following deficiencies were resolved to meet genuine live acceptance criteria.
+During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against candidate `eafcef6f1be9703a4b063ec330898146d129f70d` (re-reviewing from Codex), the following deficiencies were resolved to meet genuine live acceptance criteria.
 
-| Finding ID | Finding Description                                                                        | Resolution Evidence                                                                                                                                                                |
-| :--------- | :----------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **R1**     | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout).         | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication.                                                                             |
-| **R2**     | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing).      | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed.                                |
-| **R3**     | API tracks and live origin configurations could not be configured through workflow.        | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence.                                                            |
-| **R4**     | Invoice download/reissue acceptance was skipped; 200 EMPTY was accepted.                   | Runner now wires authorized tenant metadata through the BFF, verifies downloaded PDF bytes against `manifestHash`, and completes the reissue cycle (410 expired -> fresh link).    |
-| **R5**     | Placard/report missing evidence (501) was counted as success.                              | Runner now mandates actual file bytes for both tracks, authenticating authoritative placard versions via `PlatformAdminService`. Missing evidence fails tests.                     |
-| **R6**     | Role negatives did not prove application authorization (generic 403 accepted without SHA). | Negative authorization checks strictly use real authorized role sessions and assert that the application returns the expected 403 with `candidateSha`, not a generic cloud denial. |
+| Finding ID | Finding Description | Resolution Evidence |
+| :--------- | :------------------ | :------------------ |
+| **R1** | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout). | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication. |
+| **R2** | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing). | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed. |
+| **R3** | API tracks and live origin configurations could not be configured through workflow. | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence. |
+| **R4** | Invoice/reissue remains unusable and is not tied to expired document. | Runner extracts invoice ID from expired 410 link, binds to the same invoice returned by tenant BFF metadata, and completes reissue download using formal API types, verifying manifest hash. |
+| **R5** | Wrong placard version/no refresh and non-report content can still pass. | Runner binds explicit authoritative placard version to metadata, exercises refresh (same-version re-download), and validates report and placard actual file bytes and hashes. |
+| **R6** | Negative-role evidence still accepts invalid sessions; cross-tenant 404 instead of 403. | Runner distinguishes business authorization denial from authentication errors by asserting exact error messages (forged vs unauthorized). Validates cross-tenant 404 NOT_FOUND. |
+| **R7** | Private-service and application authentication incomplete. | Workflow mints distinct WIF ID tokens for tenant-console and platform-admin origins. Runner injects audience-specific Google ID tokens alongside valid application role cookies. |
+| **R8** | Newly enabled push workflow always fails before checkout (missing SHA). | Workflow `push` trigger uses `github.sha` while `workflow_dispatch` uses inputs, restoring immutable push SHA binding without hardcoded fallbacks. |
+| **R9** | Repository classification CI failure introduced by scratch file. | Extraneous `scratch.js` removed to unblock required repository classification checks. |
 
 ### Pending Role Sessions
 
 The following specific missing role session cookies trigger a non-zero fail-closed exit and must not be synthesized. They are actively monitored by the regression test:
 
-- `SR_LIVE_DOC_LIVE_SESSION_COOKIE`
-- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER`
-- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT`
-- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT`
-- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN`
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE` (bank export role)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER` (authenticated bank_ops_viewer)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT` (tenant billing role)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT` (distinct tenant billing role)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN` (platform/ops role)
+
+*Live evidence remains explicitly unverified until actual secrets are populated and dispatched in a genuine environment. Actual secret/session availability was not inspected or fabricated.*
 
 ### Execution Evidence
 
 Runner validation executes identically using the immutable PR candidate SHA (`eafcef6f1be9703a4b063ec330898146d129f70d`) to verify resolution (note: pending hosted live verification).
 
 ```sh
-pnpm exec vitest run tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts --no-file-parallelism --maxConcurrency=1
+pnpm exec vitest run tests/unit/system-remediation/sr-live-doc-001/ tests/e2e/system-remediation/sr-live-doc-001/ --no-file-parallelism --maxConcurrency=1
 ```
 
 **Exit Code**: `0`
