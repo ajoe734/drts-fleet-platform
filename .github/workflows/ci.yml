@@ -287,6 +287,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm run lint
+      - name: Reject cross-app relative imports
+        run: node tools/ci/check-cross-app-imports.mjs
       - name: Typecheck
         run: pnpm run typecheck
       - name: Apply migrations

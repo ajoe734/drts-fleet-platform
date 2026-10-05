@@ -382,6 +382,9 @@ importers:
 
   apps/enterprise-dispatch-web:
     dependencies:
+      "@drts/tenant-auth":
+        specifier: workspace:*
+        version: link:../../packages/tenant-auth
       "@drts/ui-tokens":
         specifier: workspace:*
         version: link:../../packages/ui-tokens
@@ -666,6 +669,9 @@ importers:
       "@drts/shared-types":
         specifier: workspace:*
         version: link:../../packages/shared-types
+      "@drts/tenant-auth":
+        specifier: workspace:*
+        version: link:../../packages/tenant-auth
       "@drts/ui-web":
         specifier: workspace:*
         version: link:../../packages/ui-web
@@ -742,6 +748,12 @@ importers:
   packages/shared-test-fixtures: {}
 
   packages/shared-types: {}
+
+  packages/tenant-auth:
+    devDependencies:
+      next:
+        specifier: ^16.3.8
+        version: 16.3.8(@playwright/test@1.59.1)(@types/node@24.12.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
 
   packages/tsconfig: {}
 

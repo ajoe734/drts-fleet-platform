@@ -49,7 +49,7 @@ describe("deployment architecture guards", () => {
     const verifier = readFileSync(
       path.join(
         repoRoot,
-        "apps/tenant-console-web/lib/auth/verified-tenant-session.server.ts",
+        "packages/tenant-auth/src/verified-tenant-session.server.ts",
       ),
       "utf8",
     );
