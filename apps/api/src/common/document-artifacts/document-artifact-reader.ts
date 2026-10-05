@@ -49,7 +49,8 @@ export async function resolveDocumentArtifact(
   store: DocumentArtifactStore,
   input: ResolveDocumentArtifactInput,
 ): Promise<DocumentArtifactResolution> {
-  if (!isDocumentArtifactKind(input.kind)) {
+  // Fleet uploads always require the authenticated parent-resource routes.
+  if (!isDocumentArtifactKind(input.kind) || input.kind.startsWith("fleet-")) {
     return { status: "not_found" };
   }
 

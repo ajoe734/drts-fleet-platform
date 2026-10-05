@@ -1,3 +1,6 @@
+import { FleetDocumentStorageService } from "../../../apps/api/src/modules/fleet-partner/fleet-document-storage.service";
+import { FleetPartnerCaseService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner-case.service";
+import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDocumentArtifactStore } from "../../../apps/api/src/common/document-artifacts/document-artifact-runtime.config";
@@ -511,5 +514,94 @@ describe("runtime configuration and bounded credentials", () => {
     for (let i = 0; i < 10; i++) await Promise.resolve();
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("C125 fleet upload composition with native GCS and Cloud Run scanner", () => {
+  it("persists and scans uploaded bytes, then reads the same attachment from a second instance", async () => {
+    const cloud = transport();
+    const createService = () =>
+      new FleetPartnerCaseService(
+        undefined,
+        undefined,
+        undefined,
+        new FleetDocumentStorageService(
+          createDocumentArtifactStore(documentEnv),
+          (storage) =>
+            createRemittanceProofScanner(storage, {
+              REMITTANCE_PROOF_SCANNER_PROVIDER: "cloud-run-clamd",
+              REMITTANCE_PROOF_SCANNER_URL: origin,
+            }),
+        ),
+      );
+    const service = createService();
+    const bytes = Buffer.from("%PDF real fleet attachment GCS transport");
+    const metadata = {
+      fileName: "evidence.pdf",
+      fileSize: bytes.length,
+      contentType: "application/pdf",
+    };
+    const intent = await service.createAttachmentUploadUrl(
+      "METRO_FLEET",
+      "cmp_0908",
+      "owner",
+      metadata,
+    );
+    await service.uploadAttachmentContent(
+      "METRO_FLEET",
+      "cmp_0908",
+      intent.objectKey,
+      Readable.from([bytes]),
+      "application/octet-stream",
+    );
+    const record = await createService().confirmAttachmentUpload(
+      "METRO_FLEET",
+      "cmp_0908",
+      "owner",
+      { ...metadata, ...intent, checksumSha256: sha(bytes) },
+    );
+    const read = await createService().downloadAttachmentForReview(
+      "cmp_0908",
+      record.attachmentId,
+    );
+    expect(read.fileContent).toEqual(bytes);
+    expect(
+      cloud.live.get(
+        `document-artifacts/fleet-upload-content/${encodeURIComponent(intent.objectKey)}`,
+      )?.bytes,
+    ).toEqual(bytes);
+    expect(cloud.requests.filter((url) => url.origin === origin)).toHaveLength(
+      1,
+    );
+    cloud.scanWith((content) =>
+      json({
+        sha256: sha(content),
+        sizeBytes: content.length,
+        verdict: "infected",
+      }),
+    );
+    const infected = await service.createAttachmentUploadUrl(
+      "METRO_FLEET",
+      "cmp_0908",
+      "owner",
+      metadata,
+    );
+    await expect(
+      service.uploadAttachmentContent(
+        "METRO_FLEET",
+        "cmp_0908",
+        infected.objectKey,
+        Readable.from([bytes]),
+        "application/octet-stream",
+      ),
+    ).rejects.toMatchObject({ code: "DOCUMENT_SCAN_REJECTED" });
+    await expect(
+      createService().confirmAttachmentUpload(
+        "METRO_FLEET",
+        "cmp_0908",
+        "owner",
+        { ...metadata, ...infected },
+      ),
+    ).rejects.toMatchObject({ code: "DOCUMENT_NOT_SCANNED" });
   });
 });

@@ -1,3 +1,4 @@
+import { fleetStorageFixture } from "../../helpers/fleet-document-fixture";
 import { describe, expect, it } from "vitest";
 
 // SR-QA-SUPPLY-001 lists C067, C069, and C070 among its capability_ids, but
@@ -35,7 +36,12 @@ import {
 
 describe("SR-QA-SUPPLY-001 — regression: C067 回覆事故／申訴與 SLA (fixed by SR-FLEET-CASE-001)", () => {
   it("a fleet-owned, non-closed complaint (cmp_0908, fleetPartnerId METRO_FLEET) can be replied to, and the reply is immediately readable in the Ops case timeline", async () => {
-    const service = new FleetPartnerCaseService();
+    const service = new FleetPartnerCaseService(
+      undefined,
+      undefined,
+      undefined,
+      fleetStorageFixture().storage,
+    );
     const reply = await service.submitReply(
       "METRO_FLEET",
       "cmp_0908",
@@ -55,7 +61,12 @@ describe("SR-QA-SUPPLY-001 — regression: C067 回覆事故／申訴與 SLA (fi
   });
 
   it("a closed case cannot be replied to (CASE_CLOSED_NO_REPLY), and a case owned by another fleet partner is scope-denied (NOT_FOUND/FORBIDDEN)", async () => {
-    const service = new FleetPartnerCaseService();
+    const service = new FleetPartnerCaseService(
+      undefined,
+      undefined,
+      undefined,
+      fleetStorageFixture().storage,
+    );
     await expect(
       service.submitReply("METRO_FLEET", "cmp_closed_001", "fleet-user-qa", {
         content: "too late",
