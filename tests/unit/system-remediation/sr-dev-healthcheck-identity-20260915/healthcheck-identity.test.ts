@@ -123,6 +123,16 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     // trusted, explicitly enforce in the deploy step) that deploying with
     // the exposure flag false actually removes a pre-existing allUsers
     // binding rather than merely withholding a new grant.
+    //
+    // CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 R1: a raw
+    // `gcloud run services remove-iam-policy-binding` call here is not
+    // idempotent -- it exits non-zero when the binding is already absent
+    // (e.g. because the deploy step already retracted it), which would fail
+    // the whole job. The enforcement steps delegate to
+    // enforce-no-public-access.sh, which checks the policy first; that
+    // script's own present/absent/failure behavior is covered by
+    // tests/unit/enforce-no-public-access.test.ts.
+    expect(workflowContent).not.toContain("remove-iam-policy-binding is idempotent");
     for (const [service, output, flagOutput] of [
       ["platform-admin-web", "platform_admin_service", "platform_admin_exposure_flag"],
       ["ops-console-web", "ops_console_service", "ops_console_exposure_flag"],
@@ -133,12 +143,15 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
       expect(workflowContent).toContain(
         `if: \${{ needs.prepare.outputs.${flagOutput} == '--no-allow-unauthenticated' }}`,
       );
-      expect(workflowContent).toContain(
-        `gcloud run services remove-iam-policy-binding "\${{ needs.prepare.outputs.${output} }}"`,
+      const stepIndex = workflowContent.indexOf(`Enforce no public access — ${service}`);
+      const nextStepIndex = workflowContent.indexOf("\n      - name:", stepIndex + 1);
+      const stepBody = workflowContent.slice(
+        stepIndex,
+        nextStepIndex === -1 ? undefined : nextStepIndex,
       );
+      expect(stepBody).toContain("./operations/deployment/enforce-no-public-access.sh");
+      expect(stepBody).toContain(`needs.prepare.outputs.${output}`);
     }
-    expect(workflowContent).toContain("--member allUsers");
-    expect(workflowContent).toContain("--role roles/run.invoker");
   });
 
   it("implements tenant-console-web /healthz route handler and includes it in PUBLIC_AUTH_PATHS", async () => {

@@ -1062,16 +1062,17 @@ jobs:
       # added. Make the retraction explicit so a future accidental or
       # temporary flip of this service's *_ALLOW_UNAUTHENTICATED variable
       # back to true cannot leave it silently public after the flag is
-      # turned false again. remove-iam-policy-binding is idempotent: it is a
-      # no-op if the binding is already absent.
+      # turned false again. `gcloud run services remove-iam-policy-binding`
+      # is NOT idempotent: it exits non-zero (IamPolicyBindingNotFound) when
+      # the binding is already absent, so enforce-no-public-access.sh checks
+      # the policy first and only removes a binding that is actually present.
       - name: Enforce no public access — platform-admin-web
         if: ${{ needs.prepare.outputs.platform_admin_exposure_flag == '--no-allow-unauthenticated' }}
         run: |
-          gcloud run services remove-iam-policy-binding "${{ needs.prepare.outputs.platform_admin_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --member allUsers \
-            --role roles/run.invoker
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.platform_admin_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — ops-console-web
         run: |
@@ -1097,11 +1098,10 @@ jobs:
       - name: Enforce no public access — ops-console-web
         if: ${{ needs.prepare.outputs.ops_console_exposure_flag == '--no-allow-unauthenticated' }}
         run: |
-          gcloud run services remove-iam-policy-binding "${{ needs.prepare.outputs.ops_console_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --member allUsers \
-            --role roles/run.invoker
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.ops_console_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — fleet-partner-portal-web
         run: |
@@ -1127,11 +1127,10 @@ jobs:
       - name: Enforce no public access — fleet-partner-portal-web
         if: ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag == '--no-allow-unauthenticated' }}
         run: |
-          gcloud run services remove-iam-policy-binding "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --member allUsers \
-            --role roles/run.invoker
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
 
       - name: Deploy — tenant-console-web
         run: |
@@ -1241,11 +1240,10 @@ jobs:
       - name: Enforce no public access — channel-partner-portal-web
         if: ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag == '--no-allow-unauthenticated' }}
         run: |
-          gcloud run services remove-iam-policy-binding "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
-            --project "${{ needs.prepare.outputs.project_id }}" \
-            --member allUsers \
-            --role roles/run.invoker
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
 
   paused-partner-booking-cleanup:
     name: Enforce Partner Booking paused state
