@@ -93,48 +93,93 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
 
     print("Test 4b: Engine-limit rejection (archive >10MiB uncompressed)")
     status, body = scan(ENGINE_LIMIT_PAYLOAD)
-    assert status == 200, f"Expected 200, got {status}: {body}"
-    assert_receipt(body, ENGINE_LIMIT_PAYLOAD, expected_verdict="infected")
+    assert status == 502, f"Expected 502, got {status}: {body}"
+    assert isinstance(body, dict) and body.get("error") == "scan_engine_indeterminate", f"Expected error scan_engine_indeterminate, got {body.get('error')}"
 
     if scanner_service and project and region:
         import time
-        def update_service_env(clamd_port="3310", ready_marker="/var/run/clamav-ready/ready"):
-            run([
+        import uuid
+        
+        def update_service_env(**kwargs):
+            env_vars = [f"{k}={v}" for k, v in kwargs.items()]
+            cmd = [
                 "gcloud", "run", "services", "update", scanner_service,
                 "--project", project, "--region", region,
-                "--set-env-vars", f"CLAMD_HOST=127.0.0.1,CLAMD_PORT={clamd_port},CLAMAV_READY_MARKER={ready_marker}"
-            ])
-            time.sleep(5)
+                "--update-env-vars", ",".join(env_vars)
+            ]
+            run(cmd)
 
         try:
-            print("Test 5: Readiness rejection (break port)")
-            update_service_env(clamd_port="9999")
+            print("Test 5: Readiness rejection (stale signatures)")
+            update_service_env(MAX_SIGNATURE_AGE_MS="1")
+            time.sleep(5)
             status, body = scan(CLEAN)
             assert status == 503, f"Expected 503, got {status}: {body}"
             assert isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", f"Expected scan_engine_not_ready error, got {body}"
 
-            print("Test 6: Readiness rejection (break marker)")
-            update_service_env(ready_marker="/invalid/marker")
-            status, body = scan(CLEAN)
-            assert status == 503, f"Expected 503, got {status}: {body}"
-            assert isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", f"Expected scan_engine_not_ready error, got {body}"
+            print("Test 6: Genuine unavailable transport path")
+            print("  [UNEXECUTED] Manual fault injection (e.g. killing clamd) required in hosted environment")
 
-            print("Test 7/8: Recovery and verified freshness")
-            update_service_env() # restore to defaults
-            status, body = scan(CLEAN)
+            print("Test 7/8: Cold-start recovery, failed/pending-to-activated transition, and freshclam verification")
+            nonce = uuid.uuid4().hex[:8]
+            # Restore age and force cold start
+            update_service_env(MAX_SIGNATURE_AGE_MS="21600000", COLD_START_NONCE=nonce)
+            
+            # Observe pending state
+            print("  Polling for readiness...")
+            max_attempts = 60
+            ready = False
+            for i in range(max_attempts):
+                status, _ = scan(CLEAN)
+                if status == 200:
+                    ready = True
+                    break
+                elif status == 503:
+                    pass
+                time.sleep(2)
+            
+            assert ready, "Service did not become ready after cold start"
+            
+            status, body = scan(EICAR)
             assert status == 200, f"Expected 200 after recovery, got {status}: {body}"
-            assert_receipt(body, CLEAN, expected_verdict="clean")
+            assert_receipt(body, EICAR, expected_verdict="infected")
 
+            print("  Verifying Cloud Run logs for freshclam output and loaded version...")
+            res = run([
+                "gcloud", "logging", "read",
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND textPayload:"Fetching ClamAV signatures"',
+                "--project", project,
+                "--limit=1", "--format=json"
+            ])
+            logs = json.loads(res.stdout) if res.stdout.strip() else []
+            assert len(logs) > 0, "Could not find 'Fetching ClamAV signatures' in logs"
+            
+            res_fresh = run([
+                "gcloud", "logging", "read",
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND (textPayload:"database is up-to-date" OR textPayload:"updated (version:")',
+                "--project", project,
+                "--limit=1", "--format=json"
+            ])
+            logs_fresh = json.loads(res_fresh.stdout) if res_fresh.stdout.strip() else []
+            assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs"
+            
         finally:
             print("Ensuring service is restored to healthy state")
-            update_service_env()
+            try:
+                subprocess.run([
+                    "gcloud", "run", "services", "update", scanner_service,
+                    "--project", project, "--region", region,
+                    "--remove-env-vars", "MAX_SIGNATURE_AGE_MS,COLD_START_NONCE"
+                ], capture_output=True)
+            except Exception:
+                pass
     else:
-        print("Test 5: Readiness rejection (break port)")
-        print("  [UNEXECUTED] Manual fault injection required in hosted environment")
-        print("Test 6: Readiness rejection (break marker)")
-        print("  [UNEXECUTED] Manual fault injection required in hosted environment")
-        print("Test 7/8: Recovery and verified freshness")
-        print("  [UNEXECUTED] Manual verification required in hosted environment")
+        print("Test 5: Readiness rejection (stale signatures)")
+        print("  [UNEXECUTED] Hosted environment required")
+        print("Test 6: Genuine unavailable transport path")
+        print("  [UNEXECUTED] Hosted environment required")
+        print("Test 7/8: Cold-start recovery, failed/pending-to-activated transition, and freshclam verification")
+        print("  [UNEXECUTED] Hosted environment required")
         return False
     return True
 

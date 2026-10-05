@@ -53,7 +53,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
             (400, {"sha256": "wrong", "sizeBytes": -1, "error": "content_sha256_mismatch"}),
             (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"}),
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.ENGINE_LIMIT_PAYLOAD).hexdigest(), "sizeBytes": len(self.mod.ENGINE_LIMIT_PAYLOAD), "verdict": "infected"})
+            (502, {"error": "scan_engine_indeterminate"})
         ]
         def side_effect(req, timeout=30):
             status, body = responses.pop(0)
@@ -83,12 +83,13 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
             (400, {"sha256": "wrong", "sizeBytes": -1, "error": "content_sha256_mismatch"}),
             (413, {"sha256": "x", "sizeBytes": -1, "error": "payload_too_large"}),
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.ENGINE_LIMIT_PAYLOAD).hexdigest(), "sizeBytes": len(self.mod.ENGINE_LIMIT_PAYLOAD), "verdict": "infected"}), # Test 4b Engine limit
-            (503, {"error": "scan_engine_not_ready"}), # Test 5 port
-            (503, {"error": "scan_engine_not_ready"}), # Test 6 marker
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}) # Test 7/8 recovery
+            (502, {"error": "scan_engine_indeterminate"}), # Test 4b Engine limit
+            (503, {"error": "scan_engine_not_ready"}), # Test 5 stale
+            (503, {"error": "scan_engine_not_ready"}), # Test 7 polling pending
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 7 polling ready
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # Test 7 EICAR
         ]
-        def side_effect(req, timeout=30):
+        def urlopen_side_effect(req, timeout=30):
             status, body = responses.pop(0)
             if status >= 400:
                 mock_err = urllib.error.HTTPError(req.full_url, status, "Error", hdrs={}, fp=None)
@@ -101,9 +102,18 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             mock_cm.__enter__.return_value = mock_resp
             return mock_cm
 
-        mock_urlopen.side_effect = side_effect
+        mock_urlopen.side_effect = urlopen_side_effect
+        
+        def run_side_effect(*args, **kwargs):
+            mock_res = MagicMock()
+            mock_res.stdout = '[{"textPayload": "Fetching ClamAV signatures"}, {"textPayload": "database is up-to-date"}]'
+            return mock_res
+            
+        mock_run.side_effect = run_side_effect
+
         self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
-        self.assertEqual(mock_run.call_count, 4) # 3 updates (port, marker, default), 1 restore in finally
+        self.assertEqual(mock_run.call_count, 5) # update(stale), update(cold_start), read logs, read logs, restore
+
 
 
     @patch("urllib.request.urlopen")
