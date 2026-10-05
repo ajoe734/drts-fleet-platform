@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline CLI boundary only. Never connects, binds a port, or loads credentials."""
+import base64
 import datetime as dt
 import json
 import os
@@ -58,7 +59,18 @@ elif kind == "psql":
         rows[0]["max_updated_at"] = (now + dt.timedelta(hours=1)).isoformat()
     emit({"observed_at": now.isoformat(), "database_bytes": 123456, "tables": rows})
 elif kind == "gcloud":
-    assert "--project=drts-dev-devcc-20260825" in args and "--format=json" in args
+    assert "--project=drts-dev-devcc-20260825" in args
+    if args[:3] == ["secrets", "versions", "access"]:
+        if scenario == "secret_failure":
+            fail()
+        secret = os.environ.get("DRILL_FAKE_DB_URL", "postgresql://drill-user:TOP-SECRET-PASSWORD@/drts?host=/cloudsql/private-db")
+        # Match the SDK: explicit JSON is the response resource, not raw data.
+        if "--format=json" in args:
+            emit({"name": "projects/123/secrets/drts-dev-db-url/versions/1",
+                  "payload": {"data": base64.b64encode(secret.encode()).decode()}})
+        print(secret)
+        sys.exit(0)
+    assert "--format=json" in args
     if args[:2] == ["projects", "describe"]:
         emit({"projectNumber": "1234567890"})
     if args[:4] == ["iam", "workload-identity-pools", "providers", "describe"]:
@@ -148,11 +160,6 @@ elif kind == "gcloud":
         if scenario == "stale_point":
             point -= dt.timedelta(hours=1)
         emit({"earliestRecoveryTime": (now - dt.timedelta(days=1)).isoformat(), "latestRecoveryTime": point.isoformat()})
-    if args[:3] == ["secrets", "versions", "access"]:
-        if scenario == "secret_failure":
-            fail()
-        print("postgresql://drill-user:TOP-SECRET-PASSWORD@private-db/drts?host=/cloudsql/private-db")
-        sys.exit(0)
     if args[:3] == ["sql", "instances", "clone"]:
         assert args[3] == "drts-dev-db" and args[4] == "drts-dev-db-drill-123-1"
         assert "--async" in args and any(a.startswith("--point-in-time=") for a in args)
