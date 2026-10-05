@@ -36,7 +36,7 @@ OVERSIZED = CLEAN + b"0" * (11 * 1024 * 1024) # 11 MiB (max is 10 MiB)
 def test_scanner(scanner_url):
     print(f"Testing scanner at {scanner_url}")
     token = get_identity_token(scanner_url)
-    
+
     def scan(content, sha256_header=None):
         req = urllib.request.Request(f"{scanner_url}/scan", data=content, method="POST")
         req.add_header("Authorization", f"Bearer {token}")
@@ -45,7 +45,7 @@ def test_scanner(scanner_url):
             req.add_header("X-Content-SHA256", sha256_header)
         else:
             req.add_header("X-Content-SHA256", hashlib.sha256(content).hexdigest())
-        
+
         try:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return response.status, json.loads(response.read().decode())
@@ -69,17 +69,17 @@ def test_scanner(scanner_url):
     status, body = scan(CLEAN)
     assert status == 200, f"Expected 200, got {status}: {body}"
     assert_receipt(body, CLEAN, expected_verdict="clean")
-    
+
     print("Test 2: EICAR file")
     status, body = scan(EICAR)
     assert status == 200, f"Expected 200, got {status}: {body}"
     assert_receipt(body, EICAR, expected_verdict="infected")
-    
+
     print("Test 3: Hash mismatch")
     status, body = scan(CLEAN, sha256_header="0000000000000000000000000000000000000000000000000000000000000000")
     assert status == 400, f"Expected 400, got {status}: {body}"
     assert body.get("error") == "hash_mismatch", f"Expected error hash_mismatch, got {body.get('error')}"
-    
+
     print("Test 4: Oversized file")
     status, body = scan(OVERSIZED)
     assert status == 413 or status == 400, f"Expected 413 or 400, got {status}: {body}"
@@ -91,57 +91,57 @@ def test_gcs(bucket_name):
     print(f"Testing GCS bucket: {bucket_name}")
     import uuid
     import subprocess
-    
+
     test_key = f"verify-test-{int(time.time())}-{uuid.uuid4().hex[:8]}.txt"
     test_file = f"gs://{bucket_name}/{test_key}"
     temp_in = f"temp_in_{test_key}.txt"
     temp_out = f"temp_out_{test_key}.txt"
-    
+
     test_data = "test data v1"
     test_data_v2 = "test data v2"
-    
+
     with open(temp_in, "w") as f:
         f.write(test_data)
-        
+
     try:
         print("Test 1: Upload (create with if-generation-match=0)")
         run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
-        
+
         print("Test 2: Read generation")
         res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
         gen1 = res.stdout.strip()
         assert gen1 and gen1.isdigit(), f"Expected numeric generation, got {gen1}"
-        
+
         print("Test 3: Download with exact generation match")
         run(["gcloud", "storage", "cp", f"{test_file}#{gen1}", temp_out])
         with open(temp_out, "r") as f:
             downloaded = f.read()
         assert downloaded == test_data, f"Content mismatch: expected {test_data}, got {downloaded}"
-        
+
         print("Test 4: Upload with mismatched generation (0 again, should fail Precondition Failed)")
         try:
             run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
             assert False, "Expected upload to fail with mismatched generation"
         except subprocess.CalledProcessError as e:
             assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
-            
+
         print("Test 5: Update with correct generation match")
         with open(temp_in, "w") as f:
             f.write(test_data_v2)
         run(["gcloud", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
-        
+
         print("Test 6: Read updated generation")
         res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
         gen2 = res.stdout.strip()
         assert gen2 and gen2.isdigit(), f"Expected numeric generation, got {gen2}"
         assert gen1 != gen2, "Generation did not change after update"
-        
+
         print("Test 7: Download immutable prior generation")
         run(["gcloud", "storage", "cp", f"{test_file}#{gen1}", temp_out])
         with open(temp_out, "r") as f:
             downloaded = f.read()
         assert downloaded == test_data, f"Old generation content mismatch: expected {test_data}, got {downloaded}"
-        
+
     finally:
         print("Cleanup test owned object")
         try:
@@ -150,7 +150,7 @@ def test_gcs(bucket_name):
             pass
         if os.path.exists(temp_in): os.remove(temp_in)
         if os.path.exists(temp_out): os.remove(temp_out)
-    
+
     print(f"GCS bucket {bucket_name} tests passed.")
 
 def main():
@@ -159,11 +159,11 @@ def main():
     parser.add_argument("--remittance-bucket", required=True)
     parser.add_argument("--scanner-url", required=True)
     args = parser.parse_args()
-    
+
     test_scanner(args.scanner_url)
     test_gcs(args.document_bucket)
     test_gcs(args.remittance_bucket)
-    
+
     print("All dev artifact backend verification tests passed.")
 
 if __name__ == "__main__":

@@ -68,31 +68,31 @@ jobs:
           set -euo pipefail
           REGISTRY="${DEV_ARTIFACT_REGION}-docker.pkg.dev/${DEV_ARTIFACT_PROJECT_ID}/${DEV_ARTIFACT_REPOSITORY}"
           SHA=$(git rev-parse HEAD)
-          
+
           GATEWAY_IMAGE="${REGISTRY}/artifact-scanner-gateway:${SHA}"
           CLAMD_IMAGE="${REGISTRY}/artifact-scanner-clamd:${SHA}"
-          
+
           docker build -t "$GATEWAY_IMAGE" -f operations/artifact-scanner/Dockerfile.gateway operations/artifact-scanner/
           docker build -t "$CLAMD_IMAGE" -f operations/artifact-scanner/Dockerfile.clamd operations/artifact-scanner/
-          
+
           docker push "$GATEWAY_IMAGE"
           docker push "$CLAMD_IMAGE"
-          
+
           GATEWAY_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$GATEWAY_IMAGE")
           CLAMD_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$CLAMD_IMAGE")
-          
+
           echo "gateway_image=$GATEWAY_DIGEST" >> "$GITHUB_OUTPUT"
           echo "clamd_image=$CLAMD_DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Provision Backends
         run: |
           set -euo pipefail
-          
+
           DOCUMENT_BUCKET="${DEV_GCP_PROJECT_ID}-document-artifacts"
           REMITTANCE_BUCKET="${DEV_GCP_PROJECT_ID}-remittance-proofs"
           SCANNER_SERVICE="drts-dev-scanner"
           SCANNER_SA="drts-dev-artifact-scanner@${DEV_GCP_PROJECT_ID}.iam.gserviceaccount.com"
-          
+
           python3 operations/deployment/provision-dev-artifact-backends.py \
             --project "$DEV_GCP_PROJECT_ID" \
             --region "$DEV_GCP_REGION" \
@@ -131,16 +131,16 @@ jobs:
           SCANNER_ID_TOKEN: ${{ steps.id_token_scanner.outputs.id_token }}
         run: |
           set -euo pipefail
-          
+
           DOCUMENT_BUCKET="${DEV_GCP_PROJECT_ID}-document-artifacts"
           REMITTANCE_BUCKET="${DEV_GCP_PROJECT_ID}-remittance-proofs"
-          
+
           echo "::add-mask::${SCANNER_ID_TOKEN}"
           if [[ -z "${SCANNER_ID_TOKEN:-}" ]]; then
             echo "::error::SCANNER_ID_TOKEN is empty; identity token minting failed upstream." >&2
             exit 1
           fi
-          
+
           python3 operations/verification/verify-dev-artifact-backends.py \
             --document-bucket "$DOCUMENT_BUCKET" \
             --remittance-bucket "$REMITTANCE_BUCKET" \

@@ -17,7 +17,7 @@ The initial implementation of `2fa1f87dd402e6d41e4844275ef93c1e74c4ff93` receive
 
 ### 1. immutable_hosted_workflow_review_ci
 - **Requirement:** Independently reviewed exact SHA and CI, no mutable code dispatch.
-- **Source/Offline Result:** 
+- **Source/Offline Result:**
   - `provision-dev-artifact-backends.yml` strictly enforces 40-character SHA matching checked-out HEAD before side effects.
   - CI path covers `verify-dev-artifact-backends.py` with mock tests to enforce code coverage.
 - **Pending Hosted Checks:**

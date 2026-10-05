@@ -47,7 +47,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
     @patch("os.environ.get")
     def test_scanner_success(self, mock_env, mock_urlopen):
         mock_env.return_value = "fake-token"
-        
+
         responses = [
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}),
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}),
@@ -91,11 +91,11 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             mock_cm = MagicMock()
             mock_cm.__enter__.return_value = mock_resp
             return mock_cm
-            
+
         mock_urlopen.side_effect = side_effect
         with self.assertRaises(AttributeError):
             self.mod.test_scanner("http://fake")
-            
+
     @patch("urllib.request.urlopen")
     @patch("os.environ.get")
     def test_scanner_assertion_errors(self, mock_env, mock_urlopen):
@@ -107,7 +107,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         mock_cm = MagicMock()
         mock_cm.__enter__.return_value = mock_resp
         mock_urlopen.return_value = mock_cm
-        
+
         with self.assertRaises(AssertionError):
             self.mod.test_scanner("http://fake")
 
@@ -121,7 +121,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 res.stdout = str(12345 + describe_counter["count"])
             else:
                 res.stdout = "12345"
-                
+
             if "cp" in cmd and "#" in cmd[3] and cmd[3].startswith("gs://"):
                 with open(cmd[4], "w") as f:
                     if "test data v2" in open("temp_in_" + cmd[3].split("gs://fake-bucket/")[1].split("#")[0] + ".txt", "r").read():
@@ -133,7 +133,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
                     raise err
             return res
-            
+
         mock_run.side_effect = side_effect
         self.mod.test_gcs("fake-bucket")
 
