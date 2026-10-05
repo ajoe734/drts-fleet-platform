@@ -500,20 +500,8 @@ export class FleetPartnerCaseService {
     caseFleetPartnerId: string,
     requestFleetPartnerId: string,
   ): boolean {
-    const normCase = caseFleetPartnerId.trim().toUpperCase();
-    const normReq = requestFleetPartnerId.trim().toUpperCase();
-    if (normCase === normReq) return true;
-
-    // Default portal demos: METRO_FLEET / fleet-demo-001 / fp-test-001 represent the primary test partner
-    const primaryPartners = ["METRO_FLEET", "FLEET-DEMO-001", "FP-TEST-001"];
-    if (
-      primaryPartners.includes(normCase) &&
-      primaryPartners.includes(normReq)
-    ) {
-      return true;
-    }
-
-    return false;
+    // Partner identifiers are authoritative IDs, not demo aliases.
+    return caseFleetPartnerId === requestFleetPartnerId;
   }
 
   private assertFleetScope(caseItem: FleetCaseItem, fleetPartnerId: string) {

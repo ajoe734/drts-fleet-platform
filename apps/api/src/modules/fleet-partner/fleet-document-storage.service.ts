@@ -31,6 +31,7 @@ export interface FleetDocumentUploadIntent {
   documentType?: string;
   attachmentId?: string;
   documentId?: string;
+  consumedAt?: string;
   expiresAt: string;
 }
 
@@ -97,6 +98,7 @@ export class FleetDocumentStorageService {
       : null;
     if (
       !intent ||
+      intent.consumedAt ||
       intent.objectKey !== objectKey ||
       intent.family !== family ||
       intent.fleetPartnerId !== fleetPartnerId ||
@@ -111,6 +113,41 @@ export class FleetDocumentStorageService {
       );
     }
     return intent;
+  }
+
+  async consumeIntent(objectKey: string) {
+    const current = await this.storage(() =>
+      this.store.get("fleet-upload-intent", objectKey),
+    );
+    if (!current)
+      throw new ApiRequestError(
+        409,
+        "UPLOAD_URL_INVALID",
+        "Upload intent is missing.",
+      );
+    const intent: FleetDocumentUploadIntent = JSON.parse(
+      current.bytes.toString("utf8"),
+    );
+    if (intent.consumedAt) return;
+    const result = await this.storage(() =>
+      this.store.putIfUnchanged(
+        {
+          kind: "fleet-upload-intent",
+          subjectId: objectKey,
+          mimeType: "application/json",
+          bytes: Buffer.from(
+            JSON.stringify({ ...intent, consumedAt: new Date().toISOString() }),
+          ),
+        },
+        current.record.generation,
+      ),
+    );
+    if (!result.applied)
+      throw new ApiRequestError(
+        409,
+        "DOCUMENT_WRITE_CONFLICT",
+        "Upload intent changed concurrently.",
+      );
   }
 
   /** Auth and parent editability are checked by the caller before consuming the stream. */

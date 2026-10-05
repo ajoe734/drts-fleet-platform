@@ -201,6 +201,7 @@ export class SupplyDocumentService {
       [document],
       "confirm supply document upload",
     );
+    await this.storage.consumeIntent(objectKey);
     this.supplySubmissionService.recordMutationAudit(
       {
         actorId,

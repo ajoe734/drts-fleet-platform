@@ -14,8 +14,8 @@ import {
   putFleetDocument,
   type FleetDocumentUploadIntent,
 } from "../../../lib/fleet-document-upload";
-import { FleetActionButton } from "@/components/fleet-action-button";
-import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+import { FleetActionButton } from "../../../components/fleet-action-button";
+import { buildFleetTheme } from "../../../lib/fleet-portal-theme";
 import type {
   FleetCaseItem,
   FleetCaseAttachmentRecord,

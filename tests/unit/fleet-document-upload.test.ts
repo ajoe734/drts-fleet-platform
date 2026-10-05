@@ -390,6 +390,15 @@ describe("C125 real fleet uploads", () => {
       ).rejects.toMatchObject({ code: "DOCUMENT_REVIEW_DENIED" });
     },
   );
+  it.each(["fleet-demo-001", "fp-test-001", "metro_fleet"])(
+    "does not treat %s as an alias for another partner",
+    async (other) => {
+      const { service } = caseFixture();
+      await expect(
+        service.createAttachmentUploadUrl(other, caseId, "owner", command),
+      ).rejects.toMatchObject({ code: "CASE_NOT_FLEET_SCOPED" });
+    },
+  );
   it("does not expose fleet bytes through the public signed-download reader", async () => {
     const { store, intent } = await uploadCase();
     expect(
@@ -407,7 +416,11 @@ async function supplyFixture() {
   const repository = new SupplySubmissionRepository();
   const submissions = new SupplySubmissionService(
     repository,
-    new RegulatoryRegistryService(),
+    new RegulatoryRegistryService(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    ),
   );
   const service = new SupplyDocumentService(submissions, repository, storage);
   const draft = await submissions.createDriverDraft(partner, "owner", {
@@ -481,6 +494,12 @@ describe("C125 supply documents", () => {
         "owner",
         command,
       );
+      await expect(
+        service.confirmUpload(partner, submissionId, "owner", {
+          ...command,
+          expectedRevisionNo: 2,
+        }),
+      ).rejects.toMatchObject({ code: "UPLOAD_URL_INVALID" });
       expect(
         (await service.downloadDocument(partner, submissionId, doc.documentId))
           .bytes,
