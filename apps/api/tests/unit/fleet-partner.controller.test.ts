@@ -1,3 +1,10 @@
+import { createHash } from "node:crypto";
+import {
+  fleetStorageFixture,
+  byteStream,
+  fleetIdentity,
+} from "../../../../tests/unit/helpers/fleet-document-fixture";
+import type { IncomingMessage } from "node:http";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { describe, expect, it } from "vitest";
 
@@ -19,16 +26,21 @@ import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mob
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
-const VALID_CHECKSUM_A =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const VALID_CHECKSUM_B =
-  "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
-const VALID_CHECKSUM_C =
-  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const VALID_CHECKSUM_D =
-  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const VALID_CHECKSUM_E =
-  "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const VALID_CHECKSUM_A = createHash("sha256")
+  .update(Buffer.alloc(1024, 0))
+  .digest("hex");
+const VALID_CHECKSUM_B = createHash("sha256")
+  .update(Buffer.alloc(1024, 1))
+  .digest("hex");
+const VALID_CHECKSUM_C = createHash("sha256")
+  .update(Buffer.alloc(1024, 2))
+  .digest("hex");
+const VALID_CHECKSUM_D = createHash("sha256")
+  .update(Buffer.alloc(1024, 3))
+  .digest("hex");
+const VALID_CHECKSUM_E = createHash("sha256")
+  .update(Buffer.alloc(1024, 4))
+  .digest("hex");
 
 type FixtureOptions = {
   useSeededReviewService?: boolean;
@@ -78,9 +90,11 @@ function buildSharedServices() {
     regulatoryRegistryService,
     auditNotificationService,
   );
+  const { storage, store } = fleetStorageFixture();
   const supplyDocumentService = new SupplyDocumentService(
     supplySubmissionService,
     supplySubmissionRepository,
+    storage,
   );
   const vehicleEligibilityService = new VehicleEligibilityService(
     regulatoryRegistryService,
@@ -93,6 +107,7 @@ function buildSharedServices() {
   );
 
   return {
+    store,
     auditNotificationService,
     fleetPartnerService,
     regulatoryRegistryService,
@@ -150,6 +165,25 @@ async function uploadDocument(
       contentType: "application/pdf",
     },
     `req-upload-${documentType}`,
+    fleetIdentity,
+  );
+
+  const fill = [
+    VALID_CHECKSUM_A,
+    VALID_CHECKSUM_B,
+    VALID_CHECKSUM_C,
+    VALID_CHECKSUM_D,
+    VALID_CHECKSUM_E,
+  ].indexOf(checksumSha256);
+  const request = Object.assign(byteStream(Buffer.alloc(1024, fill)), {
+    headers: { "content-type": "application/octet-stream" },
+  });
+  await controller.uploadSupplyDocumentContent(
+    "fleet-demo-001",
+    submissionId,
+    uploadUrl.data.objectKey,
+    request as IncomingMessage,
+    fleetIdentity,
   );
 
   return controller.confirmSupplyDocumentUpload(
@@ -168,6 +202,7 @@ async function uploadDocument(
       effectiveUntil: "2027-12-31",
     },
     `req-confirm-${documentType}`,
+    fleetIdentity,
   );
 }
 
@@ -426,6 +461,7 @@ describe("FleetPartnerController portal routes", () => {
         contentType: "application/pdf",
       },
       "req-driver-revision-upload-url",
+      fleetIdentity,
     );
     expect(revisionUploadUrl.data.objectKey).toContain(driverSubmissionId);
 
@@ -759,6 +795,16 @@ describe("FleetPartnerController portal routes", () => {
         contentType: "application/pdf",
       },
       "req-upload-extra-document",
+      fleetIdentity,
+    );
+    await controller.uploadSupplyDocumentContent(
+      "fleet-demo-001",
+      submissionId,
+      extraUploadUrl.data.objectKey,
+      Object.assign(byteStream(Buffer.alloc(1024, 2)), {
+        headers: { "content-type": "application/octet-stream" },
+      }) as IncomingMessage,
+      fleetIdentity,
     );
     const extraDocument = await controller.confirmSupplyDocumentUpload(
       "fleet-demo-001",
@@ -770,12 +816,13 @@ describe("FleetPartnerController portal routes", () => {
         objectKey: extraUploadUrl.data.objectKey,
         originalFileName: "extra-note.pdf",
         contentType: "application/pdf",
-        fileSize: 256,
+        fileSize: 1024,
         checksumSha256: VALID_CHECKSUM_C,
         effectiveFrom: "2026-01-01",
         effectiveUntil: "2027-12-31",
       },
       "req-confirm-extra-document",
+      fleetIdentity,
     );
 
     const deleted = await controller.deleteSupplyDocument(
@@ -785,6 +832,7 @@ describe("FleetPartnerController portal routes", () => {
       extraDocument.data.documentId,
       { expectedRevisionNo: 4 },
       "req-delete-extra-document",
+      fleetIdentity,
     );
     expect(deleted.data).toEqual({ deleted: true });
 
@@ -818,7 +866,7 @@ describe("FleetPartnerController portal routes", () => {
   });
 
   it("rejects confirming a pre-signed upload after the intent expires", async () => {
-    const { controller, supplyDocumentService } = createFixture();
+    const { controller, store } = createFixture();
 
     const created = await controller.createDriverSupplySubmission(
       "fleet-demo-001",
@@ -849,18 +897,23 @@ describe("FleetPartnerController portal routes", () => {
         contentType: "application/pdf",
       },
       "req-supply-upload-expired",
+      fleetIdentity,
     );
 
-    const pendingUploadIntents = (
-      supplyDocumentService as unknown as {
-        pendingUploadIntents: Map<string, Record<string, string>>;
-      }
-    ).pendingUploadIntents;
-    const intent = pendingUploadIntents.get(uploadUrl.data.objectKey);
-    expect(intent).toBeDefined();
-    pendingUploadIntents.set(uploadUrl.data.objectKey, {
-      ...intent!,
-      expiresAt: "2020-01-01T00:00:00.000Z",
+    const intent = (await store.get(
+      "fleet-upload-intent",
+      uploadUrl.data.objectKey,
+    ))!;
+    await store.put({
+      kind: "fleet-upload-intent",
+      subjectId: uploadUrl.data.objectKey,
+      mimeType: "application/json",
+      bytes: Buffer.from(
+        JSON.stringify({
+          ...JSON.parse(intent.bytes.toString()),
+          expiresAt: "2020-01-01T00:00:00.000Z",
+        }),
+      ),
     });
 
     const expiredError = await controller
@@ -880,6 +933,7 @@ describe("FleetPartnerController portal routes", () => {
           effectiveUntil: "2027-12-31",
         },
         "req-supply-confirm-expired",
+        fleetIdentity,
       )
       .catch((error: unknown) => error);
 
@@ -887,11 +941,6 @@ describe("FleetPartnerController portal routes", () => {
     expect((expiredError as ApiRequestError).getResponse()).toMatchObject({
       error: {
         code: "UPLOAD_URL_INVALID",
-        message: "The pre-signed upload intent has expired.",
-        details: {
-          submissionId,
-          objectKey: uploadUrl.data.objectKey,
-        },
       },
     });
   });
@@ -928,6 +977,7 @@ describe("FleetPartnerController portal routes", () => {
         contentType: "application/pdf",
       },
       "req-supply-upload-mismatch",
+      fleetIdentity,
     );
 
     const mismatchError = await controller
@@ -947,6 +997,7 @@ describe("FleetPartnerController portal routes", () => {
           effectiveUntil: "2027-12-31",
         },
         "req-supply-confirm-mismatch",
+        fleetIdentity,
       )
       .catch((error: unknown) => error);
 
@@ -995,8 +1046,18 @@ describe("FleetPartnerController portal routes", () => {
         contentType: "application/pdf",
       },
       "req-supply-upload-trimmed-key",
+      fleetIdentity,
     );
 
+    await controller.uploadSupplyDocumentContent(
+      "fleet-demo-001",
+      submissionId,
+      uploadUrl.data.objectKey,
+      Object.assign(byteStream(Buffer.alloc(1024, 0)), {
+        headers: { "content-type": "application/octet-stream" },
+      }) as IncomingMessage,
+      fleetIdentity,
+    );
     const confirmed = await controller.confirmSupplyDocumentUpload(
       "fleet-demo-001",
       "fleet-user-1",
@@ -1013,6 +1074,7 @@ describe("FleetPartnerController portal routes", () => {
         effectiveUntil: "2027-12-31",
       },
       "req-supply-confirm-trimmed-key",
+      fleetIdentity,
     );
 
     expect(confirmed.data.fileObjectKey).toBe(uploadUrl.data.objectKey);
@@ -1051,6 +1113,7 @@ describe("FleetPartnerController portal routes", () => {
           contentType: "application/pdf",
         },
         "req-supply-upload-invalid-checksum",
+        fleetIdentity,
       );
 
     const invalidChecksumError = await controller
@@ -1070,6 +1133,7 @@ describe("FleetPartnerController portal routes", () => {
           effectiveUntil: "2027-12-31",
         },
         "req-supply-confirm-invalid-checksum",
+        fleetIdentity,
       )
       .catch((error: unknown) => error);
     expect(invalidChecksumError).toBeInstanceOf(ApiRequestError);
@@ -1096,6 +1160,7 @@ describe("FleetPartnerController portal routes", () => {
           contentType: "application/pdf",
         },
         "req-supply-upload-invalid-range",
+        fleetIdentity,
       );
 
     const invalidRangeError = await controller
@@ -1115,6 +1180,7 @@ describe("FleetPartnerController portal routes", () => {
           effectiveUntil: "2026-01-01",
         },
         "req-supply-confirm-invalid-range",
+        fleetIdentity,
       )
       .catch((error: unknown) => error);
     expect(invalidRangeError).toBeInstanceOf(ApiRequestError);

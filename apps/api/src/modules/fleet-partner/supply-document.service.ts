@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 
 import type { SupplyDocumentRecord } from "@drts/contracts";
 
+import { FleetDocumentStorageService } from "./fleet-document-storage.service";
 import { ApiRequestError } from "../../common/api-envelope";
 import { SupplySubmissionRepository } from "./supply-submission.repository";
 import { SupplySubmissionService } from "./supply-submission.service";
@@ -13,27 +14,13 @@ import type {
   DeleteSupplyDocumentCommand,
 } from "./supply-submission.types";
 
-type PendingDocumentUploadIntent = {
-  submissionId: string;
-  fleetPartnerId: string;
-  documentType: SupplyDocumentRecord["documentType"];
-  objectKey: string;
-  originalFileName: string;
-  contentType: string;
-  createdAt: string;
-  expiresAt: string;
-};
-
 @Injectable()
 export class SupplyDocumentService {
-  private readonly pendingUploadIntents = new Map<
-    string,
-    PendingDocumentUploadIntent
-  >();
-
   constructor(
     private readonly supplySubmissionService: SupplySubmissionService,
     private readonly supplySubmissionRepository: SupplySubmissionRepository,
+    @Optional()
+    private readonly storage: FleetDocumentStorageService = new FleetDocumentStorageService(),
   ) {}
 
   async createUploadUrl(
@@ -65,14 +52,15 @@ export class SupplyDocumentService {
     ].join("/");
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
-    this.pendingUploadIntents.set(objectKey, {
-      submissionId,
+    await this.storage.createIntent({
+      family: "supply",
+      documentId: randomUUID(),
+      parentId: submissionId,
       fleetPartnerId,
       documentType: command.documentType,
       objectKey,
-      originalFileName: command.originalFileName.trim(),
+      fileName: command.originalFileName.trim(),
       contentType: command.contentType.trim(),
-      createdAt: now.toISOString(),
       expiresAt,
     });
 
@@ -97,11 +85,11 @@ export class SupplyDocumentService {
     return {
       submissionId,
       objectKey,
-      uploadUrl: `https://uploads.drts.example/presigned/${encodeURIComponent(objectKey)}`,
+      uploadUrl: `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}/documents/content?objectKey=${encodeURIComponent(objectKey)}`,
       expiresAt,
       method: "PUT",
       headers: {
-        "content-type": command.contentType.trim(),
+        "content-type": "application/octet-stream",
       },
     };
   }
@@ -151,27 +139,45 @@ export class SupplyDocumentService {
       );
     }
 
-    const uploadIntent = this.pendingUploadIntents.get(objectKey);
-    if (!uploadIntent || uploadIntent.submissionId !== submissionId) {
+    const uploadIntent = await this.storage.intent(
+      objectKey,
+      "supply",
+      fleetPartnerId,
+      submissionId,
+    );
+    const mismatchedFields = [
+      ["documentType", uploadIntent.documentType, command.documentType],
+      ["originalFileName", uploadIntent.fileName, originalFileName],
+      ["contentType", uploadIntent.contentType, contentType],
+    ]
+      .filter(([, expected, actual]) => expected !== actual)
+      .map(([field]) => field);
+    if (mismatchedFields.length) {
       throw new ApiRequestError(
-        HttpStatus.CONFLICT,
+        409,
         "UPLOAD_URL_INVALID",
-        "The upload confirmation does not match an active pre-signed upload intent.",
-        {
-          submissionId,
-          objectKey,
-        },
+        "Confirmation metadata does not match the upload intent.",
+        { submissionId, objectKey, mismatchedFields },
       );
     }
-    this.assertUploadIntent(uploadIntent, fleetPartnerId, submissionId, {
-      ...command,
-      objectKey,
-      originalFileName,
+    if (
+      !uploadIntent.documentId ||
+      this.supplySubmissionService.getDocumentById(uploadIntent.documentId)
+    ) {
+      throw new ApiRequestError(
+        409,
+        "UPLOAD_URL_INVALID",
+        "Upload intent has already been confirmed.",
+      );
+    }
+    const content = await this.storage.read(objectKey, {
+      fileSize: command.fileSize,
       contentType,
+      checksumSha256,
     });
 
     const document: SupplyDocumentRecord = {
-      documentId: randomUUID(),
+      documentId: uploadIntent.documentId,
       fleetPartnerId,
       submissionId,
       documentType: command.documentType,
@@ -179,7 +185,7 @@ export class SupplyDocumentService {
       originalFileName,
       contentType,
       fileSize: command.fileSize,
-      checksumSha256,
+      checksumSha256: content.checksumSha256,
       effectiveFrom,
       effectiveUntil,
       reviewStatus: "pending",
@@ -195,7 +201,6 @@ export class SupplyDocumentService {
       [document],
       "confirm supply document upload",
     );
-    this.pendingUploadIntents.delete(objectKey);
     this.supplySubmissionService.recordMutationAudit(
       {
         actorId,
@@ -215,6 +220,51 @@ export class SupplyDocumentService {
     );
 
     return document;
+  }
+
+  async uploadContent(
+    fleetPartnerId: string,
+    submissionId: string,
+    objectKey: string,
+    stream: AsyncIterable<Uint8Array>,
+    contentType: string,
+  ) {
+    await this.supplySubmissionService.syncState();
+    const submission = this.supplySubmissionService.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
+    this.supplySubmissionService.assertSubmissionEditable(submission);
+    const intent = await this.storage.intent(
+      objectKey,
+      "supply",
+      fleetPartnerId,
+      submissionId,
+    );
+    return this.storage.upload(intent, stream, contentType);
+  }
+
+  async downloadDocument(
+    fleetPartnerId: string | null,
+    submissionId: string,
+    documentId: string,
+  ) {
+    await this.supplySubmissionService.syncState();
+    const document = this.supplySubmissionService.getDocumentById(documentId);
+    if (!document || document.submissionId !== submissionId)
+      throw new ApiRequestError(404, "NOT_FOUND", "Supply document not found.");
+    this.supplySubmissionService.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId ?? document.fleetPartnerId,
+    );
+    if (fleetPartnerId && document.fleetPartnerId !== fleetPartnerId)
+      throw new ApiRequestError(
+        403,
+        "FLEET_SCOPE_DENIED",
+        "Document is outside the fleet scope.",
+      );
+    const content = await this.storage.read(document.fileObjectKey, document);
+    return { document, ...content };
   }
 
   async deleteDocument(
@@ -288,66 +338,6 @@ export class SupplyDocumentService {
 
   private sanitizeFileName(fileName: string) {
     return fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-");
-  }
-
-  private assertUploadIntent(
-    uploadIntent: PendingDocumentUploadIntent,
-    fleetPartnerId: string,
-    submissionId: string,
-    command: ConfirmSupplyDocumentUploadCommand,
-  ) {
-    if (
-      uploadIntent.fleetPartnerId !== fleetPartnerId ||
-      uploadIntent.submissionId !== submissionId
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "UPLOAD_URL_INVALID",
-        "The upload confirmation does not match an active pre-signed upload intent.",
-        {
-          submissionId,
-          fleetPartnerId,
-          objectKey: command.objectKey,
-        },
-      );
-    }
-
-    if (new Date(uploadIntent.expiresAt).getTime() <= Date.now()) {
-      this.pendingUploadIntents.delete(command.objectKey);
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "UPLOAD_URL_INVALID",
-        "The pre-signed upload intent has expired.",
-        {
-          submissionId,
-          objectKey: command.objectKey,
-          expiresAt: uploadIntent.expiresAt,
-        },
-      );
-    }
-
-    const mismatchedFields: string[] = [];
-    if (uploadIntent.documentType !== command.documentType) {
-      mismatchedFields.push("documentType");
-    }
-    if (uploadIntent.originalFileName !== command.originalFileName.trim()) {
-      mismatchedFields.push("originalFileName");
-    }
-    if (uploadIntent.contentType !== command.contentType.trim()) {
-      mismatchedFields.push("contentType");
-    }
-    if (mismatchedFields.length > 0) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "UPLOAD_URL_INVALID",
-        "The upload confirmation metadata does not match the issued pre-signed upload intent.",
-        {
-          submissionId,
-          objectKey: command.objectKey,
-          mismatchedFields,
-        },
-      );
-    }
   }
 
   private assertNonBlank(value: string, fieldName: string) {

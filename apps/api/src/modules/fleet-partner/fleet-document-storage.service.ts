@@ -30,6 +30,7 @@ export interface FleetDocumentUploadIntent {
   fileSize?: number;
   documentType?: string;
   attachmentId?: string;
+  documentId?: string;
   expiresAt: string;
 }
 
