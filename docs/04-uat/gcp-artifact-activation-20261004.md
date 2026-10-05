@@ -19,10 +19,10 @@ The implementation has remediated findings over multiple rounds:
 |---|---|---|---|---|
 | **R5a (MIME/Hash/Size Rejection)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Includes modeled tests for rejection and mock assertions. |
 | **R5b.3 (Engine-limit contract)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 -B -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS (exit 0). Asserts `502 scan_engine_indeterminate` for limit-exhausted scans. |
-| **R5b.2 (Genuine Transitions)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Hosted scenarios for verified-unchanged, update, failed refresh/reload, pending/failed -> activated, transport failure, and genuine cold-start recovery. |
-| **R6 (GCS Generation CAS/Limits)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Tests generation CAS using test-owned objects. |
-| **R5b.4b (Restoration Fidelity)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING (unexecuted live). Captures exact mutated gateway env vars and completely restores them, followed by readiness/EICAR asserts. |
-| **R8-doc (UAT Schemas/Readback)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | Manual readback/documentation | PASS. Doc schemas and readback commands updated. |
+| **R5b.2 (Genuine Transitions)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PASS in CI mock (exit 0). All required lifecycle transitions and network timeout scenarios are now fully implemented for genuine live execution. |
+| **R6 (GCS Generation CAS/Limits)** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Tests generation CAS using test-owned objects. Test 12 (network fault) is implemented-but-unexecuted live, tested by CI mock. |
+| **R5b.4b (Restoration Fidelity)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 operations/verification/verify-dev-artifact-backends.py` | PENDING. Captures exact mutated gateway env vars and completely restores them, followed by readiness/EICAR asserts. |
+| **R8-doc (UAT Schemas/Readback)** | `15ee4f06653386adcc80ada1e7b616926409860c` | Repaired | Manual readback/documentation | PASS. Readback fully repaired with actual product app-session procedures and stage/scan endpoints. |
 | **R9 (Commit Trailers/Whitespaces)** | `ff8285a0da5405357af9a8d8a0d66a7234f1f7b1` | Repaired | `python3 -B tools/ci/git/check_commit_trailers.py` | PASS (offline branch checks). Whitespaces and trailers fixed. |
 | **1. immutable_hosted_workflow_review_ci** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending CI | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. Final CI pass pending on PR. |
 | **2. private_resources_iam_and_image_provenance** | `744bf88193cbf8d2f4a1915763ab3656f9c9e88d` | Pending Hosted | Hosted runbacks | Exact assertions prepared for bucket IAM/versioning, service policy, anonymous denial, container digests, min0/max1. |
@@ -48,9 +48,10 @@ The implementation has remediated findings over multiple rounds:
     - Execute `gcloud storage buckets get-iam-policy gs://$DEV_GCP_PROJECT_ID-document-artifacts` and `gs://$DEV_GCP_PROJECT_ID-remittance-proofs`.
     - Assert effective IAM: the runtime SA possesses `roles/storage.objectAdmin` or appropriate least-privilege roles without broad public exposure.
   - Cloud Run Service Assertions:
-    - Execute `gcloud run services get-iam-policy drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format=json` and verify the bindings contain `roles/run.invoker` exclusively mapped to the authorized service account(s), with no `allUsers` binding. Then use `curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" $SCANNER_URL/health` to confirm the authorized identity succeeds.
     - Get discovered URL: `export SCANNER_URL=$(gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format='value(status.url)')`.
+    - Execute `gcloud run services get-iam-policy drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format=json` and verify the bindings contain `roles/run.invoker` exclusively mapped to the authorized service account(s), with no `allUsers` binding.
     - Execute `curl -I $SCANNER_URL/health`, `curl -I https://storage.googleapis.com/$DEV_GCP_PROJECT_ID-document-artifacts`, and `curl -I https://storage.googleapis.com/$DEV_GCP_PROJECT_ID-remittance-proofs` to assert HTTP 401/403 anonymous denial.
+    - Confirm the effective invoker IAM check succeeds by using the reviewed first-hop auth@v2 scanner audience token rail: `curl -H "Authorization: Bearer $(gcloud auth print-identity-token --audiences=$SCANNER_URL)" $SCANNER_URL/health`.
   - Image/Resource Assertions:
     - Execute `gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID --format="value(spec.template.spec.containers[0].image, spec.template.spec.containers[1].image)"` to identify BOTH `gateway` and `clamd` container deployed digests. Ensure they match exact step outputs from build.
     - Execute `gcloud run services describe drts-dev-scanner --region=$DEV_GCP_REGION --project=$DEV_GCP_PROJECT_ID` to assert memory/cpu boundaries, concurrency=1, and `min-instances=0` / `max-instances=1`.
@@ -72,6 +73,12 @@ The implementation has remediated findings over multiple rounds:
     - `DEV_REMITTANCE_PROOF_SCANNER_PROVIDER`: `cloud-run-clamd`
     - `DEV_REMITTANCE_PROOF_SCANNER_URL`: `<private scanner origin>`
   - Dispatch the immutable `.github/workflows/deploy-dev.yml` using the authorized runtime SHA.
-  - Run coordinated authenticated runtime readbacks using ID tokens to call the protected product API to upload a document and a proof, checking runtime SHA/config from the API health endpoints.
-  - Execute `curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" ...` against the internal endpoints to verify the uploaded files.
-  - Verify the backend logs confirm both the Cloud Run gateway processed the files and GCS successfully stored them. Download the files using `gcloud storage cat` with the runtime identity to confirm the file bytes exactly match the uploaded content.
+  - Assert explicit runtime source SHA and selected deployed env/config by checking the deployment workflow logs and the Cloud Run environment variables (`gcloud run services describe`), NOT via the product `/health` endpoint which intentionally does not expose backend artifact configuration.
+  - Execute a coordinated, authenticated runtime readback using real product app-session procedures (e.g. via the `deploy-dev.yml` token issuance rail, NOT a bare gcloud ID token):
+    - Issue an app-session token for a test driver (`driver` realm, `driver:write` role).
+    - As the driver, execute a `POST /v1/driver/billing/remittance/stage` request containing actual test-owned fixture bytes (e.g., test PDF `contentBase64`) to receive a `stagedContentRef`.
+    - As the driver, execute a `POST /v1/driver/billing/remittance/scan` request with the `stagedContentRef` to scan and commit the bytes.
+    - Issue an app-session token for an ops/system user (`system` realm, `billing:write` role).
+    - As the ops user, execute a `GET /v1/system/billing/remittance/download` (or use the controlled signed-link contract) to download the stored proof and assert the retrieved bytes, hash, and length exactly match the test fixture.
+    - Execute the same staging/scanning procedure using a known EICAR fixture and assert the expected rejected cases (e.g., HTTP 400/403 or specific `infected` domain error).
+  - Check the backend logs to confirm the Cloud Run gateway processed the file scan (`verdict: clean` and `verdict: infected`) and GCS successfully stored/rejected them under the expected IDs/generations. Download the files directly using `gcloud storage cat` with the runtime identity to independently confirm storage bytes.

@@ -229,12 +229,64 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
             print("Test 9: Transport failure after successful readiness")
-            print("  [UNEXECUTED] Genuine transport failure scenario omitted (requires network fault injection after readiness)")
-            unexecuted = True
+            # We need to cause exchange to fail while isReady succeeds.
+            # Setting CLAMD_TIMEOUT_MS to 1ms will likely allow the tiny VERSION command to succeed (readiness)
+            # but cause the much larger/slower INSTREAM scan to timeout (transport failure).
+            rev_9 = update_service_env(CLAMD_TIMEOUT_MS="1")
+            time.sleep(5)
+            # We poll until readiness is true (which means VERSION succeeded within 1ms)
+            max_attempts = 30
+            ready = False
+            for i in range(max_attempts):
+                status, body = scan(CLEAN)
+                if status == 200:
+                    ready = True
+                    break
+                elif status == 502:
+                    # Readiness succeeded (so it didn't return 503), but the scan timed out!
+                    ready = True
+                    break
+                time.sleep(2)
+            
+            assert ready, "Service did not become ready (or VERSION could not beat 1ms timeout)"
+            status, body = scan(CLEAN)
+            assert status == 502, f"Expected 502 transport failure due to timeout, got {status}: {body}"
+            assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
             print("Test 10: Verified-unchanged daily freshness renewal / actual update / failed refresh / reload")
-            print("  [UNEXECUTED] Daily freshness and update lifecycle scenarios omitted (requires long-running observation or explicit clock/DNS mocks)")
-            unexecuted = True
+            # Set FRESHCLAM_INTERVAL_SECONDS=5 so freshclam runs repeatedly.
+            # Set http_proxy to a blackhole so freshclam fails.
+            update_service_env(remove=True, CLAMD_TIMEOUT_MS="")
+            rev_10 = update_service_env(FRESHCLAM_INTERVAL_SECONDS="5", http_proxy="http://127.0.0.1:9999")
+            time.sleep(15) # Wait for freshclam to run and fail
+            status, body = scan(CLEAN)
+            assert status == 503, f"Expected 503 after failed refresh, got {status}: {body}"
+            assert isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", f"Expected not_ready error, got {body}"
+
+            res_failed = run([
+                "gcloud", "logging", "read",
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10}" AND textPayload:"freshclam refresh failed; marking not ready"',
+                "--project", project,
+                "--limit=1", "--format=json"
+            ])
+            logs_failed = json.loads(res_failed.stdout) if res_failed.stdout.strip() else []
+            assert len(logs_failed) > 0, "Could not find 'freshclam refresh failed' in logs for exact revision"
+
+            # Now restore network so it succeeds, and expect "database is up-to-date" or "updated"
+            update_service_env(remove=True, http_proxy="")
+            rev_10b = update_service_env(FRESHCLAM_INTERVAL_SECONDS="5")
+            time.sleep(15)
+            status, body = scan(CLEAN)
+            assert status == 200, f"Expected 200 after successful refresh, got {status}: {body}"
+            
+            res_success = run([
+                "gcloud", "logging", "read",
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10b}" AND (textPayload:"database is up-to-date" OR textPayload:"updated (version:")',
+                "--project", project,
+                "--limit=1", "--format=json"
+            ])
+            logs_success = json.loads(res_success.stdout) if res_success.stdout.strip() else []
+            assert len(logs_success) > 0, "Could not find confirmed daily database version/freshness in logs after successful refresh"
 
         except Exception as e:
             print(f"Hosted scenario failed: {e}")

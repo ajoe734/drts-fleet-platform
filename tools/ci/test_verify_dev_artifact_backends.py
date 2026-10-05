@@ -89,6 +89,10 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (503, {"error": "scan_engine_not_ready"}), # Test 7
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 7 polling ready
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}), # Test 7 EICAR
+            (502, {"error": "scan_engine_unavailable"}), # Test 9 polling transport failure
+            (502, {"error": "scan_engine_unavailable"}), # Test 9 final scan transport failure
+            (503, {"error": "scan_engine_not_ready"}), # Test 10 failed refresh
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 10 successful refresh
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally health check
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally health check EICAR
         ]
