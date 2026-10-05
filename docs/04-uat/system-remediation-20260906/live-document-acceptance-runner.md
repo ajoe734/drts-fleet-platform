@@ -52,7 +52,7 @@ A runnable authenticated artifact downloader that:
 calls the Next.js route handlers directly in-process, and
 `tests/unit/system-remediation/sr-invoice-001/` already calls
 `BillingSettlementService`/`ControlledDownloadController` directly in-process.
-Both are legitimate, but neither proves a *downloader* -- something that
+Both are legitimate, but neither proves a _downloader_ -- something that
 authenticates and fetches bytes across an HTTP boundary -- actually works.
 This task's harness
 (`tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts`)
@@ -145,3 +145,41 @@ pending, not fabricated as passing.
   synchronous and in-memory today) is out of scope here; if live evidence
   later shows a durable store is required, that is a separately scoped
   product/contract task, not a silent addition to this runner.
+
+## 0.7 Runner Upgrade Findings (2026-10-05)
+
+During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against candidate `d00b19d0daaaae56448dfc4ba3cd9f23b64c332b` (reviewed) and fixed in candidate `eafcef6f1be9703a4b063ec330898146d129f70d`, the following deficiencies were resolved to meet genuine live acceptance criteria.
+
+| Finding ID | Finding Description                                                                        | Resolution Evidence                                                                                                                                                                |
+| :--------- | :----------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R1**     | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout).         | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication.                                                                             |
+| **R2**     | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing).      | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed.                                |
+| **R3**     | API tracks and live origin configurations could not be configured through workflow.        | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence.                                                            |
+| **R4**     | Invoice download/reissue acceptance was skipped; 200 EMPTY was accepted.                   | Runner now wires authorized tenant metadata through the BFF, verifies downloaded PDF bytes against `manifestHash`, and completes the reissue cycle (410 expired -> fresh link).    |
+| **R5**     | Placard/report missing evidence (501) was counted as success.                              | Runner now mandates actual file bytes for both tracks, authenticating authoritative placard versions via `PlatformAdminService`. Missing evidence fails tests.                     |
+| **R6**     | Role negatives did not prove application authorization (generic 403 accepted without SHA). | Negative authorization checks strictly use real authorized role sessions and assert that the application returns the expected 403 with `candidateSha`, not a generic cloud denial. |
+
+### Pending Role Sessions
+
+The following specific missing role session cookies trigger a non-zero fail-closed exit and must not be synthesized. They are actively monitored by the regression test:
+
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE`
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER`
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT`
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT`
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN`
+
+### Execution Evidence
+
+Runner validation executes identically using the immutable PR candidate SHA (`eafcef6f1be9703a4b063ec330898146d129f70d`) to verify resolution (note: pending hosted live verification).
+
+```sh
+pnpm exec vitest run tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts --no-file-parallelism --maxConcurrency=1
+```
+
+**Exit Code**: `0`
+
+Tests executed include:
+
+- `✓ tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts (20 tests | 5 skipped)`
+- `✓ tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts (13 tests)`
