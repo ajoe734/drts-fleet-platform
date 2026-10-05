@@ -281,55 +281,82 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             self.assertEqual(cm.exception.code, 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     @patch("subprocess.run")
     @patch("time.sleep")
     @patch("urllib.request.urlopen")
     @patch("os.environ.get")
     def test_scanner_hosted_restoration_regression(self, mock_env, mock_urlopen, mock_sleep, mock_run):
         mock_env.return_value = "fake-token"
-        
-        # We need to simulate that FAULT_INJECT_TRANSPORT is set, but then an exception is raised
-        # before it is cleared, and we verify that the finally block STILL restores it perfectly.
+
         def mock_run_side_effect(cmd, *args, **kwargs):
             mock_res = MagicMock()
             mock_res.stdout = "fake-output\n"
             mock_res.returncode = 0
-            
-            # When describe is called, return a dummy spec
             if "describe" in cmd:
                 mock_res.stdout = '{"spec": {"template": {"spec": {"containers": [{"name": "gateway", "env": []}, {"name": "clamd", "env": []}]}}}}'
             elif "logging" in cmd:
-                mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 27315"}]'
+                mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 27315)"}]'
             return mock_res
-            
+
         mock_run.side_effect = mock_run_side_effect
-        
-        # Simulate a timeout or error right after enabling FAULT_INJECT_TRANSPORT
-        # FAULT_INJECT_TRANSPORT is enabled in Test 9
+
         def mock_urlopen_side_effect(req, *args, **kwargs):
             import urllib.error
-            # Allow the first few health checks (for pending, etc.)
-            # But eventually raise an error to simulate the fault
-            if req.data == b"clean" and mock_urlopen.call_count > 10:
+            import io
+            import json
+
+            # Try to get header directly or iterate over headers for case-insensitivity
+            client_sha256 = req.get_header("X-content-sha256")
+
+            data = getattr(req, "data", b"")
+            actual_sha256 = self.mod.hashlib.sha256(data).hexdigest() if data else ""
+            size = len(data) if data else 0
+
+            # Test 3: Hash mismatch
+            if client_sha256 and client_sha256.lower() != actual_sha256.lower():
+                fp = io.BytesIO(json.dumps({"error": "content_sha256_mismatch"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", req.headers, fp)
+
+            # Test 4: Oversized file
+            if size > 10 * 1024 * 1024:
+                fp = io.BytesIO(json.dumps({"error": "payload_too_large"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 413, "Payload Too Large", req.headers, fp)
+
+            # Test 4b: Engine-limit rejection
+            if data == self.mod.ENGINE_LIMIT_PAYLOAD:
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_indeterminate"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", req.headers, fp)
+
+            # Fault injection test simulation (Test 9)
+            if data == self.mod.CLEAN and mock_urlopen.call_count > 10:
                 raise urllib.error.URLError("Simulated network failure after fault enable")
-            
+
             mock_resp = MagicMock()
             mock_resp.status = 200
-            mock_resp.read.return_value = b'{"status":"ready", "verdict":"clean", "sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}'
-            return mock_resp
-            
+
+            verdict = "clean" if data == self.mod.CLEAN else "infected"
+
+            mock_resp.read.return_value = json.dumps({
+                "status": "ready",
+                "verdict": verdict,
+                "sha256": actual_sha256,
+                "sizeBytes": size
+            }).encode()
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = mock_resp
+            return mock_cm
+
         mock_urlopen.side_effect = mock_urlopen_side_effect
-        
+
         with self.assertRaises(Exception):
             self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
-            
-        # We want to assert that update_service_env was called to REMOVE the FAULT_INJECT_TRANSPORT key
-        # verify the arguments to subprocess.run in the finally block
+
+        # Verify restoration of CLAMD_TIMEOUT_MS and error propagation
         remove_calls = [
             call for call in mock_run.call_args_list
-            if "update" in call[0][0] and "--remove-env-vars" in call[0][0] and "FAULT_INJECT_TRANSPORT" in call[0][0][call[0][0].index("--remove-env-vars")+1]
+            if "update" in call[0][0] and "--remove-env-vars" in call[0][0] and "CLAMD_TIMEOUT_MS" in call[0][0][call[0][0].index("--remove-env-vars")+1]
         ]
-        self.assertTrue(len(remove_calls) > 0, "Expected FAULT_INJECT_TRANSPORT to be removed in finally block")
+        self.assertTrue(len(remove_calls) > 0, "Expected CLAMD_TIMEOUT_MS to be removed in finally block")
+
+if __name__ == "__main__":
+    unittest.main()

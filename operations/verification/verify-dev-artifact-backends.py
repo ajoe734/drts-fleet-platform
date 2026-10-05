@@ -221,27 +221,35 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
             print("Test 9: Transport failure after successful readiness")
-            # We use a dedicated fault injection flag to deterministically fail transport without breaking readiness
-            rev_9 = update_service_env(container="gateway", FAULT_INJECT_TRANSPORT="1")
+            # We use a short timeout to fail transport (exchangeWithClamd) while polling for 502.
+            # zVERSION might occasionally time out (503), but zINSTREAM (PDF payload) will reliably time out (502).
+            rev_9 = update_service_env(container="gateway", CLAMD_TIMEOUT_MS="1")
 
             # We can now use a normal clean payload, the fault is injected at the transport boundary
             max_attempts = 30
             ready = False
             for i in range(max_attempts):
                 status, body = scan(CLEAN)
-                if status == 502:
+                if status == 502 and isinstance(body, dict) and body.get("error") == "scan_engine_unavailable":
                     ready = True
                     break
                 time.sleep(2)
 
             assert ready, "Service did not become ready (or fault did not trigger)"
             status, body = scan(CLEAN)
+            if status == 503:
+                # If readiness timed out this exact millisecond, try again once
+                time.sleep(1)
+                status, body = scan(CLEAN)
             assert status == 502, f"Expected 502 transport failure due to injected fault, got {status}: {body}"
             assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
             # Recovery after fault
-            update_service_env(container="gateway", remove=True, FAULT_INJECT_TRANSPORT="")
-            
+            if original_env_by_container.get("gateway", {}).get("CLAMD_TIMEOUT_MS"):
+                update_service_env(container="gateway", CLAMD_TIMEOUT_MS=original_env_by_container["gateway"]["CLAMD_TIMEOUT_MS"])
+            else:
+                update_service_env(container="gateway", remove=True, CLAMD_TIMEOUT_MS="")
+
             print("  (Genuine engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
         except Exception as e:
             print(f"Hosted scenario failed: {e}")
@@ -260,7 +268,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                             updates[key] = c_orig[key]
                         else:
                             to_remove.append(key)
-                    
+
                     cmd = [
                         "gcloud", "run", "services", "update", scanner_service,
                         "--project", project, "--region", region,
@@ -268,17 +276,17 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                     ]
                     if to_remove:
                         cmd.extend(["--remove-env-vars", ",".join(to_remove)])
-                    
+
                     if updates:
                         cmd.extend(["--update-env-vars", ",".join([f"{k}={v}" for k, v in updates.items()])])
-                    
+
                     try:
                         if to_remove or updates:
                             import subprocess
                             subprocess.run(cmd, capture_output=True, text=True, check=True)
                     except subprocess.CalledProcessError as e:
                         restore_errors.append(f"Container {c_name} restore failed: {e.stderr}")
-                
+
                 if restore_errors:
                     raise subprocess.CalledProcessError(1, "restore", stderr="\\n"
 .join(restore_errors))

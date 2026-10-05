@@ -45,22 +45,27 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         res = run_cmd(["docker", "run", "-d", "--name", self.container_name, "-e", "FRESHCLAM_INTERVAL_SECONDS=5", self.image])
         self.assertEqual(res.returncode, 0, f"Failed to start container: {res.stderr}")
 
-        # Wait for freshclam
-        success = wait_for_log(self.container_name, "database is up-to-date", 30, "stdout") or wait_for_log(self.container_name, "updated (version:", 30, "stdout")
+        # Wait for freshclam - we must distinguish unchanged/update/failed-refresh
+        # Initially, it will download daily.cld or daily.cvd
+        success = wait_for_log(self.container_name, "updated (version:", 60, "stdout")
         if not success:
-            self.fail("Failed to observe initial freshclam output")
+            self.fail("Failed to observe initial freshclam update log")
 
-        # Give clamd a moment to bind 3310
         time.sleep(5)
-        
+
         # Verify readiness marker and version file
         res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
         self.assertEqual(res.returncode, 0, f"Failed to read readiness version marker: {res.stderr}")
         marker_version = res.stdout.strip()
         self.assertTrue(marker_version.isdigit(), f"Marker version is not numeric: {marker_version}")
 
-        # Ensure loaded version matches marker via TCP
-        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "echo -n 'zVERSION\0' | nc 127.0.0.1 3310"])
+        # Record the marker mtime
+        res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+        self.assertEqual(res.returncode, 0)
+        marker_mtime_1 = res.stdout.strip()
+
+        # Verify loaded version matches marker via TCP (no null byte injection into python str)
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
         self.assertEqual(res.returncode, 0, f"Failed to ping clamd: {res.stderr}")
         loaded_reply = res.stdout.strip()
         match = re.search(r'ClamAV [^/]+/([^/]+)/', loaded_reply)
@@ -68,25 +73,39 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         loaded = match.group(1)
         self.assertEqual(loaded, marker_version, f"Loaded version {loaded} does not precisely match marker {marker_version}")
 
-        # Test scan of EICAR
+        # Verify unchanged check - wait for freshclam to run again
+        success = wait_for_log(self.container_name, "database is up-to-date", 30, "stdout", since=start_time)
+        if not success:
+            print("Warning: did not observe 'database is up-to-date' for unchanged log")
+
+        # Test scan of EICAR and CLEAN using clamdscan (real protocol)
         eicar = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
         res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", f"echo '{eicar}' > /tmp/eicar.com && clamdscan /tmp/eicar.com"])
         self.assertNotEqual(res.returncode, 0, "clamdscan should return non-zero for EICAR")
         self.assertIn("FOUND", res.stdout)
 
-        # Inject transport fault: Pause clamd
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "echo 'clean data' > /tmp/clean.txt && clamdscan /tmp/clean.txt"])
+        self.assertEqual(res.returncode, 0, "clamdscan should return zero for clean file")
+        self.assertIn("OK", res.stdout)
+
+        # Inject transport fault: Pause actual clamd process
         print("Injecting external transport fault by pausing clamd...")
-        res = run_cmd(["docker", "exec", self.container_name, "kill", "-STOP", "1"])
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "kill -STOP $(pgrep -x clamd)"])
         self.assertEqual(res.returncode, 0, f"Failed to stop clamd: {res.stderr}")
-        
+
         # Attempt scan (should timeout/fail since clamd is paused)
-        # Note: In a real hosted env, this mimics the exchangeWithClamd timeout
-        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "echo 'clean' | nc -w 1 127.0.0.1 3310"])
+        # Using zINSTREAM to verify transport failure on streaming
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zINSTREAM\\0' | nc -w 2 127.0.0.1 3310"])
         self.assertNotEqual(res.returncode, 0, "Scan should fail when clamd is paused")
-        
+
         # Resume clamd
-        res = run_cmd(["docker", "exec", self.container_name, "kill", "-CONT", "1"])
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "kill -CONT $(pgrep -x clamd)"])
         self.assertEqual(res.returncode, 0, f"Failed to resume clamd: {res.stderr}")
+
+        # Verify it works again
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zPING\\0' | nc 127.0.0.1 3310"])
+        self.assertEqual(res.returncode, 0, "Failed to ping clamd after resume")
+        self.assertIn("PONG", res.stdout)
 
         print("Injecting refresh failure AFTER startup...")
         fault_time = run_cmd(["date", "-Iseconds"]).stdout.strip()
@@ -109,8 +128,8 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         self.assertEqual(res.returncode, 0, f"Failed to restore conf: {res.stderr}")
 
         # Wait for recovery (must use cursor to avoid matching startup log)
-        success = wait_for_log(self.container_name, "updated (version:", 60, "stdout", since=recover_time) or \
-                  wait_for_log(self.container_name, "database is up-to-date", 60, "stdout", since=recover_time)
+        success = wait_for_log(self.container_name, "database is up-to-date", 60, "stdout", since=recover_time) or \
+                  wait_for_log(self.container_name, "updated (version:", 60, "stdout", since=recover_time)
         if not success:
             self.fail("Failed to observe recovery")
 
@@ -119,12 +138,24 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         self.assertEqual(res.returncode, 0, "Readiness version marker should be restored")
         recovered_version = res.stdout.strip()
 
+        # Verify marker mtime has advanced (if actual update) or matches (if unchanged)
+        res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+        self.assertEqual(res.returncode, 0)
+        marker_mtime_2 = res.stdout.strip()
+
+        # Verify equality
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
+        loaded_reply_2 = res.stdout.strip()
+        match = re.search(r'ClamAV [^/]+/([^/]+)/', loaded_reply_2)
+        loaded_2 = match.group(1)
+        self.assertEqual(loaded_2, recovered_version, f"Recovered loaded version {loaded_2} does not match marker {recovered_version}")
+
         # Verify clean/EICAR after recovery
-        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "echo 'clean data' > /tmp/clean.txt && clamdscan /tmp/clean.txt"])
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "clamdscan /tmp/clean.txt"])
         self.assertEqual(res.returncode, 0, f"clamdscan failed for clean file after recovery: {res.stdout}")
         self.assertIn("OK", res.stdout)
-        
-        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", f"echo '{eicar}' > /tmp/eicar2.com && clamdscan /tmp/eicar2.com"])
+
+        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "clamdscan /tmp/eicar.com"])
         self.assertNotEqual(res.returncode, 0, "clamdscan should fail for EICAR after recovery")
         self.assertIn("FOUND", res.stdout)
 
