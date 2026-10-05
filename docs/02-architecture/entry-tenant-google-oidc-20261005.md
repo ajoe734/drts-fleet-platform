@@ -47,3 +47,18 @@ Google 協定來源：[OpenID Connect](https://developers.google.com/identity/op
 | 同候選SHA CI通過且獨立reviewer審查 | candidate lifecycle | 尚未建立候選 | reviewer Claude2 | owner 不結案 |
 
 本 VM 僅執行 repository checks，不啟動產品服務、瀏覽器或 Docker。
+
+### 修復單元 1：ID token / PKCE
+
+- `tests/unit/entry-tenant-google-oidc.test.ts` 直接呼叫正式 PKCE service；只 mock
+  Google HTTP 邊界，以本次產生的 RSA key 簽 token，沒有 mock 驗證邏輯。
+- 舊版 `9d191f5ac`（產品碼同 base）：9 項中 6 fail / 3 pass，exit 1。
+  已重現輪替失敗、未知 kid 取第一把 key、Google HMAC 接受、錯誤 azp 接受、
+  缺 sub/exp 接受、userinfo 提升 MFA。安裝缺件的首次失敗不列為重現。
+- 新版工作樹：Google 9 項 + 既有 PKCE 29 項，38 pass，exit 0。
+  `pnpm exec vitest run tests/unit/entry-tenant-google-oidc.test.ts tests/unit/auth-oidc-pkce.test.ts`
+  本機 evidence：`.local/entry-tenant-google-oidc/{baseline,core}.log`。
+- 現有 provider fixture 補入強制要求的 `exp`；callback 恢復 state 內 tenant，
+  callback 若嘗試改寫已指定 tenant/partner 則拒絕。
+- legacy `/tenant/oidc-session`、邀請綁定、dev waiver、BFF 與部署尚待下一單元；
+  以上 scoped pass 不代表完整交付。
