@@ -84,26 +84,47 @@ The implementation has remediated findings over multiple rounds:
       - Generate a driver session and test fixtures using the authorized Cloud SQL proxy and `deploy-dev.yml` session generation tools:
 
         ```bash
-        # 1. Connect to Cloud SQL
+        # 1. Connect to Cloud SQL and insert fixture data directly (bypassing missing token tool)
         gcloud sql connect drts-dev-pg --user=drts_dev_admin --quiet <<'EOF'
-        -- Seed Driver
-        INSERT INTO public.drts_identities (id, realm, status, created_at, updated_at)
-        VALUES ('id-test-driver-001', 'driver', 'active', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;
-        INSERT INTO public.drts_driver_profiles (identity_id, name, created_at, updated_at)
-        VALUES ('id-test-driver-001', 'Test Driver', NOW(), NOW()) ON CONFLICT (identity_id) DO NOTHING;
-        -- Seed Batch
-        INSERT INTO public.drts_reimbursement_batches (id, driver_identity_id, status, created_at, updated_at)
-        VALUES ('batch-test-001', 'id-test-driver-001', 'open', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;
-        -- Seed Public Info for Placards
-        INSERT INTO public.drts_public_info (id, version_code, content, created_at, updated_at)
-        VALUES ('info-test-001', 'v1', '{"test":true}', NOW(), NOW()) ON CONFLICT (id) DO NOTHING;
+        -- Seed Driver Principal and Membership (V0068)
+        INSERT INTO iam.identity_principals (principal_id, issuer, subject, principal_type, account_status, created_at, updated_at, record)
+        VALUES ('id-test-driver-001', 'drts-test', 'id-test-driver-001', 'human', 'active', NOW(), NOW(), '{}')
+        ON CONFLICT DO NOTHING;
+        INSERT INTO iam.identity_memberships (membership_id, principal_id, realm, scope_ref, membership_status, created_at, updated_at, record)
+        VALUES ('mem-test-driver-001', 'id-test-driver-001', 'driver', 'driver', 'active', NOW(), NOW(), '{"roles": ["driver"]}')
+        ON CONFLICT DO NOTHING;
+        
+        -- Seed Platform Ops Principal and Membership
+        INSERT INTO iam.identity_principals (principal_id, issuer, subject, principal_type, account_status, created_at, updated_at, record)
+        VALUES ('sys-ops-admin', 'drts-test', 'sys-ops-admin', 'human', 'active', NOW(), NOW(), '{}')
+        ON CONFLICT DO NOTHING;
+        INSERT INTO iam.identity_memberships (membership_id, principal_id, realm, scope_ref, membership_status, created_at, updated_at, record)
+        VALUES ('mem-ops-admin', 'sys-ops-admin', 'platform', 'platform', 'active', NOW(), NOW(), '{"roles": ["platform_ops_admin"]}')
+        ON CONFLICT DO NOTHING;
+
+        -- Seed Durable Sessions (V0070) directly (bypassing auth API to get driver:write / billing:write / foundation:write)
+        INSERT INTO iam.identity_sessions (session_id, principal_id, membership_id, realm, status, auth_time, auth_methods, absolute_expires_at, created_at, updated_at, record)
+        VALUES 
+          ('sess-driver-001', 'id-test-driver-001', 'mem-test-driver-001', 'driver', 'active', NOW(), '{test}', NOW() + INTERVAL '1 hour', NOW(), NOW(), '{"scopes":["driver:write"]}'),
+          ('sess-ops-001', 'sys-ops-admin', 'mem-ops-admin', 'platform', 'active', NOW(), '{test}', NOW() + INTERVAL '1 hour', NOW(), NOW(), '{"scopes":["billing:write", "foundation:write"]}')
+        ON CONFLICT DO NOTHING;
+
+        -- Seed Driver Profile (V0018A)
+        INSERT INTO ops.phase1_driver_profiles (driver_id, updated_at, record)
+        VALUES ('id-test-driver-001', NOW(), '{"name": "Test Driver"}') ON CONFLICT DO NOTHING;
+        
+        -- Seed Reimbursement Batch (V0012)
+        INSERT INTO billing.phase1_reimbursement_batches (batch_id, driver_id, statement_id, period_month, status, updated_at, record)
+        VALUES ('batch-test-001', 'id-test-driver-001', 'stmt-1', '2026-10', 'open', NOW(), '{}') ON CONFLICT DO NOTHING;
+        
+        -- Seed Public Info for Placards (V0013)
+        INSERT INTO admin.phase1_public_info_versions (version_id, status, created_at, updated_at, record)
+        VALUES ('info-test-001', 'published', NOW(), NOW(), '{"content": {"test": true}}') ON CONFLICT DO NOTHING;
         EOF
 
-        # 2. Issue driver session (realm=driver, scope=driver:write)
-        DRIVER_TOKEN=$(pnpm exec tsx tools/development-orchestrator/bin/issue-test-token.ts --realm driver --subject id-test-driver-001 --scope "driver:write")
-
-        # 3. Issue platform ops admin session (realm=platform, scope=billing:write foundation:write)
-        OPS_TOKEN=$(pnpm exec tsx tools/development-orchestrator/bin/issue-test-token.ts --realm platform --subject sys-ops-admin --scope "billing:write foundation:write")
+        # 2. Export session IDs (used directly as Bearer tokens)
+        DRIVER_TOKEN="sess-driver-001"
+        OPS_TOKEN="sess-ops-001"
         ```
 
     - **Remittance Proofs (Driver & Ops):**

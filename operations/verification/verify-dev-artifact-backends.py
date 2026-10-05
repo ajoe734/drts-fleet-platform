@@ -121,7 +121,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                         c_env[env["name"]] = env["value"]
                 original_env_by_container[c_name] = c_env
 
-        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_TIMEOUT_MS", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "INJECT_TRANSPORT_FAULT"]
+        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_TIMEOUT_MS", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "FAULT_INJECT_TRANSPORT"]
         original_max_age = original_env_by_container.get("gateway", {}).get("MAX_SIGNATURE_AGE_MS", "")
         original_clamd_port = original_env_by_container.get("gateway", {}).get("CLAMD_PORT", "")
 
@@ -260,7 +260,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                             updates[key] = c_orig[key]
                         else:
                             to_remove.append(key)
-
+                    
                     cmd = [
                         "gcloud", "run", "services", "update", scanner_service,
                         "--project", project, "--region", region,
@@ -268,17 +268,20 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                     ]
                     if to_remove:
                         cmd.extend(["--remove-env-vars", ",".join(to_remove)])
-
+                    
                     if updates:
                         cmd.extend(["--update-env-vars", ",".join([f"{k}={v}" for k, v in updates.items()])])
-
+                    
                     try:
-                        subprocess.run(cmd, capture_output=True, text=True, check=True)
+                        if to_remove or updates:
+                            import subprocess
+                            subprocess.run(cmd, capture_output=True, text=True, check=True)
                     except subprocess.CalledProcessError as e:
                         restore_errors.append(f"Container {c_name} restore failed: {e.stderr}")
-
+                
                 if restore_errors:
-                    raise subprocess.CalledProcessError(1, "restore", stderr="\n".join(restore_errors))
+                    raise subprocess.CalledProcessError(1, "restore", stderr="\\n"
+.join(restore_errors))
 
                 # wait for readiness
                 ready = False
@@ -287,6 +290,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                     if status == 200:
                         ready = True
                         break
+                    import time
                     time.sleep(2)
                 if not ready:
                     raise Exception("Service not healthy (timed out waiting for readiness) after restore")

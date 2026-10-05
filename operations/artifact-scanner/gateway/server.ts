@@ -51,10 +51,7 @@ const isReady = createIsReady({
 const handler = createRequestHandler({
   clamd,
   isReady,
-  exchange:
-    process.env.FAULT_INJECT_TRANSPORT === "1"
-      ? () => Promise.reject(new Error("Injected transport fault"))
-      : exchangeWithClamd,
+  exchange: exchangeWithClamd,
   log: (fields) => console.log(JSON.stringify(fields)),
 });
 

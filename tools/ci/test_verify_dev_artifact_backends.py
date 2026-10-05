@@ -283,3 +283,53 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    @patch("os.environ.get")
+    def test_scanner_hosted_restoration_regression(self, mock_env, mock_urlopen, mock_sleep, mock_run):
+        mock_env.return_value = "fake-token"
+        
+        # We need to simulate that FAULT_INJECT_TRANSPORT is set, but then an exception is raised
+        # before it is cleared, and we verify that the finally block STILL restores it perfectly.
+        def mock_run_side_effect(cmd, *args, **kwargs):
+            mock_res = MagicMock()
+            mock_res.stdout = "fake-output\n"
+            mock_res.returncode = 0
+            
+            # When describe is called, return a dummy spec
+            if "describe" in cmd:
+                mock_res.stdout = '{"spec": {"template": {"spec": {"containers": [{"name": "gateway", "env": []}, {"name": "clamd", "env": []}]}}}}'
+            elif "logging" in cmd:
+                mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 27315"}]'
+            return mock_res
+            
+        mock_run.side_effect = mock_run_side_effect
+        
+        # Simulate a timeout or error right after enabling FAULT_INJECT_TRANSPORT
+        # FAULT_INJECT_TRANSPORT is enabled in Test 9
+        def mock_urlopen_side_effect(req, *args, **kwargs):
+            import urllib.error
+            # Allow the first few health checks (for pending, etc.)
+            # But eventually raise an error to simulate the fault
+            if req.data == b"clean" and mock_urlopen.call_count > 10:
+                raise urllib.error.URLError("Simulated network failure after fault enable")
+            
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = b'{"status":"ready", "verdict":"clean", "sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}'
+            return mock_resp
+            
+        mock_urlopen.side_effect = mock_urlopen_side_effect
+        
+        with self.assertRaises(Exception):
+            self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
+            
+        # We want to assert that update_service_env was called to REMOVE the FAULT_INJECT_TRANSPORT key
+        # verify the arguments to subprocess.run in the finally block
+        remove_calls = [
+            call for call in mock_run.call_args_list
+            if "update" in call[0][0] and "--remove-env-vars" in call[0][0] and "FAULT_INJECT_TRANSPORT" in call[0][0][call[0][0].index("--remove-env-vars")+1]
+        ]
+        self.assertTrue(len(remove_calls) > 0, "Expected FAULT_INJECT_TRANSPORT to be removed in finally block")
