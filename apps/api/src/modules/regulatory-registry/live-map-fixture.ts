@@ -15,6 +15,7 @@ type Refusal =
   | "LIVE_MAP_FIXTURE_ASSIGNED"
   | "LIVE_MAP_FIXTURE_BOUND"
   | "LIVE_MAP_FIXTURE_INVITATION_PENDING"
+  | "LIVE_MAP_FIXTURE_READBACK_UNSAFE"
   | "LIVE_MAP_FIXTURE_CONTEXT_UNAVAILABLE";
 
 export type LiveMapFixtureResult =
@@ -48,15 +49,21 @@ function refuse(reason: Refusal): LiveMapFixtureResult {
   return { status: "refused", reason };
 }
 
-function unsafeDriver(driver: StoredDriver) {
-  const record = driver.record;
+export function isIsolatedLiveMapFixture(
+  record: DriverRegistryRecord | undefined,
+) {
   return (
-    driver.work_state !== "offline" ||
-    record?.driverId !== LIVE_MAP_FIXTURE_DRIVER_ID ||
-    record.workState !== "offline" ||
-    record.dispatchEligible !== false ||
-    !Array.isArray(record.deviceBindings) ||
-    record.deviceBindings.some((binding) => binding?.status !== "revoked")
+    record?.driverId === LIVE_MAP_FIXTURE_DRIVER_ID &&
+    record.workState === "offline" &&
+    record.dispatchEligible === false &&
+    Array.isArray(record.deviceBindings) &&
+    record.deviceBindings.every((binding) => binding?.status === "revoked")
+  );
+}
+
+function unsafeDriver(driver: StoredDriver) {
+  return (
+    driver.work_state !== "offline" || !isIsolatedLiveMapFixture(driver.record)
   );
 }
 

@@ -44,7 +44,7 @@ const clearContext = {
 
 function fixtureRepository(
   options: {
-    driver?: DriverRegistryRecord;
+    driver?: DriverRegistryRecord | undefined;
     storedWorkState?: string;
     context?: Record<string, unknown>;
     raceDriver?: DriverRegistryRecord;
@@ -91,6 +91,26 @@ function fixtureRepository(
 }
 
 describe("durable live-map fixture safeguards", () => {
+  it.each([
+    {
+      failAt: "FROM reg.phase1_registry_vehicles",
+      reason: "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
+    },
+    { reason: "LIVE_MAP_FIXTURE_READBACK_UNSAFE" },
+  ])(
+    "refuses an unavailable or missing durable readback after ensure: $reason",
+    async ({ reason, ...options }) => {
+      const db = fixtureRepository(options);
+      const audit = new AuditNotificationService();
+      const service = new RegulatoryRegistryService(
+        { publishSupplyLifecycleUpdated: vi.fn() } as never,
+        audit,
+        new DriverProfileService(audit),
+        db.repository,
+      );
+      await expect(service.onModuleInit()).rejects.toThrow(reason);
+    },
+  );
   it.each([
     {
       context: { ...clearContext, has_binding: true },
