@@ -49,6 +49,35 @@ afterAll(() => {
 });
 
 describe("run-e2e-hermetic harness", () => {
+  it.each(["018", "019"])(
+    "scopes the external scanner fixture to hosted E2E-%s without starting a server",
+    (suite) => {
+      const marker = path.join(testRoot, `node-options-${suite}`);
+      const result = runHarnessLibrary(
+        [
+          'setsid() { printf "%s" "$NODE_OPTIONS" > "$SCANNER_OPTIONS_MARKER"; }',
+          'curl() { printf "200"; }',
+          'API_LOG="$HERMETIC_LOG_DIR/scanner-launch.log"',
+          "start_api",
+          'wait "$API_PID"',
+        ].join("\n"),
+        {
+          CI: "true",
+          AUTH_MODE: "test",
+          HERMETIC_SUITE_LABEL: suite,
+          NODE_OPTIONS: "--no-warnings",
+          SCANNER_OPTIONS_MARKER: marker,
+        },
+      );
+      expect(result.status).toBe(0);
+      const options = readFileSync(marker, "utf8");
+      expect(options).toContain("--no-warnings");
+      expect(options.includes("fleet-upload-scanner.cjs")).toBe(
+        suite === "019",
+      );
+    },
+  );
+
   it("derives an isolated database name from the worktree root and honors overrides", () => {
     const defaultResult = runHarnessLibrary(
       'printf "%s\\n%s\\n" "$DATABASE_URL" "$(worktree_db_name)"',
