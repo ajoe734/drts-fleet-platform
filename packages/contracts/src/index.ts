@@ -3194,6 +3194,7 @@ export interface MoneyAmount {
 export interface EtaSnapshot {
   etaMinutes: number;
   calculatedAt: string;
+  notifiedEtaMinutes?: number;
 }
 
 export interface DriverLocationHeartbeatCommand {

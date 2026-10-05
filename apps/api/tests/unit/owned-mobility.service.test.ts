@@ -7462,13 +7462,14 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
     expect(persistedChanges).toHaveLength(1);
     expect(persistedChanges[0].consumerNotificationOutbox).toBeUndefined(); // no outbox for 2 min change
 
-    // Large change >= 3 minutes
-    await service.updateDriverTaskEta(taskId, 15);
+    // Another small change, cumulative diff from 10 is 4 >= 3
+    await service.updateDriverTaskEta(taskId, 14);
     expect(persistedChanges).toHaveLength(2);
     expect(persistedChanges[1].consumerNotificationOutbox).toHaveLength(1); // outbox generated
     expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe(
       "eta_changed",
     );
+    expect(persistedChanges[1].consumerNotificationOutbox[0].payload.oldEtaMinutes).toBe(10);
   });
 
   it("completeTask produces receipt_ready outbox", async () => {

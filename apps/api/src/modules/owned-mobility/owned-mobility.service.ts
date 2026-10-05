@@ -6509,10 +6509,12 @@ export class OwnedMobilityService
 
     const now = new Date().toISOString();
     const oldEta = order.etaSnapshot?.etaMinutes ?? 0;
+    const lastNotifiedEta = order.etaSnapshot?.notifiedEtaMinutes ?? oldEta;
 
     order.etaSnapshot = {
       etaMinutes,
       calculatedAt: now,
+      notifiedEtaMinutes: lastNotifiedEta,
     };
     order.updatedAt = now;
 
@@ -6528,7 +6530,8 @@ export class OwnedMobilityService
     };
 
     // Prevent spamming: only notify if ETA change is 3 minutes or more.
-    if (Math.abs(etaMinutes - oldEta) >= 3) {
+    if (Math.abs(etaMinutes - lastNotifiedEta) >= 3) {
+      order.etaSnapshot.notifiedEtaMinutes = etaMinutes;
       const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
       const etaChangedOutbox: ConsumerNotificationOutboxRecord = {
         outboxId: randomUUID(),
@@ -6536,7 +6539,7 @@ export class OwnedMobilityService
         passengerSubjectRef,
         eventType: "eta_changed",
         assignmentVersion: null,
-        payload: { taskId, etaMinutes, oldEtaMinutes: oldEta },
+        payload: { taskId, etaMinutes, oldEtaMinutes: lastNotifiedEta },
         status: "pending",
         attemptCount: 0,
         nextAttemptAt: now,
