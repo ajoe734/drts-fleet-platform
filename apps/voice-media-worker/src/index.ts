@@ -14,6 +14,7 @@ export * from "./language/language-router";
 export * from "./dialogue/voice-dialogue-provider";
 export * from "./dialogue/dialogue-state";
 export * from "./dialogue/dialogue-engine";
+export * from "./dialogue/call-turn-coordinator";
 export * from "./dialogue/confirmation/confirmation-controller";
 export * from "./handoff";
 export * from "./server/media-worker-server";

@@ -1,4 +1,7 @@
-import type { VoiceDialogueOutput } from "@drts/contracts";
+import type {
+  VoiceDialogueOutput,
+  VoiceDialogueSnapshotContent,
+} from "@drts/contracts";
 
 export interface SlotEvidence {
   rawText: string;
@@ -38,6 +41,58 @@ export class VoiceDialogueState {
     candidates: AddressCandidate[];
   }> = [];
   handoff: { reason: string; intent: string } | null = null;
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+   * canonical 2026-10-03T20:13:00Z): the `expectedSnapshotSessionVersion`
+   * this attachment's dialogue CONTENT was last durably committed under --
+   * deliberately separate from `VoiceSessionBinding.sessionVersion`, which
+   * also advances on every authoritative CONTROL event (e.g. a barge-in's
+   * `speech.started`, see `VoiceCallTurnCoordinator.
+   * recordAuthoritativeControlEvent`) with no dialogue-content write at
+   * all. A prior version of `createTrustedDialoguePersistPort`'s late
+   * reconciliation fenced against `binding.sessionVersion` itself to avoid
+   * regressing a newer turn's already-installed content -- but a barge-in
+   * alone bumps that same counter without ever installing anything here,
+   * so it incorrectly suppressed recovery of a cancelled turn's genuinely
+   * durable commit. `null` means no content has been committed to this
+   * attachment yet (fresh session, or restored with no prior snapshot). */
+  committedSessionVersion: number | null = null;
+
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+   * canonical 2026-10-03T21:09:40Z, "unresolved commit still admits
+   * destructive subsequent dialogue"): non-null exactly when a content
+   * commit's own HTTP acknowledgement was lost AND the immediate
+   * best-effort reconciliation read (`reconcileAmbiguousCommit`) also
+   * failed to resolve it -- the server-side outcome of this exact write
+   * (landed, or never landed) is genuinely unknown, not merely "failed".
+   * Captures the exact identity of the ambiguous write so a later
+   * reconciliation attempt (possibly for a completely different,
+   * subsequent turn) can still recognize and resolve THIS ONE. Must be
+   * cleared only by `reconcileUnresolvedCommit` actually resolving it --
+   * never by a later turn's own persist attempt proceeding past it,
+   * which is exactly the defect this marker exists to block. */
+  unresolvedCommit: {
+    expectedSessionVersion: number;
+    inputEpoch: number;
+    mediaEpoch: number;
+    turnId: string;
+  } | null = null;
+  // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-persist (Codex reopen,
+  // canonical 2026-10-03T21:53:56Z, "new Promise field crashes cloning
+  // before the advertised join gate"): the in-flight bounded
+  // reconciliation attempting to resolve `unresolvedCommit` used to live
+  // right here as a `Promise`-valued instance field -- but
+  // `VoiceDialogueEngine.turn` builds every turn's own candidate state via
+  // `structuredClone(state)` (see that method's doc), and a `Promise`
+  // cannot be structured-cloned: any turn starting while a reconciliation
+  // was genuinely in flight crashed with `DataCloneError` before ever
+  // reaching `persist()`'s own join gate, silently dropping that turn
+  // instead of either joining the recovery or failing it closed on
+  // purpose. This asynchronous attachment-lifecycle bookkeeping is kept
+  // OFF this cloneable dialogue-content class entirely now -- see
+  // `dialogue-persist-port.ts`'s own `unresolvedCommitRecoveries` WeakMap,
+  // keyed by the `VoiceDialogueState` instance itself, which is exactly as
+  // joinable across concurrent callers without being a property
+  // `structuredClone` ever has to look at.
 
   apply(output: VoiceDialogueOutput, turnId: string): void {
     if (this.handoff) return;
@@ -103,6 +158,55 @@ export class VoiceDialogueState {
       this.handoff = { reason: "location_unresolved", intent: "book" };
       this.confirmationId = null;
     }
+  }
+
+  /** AUDIT-VOICE-APPLICATION-WIRING-20261003 R4: the plain, JSON-serializable
+   * projection persisted via `VoiceApiClient.persistDialogueSnapshot`
+   * (encrypted at rest by apps/api, see
+   * `infra/migrations/V0106__voice_dialogue_snapshot.sql`) and validated
+   * against `voiceDialogueSnapshotContentSchema` field-for-field. */
+  toSnapshotContent(): VoiceDialogueSnapshotContent {
+    return {
+      draftVersion: this.draftVersion,
+      confirmationId: this.confirmationId,
+      slots: structuredClone(this.slots) as VoiceDialogueSnapshotContent["slots"],
+      slotHistory: structuredClone(
+        this.slotHistory,
+      ) as VoiceDialogueSnapshotContent["slotHistory"],
+      addressRepairs: { ...this.addressRepairs },
+      addressHistory: structuredClone(
+        this.addressHistory,
+      ) as VoiceDialogueSnapshotContent["addressHistory"],
+      handoff: this.handoff ? { ...this.handoff } : null,
+    };
+  }
+
+  /** Rehydrates a freshly-constructed (blank) state from a restored
+   * snapshot -- call once, immediately after `attach()`, before any turn
+   * runs for this attachment (see
+   * `VoiceCallTurnCoordinator`'s restoration doc). Never merges into a
+   * state that has already processed a turn: a restore is a cold-start
+   * seam, not a live reconciliation. */
+  restoreFromSnapshotContent(content: VoiceDialogueSnapshotContent): void {
+    this.draftVersion = content.draftVersion;
+    this.confirmationId = content.confirmationId;
+    for (const field of Object.keys(this.slots) as Array<
+      keyof typeof this.slots
+    >) {
+      delete this.slots[field];
+    }
+    for (const [field, evidence] of Object.entries(content.slots)) {
+      (this.slots as Record<string, unknown>)[field] = structuredClone(evidence);
+    }
+    this.slotHistory.length = 0;
+    this.slotHistory.push(...(structuredClone(content.slotHistory) as typeof this.slotHistory));
+    this.addressRepairs.pickup = content.addressRepairs.pickup;
+    this.addressRepairs.dropoff = content.addressRepairs.dropoff;
+    this.addressHistory.length = 0;
+    this.addressHistory.push(
+      ...(structuredClone(content.addressHistory) as typeof this.addressHistory),
+    );
+    this.handoff = content.handoff ? { ...content.handoff } : null;
   }
 
   handoffSummary() {

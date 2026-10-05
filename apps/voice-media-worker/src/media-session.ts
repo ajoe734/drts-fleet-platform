@@ -25,7 +25,8 @@ export type VoiceMediaWorkerEvent =
   | VoiceDtmfReceivedMediaEvent
   | VoiceTtsPlaybackStartedEvent
   | VoiceTtsPlaybackCompletedEvent
-  | VoiceTtsPlaybackCancelledEvent;
+  | VoiceTtsPlaybackCancelledEvent
+  | VoiceMediaEpochAdvancedEvent;
 
 interface VoiceMediaWorkerEventBase {
   sessionId: string;
@@ -65,6 +66,18 @@ export interface VoiceTtsPlaybackCompletedEvent extends VoiceMediaWorkerEventBas
 export interface VoiceTtsPlaybackCancelledEvent extends VoiceMediaWorkerEventBase {
   type: "tts.playback.cancelled";
   payload: { playbackId: string; generation: number; reason: string };
+}
+
+/** Codex reopen round 5/6, R2 residual: published by `advanceMediaEpoch`
+ * itself (not by a separate caller-side wrapper) so that a media-authority
+ * transition has exactly one boundary that always reaches whatever is
+ * consuming this session's event stream -- whether `advanceMediaEpoch` was
+ * invoked through `VoiceSessionComposer`'s own composed method or directly
+ * on a retained `VoiceMediaWorkerSession` reference (e.g.
+ * `composer.get(id).advanceMediaEpoch()`, as unit tests driving the session
+ * alone still do). `mediaEpoch` on the base event stamp is the *new* epoch. */
+export interface VoiceMediaEpochAdvancedEvent extends VoiceMediaWorkerEventBase {
+  type: "media.epoch.advanced";
 }
 
 export type VoiceMediaWorkerEventSink = (event: VoiceMediaWorkerEvent) => void;
@@ -129,19 +142,57 @@ export class VoiceMediaWorkerSession {
   }
 
   /**
+   * Whether a registered playback is still eligible to have its audio
+   * published or its completion honored (Codex reopen round 5/6, R1
+   * residual): `handleSpeechStarted`, `advanceMediaEpoch`, and
+   * `cancelPlayback` all clear a `TrackedPlayback` entry *directly*, with
+   * no event of their own reaching whichever outbound sink is holding this
+   * playback's `handle` -- only `startPlayback`'s own `cancelOn` listener
+   * re-invokes `cancelPlayback` for an abort, and that is a path only the
+   * turn-coordinator-driven `speak` call wires up at all (`cancelOn` is
+   * never passed for the raw `tts.synthesize` control frame). A sink must
+   * call this immediately before publishing audio for `handle.playbackId`
+   * (atomically with any other staleness check it already does), not rely
+   * solely on its own signal/epoch snapshot: that snapshot cannot see a
+   * barge-in, epoch advance, or explicit `tts.cancel` that cleared this
+   * specific registration through one of those direct paths instead.
+   */
+  isPlaybackActive(playbackId: string): boolean {
+    const playback = this.playbacksById.get(playbackId);
+    return playback !== undefined && !playback.cleared;
+  }
+
+  /**
    * SD §5.4 "建立唯一 media output owner／epoch": used on handoff/reconnect
    * to invalidate any in-flight playback generation before a new owner may
-   * play audio.
+   * play audio. Also publishes a `media.epoch.advanced` event (Codex
+   * reopen round 5/6, R2 residual) through the same `eventSink` every other
+   * session event flows through -- this is the one authority-transition
+   * boundary a turn coordinator downstream needs to react to, regardless of
+   * which caller (composed wrapper or a directly retained session
+   * reference) triggered this method. Emitted synchronously, after the
+   * local epoch/generation bookkeeping above but before returning, so a
+   * caller observing no cancellation immediately after this call returns
+   * would be a real regression, not a timing artifact.
    */
   advanceMediaEpoch(): number {
     const previousGeneration = this.activeGeneration;
     this.mediaEpoch += 1;
-    this.activeGeneration = this.mediaEpoch;
+    // Incremented independently of `mediaEpoch`'s own value (not assigned
+    // from it): `handleSpeechStarted` also advances `activeGeneration` on
+    // its own, unrelated schedule, and this must stay monotonic regardless
+    // of how many barge-ins happened since the last epoch advance -- never
+    // regress to a lower generation number than one already issued.
+    this.activeGeneration = previousGeneration + 1;
     for (const playback of this.playbacksById.values()) {
       if (!playback.cleared && playback.generation === previousGeneration) {
         playback.cleared = true;
       }
     }
+    this.emit({
+      type: "media.epoch.advanced",
+      ...this.eventStamp(new Date().toISOString()),
+    });
     return this.mediaEpoch;
   }
 
@@ -150,11 +201,21 @@ export class VoiceMediaWorkerSession {
    * detected speech start, independent of any API/DB round trip. Returns the
    * ids of playbacks that were cleared by this call (if any), so the caller
    * (e.g. the CTI/media bridge) knows which outbound buffers to clear.
+   *
+   * Bumps `activeGeneration` (not just clearing already-registered
+   * playbacks): a `startPlayback` call whose `synthesize` is still in
+   * flight when speech starts has not registered into `playbacksById` yet,
+   * so scanning the map alone could never see it. Once bumped, that call's
+   * captured (now-stale) generation will mismatch `activeGeneration` the
+   * moment its `synthesize` resolves, and `startPlayback` discards it
+   * instead of registering/emitting late audio over the caller's barge-in.
    */
   handleSpeechStarted(occurredAt: string): { clearedPlaybackIds: string[] } {
     const clearedPlaybackIds: string[] = [];
+    const previousGeneration = this.activeGeneration;
+    this.activeGeneration += 1;
     for (const playback of this.playbacksById.values()) {
-      if (!playback.cleared && playback.generation === this.activeGeneration) {
+      if (!playback.cleared && playback.generation === previousGeneration) {
         playback.cleared = true;
         clearedPlaybackIds.push(playback.playbackId);
       }
@@ -241,11 +302,47 @@ export class VoiceMediaWorkerSession {
     });
   }
 
-  /** SD §11.2/§5.4: playback is tagged with the generation active at creation time. */
+  /** SD §11.2/§5.4: playback is tagged with the generation active at creation time.
+   *
+   * Barge-in (`handleSpeechStarted`) may bump `activeGeneration` while
+   * `synthesize` is still in flight -- before this playback has registered
+   * into `playbacksById` at all, so a plain map scan at barge-in time could
+   * never have cleared it. Checking the captured `generation` against the
+   * (possibly now-newer) `activeGeneration` here, after the await, is what
+   * actually fences that case: a stale result is discarded (never
+   * registered, never emitted, empty audio returned) instead of being
+   * played back over the caller's barge-in.
+   *
+   * `isStillValid`, when supplied, is re-checked at the exact same point as
+   * the generation comparison -- atomically, before this playback is ever
+   * registered or its "started" event emitted (Codex reopen round 3, R1):
+   * a caller-level re-check performed only *after* `startPlayback` already
+   * returned is too late, since registration/emission has already
+   * happened by then. This is what lets a turn-level staleness source that
+   * `activeGeneration` alone cannot see (a newer final, a turn timeout, or
+   * a media-epoch advance that happened while this call's own `propose`/
+   * `synthesize` was still in flight) discard the result before it can
+   * ever be marked started, let alone later accepted as completed.
+   *
+   * `cancelOn`, when supplied, is re-checked for the entire remaining
+   * *lifetime* of this registered playback, not only once before
+   * registration (Codex reopen round 4, R1): a newer final, a turn
+   * timeout, or a release/drain can all abort it well *after* this
+   * playback has already registered and even after its audio has already
+   * been published -- `isStillValid` alone cannot see that, since it is
+   * only ever consulted at this one point in time. Registering an abort
+   * listener here means any such later abort immediately cancels this
+   * specific playback (SD §11.5: once cancelled, a late completion mark
+   * must never "revive" it), instead of leaving it `cleared: false`
+   * forever until an unrelated barge-in/epoch-advance happens to touch the
+   * same generation.
+   */
   async startPlayback(
     text: string,
     languageCode: string,
     occurredAt: string,
+    isStillValid?: () => boolean,
+    cancelOn?: AbortSignal,
   ): Promise<VoiceTtsPlaybackHandle> {
     const generation = this.activeGeneration;
     const handle = await this.ttsAdapter.synthesize({
@@ -254,11 +351,30 @@ export class VoiceMediaWorkerSession {
       languageCode,
       generation,
     });
+    if (
+      generation !== this.activeGeneration ||
+      (isStillValid && !isStillValid())
+    ) {
+      return { ...handle, audioChunks: [] };
+    }
     this.playbacksById.set(handle.playbackId, {
       playbackId: handle.playbackId,
       generation,
       cleared: false,
     });
+    if (cancelOn) {
+      cancelOn.addEventListener(
+        "abort",
+        () => {
+          this.cancelPlayback(
+            handle.playbackId,
+            "turn_superseded",
+            new Date().toISOString(),
+          );
+        },
+        { once: true },
+      );
+    }
     this.emit({
       type: "tts.playback.started",
       ...this.eventStamp(occurredAt),

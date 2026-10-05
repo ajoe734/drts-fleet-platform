@@ -113,11 +113,11 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     }
   });
 
-  it("C096: 車內牌貼 (Placard) 關聯綁定至公開資訊版本，並防範同版號重複建立 (409 PLACARD_VERSION_CODE_CONFLICT)", () => {
+  it("C096: 車內牌貼 (Placard) 關聯綁定至公開資訊版本，並防範同版號重複建立 (409 PLACARD_VERSION_CODE_CONFLICT)", async () => {
     const service = createService();
 
     // 1. 成功建立綁定至公開資訊之牌貼
-    const placard = service.generatePlacardVersion(
+    const placard = await service.generatePlacardVersion(
       {
         versionCode: "placard-2026-q3-metro",
         publicInfoVersionId: "public-info-demo-001",
@@ -133,7 +133,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
     // 2. 重複建立相同 versionCode 之牌貼 -> 拋出 409 Conflict
     try {
-      service.generatePlacardVersion(
+      await service.generatePlacardVersion(
         {
           versionCode: "placard-2026-q3-metro",
           publicInfoVersionId: "public-info-demo-001",
@@ -150,7 +150,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
     // 3. 綁定不存在之公開資訊版本 -> 拋出 404
     try {
-      service.generatePlacardVersion(
+      await service.generatePlacardVersion(
         {
           versionCode: "placard-2026-q3-invalid",
           publicInfoVersionId: "public-info-nonexistent",
@@ -166,7 +166,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     }
   });
 
-  it("C096: 車內牌貼發布生命週期與重複發布阻斷 (409 PLACARD_VERSION_ALREADY_PUBLISHED)", () => {
+  it("C096: 車內牌貼發布生命週期與重複發布阻斷 (409 PLACARD_VERSION_ALREADY_PUBLISHED)", async () => {
     const service = createService();
     const draftPublicInfo = service.createPublicInfoVersion(
       {
@@ -182,7 +182,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     );
 
     // 建立綁定至草稿公開資訊之草稿牌貼
-    const placard = service.generatePlacardVersion(
+    const placard = await service.generatePlacardVersion(
       {
         versionCode: "placard-2026-q4-draft",
         publicInfoVersionId: draftPublicInfo.versionId,
@@ -193,7 +193,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     expect(placard.publishedAt).toBeNull();
 
     // 首次發布
-    const published = service.publishPlacardVersion(
+    const published = await service.publishPlacardVersion(
       placard.placardVersionId,
       {},
       "req-c096-p4-pub",
@@ -203,7 +203,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
     // 再次嘗試發布已發布之牌貼 -> 拋出 409
     try {
-      service.publishPlacardVersion(
+      await service.publishPlacardVersion(
         placard.placardVersionId,
         {},
         "req-c096-p4-repub",
@@ -213,7 +213,9 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
       expect(err.status).toBe(409);
-      expect(err.response?.error?.code).toBe("PLACARD_VERSION_ALREADY_PUBLISHED");
+      expect(err.response?.error?.code).toBe(
+        "PLACARD_VERSION_ALREADY_PUBLISHED",
+      );
     }
   });
 });
