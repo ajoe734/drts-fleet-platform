@@ -13,20 +13,29 @@ fi
 SECRET_PREFIX="$1"
 PROJECT_ID="$2"
 
-bank_signing_private_secret="${SECRET_PREFIX}-bank-signing-private-key"
-bank_signing_public_secret="${SECRET_PREFIX}-bank-signing-public-key"
-bank_signing_kid_secret="${SECRET_PREFIX}-bank-signing-key-id"
+bank_signing_private_secret="${SECRET_PREFIX}-bank-artifact-signing-private-key"
+bank_signing_public_secret="${SECRET_PREFIX}-bank-artifact-signing-public-key"
+bank_signing_kid_secret="${SECRET_PREFIX}-bank-artifact-signing-key-id"
 
 count=0
 for secret in "$bank_signing_private_secret" "$bank_signing_public_secret" "$bank_signing_kid_secret"; do
   # In testing, we might mock gcloud.
-  if gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+  set +e
+  err_out=$(gcloud secrets describe "$secret" --project "$PROJECT_ID" 2>&1 >/dev/null)
+  exit_code=$?
+  set -e
+  if [[ $exit_code -eq 0 ]]; then
     count=$((count + 1))
+  elif echo "$err_out" | grep -q "NOT_FOUND"; then
+    : # correctly identified as absent
+  else
+    echo "::error::Failed to describe secret $secret. Reason: $err_out" >&2
+    exit 1
   fi
 done
 
 if [[ "$count" -eq 3 ]]; then
-  echo "BANK_SIGNING_PRIVATE_KEY=${bank_signing_private_secret}:latest,BANK_SIGNING_PUBLIC_KEY=${bank_signing_public_secret}:latest,BANK_SIGNING_KEY_ID=${bank_signing_kid_secret}:latest"
+  echo "BANK_ARTIFACT_SIGNING_PRIVATE_KEY=${bank_signing_private_secret}:latest,BANK_ARTIFACT_SIGNING_PUBLIC_KEY=${bank_signing_public_secret}:latest,BANK_ARTIFACT_SIGNING_KEY_ID=${bank_signing_kid_secret}:latest"
 elif [[ "$count" -gt 0 ]]; then
   echo "::error::Bank signing configuration is partial (${count}/3 secrets present). All three of ${bank_signing_private_secret}, ${bank_signing_public_secret}, ${bank_signing_kid_secret} must be present, or none of them." >&2
   exit 1
