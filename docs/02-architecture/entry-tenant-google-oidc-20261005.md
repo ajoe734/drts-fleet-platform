@@ -171,3 +171,39 @@ logout-all 透過 API 撤銷所有 session。企業派車的登入按鈕維持 c
   區段，不碰 IAP 的 waiver guard），以及 `tests/integ/oidc-pkce-bff.test.ts`
   （只補 real-provider 正向 fixture 的明確 issuer/sub binding）。擴充後先修這兩项、
   重跑受影響 checks，再建立 PR 並 handoff；本 checkpoint 不聲稱 CI／review 通過。
+
+### 本次 redispatch：可重跑的 strict startup 回歸（仍待 scope）
+
+- 重新讀取 canonical task slice，兩個 scope 申請仍未加入 `write_scopes`。
+  Owner 維持 Codex、reviewer 維持 Claude2；沒有候選交審或退修輪次可宣稱。
+  依協作指南 §0.7，須由 Supervisor 核對衝突並擴充原任務，owner 不自行改寫 scope。
+- 已在允許的 `tests/unit/auth-startup-config.test.ts` 補入 7 項回歸，保存於
+  `f5c561d9a387dea73584a2006f19894b1d1bd4cf`。直接呼叫正式
+  `buildAuthStartupConfigReport`，沿用既有完整環境 fixture，不 mock 驗證邏輯。
+  兩項合法 Google JWKS 設定案例仍失敗，未用 skip 或 expected-failure 隱藏；
+  這是待修缺陷的 anchor，不是已完成的候選。
+- 修正邊界更精確：staging／production 會被三個 `TENANT_OIDC_*` 舊設定要求
+  擋住；共享 dev 的 `NODE_ENV=production`、`DRTS_ENV=development`、
+  `AUTH_MODE=explicit` 設定可通過。不能把此 strict startup 缺陷描述為已證明
+  共享 dev 啟動失敗。Google 缺 client ID、啟用 mock mode 的拒絕情境各兩項皆通過。
+
+| Finding | 原始碼與修正邊界 | 本輪重現／驗證 | 待辦 |
+| --- | --- | --- | --- |
+| Google JWKS 被要求另設 static tenant credentials | `auth-startup-config.ts` 的 tenant workforce verification 區段；應與 `OidcIdTokenVerifier.verify` 的 issuer/audience 與遠端 JWKS 路徑一致，不以 JWT session secret 代替 provider key | `586d93d2b8c61bf58c513e3e9ebaf9b5786097c6` 產品碼 + 新回歸：staging／production 各 1 fail，精確回報三個 `TENANT_OIDC_*` missing controls | 加入 config 檔 scope；保留 generic PKCE 必填／mock 拒絕，以及 IAP lane 的 MFA waiver 政策 |
+| real-provider 正向 fixture 缺 issuer/sub | `tests/integ/oidc-pkce-bff.test.ts` 最後一項刪除 `OIDC_MOCK_MODE` 後，seed 只有 sub；`findTenantUserByOidcIdentity` 正確拒絕未綁定 issuer 的身分 | 原檔 baseline 與本輪均 4 pass / 1 fail；`issueVerifiedTenantSession` 回 `AUTH_SESSION_EXCHANGE_DENIED` | 加入該 test scope；以既有 `bindTenantUserSubject` 明確装配測試身分，不放寬正式登入或恢復按 email 登入 |
+
+本輪命令與結果（Node 22.23.2／pnpm 10.33.0／Vitest 4.1.4）：
+
+- `pnpm exec vitest run tests/unit/auth-startup-config.test.ts tests/integ/oidc-pkce-bff.test.ts`
+  原 checkpoint：40 pass / 1 fail，exit 1；新增回歸後：45 pass / 3 fail，exit 1。
+  新增的兩個 fail 是把原 startup probe 轉為版本控制中的 regression，未修改產品碼。
+- `pnpm run typecheck:root`、針對修改 test 的 ESLint 與 Prettier check 均 exit 0。
+  初次 test fixture 缺 `AUTH_MODE`、初次 typecheck 缺 record 型別已修正，
+  這些測試裝配錯誤不列為產品缺陷；上列數字是修正 fixture 後的完整結果。
+- 本輪工作樹 `.local/entry-tenant-google-oidc/` 保存
+  `redispatch-baseline.log`、`redispatch-startup-regression.log`、
+  `redispatch-root-typecheck.log`、`redispatch-startup-eslint.log`。
+  所有已啟動本機 checks 已結束並讀取結果；不重述前輪 scoped pass 為本輪驗收。
+- 下一步仍是 Supervisor 擴充兩檔 scope → 原 owner 修復 → 同一命令應達
+  48 pass → 受影響整體回歸 → 鎖定並 handoff 同一 SHA。
+  未執行服務、瀏覽器、Docker、OAuth client 建立或部署；CI／獨立 review／真實登入仍待驗。
