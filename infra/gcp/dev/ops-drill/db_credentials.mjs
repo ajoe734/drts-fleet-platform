@@ -1,12 +1,11 @@
-"use strict";
-
 // Credential-only interpretation of the API's pg-connection-string URL rules.
 // Use Node's WHATWG URL (including pg's empty-host fallback), not Python's
 // authority parser, which interprets brackets in passwords as IPv6 syntax.
 // Never connect, honor URL host/options, or load SSL files in this helper.
-const { readFileSync } = require("node:fs");
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
-function credentials(secret) {
+export function credentials(secret) {
   if (/[\r\n\0]/.test(secret)) throw new Error("invalid_db_secret");
   // Match pg-connection-string's treatment of spaces and literal percent signs.
   const normalized = / |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(secret)
@@ -33,9 +32,10 @@ function credentials(secret) {
   return result;
 }
 
-module.exports = { credentials };
-
-if (require.main === module) {
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
   try {
     // stdin/stdout are private pipes owned by Readback, never runner logs.
     process.stdout.write(JSON.stringify(credentials(readFileSync(0, "utf8"))));

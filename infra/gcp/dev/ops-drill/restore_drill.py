@@ -196,7 +196,7 @@ class Readback:
         secret = command(["gcloud", "secrets", "versions", "access", "latest",
                           "--secret=drts-dev-db-url", "--project=" + PROJECT, "--quiet"])
         try:
-            parsed = obj(command(["node", str(Path(__file__).with_name("db_credentials.cjs"))],
+            parsed = obj(command(["node", str(Path(__file__).with_name("db_credentials.mjs"))],
                                  input_text=secret, timeout=10))
             user, password, db = (parsed[key] for key in ("user", "password", "database"))
             require(all(isinstance(value, str) and value for value in (user, password, db)), "invalid_db_secret")

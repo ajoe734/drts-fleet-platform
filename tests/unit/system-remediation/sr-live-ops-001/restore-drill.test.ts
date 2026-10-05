@@ -2,12 +2,10 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { credentials } from "../../../../infra/gcp/dev/ops-drill/db_credentials.mjs";
 
 const apiRequire = createRequire(path.resolve("apps/api/package.json"));
 const { Client } = apiRequire("pg");
-const { credentials } = apiRequire(
-  path.resolve("infra/gcp/dev/ops-drill/db_credentials.cjs"),
-);
 
 it("matches the API pg driver's credentials without opening a connection", () => {
   const urls = [
