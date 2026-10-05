@@ -110,6 +110,25 @@ jobs:
              exit 1
           fi
 
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs and TokenCreator on Runtime SA ($DEV_GCP_RUNTIME_SERVICE_ACCOUNT)..."
+          if ! gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None >/dev/null 2>&1; then
+             echo "::error::Failed to grant actAs on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER."
+             exit 1
+          fi
+          
+          if ! gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountTokenCreator" \
+              --condition=None >/dev/null 2>&1; then
+             echo "::error::Failed to grant TokenCreator on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER for verification impersonation."
+             exit 1
+          fi
+
       - name: Provision Backends
         run: |
           set -euo pipefail
@@ -170,4 +189,5 @@ jobs:
           python3 operations/verification/verify-dev-artifact-backends.py \
             --document-bucket "$DOCUMENT_BUCKET" \
             --remittance-bucket "$REMITTANCE_BUCKET" \
-            --scanner-url "${{ steps.scanner_url.outputs.url }}"
+            --scanner-url "${{ steps.scanner_url.outputs.url }}" \
+            --runtime-sa "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT"

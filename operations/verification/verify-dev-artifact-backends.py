@@ -85,9 +85,21 @@ def test_scanner(scanner_url):
     assert status == 413, f"Expected 413, got {status}: {body}"
     assert body.get("error") == "payload_too_large", f"Expected payload_too_large error, got {body.get('error')}"
 
-    print("Scanner tests passed.")
+    print("Test 5: Genuine-engine unavailable/indeterminate")
+    print("  [UNEXECUTED] Manual fault injection required in hosted environment (e.g., kill clamd)")
+    
+    print("Test 6: Stale/failed/pending signature activation")
+    print("  [UNEXECUTED] Manual fault injection required in hosted environment (e.g., block freshclam)")
 
-def test_gcs(bucket_name):
+    print("Test 7: Verified-unchanged freshness")
+    print("  [UNEXECUTED] Manual verification required in hosted environment")
+
+    print("Test 8: Actual freshclam/reload or cold-start")
+    print("  [UNEXECUTED] Manual verification required in hosted environment")
+
+    print("Scanner tests passed (with unexecuted manual genuine-engine scenarios recorded).")
+
+def test_gcs(bucket_name, runtime_sa):
     print(f"Testing GCS bucket: {bucket_name}")
     import uuid
     import subprocess
@@ -107,22 +119,22 @@ def test_gcs(bucket_name):
 
     try:
         print("Test 1: Upload (create with if-generation-match=0)")
-        run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
 
         print("Test 2: Read generation")
-        res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
+        res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
         gen1 = res.stdout.strip()
         assert gen1 and gen1.isdigit(), f"Expected numeric generation, got {gen1}"
 
         print("Test 3: Download with exact generation match")
-        run(["gcloud", "storage", "cp", f"{test_file}#{gen1}", temp_out])
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", f"{test_file}#{gen1}", temp_out])
         with open(temp_out, "r") as f:
             downloaded = f.read()
         assert downloaded == test_data, f"Content mismatch: expected {test_data}, got {downloaded}"
 
         print("Test 4: Upload with mismatched generation (0 again, should fail Precondition Failed)")
         try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
             assert False, "Expected upload to fail with mismatched generation"
         except subprocess.CalledProcessError as e:
             assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
@@ -130,34 +142,45 @@ def test_gcs(bucket_name):
         print("Test 5: Update with correct generation match")
         with open(temp_in, "w") as f:
             f.write(test_data_v2)
-        run(["gcloud", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
 
         print("Test 6: Read updated generation")
-        res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
+        res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
         gen2 = res.stdout.strip()
         assert gen2 and gen2.isdigit(), f"Expected numeric generation, got {gen2}"
         assert gen1 != gen2, "Generation did not change after update"
 
+        print("Test 6b: Download and assert gen2 bytes")
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", f"{test_file}#{gen2}", temp_out])
+        with open(temp_out, "r") as f:
+            downloaded = f.read()
+        assert downloaded == test_data_v2, f"Gen2 content mismatch: expected {test_data_v2}, got {downloaded}"
+
         print("Test 7: Download immutable prior generation")
-        run(["gcloud", "storage", "cp", f"{test_file}#{gen1}", temp_out])
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", f"{test_file}#{gen1}", temp_out])
         with open(temp_out, "r") as f:
             downloaded = f.read()
         assert downloaded == test_data, f"Old generation content mismatch: expected {test_data}, got {downloaded}"
 
         print("Test 8: Upload with stale generation")
         try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to fail with stale generation"
         except subprocess.CalledProcessError as e:
             assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
 
         print("Test 9: Verify winning generation remains unchanged")
-        res = run(["gcloud", "storage", "objects", "describe", test_file, "--format=value(generation)"])
+        res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
         assert res.stdout.strip() == gen2, "Generation changed after failed write"
+        
+        run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", f"{test_file}#{gen2}", temp_out])
+        with open(temp_out, "r") as f:
+            downloaded = f.read()
+        assert downloaded == test_data_v2, f"Winning generation content was modified: expected {test_data_v2}, got {downloaded}"
 
         print("Test 10: Upload with malformed generation")
         try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=not_a_number"])
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--if-generation-match=not_a_number"])
             assert False, "Expected upload to fail with malformed generation"
         except subprocess.CalledProcessError as e:
             pass  # Expected to fail parameter validation or API error
@@ -167,7 +190,7 @@ def test_gcs(bucket_name):
         # We simulate this by trying to copy to a path we definitely don't have access to, or just asserting
         # that actual 403 is distinct from 412 if it were to happen.
         try:
-            run(["gcloud", "storage", "cp", temp_in, f"gs://{bucket_name}/forbidden/path", f"--if-generation-match={gen1}"])
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, f"gs://{bucket_name}/forbidden/path", f"--if-generation-match={gen1}"])
         except subprocess.CalledProcessError as e:
             assert "412" not in e.stderr, f"403/Forbidden network errors should not masquerade as 412 CAS errors: {e.stderr}"
 
@@ -175,9 +198,9 @@ def test_gcs(bucket_name):
         print("Cleanup test owned object")
         # exact run-owned generation cleanup with surfaced errors
         if 'gen2' in locals() and gen2.isdigit():
-            run(["gcloud", "storage", "rm", f"{test_file}#{gen2}"])
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "rm", f"{test_file}#{gen2}"])
         if 'gen1' in locals() and gen1.isdigit():
-            run(["gcloud", "storage", "rm", f"{test_file}#{gen1}"])
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "rm", f"{test_file}#{gen1}"])
         if os.path.exists(temp_in): os.remove(temp_in)
         if os.path.exists(temp_out): os.remove(temp_out)
 
@@ -188,11 +211,12 @@ def main():
     parser.add_argument("--document-bucket", required=True)
     parser.add_argument("--remittance-bucket", required=True)
     parser.add_argument("--scanner-url", required=True)
+    parser.add_argument("--runtime-sa", required=True)
     args = parser.parse_args()
 
     test_scanner(args.scanner_url)
-    test_gcs(args.document_bucket)
-    test_gcs(args.remittance_bucket)
+    test_gcs(args.document_bucket, args.runtime_sa)
+    test_gcs(args.remittance_bucket, args.runtime_sa)
 
     print("All dev artifact backend verification tests passed.")
 

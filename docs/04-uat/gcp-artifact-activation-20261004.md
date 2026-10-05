@@ -16,14 +16,14 @@ The initial implementation of `2fa1f87dd402e6d41e4844275ef93c1e74c4ff93` receive
 
 | Finding / Gate | Adjacent SHA | Command | Result / Artifacts | Pending Limits |
 |---|---|---|---|---|
-| **R5a (Gateway Errors)** | `3eea6d59bc` | `python3 -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS. `content_sha256_mismatch` and `payload_too_large` correctly expected. | Offline verified. Requires hosted API hit. |
-| **R5b (Genuine Engine)** | `3eea6d59bc` | Manual offline checks | Acceptance boundary defined. Tests use genuine engine only in hosted authorized environment. | Needs execution of manual fault/recovery scenarios in shared dev after merge. |
-| **R6 (GCS Robustness)** | `3eea6d59bc` | `python3 -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS. Added stale write, malformed gen, network simulated failure and exact gen cleanup. | Execution required against live GCS via hosted verification workflow. |
-| **R8 (Prerequisites)** | `3eea6d59bc` | Checked workflow | `.github/workflows/provision-dev-artifact-backends.yml` validates and bootstraps Scanner SA before provisioning. | Pending verification of IAM policies/readbacks during provisioning. |
-| **1. immutable_hosted_workflow_review_ci** | `3eea6d59bc` | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. | Pending reviewer approval and final CI pass on PR. |
-| **2. private_resources_iam_and_image_provenance** | `3eea6d59bc` | Offline scripts | Scripts configured for private buckets and IAM policies. | Pending readback of runtime SA ownership/access, `imageDigest`, memory limits in hosted environment. |
-| **3. genuine_scan_storage_positive_negative** | `3eea6d59bc` | Unit tests | `verify-dev-artifact-backends.py` completes tests for clean, EICAR, mismatch, oversize, CAS handling. | Pending hosted verification using genuine `clamd` sidecar. |
-| **4. shared_dev_provider_activation_readback** | `3eea6d59bc` | Offline prep | N/A | Update `DEV_DOCUMENT_ARTIFACT_STORAGE_PROVIDER`, `DEV_DOCUMENT_ARTIFACT_GCS_BUCKET`, `DEV_REMITTANCE_PROOF_STORAGE_PROVIDER`, `DEV_REMITTANCE_PROOF_GCS_BUCKET`, `DEV_REMITTANCE_PROOF_SCANNER_PROVIDER`, `DEV_REMITTANCE_PROOF_SCANNER_URL` variables. |
+| **R5a (Gateway Errors)** | `HEAD` | `python3 -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS. `content_sha256_mismatch` and `payload_too_large` correctly expected. | Offline verified. Requires hosted API hit. |
+| **R5b (Genuine Engine)** | `HEAD` | Manual offline checks | Acceptance boundary defined. Added explicit unexecuted genuine engine scenarios to test output (fault injection/recovery). Tests use genuine engine only in hosted authorized environment. | Needs execution of manual fault/recovery scenarios in shared dev after merge. |
+| **R6 (GCS Robustness)** | `HEAD` | `python3 -m unittest tools.ci.test_verify_dev_artifact_backends` | PASS. Added gen2 byte download, unchanged winner validation, stale write, malformed gen, network error and exact gen cleanup. Helper executes as runtime SA via explicit impersonation. | Execution required against live GCS via hosted verification workflow. |
+| **R8 (Prerequisites)** | `HEAD` | Checked workflow | `.github/workflows/provision-dev-artifact-backends.yml` validates and bootstraps Scanner SA, and explicitly verifies actAs/TokenCreator prerequisites for runtime SA before provisioning. | Pending verification of IAM policies/readbacks during provisioning. |
+| **1. immutable_hosted_workflow_review_ci** | `HEAD` | Git / CI Checks | Workflow ensures `source_ref` immutable validation and mock tests are part of CI. | Pending reviewer approval and final CI pass on PR. |
+| **2. private_resources_iam_and_image_provenance** | `HEAD` | Offline scripts | Scripts configured for private buckets and IAM policies. | Pending readback of runtime SA ownership/access, `imageDigest`, memory limits in hosted environment. |
+| **3. genuine_scan_storage_positive_negative** | `HEAD` | Unit tests | `verify-dev-artifact-backends.py` completes tests for clean, EICAR, mismatch, oversize, CAS handling. | Pending hosted verification using genuine `clamd` sidecar. |
+| **4. shared_dev_provider_activation_readback** | `HEAD` | Offline prep | N/A | Update `DEV_DOCUMENT_ARTIFACT_STORAGE_PROVIDER`, `DEV_DOCUMENT_ARTIFACT_GCS_BUCKET`, `DEV_REMITTANCE_PROOF_STORAGE_PROVIDER`, `DEV_REMITTANCE_PROOF_GCS_BUCKET`, `DEV_REMITTANCE_PROOF_SCANNER_PROVIDER`, `DEV_REMITTANCE_PROOF_SCANNER_URL` variables. |
 
 ## Acceptance Criteria
 

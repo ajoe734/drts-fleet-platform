@@ -121,14 +121,12 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             else:
                 res.stdout = "12345"
 
-            if "cp" in cmd and "#" in cmd[3] and cmd[3].startswith("gs://"):
-                with open(cmd[4], "w") as f:
-                    import tempfile
-                    temp_dir = tempfile.gettempdir()
-                    test_key = cmd[3].split("gs://fake-bucket/")[1].split("#")[0]
-                    temp_in_path = os.path.join(temp_dir, "temp_in_" + test_key)
-                    if "test data v2" in open(temp_in_path, "r").read():
-                        f.write("test data v1") # It tests old generation download, so it expects v1
+            cp_idx = cmd.index("cp") if "cp" in cmd else -1
+            if "cp" in cmd and "#" in cmd[cp_idx+1] and cmd[cp_idx+1].startswith("gs://"):
+                with open(cmd[cp_idx+2], "w") as f:
+                    requested_gen = cmd[cp_idx+1].split("#")[1]
+                    if requested_gen == "12347":
+                        f.write("test data v2")
                     else:
                         f.write("test data v1")
             elif "cp" in cmd and "--if-generation-match=0" in cmd:
@@ -146,22 +144,22 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     raise err
                 state["generation"] += 1
 
-            elif "cp" in cmd and "forbidden/path" in cmd[4]:
+            elif "cp" in cmd and "forbidden/path" in cmd[cmd.index("cp")+2]:
                 err = subprocess.CalledProcessError(1, cmd, stderr="403 Forbidden")
                 raise err
             return res
 
         mock_run.side_effect = side_effect
-        self.mod.test_gcs("fake-bucket")
+        self.mod.test_gcs("fake-bucket", "fake-sa")
 
-    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s"])
+    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa"])
     def test_main(self):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:
             self.mod.main()
             mock_scanner.assert_called_once_with("s")
-            mock_gcs.assert_any_call("d")
-            mock_gcs.assert_any_call("r")
+            mock_gcs.assert_any_call("d", "sa")
+            mock_gcs.assert_any_call("r", "sa")
 
 if __name__ == "__main__":
     unittest.main()
