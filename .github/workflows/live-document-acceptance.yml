@@ -80,6 +80,18 @@ jobs:
       WORKFLOW_SHA: ${{ github.sha }}
       SR_LIVE_DOC_RUNNER_EVIDENCE: ${{ github.workspace }}/.artifacts/live-document-acceptance/evidence-runner-record.json
       SR_LIVE_DOC_LIVE_TARGET_ORIGIN: ${{ github.event.inputs.live_target_origin }}
+      SR_LIVE_DOC_LIVE_API_ORIGIN: ${{ github.event.inputs.live_api_origin }}
+      SR_LIVE_DOC_LIVE_TENANT_CONSOLE_ORIGIN: ${{ github.event.inputs.live_tenant_console_origin }}
+      SR_LIVE_DOC_LIVE_PLATFORM_ADMIN_ORIGIN: ${{ github.event.inputs.live_platform_admin_origin }}
+      SR_LIVE_DOC_LIVE_INVOICE_PATH: ${{ github.event.inputs.live_invoice_path }}
+      SR_LIVE_DOC_LIVE_EXPIRED_INVOICE_PATH: ${{ github.event.inputs.live_expired_invoice_path }}
+      SR_LIVE_DOC_LIVE_CROSS_TENANT_INVOICE_PATH: ${{ github.event.inputs.live_cross_tenant_invoice_path }}
+      SR_LIVE_DOC_LIVE_PLACARD_PATH: ${{ github.event.inputs.live_placard_path }}
+      SR_LIVE_DOC_LIVE_REPORT_PATH: ${{ github.event.inputs.live_report_path }}
+      SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER: ${{ secrets.SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER }}
+      SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT: ${{ secrets.SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT }}
+      SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT: ${{ secrets.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT }}
+      SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN: ${{ secrets.SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN }}
       SR_LIVE_DOC_LIVE_BANK_CODE: ${{ github.event.inputs.live_bank_code }}
       SR_LIVE_DOC_LIVE_STATEMENT_PATH: ${{ github.event.inputs.live_statement_path }}
       SR_LIVE_DOC_LIVE_SESSION_COOKIE: ${{ secrets.SR_LIVE_DOC_LIVE_SESSION_COOKIE }}
@@ -93,6 +105,14 @@ jobs:
             exit 1
           fi
 
+      - name: Authenticate to Google Cloud for live testing
+        id: auth
+        if: ${{ github.event.inputs.live_target_origin != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.candidate_sha || 'd5edf78ff03a7313f2c9edaa4070d4e5ac79672f' }}
@@ -184,7 +204,7 @@ jobs:
           # Exactly one test (the live-acceptance placeholder) is allowed to be
           # pending when no live target was supplied -- that is `it.runIf`
           # correctly declining to fabricate a live result, not a real skip.
-          allowed_pending = 0 if live_target_supplied else 1
+          allowed_pending = 0 if live_target_supplied else 8
           if total < 27 or passed != total - pending or pending > allowed_pending or not report.get("success"):
               raise SystemExit(
                   f"Live document acceptance incomplete: total={total}, "

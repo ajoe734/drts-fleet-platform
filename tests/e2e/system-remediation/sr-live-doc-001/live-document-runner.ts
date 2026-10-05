@@ -3,6 +3,44 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { GoogleAuth } from "google-auth-library";
+
+const authCache = new Map<string, string>();
+let googleAuthInstance: GoogleAuth | null = null;
+
+export async function getGoogleIdToken(
+  audience: string,
+): Promise<string | null> {
+  if (
+    !process.env.GOOGLE_APPLICATION_CREDENTIALS &&
+    !process.env.GOOGLE_GHA_CREDS_PATH
+  ) {
+    throw new Error(
+      "Missing WIF credentials in environment (GOOGLE_APPLICATION_CREDENTIALS). Cannot authenticate to live targets.",
+    );
+  }
+
+  if (authCache.has(audience)) {
+    return authCache.get(audience)!;
+  }
+
+  if (!googleAuthInstance) {
+    googleAuthInstance = new GoogleAuth();
+  }
+
+  try {
+    const client = await googleAuthInstance.getIdTokenClient(audience);
+    const token = await client.idTokenProvider.fetchIdToken(audience);
+    authCache.set(audience, token);
+    return token;
+  } catch (err) {
+    console.warn(
+      `Failed to fetch Google ID token for audience ${audience}:`,
+      err,
+    );
+    return null;
+  }
+}
 
 /**
  * Shared logic behind SR-LIVE-DOC-RUNNER-001's authenticated artifact
@@ -20,6 +58,7 @@ export interface DownloadOutcome {
   bytes: Buffer | null;
   contentType: string | null;
   errorCode: string | null;
+  candidateSha: string | null;
 }
 
 /**
@@ -35,9 +74,16 @@ export async function downloadArtifact(
 ): Promise<DownloadOutcome> {
   const res = await fetchImpl(url, init);
   const contentType = res.headers.get("content-type");
+  const candidateSha = res.headers.get("x-drts-candidate-sha");
   if (res.status >= 200 && res.status < 300) {
     const bytes = Buffer.from(await res.arrayBuffer());
-    return { status: res.status, bytes, contentType, errorCode: null };
+    return {
+      status: res.status,
+      bytes,
+      contentType,
+      errorCode: null,
+      candidateSha,
+    };
   }
   let errorCode: string | null = null;
   try {
@@ -46,14 +92,24 @@ export async function downloadArtifact(
   } catch {
     errorCode = null;
   }
-  return { status: res.status, bytes: null, contentType, errorCode };
+  return {
+    status: res.status,
+    bytes: null,
+    contentType,
+    errorCode,
+    candidateSha,
+  };
 }
 
 export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export type BankSignatureStatus = "SIGNED" | "UNSIGNED" | "TAMPERED" | "UNKNOWN";
+export type BankSignatureStatus =
+  | "SIGNED"
+  | "UNSIGNED"
+  | "TAMPERED"
+  | "UNKNOWN";
 
 export interface IndependentVerifierOutcome {
   exitCode: number;
@@ -147,7 +203,9 @@ export function runIndependentBankVerifier(
  * is not live signing success. Only a hash-matched, SIGNED, OpenSSL-verified
  * artifact clears the gate.
  */
-export function liveSigningGatePassed(outcome: IndependentVerifierOutcome): boolean {
+export function liveSigningGatePassed(
+  outcome: IndependentVerifierOutcome,
+): boolean {
   return (
     outcome.ok &&
     outcome.hashMatch === true &&
