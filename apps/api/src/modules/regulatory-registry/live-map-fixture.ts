@@ -23,8 +23,12 @@ export type LiveMapFixtureResult =
   | { status: "created" | "unchanged" };
 
 export class LiveMapFixtureProvisioningError extends Error {
-  constructor() {
-    super("LIVE_MAP_FIXTURE_PERSISTENCE_FAILED");
+  constructor(
+    reason:
+      | Refusal
+      | "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED" = "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
+  ) {
+    super(reason);
   }
 }
 
@@ -68,6 +72,8 @@ async function readDriver(client: PoolClient) {
 async function readIsolationContext(client: PoolClient) {
   // Official V0011/V0012/V0018A/V0034/V0078 schemas. Registry/profile
   // snapshots alone are not authority for an active device session or task.
+  // Conservatively refuse prior task/assignment/on-duty telemetry too: this
+  // hook never repurposes an identity previously used for operational work.
   const result = await client.query<IsolationContext>(
     `SELECT
        EXISTS (SELECT 1 FROM reg.phase1_registry_supply_pairs WHERE driver_id = $1) AS has_supply_pair,

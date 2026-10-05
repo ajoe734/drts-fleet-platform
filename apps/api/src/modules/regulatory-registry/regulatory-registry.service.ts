@@ -652,6 +652,14 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
 
       const liveMapFixture =
         await this.regulatoryRegistryRepository.ensureLiveMapTestDriver?.();
+      if (
+        liveMapFixture?.status === "refused" &&
+        liveMapFixture.reason !== "LIVE_MAP_FIXTURE_ENVIRONMENT_FORBIDDEN"
+      ) {
+        // An opted-in dev startup must not expose an unsafe existing identity
+        // as an acceptance fixture or silently substitute the demo seed.
+        throw new LiveMapFixtureProvisioningError(liveMapFixture.reason);
+      }
       const persistedState =
         await this.regulatoryRegistryRepository.loadState();
       const hasPersistedState =
