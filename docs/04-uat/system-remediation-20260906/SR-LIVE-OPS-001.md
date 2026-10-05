@@ -1,5 +1,108 @@
 # SR-LIVE-OPS-001 — restore drill evidence
 
+## Hosted failure repair (2026-10-05, current)
+
+Owner **Codex**, reviewer **Claude2**. This section supersedes the historical
+readiness, query-window and operator instructions below. Dispatch baseline:
+`origin/dev` **a7b406dcacff1588fb41119605e61a71837587a6**, fetched before changes
+and merged without conflict as `7a416db213e41c36b6d7e8a4ec1833d9ce2f19c1`.
+The original published history was retained. The two defective Python modules
+are byte-identical at this baseline and previous reviewed candidate
+`0437249456822a7c8c3b1c8861c87e77d2a03a19` (merged through PR #2286).
+Final implementation checkpoint: `2c372b8fbc8ccc88769da19c1e7980d7e3c0146d`.
+The evidence-only closeout SHA is recorded in canonical handoff and the new PR;
+it must receive its own review/CI, not inherit PR #2286's approval.
+
+Supervisor's 2026-10-05T14:00Z integration notes and the retrieved
+[first hosted drill](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37320255336)
+are the repair source. It ran main candidate
+`bc85c54cf080a5906721912e4c009f4bf5c11239`, base/main parent
+`a8f511aa28d356620c8d88599029b1d3e561f090`, attempt 1. Readiness succeeded;
+restore failed with `invalid_db_secret` before cloning (`cleanup=not_created`).
+Sweep failed with `child_unavailable_or_timeout`; its inventory found no drill
+instances. This is failed live evidence, not a completed restore.
+
+Retrieved with `gh run view 37320255336 --json headSha,conclusion,url,createdAt,updatedAt`
+and `gh run download 37320255336 --dir .local/sr-live-ops-001/rework-20261005/hosted`
+(both exit 0). Artifact name:
+`sr-live-ops-bc85c54cf080a5906721912e4c009f4bf5c11239-37320255336-1`.
+SHA256 of `restore.json`:
+`4545d3c23555b386d20ec70346caded03cd8b3548a3fc51f89162b2293d74846`;
+`sweep.json`: `a281973f87433856aa119ef510b79c243a136bb302aca13074704229c64b9c05`;
+`readiness.json`: `118129143aa4325092af07973ce8b46857ec4ba9a8c98bda6ebaf63b136bb3b7`.
+
+| Finding / trigger                         | Source / change                                                                                                        | Old → corrected result                                                                                                                                                       | Command / evidence                                                                                                                                                                                        | Remaining                                                                                                          |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| H1: JSON resource treated as DB URL       | `restore_drill.Readback.__init__`; `fake_cli.py` now returns base64 `payload.data` for `--format=json`                 | Existing successful-readback test fails with the realistic boundary → passes when secret access uses raw output without `gc()`'s JSON format                                 | `regression-before.txt` / `regression-after.txt`; real Python orchestration with external CLI fakes                                                                                                       | Real secret read under drill SA on hosted runner                                                                   |
+| H2: socket URL / special password parsing | `provision-dev-project.sh:db_url`; API `DatabaseService` passes URL to `pg.Pool`; new `db_credentials.mjs:credentials` | Old `Readback` with raw synthetic `[]` password throws `ValueError` in `urlsplit` → socket/TCP, encoded delimiters, raw brackets, query credentials and pgpass escaping pass | `parser-before.txt`; unit `test_readback_uses_raw_secret_and_pg_credentials_for_socket_and_tcp_urls`; Vitest compares eight inputs against actual API `pg.Client.connectionParameters` without connecting | Only credential interpretation is reused; connection host/options are deliberately fixed to the local hosted proxy |
+| H3: 400-day audit query times out         | `sweep_drill.sweep`                                                                                                    | Old window/bounded-timeout tests fail → window starts at restore `started_at` minus 15m, ends at sweep start; invalid/future/over-95m run start fails closed                 | Five new sweep tests, including transient/persistent `subprocess.TimeoutExpired`; no live logging call in tests                                                                                           | Hosted latency and audit availability remain unverified                                                            |
+| H4: promotion has no dev ancestry         | Workflow `base_sha` input description; existing ancestry checks retained                                               | Historical instruction to use dev SHA replaced by main ancestor/main parent; no guard bypass                                                                                 | Workflow/YAML content check; real run's base above                                                                                                                                                        | Operator must refresh readiness for new promoted main SHA                                                          |
+| Prior cleanup, IAM and evidence findings  | Existing production orchestration, provisioner and artifact validator unchanged except secret/sweep boundaries         | All prior 32 tests retained and passing alongside seven added cases (39 total)                                                                                               | Final unit + Vitest results below                                                                                                                                                                         | Offline results never establish live acceptance                                                                    |
+
+The secret command now follows Google's documented
+[raw UTF-8 access behavior](https://docs.cloud.google.com/sdk/gcloud/reference/secrets/versions/access).
+Credentials pass through captured private pipes to a Node helper, never command
+arguments, logs or artifacts. It uses the same WHATWG URL normalization,
+empty-host fallback, query credential precedence and decoding rules used by the
+API's installed `pg-connection-string@2.12.0`
+([upstream implementation](https://github.com/brianc/node-postgres/blob/master/packages/pg-connection-string/index.js)).
+It extracts only user/password/database; URL host, SSL files and connection
+options cannot override the hosted proxy/read-only settings. Invalid credentials
+fail with a sanitized code before clone. `pgpass` is created mode 0600 before
+writing, inherited `PG*` variables are removed, and credentials remain inside
+the temporary directory/private process pipes. The workflow explicitly supplies
+Node 22 before offline checks and readback. No npm installation is added.
+
+Sweep still inventories **all** remaining drill instances and rejects unknown,
+foreign, missing-own-operation or truncated audit evidence. Only the audit time
+range changes: restore start minus 15 minutes to sweep start. If restore never
+wrote evidence, it uses sweep start minus 15 minutes. Up to four 25-second logging
+reads plus three 20-second waits and the 90-second inventory fit within the
+existing five-minute step. A timeout is recorded in `audit_read_attempts`; repeated
+timeouts produce `audit_read_timeout`, never a clean sweep. Earlier historical
+create activity outside this run window is no longer asserted to have been scanned.
+
+Completed local checks at `2c372b8fbc8ccc88769da19c1e7980d7e3c0146d`, Python 3.12.3,
+Node v22.23.2, Vitest 4.1.4. Machine-specific evidence directory:
+`.local/sr-live-ops-001/rework-20261005/`.
+
+- `python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v`:
+  **exit 0, 39/39**, 32.921s, `unit-esm.txt`.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts`:
+  **exit 0, 2/2**, 31.89s, `vitest-esm.txt`; includes the Python suite and actual
+  pg driver comparison. No database/proxy/browser connection is made.
+- `pnpm exec eslint tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts infra/gcp/dev/ops-drill/db_credentials.mjs --max-warnings=0`:
+  **exit 0**, `lint-esm.txt`. The initial CommonJS helper failed lint; the final
+  ESM change and reruns supersede that result.
+- `python3 tools/ci/check_test_coverage.py`: **exit 0**, all 83 tracked tests
+  covered. No new change to `.github/workflows/ci-integ.yml` was needed.
+- Python compilation, `node --check infra/gcp/dev/ops-drill/db_credentials.mjs`,
+  both shell entrypoints' `bash -n`, YAML dispatch-only assertion and `bash -n`
+  for all seven workflow shell bodies: **exit 0**, `syntax-final.txt`.
+- Before/after narrow probes: seven tests against unchanged old Python modules
+  with the corrected external fake **exit 1** (seven failures/seven subtest
+  errors); the repaired implementation plus invalid-secret rejection **exit 0,
+  8/8**. Logs: `regression-before.txt`, `regression-after.txt`. No active tree was reset.
+
+| Required acceptance              | Evidence available now                                                                                                                                                                                                 | Outstanding / responsible party                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authorized_isolated_ops_target` | User approval + Supervisor-confirmed SA/conditioned roles/single-secret access; previous main's readiness artifact retrieved. Live `DEV_GCP_*` reread still targets `drts-dev-devcc-20260825:us-central1:drts-dev-db`. | Operator refreshes `--check-ready` at the new promoted main SHA; old receipt is not valid for this candidate.                                  |
+| `backup_restore_readback`        | Hosted failure before clone, new 39-test offline regression.                                                                                                                                                           | Supervisor dispatches repaired workflow after merge/publish/promotion; real source/clone readback + deletion/sweep artifacts required.         |
+| `rpo_rto_capacity_baseline`      | No successful live RPO/RTO yet; capacity remains explicitly unevaluated.                                                                                                                                               | Supervisor/operator provide approved representative workload/SLO and live measurements; this repair does not authorize load testing.           |
+| `scheduled_job_restart_proof`    | Historical Scheduler/revision observations retained below, including unresolved HTTP 500.                                                                                                                              | Supervisor/reviewer collect and bind current read-only Scheduler/Cloud Run evidence; no controlled restart or multi-instance proof is claimed. |
+| `live_candidate_sha`             | Old main run's candidate/base verified; new candidate locked only at handoff.                                                                                                                                          | Map new reviewed dev candidate → publish → promoted main drill SHA and deployed API revision; merge SHA is not the candidate.                  |
+
+Execution sequence after review/CI: merge to dev, publish and promote; operator
+runs `--check-ready` from a clean checkout at the **new main SHA**; Supervisor
+dispatches with that full main SHA and a full **main ancestor** (normally its main
+parent). The dev baseline above is traceability, not the workflow's `base_sha`
+when promotion creates a tree commit. No worker ran live IAM apply/readiness,
+read the actual secret, created/deleted a cloud instance, dispatched a workflow,
+started a product/PG/proxy server, ran Playwright or performed load testing.
+All five gates remain pending for this candidate; do not mark the task done.
+
+## Historical delivery context (2026-10-03)
+
 Owner: Codex. Reviewer: Claude2. Base: `cccd9b1118e2008adccabc117fef94bcebdccfe0`
 (original branch base, origin/dev fetched 2026-10-03). The preceding dispatch fetched
 `origin/dev` at `a1b84bd336b3e3179abd01a3f753a299275cc423`. This CI-registration
