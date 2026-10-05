@@ -74,11 +74,16 @@ Node v22.23.2, Vitest 4.1.4. Machine-specific evidence directory:
 - `pnpm exec eslint tests/unit/system-remediation/sr-live-ops-001/restore-drill.test.ts infra/gcp/dev/ops-drill/db_credentials.mjs --max-warnings=0`:
   **exit 0**, `lint-esm.txt`. The initial CommonJS helper failed lint; the final
   ESM change and reruns supersede that result.
-- `python3 tools/ci/check_test_coverage.py`: **exit 0**, all 83 tracked tests
+- `python3 tools/ci/check_test_coverage.py`: **exit 0**, all 83 tracked Python test files
   covered. No new change to `.github/workflows/ci-integ.yml` was needed.
 - Python compilation, `node --check infra/gcp/dev/ops-drill/db_credentials.mjs`,
   both shell entrypoints' `bash -n`, YAML dispatch-only assertion and `bash -n`
   for all seven workflow shell bodies: **exit 0**, `syntax-final.txt`.
+- `pnpm exec prettier --check` on the changed workflow, helper, TS test and this
+  document, `git diff --check`, and `python3 tools/ci/git/check_commit_trailers.py
+--base origin/dev --head HEAD`: **exit 0**. Before handoff, a fresh fetch/merge
+  found the dev baseline unchanged; the final evidence commits leave tested code
+  byte-identical to the implementation checkpoint above.
 - Before/after narrow probes: seven tests against unchanged old Python modules
   with the corrected external fake **exit 1** (seven failures/seven subtest
   errors); the repaired implementation plus invalid-secret rejection **exit 0,
