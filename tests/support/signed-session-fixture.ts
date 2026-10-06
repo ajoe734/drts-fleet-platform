@@ -196,7 +196,7 @@ export async function issueOpsSessionFixture(
     createdAt: now,
     updatedAt: now,
   });
-  const roleBinding = await repo.ensureRoleBindingRecord({
+  await repo.ensureRoleBindingRecord({
     roleBindingId: `fixture-role-binding-${randomUUID()}`,
     sourceRef: `fixture:ops:${actorId}:role_binding`,
     membershipId: membership.membershipId,
@@ -261,11 +261,11 @@ export async function issueOpsSessionFixture(
 // shell variable; everything else goes to stderr.
 if (require.main === module) {
   const kind = process.argv[2];
-  const actorId = process.argv[3] || undefined;
+  const actorId = process.argv[3];
   const run =
     kind === "ops"
-      ? issueOpsSessionFixture({ actorId })
-      : issueDriverSessionFixture({ actorId });
+      ? issueOpsSessionFixture(actorId ? { actorId } : {})
+      : issueDriverSessionFixture(actorId ? { actorId } : {});
   run
     .then((fixture) => {
       console.error(
