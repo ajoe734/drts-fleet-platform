@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import cp from "node:child_process";
-
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 export async function getGoogleIdToken(
   audience: string,
 ): Promise<string | null> {
@@ -58,13 +57,13 @@ export async function getGoogleIdToken(
 export type FetchLike = typeof fetch;
 
 export interface DownloadOutcome {
+  errorData?: any;
   status: number;
   bytes: Buffer | null;
   contentType: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   candidateSha: string | null;
-  errorData?: any;
 }
 
 /**
@@ -100,7 +99,8 @@ export async function downloadArtifact(
     const body = (await res.json()) as any;
     errorCode = body?.error?.code ?? null;
     errorMessage = body?.error?.message ?? null;
-    errorData = body?.error?.data ?? body?.error ?? null;
+    errorData =
+      body?.error?.details ?? body?.error?.data ?? body?.error ?? null;
   } catch {
     errorCode = null;
   }
@@ -160,19 +160,19 @@ export function runIndependentBankVerifier(
   } = options;
 
   const tempId = Math.random().toString(36).substring(2);
-  const artifactPath = path.join(os.tmpdir(), `artifact-${tempId}.txt`);
-  const pubkeyPath = path.join(os.tmpdir(), `pubkey-${tempId}.pem`);
+  const artifactPath = join(tmpdir(), `artifact-${tempId}.txt`);
+  const pubkeyPath = join(tmpdir(), `pubkey-${tempId}.pem`);
 
   try {
-    fs.writeFileSync(artifactPath, artifactBytes);
+    writeFileSync(artifactPath, artifactBytes);
 
     const args = [verifierScriptPath, artifactPath];
     if (publicKeyPem) {
-      fs.writeFileSync(pubkeyPath, publicKeyPem);
+      writeFileSync(pubkeyPath, publicKeyPem);
       args.push("--public-key", pubkeyPath);
     }
 
-    const result = cp.spawnSync(pythonBin, args, { encoding: "utf-8" });
+    const result = spawnSync(pythonBin, args, { encoding: "utf-8" });
     const stdout = result.stdout || "";
     const stderr = result.stderr || "";
 
@@ -197,8 +197,6 @@ export function runIndependentBankVerifier(
     if (stdout.includes("Signature Status: SIGNED")) signatureStatus = "SIGNED";
     else if (stdout.includes("Signature Status: UNSIGNED"))
       signatureStatus = "UNSIGNED";
-    if (stdout.includes("TAMPERED") || stdout.includes("FAILED (TAMPERED)"))
-      signatureStatus = "TAMPERED";
 
     let signatureVerified: boolean | null = null;
     if (signatureStatus === "SIGNED") {
@@ -209,6 +207,15 @@ export function runIndependentBankVerifier(
       if (stdout.includes("TAMPERED") || stdout.includes("Defect detected")) {
         signatureVerified = false;
       }
+    }
+
+    if (
+      stdout.includes("TAMPERED") ||
+      stdout.includes("FAILED (TAMPERED)") ||
+      stdout.includes("OpenSSL Signature Verification: FAILED")
+    ) {
+      signatureStatus = "TAMPERED";
+      signatureVerified = false;
     }
 
     return {
@@ -232,12 +239,12 @@ export function runIndependentBankVerifier(
     };
   } finally {
     try {
-      fs.unlinkSync(artifactPath);
+      unlinkSync(artifactPath);
     } catch {
       /* ignore */
     }
     try {
-      fs.unlinkSync(pubkeyPath);
+      unlinkSync(pubkeyPath);
     } catch {
       /* ignore */
     }
