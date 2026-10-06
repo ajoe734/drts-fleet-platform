@@ -15,9 +15,10 @@ UI／視覺增量（原 03_ui_design_delta.md）與來源清單（原 04_sources
 
 ## 取代關係
 
-本包取代 `docs/02-architecture/passenger-notification-partner-app-sa-20260917.md`
-（初版 SA，僅提出問題未定案），以及 Q-SR-PUSH-001／P05 對「夥伴 App 內嵌乘客」
-的接收端與傳輸方式決策。初版 SA 保留作追溯，不刪除。
+本包取代初版 SA 草稿「passenger-notification-partner-app-sa-20260917」（僅提出問題未定案）
+的結論，以及 Q-SR-PUSH-001／P05 對「夥伴 App 內嵌乘客」的接收端與傳輸方式決策。
+初版 SA 草稿未保留在目前 canonical tree（僅見於歷史 WIP 記錄），故本節不再以檔案路徑引用它；
+本包內容為現行定案依據。
 
 ## 工程必須保留的既有行為
 
