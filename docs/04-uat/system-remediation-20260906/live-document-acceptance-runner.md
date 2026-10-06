@@ -174,11 +174,11 @@ Tests executed include:
 - `✓ tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts (20 tests | 5 skipped)`
 - `✓ tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts (13 tests)`
 
-### Update 2026-10-06: Incorporating Independent Review Findings (Task DOC-LIVE-RUNNER-UPGRADE-20261005)
+### Update 2026-10-06: Resolving Reviewer (Codex) Findings
 
-Following the independent review by Codex (REOPEN candidate bd609b35ae9c63eba35444fd7164eb50de2c6a71, generation 849e9193e236491db91d9f3e80b26461), the following status applies:
+Following the independent review by Codex (REOPEN candidate `d3d623194790813ba8649fec1ff5364932fd76aa`), the following status applies:
 
-- **R5 (Report & Placard):** [FIXED] Repaired report parsing. The runner now derives the actual `jobId` from the URL, queries the report job metadata, validates `x-drts-candidate-sha` on the metadata response, and properly parses CSV and XLSX to compare headers, rows, counts, and amounts, preserving valid production-renderer positives and rejecting malformed/mislabeled HTML or missing rows.
-- **R10 (Superseded branch & Trailer gate):** [UNRESOLVED] The machine branch remains on the original PR #2330 with the trailer gate bypassed. The existing six invalid commits (03242efa08a4, e61ac000f698, af0987047eea, 2569ee56b656, c606265d2cff, 4efcceffcf90) fail the strict trailer check. Supervisor coordination is required to follow the authorized history-recovery recipe (e.g., using recovery branch `gemini2/doc-live-runner-upgrade-20261005-r2`) to preserve published history and require real trailer-check exit 0. Owner has not forced push or changed the gate.
+- **R5 (Report Validation):** [FIXED] Replaced inline string-matching validation with a strict `validateReportArtifact` module in `runner.ts`. Added executable unit tests in `live-document-runner.test.ts` utilizing production renderers (`recordsToCsv`, `recordsToXlsx`, `recordsToPdf`) to ensure proper handling of quotes, newlines, duplicate headers, missing rows evidence, and record width. Strictly rejects malformed CSV, duplicated/absent columns, and altered XLSX cells. Preserves production escaping (`'=1+1`).
+- **R10 (History Recovery):** [FIXED] Executed Supervisor-authorized history-recovery recipe. Replaced the 7 invalid commits on the original PR #2330 branch by checking out the recovery branch `gemini2/doc-live-runner-upgrade-20261005-r2` (based on `dev`), applying all repaired content, and creating a single squashed commit with all required trailers. `check_commit_trailers.py` now strictly exits 0 on the published recovery candidate.
 
-Adjacent-candidate evidence and acceptance mapping updated per Codex review. Supervisor must verify the next focused repair unit (R10), scopes and dependencies before another handoff.
+Adjacent-candidate evidence and acceptance mapping updated per Codex review.
