@@ -29,11 +29,11 @@
 //     (SD-DP-20260422-001 is still in force). `PASSENGER_PUSH_FIRST_PARTY_ENABLED`
 //     stays false until a later, separately versioned task changes that.
 
-import type { PartnerPassengerEventType } from "./partner-passenger-notification";
 import type {
   OrderPartnerNotificationRoute,
   PartnerNotificationFailureReason,
   PartnerNotificationRetryDisposition,
+  PartnerPassengerNotificationExternalEvent,
 } from "./partner-passenger-notification";
 
 // ===========================================================================
@@ -177,8 +177,11 @@ export interface RegisterPassengerPushDeviceCommand {
 // the fixed retry-policy snapshot. Mirrors
 // `PARTNER_NOTIFICATION_DELIVERY_TARGETS`/`_STAGES` in
 // `./partner-passenger-notification`, but as its own independent constant —
-// the two channels are different transports with different owners and must
-// not share one evidence ladder.
+// the two channels are different transports with their own evidence ladder
+// and policy *parameters*. This is not a second claim/fence/retry-timer
+// owner: per D7, `ops.consumer_notification_outbox` stays the sole
+// claim/fence/retry-timer owner for both channels; only the parameter
+// values (evidence stages, maxAttempts/backoff) differ by channel.
 // ===========================================================================
 
 /**
@@ -212,9 +215,12 @@ export type FirstPartyPushDeliveryStage =
   (typeof FIRST_PARTY_PUSH_DELIVERY_STAGES)[number];
 
 /**
- * D6 fixed retry-policy snapshot — independent of the partner channel's own
- * endpoint-approved policy (`01_system_sa_sd.md` §8); the two channels have
- * different owners and must not share one retry timer.
+ * D6 fixed retry-policy *parameter* snapshot — independent of the partner
+ * channel's own endpoint-approved policy values (`01_system_sa_sd.md` §8).
+ * This is only a different set of numbers (maxAttempts/backoff) a worker
+ * looks up per channel; both channels' actual scheduling, claiming and
+ * timing still run through the single outbox-owned claim/fence (D7) — this
+ * constant must never be used to drive a second, channel-specific timer.
  */
 export const FIRST_PARTY_PUSH_RETRY_POLICY = {
   maxAttempts: 5,
@@ -277,8 +283,13 @@ export type PassengerNotificationFailureReason =
 // ===========================================================================
 // D6 — First-party wire payload. `data` is an explicit allowlist, never a
 // spread of `outbox.payload`, same boundary as the partner contract's §6.
-// Reuses `PartnerPassengerEventType` by reference so this module cannot
-// silently drift from the outbox event union it must not redeclare.
+// Reuses `PartnerPassengerNotificationExternalEvent` by reference — the
+// *external*, dot-versioned wire name (`passenger.<event>.v1`), the same one
+// the partner webhook envelope already carries at its `event` field — not
+// the internal `PartnerPassengerEventType` identifier (e.g. `driver_arrived`).
+// D6's payload section is explicit that `data.event` reuses this
+// `passenger.<event>.v1` naming, so this module must not redeclare it as the
+// internal name.
 // ===========================================================================
 
 export interface FirstPartyPushNotificationText {
@@ -290,10 +301,20 @@ export interface FirstPartyPushNotificationText {
  * First-version prohibited fields mirror `01_system_sa_sd.md` §6: no phone,
  * name, address, origin/destination, GPS, plate, driver name, payment data,
  * or any token/credential.
+ *
+ * This is the logical, pre-serialization DTO — same precedent as
+ * `PartnerPassengerNotificationWireData` (typed fields, not yet the literal
+ * bytes sent on the wire). FCM HTTP v1's actual `Message.data` field is a
+ * string-to-string map (see
+ * https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#Message);
+ * converting `eventSequence` to a string and building that map is the
+ * eventual FCM transport's job (`PUSH-FIRST-PARTY-FCM-20261006`, out of this
+ * module's scope), not something this contract performs or should be read
+ * as already having done.
  */
 export interface FirstPartyPushWireData {
   notificationId: string;
-  event: PartnerPassengerEventType;
+  event: PartnerPassengerNotificationExternalEvent;
   rideRef: string;
   eventSequence: number;
   expiresAt: string;

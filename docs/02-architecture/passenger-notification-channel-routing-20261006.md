@@ -72,7 +72,7 @@ PASSENGER_NOTIFICATION_CHANNELS = ["partner_webhook", "first_party_app"]
 | `app_id` | 第一方 App 的 Firebase/APNs app 識別 |
 | `app_version` | 用於除錯與分階段淘汰舊版本 |
 | `token` | 原始 FCM registration token（見下方「token 不落 log」） |
-| `token_sha256` | token 的 SHA-256，`UNIQUE (provider, token_sha256)` |
+| `token_sha256` | token 的 SHA-256。唯一性是**部分索引**（只限 `status='active'` 的列），不是全表 `UNIQUE`：`CREATE UNIQUE INDEX ... ON iam.phase1_passenger_push_devices (provider, token_sha256) WHERE status = 'active'`。原因見下方「換人登入同一支手機」——轉綁時舊列保留且標 `revoked`、新列 insert，若唯一性是全表範圍，新列會因與舊列（未刪除、只是 revoked）同一 hash 而被拒絕；限定在 `active` 列，舊列一旦轉成 `revoked` 就退出這個索引，新 `active` 列才能進來。同一 hash 可以同時存在多筆歷史 `revoked`/`invalid` 列，但任何時間點至多一筆 `active`。 |
 | `status` | `active` \| `revoked` \| `invalid` |
 | `status_reason` | 人可讀的狀態變更原因 |
 | `notification_consent_version` | 乘客同意接收通知的版本化紀錄 |
@@ -81,7 +81,7 @@ PASSENGER_NOTIFICATION_CHANNELS = ["partner_webhook", "first_party_app"]
 
 ### 規則
 
-- **換人登入同一支手機**：同一 `token` 重新登錄到另一位乘客時，轉綁給新乘客；舊綁定（原乘客）標 `revoked`、`status_reason` 記錄原因。
+- **換人登入同一支手機**：同一 `token` 重新登錄到另一位乘客時，**在同一交易內**把舊綁定（原乘客）的那一列標 `revoked`、`status_reason` 記錄原因，**並為新乘客 insert 一筆新列**——不是原地把舊列的 `drts_passenger_id` 改成新乘客（那樣會抹掉原乘客的歷史綁定記錄）。這個 insert-new-row 動作能成立，是因為 `token_sha256` 的唯一性只限定在 `active` 列（見上方 `token_sha256` 欄）：舊列轉 `revoked` 的同一交易裡就讓出了這個 hash 的 `active` 名額。
 - **token 輪替**：舊 token 的紀錄 `revoked`，新 token 以新 `device_id` 寫 `active`——不是原地覆寫 token 欄位（content-identity 不可變,同 remittance-proof 的 precedent）。
 - **登出**：對應裝置紀錄 `revoked`。
 - **供應商回報失效**（FCM 的 `UNREGISTERED`/`INVALID_ARGUMENT`/`SENDER_ID_MISMATCH`，見 D6）：`invalid`。
@@ -162,7 +162,7 @@ DELETE /api/passenger-app/push-devices/{deviceId}
   - `deliveryStage = provider_accepted`
   - `receiptId` = FCM 回傳的真實 message name（禁止合成值，同夥伴管道 01 §7 的 `receipt-${outboxId}` 反例）。
 - **永遠不宣稱** `device_received` 或「已讀」——這兩層證據（01 §7 的證據階梯）本波沒有 callback 可以提供。
-- 其餘暫時失敗的裝置，**不**在同一次嘗試裡補送第二次——下一輪重試再處理。
+- 其餘裝置一旦被判定暫時失敗（見下方「錯誤對照」），**在這則 outbox 已經 `delivered` 之後就不再補送**，也沒有「下一輪重試」可言：`delivered` 是 outbox 既有 status enum 的終態，worker 的 claim/fence 條件不會再撈到已經 `delivered` 的列（D7）。這是設計上刻意的行為——D6 的投遞義務只要求「至少一個裝置收到」，其餘裝置的暫時失敗在整批判定 `delivered` 的同一次嘗試裡就一併結案，不再有後續嘗試。只有在**沒有任何裝置**回 200（即整批都失敗或都 invalid）時，outbox 才維持非終態、交給一般重試機制（`retryDisposition=automatic`／`configuration_blocked`）在下一輪重新嘗試全部仍 `active` 的裝置。
 
 ### 錯誤對照
 
@@ -175,7 +175,7 @@ DELETE /api/passenger-app/push-devices/{deviceId}
 
 ### 重試政策
 
-- 獨立 snapshot（不沿用夥伴管道的 policy，兩者是不同 owner 的重試政策）：`maxAttempts=5`、起始 30 秒、倍數 2、上限 10 分鐘，同時受 `expiresAt` 限制。
+- 獨立的政策**參數** snapshot（不沿用夥伴管道的 `maxAttempts`/backoff 數值）：`maxAttempts=5`、起始 30 秒、倍數 2、上限 10 分鐘，同時受 `expiresAt` 限制。這只是兩套不同的參數表，**不代表兩個管道各自有自己的 claim/fence 或 retry timer**——實際排程、取件、計時仍然只有 outbox 一個 owner，見 D7；這裡的「獨立」純粹指 worker 查這筆 outbox 屬於哪個管道時，該用哪一組 `maxAttempts`/backoff 數字。
 - TTL 沿用既有 `PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS`（`packages/contracts/src/partner-passenger-notification.ts`），對應到 FCM 的 `android.ttl` 與 `apns-expiration`。
 - Collapse：同一訂單的 `eta_changed` 共用一個 collapse key（`apns-collapse-id`、Android 的 `collapse_key`），新的蓋過舊的——與 01 §5 的 ETA 節流精神一致，但這是 FCM 傳輸層的 collapse，不是 outbox 層的節流。
 

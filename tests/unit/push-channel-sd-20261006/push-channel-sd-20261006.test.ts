@@ -18,6 +18,7 @@ import {
   FIRST_PARTY_PUSH_DEVICE_STALE_AFTER_DAYS,
   PARTNER_NOTIFICATION_FAILURE_REASONS,
   PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS,
+  PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS,
   type PassengerNotificationChannel,
   type OrderFirstPartyNotificationRoute,
   type PassengerNotificationChannelRoute,
@@ -231,7 +232,7 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         notification: { title: "行程通知", body: "司機即將到達" },
         data: {
           notificationId: "outbox-001",
-          event: "driver_arrived",
+          event: "passenger.driver_arrived.v1",
           rideRef: "ride-001",
           eventSequence: 1,
           expiresAt: "2026-10-06T00:05:00.000Z",
@@ -248,6 +249,19 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
       );
     });
 
+    it("rejects an internal event identifier in data.event: D6 requires the external passenger.<event>.v1 wire name", () => {
+      // Guards against regressing FirstPartyPushWireData.event back to the
+      // internal PartnerPassengerEventType identifier (e.g. "driver_arrived")
+      // instead of the external, dot-versioned name the design doc's D6
+      // payload section requires.
+      expect(PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS).toContain(
+        "passenger.driver_arrived.v1",
+      );
+      expect(
+        PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS as readonly string[],
+      ).not.toContain("driver_arrived");
+    });
+
     it("validates a FirstPartyPushDeliveryContext never pre-sets deliveryStage before a completed attempt", () => {
       const context: FirstPartyPushDeliveryContext = {
         outboxId: "outbox-001",
@@ -260,7 +274,7 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
           notification: { title: "行程通知", body: "司機即將到達" },
           data: {
             notificationId: "outbox-001",
-            event: "driver_arrived",
+            event: "passenger.driver_arrived.v1",
             rideRef: "ride-001",
             eventSequence: 1,
             expiresAt: "2026-10-06T00:05:00.000Z",
