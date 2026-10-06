@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { validateReportArtifact } from "./report-validator";
 
 import {
   buildArtifactText,
@@ -1005,10 +1006,20 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const { data: placards } = await metadataRes.json();
 
         // Report
+        const jobId = reportPath!.split("/").find((s, i, a) => a[i - 1] === "jobs")!;
+        const jobUrl = `${platformAdminOriginStrict}${reportPath!.replace(/\/artifact.*$/, "")}`;
+        const jobRes = await fetch(jobUrl, { headers: platformHeaders });
+        expect(jobRes.status).toBe(200);
+        expect(jobRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+        const { data: jobDetail } = await jobRes.json();
+        
+        expect(jobDetail.jobId).toBe(jobId);
+
         const reportOutcome = await downloadArtifact(`${platformAdminOriginStrict}${reportPath}`, { headers: platformHeaders });
         expect(reportOutcome.status).toBe(200);
         expect(reportOutcome.bytes).not.toBeNull();
         expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
+        const contentType = reportOutcome.contentType || "text/csv";
 
         await validateReportArtifact(jobDetail, jobId, contentType, reportOutcome.bytes!);
 
