@@ -22,3 +22,5 @@ Since the previous candidate is already merged into `dev`, the non-destructive r
 
 ## Unblocked Next Step
 The parent task owner (Codex2) should continue implementation on a new branch `codex2/c125-real-upload-storage-20261005-r3` branched from `dev`, focusing on the missing real GCS/ClamAV and identity prerequisites.
+
+Crucially, the stale `candidate_sha` (dca08ecfd4680275eda1dd268a191e5429732294) that caused the terminal loop has been reset to `null` on the parent task, so Codex2 will stop diffing against the merged `-r2` commit.
