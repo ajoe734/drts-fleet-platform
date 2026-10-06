@@ -167,6 +167,14 @@ ETA：同 order + assignmentVersion 至多每 60 秒一筆，變動至少 2 分�
 
 送出前重查事件是否仍有通知意義：已取消／已結束的「司機已抵達」、已被新指派取代的舊指派／ETA 停送。receipt_ready 與 trip_cancelled 可在完成／取消後送。夥伴收到亂序事件，要去重、依序更新；點擊時一律讀最新正式行程，而非呈現通知內的舊狀態。
 
+### 2026-10-05 使用者決定 A：取消通知（夥伴契約變更）
+
+`multi_taxi_direct` 訂單經正式取消入口 `cancelOwnedOrder` 成功取消時，在相同交易寫入 `trip_cancelled` outbox，沿用持久化 eventSequence、不可變 delivery context、重試去重與 accepted/duplicate ack 契約。重複取消受訂單狀態防護，不新增第二筆取消通知；其它 runtime profile 不新增此事件。
+
+外部事件為 `passenger.trip_cancelled.v1`，`schema_version=1.0`，TTL 為 7 日，仍受 endpoint maxAttempts 限制。夥伴必須明確訂閱並支援本事件；既有 binding 與 endpoint 不會自動加訂。固定文案為「行程已取消，請回行程查看。」。內部原因僅保存分類碼 `passenger_cancelled`；外送 payload 沿用原有 allowlist，不新增原因欄位或個資，不含乘客提供的自由文字取消原因。
+
+取消仍令先前待送的派車／改派／ETA／到場通知成為 `notification_obsolete`；取消通知本身不因行程取消或舊 assignmentVersion 停送，自動派送及受控重送都適用。`navigation.type=ride` 且帶原 `ride_ref`；夥伴需以原 entry 與目前已核身住戶取得 fresh handoff，正式 resolver 讀取最新 cancelled 狀態，導向已取消頁。通知識別與 ride_ref 均不構成授權。
+
 ## 6. 酬載與隱私
 
 共用既有 WebhookEventPayload 外框：event、deliveryId、occurredAt、tenantId、data；由既有 serializer 轉為 snake_case。data 只選 allowlist，不能把 outbox.payload 直接展開。
