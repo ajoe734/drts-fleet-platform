@@ -2,6 +2,8 @@
 
 Owner: Codex. Reviewer: Codex2. Baseline: `b20895a17` (full SHA in baseline log).
 
+Latest owner verification is in [Scope repair and candidate preparation](#scope-repair-and-candidate-preparation--2026-10-06). Earlier scope blockers below are historical; Supervisor approved those paths in the task integration notes for this dispatch.
+
 ## Repair boundary
 
 The enterprise Dockerfile copies `packages/` and only its own app. Its auth route
@@ -246,11 +248,11 @@ task heads both remain `28a0df63123ad9038f94a830f1f5b5d58ef8e97c`;
 returns no PR; the released task slice has no candidate or expanded
 `write_scopes`. No further source repair is authorized by this dispatch.
 
-| Finding / acceptance | Verification at this checkpoint | Evidence / remaining condition |
-| --- | --- | --- |
-| Full cross-app guard / CI guard acceptance | `node tools/ci/check-cross-app-imports.mjs` finishes with exit 1 at `28a0df631`, reporting the same six imports in the five API tests listed above | Retained `full-guard.log`, `environment.txt`, `results.txt`, and `SHA256SUMS` in canonical `.local/ci-build-cross-app-import/scope-audit-20261006.mpv9JG/`; relocation scope still needs Supervisor coordination |
-| Tenant booking fixture | Not rerun or repaired; two prior baseline-reproduced failures remain open | Supervisor must coordinate `apps/tenant-console-web/tests/unit/api-client.test.ts` or explicitly record its follow-up disposition |
-| Isolated build / same-SHA CI and independent review | Historical build evidence retains its original SHA; no new build, hosted CI, candidate, review, merge or deployment | Complete the scope-dependent repairs before locking a candidate |
+| Finding / acceptance                                | Verification at this checkpoint                                                                                                                    | Evidence / remaining condition                                                                                                                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full cross-app guard / CI guard acceptance          | `node tools/ci/check-cross-app-imports.mjs` finishes with exit 1 at `28a0df631`, reporting the same six imports in the five API tests listed above | Retained `full-guard.log`, `environment.txt`, `results.txt`, and `SHA256SUMS` in canonical `.local/ci-build-cross-app-import/scope-audit-20261006.mpv9JG/`; relocation scope still needs Supervisor coordination |
+| Tenant booking fixture                              | Not rerun or repaired; two prior baseline-reproduced failures remain open                                                                          | Supervisor must coordinate `apps/tenant-console-web/tests/unit/api-client.test.ts` or explicitly record its follow-up disposition                                                                                |
+| Isolated build / same-SHA CI and independent review | Historical build evidence retains its original SHA; no new build, hosted CI, candidate, review, merge or deployment                                | Complete the scope-dependent repairs before locking a candidate                                                                                                                                                  |
 
 Read-only inspection of the active release found an existing way to record this
 impasse without assigning it falsely to another lane: `system-block <task-id>
@@ -267,3 +269,67 @@ scope for the five named API test source paths, their relocation into
 `tests/unit/cross-app/`, and the tenant fixture repair/disposition. An unchanged
 owner dispatch cannot satisfy this condition. All checks started here finished
 and were read; no service, browser runner or Docker was started.
+
+## Scope repair and candidate preparation — 2026-10-06
+
+Supervisor explicitly approved the five API test paths and tenant fixture in
+`integration_notes` (labelled 2026-10-06T11:30Z), with no parallel owner conflict.
+Resumed source: `6e42d828f572ef44b18d10c083653adb3907bab4`; remote matched,
+no PR/candidate existed, and fetched `origin/dev` was
+`446228cbc771a4ced774126a7d4aaddea4db73e6`. Published history was preserved.
+The repair checkpoints are `f84b121b6` (relocation) and
+`fb4ab64be009df7b27a939f0842b0105b4be7f7f` (fixture/type compatibility).
+All app, package, guard, test and workflow inputs for final handoff are at the
+latter SHA; the final commit only updates this evidence document.
+
+Durable evidence directory for this dispatch:
+`/home/lupin/workspace/drts-fleet-platform/.local/ci-build-cross-app-import/scope-repair-20261006/`.
+Node `v22.23.2`, pnpm `10.33.0`, Vitest `4.1.4`, Next `16.3.8`.
+
+| Finding / acceptance                                  | Source / repair                                                                                                                                                                                      | Before → after                                                                                                                                    | Command / exit / evidence                                                                                                                                                                                                                            | Remaining limit                                                                                                                                                          |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Six cross-app imports / 不再跨app相對路徑匯入         | Move five suites into `tests/unit/cross-app/`; resolve API-owned Nest dependencies with `createRequire` anchored at `apps/api/package.json`                                                          | `6e42d828f` reports six imports, exit 1 → `fb4ab64be` scan reports zero violations across 1641 sources, exit 0                                    | `node tools/ci/check-cross-app-imports.mjs`; `guard-before.log`, `guard-after.log`                                                                                                                                                                   | No allowlist/exemption; static guard does not evaluate arbitrary runtime variables                                                                                       |
+| Preserve test assertions and CI jobs                  | Original two API integration paths retain imports of root suites, so API integration CI still executes them. Root `tests/unit/**/*.test.ts` discovery runs all five in product smoke / ci-integ unit | 15 integration cases pass through original API entrypoints; all 18 moved cases pass at root. The 105 `expect(...)` assertions are retained        | `pnpm --filter @drts/api exec vitest run tests/integration/int-mtx-rating-governance-read-authority.test.ts tests/integration/sr-partner-notify-fix-admin-20260927.integration.test.ts`; exit 0, `api-integration-entrypoints.log`; `regression.log` | In-memory tests exercise production handlers/controllers/services; HTTP and DB boundaries are mocked. No PG acceptance claimed                                           |
+| Relocated tests enter root TypeScript checking        | Typed order fixtures; await `createCallCenterOrder`'s `MaybePromise`; align mock audit records / constructor arity with production contracts; narrow error before `getStatus`                        | Initial migration exposed 20 diagnostics → root typecheck passes after fixture-only fixes                                                         | `pnpm typecheck:root`; exit 0, `root-typecheck.log`; earlier diagnostics read in worker terminal                                                                                                                                                     | No production code changed for these fixture repairs; no assertion removed                                                                                               |
+| Test replay artifact root                             | `proof-artifacts.ts` anchors output under workspace `.local/cross-app-proofs/` independently of cwd; replay commands now use root paths                                                              | Root and API entrypoints pass; historical committed proof files remain unchanged                                                                  | `regression.log`; generated JSON copied to durable `replay-proofs/`                                                                                                                                                                                  | Preserved relative artifact names; these are service/model replay outputs, not fresh browser/PG evidence                                                                 |
+| Stale tenant booking fixture                          | `api-client.test.ts` now returns the paginated envelope consumed by real `ApiClient.listTenantBookings`; restore stubbed fetch/environment                                                           | Same resumed source fails both tests with `paged.items is not iterable` → both pass, complete tenant suite 74/74                                  | `pnpm --filter @drts/tenant-console-web exec vitest run tests/unit/api-client.test.ts`, exit 1 then 0 (`tenant-fixture-before-installed.log`, `tenant-fixture-after.log`); full `test`, exit 0 (`tenant-suite.log`)                                  | Initial attempt lacked workspace package links (`tenant-fixture-before.log`); it is setup failure, not defect reproduction. Frozen install fixed setup before comparison |
+| Enterprise fixture and auth behavior regression       | Existing enterprise fixture fix retained; actual shared handlers used by both hosts                                                                                                                  | Enterprise suite 32/32; auth, guard and relocated suites 97/97 in 12 files                                                                        | `enterprise-suite.log`, `regression.log`; commands below; exit 0                                                                                                                                                                                     | Vitest in-memory tests only; no browser runner or server                                                                                                                 |
+| CI加入防止跨app匯入的檢查                             | `.github/workflows/ci.yml` product smoke executes `check-cross-app-imports.mjs`; 34 real-CLI positive/negative fixtures                                                                              | Full scanner and all 34 fixtures pass                                                                                                             | `guard-after.log`, `regression.log`; exit 0                                                                                                                                                                                                          | Hosted CI belongs to final candidate, not these local runs                                                                                                               |
+| enterprise-dispatch-web可在自己的Docker建置脈絡中建置 | Shared handler closure in `@drts/tenant-auth`; exact Dockerfile source inputs and four build commands                                                                                                | Baseline exit 1 with missing module → refreshed source `fb4ab64be` exits 0; context contains only enterprise app and has standalone server output | `DRTS_BUILD_EVIDENCE_DIR=<directory above> bash tools/ci/verify-enterprise-build-context.sh fb4ab64be009df7b27a939f0842b0105b4be7f7f`; `fixed-build.log`, retained `context.uCMI0R`; exit 0                                                          | Build only; generated standalone server inspected, never started                                                                                                         |
+| 同候選SHA CI通過且獨立reviewer審查                    | Final SHA, remote branch and PR head will be checked before released CLI handoff to Codex2                                                                                                           | Pending candidate CI and independent review                                                                                                       | Canonical task candidate plus PR/run URLs at handoff                                                                                                                                                                                                 | Supervisor notes shared dependency-security failures are tracked by `CI-DEPENDENCY-ADVISORIES-20261006`; do not waive that gate. Supervisor deploys after merge          |
+
+Final regression command (exit 0, 97 passed):
+
+```bash
+pnpm exec vitest run tests/unit/cross-app \
+  tests/unit/tenant-google-bff.test.ts \
+  tests/unit/deployment-architecture-guards.test.ts \
+  tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts \
+  tests/security/iam-browser-storage-and-secret-leakage.test.ts \
+  tests/security/iam-tenant-session-revocation-e2e.test.ts \
+  tests/e2e/tenant-console-oidc-production.test.ts
+pnpm --filter @drts/tenant-console-web test
+pnpm --filter @drts/enterprise-dispatch-web test
+```
+
+Additional completed checks: root and both app typechecks (logs named
+`{root,tenant,enterprise}-typecheck.log`), shared package typecheck/lint, scoped
+ESLint for the guard, moved tests, auth/deployment tests and both booking fixture
+tests, and `git diff --check`: all exit 0. Tenant type generation added a line
+to tracked `next-env.d.ts`; that generated-only side effect was restored.
+No UI markup, visual tokens, or design was changed.
+
+The baseline build log retained under `dispatch-20261006T0016Z/baseline-build.log`
+was re-read and its SHA-256 verified against the existing manifest:
+`1b4a6eae274fed36a392fc38c15c3703a0347ac5ebbc6aeacb5ba369a637cc99`.
+Its original source SHA is `b20895a17085681eb0974864be53eae8d726b343` and
+its result is exit 1 with the exact missing tenant auth module. It was not
+re-executed in this dispatch. The clean source contexts and fresh logs are
+retained; `SHA256SUMS` accompanies this dispatch's evidence.
+
+Owner implementation is not task closeout. Same-candidate CI, independent
+Codex2 review, merge and Supervisor deployment remain separate lifecycle gates.
+
+All locally started checks finished and their results were read before candidate
+handoff. Final candidate differs from verified source `fb4ab64be` only in this
+evidence artifact; build and test inputs are identical.
