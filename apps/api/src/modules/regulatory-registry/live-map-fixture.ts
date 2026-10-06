@@ -16,22 +16,13 @@ type Refusal =
   | "LIVE_MAP_FIXTURE_BOUND"
   | "LIVE_MAP_FIXTURE_INVITATION_PENDING"
   | "LIVE_MAP_FIXTURE_READBACK_UNSAFE"
-  | "LIVE_MAP_FIXTURE_CONTEXT_UNAVAILABLE";
+  | "LIVE_MAP_FIXTURE_CONTEXT_UNAVAILABLE"
+  | "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED";
 
 export type LiveMapFixtureResult =
   | { status: "disabled" }
   | { status: "refused"; reason: Refusal }
   | { status: "created" | "unchanged" };
-
-export class LiveMapFixtureProvisioningError extends Error {
-  constructor(
-    reason:
-      | Refusal
-      | "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED" = "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
-  ) {
-    super(reason);
-  }
-}
 
 type StoredDriver = { record: DriverRegistryRecord; work_state: string };
 type IsolationContext = {
@@ -229,8 +220,84 @@ export async function ensureLiveMapFixture(
         /* Fixed error below. */
       }
     }
-    // An opted-in failed durable ensure must not fall back to in-memory seeds.
-    throw new LiveMapFixtureProvisioningError();
+    // Fixture availability must never decide application availability: an
+    // opted-in failed durable ensure is refused, not thrown, and must not
+    // fall back to in-memory seeds either.
+    return refuse("LIVE_MAP_FIXTURE_PERSISTENCE_FAILED");
+  } finally {
+    client?.release();
+  }
+}
+
+// Every statement below is parameterized on the reserved fixture identity
+// and nothing else; it is not possible to call this with another driver's
+// ID, so a live-map acceptance run can be unstuck without risk to real
+// drivers even when the API process it would normally call cannot start.
+const LIVE_MAP_FIXTURE_RESET_TABLES = [
+  "iam.driver_refresh_families",
+  "iam.driver_device_bindings",
+  "iam.driver_device_invitations",
+  "ops.phase1_driver_profiles",
+  "reg.phase1_registry_supply_pairs",
+  "telemetry.driver_location_events",
+] as const;
+
+export type LiveMapFixtureResetResult = {
+  status: "disabled" | "reset" | "failed";
+};
+
+export async function resetLiveMapFixture(
+  database: DatabaseService | undefined,
+): Promise<LiveMapFixtureResetResult> {
+  if (process.env.DRTS_E2E_PROVISIONING !== "true")
+    return { status: "disabled" };
+  const environment = detectAuthEnvironment(process.env);
+  if (environment === "production" || environment === "staging") {
+    logger.warn("LIVE_MAP_FIXTURE_ENVIRONMENT_FORBIDDEN");
+    return { status: "disabled" };
+  }
+  if (!database?.isEnabled()) return { status: "disabled" };
+
+  let client: PoolClient | undefined;
+  try {
+    client = await database.connect();
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      ["drts-live-map-fixture:drv-demo-002"],
+    );
+    for (const table of LIVE_MAP_FIXTURE_RESET_TABLES) {
+      await client.query(`DELETE FROM ${table} WHERE driver_id = $1`, [
+        LIVE_MAP_FIXTURE_DRIVER_ID,
+      ]);
+    }
+    await client.query(
+      `DELETE FROM ops.phase1_driver_tasks WHERE record->>'driverId' = $1`,
+      [LIVE_MAP_FIXTURE_DRIVER_ID],
+    );
+    await client.query(
+      `DELETE FROM ops.phase1_dispatch_assignments WHERE record->>'driverId' = $1`,
+      [LIVE_MAP_FIXTURE_DRIVER_ID],
+    );
+    // Drop the fixture row itself last; ensureLiveMapFixture recreates a
+    // fresh isolated record on the next startup or acceptance run.
+    await client.query(
+      "DELETE FROM reg.phase1_registry_drivers WHERE driver_id = $1",
+      [LIVE_MAP_FIXTURE_DRIVER_ID],
+    );
+    await client.query("COMMIT");
+    logger.log("LIVE_MAP_FIXTURE_RESET");
+    return { status: "reset" };
+  } catch {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* Fixed error below. */
+      }
+    }
+    logger.warn("LIVE_MAP_FIXTURE_RESET_FAILED");
+    return { status: "failed" };
   } finally {
     client?.release();
   }
