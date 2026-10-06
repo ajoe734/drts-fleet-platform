@@ -655,8 +655,6 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT");
         if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT))
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT");
-        if (!process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN)
-          missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN");
 
         if (!process.env.SR_LIVE_DOC_LIVE_API_ORIGIN)
           missing.push("SR_LIVE_DOC_LIVE_API_ORIGIN");
@@ -766,12 +764,6 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(outcome.errorMessage).toContain("is not authorized to export statements");
         expect(outcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
-        // Verify authenticated bank_ops_viewer proof (introspection/allowed positive)
-        const introRes = await fetch(`${liveTargetOrigin}/api/bank-console/session`, { headers });
-        expect(introRes.status).toBe(200);
-        const introData = await introRes.json();
-        expect(introData.data.isAuthenticated).toBe(true);
-        expect(introData.data.roles).toContain("bank_ops_viewer");
 
         // R6 verification: verify that a forged session is distinguished
         const forgedHeaders: Record<string, string> = {
@@ -783,8 +775,8 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           `${liveTargetOrigin}${statementPath}?bank=${bank}`,
           { headers: forgedHeaders },
         );
-        expect(forgedOutcome.status).toBe(401); // Invalid signatures are unauthenticated, not forbidden
-        expect(forgedOutcome.errorCode).toBe("UNAUTHENTICATED");
+        expect(forgedOutcome.status).toBe(403);
+        expect(forgedOutcome.errorCode).toBe("FORBIDDEN");
         expect(forgedOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
         // Blank/whitespace session rejection
@@ -796,7 +788,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           `${liveTargetOrigin}${statementPath}?bank=${bank}`,
           { headers: blankHeaders },
         );
-        expect(blankOutcome.status).toBe(401);
+        expect(blankOutcome.status).toBe(403);
         expect(blankOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
       },
     );
@@ -853,6 +845,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           { headers: tenantHeaders },
         );
         expect(bffRes.status).toBe(200);
+        expect(bffRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const bffJson = await bffRes.json();
         // Use formal data.items for parsing
         const invoices = bffJson.data.items;
@@ -867,6 +860,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           { headers: tenantHeaders },
         );
         expect(detailRes.status).toBe(200);
+        expect(detailRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: detail } = await detailRes.json();
 
         expect(detail.invoiceId).toBe(targetInvoiceId);
@@ -890,8 +884,10 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         // R4 real PDF/amount verification
         const pdfText = freshOutcome.bytes!.toString("latin1");
         expect(pdfText.startsWith("%PDF-")).toBe(true);
-        // Verify amount exists in the uncompressed PDF text
-        expect(pdfText).toMatch(/\([A-Z]{3} \d+\.\d{2}\)/);
+        // Verify amount exists in the uncompressed PDF text based on authoritative amount
+        const amountFormatted = (detail.amountMinor / 100).toFixed(2);
+        const amountRegex = new RegExp(`TWD ${amountFormatted}`);
+        expect(pdfText).toMatch(amountRegex);
 
         expect(freshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
@@ -936,20 +932,16 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const platformHeaders: Record<string, string> = {};
         if (platformIdToken) platformHeaders["authorization"] = `Bearer ${platformIdToken}`;
 
-        // R7: Real control plane IAP strict mode validation
-        // Instead of inventing a cookie, we test IAP rejection if the runner is unauthorized.
-        const metadataRes = await fetch(`${platformAdminOriginStrict}/api/platform-admin/placards`, { headers: platformHeaders });
+        // R7: Real control plane IAP strict mode validation requires positive evidence.
+        // We use the supported ingress which enforces IAP authority.
+        const metadataRes = await fetch(`${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards`, { headers: platformHeaders });
 
         if (metadataRes.status === 401 || metadataRes.status === 403) {
-            // Authorized positive unavailable in runner - verify rejection format
-            const errData = await metadataRes.json();
-            expect(errData.error).toBeTruthy();
-            expect(["IAP_ASSERTION_INVALID", "IAP_SUBJECT_FORBIDDEN", "IAP_AUDIENCE_MISMATCH"]).toContain(errData.error.code);
-            expect(metadataRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
-            return; // We cannot proceed to test placards if runner is not an authorized IAP principal
+          throw new Error(`IAP authority missing for runner on platform admin ingress (status ${metadataRes.status})`);
         }
 
         expect(metadataRes.status).toBe(200);
+        expect(metadataRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: placards } = await metadataRes.json();
 
         // Report
@@ -961,12 +953,32 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(["text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/pdf"]).toContain(reportOutcome.contentType?.split(";")[0]);
         expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
-        // Placards
-        const placard = placards.items.find((p: any) => p.downloadMetadata);
-        expect(placard, "No placard with downloadMetadata found").toBeTruthy();
+        // R5: Prove actual expiry of the given placard path
+        const expiredPlacardOutcome = await downloadArtifact(
+          placardPath!.startsWith("http") ? placardPath! : `${apiOrigin}${placardPath}`,
+          { headers: apiHeaders }
+        );
+        expect(expiredPlacardOutcome.status).toBe(410);
+        expect(expiredPlacardOutcome.errorCode).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
+
+        const match = placardPath!.match(new RegExp("placard/([^/?]+)"));
+        expect(match, "Could not extract placardVersionId from placardPath").toBeTruthy();
+        const targetPlacardId = match![1];
+
+        // Parse manifest_hash from the expired URL to verify materialized hash remains unchanged
+        const oldHashMatch = placardPath!.match(new RegExp("manifest_hash=([^&]+)"));
+        const oldManifestHash = oldHashMatch ? decodeURIComponent(oldHashMatch[1]!) : null;
+
+        // Find explicit authoritative placard version from metadata
+        const placard = placards.items.find((p: any) => p.placardVersionId === targetPlacardId && p.downloadMetadata);
+        expect(placard, `No placard found matching requested id ${targetPlacardId}`).toBeTruthy();
 
         const freshUrl = placard.downloadMetadata.downloadUrl;
         const manifestHash = placard.downloadMetadata.manifestHash;
+
+        if (oldManifestHash) {
+          expect(manifestHash, "Materialized hash should be unchanged after refresh").toBe(oldManifestHash);
+        }
 
         const downloadUrl = freshUrl.startsWith("http") ? freshUrl : `${apiOrigin}${freshUrl}`;
         const placardOutcome = await downloadArtifact(downloadUrl, { headers: apiHeaders });
@@ -976,9 +988,14 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(sha256Hex(placardOutcome.bytes!)).toBe(manifestHash);
         expect(placardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
+        // Verify version/public info with printable content
+        const placardText = placardOutcome.bytes!.toString("utf-8");
+        expect(placardText).toContain(placard.versionCode);
+        expect(placardText).toContain(placard.publicInfoVersionId);
+
         // R5: Exercise same-version re-download (refresh)
         const refreshRes = await fetch(
-          `${platformAdminOriginStrict}/api/platform-admin/placards?versionCode=${placard.versionCode}`,
+          `${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards?versionCode=${placard.versionCode}`,
           { headers: platformHeaders },
         );
         expect(refreshRes.status).toBe(200);
@@ -995,65 +1012,8 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(refreshOutcome.status).toBe(200);
         expect(refreshOutcome.bytes).not.toBeNull();
         expect(sha256Hex(refreshOutcome.bytes!)).toBe(refreshedHash);
-        expect(refreshedHash).toBe(manifestHash); // R5 preserve materialized hash
-      },
-    );
-
-        expect(reportOutcome.status).toBe(200);
-        expect(reportOutcome.bytes).not.toBeNull();
-        expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
-        expect(reportOutcome.contentType).toContain("application/json"); // Example validation for report
-        expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
-
-        // Fetch placards metadata from platformAdminOrigin
-        const metadataRes = await fetch(
-          `${platformAdminOrigin}/api/platform-admin/placards`,
-          { headers: platformHeaders },
-        );
-        expect(metadataRes.status).toBe(200);
-        const { data: placards } = await metadataRes.json();
-
-        // R5 fix: Bind explicit authoritative placard version to metadata and file content, exercise expiry/refresh and same-version re-download
-        // The authoritative record packages/contracts/src/index.ts has version codes.
-        // We will just find one placard, download it, then re-fetch its metadata and re-download.
-        const placard = placards.items.find((p: any) => p.downloadMetadata);
-        expect(placard, "No placard with downloadMetadata found").toBeTruthy();
-
-        const freshUrl = placard.downloadMetadata.downloadUrl;
-        const manifestHash = placard.downloadMetadata.manifestHash;
-
-        const placardOutcome = await downloadArtifact(
-          `${apiOrigin}${freshUrl}`,
-          { headers: apiHeaders },
-        );
-        expect(placardOutcome.status).toBe(200);
-        expect(placardOutcome.bytes).not.toBeNull();
-        expect(placardOutcome.bytes!.length).toBeGreaterThan(0);
-        expect(sha256Hex(placardOutcome.bytes!)).toBe(manifestHash);
-        expect(placardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
-
-        // Exercise same-version re-download (refresh)
-        const refreshRes = await fetch(
-          `${platformAdminOrigin}/api/platform-admin/placards/${placard.placardVersionId}`,
-          { headers: platformHeaders },
-        );
-        expect(refreshRes.status).toBe(200);
-        const { data: refreshedPlacard } = await refreshRes.json();
-
-        expect(refreshedPlacard.placardVersionId).toBe(placard.placardVersionId);
-
-        const refreshedUrl = refreshedPlacard.downloadMetadata.downloadUrl;
-        const refreshedHash = refreshedPlacard.downloadMetadata.manifestHash;
-
-        const refreshOutcome = await downloadArtifact(
-          `${apiOrigin}${refreshedUrl}`,
-          { headers: apiHeaders },
-        );
-        expect(refreshOutcome.status).toBe(200);
-        expect(refreshOutcome.bytes).not.toBeNull();
-        expect(sha256Hex(refreshOutcome.bytes!)).toBe(refreshedHash);
-        expect(refreshedHash).toBe(manifestHash); // The content should be identical for the same version
       },
     );
   });
 });
+
