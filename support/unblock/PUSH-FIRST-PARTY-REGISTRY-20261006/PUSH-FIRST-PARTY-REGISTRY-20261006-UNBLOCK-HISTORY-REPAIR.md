@@ -117,3 +117,30 @@ worktree, or any of its commits.
    since this session does not own the parent task's in-progress work) so
    its `next` field reflects the concrete unblock without disturbing its
    `waiting_for: Codex` review state.
+
+## 5. CI flake confirmation on this task's own candidate (2026-10-06T16:31Z)
+
+This task's own candidate (PR
+[#2363](https://github.com/ajoe734/drts-fleet-platform/pull/2363), SHA
+`3113ff91c91c10c2427974b7142247fbc5440223`) initially showed its `unit` CI
+job failing at
+`tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts:1039`
+(`expect(sentBinary.length).toBeGreaterThan(0)`). That file is untouched by
+this diff (only `sr-partner-notify-con-20260917.test.ts` plus this doc
+changed) and is outside this task's `write_scopes`. It passed locally 3/3
+runs. To confirm this was a CI-only flake rather than a regression, ran
+`gh run rerun 37493446474 --failed` and waited for completion:
+
+- Rerun `37493446474` -- `headSha=3113ff91c91c10c2427974b7142247fbc5440223`,
+  `event=pull_request`, `status=completed`, `conclusion=success`.
+- Every job, including `unit`, is `success` (verified via
+  `gh run view 37493446474 --json jobs` and
+  `gh pr view 2363 --json statusCheckRollup`); `orchestrator-tests` is
+  `skipped` as expected for this change.
+- PR #2363 is `OPEN` / `mergeable=MERGEABLE`.
+
+This confirms the original `unit` failure was a transient, unrelated flake:
+the exact same candidate SHA is fully green on a clean rerun. No further
+code change is needed on this branch; the candidate is ready for reviewer
+Pi, and once PR #2363 merges, §4 above is the concrete unblock step for the
+parent.
