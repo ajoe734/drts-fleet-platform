@@ -89,8 +89,12 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (503, {"error": "scan_engine_not_ready"}), # Test 7
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 7 polling ready
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}), # Test 7 EICAR
-            (502, {"error": "scan_engine_unavailable"}), # Test 9 polling transport failure
-            (502, {"error": "scan_engine_unavailable"}), # Test 9 final scan transport failure
+            (503, {"error": "scan_engine_not_ready"}), # Test 9 polling transport failure (closed CLAMD_PORT)
+            (503, {"error": "scan_engine_not_ready"}), (503, {"error": "scan_engine_not_ready"}), # Test 9 sustained CLEAN/EICAR, round 1
+            (503, {"error": "scan_engine_not_ready"}), (503, {"error": "scan_engine_not_ready"}), # Test 9 sustained CLEAN/EICAR, round 2
+            (503, {"error": "scan_engine_not_ready"}), (503, {"error": "scan_engine_not_ready"}), # Test 9 sustained CLEAN/EICAR, round 3
+            (503, {"error": "scan_engine_not_ready"}), (503, {"error": "scan_engine_not_ready"}), # Test 9 sustained CLEAN/EICAR, round 4
+            (503, {"error": "scan_engine_not_ready"}), (503, {"error": "scan_engine_not_ready"}), # Test 9 sustained CLEAN/EICAR, round 5
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally polling readiness
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally scan CLEAN
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally scan EICAR
@@ -281,8 +285,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             self.assertEqual(cm.exception.code, 1)
 
 
-    MUTATED_KEYS = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_TIMEOUT_MS",
-                    "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "FAULT_INJECT_TRANSPORT"]
+    MUTATED_KEYS = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE",
+                    "FRESHCLAM_INTERVAL_SECONDS", "http_proxy"]
 
     def _make_env_aware_run_side_effect(self, container_env, cold_start_polls, on_update=None):
         """A gcloud double that actually tracks per-container env state,
@@ -369,8 +373,11 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 cold_start_polls["n"] += 1
                 if cold_start_polls["n"] <= 2:
                     http_error(503, "scan_engine_not_ready")
-            if gw.get("CLAMD_TIMEOUT_MS") == "1":
-                http_error(502, "scan_engine_unavailable")
+            if gw.get("CLAMD_PORT") == "1":
+                # Test 9's genuinely-closed port: nothing listens there, so
+                # the readiness probe fails exactly like Test 6's "9999"
+                # case, deterministically and without a timeout race.
+                http_error(503, "scan_engine_not_ready")
 
             mock_resp = MagicMock()
             mock_resp.status = 200
@@ -414,13 +421,14 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
         updates = self._update_cmds
 
-        # Prove the CLAMD_TIMEOUT_MS fault was actually enabled (reached),
-        # not merely that some later call happened to look like a restore.
+        # Prove the Test 9 transport fault (a genuinely closed CLAMD_PORT,
+        # distinct from Test 6's "9999") was actually enabled (reached), not
+        # merely that some later call happened to look like a restore.
         enable_calls = [
             c for c in updates
-            if "--update-env-vars" in c and "CLAMD_TIMEOUT_MS=1" in c[c.index("--update-env-vars") + 1]
+            if "--update-env-vars" in c and "CLAMD_PORT=1" in c[c.index("--update-env-vars") + 1].split(",")
         ]
-        self.assertTrue(len(enable_calls) > 0, "Expected CLAMD_TIMEOUT_MS=1 to be enabled for Test 9")
+        self.assertTrue(len(enable_calls) > 0, "Expected CLAMD_PORT=1 to be enabled for Test 9")
 
         # The finally block must restore via --remove-env-vars (not
         # --update-env-vars to some fabricated placeholder value) for every

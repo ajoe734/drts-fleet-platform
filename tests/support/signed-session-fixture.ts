@@ -1,0 +1,162 @@
+import { randomUUID } from "node:crypto";
+
+import { DatabaseService } from "../../apps/api/src/common/db";
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+
+/**
+ * Test-only signed-session issuance through the REAL
+ * jwt-auth.service.ts#issueSessionToken path -- the exact signature/
+ * required-session-claims/active-durable-session checks
+ * bootstrap-auth.guard.ts verifies against (apps/api/src/common/auth/
+ * bootstrap-auth.guard.ts:388 -> jwt-auth.service.ts:935-979). A hand-rolled
+ * or placeholder JWT, or a raw database insert, can never satisfy that path,
+ * so a hosted acceptance run that needs to call driver/ops-authorized
+ * endpoints (billing-settlement.controller.ts's `driver:write`/`billing:write`
+ * reimbursement-proof routes, platform-admin.controller.ts's placard
+ * generation) must mint a genuine session through this exact function, not
+ * invent a token.
+ *
+ * `DatabaseService`/`IdentityRepository` fall back to an in-process,
+ * non-durable store when `DATABASE_URL` is unset (identity.repository.ts's
+ * own `isEnabled()` branches), so these functions also work for a local,
+ * DB-less unit/functional test; against the live hosted dev deployment, run
+ * with `DATABASE_URL` pointed at that deployment's own database so the
+ * session row this writes is the same one the running API's guard reads
+ * back.
+ *
+ * Never import this from product code (apps/**\/src, packages/**\/src,
+ * operations/**): signed-session-fixture-guard.test.ts enforces that
+ * boundary by scanning those trees for any reference to this module.
+ */
+
+export interface SignedSessionFixture {
+  token: string;
+  sessionId: string;
+  tokenId: string;
+  principalId: string;
+  actorId: string;
+}
+
+export interface IssueDriverSessionFixtureOptions {
+  actorId?: string;
+  principalId?: string;
+  tenantId?: string | null;
+  identityRepository?: IdentityRepository;
+}
+
+export interface IssueOpsSessionFixtureOptions {
+  actorId?: string;
+  principalId?: string;
+  scopes?: string[];
+  identityRepository?: IdentityRepository;
+}
+
+function resolveRepository(injected?: IdentityRepository): IdentityRepository {
+  return injected ?? new IdentityRepository(new DatabaseService());
+}
+
+/** Mints a real signed session for the `driver` realm with `driver:write`
+ * (billing-settlement.controller.ts:706,755 requires it for staged-content
+ * upload and proof persistence). */
+export async function issueDriverSessionFixture(
+  options: IssueDriverSessionFixtureOptions = {},
+): Promise<SignedSessionFixture> {
+  const repo = resolveRepository(options.identityRepository);
+  const service = new JwtAuthService(repo);
+  const actorId = options.actorId ?? `fixture-driver-${randomUUID()}`;
+  const principalId = options.principalId ?? `principal_${actorId}`;
+  const issued = await service.issueSessionToken(
+    {
+      authMode: "jwt_bearer",
+      actorType: "driver_user",
+      actorId,
+      principalId,
+      realm: "driver",
+      tenantId: options.tenantId ?? null,
+      roleFamilies: ["driver"],
+      roles: ["driver_user"],
+      scopes: ["driver:read", "driver:write"],
+      requestId: null,
+    },
+    {
+      principalId,
+      subject: `driver:${actorId}`,
+      ensurePrincipal: true,
+    },
+  );
+  return {
+    token: issued.token,
+    sessionId: issued.sessionId,
+    tokenId: issued.tokenId,
+    principalId,
+    actorId,
+  };
+}
+
+/** Mints a real signed session for the `platform` realm with
+ * `billing:write` (reimbursement readback,
+ * billing-settlement.controller.ts:821) and `foundation:write` (placard
+ * generation, platform-admin.controller.ts's `/placards`). */
+export async function issueOpsSessionFixture(
+  options: IssueOpsSessionFixtureOptions = {},
+): Promise<SignedSessionFixture> {
+  const repo = resolveRepository(options.identityRepository);
+  const service = new JwtAuthService(repo);
+  const actorId = options.actorId ?? `fixture-ops-${randomUUID()}`;
+  const principalId = options.principalId ?? `principal_${actorId}`;
+  const issued = await service.issueSessionToken(
+    {
+      authMode: "jwt_bearer",
+      actorType: "platform_admin",
+      actorId,
+      principalId,
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["platform_admin"],
+      scopes: options.scopes ?? [
+        "billing:read",
+        "billing:write",
+        "foundation:read",
+        "foundation:write",
+      ],
+      requestId: null,
+    },
+    {
+      principalId,
+      subject: `platform:${actorId}`,
+      ensurePrincipal: true,
+    },
+  );
+  return {
+    token: issued.token,
+    sessionId: issued.sessionId,
+    tokenId: issued.tokenId,
+    principalId,
+    actorId,
+  };
+}
+
+// Manual runbook entry point (docs/04-uat/gcp-artifact-activation-20261004.md
+// §4's DRIVER_TOKEN/OPS_TOKEN export step): `cd apps/api && pnpm exec tsx
+// ../../tests/support/signed-session-fixture.ts driver` (or `ops`), with
+// `DATABASE_URL` set to the target deployment's database. Prints only the
+// bearer token to stdout so it can be captured directly into a shell
+// variable; everything else goes to stderr.
+if (require.main === module) {
+  const kind = process.argv[2];
+  const run =
+    kind === "ops" ? issueOpsSessionFixture() : issueDriverSessionFixture();
+  run
+    .then((fixture) => {
+      console.error(
+        `Issued ${kind === "ops" ? "ops" : "driver"} session ${fixture.sessionId} for actor ${fixture.actorId}`,
+      );
+      process.stdout.write(`${fixture.token}\n`);
+    })
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+}

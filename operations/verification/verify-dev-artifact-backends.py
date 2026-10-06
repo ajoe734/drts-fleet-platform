@@ -121,7 +121,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                         c_env[env["name"]] = env["value"]
                 original_env_by_container[c_name] = c_env
 
-        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_TIMEOUT_MS", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "FAULT_INJECT_TRANSPORT"]
+        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy"]
         original_max_age = original_env_by_container.get("gateway", {}).get("MAX_SIGNATURE_AGE_MS", "")
         original_clamd_port = original_env_by_container.get("gateway", {}).get("CLAMD_PORT", "")
 
@@ -220,37 +220,89 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             logs_fresh = json.loads(res_fresh.stdout) if res_fresh.stdout.strip() else []
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
-            print("Test 9: Transport failure after successful readiness")
-            # We use a short timeout to fail transport (exchangeWithClamd) while polling for 502.
-            # zVERSION might occasionally time out (503), but zINSTREAM (PDF payload) will reliably time out (502).
-            rev_9 = update_service_env(container="gateway", CLAMD_TIMEOUT_MS="1")
+            print("Test 9: Fail-closed after a previously-healthy deployment loses engine connectivity")
+            # CLAMD_TIMEOUT_MS=1 used to race isReady()'s zVERSION probe
+            # against the scan's own INSTREAM exchange on the exact same
+            # deadline: gateway/server.ts:15-19 reads both into ONE `clamd`
+            # config object, and handler.ts:135-142 calls isReady() then
+            # exchange() against that same object within the same request --
+            # a fast local loopback round-trip could let either command
+            # genuinely finish inside 1ms, so this polling loop used to
+            # silently ignore an occasional 200 (a real successful receipt
+            # during what was supposed to be the fault window) instead of
+            # failing on it.
+            #
+            # A deterministic fault requires isReady() to independently stay
+            # true while the exchange() call on that SAME request fails --
+            # impossible to arrange from here without either changing
+            # gateway/server.ts (out of this task's write_scopes; the
+            # FAULT_INJECT_TRANSPORT branch proposed in a prior round is a
+            # production-source change still awaiting scope authorization)
+            # or standing up new reachable infrastructure the gateway could
+            # dial into with divergent per-command behavior (blocked: no VM
+            # hosting, and Cloud Run has no raw-TCP ingress to proxy a
+            # clamd-protocol responder). `clamd` is also captured ONCE at
+            # process start (module scope), so an env update only ever takes
+            # effect on a brand-new, cold revision that re-evaluates
+            # isReady() against the very same broken config from its first
+            # request -- there is no already-ready instance to break
+            # mid-flight. The exact isReady()-true-then-exchange()-throws
+            # branch (502 scan_engine_unavailable) is instead proven
+            # deterministically against this real, unmodified handler.ts/
+            # clamd-transport.ts composition by this task's
+            # test_gateway_transport_regression.test.ts, which injects a
+            # fake Connector that answers VERSION but resets INSTREAM.
+            #
+            # What this hosted check proves instead: the REAL deployed
+            # service -- which Test 7/8 just confirmed is healthy and
+            # scanning clean/EICAR correctly -- fails closed end-to-end,
+            # deterministically and immediately (no timeout race), once its
+            # only configured path to the engine becomes genuinely
+            # unreachable, and never serves a single successful verdict
+            # while that fault is in effect. Port "1" (distinct from Test
+            # 6's "9999" so evidence/logs are unambiguous about which test
+            # induced which revision) is a reserved port nothing in this
+            # image listens on, so every connection attempt gets an
+            # immediate ECONNREFUSED rather than waiting out a timeout.
+            rev_9 = update_service_env(container="gateway", CLAMD_PORT="1")
 
-            # We can now use a normal clean payload, the fault is injected at the transport boundary
             max_attempts = 30
-            ready = False
+            observed_fault = False
             for i in range(max_attempts):
                 status, body = scan(CLEAN)
-                if status == 502 and isinstance(body, dict) and body.get("error") == "scan_engine_unavailable":
-                    ready = True
+                assert status != 200, f"Unexpected successful scan while the transport fault is active: {status}: {body}"
+                if status == 503 and isinstance(body, dict) and body.get("error") == "scan_engine_not_ready":
+                    observed_fault = True
                     break
+                assert status == 503, f"Unexpected status while waiting for the new revision to take effect: {status}: {body}"
                 time.sleep(2)
 
-            assert ready, "Service did not become ready (or fault did not trigger)"
-            status, body = scan(CLEAN)
-            if status == 503:
-                # If readiness timed out this exact millisecond, try again once
+            assert observed_fault, "Service never entered the fail-closed state after the transport fault was injected"
+
+            # Hold the fault for several more requests against BOTH payload
+            # types and assert every single observed response stays
+            # fail-closed -- not just the first one -- so a transient or
+            # flaky "ready" response cannot slip through this check the way
+            # the old polling loop let a successful fault-period receipt
+            # slip through unasserted.
+            for i in range(5):
+                for payload in (CLEAN, EICAR):
+                    status, body = scan(payload)
+                    assert status == 503 and isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", (
+                        f"Expected a sustained fail-closed 503 while the transport fault is active, got {status}: {body}"
+                    )
                 time.sleep(1)
-                status, body = scan(CLEAN)
-            assert status == 502, f"Expected 502 transport failure due to injected fault, got {status}: {body}"
-            assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
             # Recovery after fault
-            if original_env_by_container.get("gateway", {}).get("CLAMD_TIMEOUT_MS"):
-                update_service_env(container="gateway", CLAMD_TIMEOUT_MS=original_env_by_container["gateway"]["CLAMD_TIMEOUT_MS"])
+            if original_clamd_port:
+                update_service_env(container="gateway", CLAMD_PORT=original_clamd_port)
             else:
-                update_service_env(container="gateway", remove=True, CLAMD_TIMEOUT_MS="")
+                update_service_env(container="gateway", remove=True, CLAMD_PORT="")
 
-            print("  (Genuine engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
+            print("  (The exact isReady()-true-then-exchange()-throws 502 branch is proven deterministically, "
+                  "against this real unmodified handler.ts/clamd-transport.ts, by "
+                  "test_gateway_transport_regression.test.ts's fake-Connector Vitest coverage; the genuine "
+                  "engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
         except Exception as e:
             print(f"Hosted scenario failed: {e}")
             raise
