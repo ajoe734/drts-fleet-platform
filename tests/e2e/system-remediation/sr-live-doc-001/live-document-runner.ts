@@ -54,12 +54,14 @@ export async function getGoogleIdToken(
 export type FetchLike = typeof fetch;
 
 export interface DownloadOutcome {
+  errorData?: any;
   status: number;
   bytes: Buffer | null;
   contentType: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   candidateSha: string | null;
+  errorData?: any;
 }
 
 /**
@@ -85,16 +87,17 @@ export async function downloadArtifact(
       errorCode: null,
       errorMessage: null,
       candidateSha,
+      errorData: null,
     };
   }
   let errorCode: string | null = null;
   let errorMessage: string | null = null;
+  let errorData: any = null;
   try {
-    const body = (await res.json()) as {
-      error?: { code?: string; message?: string };
-    };
+    const body = (await res.json()) as any;
     errorCode = body?.error?.code ?? null;
     errorMessage = body?.error?.message ?? null;
+    errorData = body?.error?.data ?? body?.error ?? null;
   } catch {
     errorCode = null;
   }
@@ -105,10 +108,11 @@ export async function downloadArtifact(
     errorCode,
     errorMessage,
     candidateSha,
+    errorData,
   };
 }
 
-import { createVerify } from "node:crypto";
+
 
 export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -147,98 +151,79 @@ export interface RunIndependentBankVerifierOptions {
 export function runIndependentBankVerifier(
   options: RunIndependentBankVerifierOptions,
 ): IndependentVerifierOutcome {
-  const text = options.artifactBytes.toString("utf-8");
-  const DELIMITER =
-    "--------------------------------------------------------------------------------\n" +
-    "DIGITAL SIGNATURE & AUDIT MANIFEST\n" +
-    "--------------------------------------------------------------------------------";
+  const { verifierScriptPath, artifactBytes, publicKeyPem, pythonBin = "python3" } = options;
 
-  const idx = text.indexOf(DELIMITER);
-  if (idx === -1) {
+  const tempId = Math.random().toString(36).substring(2);
+  const artifactPath = require("node:path").join(require("node:os").tmpdir(), `artifact-${tempId}.txt`);
+  const pubkeyPath = require("node:path").join(require("node:os").tmpdir(), `pubkey-${tempId}.pem`);
+
+  try {
+    require("node:fs").writeFileSync(artifactPath, artifactBytes);
+
+    const args = [verifierScriptPath, artifactPath];
+    if (publicKeyPem) {
+      require("node:fs").writeFileSync(pubkeyPath, publicKeyPem);
+      args.push("--public-key", pubkeyPath);
+    }
+
+    const result = require("node:child_process").spawnSync(pythonBin, args, { encoding: "utf-8" });
+    const stdout = result.stdout || "";
+    const stderr = result.stderr || "";
+
+    if (result.error) {
+      return {
+        exitCode: 1,
+        ok: false,
+        hashMatch: false,
+        signatureVerified: false,
+        signatureStatus: "UNKNOWN",
+        stdout: "",
+        stderr: result.error.message,
+      };
+    }
+
+    const exitCode = result.status ?? 1;
+    const ok = exitCode === 0;
+
+    const hashMatch = stdout.includes("SHA-256 Match:    PASSED");
+
+    let signatureStatus: BankSignatureStatus = "UNKNOWN";
+    if (stdout.includes("Signature Status: SIGNED")) signatureStatus = "SIGNED";
+    else if (stdout.includes("Signature Status: UNSIGNED")) signatureStatus = "UNSIGNED";
+    if (stdout.includes("TAMPERED") || stdout.includes("FAILED (TAMPERED)")) signatureStatus = "TAMPERED";
+
+    let signatureVerified: boolean | null = null;
+    if (signatureStatus === "SIGNED") {
+      signatureVerified = stdout.includes("OpenSSL Cryptographic Signature Verification: PASSED");
+    } else if (signatureStatus === "UNSIGNED") {
+      if (stdout.includes("TAMPERED") || stdout.includes("Defect detected")) {
+          signatureVerified = false;
+      }
+    }
+
+    return {
+      exitCode,
+      ok,
+      hashMatch,
+      signatureVerified,
+      signatureStatus,
+      stdout,
+      stderr,
+    };
+  } catch (error: any) {
     return {
       exitCode: 1,
       ok: false,
       hashMatch: false,
       signatureVerified: false,
-      signatureStatus: "TAMPERED",
+      signatureStatus: "UNKNOWN",
       stdout: "",
-      stderr: "Missing manifest delimiter in artifact",
+      stderr: error.message,
     };
+  } finally {
+    try { require("node:fs").unlinkSync(artifactPath); } catch (e) {}
+    try { require("node:fs").unlinkSync(pubkeyPath); } catch (e) {}
   }
-
-  const payload = text.substring(0, idx).replace(/[\r\n]+$/, "");
-  const manifestRaw = text.substring(idx + DELIMITER.length);
-  const fields: Record<string, string> = {};
-  for (const line of manifestRaw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("=") || trimmed.startsWith("-")) continue;
-    const colon = trimmed.indexOf(":");
-    if (colon !== -1) {
-      fields[trimmed.substring(0, colon).trim()] = trimmed.substring(colon + 1).trim();
-    }
-  }
-
-  const expectedHash = (fields["Manifest Hash"] || "").replace(/^sha256:/i, "").toLowerCase();
-  const actualHash = createHash("sha256").update(payload, "utf-8").digest("hex").toLowerCase();
-  const hashMatch = actualHash === expectedHash;
-
-  const status = fields["Signature Status"] || "UNSIGNED";
-  const signature = fields["Digital Signature"] || "";
-
-  let signatureStatus: BankSignatureStatus = "UNKNOWN";
-  let signatureVerified: boolean | null = null;
-  let stdout = `SHA-256 Match: ${hashMatch ? "PASSED" : "FAILED"}\n`;
-  stdout += `Signature Status: ${status}\n`;
-
-  if (!hashMatch) {
-    signatureStatus = "TAMPERED";
-    signatureVerified = false;
-  } else if (status === "UNSIGNED") {
-    if (signature.includes("VALID") || signature.startsWith("SIG_")) {
-      signatureStatus = "TAMPERED";
-      signatureVerified = false;
-    } else {
-      signatureStatus = "UNSIGNED";
-      signatureVerified = null;
-    }
-  } else if (status === "SIGNED") {
-    if (!options.publicKeyPem) {
-      signatureStatus = "TAMPERED";
-      signatureVerified = false;
-    } else {
-      try {
-        // Implement real signature verification here (handles both RSA and ECDSA automatically)
-        const verifier = createVerify("SHA256");
-        verifier.update(payload, "utf-8");
-        const isValid = verifier.verify(options.publicKeyPem, signature, "base64");
-        
-        signatureVerified = isValid;
-        signatureStatus = isValid ? "SIGNED" : "TAMPERED";
-        if (isValid) {
-          stdout += "OpenSSL Cryptographic Signature Verification: PASSED (Verified OK)\n";
-        } else {
-          stdout += "OpenSSL Signature Verification: FAILED\n";
-        }
-      } catch (err: any) {
-        signatureVerified = false;
-        signatureStatus = "TAMPERED";
-        stdout += `OpenSSL Signature Verification: FAILED\n${err.message}\n`;
-      }
-    }
-  } else {
-    signatureStatus = "UNKNOWN";
-    signatureVerified = false;
-  }
-
-  return {
-    exitCode: signatureStatus === status && signatureVerified !== false ? 0 : 1,
-    ok: signatureStatus === status && signatureVerified !== false,
-    hashMatch,
-    signatureVerified,
-    signatureStatus,
-    stdout,
-    stderr: "",
-  };
 }
 
 /**
