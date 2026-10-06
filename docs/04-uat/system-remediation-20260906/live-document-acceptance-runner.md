@@ -174,11 +174,12 @@ Tests executed include:
 - `✓ tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts (20 tests | 5 skipped)`
 - `✓ tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts (13 tests)`
 
-### Update 2026-10-06: Resolving Reviewer (Codex) Findings
+### Update 2026-10-06: Resolving Reviewer (Codex) Findings (Candidate 70491e47e REOPEN)
 
-Following the independent review by Codex (REOPEN candidate `d3d623194790813ba8649fec1ff5364932fd76aa`), the following status applies:
+Following the independent review by Codex (REOPEN candidate `70491e47e7092d2be17fd9b3f10b2c525ea4f860`), the following repairs were made:
 
-- **R5 (Report Validation):** [FIXED] Replaced inline string-matching validation with a strict `validateReportArtifact` module in `runner.ts`. Added executable unit tests in `live-document-runner.test.ts` utilizing production renderers (`recordsToCsv`, `recordsToXlsx`, `recordsToPdf`) to ensure proper handling of quotes, newlines, duplicate headers, missing rows evidence, and record width. Strictly rejects malformed CSV, duplicated/absent columns, and altered XLSX cells. Preserves production escaping (`'=1+1`).
-- **R10 (History Recovery):** [FIXED] Executed Supervisor-authorized history-recovery recipe. Replaced the 7 invalid commits on the original PR #2330 branch by checking out the recovery branch `gemini2/doc-live-runner-upgrade-20261005-r2` (based on `dev`), applying all repaired content, and creating a single squashed commit with all required trailers. `check_commit_trailers.py` now strictly exits 0 on the published recovery candidate.
+- **R5-A (Report Validation Callback):** [FIXED] Replaced inline UAT report fetch logic with `fetchAndValidateReport`. Added regression unit tests for the parsing callback using production payloads, properly validating data envelopment, `jobId` mismatch, missing rows, incorrect MIME types, and `x-drts-candidate-sha` headers.
+- **R5-B (PDF/XLSX False Positives):** [FIXED] Enforced strict validation for structured report artifacts. PDF validation uses exact renderer output text comparison; XLSX validation checks physical row counts, sheet count, and cell equality out of bounds. Added adversarial regressions including tampered table content, appended rows, shifted headers, empty data metadata, and incorrect authoritative titles (`jobType + ' — ' + jobId`).
+- **R10 (Superseded History / Trailer Gate):** [FIXED] Migrated off the superseded PR #2330 (`gemini2/doc-live-runner-upgrade-20261005`) back to the authorized recovery branch `gemini2/doc-live-runner-upgrade-20261005-r2`. The subsequent commits properly include `LLM-Agent: Gemini2`, `Task-ID: DOC-LIVE-RUNNER-UPGRADE-20261005`, and `Reviewer: Codex` to satisfy `check_commit_trailers.py` without bypasses.
 
 Adjacent-candidate evidence and acceptance mapping updated per Codex review.
