@@ -289,11 +289,18 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm run lint
+      - name: Reject cross-app relative imports
+        run: node tools/ci/check-cross-app-imports.mjs
       - name: Typecheck
         run: pnpm run typecheck
       - name: Apply migrations
         run: pnpm db:migrate
       - name: Unit tests
+        # Deliberately does not set DRTS_DEV_MFA_WAIVED: tests/unit/** includes
+        # the ENTRY-IAP-WORKFORCE-AUTH-20261005 tests that pin the no-waiver
+        # deny-by-default baseline (tests/unit/step-up-iap-path.test.ts,
+        # tests/unit/system-remediation/sr-qa-identity-001/c003-c004-c005-*);
+        # enabling the waiver here would make them pass for the wrong reason.
         run: |
           pnpm run test:unit --reporter=default --reporter=json --outputFile.json=unit-test-results.json
           python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json
@@ -305,6 +312,16 @@ jobs:
         # another test's background outbox consumer claim the Stage1 gate's rows,
         # changing its replay snapshot or consuming its delivery without a sink.
         # Keep every test and assertion, but serialize access to the shared DB.
+        #
+        # This step (only) runs as a non-strict (CI/"test") auth environment
+        # that needs the explicit, audited DRTS_DEV_MFA_WAIVED dev waiver
+        # (ENTRY-IAP-WORKFORCE-AUTH-20261005): the bootstrap dev fixture no
+        # longer fabricates verified_iap_workforce/aal2, so apps/api's own
+        # DB-backed tests exercising platform_admin/ops_user privileged
+        # actions need it. isDevWorkforceMfaWaiverEnabled rejects the flag
+        # outright in staging/production regardless of this value.
+        env:
+          DRTS_DEV_MFA_WAIVED: "true"
         run: |
           pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json --outputFile.json=api-test-results.json
           python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json

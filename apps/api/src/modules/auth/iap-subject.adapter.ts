@@ -1,15 +1,14 @@
 import { Injectable, Optional } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 
 import type {
   CanonicalAccountStatus,
   CanonicalIdentityMembershipRecord,
   CanonicalIdentityPrincipalRecord,
-  CanonicalIdentityRoleBindingRecord,
 } from "@drts/contracts";
 import {
   extractIapJwtAssertion,
+  resolveGoogleIapJwtVerificationKey,
   verifyIapJwtAssertion,
   type HeaderRecord,
   type IapJwtPayload,
@@ -20,16 +19,6 @@ import { IdentityRepository } from "../identity/identity.repository";
 import { SecurityEventsService } from "../security-events/security-events.service";
 
 import { AUTH_SCOPE_PRESETS } from "../../common/auth/auth.constants";
-
-export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
-  superadmin: "platform-admins@platform.drts",
-  admin: "platform-admins@platform.drts",
-  viewer: "platform-admins@platform.drts",
-  operator: "ops-users@platform.drts",
-  platform_admin: "platform-admins@platform.drts",
-  security_admin: "platform-admins@platform.drts",
-  ops_user: "ops-users@platform.drts",
-};
 
 const PLATFORM_VIEWER_SCOPES = [
   "identity:read",
@@ -67,8 +56,6 @@ export interface ResolveIapSubjectOptions {
   expectedIssuer?: string;
   jwtSecretOrPublicKey?: string;
   strictIapMode?: boolean;
-  autoProvision?: boolean;
-  roleGroupMapping?: Record<string, string>;
   requestedRealm?: "platform" | "ops";
 }
 
@@ -78,19 +65,25 @@ export interface ResolvedIapWorkforceSubject {
   effectiveRoles: string[];
   effectiveScopes: string[];
   tokenVersion: number;
-  driftDetected: boolean;
   /** Server-owned authentication evidence for the MFA / step-up policy. */
   authMethods: string[];
   assurance: "aal1" | "aal2" | "aal3";
   /** Authentication time from the verified assertion, or null when absent. */
   authTime: string | null;
-  driftDetails?: {
-    originalRoles: string[];
-    effectiveRoles: string[];
-    missingGroups: string[];
-  };
 }
 
+/**
+ * Resolves a verified Google IAP assertion to a durable workforce identity.
+ *
+ * Role authority comes exclusively from persisted `iam.identity_role_bindings`
+ * rows looked up by the assertion's verified `email`, never from a `groups` /
+ * `gcp_ia_groups` claim: a real Cloud IAP JWT carries no group membership
+ * claim at all (see docs/02-architecture/entry-iap-workforce-20261005.md), so
+ * gating roles on one meant every real login resolved to zero effective
+ * roles. An email with no persisted, active platform/ops membership and role
+ * binding is denied outright -- this adapter never auto-provisions a new
+ * workforce identity from assertion content.
+ */
 @Injectable()
 export class IAPSubjectAdapter {
   constructor(
@@ -146,13 +139,18 @@ export class IAPSubjectAdapter {
       );
     }
 
-    // Verify assertion
+    // Verify assertion. With no explicit jwtSecretOrPublicKey (the real
+    // production path), resolve the Google-managed ES256 key for this
+    // assertion's kid from Google's rotating IAP JWKS before verifying.
     let payload: IapJwtPayload;
     try {
+      const verificationKey =
+        options.jwtSecretOrPublicKey ??
+        (await resolveGoogleIapJwtVerificationKey(rawAssertion));
       payload = verifyIapJwtAssertion(rawAssertion, {
         expectedAudience: options.expectedAudience,
         expectedIssuer: options.expectedIssuer,
-        jwtSecretOrPublicKey: options.jwtSecretOrPublicKey,
+        jwtSecretOrPublicKey: verificationKey,
       });
     } catch (err: any) {
       if (
@@ -175,19 +173,13 @@ export class IAPSubjectAdapter {
     }
 
     const subject = payload.sub;
-    const assertionGroups = payload.gcp_ia_groups || payload.groups || [];
     if (options.strictIapMode && !payload.email) {
-      const { actorType, realm } = this.getActorContext(
-        undefined,
-        undefined,
-        assertionGroups,
-      );
       this.emitDeniedEvent(
         "missing_email_in_strict_mode",
         subject,
         undefined,
-        realm,
-        actorType,
+        "platform",
+        "platform_admin",
       );
       throw new ApiRequestError(
         401,
@@ -226,126 +218,39 @@ export class IAPSubjectAdapter {
       }
     }
 
-    if (principal) {
-      if (this.isInactiveStatus(principal.status)) {
-        const { actorType, realm } = this.getActorContext(
-          undefined,
-          undefined,
-          assertionGroups,
-        );
-        this.emitDeniedEvent(
-          "user_inactive",
-          principal.email || normalizedEmail,
-          principal.principalId,
-          realm,
-          actorType,
-        );
-        throw new ApiRequestError(
-          403,
-          "IAP_WORKFORCE_USER_INACTIVE",
-          "Workforce user account is inactive or suspended.",
-        );
-      }
-    } else {
-      if (!options.autoProvision) {
-        const { actorType, realm } = this.getActorContext(
-          undefined,
-          undefined,
-          assertionGroups,
-        );
-        this.emitDeniedEvent(
-          "user_not_found",
-          normalizedEmail,
-          undefined,
-          realm,
-          actorType,
-        );
-        throw new ApiRequestError(
-          403,
-          "IAP_WORKFORCE_USER_INACTIVE",
-          "Workforce user identity is not provisioned.",
-        );
-      }
-
-      // Provision new principal strictly from verified IAP groups, not email substring
-      const isPlatformAdminGroup = assertionGroups.includes(
-        "platform-admins@platform.drts",
+    if (!principal) {
+      // Deny-by-default: an email with no pre-existing, persisted account/
+      // membership/role binding is never auto-provisioned from assertion
+      // content (a real IAP token carries no group or role claim to
+      // provision from in the first place).
+      this.emitDeniedEvent(
+        "user_not_found",
+        normalizedEmail,
+        undefined,
+        "platform",
+        "platform_admin",
       );
-      const isOpsUserGroup = assertionGroups.includes(
-        "ops-users@platform.drts",
+      throw new ApiRequestError(
+        403,
+        "IAP_WORKFORCE_USER_INACTIVE",
+        "Workforce user identity is not provisioned.",
       );
+    }
 
-      if (!isPlatformAdminGroup && !isOpsUserGroup) {
-        const { actorType, realm } = this.getActorContext(
-          undefined,
-          undefined,
-          assertionGroups,
-        );
-        this.emitDeniedEvent(
-          "unmapped_group_membership",
-          normalizedEmail,
-          undefined,
-          realm,
-          actorType,
-        );
-        throw new ApiRequestError(
-          403,
-          "IAP_WORKFORCE_USER_INACTIVE",
-          "Unmapped workforce user subject has no valid group membership.",
-        );
-      }
-
-      const defaultRole = isPlatformAdminGroup ? "superadmin" : "operator";
-      const defaultRealm = isPlatformAdminGroup ? "platform" : "ops";
-
-      const newPrincipal: CanonicalIdentityPrincipalRecord = {
-        principalId: `principal_iap_${randomUUID()}`,
-        sourceRef: `iap_subject:${subject}`,
-        issuer: "google_iap",
-        subject,
-        principalType: "human",
-        email: normalizedEmail,
-        emailVerified: true,
-        displayName: normalizedEmail.split("@")[0] ?? "IAP User",
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const newMembership: CanonicalIdentityMembershipRecord = {
-        membershipId: `membership_iap_${randomUUID()}`,
-        sourceRef: `iap_membership:${subject}`,
-        principalId: newPrincipal.principalId,
-        realm: defaultRealm,
-        scopeRef: "platform:control_plane",
-        tenantId: null,
-        partnerId: null,
-        status: "active",
-        invitedByPrincipalId: null,
-        invitationId: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const newRoleBinding: CanonicalIdentityRoleBindingRecord = {
-        roleBindingId: `role_binding_iap_${randomUUID()}`,
-        sourceRef: `iap_role_binding:${subject}`,
-        membershipId: newMembership.membershipId,
-        roleCode: defaultRole,
-        grantedByPrincipalId: null,
-        approvalId: null,
-        validFrom: now,
-        validTo: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const created = await this.identityRepository.upsertWorkforceIdentity(
-        newPrincipal,
-        newMembership,
-        [newRoleBinding],
+    if (this.isInactiveStatus(principal.status)) {
+      const { actorType, realm } = this.getActorContext(undefined, undefined);
+      this.emitDeniedEvent(
+        "user_inactive",
+        principal.email || normalizedEmail,
+        principal.principalId,
+        realm,
+        actorType,
       );
-      principal = created.principal;
+      throw new ApiRequestError(
+        403,
+        "IAP_WORKFORCE_USER_INACTIVE",
+        "Workforce user account is inactive or suspended.",
+      );
     }
 
     // Lookup active control-plane (platform/ops) memberships deterministically
@@ -404,27 +309,15 @@ export class IAPSubjectAdapter {
       }
     }
 
-    const isPlatformGroup = assertionGroups.includes(
-      "platform-admins@platform.drts",
-    );
-    const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
-
     const currentTimeMs = new Date(now).getTime();
-    const roleGroupMapping =
-      options.roleGroupMapping ?? DEFAULT_IAP_ROLE_GROUP_MAPPING;
 
     interface MembershipAnalysis {
       membership: CanonicalIdentityMembershipRecord;
-      originalRoles: string[];
-      effectiveRoles: string[];
-      missingGroups: string[];
+      roles: string[];
       tokenVersionTimestamps: string[];
-      driftDetected: boolean;
     }
 
     const membershipAnalyses: MembershipAnalysis[] = [];
-    const allMissingGroups = new Set<string>();
-    let overallDriftDetected = false;
 
     for (const m of activeControlPlaneMemberships) {
       const bindings =
@@ -450,6 +343,9 @@ export class IAPSubjectAdapter {
       const allAssignedRoles = Array.from(
         new Set(activeBindings.map((b) => b.roleCode)),
       );
+      // Roles are scoped to the membership's realm: a role code that only
+      // makes sense for the other realm (e.g. an ops-only `operator` role
+      // recorded against a platform membership) never grants access there.
       const assignedRoles = allAssignedRoles.filter((r) => {
         if (m.realm === "platform") {
           return (
@@ -466,36 +362,13 @@ export class IAPSubjectAdapter {
         return true;
       });
 
-      const missingGroupsForM: string[] = [];
-      const effectiveRolesForM: string[] = [];
-      let driftForM = false;
-
-      for (const role of assignedRoles) {
-        const requiredGroup = roleGroupMapping[role];
-        if (requiredGroup) {
-          if (assertionGroups.includes(requiredGroup)) {
-            effectiveRolesForM.push(role);
-          } else {
-            driftForM = true;
-            overallDriftDetected = true;
-            missingGroupsForM.push(requiredGroup);
-            allMissingGroups.add(requiredGroup);
-          }
-        } else {
-          effectiveRolesForM.push(role);
-        }
-      }
-
       membershipAnalyses.push({
         membership: m,
-        originalRoles: assignedRoles,
-        effectiveRoles: effectiveRolesForM,
-        missingGroups: missingGroupsForM,
+        roles: assignedRoles,
         tokenVersionTimestamps: [
           m.updatedAt,
           ...bindings.map((b) => b.updatedAt),
         ],
-        driftDetected: driftForM,
       });
     }
 
@@ -506,11 +379,7 @@ export class IAPSubjectAdapter {
         (a) => a.membership.realm === requestedRealm,
       );
       if (!targetAnalysis) {
-        const { actorType, realm } = this.getActorContext(
-          requestedRealm,
-          undefined,
-          assertionGroups,
-        );
+        const { actorType, realm } = this.getActorContext(requestedRealm);
         this.emitDeniedEvent(
           "user_inactive",
           principal.email || normalizedEmail,
@@ -525,11 +394,10 @@ export class IAPSubjectAdapter {
         );
       }
 
-      if (targetAnalysis.originalRoles.length === 0) {
+      if (targetAnalysis.roles.length === 0) {
         const { actorType, realm } = this.getActorContext(
           targetAnalysis.membership.realm,
-          undefined,
-          assertionGroups,
+          targetAnalysis.roles,
         );
         this.emitDeniedEvent(
           "user_inactive",
@@ -545,49 +413,15 @@ export class IAPSubjectAdapter {
         );
       }
 
-      if (targetAnalysis.effectiveRoles.length === 0) {
-        const { actorType, realm } = this.getActorContext(
-          targetAnalysis.membership.realm,
-          targetAnalysis.originalRoles,
-          assertionGroups,
-        );
-        this.emitDeniedEvent(
-          "unmapped_group_membership",
-          principal.email || normalizedEmail,
-          principal.principalId,
-          realm,
-          actorType,
-        );
-        throw new ApiRequestError(
-          403,
-          "IAP_WORKFORCE_USER_INACTIVE",
-          "Workforce user has no active verified group memberships.",
-        );
-      }
-
       selectedAnalysis = targetAnalysis;
     } else {
-      const candidateAnalyses = [...membershipAnalyses];
-      candidateAnalyses.sort((a, b) => {
-        const getRealmPriority = (realm: string): number => {
-          if (isPlatformGroup) {
-            // When user has platform-admins group (or both platform and ops groups),
-            // platform membership takes precedence over ops.
-            return realm === "platform" ? 0 : realm === "ops" ? 1 : 2;
-          }
-          if (isOpsGroup) {
-            // When user has ops-users group but not platform-admins group,
-            // ops membership takes precedence over platform.
-            return realm === "ops" ? 0 : realm === "platform" ? 1 : 2;
-          }
-          // Default order when no explicit platform/ops group signals matched:
-          // platform takes precedence over ops.
-          return realm === "platform" ? 0 : realm === "ops" ? 1 : 2;
-        };
-
+      // No explicit realm requested: platform membership wins over ops when
+      // the account holds both, deterministically tie-broken by membershipId.
+      const candidateAnalyses = [...membershipAnalyses].sort((a, b) => {
+        const priority = (realm: string) =>
+          realm === "platform" ? 0 : realm === "ops" ? 1 : 2;
         const priorityDiff =
-          getRealmPriority(a.membership.realm) -
-          getRealmPriority(b.membership.realm);
+          priority(a.membership.realm) - priority(b.membership.realm);
         if (priorityDiff !== 0) {
           return priorityDiff;
         }
@@ -596,39 +430,12 @@ export class IAPSubjectAdapter {
         );
       });
 
-      selectedAnalysis = candidateAnalyses.find(
-        (a) => a.effectiveRoles.length > 0,
-      );
+      selectedAnalysis = candidateAnalyses.find((a) => a.roles.length > 0);
 
       if (!selectedAnalysis) {
-        const hadRolesCandidate = candidateAnalyses.find(
-          (a) => a.originalRoles.length > 0,
-        );
-        if (hadRolesCandidate) {
-          const { actorType, realm } = this.getActorContext(
-            hadRolesCandidate.membership.realm,
-            hadRolesCandidate.originalRoles,
-            assertionGroups,
-          );
-          this.emitDeniedEvent(
-            "unmapped_group_membership",
-            principal.email || normalizedEmail,
-            principal.principalId,
-            realm,
-            actorType,
-          );
-          throw new ApiRequestError(
-            403,
-            "IAP_WORKFORCE_USER_INACTIVE",
-            "Workforce user has no active verified group memberships.",
-          );
-        }
-
         const fallbackCandidate = candidateAnalyses[0];
         const { actorType, realm } = this.getActorContext(
           fallbackCandidate?.membership.realm,
-          undefined,
-          assertionGroups,
         );
         this.emitDeniedEvent(
           "user_inactive",
@@ -646,8 +453,7 @@ export class IAPSubjectAdapter {
     }
 
     const activeMembership = selectedAnalysis.membership;
-    const effectiveRoles = selectedAnalysis.effectiveRoles;
-    const originalRoles = selectedAnalysis.originalRoles;
+    const effectiveRoles = selectedAnalysis.roles;
     const tokenVersion = Math.max(
       Date.parse(principal.updatedAt),
       ...selectedAnalysis.tokenVersionTimestamps.map((timestamp) =>
@@ -658,36 +464,10 @@ export class IAPSubjectAdapter {
     const finalActorContext = this.getActorContext(
       activeMembership.realm,
       effectiveRoles,
-      assertionGroups,
     );
 
-    let driftDetails: ResolvedIapWorkforceSubject["driftDetails"];
-    const missingGroupsList = requestedRealm
-      ? selectedAnalysis.missingGroups
-      : allMissingGroups.size > 0
-        ? Array.from(allMissingGroups)
-        : selectedAnalysis.missingGroups;
-    const hasDrift = requestedRealm
-      ? selectedAnalysis.driftDetected || missingGroupsList.length > 0
-      : overallDriftDetected ||
-        selectedAnalysis.driftDetected ||
-        missingGroupsList.length > 0;
-
-    if (hasDrift) {
-      driftDetails = {
-        originalRoles,
-        effectiveRoles,
-        missingGroups: missingGroupsList,
-      };
-      this.emitGroupDriftEvent(
-        principal.principalId,
-        driftDetails,
-        finalActorContext.realm,
-        finalActorContext.actorType,
-      );
-    }
-
-    // Derive effective scopes strictly from verified roles (ignoring any client spoofed x-scopes)
+    // Derive effective scopes strictly from verified persisted roles
+    // (ignoring any client-spoofed x-scopes).
     const effectiveScopesSet = new Set<string>();
     for (const role of effectiveRoles) {
       const scopes = DEFAULT_ROLE_SCOPES[role] ?? DEFAULT_ROLE_SCOPES.ops_user;
@@ -711,11 +491,9 @@ export class IAPSubjectAdapter {
       effectiveRoles,
       effectiveScopes: Array.from(effectiveScopesSet),
       tokenVersion,
-      driftDetected: hasDrift,
       authMethods,
       assurance,
       authTime,
-      ...(driftDetails ? { driftDetails } : {}),
     };
   }
 
@@ -859,7 +637,6 @@ export class IAPSubjectAdapter {
   private getActorContext(
     realm?: "platform" | "ops" | string | null,
     roles?: string[],
-    assertionGroups?: string[],
   ): { actorType: "platform_admin" | "ops_user"; realm: "platform" | "ops" } {
     if (realm === "ops") {
       return { actorType: "ops_user", realm: "ops" };
@@ -884,15 +661,6 @@ export class IAPSubjectAdapter {
       }
       if (hasPlatformRole) {
         return { actorType: "platform_admin", realm: "platform" };
-      }
-    }
-    if (assertionGroups && assertionGroups.length > 0) {
-      const isOpsGroup = assertionGroups.includes("ops-users@platform.drts");
-      const isPlatformGroup = assertionGroups.includes(
-        "platform-admins@platform.drts",
-      );
-      if (isOpsGroup && !isPlatformGroup) {
-        return { actorType: "ops_user", realm: "ops" };
       }
     }
     return { actorType: "platform_admin", realm: "platform" };
@@ -932,44 +700,6 @@ export class IAPSubjectAdapter {
         summary: `IAP assertion denied: ${reason} (target: ${target})`,
         reason,
         target,
-      },
-    });
-  }
-
-  private emitGroupDriftEvent(
-    actorId: string,
-    driftDetails: NonNullable<ResolvedIapWorkforceSubject["driftDetails"]>,
-    realm: "platform" | "ops",
-    actorType: "platform_admin" | "ops_user",
-  ) {
-    if (!this.securityEventsService) return;
-    this.securityEventsService.recordEvent({
-      actorId,
-      actorType,
-      subjectId: actorId,
-      realm,
-      tenantId: null,
-      partnerId: null,
-      eventType: "iap_group_drift.detected",
-      eventFamily: "role",
-      outcome: "success",
-      severity: "high",
-      targetType: "iap_workforce_membership",
-      targetId: actorId,
-      sessionId: null,
-      tokenId: null,
-      authMethods: ["iap"],
-      sourceIp: null,
-      userAgent: null,
-      requestId: null,
-      traceId: null,
-      reasonCode: "group_drift_applied",
-      approvalId: null,
-      maskedContext: {
-        summary: `IAP group drift detected for ${actorId}. Downgraded from [${driftDetails.originalRoles.join(",")}] to [${driftDetails.effectiveRoles.join(",")}]. Missing groups: [${driftDetails.missingGroups.join(",")}]`,
-        originalRoles: driftDetails.originalRoles,
-        effectiveRoles: driftDetails.effectiveRoles,
-        missingGroups: driftDetails.missingGroups,
       },
     });
   }

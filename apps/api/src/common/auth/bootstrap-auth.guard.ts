@@ -323,7 +323,6 @@ export class BootstrapAuthGuard implements CanActivate {
       ...(expectedAudience ? { expectedAudience } : {}),
       ...(expectedIssuer ? { expectedIssuer } : {}),
       ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
-      autoProvision: !isStrictIap,
     });
 
     const identity: BootstrapRequestIdentity = {

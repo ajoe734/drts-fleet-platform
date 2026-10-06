@@ -248,5 +248,83 @@ describe.skipIf(!hostedUnit)(
         ).rows,
       ).toEqual(before.rows);
     });
+
+    it("resets only the fixture's own binding, invitation and supply pair, leaving another driver untouched", async () => {
+      const now = new Date().toISOString();
+      const otherDriverId = "drv-c114-other-untouched";
+      const sessions = new DriverDeviceSessionRepository(database);
+      await sessions.saveBinding({
+        bindingId: "c114-fixture-binding",
+        driverId,
+        deviceId: "c114-fixture-device",
+        deviceLabel: null,
+        status: "active",
+        issuedAt: now,
+        refreshedAt: now,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await sessions.saveBinding({
+        bindingId: "c114-other-binding",
+        driverId: otherDriverId,
+        deviceId: "c114-other-device",
+        deviceLabel: null,
+        status: "active",
+        issuedAt: now,
+        refreshedAt: now,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await repository.persistChanges({
+        supplyPairs: [
+          {
+            driverId: otherDriverId,
+            vehicleId: "veh-c114-other-untouched",
+            etaMinutes: 0,
+          },
+        ],
+      });
+      try {
+        await expect(repository.resetLiveMapTestDriver()).resolves.toEqual({
+          status: "reset",
+        });
+
+        expect(
+          (
+            await database!.query(
+              "SELECT record FROM iam.driver_device_bindings WHERE driver_id = $1",
+              [driverId],
+            )
+          ).rows,
+        ).toHaveLength(0);
+        expect(await stored()).toEqual([]);
+
+        const otherBinding = await database!.query(
+          "SELECT record FROM iam.driver_device_bindings WHERE driver_id = $1",
+          [otherDriverId],
+        );
+        expect(otherBinding.rows).toHaveLength(1);
+        const otherPair = await database!.query(
+          "SELECT record FROM reg.phase1_registry_supply_pairs WHERE driver_id = $1",
+          [otherDriverId],
+        );
+        expect(otherPair.rows).toHaveLength(1);
+
+        await expect(repository.ensureLiveMapTestDriver()).resolves.toEqual({
+          status: "created",
+        });
+      } finally {
+        await database!.query(
+          "DELETE FROM reg.phase1_registry_supply_pairs WHERE driver_id = $1",
+          [otherDriverId],
+        );
+        await database!.query(
+          "DELETE FROM iam.driver_device_bindings WHERE driver_id = $1",
+          [otherDriverId],
+        );
+      }
+    });
   },
 );

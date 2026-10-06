@@ -10,7 +10,10 @@ import {
   Put,
   Query,
   Res,
+  Req,
 } from "@nestjs/common";
+
+import type { IncomingMessage } from "node:http";
 
 interface HttpResponseLike {
   setHeader(name: string, value: string | number): void;
@@ -94,6 +97,57 @@ export class FleetPartnerController {
     }
 
     return normalizedFleetPartnerId;
+  }
+
+  private documentPartner(
+    fleetPartnerId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const partnerId = identity?.partnerId?.trim();
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      !["partner_api_key", "partner_user"].includes(identity.actorType) ||
+      !partnerId ||
+      partnerId !== fleetPartnerId?.trim()
+    ) {
+      throw new ApiRequestError(
+        403,
+        "FLEET_SCOPE_DENIED",
+        "Document access requires the authenticated fleet partner scope.",
+      );
+    }
+    return partnerId;
+  }
+
+  private documentReviewer(identity: BootstrapRequestIdentity | null) {
+    if (
+      identity?.realm !== "platform" ||
+      identity.actorType !== "platform_admin"
+    ) {
+      throw new ApiRequestError(
+        403,
+        "DOCUMENT_REVIEW_DENIED",
+        "Document readback requires a platform reviewer.",
+      );
+    }
+  }
+
+  private sendDocument(
+    res: HttpResponseLike,
+    name: string,
+    contentType: string,
+    bytes: Buffer,
+  ) {
+    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(name)}"`,
+    );
+    res.setHeader("Content-Length", bytes.length);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(bytes);
   }
 
   private requireReviewerActorId(identity: BootstrapRequestIdentity | null) {
@@ -524,16 +578,85 @@ export class FleetPartnerController {
     @Param("submissionId") submissionId: string,
     @Body() command: CreateSupplyDocumentUploadUrlCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplyDocumentService.createUploadUrl(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
         this.actorId(actorId),
         command,
         requestId,
       ),
       requestId,
+    );
+  }
+
+  @Put("fleet-partner/supply-submissions/:submissionId/documents/content")
+  @RequireRealms("partner")
+  async uploadSupplyDocumentContent(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("submissionId") submissionId: string,
+    @Query("objectKey") objectKey: string,
+    @Req() request: IncomingMessage,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplyDocumentService.uploadContent(
+        this.documentPartner(fleetPartnerId, identity),
+        submissionId,
+        objectKey,
+        request,
+        request.headers["content-type"] ?? "",
+      ),
+    );
+  }
+
+  @Get(
+    "fleet-partner/supply-submissions/:submissionId/documents/:documentId/download",
+  )
+  @RequireRealms("partner")
+  async downloadSupplyDocument(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("submissionId") submissionId: string,
+    @Param("documentId") documentId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Res() res: HttpResponseLike,
+  ) {
+    const result = await this.supplyDocumentService.downloadDocument(
+      this.documentPartner(fleetPartnerId, identity),
+      submissionId,
+      documentId,
+    );
+    this.sendDocument(
+      res,
+      result.document.originalFileName,
+      result.contentType,
+      result.bytes,
+    );
+  }
+
+  @Get(
+    "admin/fleet-partners/supply-documents/:submissionId/:documentId/download",
+  )
+  @RequireRealms("platform")
+  async downloadSupplyDocumentForReview(
+    @Param("submissionId") submissionId: string,
+    @Param("documentId") documentId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Res() res: HttpResponseLike,
+  ) {
+    this.documentReviewer(identity);
+    const result = await this.supplyDocumentService.downloadDocument(
+      null,
+      submissionId,
+      documentId,
+    );
+    this.sendDocument(
+      res,
+      result.document.originalFileName,
+      result.contentType,
+      result.bytes,
     );
   }
 
@@ -544,10 +667,11 @@ export class FleetPartnerController {
     @Param("submissionId") submissionId: string,
     @Body() command: ConfirmSupplyDocumentUploadCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplyDocumentService.confirmUpload(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
         this.actorId(actorId),
         command,
@@ -567,10 +691,11 @@ export class FleetPartnerController {
     @Param("documentId") documentId: string,
     @Body() command: DeleteSupplyDocumentCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       await this.supplyDocumentService.deleteDocument(
-        this.requireFleetPartnerId(fleetPartnerId),
+        this.documentPartner(fleetPartnerId, identity),
         submissionId,
         documentId,
         this.actorId(actorId),
@@ -742,9 +867,10 @@ export class FleetPartnerController {
     @Param("caseId") caseId: string,
     @Body() command: SubmitFleetCaseReplyCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     const result = await this.caseService.submitReply(
-      this.requireFleetPartnerId(fleetPartnerId),
+      this.documentPartner(fleetPartnerId, identity),
       caseId,
       this.actorId(actorId),
       command,
@@ -760,14 +886,56 @@ export class FleetPartnerController {
     @Param("caseId") caseId: string,
     @Body() command: CreateCaseAttachmentUploadUrlCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     const result = await this.caseService.createAttachmentUploadUrl(
-      this.requireFleetPartnerId(fleetPartnerId),
+      this.documentPartner(fleetPartnerId, identity),
       caseId,
       this.actorId(actorId),
       command,
     );
     return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @Put("fleet-partner/cases/:caseId/attachments/content")
+  @RequireRealms("partner")
+  async uploadPortalCaseAttachmentContent(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("caseId") caseId: string,
+    @Query("objectKey") objectKey: string,
+    @Req() request: IncomingMessage,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.caseService.uploadAttachmentContent(
+        this.documentPartner(fleetPartnerId, identity),
+        caseId,
+        objectKey,
+        request,
+        request.headers["content-type"] ?? "",
+      ),
+    );
+  }
+
+  @Get("admin/fleet-partners/case-attachments/:caseId/:attachmentId/download")
+  @RequireRealms("platform")
+  async downloadCaseAttachmentForReview(
+    @Param("caseId") caseId: string,
+    @Param("attachmentId") attachmentId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Res() res: HttpResponseLike,
+  ) {
+    this.documentReviewer(identity);
+    const result = await this.caseService.downloadAttachmentForReview(
+      caseId,
+      attachmentId,
+    );
+    this.sendDocument(
+      res,
+      result.attachment.name,
+      result.attachment.contentType,
+      result.fileContent,
+    );
   }
 
   @Post("fleet-partner/cases/:caseId/attachments/confirm")
@@ -777,9 +945,10 @@ export class FleetPartnerController {
     @Param("caseId") caseId: string,
     @Body() command: ConfirmCaseAttachmentUploadCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     const result = await this.caseService.confirmAttachmentUpload(
-      this.requireFleetPartnerId(fleetPartnerId),
+      this.documentPartner(fleetPartnerId, identity),
       caseId,
       this.actorId(actorId),
       command,
@@ -793,9 +962,10 @@ export class FleetPartnerController {
     @Param("caseId") caseId: string,
     @Param("attachmentId") attachmentId: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     const result = await this.caseService.getAttachmentReadUrl(
-      this.requireFleetPartnerId(fleetPartnerId),
+      this.documentPartner(fleetPartnerId, identity),
       caseId,
       attachmentId,
     );
@@ -810,24 +980,23 @@ export class FleetPartnerController {
     @Query("expiresAt") expiresAtStr: string,
     @Query("sig") sig: string,
     @Res() res: HttpResponseLike,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    const normalizedPartnerId = this.requireFleetPartnerId(fleetPartnerId);
+    const normalizedPartnerId = this.documentPartner(fleetPartnerId, identity);
     const expiresAt = Number.parseInt(expiresAtStr || "0", 10);
-    const result =
-      await this.caseService.verifyAndGetAttachmentForDownload(
-        normalizedPartnerId,
-        caseId,
-        attachmentId,
-        expiresAt,
-        sig || "",
-      );
-
-    res.setHeader("Content-Type", result.attachment.contentType);
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(result.attachment.name)}"`,
+    const result = await this.caseService.verifyAndGetAttachmentForDownload(
+      normalizedPartnerId,
+      caseId,
+      attachmentId,
+      expiresAt,
+      sig || "",
     );
-    res.setHeader("Content-Length", result.fileContent.length);
-    res.send(result.fileContent);
+
+    this.sendDocument(
+      res,
+      result.attachment.name,
+      result.attachment.contentType,
+      result.fileContent,
+    );
   }
 }

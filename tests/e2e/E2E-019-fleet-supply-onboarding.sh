@@ -20,11 +20,6 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 SCENARIO="E2E-019"
 FLEET_PARTNER_ID="${E2E_SUPPLY_FLEET_PARTNER_ID:-fleet-demo-001}"
 READINESS_SCOPES="${E2E_SUPPLY_READINESS_SCOPES:-billing:read partner:entries:read}"
-VALID_CHECKSUM_A="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-VALID_CHECKSUM_B="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
-VALID_CHECKSUM_C="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-VALID_CHECKSUM_D="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-VALID_CHECKSUM_E="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
 TMP_FILES=()
 cleanup() {
@@ -39,6 +34,7 @@ use_actor_id() { switch_actor "platform_admin" "$1"; }
 use_partner_actor() {
   switch_actor "partner_api_key" "e2e-fleet-partner-001"
   E2E_FLEET_PARTNER_ID="$FLEET_PARTNER_ID"
+  E2E_PARTNER_ID="$FLEET_PARTNER_ID"
   E2E_EXTRA_SCOPES="$READINESS_SCOPES"
 }
 
@@ -108,15 +104,37 @@ create_upload_url() { # submission-id revision document-type file-name
     log_fail "Body: ${RESP_BODY}"
     exit 1
   fi
+  DOC_UPLOAD_URL=$(json_get '.data.upload_url')
+  DOC_BYTES_FILE=$(mktemp)
+  TMP_FILES+=("$DOC_BYTES_FILE")
+  printf '%%PDF-1.4 C125 evidence %s %s' "$3" "$4" > "$DOC_BYTES_FILE"
+  DOC_FILE_SIZE=$(wc -c < "$DOC_BYTES_FILE" | tr -d ' ')
+  DOC_CHECKSUM=$(sha256sum "$DOC_BYTES_FILE" | cut -d ' ' -f1)
+  http_call PUT "${DOC_UPLOAD_URL#${E2E_API_PATH_PREFIX}}" "$DOC_BYTES_FILE" "application/octet-stream"
+  assert_status "200|201"
+  if [[ "$(json_get '.data.scan_state')" != "clean" ]]; then
+    log_fail "Upload did not return a clean correlated scan receipt"
+    exit 1
+  fi
+
 }
 
-confirm_upload() { # submission-id revision document-type file-name checksum
+confirm_upload() { # submission-id revision document-type file-name
   use_partner_actor
   post_json \
     "/fleet-partner/supply-submissions/$1/documents/confirm" \
-    "{\"expectedRevisionNo\":$2,\"documentType\":\"$3\",\"objectKey\":\"${DOC_OBJECT_KEY}\",\"originalFileName\":\"$4\",\"contentType\":\"application/pdf\",\"fileSize\":1024,\"checksumSha256\":\"$5\",\"effectiveFrom\":\"2026-01-01\",\"effectiveUntil\":\"2027-12-31\"}"
+    "{\"expectedRevisionNo\":$2,\"documentType\":\"$3\",\"objectKey\":\"${DOC_OBJECT_KEY}\",\"originalFileName\":\"$4\",\"contentType\":\"application/pdf\",\"fileSize\":${DOC_FILE_SIZE},\"checksumSha256\":\"${DOC_CHECKSUM}\",\"effectiveFrom\":\"2026-01-01\",\"effectiveUntil\":\"2027-12-31\"}"
   assert_status "200|201"
   DOC_ID=$(json_get '.data.document_id')
+  http_call GET "/fleet-partner/supply-submissions/$1/documents/${DOC_ID}/download"
+  assert_status "200"
+  local downloaded_checksum
+  downloaded_checksum=$(printf '%s' "$RESP_BODY" | sha256sum | cut -d ' ' -f1)
+  if [[ "$downloaded_checksum" != "$DOC_CHECKSUM" ]]; then
+    log_fail "Stored document readback differs from uploaded bytes"
+    exit 1
+  fi
+  log_ok "Uploaded, scanned and read back ${DOC_FILE_SIZE} bytes (${DOC_CHECKSUM})"
 }
 
 chain_init
@@ -164,17 +182,17 @@ read_portal_submission "$DRIVER_SUB"
 log_ok "PUT /driver advanced driver draft revision"
 
 create_upload_url "$DRIVER_SUB" 2 "professional_driver_license" "driver-license.pdf"
-confirm_upload "$DRIVER_SUB" 2 "professional_driver_license" "driver-license.pdf" "$VALID_CHECKSUM_A"
+confirm_upload "$DRIVER_SUB" 2 "professional_driver_license" "driver-license.pdf"
 read_portal_submission "$DRIVER_SUB"
 [[ "$PORTAL_SUB_REV" == "3" ]] || { log_fail "Expected driver revision 3 after first document, got ${PORTAL_SUB_REV}"; exit 1; }
 
 create_upload_url "$DRIVER_SUB" 3 "taxi_driver_registration" "taxi-registration.pdf"
-confirm_upload "$DRIVER_SUB" 3 "taxi_driver_registration" "taxi-registration.pdf" "$VALID_CHECKSUM_B"
+confirm_upload "$DRIVER_SUB" 3 "taxi_driver_registration" "taxi-registration.pdf"
 read_portal_submission "$DRIVER_SUB"
 [[ "$PORTAL_SUB_REV" == "4" ]] || { log_fail "Expected driver revision 4 after second document, got ${PORTAL_SUB_REV}"; exit 1; }
 
 create_upload_url "$DRIVER_SUB" 4 "other" "driver-extra.pdf"
-confirm_upload "$DRIVER_SUB" 4 "other" "driver-extra.pdf" "$VALID_CHECKSUM_C"
+confirm_upload "$DRIVER_SUB" 4 "other" "driver-extra.pdf"
 EXTRA_DRIVER_DOC_ID="$DOC_ID"
 delete_json \
   "/fleet-partner/supply-submissions/${DRIVER_SUB}/documents/${EXTRA_DRIVER_DOC_ID}" \
@@ -258,9 +276,9 @@ post_json \
 assert_status "200|201"
 WITHDRAW_SUB=$(json_get '.data.submission.submission_id')
 create_upload_url "$WITHDRAW_SUB" 1 "professional_driver_license" "withdraw-license.pdf"
-confirm_upload "$WITHDRAW_SUB" 1 "professional_driver_license" "withdraw-license.pdf" "$VALID_CHECKSUM_A"
+confirm_upload "$WITHDRAW_SUB" 1 "professional_driver_license" "withdraw-license.pdf"
 create_upload_url "$WITHDRAW_SUB" 2 "taxi_driver_registration" "withdraw-registration.pdf"
-confirm_upload "$WITHDRAW_SUB" 2 "taxi_driver_registration" "withdraw-registration.pdf" "$VALID_CHECKSUM_B"
+confirm_upload "$WITHDRAW_SUB" 2 "taxi_driver_registration" "withdraw-registration.pdf"
 use_partner_actor
 post_json \
   "/fleet-partner/supply-submissions/${WITHDRAW_SUB}/submit" \
@@ -296,11 +314,11 @@ read_portal_submission "$VEHICLE_SUB"
 [[ "$PORTAL_SUB_REV" == "2" ]] || { log_fail "Expected vehicle revision 2 after update, got ${PORTAL_SUB_REV}"; exit 1; }
 
 create_upload_url "$VEHICLE_SUB" 2 "vehicle_registration" "vehicle-registration.pdf"
-confirm_upload "$VEHICLE_SUB" 2 "vehicle_registration" "vehicle-registration.pdf" "$VALID_CHECKSUM_C"
+confirm_upload "$VEHICLE_SUB" 2 "vehicle_registration" "vehicle-registration.pdf"
 create_upload_url "$VEHICLE_SUB" 3 "insurance_policy" "vehicle-insurance.pdf"
-confirm_upload "$VEHICLE_SUB" 3 "insurance_policy" "vehicle-insurance.pdf" "$VALID_CHECKSUM_D"
+confirm_upload "$VEHICLE_SUB" 3 "insurance_policy" "vehicle-insurance.pdf"
 create_upload_url "$VEHICLE_SUB" 4 "fleet_participation_contract" "fleet-contract.pdf"
-confirm_upload "$VEHICLE_SUB" 4 "fleet_participation_contract" "fleet-contract.pdf" "$VALID_CHECKSUM_E"
+confirm_upload "$VEHICLE_SUB" 4 "fleet_participation_contract" "fleet-contract.pdf"
 read_portal_submission "$VEHICLE_SUB"
 [[ "$PORTAL_SUB_REV" == "5" ]] || { log_fail "Expected vehicle revision 5 after uploads, got ${PORTAL_SUB_REV}"; exit 1; }
 

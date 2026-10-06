@@ -18,16 +18,17 @@ import {
 } from "../../apps/api/src/common/auth/auth.constants";
 
 describe("IAM policy catalog", () => {
-  it("drives the API and control-plane actor scope presets from one source", () => {
+  it("drives the API and control-plane actor scope presets from one source", async () => {
     expect(AUTH_SCOPE_PRESETS.platform_admin).toEqual(
       getIamActorScopePreset("platform_admin"),
     );
     expect(
-      issueControlPlaneRequestAuth({ actorType: "platform_admin" }).identity
-        .scopes,
+      (await issueControlPlaneRequestAuth({ actorType: "platform_admin" }))
+        .identity.scopes,
     ).toEqual(getIamActorScopePreset("platform_admin"));
     expect(
-      issueControlPlaneRequestAuth({ actorType: "ops_user" }).identity.scopes,
+      (await issueControlPlaneRequestAuth({ actorType: "ops_user" })).identity
+        .scopes,
     ).toEqual(getIamActorScopePreset("ops_user"));
   });
 

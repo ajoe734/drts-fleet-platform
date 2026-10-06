@@ -45,6 +45,10 @@ import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extracto
 import type { AuthBootstrapHeaders, AuthRealm, AuthActorType } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  DEV_MFA_WAIVED_AMR,
+  isDevWorkforceMfaWaiverEnabled,
+} from "../../common/auth/trusted-mfa.policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
@@ -98,10 +102,17 @@ function resolveBootstrapTokenAssurance(identity: BootstrapRequestIdentity): {
   switch (identity.actorType) {
     case "platform_admin":
     case "ops_user":
-      return {
-        amr: ["verified_iap_workforce"],
-        acr: "aal2",
-      };
+      // Bootstrap headers (`x-actor-type: platform_admin|ops_user`) are a dev
+      // fixture, not a verified IAP assertion: stamping `verified_iap_workforce`
+      // / `aal2` here was a fabricated MFA claim (ENTRY-IAP-WORKFORCE-AUTH-20261005).
+      // The real IAP path (`issueToken`'s `rawAssertion` branch) derives amr/acr
+      // from `IAPSubjectAdapter.resolveSubject`'s verified assertion instead.
+      // An explicit, audited dev waiver is the only way this identity clears
+      // the workforce step-up gate without a real MFA signal; see
+      // `isDevWorkforceMfaWaiverEnabled` in trusted-mfa.policy.ts.
+      return isDevWorkforceMfaWaiverEnabled()
+        ? { amr: [DEV_MFA_WAIVED_AMR] }
+        : {};
     case "tenant_admin":
       return {
         amr: ["tenant_bootstrap_fixture"],
@@ -596,7 +607,6 @@ export class AuthController {
           ...(expectedAudience ? { expectedAudience } : {}),
           ...(expectedIssuer ? { expectedIssuer } : {}),
           ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
-          autoProvision: !isStrictIap,
         },
       );
 
