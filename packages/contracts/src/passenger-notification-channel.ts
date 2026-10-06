@@ -302,22 +302,29 @@ export interface FirstPartyPushNotificationText {
  * name, address, origin/destination, GPS, plate, driver name, payment data,
  * or any token/credential.
  *
- * This is the logical, pre-serialization DTO — same precedent as
- * `PartnerPassengerNotificationWireData` (typed fields, not yet the literal
- * bytes sent on the wire). FCM HTTP v1's actual `Message.data` field is a
- * string-to-string map (see
- * https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#Message);
- * converting `eventSequence` to a string and building that map is the
- * eventual FCM transport's job (`PUSH-FIRST-PARTY-FCM-20261006`, out of this
- * module's scope), not something this contract performs or should be read
- * as already having done.
+ * Unlike `PartnerPassengerNotificationWireData` — a typed, pre-serialization
+ * DTO that a generic `partnerNotificationWireBytes()` snake_cases and sorts
+ * at send time, because the partner webhook body is arbitrary JSON — this
+ * type is the literal shape of FCM HTTP v1's `Message.data` field: a
+ * string-to-string map with no generic serializer available (see
+ * https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#Message).
+ * FCM rejects a non-string value in `data` outright, so this module pins the
+ * already-snake_case, already-stringified shape directly rather than a
+ * camelCase/typed intermediate — `event_sequence` is a decimal string, not a
+ * number. `FirstPartyPushMessage.data` and
+ * `FirstPartyPushDeliveryContext.wireMessage`/`wireMessageHash` (D6) freeze
+ * exactly this shape; a retry re-sends these same bytes unchanged. Producing
+ * this value from an order's event data is the eventual FCM transport's job
+ * (`PUSH-FIRST-PARTY-FCM-20261006`, out of this module's scope) — this
+ * contract only pins what that transport must produce and what the context
+ * must store.
  */
 export interface FirstPartyPushWireData {
-  notificationId: string;
+  notification_id: string;
   event: PartnerPassengerNotificationExternalEvent;
-  rideRef: string;
-  eventSequence: number;
-  expiresAt: string;
+  ride_ref: string;
+  event_sequence: string;
+  expires_at: string;
 }
 
 export interface FirstPartyPushMessage {

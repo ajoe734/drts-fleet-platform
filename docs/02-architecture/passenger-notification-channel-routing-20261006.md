@@ -29,12 +29,12 @@ PASSENGER_NOTIFICATION_CHANNELS = ["partner_webhook", "first_party_app"]
 
 管道由訂單來源決定，來源以 **server 端已核身身分**判定，不信 request body 自稱的欄位：
 
-| 訂單來源 | 判定依據 | 管道 |
-|---|---|---|
-| 夥伴內嵌叫車（referral-embed-web） | `referral_passenger` 身分，經 `POST /api/partner/referral/passenger/bookings` → `createReferralPassengerBooking` | `partner_webhook` |
-| 帶夥伴 session 的 multi-taxi ride（既有路徑） | 既有 `writeOrderPartnerNotificationRouteIfApplicable` 寫入路徑 | `partner_webhook` |
-| 將來的第一方乘客 App session（目前不存在） | 第一方乘客身分（本波尚未開放） | `first_party_app` |
-| 電話客服、無人語音、企業派車、夥伴人員代訂（partner-booking-web）、外部平台轉單 | 無上述任一已核身 App session | 無管道 |
+| 訂單來源                                                                        | 判定依據                                                                                                         | 管道              |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------- |
+| 夥伴內嵌叫車（referral-embed-web）                                              | `referral_passenger` 身分，經 `POST /api/partner/referral/passenger/bookings` → `createReferralPassengerBooking` | `partner_webhook` |
+| 帶夥伴 session 的 multi-taxi ride（既有路徑）                                   | 既有 `writeOrderPartnerNotificationRouteIfApplicable` 寫入路徑                                                   | `partner_webhook` |
+| 將來的第一方乘客 App session（目前不存在）                                      | 第一方乘客身分（本波尚未開放）                                                                                   | `first_party_app` |
+| 電話客服、無人語音、企業派車、夥伴人員代訂（partner-booking-web）、外部平台轉單 | 無上述任一已核身 App session                                                                                     | 無管道            |
 
 這張表只是分類依據，不是新的路由判定程式碼位置；實際寫入時機見 D2。
 
@@ -63,21 +63,21 @@ PASSENGER_NOTIFICATION_CHANNELS = ["partner_webhook", "first_party_app"]
 
 `iam.phase1_passenger_push_devices`（與既有 `iam.driver_device_bindings`——`infra/migrations/V0078__driver_device_session_persistence.sql`——同一 schema 並列，欄位精神相同：伺服器簽發 id、token 以雜湊儲存、status 驅動生命週期）：
 
-| 欄位 | 說明 |
-|---|---|
-| `device_id` | uuid，PK |
-| `drts_passenger_id` | 第一方乘客身分（本波尚未開放發放，欄位先留） |
-| `platform` | `ios` \| `android` |
-| `provider` | `fcm_v1`（固定值，為未來多 provider 留擴充空間） |
-| `app_id` | 第一方 App 的 Firebase/APNs app 識別 |
-| `app_version` | 用於除錯與分階段淘汰舊版本 |
-| `token` | 原始 FCM registration token（見下方「token 不落 log」） |
-| `token_sha256` | token 的 SHA-256。唯一性是**部分索引**（只限 `status='active'` 的列），不是全表 `UNIQUE`：`CREATE UNIQUE INDEX ... ON iam.phase1_passenger_push_devices (provider, token_sha256) WHERE status = 'active'`。原因見下方「換人登入同一支手機」——轉綁時舊列保留且標 `revoked`、新列 insert，若唯一性是全表範圍，新列會因與舊列（未刪除、只是 revoked）同一 hash 而被拒絕；限定在 `active` 列，舊列一旦轉成 `revoked` 就退出這個索引，新 `active` 列才能進來。同一 hash 可以同時存在多筆歷史 `revoked`/`invalid` 列，但任何時間點至多一筆 `active`。 |
-| `status` | `active` \| `revoked` \| `invalid` |
-| `status_reason` | 人可讀的狀態變更原因 |
-| `notification_consent_version` | 乘客同意接收通知的版本化紀錄 |
-| `registered_at` / `last_seen_at` / `invalidated_at` | 生命週期時間戳 |
-| `created_at` / `updated_at` | 稽核時間戳 |
+| 欄位                                                | 說明                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `device_id`                                         | uuid，PK                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `drts_passenger_id`                                 | 第一方乘客身分（本波尚未開放發放，欄位先留）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `platform`                                          | `ios` \| `android`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `provider`                                          | `fcm_v1`（固定值，為未來多 provider 留擴充空間）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `app_id`                                            | 第一方 App 的 Firebase/APNs app 識別                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `app_version`                                       | 用於除錯與分階段淘汰舊版本                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `token`                                             | 原始 FCM registration token（見下方「token 不落 log」）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `token_sha256`                                      | token 的 SHA-256。唯一性是**部分索引**（只限 `status='active'` 的列），不是全表 `UNIQUE`：`CREATE UNIQUE INDEX ... ON iam.phase1_passenger_push_devices (provider, token_sha256) WHERE status = 'active'`。原因見下方「換人登入同一支手機」——轉綁時舊列保留且標 `revoked`、新列 insert，若唯一性是全表範圍，新列會因與舊列（未刪除、只是 revoked）同一 hash 而被拒絕；限定在 `active` 列，舊列一旦轉成 `revoked` 就退出這個索引，新 `active` 列才能進來。同一 hash 可以同時存在多筆歷史 `revoked`/`invalid` 列，但任何時間點至多一筆 `active`。 |
+| `status`                                            | `active` \| `revoked` \| `invalid`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `status_reason`                                     | 人可讀的狀態變更原因                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `notification_consent_version`                      | 乘客同意接收通知的版本化紀錄                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `registered_at` / `last_seen_at` / `invalidated_at` | 生命週期時間戳                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `created_at` / `updated_at`                         | 稽核時間戳                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### 規則
 
@@ -123,17 +123,17 @@ DELETE /api/passenger-app/push-devices/{deviceId}
 新增 `mobility.phase1_order_first_party_notification_routes`，與夥伴管道的
 `mobility.phase1_order_partner_notification_routes`（01_system_sa_sd.md §4）**平行存在、結構對應但欄位不同**：
 
-| 欄位 | 說明 |
-|---|---|
-| `order_id` | PK |
-| `tenant_id` | 租戶隔離 |
-| `drts_passenger_id` | 第一方乘客身分 |
-| `passenger_subject_ref` | 內部核對用，**不**放入通知 payload（同 01 §6 的既有原則） |
-| `app_id` | 第一方 App 識別 |
-| `notification_policy_version` | `CHECK (notification_policy_version = 'first_party_notification_v1')` |
-| `consent_version` | 乘客同意版本 |
-| `ride_ref` | `UNIQUE`——不可作為 bearer credential，與夥伴管道的 `ride_ref` 唯一性原則相同 |
-| `created_at` | 寫入時間 |
+| 欄位                          | 說明                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `order_id`                    | PK                                                                           |
+| `tenant_id`                   | 租戶隔離                                                                     |
+| `drts_passenger_id`           | 第一方乘客身分                                                               |
+| `passenger_subject_ref`       | 內部核對用，**不**放入通知 payload（同 01 §6 的既有原則）                    |
+| `app_id`                      | 第一方 App 識別                                                              |
+| `notification_policy_version` | `CHECK (notification_policy_version = 'first_party_notification_v1')`        |
+| `consent_version`             | 乘客同意版本                                                                 |
+| `ride_ref`                    | `UNIQUE`——不可作為 bearer credential，與夥伴管道的 `ride_ref` 唯一性原則相同 |
+| `created_at`                  | 寫入時間                                                                     |
 
 本波只提供 writer（schema + typed command 形狀），**目前沒有呼叫端**——第一方叫車路徑不存在，這張表不會被任何本波程式寫入。寫入時機見 D8「本波不做」。
 
@@ -162,16 +162,20 @@ DELETE /api/passenger-app/push-devices/{deviceId}
   - `deliveryStage = provider_accepted`
   - `receiptId` = FCM 回傳的真實 message name（禁止合成值，同夥伴管道 01 §7 的 `receipt-${outboxId}` 反例）。
 - **永遠不宣稱** `device_received` 或「已讀」——這兩層證據（01 §7 的證據階梯）本波沒有 callback 可以提供。
-- 其餘裝置一旦被判定暫時失敗（見下方「錯誤對照」），**在這則 outbox 已經 `delivered` 之後就不再補送**，也沒有「下一輪重試」可言：`delivered` 是 outbox 既有 status enum 的終態，worker 的 claim/fence 條件不會再撈到已經 `delivered` 的列（D7）。這是設計上刻意的行為——D6 的投遞義務只要求「至少一個裝置收到」，其餘裝置的暫時失敗在整批判定 `delivered` 的同一次嘗試裡就一併結案，不再有後續嘗試。只有在**沒有任何裝置**回 200（即整批都失敗或都 invalid）時，outbox 才維持非終態、交給一般重試機制（`retryDisposition=automatic`／`configuration_blocked`）在下一輪重新嘗試全部仍 `active` 的裝置。
+- 其餘裝置一旦被判定暫時失敗（見下方「錯誤對照」），**在這則 outbox 已經 `delivered` 之後就不再補送**，也沒有「下一輪重試」可言：`delivered` 是 outbox 既有 status enum 的終態，worker 的 claim/fence 條件不會再撈到已經 `delivered` 的列（D7）。這是設計上刻意的行為——D6 的投遞義務只要求「至少一個裝置收到」，其餘裝置的暫時失敗在整批判定 `delivered` 的同一次嘗試裡就一併結案，不再有後續嘗試。
+- **沒有任何裝置**回 200 時，一次嘗試的結果依下方「錯誤對照」分三種，不能一概「下一輪重新嘗試」：
+  - 全部 `active` 裝置都回 `invalid`，或這張單一開始就沒有任何 `active` 裝置：`failureReason=no_active_device`、`retryDisposition=terminal`——沒有收件對象了，不排程下一輪，也不是「暫時」卡住。
+  - 至少一個裝置回暫時性錯誤（`QUOTA_EXCEEDED`/`UNAVAILABLE`/`INTERNAL`/逾時），且不是上一種全部 invalid 的情況：`retryDisposition=automatic`，下一輪只重新嘗試這則 context 裡當下仍是 `active` 的裝置（不重新解析收件人，呼應 D2）。
+  - 回 `THIRD_PARTY_AUTH_ERROR`/401/其他 403：`failureReason=credential_rejected`、`retryDisposition=configuration_blocked`，等憑證或設定修好才重試，不是自動排程下一輪。
 
 ### 錯誤對照
 
-| FCM 回應 | 處理 |
-|---|---|
-| `UNREGISTERED`（404）、`INVALID_ARGUMENT`（token 無效）、`SENDER_ID_MISMATCH`（403） | 該裝置標 `invalid`（D4），該裝置之後不再送 |
-| `QUOTA_EXCEEDED`（429）、`UNAVAILABLE`（503）、`INTERNAL`（500）、逾時 | `provider_transient_error` 等級，`retryDisposition=automatic`，尊重 `Retry-After` |
-| `THIRD_PARTY_AUTH_ERROR`、401、其他 403 | `credential_rejected`，`retryDisposition=configuration_blocked` |
-| 所有裝置都 `invalid` 或沒有任何 `active` 裝置 | `failureReason=no_active_device`，`retryDisposition=terminal` |
+| FCM 回應                                                                             | 處理                                                                              |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `UNREGISTERED`（404）、`INVALID_ARGUMENT`（token 無效）、`SENDER_ID_MISMATCH`（403） | 該裝置標 `invalid`（D4），該裝置之後不再送                                        |
+| `QUOTA_EXCEEDED`（429）、`UNAVAILABLE`（503）、`INTERNAL`（500）、逾時               | `provider_transient_error` 等級，`retryDisposition=automatic`，尊重 `Retry-After` |
+| `THIRD_PARTY_AUTH_ERROR`、401、其他 403                                              | `credential_rejected`，`retryDisposition=configuration_blocked`                   |
+| 所有裝置都 `invalid` 或沒有任何 `active` 裝置                                        | `failureReason=no_active_device`，`retryDisposition=terminal`                     |
 
 ### 重試政策
 
@@ -182,7 +186,7 @@ DELETE /api/passenger-app/push-devices/{deviceId}
 ### Payload
 
 - `notification` 欄位放通用中文標題與內文（不含個資）。
-- `data` 欄位只放：`notification_id`、`event`（沿用既有 `passenger.<event>.v1` 命名，見 `partner-passenger-notification.ts`）、`ride_ref`、`event_sequence`、`expires_at`。
+- `data` 欄位是 FCM `Message.data` 要求的 string-to-string map（見官方規格 https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#Message ），只放：`notification_id`、`event`（沿用既有 `passenger.<event>.v1` 命名，見 `partner-passenger-notification.ts`）、`ride_ref`、`event_sequence`（十進位字串，不是數字）、`expires_at`。這就是 D6「投遞 context」裡 `wireMessage`/`wireMessageHash` 凍結的那組位元組本身，不是另一層轉換前的中間型；`packages/contracts/src/passenger-notification-channel.ts` 的 `FirstPartyPushWireData` 直接宣告成這個最終形狀。
 - 不放 01 §6 禁止的任何欄位（電話、姓名、地址、GPS、車牌、司機姓名、付款資料、任何 token）。
 
 ## D7 分流點與單一重試 owner

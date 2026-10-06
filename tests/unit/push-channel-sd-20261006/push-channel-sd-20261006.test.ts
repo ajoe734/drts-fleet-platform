@@ -39,23 +39,21 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         "partner_webhook",
         "first_party_app",
       ]);
-      expect(PASSENGER_NOTIFICATION_CHANNELS as readonly string[]).not.toContain(
-        "none",
-      );
+      expect(
+        PASSENGER_NOTIFICATION_CHANNELS as readonly string[],
+      ).not.toContain("none");
     });
 
     it("does not rename or remove any existing partner failure reason or disposition value", () => {
       // Guards against this task editing partner-passenger-notification.ts,
       // which is out of write scope (common.md boundary).
-      expect(PARTNER_NOTIFICATION_FAILURE_REASONS).toContain(
-        "route_missing",
-      );
+      expect(PARTNER_NOTIFICATION_FAILURE_REASONS).toContain("route_missing");
       expect(PARTNER_NOTIFICATION_FAILURE_REASONS).toContain(
         "credential_rejected",
       );
-      expect(PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS.route_missing).toBe(
-        "manual_only",
-      );
+      expect(
+        PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS.route_missing,
+      ).toBe("manual_only");
       expect(
         PARTNER_NOTIFICATION_FAILURE_REASON_RETRY_DISPOSITIONS.recipient_revoked,
       ).toBe("terminal");
@@ -73,7 +71,8 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         drtsPassengerId: "passenger-001",
         passengerSubjectRef: "subj-pseudo-001",
         appId: "app-first-party-001",
-        notificationPolicyVersion: FIRST_PARTY_NOTIFICATION_ROUTE_POLICY_VERSION,
+        notificationPolicyVersion:
+          FIRST_PARTY_NOTIFICATION_ROUTE_POLICY_VERSION,
         consentVersion: "v1",
         rideRef: "ride-001",
         createdAt: "2026-10-06T00:00:00.000Z",
@@ -107,9 +106,7 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         expect(resolved.route.rideRef).toBe("ride-002");
       }
 
-      const channels: PassengerNotificationChannel[] = [
-        resolved.channel,
-      ];
+      const channels: PassengerNotificationChannel[] = [resolved.channel];
       expect(channels).toEqual(["partner_webhook"]);
     });
   });
@@ -163,9 +160,7 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
   // =========================================================================
   describe("D6 first-party delivery semantics", () => {
     it("exports exactly one delivery target, reserved for symmetry with the partner contract", () => {
-      expect(FIRST_PARTY_PUSH_DELIVERY_TARGETS).toEqual([
-        "first_party_device",
-      ]);
+      expect(FIRST_PARTY_PUSH_DELIVERY_TARGETS).toEqual(["first_party_device"]);
     });
 
     it("exports the full evidence ladder but documents only outbox_persisted/provider_accepted as currently written", () => {
@@ -227,33 +222,61 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
       expect(PASSENGER_PUSH_FIRST_PARTY_ENABLED_DEFAULT).toBe(false);
     });
 
-    it("validates a FirstPartyPushMessage carries only the D6 allowlisted data fields", () => {
+    it("validates a FirstPartyPushMessage.data carries only the D6 allowlisted fields, in FCM's literal snake_case/string wire shape", () => {
       const message: FirstPartyPushMessage = {
         notification: { title: "行程通知", body: "司機即將到達" },
         data: {
-          notificationId: "outbox-001",
+          notification_id: "outbox-001",
           event: "passenger.driver_arrived.v1",
-          rideRef: "ride-001",
-          eventSequence: 1,
-          expiresAt: "2026-10-06T00:05:00.000Z",
+          ride_ref: "ride-001",
+          event_sequence: "1",
+          expires_at: "2026-10-06T00:05:00.000Z",
         },
       };
       expect(Object.keys(message.data).sort()).toEqual(
         [
-          "eventSequence",
-          "expiresAt",
-          "notificationId",
-          "rideRef",
+          "event_sequence",
+          "expires_at",
+          "notification_id",
+          "ride_ref",
           "event",
         ].sort(),
       );
+      // FCM's Message.data is a string-to-string map; event_sequence must be
+      // a decimal string, never a number, or it is not valid FCM data.
+      expect(typeof message.data.event_sequence).toBe("string");
+      expect(
+        Object.values(message.data).every((v) => typeof v === "string"),
+      ).toBe(true);
     });
 
-    it("rejects an internal event identifier in data.event: D6 requires the external passenger.<event>.v1 wire name", () => {
-      // Guards against regressing FirstPartyPushWireData.event back to the
-      // internal PartnerPassengerEventType identifier (e.g. "driver_arrived")
-      // instead of the external, dot-versioned name the design doc's D6
-      // payload section requires.
+    it("rejects a camelCase/numeric-sequence shape and the internal event identifier for FirstPartyPushWireData — D6 requires FCM's literal snake_case/string wire bytes, not a pre-serialization DTO", () => {
+      // Regressing to camelCase keys with a numeric eventSequence is exactly
+      // what Codex2's round-3 F2 reopen flagged (the ledger's "exact wire
+      // bytes" claim does not hold for a camelCase/typed intermediate).
+      const regressed: FirstPartyPushMessage["data"] = {
+        // @ts-expect-error -- not FCM's Message.data shape: wrong key case
+        // and a numeric value where every field must be a string.
+        notificationId: "outbox-001",
+        event: "passenger.driver_arrived.v1",
+        rideRef: "ride-001",
+        eventSequence: 1,
+        expiresAt: "2026-10-06T00:05:00.000Z",
+      };
+      // The internal PartnerPassengerEventType identifier (e.g.
+      // "driver_arrived") must not satisfy data.event — only the external,
+      // dot-versioned PartnerPassengerNotificationExternalEvent union may.
+      const internalEvent: FirstPartyPushMessage["data"] = {
+        notification_id: "outbox-001",
+        // @ts-expect-error -- "driver_arrived" is the internal identifier,
+        // not a member of PartnerPassengerNotificationExternalEvent.
+        event: "driver_arrived",
+        ride_ref: "ride-001",
+        event_sequence: "1",
+        expires_at: "2026-10-06T00:05:00.000Z",
+      };
+      void regressed;
+      void internalEvent;
       expect(PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS).toContain(
         "passenger.driver_arrived.v1",
       );
@@ -262,22 +285,20 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
       ).not.toContain("driver_arrived");
     });
 
-    it("validates a FirstPartyPushDeliveryContext never pre-sets deliveryStage before a completed attempt", () => {
+    it("validates a FirstPartyPushDeliveryContext never pre-sets deliveryStage before a completed attempt, and freezes the literal wire bytes", () => {
       const context: FirstPartyPushDeliveryContext = {
         outboxId: "outbox-001",
         orderId: "order-001",
         tenantId: "tenant-001",
-        targetDevices: [
-          { deviceId: "device-001", tokenSha256: "abc123" },
-        ],
+        targetDevices: [{ deviceId: "device-001", tokenSha256: "abc123" }],
         wireMessage: {
           notification: { title: "行程通知", body: "司機即將到達" },
           data: {
-            notificationId: "outbox-001",
+            notification_id: "outbox-001",
             event: "passenger.driver_arrived.v1",
-            rideRef: "ride-001",
-            eventSequence: 1,
-            expiresAt: "2026-10-06T00:05:00.000Z",
+            ride_ref: "ride-001",
+            event_sequence: "1",
+            expires_at: "2026-10-06T00:05:00.000Z",
           },
         },
         wireMessageHash: "hash-001",
@@ -293,6 +314,29 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
       };
       expect(context.deliveryStage).toBeNull();
       expect(context.receiptId).toBeNull();
+      expect(context.wireMessage.data.event_sequence).toBe("1");
+    });
+
+    it("terminates with no_active_device/terminal when every device is invalid or none exists — this must not fall into the automatic next-round retry path", () => {
+      // Guards against regressing D6's "no device returned 200" branch back
+      // into a single catch-all "retry next round" outcome (Codex2's round-3
+      // F6 reopen): all-invalid/no-active-device must map to terminal, not
+      // automatic.
+      expect(
+        FIRST_PARTY_PUSH_FAILURE_REASON_RETRY_DISPOSITIONS.no_active_device,
+      ).toBe("terminal");
+      expect(
+        FIRST_PARTY_PUSH_FAILURE_REASON_RETRY_DISPOSITIONS.no_active_device,
+      ).not.toBe("automatic");
+      // A distinct transient-error outcome (at least one device returned a
+      // retryable error, none returned 200) stays automatic, not terminal —
+      // the two must not collapse into the same disposition.
+      expect(
+        FIRST_PARTY_PUSH_FAILURE_REASON_RETRY_DISPOSITIONS.provider_transient_error,
+      ).toBe("automatic");
+      expect(
+        FIRST_PARTY_PUSH_FAILURE_REASON_RETRY_DISPOSITIONS.provider_transient_error,
+      ).not.toBe("terminal");
     });
   });
 
