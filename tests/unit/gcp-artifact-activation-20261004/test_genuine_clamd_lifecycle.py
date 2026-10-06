@@ -135,7 +135,7 @@ def container_published_port(container_name, container_port):
     line = res.stdout.strip().splitlines()[0]
     return int(line.rsplit(":", 1)[1])
 
-def start_gateway_sidecar(gateway_image, gateway_container_name, clamd_container_name, ready_host_dir):
+def start_gateway_sidecar(gateway_image, gateway_container_name, clamd_container_name, ready_host_dir, clamd_port=3310):
     """Starts the real gateway image (operations/artifact-scanner/gateway,
     unmodified) joined to `clamd_container_name`'s own network namespace via
     Docker's `--network container:<name>` -- the faithful local equivalent
@@ -145,13 +145,18 @@ def start_gateway_sidecar(gateway_image, gateway_container_name, clamd_container
     directory, mirroring that script's shared in-memory `clamav-ready`
     volume (`--add-volume-mount` on both containers). Only gateway/server.ts's
     own documented env vars (CLAMD_HOST/CLAMD_PORT) are set; no gateway
-    source is touched."""
+    source is touched. `clamd_port` defaults to clamd's real listening port
+    3310; TestGenuineGatewayTransportFault below points it at a protocol-aware
+    relay sharing this same namespace instead, so gateway/server.ts:15-19's
+    single CLAMD_HOST/CLAMD_PORT config feeds BOTH versionClamd (isReady) and
+    exchangeWithClamd (the scan) through the relay, exactly as it feeds both
+    through clamd directly in production."""
     return run_cmd([
         "docker", "run", "-d", "--name", gateway_container_name,
         "--network", f"container:{clamd_container_name}",
         "-v", f"{ready_host_dir}:/var/run/clamav-ready",
         "-e", "CLAMD_HOST=127.0.0.1",
-        "-e", "CLAMD_PORT=3310",
+        "-e", f"CLAMD_PORT={clamd_port}",
         gateway_image,
     ])
 
@@ -843,6 +848,266 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 f"Genuine version transition confirmed: {seed_version} -> {new_expected_version}, "
                 "including an observed pending/not-yet-activated window before a real RELOAD, "
                 "and real gateway refusal/receipt evidence for both."
+            )
+
+# R5b.2-transport REOPEN: the remaining gap the review identified is a REAL
+# readiness-success THEN INSTREAM-transport-error path, exercised through
+# the actual gateway HTTP contract (handler.ts:135-145), not a substitute
+# pre-readiness rejection (operations/verification/verify-dev-artifact-
+# backends.py's CLAMD_PORT=1/9999 checks) or a modeled Connector
+# (test_gateway_transport_regression.test.ts). gateway/server.ts:15-19
+# resolves ONE CLAMD_HOST/CLAMD_PORT config and feeds it to BOTH
+# versionClamd (isReady, readiness.ts:48) and exchangeWithClamd (the scan
+# itself, handler.ts:142) -- there is no way to make VERSION succeed and
+# INSTREAM fail on the exact same TCP endpoint without something between
+# the gateway and clamd that treats the two commands differently. This
+# test stands up exactly that: a small, protocol-aware TCP relay, run as
+# its own container sharing the real clamd container's network namespace
+# (the same `--network container:<name>` composition `start_gateway_sidecar`
+# already uses for the gateway), which passes clamd's `zVERSION\0`/`zPING\0`
+# idle commands straight through to the real clamd untouched, but resets
+# the connection immediately for any `zINSTREAM\0` scan request before
+# clamd ever sees it. The gateway is pointed at the relay's port instead of
+# clamd's own 3310 -- gateway/clamd-transport.ts and handler.ts are not
+# modified; only the test-only relay sits on the wire. No Cloud Run TCP
+# ingress, public infrastructure or production-source fault branch is
+# involved; everything here is container-local Docker networking on the
+# GitHub runner, matching this harness's existing write-scope boundary.
+RELAY_IMAGE = "python:3.12-alpine"
+
+# Deliberately plain, dependency-free stdlib sockets (no asyncio event loop
+# subtleties to reason about for a tiny, bounded number of connections):
+# accept a connection, peek at the first bytes the client sent, and either
+# proxy the whole bidirectional byte stream to the real clamd (anything
+# that is not a scan request) or close immediately without ever dialing
+# clamd (a scan request) -- the one and only behavioral difference between
+# "VERSION succeeds" and "INSTREAM fails" that this test needs.
+RELAY_SCRIPT = """
+import socket
+import sys
+import threading
+
+listen_port = int(sys.argv[1])
+target_port = int(sys.argv[2])
+
+def pipe(src, dst):
+    try:
+        while True:
+            chunk = src.recv(65536)
+            if not chunk:
+                break
+            dst.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+def handle(conn):
+    try:
+        conn.settimeout(10)
+        first = conn.recv(4096)
+    except OSError:
+        conn.close()
+        return
+    if first.startswith(b"zINSTREAM\\0"):
+        # Definitive, immediate transport failure for scan requests only:
+        # never forwarded to clamd, so no reply (partial or otherwise) is
+        # ever possible -- matching clamd-transport.ts#exchangeWithClamd's
+        # own close-without-reply rejection branch.
+        try:
+            conn.setsockopt(
+                socket.SOL_SOCKET, socket.SO_LINGER,
+                __import__("struct").pack("ii", 1, 0),
+            )
+        except OSError:
+            pass
+        conn.close()
+        return
+    try:
+        upstream = socket.create_connection(("127.0.0.1", target_port), timeout=10)
+    except OSError:
+        conn.close()
+        return
+    try:
+        upstream.sendall(first)
+    except OSError:
+        conn.close()
+        upstream.close()
+        return
+    t1 = threading.Thread(target=pipe, args=(conn, upstream))
+    t2 = threading.Thread(target=pipe, args=(upstream, conn))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    conn.close()
+    upstream.close()
+
+def main():
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", listen_port))
+    srv.listen(64)
+    while True:
+        conn, _ = srv.accept()
+        threading.Thread(target=handle, args=(conn,), daemon=True).start()
+
+main()
+"""
+
+RELAY_LISTEN_PORT = 3311
+
+
+def start_clamd_relay(relay_container_name, clamd_container_name, listen_port=RELAY_LISTEN_PORT, target_port=3310):
+    """Starts the protocol-aware relay above as its own container, joined
+    to `clamd_container_name`'s network namespace exactly like the gateway
+    sidecar joins it -- so the relay, clamd and (once started) the gateway
+    all reach each other over that one shared loopback, the same topology
+    Cloud Run's multi-container instance gives the real gateway/clamd
+    pair."""
+    return run_cmd([
+        "docker", "run", "-d", "--name", relay_container_name,
+        "--network", f"container:{clamd_container_name}",
+        RELAY_IMAGE, "python3", "-c", RELAY_SCRIPT,
+        str(listen_port), str(target_port),
+    ])
+
+
+class TestGenuineGatewayTransportFault(unittest.TestCase):
+    def setUp(self):
+        self.clamd_image = os.environ.get("CLAMD_IMAGE")
+        self.gateway_image = os.environ.get("GATEWAY_IMAGE")
+        self.clamd_container_name = "test_gateway_transport_fault_clamd"
+        self.relay_container_name = "test_gateway_transport_fault_relay"
+        self.gateway_container_name = "test_gateway_transport_fault_gateway"
+        if not self.clamd_image:
+            self.skipTest("CLAMD_IMAGE environment variable not set")
+        if not self.gateway_image:
+            self.skipTest("GATEWAY_IMAGE environment variable not set")
+        for name in (self.gateway_container_name, self.relay_container_name, self.clamd_container_name):
+            run_cmd(["docker", "rm", "-f", name])
+
+    def tearDown(self):
+        for name in (self.gateway_container_name, self.relay_container_name, self.clamd_container_name):
+            run_cmd(["docker", "rm", "-f", name])
+
+    def test_real_readiness_success_then_instream_transport_failure(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ready_dir = os.path.join(tmp_dir, "clamav-ready")
+            os.makedirs(ready_dir, exist_ok=True)
+            os.chmod(ready_dir, 0o777)
+
+            print("Starting real clamd container...")
+            res = run_cmd([
+                "docker", "run", "-d", "--name", self.clamd_container_name,
+                "-p", "0:8080",
+                "-v", f"{ready_dir}:/var/run/clamav-ready",
+                self.clamd_image,
+            ])
+            self.assertEqual(res.returncode, 0, f"Failed to start clamd container: {res.stderr}")
+
+            success = wait_for_log(self.clamd_container_name, "updated (version:", 60, "stdout")
+            if not success:
+                self.fail("Failed to observe initial freshclam update log")
+            time.sleep(5)
+            self.assertTrue(wait_for_ping(self.clamd_container_name, 60), "clamd never answered a live PING after startup")
+
+            print("Starting protocol-aware relay sharing clamd's network namespace...")
+            res = start_clamd_relay(self.relay_container_name, self.clamd_container_name)
+            self.assertEqual(res.returncode, 0, f"Failed to start relay: {res.stderr}")
+
+            # The relay must itself be accepting connections before the
+            # gateway is pointed at it -- poll its own passthrough path
+            # (zPING) directly rather than assuming a fixed startup delay.
+            relay_ready = False
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                res = run_cmd([
+                    "docker", "exec", self.clamd_container_name, "sh", "-c",
+                    f"printf 'zPING\\0' | nc -w 3 127.0.0.1 {RELAY_LISTEN_PORT}",
+                ])
+                if res.returncode == 0 and "PONG" in res.stdout:
+                    relay_ready = True
+                    break
+                time.sleep(1)
+            self.assertTrue(relay_ready, "Relay never answered a passthrough PING via the real clamd")
+
+            print("Starting real gateway pointed at the relay instead of clamd directly...")
+            res = start_gateway_sidecar(
+                self.gateway_image, self.gateway_container_name,
+                self.clamd_container_name, ready_dir,
+                clamd_port=RELAY_LISTEN_PORT,
+            )
+            self.assertEqual(res.returncode, 0, f"Failed to start gateway sidecar: {res.stderr}")
+
+            gateway_port = None
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                gateway_port = container_published_port(self.clamd_container_name, 8080)
+                if gateway_port:
+                    break
+                time.sleep(1)
+            self.assertIsNotNone(gateway_port, "Gateway's published port 8080 never became available")
+
+            # Readiness-success half: through the relay's VERSION/PING
+            # passthrough, the real gateway must scan successfully -- proof
+            # that isReady() (readiness.ts#createIsReady -> versionClamd)
+            # genuinely succeeded via this exact relay path, not that the
+            # relay merely broke everything indiscriminately.
+            print("Verifying the real gateway scans successfully through the relay's passthrough path...")
+            ok_status, ok_body = None, None
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                ok_status, ok_body = gateway_scan(gateway_port, b"clean data")
+                if ok_status == 200:
+                    break
+                time.sleep(2)
+            self.assertEqual(
+                ok_status, 200,
+                f"Expected the real gateway to scan successfully through the relay's VERSION/INSTREAM "
+                f"passthrough before the fault is engaged, got {ok_status}: {ok_body}",
+            )
+            self.assertEqual(ok_body.get("verdict"), "clean", f"Expected a clean verdict, got {ok_body}")
+
+            # The actual ask: readiness (VERSION, via the SAME relay/config)
+            # keeps succeeding -- the relay never touches non-INSTREAM
+            # traffic -- while every INSTREAM scan attempt now fails
+            # definitively, through the gateway's own HTTP contract
+            # (handler.ts:140-146's isReady()-true-then-exchange()-throws
+            # branch), never once falling back to 503 scan_engine_not_ready
+            # or a successful 200.
+            print("Verifying the real gateway fails closed with scan_engine_unavailable while readiness still succeeds...")
+            for payload in (b"clean data", b"clean data", b"clean data"):
+                status, body = gateway_scan(gateway_port, payload)
+                self.assertEqual(
+                    status, 502,
+                    f"Expected 502 scan_engine_unavailable for an INSTREAM-only transport fault "
+                    f"with readiness still genuinely succeeding, got {status}: {body}",
+                )
+                self.assertIsInstance(body, dict, f"Expected a JSON error body, got {body!r}")
+                self.assertEqual(
+                    body.get("error"), "scan_engine_unavailable",
+                    f"Expected scan_engine_unavailable, got {body}",
+                )
+
+            # Direct confirmation that readiness itself is still succeeding
+            # DURING the fault (not merely before it): a live zVERSION query
+            # through the relay must still resolve, proving the 502s above
+            # are the exchange()-throws branch, not a readiness regression
+            # masquerading as it.
+            res = run_cmd([
+                "docker", "exec", self.clamd_container_name, "sh", "-c",
+                f"printf 'zVERSION\\0' | nc -w 3 127.0.0.1 {RELAY_LISTEN_PORT}",
+            ])
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("ClamAV", res.stdout, f"Expected a live VERSION reply via the relay during the fault, got {res.stdout!r}")
+
+            print(
+                "Genuine readiness-success-then-INSTREAM-transport-failure path confirmed through "
+                "the real gateway's own HTTP contract."
             )
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import {
   issueOpsSessionFixture,
 } from "../../support/signed-session-fixture";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
+import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
 
 function collectSourceFiles(dir: string): string[] {
   let entries: string[];
@@ -68,18 +69,19 @@ describe("signed-session-fixture issuance", () => {
     else process.env.JWT_PRIVATE_KEY = originalPrivateKey;
   }
 
-  it("mints a driver session with driver:write that a repo-less verifier accepts", async () => {
+  it("mints a driver session that the real repository-backed guard check (jwt-auth.service.ts#verifyAccessToken) accepts as a usable app session", async () => {
     configureSigningEnv();
     try {
-      const fixture = await issueDriverSessionFixture();
+      // Same repository instance issues and verifies, mirroring
+      // bootstrap-auth.guard.ts:388-405's real caller: a `JwtAuthService`
+      // constructed with an `IdentityRepository`, not the repo-less verifier
+      // that only proves signature/claims and skips durable-state checks.
+      const repo = new IdentityRepository();
+      const fixture = await issueDriverSessionFixture({ identityRepository: repo });
       expect(fixture.token).toBeTruthy();
 
-      // A fresh service with no identityRepository skips the durable-session
-      // lookup (jwt-auth.service.ts#verifyAccessToken's `if (!this.identityRepository...)`
-      // branch) and verifies pure signature/claims -- exactly what proves
-      // issueSessionToken signed a real, well-formed token, independent of
-      // whichever store (real Postgres or the in-process fallback) minted it.
-      const payload = await new JwtAuthService().verifyAccessToken(fixture.token);
+      const service = new JwtAuthService(repo);
+      const payload = await service.verifyAccessToken(fixture.token);
       expect(payload).not.toBeNull();
       expect(payload?.realm).toBe("driver");
       expect(payload?.actorType).toBe("driver_user");
@@ -90,19 +92,73 @@ describe("signed-session-fixture issuance", () => {
     }
   });
 
-  it("mints an ops session with billing:write and foundation:write that a repo-less verifier accepts", async () => {
+  it("rejects a driver session's token against a verifier backed by a repository that never saw the session (wrong-identity case)", async () => {
     configureSigningEnv();
     try {
-      const fixture = await issueOpsSessionFixture();
+      const issuingRepo = new IdentityRepository();
+      const fixture = await issueDriverSessionFixture({
+        identityRepository: issuingRepo,
+      });
+
+      const unrelatedRepo = new IdentityRepository();
+      const payload = await new JwtAuthService(unrelatedRepo).verifyAccessToken(
+        fixture.token,
+      );
+      expect(payload).toBeNull();
+    } finally {
+      restoreSigningEnv();
+    }
+  });
+
+  it("rejects a driver session once it has been revoked", async () => {
+    configureSigningEnv();
+    try {
+      const repo = new IdentityRepository();
+      const fixture = await issueDriverSessionFixture({ identityRepository: repo });
+      const service = new JwtAuthService(repo);
+
+      expect(await service.verifyAccessToken(fixture.token)).not.toBeNull();
+
+      await repo.revokeSession(fixture.sessionId, "test_revocation");
+
+      expect(await service.verifyAccessToken(fixture.token)).toBeNull();
+    } finally {
+      restoreSigningEnv();
+    }
+  });
+
+  it("mints an ops session with billing:write and foundation:write that the real repository-backed guard check accepts as a usable app session", async () => {
+    configureSigningEnv();
+    try {
+      const repo = new IdentityRepository();
+      const fixture = await issueOpsSessionFixture({ identityRepository: repo });
       expect(fixture.token).toBeTruthy();
 
-      const payload = await new JwtAuthService().verifyAccessToken(fixture.token);
+      const service = new JwtAuthService(repo);
+      const payload = await service.verifyAccessToken(fixture.token);
       expect(payload).not.toBeNull();
       expect(payload?.realm).toBe("platform");
       expect(payload?.actorType).toBe("platform_admin");
       expect(payload?.scopes).toContain("billing:write");
       expect(payload?.scopes).toContain("foundation:write");
       expect(payload?.sid).toBe(fixture.sessionId);
+    } finally {
+      restoreSigningEnv();
+    }
+  });
+
+  it("rejects an ops session once it has been revoked", async () => {
+    configureSigningEnv();
+    try {
+      const repo = new IdentityRepository();
+      const fixture = await issueOpsSessionFixture({ identityRepository: repo });
+      const service = new JwtAuthService(repo);
+
+      expect(await service.verifyAccessToken(fixture.token)).not.toBeNull();
+
+      await repo.revokeSession(fixture.sessionId, "test_revocation");
+
+      expect(await service.verifyAccessToken(fixture.token)).toBeNull();
     } finally {
       restoreSigningEnv();
     }

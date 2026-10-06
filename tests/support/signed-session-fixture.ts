@@ -58,7 +58,15 @@ function resolveRepository(injected?: IdentityRepository): IdentityRepository {
 
 /** Mints a real signed session for the `driver` realm with `driver:write`
  * (billing-settlement.controller.ts:706,755 requires it for staged-content
- * upload and proof persistence). */
+ * upload and proof persistence).
+ *
+ * jwt-auth.service.ts#validateDurableState's `driver_user` branch (:987-999)
+ * requires `payload.driverBindingId === session.sessionId` and
+ * `payload.driverDeviceId === session.deviceSummary.deviceId` -- the same
+ * binding/device identity driver-device-session.service.ts#issueSession
+ * (:968-1003) mints through this exact function, using the binding ID as
+ * both `driverBindingId` and the session's own `sessionId`. Omitting these
+ * fields signs a session that `verifyAccessToken` always rejects. */
 export async function issueDriverSessionFixture(
   options: IssueDriverSessionFixtureOptions = {},
 ): Promise<SignedSessionFixture> {
@@ -66,6 +74,8 @@ export async function issueDriverSessionFixture(
   const service = new JwtAuthService(repo);
   const actorId = options.actorId ?? `fixture-driver-${randomUUID()}`;
   const principalId = options.principalId ?? `principal_${actorId}`;
+  const bindingId = `fixture-binding-${randomUUID()}`;
+  const deviceId = `fixture-device-${randomUUID()}`;
   const issued = await service.issueSessionToken(
     {
       authMode: "jwt_bearer",
@@ -78,11 +88,14 @@ export async function issueDriverSessionFixture(
       roles: ["driver_user"],
       scopes: ["driver:read", "driver:write"],
       requestId: null,
+      driverBindingId: bindingId,
+      driverDeviceId: deviceId,
     },
     {
       principalId,
       subject: `driver:${actorId}`,
       ensurePrincipal: true,
+      sessionId: bindingId,
     },
   );
   return {
@@ -97,7 +110,19 @@ export async function issueDriverSessionFixture(
 /** Mints a real signed session for the `platform` realm with
  * `billing:write` (reimbursement readback,
  * billing-settlement.controller.ts:821) and `foundation:write` (placard
- * generation, platform-admin.controller.ts's `/placards`). */
+ * generation, platform-admin.controller.ts's `/placards`).
+ *
+ * jwt-auth.service.ts#validateDurableState's `platform`/`ops` branch
+ * (:1066-1126) looks up an active membership matching `payload.membershipId`
+ * and derives both the required token version and the allowed-scope set
+ * from that membership's persisted role bindings -- it never accepts scopes
+ * carried only in the token claims. This mints a real
+ * `identity_role_bindings` row with `roleCode: "platform_admin"` (whose
+ * catalog preset covers the billing/foundation scopes above,
+ * packages/contracts/src/iam-policy-catalog.ts:631-660) via the same
+ * repository path a real workforce invitation uses, and signs the
+ * `workforceVersionTimestamps` option so the token's `tokenVersion` matches
+ * what `validateDurableState` recomputes from the persisted rows. */
 export async function issueOpsSessionFixture(
   options: IssueOpsSessionFixtureOptions = {},
 ): Promise<SignedSessionFixture> {
@@ -105,6 +130,33 @@ export async function issueOpsSessionFixture(
   const service = new JwtAuthService(repo);
   const actorId = options.actorId ?? `fixture-ops-${randomUUID()}`;
   const principalId = options.principalId ?? `principal_${actorId}`;
+  const now = new Date().toISOString();
+  const membership = await repo.ensureMembershipRecord({
+    membershipId: `fixture-membership-${randomUUID()}`,
+    sourceRef: `fixture:ops:${actorId}:membership`,
+    principalId,
+    realm: "platform",
+    scopeRef: "platform:root",
+    tenantId: null,
+    partnerId: null,
+    status: "active",
+    invitedByPrincipalId: null,
+    invitationId: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const roleBinding = await repo.ensureRoleBindingRecord({
+    roleBindingId: `fixture-role-binding-${randomUUID()}`,
+    sourceRef: `fixture:ops:${actorId}:role_binding`,
+    membershipId: membership.membershipId,
+    roleCode: "platform_admin",
+    grantedByPrincipalId: null,
+    approvalId: null,
+    validFrom: now,
+    validTo: null,
+    createdAt: now,
+    updatedAt: now,
+  });
   const issued = await service.issueSessionToken(
     {
       authMode: "jwt_bearer",
@@ -127,6 +179,8 @@ export async function issueOpsSessionFixture(
       principalId,
       subject: `platform:${actorId}`,
       ensurePrincipal: true,
+      membershipId: membership.membershipId,
+      workforceVersionTimestamps: [membership.updatedAt, roleBinding.updatedAt],
     },
   );
   return {
