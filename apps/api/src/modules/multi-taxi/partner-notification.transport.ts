@@ -117,7 +117,10 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
       message.orderId,
     );
     if (!relevance) throw partnerFailure("route_missing", existing);
-    if (message.eventType !== "receipt_ready" && message.eventType !== "trip_cancelled") {
+    if (
+      message.eventType !== "receipt_ready" &&
+      message.eventType !== "trip_cancelled"
+    ) {
       if (
         ["cancelled", "completed", "closed", "rejected"].includes(
           relevance.status,
