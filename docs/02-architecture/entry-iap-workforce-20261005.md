@@ -4,7 +4,7 @@
 **Status**: Implemented (dev/test verified; staging/production require a real IAP resource — see §5)
 **Owner**: Claude
 **Reviewer**: Codex
-**Last Updated**: 2026-10-05
+**Last Updated**: 2026-10-06
 
 ---
 
@@ -40,9 +40,20 @@ Per Google's documentation ("Securing your app with signed headers" /
 - The signing keys are published, and rotate, at a fixed JWKS URL:
   `https://www.gstatic.com/iap/verify/public_key-jwk`.
 - `iss` is `https://cloud.google.com/iap`.
-- `aud` is either `/projects/<project_number>/global/backendServices/<id>`
-  (HTTPS load balancer) or `/projects/<project_number>/apps/<project_id>`
-  (App Engine / the Cloud Run direct-IAP audience format).
+- `aud` is `/projects/<project_number>/global/backendServices/<id>` for the
+  HTTPS load-balancer + backend-service path (GCE/GKE), or
+  `/projects/<project_number>/apps/<project_id>` for App Engine. **Direct
+  IAP on Cloud Run uses a different format still**:
+  `/projects/<project_number>/locations/<region>/services/<service_name>`
+  (per
+  ["Securing your app with signed headers"](https://cloud.google.com/iap/docs/signed-headers-howto)
+  and
+  ["Enabling IAP for Cloud Run"](https://cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run)).
+  Reviewer correction (Codex, 2026-10-05): an earlier draft of this
+  document conflated the Cloud Run direct-IAP audience with the App Engine
+  one; using the App Engine format for `IAP_EXPECTED_AUDIENCE` against a
+  Cloud Run deployment would reject every real assertion with an audience
+  mismatch.
 - `sub` and `email` identify the authenticated principal.
 - **There is no group, role, or organizational-unit claim.** IAP's own
   authorization model (`roles/iap.httpsResourceAccessor`) is a yes/no "can
@@ -209,7 +220,14 @@ infrastructure, per the existing deploy/ops process.
    ```
    (Per Google's Cloud Run IAP documentation; this is the "direct" IAP path,
    distinct from the HTTPS load-balancer + backend-service path used for
-   GCE/GKE.)
+   GCE/GKE.) This step provisions IAP's own per-project service agent,
+   `service-<PROJECT_NUMBER>@gcp-sa-iap.iam.gserviceaccount.com`, which IAP
+   uses to reach the Cloud Run service on a caller's behalf; confirm it
+   holds `roles/run.invoker` on `<SERVICE>` (grant it explicitly with
+   `gcloud run services add-iam-policy-binding` if it is missing, e.g. a
+   project where the IAP API was enabled before this service existed). A
+   human's own `roles/run.invoker` grant in step 3 is a separate, additional
+   control, not a substitute for the service agent's.
 3. **Grant access** to each named workforce principal (not a group, per §2 —
    this repo's own role authority is the persisted role binding, but IAP's
    own reachability gate is still a separate, necessary control):
@@ -233,12 +251,16 @@ infrastructure, per the existing deploy/ops process.
    management flow (`platform-admin/users`). §3.2 denies any login for an
    email with no such persisted grant, by design.
 5. **Custom domain mappings**: if the Cloud Run service is reached through a
-   custom domain mapping rather than its default `*.run.app` URL, confirm
-   the mapping is created *after* IAP is enabled on the service — Google
-   documents that IAP must be enabled before attaching a domain mapping for
-   the assertion header to be injected correctly on that domain. See
+   custom domain mapping rather than its default `*.run.app` URL, check
+   Google's current
    ["Mapping custom domains"](https://cloud.google.com/run/docs/mapping-custom-domains)
-   together with the Cloud Run IAP guide linked in step 2.
+   and Cloud Run IAP (step 2 link) documentation together for whichever
+   ordering or interaction between the domain mapping and IAP is current at
+   setup time, and follow it. Reviewer note (Codex, 2026-10-05): an earlier
+   draft of this document asserted a specific "enable IAP before mapping the
+   domain" ordering as something Google documents, without a verified
+   citation for that specific claim — do not treat that as confirmed; verify
+   against the live docs before relying on an ordering.
 6. **Set the application env vars** from §4 to match: `CONTROL_PLANE_IAP_ENABLED=true`,
    `IAP_EXPECTED_AUDIENCE` set to the project's Cloud Run IAP audience format,
    and leave `IAP_JWT_SECRET_OR_PUBLIC_KEY`/`IAP_JWT_SECRET` unset so
@@ -255,3 +277,26 @@ and an active ops grant, this means a staging/production ops-console login
 resolves to the platform realm rather than ops. This pre-dates this task and
 is not one of its acceptance criteria; it is noted here for whoever picks up
 realm-selection plumbing next.
+
+## 7. Review findings and remediation evidence
+
+Codex's independent review of candidate `cdfbd1a75` (PR #2319,
+`candidate_generation c3b13953b61142fc937904dcb76b9320`, 2026-10-05) rejected
+it with findings F1-F7. Two follow-up commits on the same branch
+(`6314837cb`, `edd1e75f4`) fixed only F6/F7 (CI build/typecheck/integration
+plumbing); F1-F5 were still open going into this round. This section records
+what changed and where the evidence is.
+
+| Finding | Root cause & fix location | Old → new behavior | Verification | Limitations |
+| --- | --- | --- | --- | --- |
+| F1 — IAP key falls back to app `JWT_SECRET` | `server-platform-admin-authority.ts`, `api-client.server.ts`, both `control-plane-proxy/[...path]/route.ts` resolved `iapJwtSecretOrPublicKey` as `IAP_JWT_SECRET_OR_PUBLIC_KEY \|\| IAP_JWT_SECRET \|\| JWT_SECRET`; `deploy-dev.yml` always sets `JWT_SECRET`, so `issueControlPlaneRequestAuth` always used the app's own HMAC secret, never Google's JWKS. Fix: dropped the `JWT_SECRET` fallback in all four call sites. | Deployed with only `JWT_SECRET` set: HMAC-verified a forged assertion → now resolves `undefined` and falls through to real `resolveGoogleIapJwtVerificationKey`. | `pnpm exec vitest run tests/unit/control-plane-auth.test.ts tests/unit/iap-subject-adapter.test.ts --no-file-parallelism`: 50/50 passed locally (SHA `aa65ed245`). No dedicated negative-probe test was added for this exact call-site regression (the existing suite exercises `issueControlPlaneRequestAuth` directly, not these four Next.js wrapper files); CI's `build`/`integration` jobs import and exercise these files. | Did not add a unit test that imports the four web-app files directly and asserts the fallback is gone — see below. |
+| F2 — dev waiver can't clear a missing `auth_time` | `step-up-proof.service.ts`'s gate unconditionally threw `MFA_REQUIRED` when `authTimeMs === null`, even with `devWaiverApplies`, so the waiver was unusable on the real IAP path (`IAPSubjectAdapter` reports `authTime: null` when the assertion has no `auth_time`). Fix: `effectiveAuthTimeMs = devWaiverApplies ? Date.now() : authTimeMs`; only throws when that is still null. | Waiver + no `auth_time` → `MFA_REQUIRED` (old) vs. proof issued, anchored to request time (new). Real MFA evidence without `auth_time` still rejects. | `pnpm exec vitest run tests/unit/step-up-iap-path.test.ts --no-file-parallelism`: 8/8 in the "dev MFA waiver" describe block passed (SHA `aa65ed245`), including the pre-existing "no waiver, no MFA → still rejected" and "real MFA without auth_time → still rejected" cases, which the fix must not loosen. | Not re-verified end-to-end through `BootstrapAuthGuard`/`IAPSubjectAdapter` with a real missing-`auth_time` assertion (requires the hosted integration/API-unit DB job). |
+| F3 — bootstrap still fabricates `verified_iap_workforce`/`aal2` | Two independent defaulting paths reintroduced it even though `resolveBootstrapTokenAssurance` (already correct) returns `{}` for an unwaived platform/ops bootstrap identity: (a) `auth.extractor.ts` defaulted **every** non-strict bootstrap identity's `amr` to `["tenant_bootstrap_fixture"]`, which is itself in `NON_STRICT_TRUSTED_AMR`, so `hasTrustedMfa` was already `true` before the step-up gate ran; (b) `jwt-auth.service.ts`'s `resolveDefaultAmr`/`resolveDefaultAcr` special-cased `platform_admin`/`ops_user` to `verified_iap_workforce`/`aal2` whenever neither caller nor identity supplied amr/acr. Fix: scoped the extractor default to `actorType === "tenant_admin"` only; removed the platform/ops special case from both JWT defaults (now the same `internal_key`/`aal1` as every other unspecified actor type). | A bare platform/ops bootstrap session (no waiver, no real assertion) previously cleared the step-up gate for free via either path; now it is denied unless the explicit waiver is set. | Same run as F2: `step-up-iap-path.test.ts`'s "refuses the privileged action with no waiver flag and no real MFA evidence (default-safe)" and `tests/unit/system-remediation/sr-qa-identity-001/c003-c004-c005-iam-mfa-and-bank.test.ts`'s `C003-NEG-1` both passed (these are the exact two tests CI's `Product smoke acceptance` job reported FAIL on commit `edd1e75f4` — see below). | `jwt-auth.service.ts`'s own default-resolution path (`issueSessionToken` called with no explicit amr/acr) is not covered by a dedicated unit test beyond these two step-up-gate tests; not re-verified against a real signed JWT's decoded `amr`/`acr` claims (needs the hosted `apps/api` DB-backed unit job). |
+| F4 — `CONTROL_PLANE_IAP_ENABLED=true` bypassable via unverified header | `issueControlPlaneRequestAuth` only required a verified assertion when `strictIapMode` was true; with `iapEnabled=true` but `strictIapMode=false` (non-strict dev with a real IAP wired up) and no assertion present, it fell through to trusting the raw, attacker-settable `x-goog-authenticated-user-email`/`-id` headers. Fix: `requireVerifiedAssertion = strictIapMode \|\| iapEnabled` now gates the raw-header fallback, not `strictIapMode` alone. | `iapEnabled=true`, no assertion, forged email header → 200 as that identity (old) vs. `"Control-plane IAP is enabled; ... no default identity is applied"` (new). | Covered by the same `control-plane-auth.test.ts`/`iap-subject-adapter.test.ts` run (50/50 passed); no new dedicated test added for this exact header-trust branch. | No new unit test isolates `requireVerifiedAssertion` itself; relies on the broader suite not regressing plus manual code-path tracing recorded in this task's `next` history. |
+| F5 — wrong Cloud Run IAP audience format; missing IAP service-agent grant; unverified domain-mapping ordering claim | This document (§2, §5) stated the Cloud Run direct-IAP `aud` format is the same as App Engine's (`/projects/<n>/apps/<id>`), omitted the IAP service agent's required `roles/run.invoker` grant, and asserted a specific "IAP before domain mapping" ordering as Google-documented without a verified citation. | §2 now states the Cloud Run direct-IAP audience format as `/projects/<project_number>/locations/<region>/services/<service_name>`, distinct from the App Engine format. §5 step 2 now notes the `service-<PROJECT_NUMBER>@gcp-sa-iap.iam.gserviceaccount.com` service agent needs `roles/run.invoker` and to verify it if missing. §5 step 5 now tells the operator to check current docs for the ordering rather than asserting one. | Documentation-only; no code path to test. `WebFetch` to re-verify the corrected audience format and service-agent grant against live Google docs was attempted and blocked by this sandbox's network-approval gate — the correction is based on Codex's cited sources (`cloud.google.com/iap/docs/signed-headers-howto`, `cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run`), not an independent re-fetch. | Reviewer should re-verify the corrected audience format and service-agent grant against live Google docs before this document is treated as a verified operator runbook. |
+| F6 — `node:crypto` breaks `bank-console-web` edge bundle | Fixed in `edd1e75f4` (prior round); unchanged this round. | — | CI `build` job green on `edd1e75f4` and on this candidate. | — |
+| F7 — same-SHA CI not green (typecheck `exactOptionalPropertyTypes`, obsolete group-based integration assertion) | Fixed in `6314837cb`/`edd1e75f4` (prior round). This round additionally had to re-port the integration assertion fix into `tests/unit/cross-app/sr-partner-notify-fix-admin-20260927.integration.test.ts` after `CI-BUILD-CROSS-APP-IMPORT-20261005` (merged to `dev` as `afdb1ca1f`, after `edd1e75f4` was reviewed) relocated that file and turned the old path into a 2-line re-export stub. | — | `node tools/ci/check-cross-app-imports.mjs`: "Cross-app import guard passed (1643 source files)" (SHA `aa65ed245`). `pnpm exec vitest run tests/unit/cross-app/sr-partner-notify-fix-admin-20260927.integration.test.ts` could not run locally in this worktree: the `dev` merge brought in a new `@nestjs/throttler` dependency (added by an unrelated task) that this worktree's shared `node_modules` does not have, and `pnpm install` is blocked by this sandbox's approval gate (see below) — not a defect in this candidate's code; `node -e` import-graph tracing of the two changed assertion lines confirms they match the already-CI-verified `edd1e75f4` version byte-for-byte modulo the relocated import paths. | Needs the hosted CI run (clean install) to actually execute this file and the `apps/api` DB-backed "API unit tests" step. |
+
+**New regression this round, caused by this task's own prior commit, not Codex**: CI's `Product smoke acceptance` job (commit `edd1e75f4`) reported `tests/unit/step-up-iap-path.test.ts`'s and `sr-qa-identity-001/c003-c004-c005-iam-mfa-and-bank.test.ts`'s no-waiver baseline tests as FAIL (`Expected MFA_REQUIRED to be thrown`). Root cause: `6314837cb` added `DRTS_DEV_MFA_WAIVED: "true"` at the `product_smoke_acceptance` **job** level in `ci.yml` to unblock the job's `apps/api` DB-backed tests, but that job-level scope also covered the job's "Unit tests" step (`pnpm run test:unit`, i.e. `tests/unit/**`), which is exactly where this task's own no-waiver baseline tests live — they passed the waiver flag for the wrong reason and would have falsely reported MFA enforcement as working. Fixed by moving the env var to the "API unit tests" step only (`ci.yml`); `ci-integ.yml` already scoped it correctly to its separate `integration` job and was not affected. Verified locally: `pnpm exec vitest run tests/unit/step-up-iap-path.test.ts tests/unit/system-remediation/sr-qa-identity-001/c003-c004-c005-iam-mfa-and-bank.test.ts tests/unit/auth-startup-config.test.ts --no-file-parallelism` (no `DRTS_DEV_MFA_WAIVED` set, matching the corrected CI scope) — all passed (SHA `aa65ed245`).
+
+**Local verification limitations this round**: this worktree shares `node_modules` with other concurrent worktrees (documented hazard from the prior round); `pnpm install` to pick up `dev`'s new `@nestjs/throttler` dependency is blocked by this sandbox's command-approval gate (classified `defer` on every retry), so `apps/api`'s own test suite, root `pnpm run typecheck` (fails on pre-existing, unrelated missing `@types/*` packages across the whole repo), and the newly-relocated cross-app proxy test could not be executed locally this round. No command was reported as passing without actually running it; everything above states exactly what ran and what did not. The hosted CI run on candidate `aa65ed245` is the authoritative check for everything this paragraph lists as not run locally.
