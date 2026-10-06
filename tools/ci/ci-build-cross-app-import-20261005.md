@@ -2,7 +2,7 @@
 
 Owner: Codex. Reviewer: Codex2. Baseline: `b20895a17` (full SHA in baseline log).
 
-Latest owner verification is in [Scope repair and candidate preparation](#scope-repair-and-candidate-preparation--2026-10-06). Earlier scope blockers below are historical; Supervisor approved those paths in the task integration notes for this dispatch.
+Latest owner verification is in [Package classification repair](#package-classification-repair--2026-10-06). Earlier scope blockers below are historical; Supervisor approved those paths in the task integration notes.
 
 ## Repair boundary
 
@@ -333,3 +333,33 @@ Codex2 review, merge and Supervisor deployment remain separate lifecycle gates.
 All locally started checks finished and their results were read before candidate
 handoff. Final candidate differs from verified source `fb4ab64be` only in this
 evidence artifact; build and test inputs are identical.
+
+## Package classification repair — 2026-10-06
+
+Resumed published PR [#2355](https://github.com/ajoe734/drts-fleet-platform/pull/2355)
+at `5e76bab857fa83fa4d25f9048f671e2c7e9bc901`, with no locked candidate or
+independent review. Supervisor approved `repo-classification.json` in the
+2026-10-06T12:35Z integration note after checking parallel ownership. This
+repair adds only `tenant-auth` to the `package-build-config` and
+`runtime-packages` alternations. The package's tsconfig is product operations;
+its manifest and sources are product runtime. No classification exception or
+guard waiver was introduced.
+
+Durable evidence:
+`/home/lupin/workspace/drts-fleet-platform/.local/ci-build-cross-app-import/classification-repair-20261006/`.
+
+| Finding / acceptance                                  | Source / repair                                                                                                                    | Before → after                                                                                                           | Command / exit / evidence                                                                                                                                                                                                         | Remaining limit                                                                                                                                         |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New package fails repository classification           | `repo-classification.json`, only the two approved alternations                                                                     | Published `5e76bab85` fails on seven tenant-auth files, exit 1 → all 5973 tracked files classified, exit 0               | `node tools/ci/check-repo-classification.mjs`; `classification-before.log`, `classification-after.log`; Node v22.23.2                                                                                                             | Final pushed SHA needs hosted CI                                                                                                                        |
+| 不再跨app相對路徑匯入 / CI加入防止跨app匯入的檢查     | Existing guard and `.github/workflows/ci.yml` registration unchanged                                                               | Fresh whole-repo scan passes all 1641 sources, exit 0; earlier 34 guard regression cases retained                        | `node tools/ci/check-cross-app-imports.mjs`; `guard.log`; prior `scope-repair-20261006/regression.log` hash verified                                                                                                              | Static analysis does not evaluate arbitrary runtime variables                                                                                           |
+| enterprise-dispatch-web可在自己的Docker建置脈絡中建置 | All archive inputs in `verify-enterprise-build-context.sh` match verified `fb4ab64be009df7b27a939f0842b0105b4be7f7f` byte for byte | Prior isolated build exit 0 retained; context still contains only enterprise app and standalone output                   | `git diff --exit-code fb4ab64be -- package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json packages apps/enterprise-dispatch-web` exit 0; prior `fixed-build.log` hash verified                             | Build is retained evidence at the stated source SHA, not newly executed; no Docker/server                                                               |
+| Previous auth, fixtures and relocated tests           | No app/package/test/workflow changes in this repair                                                                                | Previous 97 root, 74 tenant, 32 enterprise and 15 API integration-entrypoint tests remain verified at their recorded SHA | `sha256sum -c SHA256SUMS` in `scope-repair-20261006/`: all 19 entries OK; no regression input changed                                                                                                                             | Tests were not repeated for two manifest regex additions                                                                                                |
+| 同候選SHA CI通過且獨立reviewer審查                    | Candidate lifecycle and assigned reviewer Codex2                                                                                   | Prior published SHA's CI results fully read; final repair candidate CI/review pending                                    | Prior [CI run](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37457054554) and [integration CI run](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37457054525); `prior-ci.json`, `prior-ci-integ.json` | Shared advisory failure is owned by `CI-DEPENDENCY-ADVISORIES-20261006`; it still prevents green CI. No approval, merge, deployment or closeout claimed |
+
+Prior CI runs are complete: build, unit, integration, typecheck, lint, IAM,
+hosted E2E and smoke passed. Both classification jobs and dependency-security
+jobs failed, and the integration aggregate failed; orchestrator tests skipped
+by scope. Those are prior-SHA results, not final candidate CI. Final CI results
+and exact candidate identity are recorded through the PR and released lifecycle
+CLI after normal push. Classification and guard checks above finished and their
+results were read. Prettier and `git diff --check` also passed.
