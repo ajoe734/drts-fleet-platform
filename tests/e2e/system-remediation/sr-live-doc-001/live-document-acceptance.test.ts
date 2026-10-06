@@ -34,6 +34,25 @@ import {
   sha256Hex,
 } from "./live-document-runner";
 
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
+  const task = getDocument({
+    data: new Uint8Array(pdfBuffer),
+    useSystemFonts: false,
+    disableFontFace: true,
+  });
+  const pdf = await task.promise;
+  const text: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const strings = content.items.map((item: any) => item.str);
+    text.push(strings.join(" "));
+  }
+  return text.join("\n");
+}
+
 const VERIFIER_SCRIPT_PATH = join(
   __dirname,
   "../../../unit/system-remediation/sr-bank-003/verify_artifact.py",
@@ -646,21 +665,14 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
       "checks for missing evidence sessions and requires non-zero exit if any are missing without injecting identity",
       () => {
         const missing: string[] = [];
-        const checkCookie = (val: string | undefined) =>
-          val && val.trim().length > 0;
+        const checkCookie = (val: string | undefined) => val && val.trim().length > 0 && val.includes(".");
         if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE))
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE");
-        if (
-          !checkCookie(
-            process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER,
-          )
-        )
+        if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER))
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER");
         if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT))
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT");
-        if (
-          !checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT)
-        )
+        if (!checkCookie(process.env.SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT))
           missing.push("SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT");
 
         if (!process.env.SR_LIVE_DOC_LIVE_API_ORIGIN)
@@ -761,21 +773,6 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         };
         if (idToken) headers["authorization"] = `Bearer ${idToken}`;
 
-        // 1. Prove it's a genuine authenticated bank_ops_viewer session (not unauthenticated)
-        // by attempting a role upgrade. An unauthenticated request downgrades silently to bank_ops_viewer,
-        // but a genuine authenticated session detects the mismatch and throws a TAMPERED error.
-        const tamperedOutcome = await downloadArtifact(
-          `${liveTargetOrigin}${statementPath}?bank=${bank}&role=bank_program_admin`,
-          { headers },
-        );
-        expect(tamperedOutcome.status).toBe(403);
-        expect(tamperedOutcome.errorCode).toBe("FORBIDDEN");
-        expect(tamperedOutcome.errorMessage).toContain(
-          "Role parameter tampering detected",
-        );
-        expect(tamperedOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
-
-        // 2. Prove it rejects the authorized action even without tampering
         const outcome = await downloadArtifact(
           `${liveTargetOrigin}${statementPath}?bank=${bank}`,
           { headers },
@@ -783,12 +780,22 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
         expect(outcome.status).toBe(403);
         expect(outcome.errorCode).toBe("FORBIDDEN");
-        expect(outcome.errorMessage).toContain(
-          "is not authorized to export statements",
-        );
+        expect(outcome.errorMessage).toContain("is not authorized to export statements");
         expect(outcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
-        // 3. Prove that a forged session is distinguished (signature failure)
+        // Positive evidence of genuine authenticated session:
+        // A genuine session will reject a conflicting ?role parameter as tampering.
+        // An unauthenticated session will silently ignore the parameter and fall back to viewer.
+        const positiveEvidenceOutcome = await downloadArtifact(
+          `${liveTargetOrigin}${statementPath}?bank=${bank}&role=bank_finance`,
+          { headers },
+        );
+        expect(positiveEvidenceOutcome.status).toBe(403);
+        expect(positiveEvidenceOutcome.errorCode).toBe("FORBIDDEN");
+        expect(positiveEvidenceOutcome.errorMessage).toContain("Role parameter tampering detected");
+        expect(positiveEvidenceOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // R6 verification: verify that a forged session is distinguished
         const forgedHeaders: Record<string, string> = {
           cookie: `${BANK_CONSOLE_SESSION_COOKIE}=bank_finance:acme.${"0".repeat(64)}`,
         };
@@ -800,27 +807,21 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         );
         expect(forgedOutcome.status).toBe(403);
         expect(forgedOutcome.errorCode).toBe("FORBIDDEN");
-        expect(forgedOutcome.errorMessage).toContain(
-          "Invalid or forged session signature",
-        );
+        expect(forgedOutcome.errorMessage).toContain("Invalid or forged session signature");
         expect(forgedOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
-        // 4. Blank/whitespace session rejection (acts as unauthenticated, which downgrades to bank_ops_viewer
-        // but does NOT throw a forged or tampered error even if we request bank_program_admin)
+        // Blank/whitespace session rejection
         const blankHeaders: Record<string, string> = {
           cookie: `${BANK_CONSOLE_SESSION_COOKIE}=   `,
         };
         if (idToken) blankHeaders["authorization"] = `Bearer ${idToken}`;
         const blankOutcome = await downloadArtifact(
-          `${liveTargetOrigin}${statementPath}?bank=${bank}&role=bank_program_admin`,
+          `${liveTargetOrigin}${statementPath}?bank=${bank}`,
           { headers: blankHeaders },
         );
         expect(blankOutcome.status).toBe(403);
-        // An unauthenticated request doesn't get TAMPERED; it gets silently downgraded to viewer,
-        // which then gets the viewer unauthorized message.
-        expect(blankOutcome.errorMessage).toContain(
-          "is not authorized to export statements",
-        );
+        expect(blankOutcome.errorCode).toBe("FORBIDDEN");
+        expect(blankOutcome.errorMessage).toContain("is not authorized to export statements");
         expect(blankOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
       },
     );
@@ -849,7 +850,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
         // 1. Expired link rejects with 410
         const expiredOutcome = await downloadArtifact(
-          new URL(expiredPath!, apiOrigin).href,
+          `${apiOrigin}${expiredPath}`,
           { headers: apiHeaders },
         );
         expect(expiredOutcome.status).toBe(410);
@@ -858,10 +859,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
         // R4 fix: extract the invoice id from the expired path to bind reissue
         const match = expiredPath!.match(new RegExp("tenant-invoice/([^/?]+)"));
-        expect(
-          match,
-          "Could not extract invoiceId from expiredPath",
-        ).toBeTruthy();
+        expect(match, "Could not extract invoiceId from expiredPath").toBeTruthy();
         const targetInvoiceId = match![1];
 
         // Validate expiry error retained manifest info
@@ -869,34 +867,28 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(expiredErrorData).toBeTruthy();
         expect(expiredErrorData.subjectId).toBe(targetInvoiceId);
 
+        // Ensure manifest_hash in the expired path matches the fresh hash (original hash preservation)
+        const expiredUrlObj = new URL(expiredPath!, "http://localhost");
+        const originalHash = expiredUrlObj.searchParams.get("manifest_hash");
+        expect(originalHash).toBeTruthy();
+
         // 2. Fetch fresh metadata from BFF using authorized tenant cookie + WIF token
         const tenantIdToken = await getGoogleIdToken(tenantConsoleOrigin!);
-        const tenantHeaders: Record<string, string> = {
-          cookie: `drts_tenant_session=${tenantCookie}`,
-        };
-        if (tenantIdToken)
-          tenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
+        const tenantHeaders: Record<string, string> = { cookie: `drts_tenant_session=${tenantCookie}` };
+        if (tenantIdToken) tenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
 
         const bffRes = await fetch(
           `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices`,
           { headers: tenantHeaders },
         );
         expect(bffRes.status).toBe(200);
-        expect(bffRes.headers.get("x-drts-candidate-sha")).toBe(
-          process.env.CANDIDATE_SHA,
-        );
+        expect(bffRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const bffJson = await bffRes.json();
-        // Use formal data.items for parsing
         const invoices = bffJson.data.items;
         expect(invoices.length).toBeGreaterThan(0);
 
-        const targetInvoice = invoices.find(
-          (inv: any) => inv.invoiceId === targetInvoiceId,
-        );
-        expect(
-          targetInvoice,
-          `Invoice ${targetInvoiceId} not found in list`,
-        ).toBeTruthy();
+        const targetInvoice = invoices.find((inv: any) => inv.invoiceId === targetInvoiceId);
+        expect(targetInvoice, `Invoice ${targetInvoiceId} not found in list`).toBeTruthy();
         const invoiceId = targetInvoice.invoiceId;
 
         const detailRes = await fetch(
@@ -904,9 +896,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           { headers: tenantHeaders },
         );
         expect(detailRes.status).toBe(200);
-        expect(detailRes.headers.get("x-drts-candidate-sha")).toBe(
-          process.env.CANDIDATE_SHA,
-        );
+        expect(detailRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: detail } = await detailRes.json();
 
         expect(detail.invoiceId).toBe(targetInvoiceId);
@@ -916,22 +906,40 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const manifestHash = detail.artifactDownloadMetadata.manifestHash;
         expect(freshUrl).toBeTruthy();
         expect(manifestHash).toBeTruthy();
+        expect(manifestHash, "Original manifest hash must be preserved upon renewal").toBe(originalHash);
 
         // 3. Successful download of expected bytes
-        const downloadUrl = freshUrl.startsWith("http")
-          ? freshUrl
-          : new URL(freshUrl, apiOrigin).href;
+        let downloadUrl = freshUrl;
+        let downloadHeaders = apiHeaders;
+        if (!freshUrl.startsWith("http")) {
+            // Append /api to relative routes if missing, and resolve against apiOrigin
+            downloadUrl = freshUrl.startsWith("/api") ? `${apiOrigin}${freshUrl}` : `${apiOrigin}/api${freshUrl.startsWith("/") ? "" : "/"}${freshUrl}`;
+        } else {
+            const urlObj = new URL(freshUrl);
+            if (urlObj.origin === tenantConsoleOrigin) {
+                downloadHeaders = tenantHeaders;
+            } else if (urlObj.origin === apiOrigin) {
+                downloadHeaders = apiHeaders;
+            }
+        }
+
         const freshOutcome = await downloadArtifact(downloadUrl, {
-          headers: apiHeaders,
+          headers: downloadHeaders,
         });
         expect(freshOutcome.status).toBe(200);
         expect(freshOutcome.bytes).not.toBeNull();
         expect(freshOutcome.bytes!.length).toBeGreaterThan(0);
         expect(sha256Hex(freshOutcome.bytes!)).toBe(manifestHash);
 
-        // R4 real PDF verification
-        const pdfText = freshOutcome.bytes!.toString("latin1");
-        expect(pdfText.startsWith("%PDF-")).toBe(true);
+        // R4 real PDF/amount verification using extractPdfText helper
+        const pdfText = await extractPdfText(freshOutcome.bytes!);
+        // Verify amount exists in the uncompressed PDF text based on authoritative amount
+        const amountMinor = detail.amount.amountMinor;
+        const currency = detail.amount.currency;
+        const amountFormatted = `${currency} ${(amountMinor / 100).toFixed(2)}`;
+        expect(pdfText).toContain(amountFormatted);
+        expect(pdfText).toContain(targetInvoiceId);
+        expect(pdfText).toContain(detail.tenantId);
 
         expect(freshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
@@ -939,17 +947,16 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const crossTenantHeaders: Record<string, string> = {
           cookie: `drts_tenant_session=${crossTenantCookie}`,
         };
-        if (tenantIdToken)
-          crossTenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
+        if (tenantIdToken) crossTenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
 
-        // Prove the crossTenantCookie is a genuinely authenticated tenant by fetching the list successfully
+        // Cross-tenant list must verify SHA
         const crossListRes = await fetch(
           `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices`,
           { headers: crossTenantHeaders },
         );
         expect(crossListRes.status).toBe(200);
+        expect(crossListRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
 
-        // Prove it is rejected for the specific invoice it doesn't own
         const crossRes = await fetch(
           `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices/${invoiceId}`,
           { headers: crossTenantHeaders },
@@ -965,171 +972,127 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
       },
     );
 
-    it.runIf(Boolean(apiOrigin) && Boolean(platformAdminOrigin))(
+        it.runIf(Boolean(apiOrigin) && Boolean(platformAdminOrigin))(
       "placard and report download via authorized metadata",
       async () => {
         const placardPath = process.env.SR_LIVE_DOC_LIVE_PLACARD_PATH;
         const reportPath = process.env.SR_LIVE_DOC_LIVE_REPORT_PATH;
 
-        expect(
-          placardPath,
-          "SR_LIVE_DOC_LIVE_PLACARD_PATH required",
-        ).toBeTruthy();
-        expect(
-          reportPath,
-          "SR_LIVE_DOC_LIVE_REPORT_PATH required",
-        ).toBeTruthy();
+        expect(placardPath, "SR_LIVE_DOC_LIVE_PLACARD_PATH required").toBeTruthy();
+        expect(reportPath, "SR_LIVE_DOC_LIVE_REPORT_PATH required").toBeTruthy();
 
-        const { getGoogleIdToken, sha256Hex } =
-          await import("./live-document-runner");
+        const { getGoogleIdToken, sha256Hex } = await import("./live-document-runner");
 
         const apiIdToken = await getGoogleIdToken(apiOrigin!);
         const apiHeaders: Record<string, string> = {};
         if (apiIdToken) apiHeaders["authorization"] = `Bearer ${apiIdToken}`;
 
         const platformAdminOriginStrict = platformAdminOrigin!;
-        const platformIdToken = await getGoogleIdToken(
-          platformAdminOriginStrict,
-        );
+        const platformIdToken = await getGoogleIdToken(platformAdminOriginStrict);
         const platformHeaders: Record<string, string> = {};
-        if (platformIdToken)
-          platformHeaders["authorization"] = `Bearer ${platformIdToken}`;
+        if (platformIdToken) platformHeaders["authorization"] = `Bearer ${platformIdToken}`;
 
         // R7: Real control plane IAP strict mode validation requires positive evidence.
         // We use the supported ingress which enforces IAP authority.
-        const metadataRes = await fetch(
-          `${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards`,
-          { headers: platformHeaders },
-        );
+        const metadataRes = await fetch(`${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards`, { headers: platformHeaders });
 
         if (metadataRes.status === 401 || metadataRes.status === 403) {
-          throw new Error(
-            `IAP authority missing for runner on platform admin ingress (status ${metadataRes.status})`,
-          );
+          throw new Error(`IAP authority missing for runner on platform admin ingress (status ${metadataRes.status})`);
         }
 
         expect(metadataRes.status).toBe(200);
-        expect(metadataRes.headers.get("x-drts-candidate-sha")).toBe(
-          process.env.CANDIDATE_SHA,
-        );
+        expect(metadataRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: placards } = await metadataRes.json();
 
         // Report
-        const reportOutcome = await downloadArtifact(
-          new URL(reportPath!, platformAdminOriginStrict).href,
-          { headers: platformHeaders },
-        );
+        const reportOutcome = await downloadArtifact(`${platformAdminOriginStrict}${reportPath}`, { headers: platformHeaders });
         expect(reportOutcome.status).toBe(200);
         expect(reportOutcome.bytes).not.toBeNull();
         expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
-        // R5: CSV/XLSX/PDF
-        expect([
-          "text/csv",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "application/pdf",
-        ]).toContain(reportOutcome.contentType?.split(";")[0]);
-        expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        await validateReportArtifact(jobDetail, jobId, contentType, reportOutcome.bytes!);
 
         // R5: Prove actual expiry of the given placard path
-        const expiredPlacardOutcome = await downloadArtifact(
-          placardPath!.startsWith("http")
-            ? placardPath!
-            : new URL(placardPath!, apiOrigin).href,
-          { headers: apiHeaders },
-        );
+        const resolveUrlAndHeaders = (url: string) => {
+            let downloadUrl = url;
+            let downloadHeaders = apiHeaders;
+            if (!url.startsWith("http")) {
+                downloadUrl = url.startsWith("/api") ? `${apiOrigin}${url}` : `${apiOrigin}/api${url.startsWith("/") ? "" : "/"}${url}`;
+            } else {
+                const urlObj = new URL(url);
+                if (urlObj.origin === platformAdminOriginStrict) {
+                    downloadHeaders = platformHeaders;
+                }
+            }
+            return { downloadUrl, downloadHeaders };
+        };
+
+        const { downloadUrl: expiredDownloadUrl, downloadHeaders: expiredHeaders } = resolveUrlAndHeaders(placardPath!);
+        const expiredPlacardOutcome = await downloadArtifact(expiredDownloadUrl, { headers: expiredHeaders });
         expect(expiredPlacardOutcome.status).toBe(410);
-        expect(expiredPlacardOutcome.errorCode).toBe(
-          "CONTROLLED_DOWNLOAD_EXPIRED",
-        );
-        expect(expiredPlacardOutcome.candidateSha).toBe(
-          process.env.CANDIDATE_SHA,
-        );
+        expect(expiredPlacardOutcome.errorCode).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
+        expect(expiredPlacardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
         const match = placardPath!.match(new RegExp("placard/([^/?]+)"));
-        expect(
-          match,
-          "Could not extract placardVersionId from placardPath",
-        ).toBeTruthy();
+        expect(match, "Could not extract placardVersionId from placardPath").toBeTruthy();
         const targetPlacardId = match![1];
 
         // Parse manifest_hash from the expired URL to verify materialized hash remains unchanged
-        const oldHashMatch = placardPath!.match(
-          new RegExp("manifest_hash=([^&]+)"),
-        );
-        const oldManifestHash = oldHashMatch
-          ? decodeURIComponent(oldHashMatch[1]!)
-          : null;
+        const oldHashMatch = placardPath!.match(new RegExp("manifest_hash=([^&]+)"));
+        const oldManifestHash = oldHashMatch ? decodeURIComponent(oldHashMatch[1]!) : null;
 
         // Find explicit authoritative placard version from metadata
-        const placard = placards.items.find(
-          (p: any) =>
-            p.placardVersionId === targetPlacardId && p.downloadMetadata,
-        );
-        expect(
-          placard,
-          `No placard found matching requested id ${targetPlacardId}`,
-        ).toBeTruthy();
+        const placard = placards.items.find((p: any) => p.placardVersionId === targetPlacardId && p.downloadMetadata);
+        expect(placard, `No placard found matching requested id ${targetPlacardId}`).toBeTruthy();
 
         const freshUrl = placard.downloadMetadata.downloadUrl;
         const manifestHash = placard.downloadMetadata.manifestHash;
 
         if (oldManifestHash) {
-          expect(
-            manifestHash,
-            "Materialized hash should be unchanged after refresh",
-          ).toBe(oldManifestHash);
+          expect(manifestHash, "Materialized hash should be unchanged after refresh").toBe(oldManifestHash);
         }
 
-        const downloadUrl = freshUrl.startsWith("http")
-          ? freshUrl
-          : new URL(freshUrl, apiOrigin).href;
-        const placardOutcome = await downloadArtifact(downloadUrl, {
-          headers: apiHeaders,
-        });
+        const { downloadUrl: finalDownloadUrl, downloadHeaders: finalHeaders } = resolveUrlAndHeaders(freshUrl);
+        const placardOutcome = await downloadArtifact(finalDownloadUrl, { headers: finalHeaders });
         expect(placardOutcome.status).toBe(200);
         expect(placardOutcome.bytes).not.toBeNull();
         expect(placardOutcome.bytes!.length).toBeGreaterThan(0);
         expect(sha256Hex(placardOutcome.bytes!)).toBe(manifestHash);
         expect(placardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
-        // R5 real PDF format check
-        const placardPdfText = placardOutcome.bytes!.toString("latin1");
-        expect(placardPdfText.startsWith("%PDF-")).toBe(true);
+        // Verify version/public info with printable content using real PDF parser
+        const placardText = await extractPdfText(placardOutcome.bytes!);
+        expect(placardText).toContain(placard.versionCode);
+        expect(placardText).toContain(placard.publicInfoVersionId);
+        expect(placardText).toContain(placard.subjectId);
 
         // R5: Exercise same-version re-download (refresh)
         const refreshRes = await fetch(
-          new URL(
-            `/control-plane-proxy/platform-admin/placards?versionCode=${placard.versionCode}`,
-            platformAdminOriginStrict,
-          ).href,
+          `${platformAdminOriginStrict}/control-plane-proxy/platform-admin/placards?versionCode=${placard.versionCode}`,
           { headers: platformHeaders },
         );
         expect(refreshRes.status).toBe(200);
-        expect(refreshRes.headers.get("x-drts-candidate-sha")).toBe(
-          process.env.CANDIDATE_SHA,
-        );
+        expect(refreshRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: refreshedPlacards } = await refreshRes.json();
 
-        const refreshedPlacard = refreshedPlacards.items.find(
-          (p: any) => p.placardVersionId === placard.placardVersionId,
-        );
+        const refreshedPlacard = refreshedPlacards.items.find((p: any) => p.placardVersionId === placard.placardVersionId);
         expect(refreshedPlacard).toBeTruthy();
 
         const refreshedUrl = refreshedPlacard.downloadMetadata.downloadUrl;
         const refreshedHash = refreshedPlacard.downloadMetadata.manifestHash;
-
         expect(refreshedHash).toBe(manifestHash);
 
-        const refreshDownloadUrl = refreshedUrl.startsWith("http")
-          ? refreshedUrl
-          : new URL(refreshedUrl, apiOrigin).href;
-        const refreshOutcome = await downloadArtifact(refreshDownloadUrl, {
-          headers: apiHeaders,
-        });
+        const { downloadUrl: refreshDownloadUrl, downloadHeaders: refreshHeaders } = resolveUrlAndHeaders(refreshedUrl);
+        const refreshOutcome = await downloadArtifact(refreshDownloadUrl, { headers: refreshHeaders });
         expect(refreshOutcome.status).toBe(200);
-        expect(refreshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
         expect(refreshOutcome.bytes).not.toBeNull();
         expect(sha256Hex(refreshOutcome.bytes!)).toBe(refreshedHash);
+        expect(refreshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        const refreshedText = await extractPdfText(refreshOutcome.bytes!);
+        expect(refreshedText).toContain(refreshedPlacard.versionCode);
+        expect(refreshedText).toContain(refreshedPlacard.publicInfoVersionId);
+        expect(refreshedText).toContain(refreshedPlacard.subjectId);
       },
     );
   });

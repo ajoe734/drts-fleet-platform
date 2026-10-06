@@ -234,3 +234,96 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
     });
   });
 });
+
+import { validateReportArtifact } from "../../../e2e/system-remediation/sr-live-doc-001/report-validator";
+import { recordsToCsv } from "../../../../apps/api/src/common/csv";
+import { recordsToXlsx, recordsToPdf } from "../../../../apps/api/src/modules/reporting-filing/report-renderers";
+
+describe("validateReportArtifact", () => {
+  const jobDetail = {
+    format: "csv",
+    rows: [
+      { orderId: "order-1", amountMinor: 120000, note: "line1\nline2" },
+      { orderId: "order-2", amountMinor: 4500, note: "'=1+1" }
+    ]
+  };
+
+  describe("CSV validation", () => {
+    it("accepts valid production CSV", async () => {
+      const csvString = recordsToCsv(jobDetail.rows);
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "text/csv", Buffer.from(csvString))
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects duplicate headers", async () => {
+      const badCsv = "orderId,amountMinor,amountMinor\norder-1,120000,120000\norder-2,4500,4500";
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "text/csv", Buffer.from(badCsv))
+      ).rejects.toThrow();
+    });
+
+    it("rejects wrong PDF values in CSV test?", async () => {
+      const badCsv = "orderId,amountMinor,note\norder-10,91200009,line1\norder-2,4500,note";
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "text/csv", Buffer.from(badCsv))
+      ).rejects.toThrow();
+    });
+
+    it("rejects missing rows evidence", async () => {
+      const missingRowsJob = { format: "csv", jobId: "job-1" };
+      await expect(
+        validateReportArtifact(missingRowsJob, "job-1", "text/csv", Buffer.from("job-1"))
+      ).rejects.toThrow("Missing rows evidence in metadata");
+    });
+  });
+
+  describe("XLSX validation", () => {
+    const xlsxJob = { ...jobDetail, format: "xlsx" };
+
+    it("accepts valid production XLSX", async () => {
+      const xlsxBuffer = await recordsToXlsx(xlsxJob.rows);
+      await expect(
+        validateReportArtifact(xlsxJob, "job-1", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects missing rows evidence", async () => {
+      const missingRowsJob = { format: "xlsx", jobId: "job-1" };
+      const xlsxBuffer = await recordsToXlsx([]);
+      await expect(
+        validateReportArtifact(missingRowsJob, "job-1", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)
+      ).rejects.toThrow("Missing rows evidence in metadata");
+    });
+  });
+
+  describe("PDF validation", () => {
+    const pdfJob = { ...jobDetail, format: "pdf" };
+
+    it("accepts valid production PDF", async () => {
+      const pdfBuffer = await recordsToPdf(pdfJob.rows, "job-1");
+      await expect(
+        validateReportArtifact(pdfJob, "job-1", "application/pdf", pdfBuffer)
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects missing rows evidence", async () => {
+      const missingRowsJob = { format: "pdf", jobId: "job-1" };
+      const pdfBuffer = await recordsToPdf([], "job-1");
+      await expect(
+        validateReportArtifact(missingRowsJob, "job-1", "application/pdf", pdfBuffer)
+      ).rejects.toThrow("Missing rows evidence in metadata");
+    });
+    
+    it("rejects order-10 satisfying order-1", async () => {
+      const wrongRows = [
+        { orderId: "order-10", amountMinor: 91200009, note: "line1\nline2" },
+        { orderId: "order-2", amountMinor: 4500, note: "'=1+1" }
+      ];
+      const pdfBuffer = await recordsToPdf(wrongRows, "job-1");
+      await expect(
+        validateReportArtifact(pdfJob, "job-1", "application/pdf", pdfBuffer)
+      ).rejects.toThrow();
+    });
+  });
+});
