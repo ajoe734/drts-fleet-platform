@@ -1,6 +1,9 @@
+import functools
+import http.server
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 import sys
 import os
@@ -402,7 +405,39 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # container's freshclam/clamd processes. If either does not hold, the
 # assertions below fail with a specific, attributable message identifying
 # which precondition was missing -- not a false pass.
+#
+# A genuinely unreachable mirror (the first version of this harness pointed
+# `DatabaseMirror` at 127.0.0.1) is NOT usable to seed the stale startup
+# state: `clamd-entrypoint.sh` runs under `set -eu` and its very first
+# `freshclam --stdout` call (line ~223) is unguarded -- any non-zero exit
+# from that call terminates the container before clamd (line ~227) ever
+# starts, which is a real `set -eu` consequence of this harness's own
+# fixture, not a production bug (clamd-entrypoint.sh is outside this task's
+# write_scopes and stays untouched). Instead, this test runs its own local
+# HTTP static-file server (`_start_local_mirror`, this test process only --
+# no gateway/runtime source touched) that serves the EXACT same
+# main/daily/bytecode CVD bytes just extracted from `clamav/clamav:1.3`,
+# and points the seeded container's `freshclam.conf` at it via
+# `PrivateMirror` (a real, documented freshclam directive that skips the
+# DNS TXT version check and fetches directly from the given URL). Because
+# the served content is byte-identical to what was just seeded on disk,
+# freshclam's own version comparison against each database genuinely
+# resolves "up-to-date" for all three databases and exits 0 -- a real,
+# unforced freshclam outcome, not a stubbed one -- so the unguarded initial
+# call succeeds and clamd starts up loading the still-stale seed. The
+# container reaches clamd via `host.docker.internal` (`--add-host
+# host.docker.internal:host-gateway`, a real Docker Engine >=20.10 feature
+# on Linux, not Mac/Windows-only). Known precondition this Docker-less VM
+# cannot verify locally: whether the installed freshclam build honors an
+# HTTP Range request against Python's stdlib `http.server` (which may reply
+# 200 with the full body instead of 206) when probing a CVD header via
+# PrivateMirror; if that combination does not hold, the assertions below
+# fail with a specific, attributable message (e.g. the initial-load
+# precondition assertion), not a false pass.
 SEED_IMAGE = "clamav/clamav:1.3"
+SEED_DB_FILES = (
+    "main.cvd", "main.cld", "daily.cvd", "daily.cld", "bytecode.cvd", "bytecode.cld",
+)
 
 class TestGenuineClamdVersionTransition(unittest.TestCase):
     def setUp(self):
@@ -420,25 +455,46 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
         run_cmd(["docker", "rm", "-f", self.seed_container_name])
 
     def _extract_seed_database(self, tmp_dir):
+        # Extracts ALL three databases (main/daily/bytecode), not just
+        # daily: the local PrivateMirror below must be able to answer every
+        # database freshclam.conf asks about with byte-identical content to
+        # what was seeded on disk, or freshclam reports a genuine fetch
+        # failure for whichever one is missing and the unguarded initial
+        # call in clamd-entrypoint.sh (set -eu) kills the container before
+        # clamd ever starts.
         pull = run_cmd(["docker", "pull", SEED_IMAGE], timeout=180)
         self.assertEqual(pull.returncode, 0, f"Failed to pull seed image {SEED_IMAGE}: {pull.stderr}")
         create = run_cmd(["docker", "create", "--name", self.seed_container_name, SEED_IMAGE])
         self.assertEqual(create.returncode, 0, f"Failed to create seed container: {create.stderr}")
         found = {}
-        for name in ("daily.cvd", "daily.cld"):
+        for name in SEED_DB_FILES:
             dest = os.path.join(tmp_dir, name)
             cp = run_cmd(["docker", "cp", f"{self.seed_container_name}:{self.db_dir}/{name}", dest])
             if cp.returncode == 0 and os.path.isfile(dest) and os.path.getsize(dest) > 0:
                 found[name] = dest
         run_cmd(["docker", "rm", "-f", self.seed_container_name])
         self.assertTrue(
-            found,
+            any(name.startswith("daily") for name in found),
             f"Precondition not met: seed image {SEED_IMAGE} does not ship a readable "
             f"daily.cvd/daily.cld at {self.db_dir}. This harness cannot manufacture a "
             "genuinely-signed historical database without one; a different concrete seed "
             "source is needed before this control can run.",
         )
         return found
+
+    @staticmethod
+    def _start_local_mirror(directory):
+        """Serves `directory` over plain HTTP on an ephemeral port, in this
+        test process only, so the seeded container's `freshclam.conf` can
+        point `PrivateMirror` at it (see the module-level comment above
+        `SEED_IMAGE`). Returns the live server; caller must `shutdown()` +
+        `server_close()` it (this does not start or touch any clamd/freshclam
+        process itself -- plain stdlib HTTP file serving)."""
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server
 
     def test_genuine_old_to_new_version_and_activation_lag(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -452,13 +508,18 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             seed_version = fields[2]
 
             # Create (but do not start) the real target container, then
-            # seed BOTH the stale database AND a deliberately unreachable
-            # freshclam.conf into its writable layer before the
-            # entrypoint's first (pre-clamd) freshclam call ever runs, so
-            # that call fails fast and clamd starts up loading the stale
-            # seed rather than a live download silently overwriting it.
+            # seed BOTH the stale database AND a freshclam.conf pointed at
+            # this test process's own local HTTP mirror (see the
+            # module-level comment above SEED_IMAGE for why a genuinely
+            # unreachable mirror cannot be used here) into its writable
+            # layer before the entrypoint's first (pre-clamd) freshclam
+            # call ever runs, so that call resolves "up-to-date" against
+            # the byte-identical seed and exits 0, and clamd starts up
+            # loading the still-stale seed rather than a live download
+            # silently overwriting it.
             create = run_cmd([
                 "docker", "create", "--name", self.container_name,
+                "--add-host", "host.docker.internal:host-gateway",
                 "-e", "FRESHCLAM_INTERVAL_SECONDS=5", self.image,
             ])
             self.assertEqual(create.returncode, 0, f"Failed to create container: {create.stderr}")
@@ -466,39 +527,51 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             cp = run_cmd(["docker", "cp", seed_files[seed_name], f"{self.container_name}:{self.db_dir}/{seed_name}"])
             self.assertEqual(cp.returncode, 0, f"Failed to seed {seed_name}: {cp.stderr}")
 
-            broken_conf = os.path.join(tmp_dir, "freshclam.broken.conf")
-            with open(broken_conf, "w") as f:
-                f.write("DatabaseMirror 127.0.0.1\nConnectTimeout 1\nMaxAttempts 1\n")
-            cp = run_cmd(["docker", "cp", broken_conf, f"{self.container_name}:/etc/clamav/freshclam.conf"])
-            self.assertEqual(cp.returncode, 0, f"Failed to seed broken freshclam.conf: {cp.stderr}")
+            mirror_server = self._start_local_mirror(tmp_dir)
+            try:
+                mirror_port = mirror_server.server_address[1]
+                mirror_conf = os.path.join(tmp_dir, "freshclam.mirror.conf")
+                with open(mirror_conf, "w") as f:
+                    f.write(
+                        f"PrivateMirror http://host.docker.internal:{mirror_port}\n"
+                        "ConnectTimeout 5\nMaxAttempts 2\n"
+                    )
+                cp = run_cmd(["docker", "cp", mirror_conf, f"{self.container_name}:/etc/clamav/freshclam.conf"])
+                self.assertEqual(cp.returncode, 0, f"Failed to seed mirror freshclam.conf: {cp.stderr}")
 
-            start = run_cmd(["docker", "start", self.container_name])
-            self.assertEqual(start.returncode, 0, f"Failed to start seeded container: {start.stderr}")
+                start = run_cmd(["docker", "start", self.container_name])
+                self.assertEqual(start.returncode, 0, f"Failed to start seeded container: {start.stderr}")
 
-            self.assertTrue(wait_for_ping(self.container_name, 60), "clamd never answered a live PING after seeded startup")
-            time.sleep(2)
+                self.assertTrue(wait_for_ping(self.container_name, 60), "clamd never answered a live PING after seeded startup")
+                time.sleep(2)
 
-            initial_loaded = query_loaded_version(self.container_name)
-            self.assertIsNotNone(initial_loaded, "Could not parse initial loaded version")
-            self.assertEqual(
-                initial_loaded, seed_version,
-                "Precondition not met: clamd did not load the seeded stale version at startup "
-                "(the broken-mirror precondition for observing a genuine old->new transition "
-                "was not satisfied) -- this is a missing condition, not a fabricated pass.",
-            )
-            res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-            self.assertEqual(res.returncode, 0, "Readiness version marker missing after seeded startup")
-            self.assertEqual(res.stdout.strip(), seed_version, "Readiness marker did not publish the seeded stale version")
+                initial_loaded = query_loaded_version(self.container_name)
+                self.assertIsNotNone(initial_loaded, "Could not parse initial loaded version")
+                self.assertEqual(
+                    initial_loaded, seed_version,
+                    "Precondition not met: clamd did not load the seeded stale version at startup "
+                    "(the local-mirror precondition for observing a genuine old->new transition "
+                    "was not satisfied) -- this is a missing condition, not a fabricated pass.",
+                )
+                res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
+                self.assertEqual(res.returncode, 0, "Readiness version marker missing after seeded startup")
+                self.assertEqual(res.stdout.strip(), seed_version, "Readiness marker did not publish the seeded stale version")
 
-            # Restore real connectivity, but disable freshclam's own
-            # automatic clamd notification (a real, documented
-            # freshclam.conf directive) so the genuine update this
-            # triggers writes a newer file to disk WITHOUT instantly
-            # reloading the already-running engine -- a real, observable
-            # pending/not-yet-activated window, not a timing accident.
-            res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
-                            "printf 'DatabaseMirror database.clamav.net\\nNotifyClamd no\\n' > /etc/clamav/freshclam.conf"])
-            self.assertEqual(res.returncode, 0, f"Failed to restore freshclam.conf: {res.stderr}")
+                # Restore real connectivity, but disable freshclam's own
+                # automatic clamd notification (a real, documented
+                # freshclam.conf directive) so the genuine update this
+                # triggers writes a newer file to disk WITHOUT instantly
+                # reloading the already-running engine -- a real, observable
+                # pending/not-yet-activated window, not a timing accident.
+                res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
+                                "printf 'DatabaseMirror database.clamav.net\\nNotifyClamd no\\n' > /etc/clamav/freshclam.conf"])
+                self.assertEqual(res.returncode, 0, f"Failed to restore freshclam.conf: {res.stderr}")
+            finally:
+                # The local mirror is only needed for the initial seeded
+                # startup above; the container's freshclam.conf has already
+                # been switched to the real DatabaseMirror by this point.
+                mirror_server.shutdown()
+                mirror_server.server_close()
 
             # The entrypoint's own watchdog (FRESHCLAM_INTERVAL_SECONDS=5)
             # performs the next freshclam pass and republishes the marker
