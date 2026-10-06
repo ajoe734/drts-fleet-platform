@@ -1,0 +1,202 @@
+name: Provision Dev Artifact Backends
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Immutable source SHA for the provisioning code (do not use branch names)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+  DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  DEV_GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  DEV_ARTIFACT_PROJECT_ID: ${{ vars.DEV_ARTIFACT_PROJECT_ID || vars.DEV_GCP_PROJECT_ID }}
+  DEV_ARTIFACT_REGION: ${{ vars.DEV_ARTIFACT_REGION || vars.DEV_GCP_REGION }}
+  DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY || 'drts' }}
+
+jobs:
+  provision-and-verify:
+    name: Provision and Verify Dev Backends
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Enforce Immutable Source
+        run: |
+          set -euo pipefail
+          if ! [[ "${{ inputs.source_ref }}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Error: source_ref must be a 40-character commit SHA, got '${{ inputs.source_ref }}'" >&2
+            exit 1
+          fi
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "$HEAD_SHA" != "${{ inputs.source_ref }}" ]; then
+            echo "Error: Checked out HEAD ($HEAD_SHA) does not match required SHA (${{ inputs.source_ref }})" >&2
+            exit 1
+          fi
+          echo "Verified immutable source SHA: $HEAD_SHA"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Configure Docker
+        run: |
+          gcloud auth configure-docker "${DEV_ARTIFACT_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and Push Images
+        id: build_push
+        run: |
+          set -euo pipefail
+          REGISTRY="${DEV_ARTIFACT_REGION}-docker.pkg.dev/${DEV_ARTIFACT_PROJECT_ID}/${DEV_ARTIFACT_REPOSITORY}"
+          SHA=$(git rev-parse HEAD)
+
+          GATEWAY_IMAGE="${REGISTRY}/artifact-scanner-gateway:${SHA}"
+          CLAMD_IMAGE="${REGISTRY}/artifact-scanner-clamd:${SHA}"
+
+          docker build -t "$GATEWAY_IMAGE" -f operations/artifact-scanner/Dockerfile.gateway operations/artifact-scanner/
+          docker build -t "$CLAMD_IMAGE" -f operations/artifact-scanner/Dockerfile.clamd operations/artifact-scanner/
+
+          docker push "$GATEWAY_IMAGE"
+          docker push "$CLAMD_IMAGE"
+
+          GATEWAY_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$GATEWAY_IMAGE")
+          CLAMD_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$CLAMD_IMAGE")
+
+          echo "gateway_image=$GATEWAY_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "clamd_image=$CLAMD_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight and Bootstrap Service Account
+        run: |
+          set -euo pipefail
+
+          SCANNER_SA="drts-dev-artifact-scanner@${DEV_GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          DEPLOYER="${DEV_WIF_SERVICE_ACCOUNT}"
+
+                    echo "Verifying scanner service account: $SCANNER_SA"
+          if ! err_out=$(gcloud iam service-accounts describe "$SCANNER_SA" --project "$DEV_GCP_PROJECT_ID" 2>&1 >/dev/null); then
+            if echo "$err_out" | grep -q "NOT_FOUND"; then
+              echo "Scanner SA does not exist. Attempting to create it..."
+              if ! err_create=$(gcloud iam service-accounts create drts-dev-artifact-scanner --project "$DEV_GCP_PROJECT_ID" --display-name="Artifact Scanner Identity" 2>&1); then
+                 echo "::error::Failed to create Scanner SA: $err_create"
+                 exit 1
+              fi
+            else
+              echo "::error::Failed to describe SA: $err_out"
+              exit 1
+            fi
+          fi
+
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs on Scanner SA..."
+          if ! err_out=$(gcloud iam service-accounts add-iam-policy-binding "$SCANNER_SA" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None 2>&1 >/dev/null); then
+             echo "::error::Failed to grant actAs on $SCANNER_SA to $DEPLOYER: $err_out"
+             exit 1
+          fi
+
+          echo "Ensuring WIF Deployer ($DEPLOYER) has actAs and TokenCreator on Runtime SA ($DEV_GCP_RUNTIME_SERVICE_ACCOUNT)..."
+          if ! err_out=$(gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountUser" \
+              --condition=None 2>&1 >/dev/null); then
+             echo "::error::Failed to grant actAs on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER: $err_out"
+             exit 1
+          fi
+
+          if ! err_out=$(gcloud iam service-accounts add-iam-policy-binding "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+              --project "$DEV_GCP_PROJECT_ID" \
+              --member="serviceAccount:$DEPLOYER" \
+              --role="roles/iam.serviceAccountTokenCreator" \
+              --condition=None 2>&1 >/dev/null); then
+             echo "::error::Failed to grant TokenCreator on $DEV_GCP_RUNTIME_SERVICE_ACCOUNT to $DEPLOYER: $err_out"
+             exit 1
+          fi
+
+
+      - name: Provision Backends
+        run: |
+          set -euo pipefail
+
+          DOCUMENT_BUCKET="${DEV_GCP_PROJECT_ID}-document-artifacts"
+          REMITTANCE_BUCKET="${DEV_GCP_PROJECT_ID}-remittance-proofs"
+          SCANNER_SERVICE="drts-dev-scanner"
+          SCANNER_SA="drts-dev-artifact-scanner@${DEV_GCP_PROJECT_ID}.iam.gserviceaccount.com"
+
+          python3 operations/deployment/provision-dev-artifact-backends.py \
+            --project "$DEV_GCP_PROJECT_ID" \
+            --region "$DEV_GCP_REGION" \
+            --document-bucket "$DOCUMENT_BUCKET" \
+            --remittance-bucket "$REMITTANCE_BUCKET" \
+            --runtime-service-account "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --scanner-service "$SCANNER_SERVICE" \
+            --scanner-service-account "$SCANNER_SA" \
+            --gateway-image "${{ steps.build_push.outputs.gateway_image }}" \
+            --clamd-image "${{ steps.build_push.outputs.clamd_image }}" \
+            --invoker-member "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --invoker-member "$DEV_WIF_SERVICE_ACCOUNT"
+
+      - name: Get Scanner URL
+        id: scanner_url
+        run: |
+          SCANNER_SERVICE="drts-dev-scanner"
+          URL=$(gcloud run services describe "$SCANNER_SERVICE" --region "$DEV_GCP_REGION" --project "$DEV_GCP_PROJECT_ID" --format 'value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Mint Scanner Identity Token
+        id: id_token_scanner
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.scanner_url.outputs.url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Verify Hosted Backends
+        env:
+          SCANNER_ID_TOKEN: ${{ steps.id_token_scanner.outputs.id_token }}
+        run: |
+          set -euo pipefail
+
+          DOCUMENT_BUCKET="${DEV_GCP_PROJECT_ID}-document-artifacts"
+          REMITTANCE_BUCKET="${DEV_GCP_PROJECT_ID}-remittance-proofs"
+
+          echo "::add-mask::${SCANNER_ID_TOKEN}"
+          if [[ -z "${SCANNER_ID_TOKEN:-}" ]]; then
+            echo "::error::SCANNER_ID_TOKEN is empty; identity token minting failed upstream." >&2
+            exit 1
+          fi
+
+          python3 operations/verification/verify-dev-artifact-backends.py \
+            --document-bucket "$DOCUMENT_BUCKET" \
+            --remittance-bucket "$REMITTANCE_BUCKET" \
+            --scanner-url "${{ steps.scanner_url.outputs.url }}" \
+            --runtime-sa "$DEV_GCP_RUNTIME_SERVICE_ACCOUNT" \
+            --scanner-service "drts-dev-scanner" \
+            --project "$DEV_GCP_PROJECT_ID" \
+            --region "$DEV_GCP_REGION"
