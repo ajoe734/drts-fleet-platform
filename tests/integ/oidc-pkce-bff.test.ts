@@ -247,6 +247,20 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     process.env.OIDC_CLIENT_SECRET = "drts_client_secret_test";
     delete process.env.OIDC_MOCK_MODE;
 
+    // Real-provider login requires an explicit issuer/sub binding; the seed's
+    // subject alone is intentionally insufficient outside mock mode.
+    const admin = tenantPartnerService.findTenantUserBySubject(
+      "sub_oidc_admin_acme",
+    );
+    expect(admin).toBeDefined();
+    expect(
+      tenantPartnerService.bindTenantUserSubject(
+        tenantPartnerService.getDefaultTenantId(),
+        admin!.userId,
+        "sub_oidc_admin_acme",
+      ),
+    ).toBeTruthy();
+
     const login = oidcService.generateLoginParameters("tenant", {
       redirectUri: "http://localhost:3000/api/auth/callback",
     });

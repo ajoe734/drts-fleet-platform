@@ -31,6 +31,49 @@ import { googleAssertionSource } from "./fresh-assertion";
 
 export class MailSessionInputError extends Error {}
 export class AssertionReplayError extends Error {}
+export class MailMailboxInputError extends Error {}
+
+export type MailBootstrapStage =
+  | "input-validation"
+  | "candidate-preflight"
+  | "environment-path"
+  | "assertion-configuration"
+  | "assertion-mint"
+  | "assertion-validation"
+  | "token-exchange"
+  | "token-validation"
+  | "session-export"
+  | "session-request"
+  | "session-validation"
+  | "step-up-request"
+  | "step-up-validation"
+  | "step-up-export"
+  | "mailbox-read"
+  | "alias-derivation"
+  | "recipient-export";
+
+// Never print an upstream message, stack, name, command, stderr or cause. Even
+// Error.name can contain credential data; report only fixed local class names.
+function safeErrorClass(error: unknown): string {
+  if (error instanceof MailMailboxInputError) return "MailMailboxInputError";
+  if (error instanceof MailSessionInputError) return "MailSessionInputError";
+  if (error instanceof AssertionReplayError) return "AssertionReplayError";
+  if (error instanceof SyntaxError) return "SyntaxError";
+  if (error instanceof TypeError) return "TypeError";
+  if (error instanceof Error) return "Error";
+  return "UnknownThrownValue";
+}
+
+export class MailBootstrapError extends Error {
+  constructor(
+    readonly stage: MailBootstrapStage,
+    error: unknown,
+  ) {
+    super(
+      `Mail session bootstrap failed; stage=${stage}; error_class=${safeErrorClass(error)}; credential details omitted.`,
+    );
+  }
+}
 
 export interface MailSessionConfig {
   apiOrigin: string;
@@ -88,6 +131,7 @@ export interface MailSessionFetchDeps {
   readGoogleIdToken: () => string;
   mask: (value: string) => void;
   onSessionIssued?: (token: string) => void;
+  onStage?: (stage: MailBootstrapStage) => void;
 }
 
 export interface MintedMailSession {
@@ -140,6 +184,7 @@ export async function mintTenantAdminSession(
   config: MailSessionConfig,
   deps: MailSessionFetchDeps,
 ): Promise<MintedMailSession> {
+  deps.onStage?.("assertion-validation");
   const idToken = deps.readGoogleIdToken().trim();
   if (!idToken || /[\r\n]/.test(idToken)) {
     throw new Error(
@@ -148,6 +193,7 @@ export async function mintTenantAdminSession(
   }
   deps.mask(idToken);
 
+  deps.onStage?.("token-exchange");
   const issued = await request(
     config,
     deps,
@@ -166,6 +212,7 @@ export async function mintTenantAdminSession(
     },
     true,
   );
+  deps.onStage?.("token-validation");
   const sessionToken = issued.token;
   if (
     typeof sessionToken !== "string" ||
@@ -176,8 +223,10 @@ export async function mintTenantAdminSession(
   }
   deps.mask(sessionToken);
   // Retain the cleanup handle even if identity/proof verification later fails.
+  deps.onStage?.("session-export");
   deps.onSessionIssued?.(sessionToken);
 
+  deps.onStage?.("session-request");
   const session = await request(
     config,
     deps,
@@ -185,6 +234,7 @@ export async function mintTenantAdminSession(
     { headers: { authorization: `Bearer ${sessionToken}` } },
     true,
   );
+  deps.onStage?.("session-validation");
   const identity = session.data?.identity as
     | {
         realm?: string;
@@ -200,6 +250,7 @@ export async function mintTenantAdminSession(
     identity?.actor_type !== "tenant_admin" ||
     identity?.actor_id !== config.actorId ||
     identity?.tenant_id !== config.tenantId ||
+    !Array.isArray(identity.roles) ||
     !identity.roles?.includes("tenant_admin")
   ) {
     throw new Error(
@@ -207,6 +258,7 @@ export async function mintTenantAdminSession(
     );
   }
 
+  deps.onStage?.("step-up-request");
   const proof = await request(
     config,
     deps,
@@ -221,6 +273,7 @@ export async function mintTenantAdminSession(
     },
     true,
   );
+  deps.onStage?.("step-up-validation");
   const proofData = proof.data as
     | {
         required?: boolean;
@@ -229,8 +282,10 @@ export async function mintTenantAdminSession(
       }
     | undefined;
   if (
-    !proofData?.required ||
+    proofData?.required !== true ||
+    typeof proofData.step_up_reference !== "string" ||
     !proofData.step_up_reference ||
+    /\s/.test(proofData.step_up_reference) ||
     proofData.action_id !== config.stepUpActionId
   ) {
     throw new Error(
@@ -243,7 +298,7 @@ export async function mintTenantAdminSession(
 }
 
 /**
- * Derives the Gmail plus-addressing alias (e.g. `person+invite@gmail.com`)
+ * Derives the dedicated Gmail/Workspace mailbox's plus-addressing alias.
  * Supervisor's integration_notes describe: the authorized test mailbox is
  * the dedicated SMTP sender mailbox itself, and the recipient allowlist
  * (`drts-dev-smtp-recipient-allowlist` version 2) adds that mailbox's own
@@ -252,107 +307,167 @@ export async function mintTenantAdminSession(
  * (masked immediately); it is never derived from a fixture or hardcoded.
  */
 export function deriveAliasRecipient(baseEmail: string, tag: string): string {
-  const at = baseEmail.indexOf("@");
+  const [local = "", domain = "", ...extra] = baseEmail.split("@");
+  const labels = domain.split(".");
+  const recipient = `${local}+${tag}@${domain}`;
   if (
-    !/^[a-zA-Z0-9._-]+@gmail\.com$/.test(baseEmail) ||
+    extra.length > 0 ||
+    /\s/.test(baseEmail) ||
+    !/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local) ||
+    local.startsWith(".") ||
+    local.endsWith(".") ||
+    local.includes("..") ||
+    local.length + tag.length + 1 > 64 ||
+    recipient.length > 254 ||
+    /(?:^|[.-])(?:fixture|demo|example)(?:[.-]|$)/i.test(domain) ||
+    /\.(?:invalid|test|localhost)$/i.test(domain) ||
+    labels.length < 2 ||
+    !labels.every((label) =>
+      /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(label),
+    ) ||
     !["invite", "approve"].includes(tag)
   ) {
-    throw new Error(
-      `Cannot derive a "${tag}" alias from a malformed base mailbox address.`,
+    throw new MailMailboxInputError(
+      "Cannot derive an authorized alias from a malformed base mailbox address or unsupported tag.",
     );
   }
-  return `${baseEmail.slice(0, at)}+${tag}@${baseEmail.slice(at + 1)}`;
+  return recipient;
+}
+
+export interface MailBootstrapDeps {
+  fetch: typeof fetch;
+  mask: (value: string) => void;
+  appendEnvironment: (path: string, value: string) => void;
+  readMailbox: (config: MailSessionConfig) => string;
+  assertions: (config: MailSessionConfig) => { next(): Promise<string> };
+}
+
+/** Same entry point as the hosted CLI; tests replace only cloud/IO boundaries. */
+export async function bootstrapMailSession(
+  env: MailSessionEnv,
+  deps: MailBootstrapDeps,
+  preflightOnly = false,
+): Promise<void> {
+  let stage: MailBootstrapStage = "input-validation";
+  try {
+    const config = validateMailSessionInputs(env);
+    if (env.GITHUB_ACTIONS !== "true")
+      throw new Error("Hosted runner required");
+    stage = "candidate-preflight";
+    await verifyDeployedCandidate(
+      config.apiOrigin,
+      config.candidateSha,
+      deps.fetch,
+    );
+    if (preflightOnly) return;
+    stage = "environment-path";
+    const envPath = env.GITHUB_ENV;
+    if (!envPath) {
+      throw new Error(
+        "GITHUB_ENV is required to export the minted session to later workflow steps.",
+      );
+    }
+    stage = "assertion-configuration";
+    const assertions = deps.assertions(config);
+    let minted: MintedMailSession | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      stage = "assertion-mint";
+      const assertion = await assertions.next();
+      try {
+        minted = await mintTenantAdminSession(config, {
+          fetch: deps.fetch,
+          mask: deps.mask,
+          onStage: (value) => {
+            stage = value;
+          },
+          readGoogleIdToken: () => assertion,
+          onSessionIssued: (token) =>
+            deps.appendEnvironment(
+              envPath,
+              `DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=${token}\n`,
+            ),
+        });
+        break;
+      } catch (error) {
+        // A concurrent dev workflow can consume the first same-second token.
+        // Only this explicit replay rejection permits minting a new assertion.
+        if (!(error instanceof AssertionReplayError)) throw error;
+      }
+    }
+    if (!minted)
+      throw new Error("Assertion collisions exhausted bounded retries");
+    stage = "step-up-export";
+    deps.appendEnvironment(
+      envPath,
+      `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`,
+    );
+
+    stage = "mailbox-read";
+    const baseMailbox = deps.readMailbox(config).trim();
+    deps.mask(baseMailbox);
+    stage = "alias-derivation";
+    const authorizedRecipient = deriveAliasRecipient(baseMailbox, "invite");
+    deps.mask(authorizedRecipient);
+    stage = "recipient-export";
+    deps.appendEnvironment(
+      envPath,
+      `DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT=${authorizedRecipient}\n`,
+    );
+    // Reserved TLD; production transport must record an allowlist rejection.
+    deps.appendEnvironment(
+      envPath,
+      "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-mail-001-negative@reserved.invalid\n",
+    );
+  } catch (error) {
+    throw new MailBootstrapError(stage, error);
+  }
 }
 
 async function main(): Promise<void> {
-  const config = validateMailSessionInputs(process.env);
-  if (process.env.GITHUB_ACTIONS !== "true")
-    throw new Error("Hosted runner required");
-  await verifyDeployedCandidate(config.apiOrigin, config.candidateSha);
-  if (process.argv.includes("--preflight")) return;
-  const envPath = process.env.GITHUB_ENV;
-  if (!envPath) {
-    throw new Error(
-      "GITHUB_ENV is required to export the minted session to later workflow steps.",
-    );
-  }
   const mask = (value: string) =>
     console.log(
       `::add-mask::${value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
     );
-  const assertions = googleAssertionSource(
-    config.apiOrigin,
-    requireString(
-      process.env.DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT,
-      "WIF service account",
-    ),
-    requireString(
-      process.env.DRTS_LIVE_MAIL_WIF_FEDERATED_TOKEN,
-      "WIF federated token",
-    ),
-    mask,
-  );
-  let minted: MintedMailSession | undefined;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const assertion = await assertions.next();
-    try {
-      minted = await mintTenantAdminSession(config, {
-        fetch,
-        mask,
-        readGoogleIdToken: () => assertion,
-        onSessionIssued: (token) =>
-          appendFileSync(
-            envPath,
-            `DRTS_LIVE_MAIL_ROLE_SESSION_TOKEN=${token}\n`,
+  await bootstrapMailSession(
+    process.env,
+    {
+      fetch,
+      mask,
+      appendEnvironment: appendFileSync,
+      assertions: (config) =>
+        googleAssertionSource(
+          config.apiOrigin,
+          requireString(
+            process.env.DRTS_LIVE_MAIL_WIF_SERVICE_ACCOUNT,
+            "WIF service account",
           ),
-      });
-      break;
-    } catch (error) {
-      // A concurrent dev workflow can consume the first same-second token.
-      // Only this explicit replay rejection permits minting a new assertion.
-      if (!(error instanceof AssertionReplayError)) throw error;
-    }
-  }
-  if (!minted)
-    throw new Error("Assertion collisions exhausted bounded retries");
-  appendFileSync(
-    envPath,
-    `DRTS_LIVE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`,
-  );
-
-  const baseMailbox = execFileSync(
-    "gcloud",
-    [
-      "secrets",
-      "versions",
-      "access",
-      "latest",
-      "--secret=drts-dev-smtp-username",
-      `--project=${config.gcpProjectId}`,
-    ],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  ).trim();
-  console.log(
-    `::add-mask::${baseMailbox.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
-  );
-  const authorizedRecipient = deriveAliasRecipient(baseMailbox, "invite");
-  console.log(
-    `::add-mask::${authorizedRecipient.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`,
-  );
-  appendFileSync(
-    envPath,
-    `DRTS_LIVE_MAIL_AUTHORIZED_RECIPIENT=${authorizedRecipient}\n`,
-  );
-  // RFC 2606 reserved TLD: guaranteed to never resolve or accept real mail,
-  // so this needs no operator authorization -- it only proves the
-  // allowlist gate rejects an address outside it.
-  appendFileSync(
-    envPath,
-    "DRTS_LIVE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-mail-001-negative@reserved.invalid\n",
+          requireString(
+            process.env.DRTS_LIVE_MAIL_WIF_FEDERATED_TOKEN,
+            "WIF federated token",
+          ),
+          mask,
+        ),
+      readMailbox: (config) =>
+        execFileSync(
+          "gcloud",
+          [
+            "secrets",
+            "versions",
+            "access",
+            "latest",
+            "--secret=drts-dev-smtp-username",
+            `--project=${config.gcpProjectId}`,
+          ],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+        ),
+    },
+    process.argv.includes("--preflight"),
   );
 
   console.log(
-    "Mail session bootstrap: minted and verified a live tenant_admin session, and derived the authorized test recipient.",
+    process.argv.includes("--preflight")
+      ? "Mail session bootstrap: authorization and deployed SHA verified."
+      : "Mail session bootstrap: minted and verified a live tenant_admin session, and derived the authorized test recipient.",
   );
 }
 
@@ -361,8 +476,12 @@ const invokedDirectly =
   resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (invokedDirectly) {
-  main().catch(() => {
-    console.error("Mail session bootstrap failed; credential details omitted.");
+  main().catch((error: unknown) => {
+    console.error(
+      error instanceof MailBootstrapError
+        ? error.message
+        : "Mail session bootstrap failed; stage=entrypoint; error_class=Unknown; credential details omitted.",
+    );
     process.exitCode = 1;
   });
 }

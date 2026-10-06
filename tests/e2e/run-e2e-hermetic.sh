@@ -288,7 +288,14 @@ ensure_api_build() {
 }
 
 start_api() {
-  setsid bash -c "$API_START_CMD" > "$API_LOG" 2>&1 &
+  # E2E-019 exercises real HTTP bytes and DB persistence. Only its external
+  # scanner HTTP boundary is simulated, through a test-only Nest provider.
+  # Production provider selection remains fail-closed and unchanged.
+  local api_node_options="${NODE_OPTIONS:-}"
+  if [[ "${CI:-}" == "true" && "${HERMETIC_SUITE_LABEL:-}" == "019" ]]; then
+    api_node_options+=" --require=\"${ROOT_DIR}/tests/e2e/fixtures/fleet-upload-scanner.cjs\""
+  fi
+  NODE_OPTIONS="$api_node_options" setsid bash -c "$API_START_CMD" > "$API_LOG" 2>&1 &
   API_PID=$!
   for _ in $(seq 1 60); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' "${E2E_API_URL}/health" 2>/dev/null)" = "200" ] && return 0

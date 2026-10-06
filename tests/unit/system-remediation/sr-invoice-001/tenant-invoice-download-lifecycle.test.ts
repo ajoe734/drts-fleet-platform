@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import type { BillingSettlementRepository } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.repository";
 import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { InMemoryDocumentArtifactStore } from "../../../../apps/api/src/common/document-artifacts";
 import { ControlledDownloadController } from "../../../../apps/api/src/modules/controlled-download/controlled-download.controller";
@@ -61,9 +62,9 @@ async function drain(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-function codeOf(call: () => unknown): string {
+async function codeOf(call: () => unknown): Promise<string> {
   try {
-    call();
+    await call();
   } catch (error) {
     return (error as ApiRequestError).code;
   }
@@ -90,7 +91,7 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
     );
 
     expect(
-      codeOf(() =>
+      await codeOf(() =>
         billingSettlementService.getTenantInvoice(
           "tenant-intruder",
           invoice.invoiceId,
@@ -137,12 +138,12 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
     // The rerun's link must still actually resolve real bytes, not just
     // return a cached id.
     const controller = new ControlledDownloadController(store);
-    const file = resolve(
+    const file = (await resolve(
       controller,
       "tenant-invoice",
       second.invoiceId,
       paramsOf(second.artifactUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
     expect((await drain(file.getStream())).length).toBeGreaterThan(0);
   });
 
@@ -171,9 +172,9 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
     expect(reread.artifactDownloadMetadata.expiresAt).not.toBe(
       originalExpiresAt,
     );
-    expect(Date.parse(reread.artifactDownloadMetadata.expiresAt)).toBeGreaterThan(
-      Date.now(),
-    );
+    expect(
+      Date.parse(reread.artifactDownloadMetadata.expiresAt),
+    ).toBeGreaterThan(Date.now());
     expect(reread.artifactUrl).not.toBe(originalUrl);
     // What was actually issued does not move just because someone looked at
     // the page later -- only the time-boxed link is allowed to change.
@@ -184,7 +185,7 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
     // The stale link genuinely would have failed.
     const controller = new ControlledDownloadController(store);
     expect(
-      codeOf(() =>
+      await codeOf(() =>
         resolve(
           controller,
           "tenant-invoice",
@@ -195,12 +196,12 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
     ).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
 
     // The reissued one resolves the same real bytes.
-    const refreshedFile = resolve(
+    const refreshedFile = (await resolve(
       controller,
       "tenant-invoice",
       invoice.invoiceId,
       paramsOf(reread.artifactUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
     const bytes = await drain(refreshedFile.getStream());
     expect(bytes.subarray(0, 8).toString("latin1")).toBe("%PDF-1.4");
   });
@@ -219,9 +220,8 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
 
     vi.setSystemTime(new Date("2026-04-01T00:30:00Z"));
 
-    const runtimeList = billingSettlementService.listTenantInvoicesRuntime(
-      "tenant-demo-001",
-    );
+    const runtimeList =
+      billingSettlementService.listTenantInvoicesRuntime("tenant-demo-001");
     const runtimeItem = runtimeList.items.find(
       (item) => item.invoiceId === invoice.invoiceId,
     );
@@ -238,7 +238,7 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
     expect(Date.parse(expiresAt!)).toBeGreaterThan(Date.now());
   });
 
-  it("self-heals when the underlying artifact store no longer has bytes matching the invoice's recorded link (e.g. after a process restart)", async () => {
+  it("keeps serving the same link after a repository reload (a restart), without ever needing to re-derive the manifest hash: DOCUMENT_ARTIFACT_STORE is now durable, so a restart reloads tenantInvoices from the repository but never empties the store behind it", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { billingSettlementService } = createService(store);
 
@@ -247,41 +247,53 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
       { tenantId: "tenant-demo-001", ...PERIOD },
     );
 
-    // `DocumentArtifactStore` is in-memory only (SR-ARTIFACT-001 scope); a
-    // restart empties it while `tenantInvoices` survives via the repository.
-    // There is no public seam to swap the injected store, so this simulates
-    // that restart directly on the private field.
-    (billingSettlementService as unknown as {
-      documentArtifactStore: InMemoryDocumentArtifactStore;
-    }).documentArtifactStore = new InMemoryDocumentArtifactStore();
+    // A restart reloads invoice metadata from the repository into a fresh
+    // service instance; it must share the SAME durable `documentArtifactStore`
+    // -- a real restart never wipes it, unlike the in-memory-only design this
+    // test previously modelled.
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      loadState: vi.fn(async () => ({
+        tenantBillingProfiles: [],
+        tenantInvoices: [invoice],
+        driverFeePlans: [],
+        driverStatements: [],
+        reimbursementBatches: [],
+        reconciliationIssues: [],
+        fulfillmentSegments: [],
+        sandboxBillingTreatments: [],
+      })),
+      persistChanges: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as BillingSettlementRepository;
+    const restarted = new BillingSettlementService(
+      new AuditNotificationService(),
+      repository,
+      undefined,
+      undefined,
+      store,
+    );
+    await restarted.onModuleInit();
 
-    const healed = billingSettlementService.getTenantInvoice(
+    const healed = restarted.getTenantInvoice(
       "tenant-demo-001",
       invoice.invoiceId,
     );
 
+    expect(healed.artifactDownloadMetadata.manifestHash).toBe(
+      invoice.artifactDownloadMetadata.manifestHash,
+    );
     expect(healed.lines).toEqual(invoice.lines);
     expect(healed.amount).toEqual(invoice.amount);
     expect(healed.createdAt).toBe(invoice.createdAt);
 
-    const rehealedStore = (
-      billingSettlementService as unknown as {
-        documentArtifactStore: InMemoryDocumentArtifactStore;
-      }
-    ).documentArtifactStore;
-    const materialised = rehealedStore.get("tenant-invoice", invoice.invoiceId);
-    expect(materialised).not.toBeNull();
-    expect(materialised!.record.sha256).toBe(
-      healed.artifactDownloadMetadata.manifestHash,
-    );
-
-    const controller = new ControlledDownloadController(rehealedStore);
-    const file = resolve(
+    const controller = new ControlledDownloadController(store);
+    const file = (await resolve(
       controller,
       "tenant-invoice",
       invoice.invoiceId,
       paramsOf(healed.artifactUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
     const bytes = await drain(file.getStream());
     expect(bytes.toString("latin1")).toContain(
       `Tenant Invoice ${invoice.invoiceId}`,

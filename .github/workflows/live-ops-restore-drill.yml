@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       base_sha:
-        description: Full origin/dev base SHA recorded by the candidate
+        description: Full ancestor SHA on main (for example the promoted candidate's main parent)
         required: true
         type: string
 
@@ -54,6 +54,9 @@ jobs:
           git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
           git merge-base --is-ancestor "$BASE_SHA" "$CANDIDATE_SHA"
           git checkout --detach "$CANDIDATE_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Offline orchestration regression (no cloud calls)
         run: python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
       - name: Require fresh operator-confirmed IAM readiness for this candidate

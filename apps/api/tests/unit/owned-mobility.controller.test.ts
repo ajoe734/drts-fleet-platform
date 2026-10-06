@@ -7,17 +7,21 @@ import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owne
 describe("OwnedMobilityController tenant booking routes", () => {
   it("awaits passenger cancellation and propagates transaction failures", async () => {
     const cancelOwnedOrder = vi.fn().mockResolvedValue({
-      orderId: "order-cancel", status: "cancelled",
+      orderId: "order-cancel",
+      status: "cancelled",
     });
     const controller = new OwnedMobilityController(
-      { cancelOwnedOrder } as unknown as OwnedMobilityService, {} as never,
+      { cancelOwnedOrder } as unknown as OwnedMobilityService,
+      {} as never,
     );
-    expect((await controller.cancelOwnedOrder("order-cancel", {})).data)
-      .toEqual({ orderId: "order-cancel", status: "cancelled" });
+    expect(
+      (await controller.cancelOwnedOrder("order-cancel", {})).data,
+    ).toEqual({ orderId: "order-cancel", status: "cancelled" });
     const failure = new Error("transaction rolled back");
     cancelOwnedOrder.mockRejectedValueOnce(failure);
-    await expect(controller.cancelOwnedOrder("order-cancel", {}))
-      .rejects.toBe(failure);
+    await expect(controller.cancelOwnedOrder("order-cancel", {})).rejects.toBe(
+      failure,
+    );
   });
 
   it("awaits referral ratings before wrapping the API envelope", async () => {
@@ -357,5 +361,43 @@ describe("OwnedMobilityController tenant booking routes", () => {
     });
     expect(detailResponse.data).toEqual(queueEntry);
     expect(service.getQueueEntry).toHaveBeenCalledWith(queueEntry.queueEntryId);
+  });
+});
+
+describe("OwnedMobilityController updateDriverTaskEta", () => {
+  it("rejects when caller identity does not match task.driverId", async () => {
+    const service = {
+      getDriverTask: vi.fn().mockReturnValue({
+        taskId: "task-001",
+        driverId: "dr-some-other-guy",
+      }),
+      updateDriverTaskEta: vi.fn(),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service, {} as never);
+
+    // Caller is dr-imposter
+    const identity: BootstrapRequestIdentity = {
+      actorId: "dr-imposter",
+      userId: "dr-imposter",
+      realm: "driver",
+      scopes: ["driver:write"],
+      tenantId: null,
+      partnerId: null,
+    };
+
+    let error: any;
+    try {
+      await controller.updateDriverTaskEta(
+        "task-001",
+        { etaMinutes: 10 },
+        identity,
+        "req-123",
+      );
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeDefined();
+    expect(error.code).toBe("DRIVER_IDENTITY_MISMATCH");
+    expect(service.updateDriverTaskEta).not.toHaveBeenCalled();
   });
 });
