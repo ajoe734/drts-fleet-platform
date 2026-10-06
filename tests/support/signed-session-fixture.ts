@@ -271,6 +271,19 @@ export interface EnsureReimbursementBatchFixtureOptions {
   opsToken?: string;
   driverId?: string;
   periodMonth?: string;
+  /** Confirms the fee plan actually persisted to `billing.phase1_driver_fee_plans`
+   * rather than only existing in the API's in-memory cache (see
+   * `waitForFeePlanPersistence` below). Defaults to a real `DatabaseService`
+   * pointed at `DATABASE_URL`; tests inject a double at this same external
+   * I/O boundary the way `identityRepository` lets callers substitute the
+   * identity store. */
+  databaseService?: DatabaseService;
+  /** Overrides for `waitForFeePlanPersistence`'s poll loop; production
+   * defaults (10 attempts / 300ms) tolerate the real, unawaited persist
+   * finishing shortly after the HTTP response. Tests that model a
+   * never-persists failure override these to stay fast. */
+  persistenceCheckAttempts?: number;
+  persistenceCheckIntervalMs?: number;
 }
 
 export interface PublicInfoVersionFixture {
@@ -351,6 +364,8 @@ interface DriverFeePlanWireRecord {
   plan_name: string;
   version: string;
   status: string;
+  service_fee_bps: number;
+  reimbursement_mode: string;
 }
 
 interface PublicInfoVersionWireRecord {
@@ -380,6 +395,75 @@ async function listDriverFeePlansWire(
   return list.body?.data?.items ?? [];
 }
 
+/** `plan_name`/`version` alone only prove the fixture's OWN earlier publish
+ * (or some other caller's conflicting publish of the identical name/version)
+ * reached the active slot -- not that it carries the exact
+ * `serviceFeeBps: 0` / `reimbursementMode: "platform_funded"` content this
+ * fixture promises. `createReimbursementItems` reads `activeFeePlan.
+ * serviceFeeBps`/`reimbursementMode` directly (billing-settlement.
+ * service.ts:2140-2142,2207-2210), so a same-name/version plan published
+ * with a different fee or a different valid mode (e.g. `"mixed"`,
+ * contracts/src/index.ts:5467) would silently generate statements under the
+ * wrong economics. Throws before any generation if the content disagrees. */
+function assertFeePlanContentMatches(plan: DriverFeePlanWireRecord): void {
+  if (plan.service_fee_bps !== 0 || plan.reimbursement_mode !== "platform_funded") {
+    throw new Error(
+      `Active fee plan ${plan.plan_name}/${plan.version} does not carry the ` +
+        `fixture's expected content (serviceFeeBps: 0, reimbursementMode: ` +
+        `"platform_funded"); actual service_fee_bps=${plan.service_fee_bps}, ` +
+        `reimbursement_mode=${plan.reimbursement_mode}. Reusing it would generate ` +
+        "statements under the wrong fee/reimbursement economics; use a fresh " +
+        "fixture plan name/version instead of reusing this one.",
+    );
+  }
+}
+
+/** `publishDriverFeePlan`'s controller action is not `async` and never
+ * awaits the service's `Promise` (see `ensureDriverReimbursementBatchFixture`
+ * doc comment below), and the service itself updates its in-memory
+ * `driverFeePlans` cache (billing-settlement.service.ts:2029) BEFORE
+ * `await`-ing the real `persistChanges` database write (:2030). That means
+ * the synchronous `GET driver-fee-plans` readback this fixture otherwise
+ * treats as ground truth can report our plan "active" even when the
+ * underlying `INSERT INTO billing.phase1_driver_fee_plans` (billing-
+ * settlement.repository.ts:975-1001) is still in flight, or has already
+ * rejected -- there is no rollback of the optimistic cache update on
+ * failure. A plain, uncorroborated GET can therefore send a non-persisted
+ * plan into `generateDriverStatements`, and a RETRY after such a failure
+ * would see the same still-cached (but still never-persisted) plan as
+ * "already active" and skip republishing entirely.
+ *
+ * This polls the real table directly, independent of the API's cache, so a
+ * failed or still-in-flight persist is observed and rejected rather than
+ * silently trusted. In the DB-less fallback mode (`DATABASE_URL` unset),
+ * `persistChanges` itself is a no-op (billing-settlement.repository.ts:909-
+ * 911) and the in-memory cache IS the durable state, so there is nothing
+ * further to confirm. */
+async function waitForFeePlanPersistence(
+  databaseService: DatabaseService,
+  planName: string,
+  version: string,
+  attempts: number,
+  intervalMs: number,
+): Promise<boolean> {
+  if (!databaseService.isEnabled()) {
+    return true;
+  }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = await databaseService.query<{ status: string }>(
+      `SELECT status FROM billing.phase1_driver_fee_plans WHERE plan_name = $1 AND version = $2`,
+      [planName, version],
+    );
+    if (result.rows.length > 0) {
+      return true;
+    }
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+  return false;
+}
+
 /** Ensures `driverId` (default `DEFAULT_DRIVER_FIXTURE_ACTOR_ID`) owns a
  * reimbursement batch for `periodMonth` (default
  * `FIXTURE_REIMBURSEMENT_PERIOD_MONTH`) on the target deployment, through
@@ -404,7 +488,17 @@ async function listDriverFeePlansWire(
  * if a DIFFERENT plan already shadows ours (publishing again would only
  * hit the real 409 invisibly and leave the wrong plan active for
  * `generateDriverStatements`); otherwise publish once and re-read to
- * confirm it actually became active before proceeding.
+ * confirm it actually became active before proceeding. Either way (reused
+ * or freshly published), `waitForFeePlanPersistence` then polls the real
+ * `billing.phase1_driver_fee_plans` table directly before trusting that
+ * active plan: the cache update above is optimistic and never rolled back
+ * on a failed persist, so an uncorroborated GET -- including on a retry
+ * after a previous failed persist -- cannot tell a genuinely durable plan
+ * from one that only looks active in memory. `assertFeePlanContentMatches`
+ * also rejects a same-name/version plan whose `serviceFeeBps`/
+ * `reimbursementMode` disagree with what this fixture promises, since
+ * `generateDriverStatements` would otherwise silently run under the wrong
+ * economics.
  *
  * `driver-statements/generate`'s controller action IS properly `async`/
  * awaited (billing-settlement.controller.ts:331,344-348), so its response is
@@ -422,6 +516,9 @@ export async function ensureDriverReimbursementBatchFixture(
   const driverId = options.driverId ?? DEFAULT_DRIVER_FIXTURE_ACTOR_ID;
   const periodMonth = options.periodMonth ?? FIXTURE_REIMBURSEMENT_PERIOD_MONTH;
   const token = options.opsToken ?? (await issueOpsSessionFixture()).token;
+  const databaseService = options.databaseService ?? new DatabaseService();
+  const persistenceCheckAttempts = options.persistenceCheckAttempts ?? 10;
+  const persistenceCheckIntervalMs = options.persistenceCheckIntervalMs ?? 300;
 
   const existingPlans = await listDriverFeePlansWire(baseUrl, token);
   const activePlan = existingPlans[0];
@@ -430,7 +527,9 @@ export async function ensureDriverReimbursementBatchFixture(
     activePlan.plan_name === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
     activePlan.version === FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION;
 
-  if (!isActivePlanOurs) {
+  if (isActivePlanOurs) {
+    assertFeePlanContentMatches(activePlan);
+  } else {
     const shadowedByOtherActivePlan = existingPlans.some(
       (plan) =>
         plan.plan_name === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
@@ -474,6 +573,27 @@ export async function ensureDriverReimbursementBatchFixture(
           "see this function's doc comment).",
       );
     }
+    assertFeePlanContentMatches(confirmedActive);
+  }
+
+  const persisted = await waitForFeePlanPersistence(
+    databaseService,
+    FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME,
+    FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION,
+    persistenceCheckAttempts,
+    persistenceCheckIntervalMs,
+  );
+  if (!persisted) {
+    throw new Error(
+      `Fixture fee plan ${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION} ` +
+        "is active in the API's in-memory cache (per the GET driver-fee-plans readback) " +
+        "but was not found in billing.phase1_driver_fee_plans after " +
+        `${persistenceCheckAttempts} attempts; publishDriverFeePlan's controller action ` +
+        "does not await the service's persist before responding, so the cache can report " +
+        "the plan active while the real database write is still in flight or has failed " +
+        "(see this function's doc comment). Refusing to generate statements against a " +
+        "fee plan that is not confirmed durable.",
+    );
   }
 
   const generate = await callApi(baseUrl, "/api/driver-statements/generate", {

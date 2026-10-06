@@ -11,6 +11,7 @@ import {
 } from "../../support/signed-session-fixture";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
 import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
+import type { DatabaseService } from "../../../apps/api/src/common/db";
 
 function collectSourceFiles(dir: string): string[] {
   let entries: string[];
@@ -208,7 +209,21 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
     plan_name: "fixture-platform-funded-reimbursement",
     version: "v1",
     status: "published",
+    service_fee_bps: 0,
+    reimbursement_mode: "platform_funded",
   };
+
+  // `databaseService: undefined` (DATABASE_URL-less default) hits the real
+  // `DatabaseService`'s own `isEnabled() === false` branch, so
+  // `waitForFeePlanPersistence` short-circuits to `true` without issuing any
+  // query -- these DB-less fakes only need to cover the `isEnabled() ===
+  // true` branch that models a real deployment's persistence outcome.
+  function fakeDatabaseService(rows: unknown[]): DatabaseService {
+    return {
+      isEnabled: () => true,
+      query: async () => ({ rows }),
+    } as unknown as DatabaseService;
+  }
 
   it("publishes the fixture fee plan when none exists, confirms activation via readback, generates statements, and returns the resulting batch id (eligible-positive / first publish)", async () => {
     fetchMock
@@ -221,6 +236,7 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
 
     const fixture = await ensureDriverReimbursementBatchFixture({
       opsToken: "test-ops-token",
+      databaseService: fakeDatabaseService([{ status: "published" }]),
     });
 
     expect(fixture).toEqual({
@@ -252,12 +268,55 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
 
     const fixture = await ensureDriverReimbursementBatchFixture({
       opsToken: "test-ops-token",
+      databaseService: fakeDatabaseService([{ status: "published" }]),
     });
 
     expect(fixture.batchId).toBe("reimbursement-1");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const urls = fetchMock.mock.calls.map(([url]) => url);
     expect(urls).not.toContain("https://fixture.example.test/api/driver-fee-plans/publish");
+  });
+
+  it("rejects reusing an already-active fixture fee plan whose content disagrees with the fixture's promised economics (shadowed content)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(200, {
+        data: {
+          items: [
+            {
+              ...ourActivePlan,
+              service_fee_bps: 1500,
+              reimbursement_mode: "mixed",
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({
+        opsToken: "test-ops-token",
+        databaseService: fakeDatabaseService([{ status: "published" }]),
+      }),
+    ).rejects.toThrow(/does not carry the fixture's expected content/);
+    // Same name/version alone must not be enough to proceed into generation.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects when a previous run's publish never persisted, even though the cache still reports our plan active (retry after failed persist)", async () => {
+    fetchMock.mockResolvedValueOnce(fakeResponse(200, { data: { items: [ourActivePlan] } }));
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({
+        opsToken: "test-ops-token",
+        databaseService: fakeDatabaseService([]),
+        persistenceCheckAttempts: 2,
+        persistenceCheckIntervalMs: 1,
+      }),
+    ).rejects.toThrow(/was not found in billing\.phase1_driver_fee_plans/);
+    // isActivePlanOurs skips re-publishing; the DB check must still catch it
+    // before any statement generation is attempted against the never-
+    // persisted plan.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects when a different, more recently published fee plan shadows the fixture plan (conflicting existing plan)", async () => {
@@ -278,7 +337,7 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects when publishing the fixture fee plan does not take effect by the confirmation readback (persistence failure)", async () => {
+  it("rejects when publishing the fixture fee plan does not take effect by the confirmation readback (cache never shows it active)", async () => {
     fetchMock
       .mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }))
       .mockResolvedValueOnce(fakeResponse(201, {}))
@@ -287,6 +346,31 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
     await expect(
       ensureDriverReimbursementBatchFixture({ opsToken: "test-ops-token" }),
     ).rejects.toThrow(/did not take effect/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects when the publish's database write never persists, even though the cache readback reports the plan active (genuine persistence failure)", async () => {
+    // The real service updates its in-memory cache BEFORE awaiting the
+    // actual database insert (billing-settlement.service.ts:2029-2030), and
+    // the controller never awaits that insert either -- so the confirmation
+    // GET right after POST legitimately reports our plan active even when
+    // the underlying INSERT has failed or is still in flight. A GET that
+    // instead fabricates `items: []` (the old version of this test) hides
+    // that decisive behavior; this models the real cache response and
+    // relies on the direct-database check to catch the failure.
+    fetchMock
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }))
+      .mockResolvedValueOnce(fakeResponse(201, {}))
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [ourActivePlan] } }));
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({
+        opsToken: "test-ops-token",
+        databaseService: fakeDatabaseService([]),
+        persistenceCheckAttempts: 2,
+        persistenceCheckIntervalMs: 1,
+      }),
+    ).rejects.toThrow(/was not found in billing\.phase1_driver_fee_plans/);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
