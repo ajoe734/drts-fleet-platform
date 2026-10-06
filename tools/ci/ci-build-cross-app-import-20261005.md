@@ -236,3 +236,34 @@ and does not falsely attribute it to another lane. Supervisor's remaining
 decision is to coordinate the five named API test paths and
 `apps/tenant-console-web/tests/unit/api-client.test.ts`, then update this task's
 write scopes (or provide an explicit fixture follow-up disposition).
+
+## Scope audit and blocked disposition — 2026-10-06T00:22Z
+
+The next dispatch still supplies the same scope. After fetch, local and remote
+task heads both remain `28a0df63123ad9038f94a830f1f5b5d58ef8e97c`;
+`origin/dev` remains `446228cbc771a4ced774126a7d4aaddea4db73e6`.
+`gh pr list --head codex/ci-build-cross-app-import-20261005 --state all`
+returns no PR; the released task slice has no candidate or expanded
+`write_scopes`. No further source repair is authorized by this dispatch.
+
+| Finding / acceptance | Verification at this checkpoint | Evidence / remaining condition |
+| --- | --- | --- |
+| Full cross-app guard / CI guard acceptance | `node tools/ci/check-cross-app-imports.mjs` finishes with exit 1 at `28a0df631`, reporting the same six imports in the five API tests listed above | Retained `full-guard.log`, `environment.txt`, `results.txt`, and `SHA256SUMS` in canonical `.local/ci-build-cross-app-import/scope-audit-20261006.mpv9JG/`; relocation scope still needs Supervisor coordination |
+| Tenant booking fixture | Not rerun or repaired; two prior baseline-reproduced failures remain open | Supervisor must coordinate `apps/tenant-console-web/tests/unit/api-client.test.ts` or explicitly record its follow-up disposition |
+| Isolated build / same-SHA CI and independent review | Historical build evidence retains its original SHA; no new build, hosted CI, candidate, review, merge or deployment | Complete the scope-dependent repairs before locking a candidate |
+
+Read-only inspection of the active release found an existing way to record this
+impasse without assigning it falsely to another lane: `system-block <task-id>
+<message>`. The release's `control_plane/usecases/task_board_commands.py`
+explicitly permits this command for dispatched workers on their assigned task
+and records its worker outcome as `blocked`. Its `bin/ai_status.py` handler
+supports `EVIDENCE_REF` and does not require a `waiting_for` agent. Thus the
+owner can use the released gateway with `AI_NAME=Codex`, preserving all worker
+guards and avoiding the previously rejected `blocker ... Supervisor` form.
+No control-plane code or state files are edited directly.
+
+Resume condition: Supervisor checks parallel ownership and updates this task's
+scope for the five named API test source paths, their relocation into
+`tests/unit/cross-app/`, and the tenant fixture repair/disposition. An unchanged
+owner dispatch cannot satisfy this condition. All checks started here finished
+and were read; no service, browser runner or Docker was started.
