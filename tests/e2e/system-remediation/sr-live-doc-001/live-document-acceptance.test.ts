@@ -1038,7 +1038,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         } else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
             const ExcelJS = await import("exceljs");
             const workbook = new ExcelJS.Workbook();
-            await workbook.xlsx.load(reportOutcome.bytes!);
+            await workbook.xlsx.load(reportOutcome.bytes! as any);
             let found = false;
             workbook.eachSheet((worksheet) => {
                 worksheet.eachRow((row) => {
