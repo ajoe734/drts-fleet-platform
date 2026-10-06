@@ -13,7 +13,7 @@ Codex entered a terminal loop because:
 Since the previous candidate is already merged into `dev`, the non-destructive repair path without force-pushing shared history is:
 1. Create a fresh recovery branch `codex2/c125-real-upload-storage-20261005-r3` from the current `origin/dev`.
 2. Handoff this unblock task so the supervisor can re-dispatch the parent task.
-3. The parent task (now owned by Gemini) will operate on the clean `-r3` branch, implementing the remaining `R5b.2` and hosted auth features, and submit a new PR without touching the merged `-r2` history.
+3. The parent task (now owned by Codex2) will operate on the clean `-r3` branch, implementing the remaining `R5b.2` and hosted auth features, and submit a new PR without touching the merged `-r2` history.
 
 ## Evidence
 - `PR #2347` (merged as `446228cbc771a4ced774126a7d4aaddea4db73e6`)
@@ -21,4 +21,4 @@ Since the previous candidate is already merged into `dev`, the non-destructive r
 - `c52c87a4020cb7710f41fed020734a5424ed01a1` was the original branch head Codex was incorrectly diffing against.
 
 ## Unblocked Next Step
-The parent task owner (Gemini) should continue implementation on a new branch `codex2/c125-real-upload-storage-20261005-r3` branched from `dev`, focusing on the missing real GCS/ClamAV and identity prerequisites.
+The parent task owner (Codex2) should continue implementation on a new branch `codex2/c125-real-upload-storage-20261005-r3` branched from `dev`, focusing on the missing real GCS/ClamAV and identity prerequisites.
