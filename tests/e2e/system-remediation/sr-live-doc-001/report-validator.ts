@@ -206,7 +206,9 @@ export async function validateReportArtifact(
 
               const sheetColumns: Record<string, number> = {};
               let headerCount = 0;
+              let maxColNumber = 0;
               headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                  if (colNumber > maxColNumber) maxColNumber = colNumber;
                   const val = String(cell.value || "");
                   if (val) {
                       expect(sheetColumns).not.toHaveProperty(val);
@@ -224,7 +226,10 @@ export async function validateReportArtifact(
               for (let i = 0; i < jobDetail.rows.length; i++) {
                   const row = jobDetail.rows[i]!;
                   const sheetRow = worksheet.getRow(i + 2);
-                  for (let colNumber = 1; colNumber <= headerCount; colNumber++) {
+                  sheetRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                      if (colNumber > maxColNumber) maxColNumber = colNumber;
+                  });
+                  for (let colNumber = 1; colNumber <= maxColNumber; colNumber++) {
                       const cellValue = sheetRow.getCell(colNumber).value;
                       let actualVal = "";
                       if (cellValue !== null && cellValue !== undefined) {

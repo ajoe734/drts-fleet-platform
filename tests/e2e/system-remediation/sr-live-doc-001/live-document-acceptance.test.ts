@@ -1012,7 +1012,8 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const reportMetadataRes = await fetch(`${platformAdminOriginStrict}/control-plane-proxy/reports/${jobId}`, { headers: platformHeaders });
         expect(reportMetadataRes.status).toBe(200);
         expect(reportMetadataRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
-        const jobDetail = await reportMetadataRes.json();
+        const payload = await reportMetadataRes.json();
+        const jobDetail = payload.data || payload;
         expect(jobDetail.jobId).toBe(jobId);
         expect(jobDetail.status).toBe("completed");
 

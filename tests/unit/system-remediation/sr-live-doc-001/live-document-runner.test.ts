@@ -276,6 +276,30 @@ describe("validateReportArtifact", () => {
         validateReportArtifact(missingRowsJob, "job-1", "text/csv", Buffer.from("job-1"))
       ).rejects.toThrow("Missing rows evidence in metadata");
     });
+    
+    it("accepts valid production CSV with charset", async () => {
+      const csvString = recordsToCsv(jobDetail.rows);
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "text/csv; charset=utf-8", Buffer.from(csvString))
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects wrong bytes with valid CSV charset", async () => {
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "text/csv; charset=utf-8", Buffer.from("BAD REPORT"))
+      ).rejects.toThrow();
+    });
+
+    it("rejects unknown or missing MIME type", async () => {
+      const csvString = recordsToCsv(jobDetail.rows);
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "application/json", Buffer.from(csvString))
+      ).rejects.toThrow("Unsupported MIME type: application/json");
+      
+      await expect(
+        validateReportArtifact(jobDetail, "job-1", "", Buffer.from(csvString))
+      ).rejects.toThrow("Unsupported MIME type");
+    });
   });
 
   describe("XLSX validation", () => {
@@ -294,6 +318,27 @@ describe("validateReportArtifact", () => {
       await expect(
         validateReportArtifact(missingRowsJob, "job-1", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)
       ).rejects.toThrow("Missing rows evidence in metadata");
+    });
+    
+    it("accepts authentic empty XLSX from production renderer", async () => {
+      const emptyJob = { format: "xlsx", jobId: "job-1", rows: [] };
+      const emptyBuffer = await recordsToXlsx([]);
+      await expect(
+        validateReportArtifact(emptyJob, "job-1", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", emptyBuffer)
+      ).resolves.toBeUndefined();
+    });
+
+    it("rejects sparse-null + extra-cell false positive", async () => {
+      const sparseJob = { format: "xlsx", jobId: "job-1", rows: [{ orderId: "order-1", amountMinor: 120000, note: null }] };
+      const ExcelJS = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Sheet1");
+      worksheet.addRow(["orderId", "amountMinor", "note"]);
+      worksheet.addRow(["order-1", 120000, null, "UNEXPECTED"]);
+      const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+      await expect(
+        validateReportArtifact(sparseJob, "job-1", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer)
+      ).rejects.toThrow();
     });
   });
 
