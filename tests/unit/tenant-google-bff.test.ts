@@ -8,6 +8,7 @@ import {
   TENANT_SESSION_COOKIE_NAME,
 } from "../../apps/tenant-console-web/lib/auth/constants";
 import { verifyEnterpriseTenantSession } from "../../apps/enterprise-dispatch-web/lib/enterprise-session.server";
+import { encodeStateEnvelope } from "../../apps/tenant-console-web/lib/auth/session";
 
 const context = (...auth: string[]) => ({ params: Promise.resolve({ auth }) });
 const cookie = (response: Response, name: string) =>
@@ -21,18 +22,21 @@ describe.each([
     name: "tenant",
     handlers: tenant,
     origin: "https://tenant.smarttransport.tw",
+    failurePath: "/login",
   },
   {
     name: "dispatch",
     handlers: dispatch,
     origin: "https://dispatch.smarttransport.tw",
+    failurePath: "/auth-required",
   },
   {
     name: "dispatch run.app",
     handlers: dispatch,
     origin: "https://drts-dev-enterprise-dispatch-web-test.a.run.app",
+    failurePath: "/auth-required",
   },
-])("$name host-local tenant login", ({ handlers, origin }) => {
+])("$name host-local tenant login", ({ handlers, origin, failurePath }) => {
   beforeEach(() => {
     vi.stubEnv("DRTS_API_URL", "https://api-test.a.run.app");
     vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
@@ -45,6 +49,60 @@ describe.each([
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
+
+  it("keeps the app-specific failure route and does not exchange mismatched state", async () => {
+    const upstream = vi.fn();
+    vi.stubGlobal("fetch", upstream);
+    const state = encodeStateEnvelope({
+      stateToken: "expected",
+      returnUrl: "/",
+    });
+    const response = await handlers.GET(
+      new NextRequest(
+        `${origin}/api/auth/tenant/callback?code=code&state=wrong`,
+        {
+          headers: { cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${state}` },
+        },
+      ),
+      context("tenant", "callback"),
+    );
+    const redirect = new URL(response.headers.get("location")!);
+    expect(redirect.origin).toBe(origin);
+    expect(redirect.pathname).toBe(failurePath);
+    expect(redirect.searchParams.get("error")).toBe("AUTH_STATE_MISMATCH");
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { active: true, identity: { realm: "platform", tenant_id: "tenant-1" } },
+    { active: true, identity: { realm: "tenant", tenant_id: "" } },
+    { active: false, identity: { realm: "tenant", tenant_id: "tenant-1" } },
+  ])(
+    "rejects invalid session authority and clears session/CSRF cookies: %j",
+    async (data) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string | URL) =>
+          url.toString().includes("metadata.google.internal")
+            ? new Response("cloud-run-proof")
+            : Response.json({ data }),
+        ),
+      );
+      const response = await handlers.GET(
+        new NextRequest(`${origin}/api/auth/session`, {
+          headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=session` },
+        }),
+        context("session"),
+      );
+      expect(response.status).toBe(401);
+      expect(cookie(response, TENANT_SESSION_COOKIE_NAME)).toBe(
+        `${TENANT_SESSION_COOKIE_NAME}=`,
+      );
+      expect(cookie(response, TENANT_CSRF_COOKIE_NAME)).toBe(
+        `${TENANT_CSRF_COOKIE_NAME}=`,
+      );
+    },
+  );
 
   it("uses the same PKCE API, verifies session, and revokes on logout-all without sharing cookies", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];

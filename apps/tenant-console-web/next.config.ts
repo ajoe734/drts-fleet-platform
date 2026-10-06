@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   compress: false,
   outputFileTracingRoot: path.join(__dirname, "../../"),
   transpilePackages: [
+    "@drts/tenant-auth",
     "@drts/contracts",
     "@drts/shared-types",
     "@drts/ui-tokens",

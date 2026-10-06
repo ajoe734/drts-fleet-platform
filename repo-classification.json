@@ -120,7 +120,7 @@
     },
     {
       "id": "package-build-config",
-      "pattern": "^packages/(?:api-client|contracts|control-plane-auth|shared-types|ui-tokens|ui-web)/tsconfig(?:\\.[^/]+)?\\.json$",
+      "pattern": "^packages/(?:api-client|contracts|control-plane-auth|shared-types|tenant-auth|ui-tokens|ui-web)/tsconfig(?:\\.[^/]+)?\\.json$",
       "classification": "product_operations",
       "status": "active"
     },
@@ -132,7 +132,7 @@
     },
     {
       "id": "runtime-packages",
-      "pattern": "^packages/(?:api-client|contracts|control-plane-auth|shared-types|ui-tokens|ui-web)/",
+      "pattern": "^packages/(?:api-client|contracts|control-plane-auth|shared-types|tenant-auth|ui-tokens|ui-web)/",
       "classification": "product_runtime",
       "status": "active"
     },

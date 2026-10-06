@@ -1,7 +1,13 @@
+import { proofArtifactPath } from "./proof-artifacts";
+import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname } from "node:path";
 
-import { EventEmitter2 } from "@nestjs/event-emitter";
+// Resolve API-owned dependencies from their workspace package.
+const apiRequire = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+);
+const { EventEmitter2 } = apiRequire("@nestjs/event-emitter");
 import { afterEach, expect, it, vi } from "vitest";
 
 const { randomUuidMock } = vi.hoisted(() => ({
@@ -19,16 +25,17 @@ vi.mock("node:crypto", async () => {
 
 import type {
   AuditLogRecord,
+  CreateCallCenterOrderCommand,
   DispatchJobRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
-import { ApiRequestError } from "../../src/common/api-envelope";
-import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
-import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
-import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
-import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
-import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
-import { buildOpsMapBoardModel } from "../../../ops-console-web/app/dispatch/ops-map-board";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
+import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
+import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
+import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
+import { buildOpsMapBoardModel } from "../../../apps/ops-console-web/app/dispatch/ops-map-board";
 
 const SERVICEABLE_ORDER_ID = "ORD-SMOKE-001";
 const MANUAL_REVIEW_ORDER_ID = "ORD-MAP-MANUAL-001";
@@ -66,7 +73,7 @@ function createOwnedMobilityService() {
             2,
             "0",
           )}.000Z`,
-          requestId: input.requestId ?? null,
+          requestId: input.requestId ?? "req-closeout-audit",
           actorId: input.actorId,
           actorType: input.actorType,
           tenantId: input.tenantId ?? null,
@@ -74,9 +81,12 @@ function createOwnedMobilityService() {
           actionName: input.actionName,
           resourceType: input.resourceType,
           resourceId: input.resourceId,
-          oldValuesSummary: input.oldValuesSummary ?? null,
-          newValuesSummary: input.newValuesSummary ?? null,
-          metadata: input.metadata ?? null,
+          ...(input.oldValuesSummary
+            ? { oldValuesSummary: input.oldValuesSummary }
+            : {}),
+          ...(input.newValuesSummary
+            ? { newValuesSummary: input.newValuesSummary }
+            : {}),
         };
         auditLogs.unshift(auditLog);
         return auditLog;
@@ -152,7 +162,7 @@ afterEach(() => {
   randomUuidMock.mockReset();
 });
 
-it("writes persisted spatial closeout proof for the fleets closeout task", () => {
+it("writes persisted spatial closeout proof for the fleets closeout task", async () => {
   let orderSequence = 0;
   let snapshotSequence = 0;
   let traceSequence = 0;
@@ -182,7 +192,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
   });
 
   const { service, auditLogs, persistedWrites } = createOwnedMobilityService();
-  const serviceableRequestBody = {
+  const serviceableRequestBody: CreateCallCenterOrderCommand = {
     callId: "CALL-SMOKE-001",
     agentId: "AGENT-OPS-001",
     recordingId: "REC-SMOKE-001",
@@ -234,7 +244,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     },
   };
 
-  const serviceableOrder = service.createCallCenterOrder(
+  const serviceableOrder = await service.createCallCenterOrder(
     serviceableRequestBody,
     "req-map-closeout-serviceable-001",
   );
@@ -271,7 +281,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     resourceId: SERVICEABLE_ORDER_ID,
   });
 
-  const manualReviewRequestBody = {
+  const manualReviewRequestBody: CreateCallCenterOrderCommand = {
     callId: "CALL-MANUAL-001",
     agentId: "AGENT-OPS-001",
     recordingId: "REC-MANUAL-001",
@@ -305,7 +315,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     },
   };
 
-  const manualReviewOrder = service.createCallCenterOrder(
+  const manualReviewOrder = await service.createCallCenterOrder(
     manualReviewRequestBody,
     "req-map-closeout-manual-review-001",
   );
@@ -344,23 +354,8 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     },
   });
 
-  const artifactPath = resolve(
-    process.cwd(),
-    "..",
-    "..",
-    BACKEND_ARTIFACT_RELATIVE_PATH,
-  );
-  mkdirSync(
-    resolve(
-      process.cwd(),
-      "..",
-      "..",
-      "support/sidecars/MAP-REL-001/artifacts",
-    ),
-    {
-      recursive: true,
-    },
-  );
+  const artifactPath = proofArtifactPath(BACKEND_ARTIFACT_RELATIVE_PATH);
+  mkdirSync(dirname(artifactPath), { recursive: true });
   writeFileSync(
     artifactPath,
     JSON.stringify(
