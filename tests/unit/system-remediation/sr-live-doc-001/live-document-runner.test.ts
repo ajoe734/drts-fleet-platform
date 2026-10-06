@@ -264,43 +264,43 @@ describe("fetchAndValidateReport (R5-A regressions)", () => {
 
   it("accepts an enveloped production completed job", async () => {
     const fetchFn = mockFetch({ data: validJobDetail });
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).resolves.toBeUndefined();
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).resolves.toBeUndefined();
   });
 
   it("accepts empty and nonempty valid reports", async () => {
     const emptyJob = { ...validJobDetail, rows: [] };
     const emptyCsv = Buffer.from(recordsToCsv([]));
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: emptyJob }, { bytes: emptyCsv }))).resolves.toBeUndefined();
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: emptyJob }, { bytes: emptyCsv }))).resolves.toBeUndefined();
   });
 
   it("rejects missing data (missing envelope)", async () => {
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch(validJobDetail))).rejects.toThrow("Missing data in job response envelope");
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch(validJobDetail))).rejects.toThrow("Missing data in job response envelope");
   });
 
   it("rejects missing jobId", async () => {
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, jobId: undefined } }))).rejects.toThrow("Missing jobId in job detail");
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, jobId: undefined } }))).rejects.toThrow("Missing jobId in job detail");
   });
 
   it("rejects mismatched jobId", async () => {
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, jobId: "wrong" } }))).rejects.toThrow("Mismatch jobId");
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, jobId: "wrong" } }))).rejects.toThrow("Mismatch jobId");
   });
 
   it("rejects missing status", async () => {
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, status: undefined } }))).rejects.toThrow("Job not completed");
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, status: undefined } }))).rejects.toThrow("Job not completed");
   });
 
   it("rejects missing rows", async () => {
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, rows: undefined } }))).rejects.toThrow("Missing rows in job detail");
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, rows: undefined } }))).rejects.toThrow("Missing rows in job detail");
   });
 
   it("rejects wrong SHA", async () => {
     const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "text/csv", "x-drts-candidate-sha": "wrong-sha" } });
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow("Mismatch x-drts-candidate-sha in artifact response");
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow("Mismatch x-drts-candidate-sha in artifact response");
   });
 
   it("rejects wrong MIME mismatch", async () => {
     const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "application/pdf" } });
-    await expect(fetchAndValidateReport(`/api/jobs/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow();
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow();
   });
 });
 
@@ -360,6 +360,12 @@ describe("validateReportArtifact (R5-B adversarial regressions)", () => {
     it("accepts real renderer positive", async () => {
       const xlsxBuffer = await recordsToXlsx(xlsxJob.rows);
       await expect(validateReportArtifact(xlsxJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)).resolves.toBeUndefined();
+    });
+
+    it("accepts authentic empty XLSX", async () => {
+      const emptyJob = { ...xlsxJob, rows: [] };
+      const xlsxBuffer = await recordsToXlsx([]);
+      await expect(validateReportArtifact(emptyJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)).resolves.toBeUndefined();
     });
 
     it("rejects unexpected additional column content", async () => {

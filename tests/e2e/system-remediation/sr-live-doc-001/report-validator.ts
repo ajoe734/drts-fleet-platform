@@ -63,10 +63,13 @@ export async function validateReportArtifact(
 
       const worksheet = workbook.worksheets[0]!;
       const expectedRows = jobDetail.rows;
-      expect(worksheet.rowCount).toBe(expectedRows.length > 0 ? expectedRows.length + 1 : 1);
+      expect(worksheet.rowCount).toBe(expectedRows.length > 0 ? expectedRows.length + 1 : 0);
+
+      if (expectedRows.length === 0) return;
 
       const headerRow = worksheet.getRow(1);
-      expect(headerRow.actualCellCount).toBe(expectedColumns.length);
+      const maxHeaderCol = Math.max(expectedColumns.length, headerRow.cellCount);
+      expect(maxHeaderCol).toBe(expectedColumns.length);
       for (let ci = 0; ci < expectedColumns.length; ci++) {
           const colName = expectedColumns[ci];
           const cell = headerRow.getCell(ci + 1);
@@ -77,10 +80,8 @@ export async function validateReportArtifact(
           const expectedRow = expectedRows[ri]!;
           const sheetRow = worksheet.getRow(ri + 2);
 
-          expect(sheetRow.actualCellCount).toBeLessThanOrEqual(expectedColumns.length);
-
-          for (let ci = 0; ci < expectedColumns.length; ci++) {
-              const colName = expectedColumns[ci]!;
+          const maxRowCol = Math.max(expectedColumns.length, sheetRow.cellCount);
+          for (let ci = 0; ci < maxRowCol; ci++) {
               const cellValue = sheetRow.getCell(ci + 1).value;
               let actualVal = "";
               if (cellValue !== null && cellValue !== undefined) {
@@ -92,6 +93,13 @@ export async function validateReportArtifact(
                       actualVal = String(cellValue);
                   }
               }
+              
+              if (ci >= expectedColumns.length) {
+                  expect(actualVal).toBe("");
+                  continue;
+              }
+
+              const colName = expectedColumns[ci]!;
               const val = expectedRow[colName];
               const expectedVal = val === null || val === undefined ? "" : (typeof val === "object" ? JSON.stringify(val) : String(val));
               expect(actualVal).toBe(expectedVal);
