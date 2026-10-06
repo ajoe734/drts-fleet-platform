@@ -47,6 +47,22 @@ export function inspectMapDriverIsolation(
     return evidence;
   }
   const driver = record(matches[0])!;
+  const fixture = record(driver.liveMapFixture);
+  if (
+    driver.liveMapFixture !== undefined &&
+    fixture?.status !== "created" &&
+    fixture?.status !== "unchanged"
+  ) {
+    evidence.failures.push("fixture_unavailable");
+  }
+  if (
+    Array.isArray(driver.deviceBindings) &&
+    driver.deviceBindings.some(
+      (binding) => record(binding)?.status !== "revoked",
+    )
+  ) {
+    evidence.failures.push("driver_bound");
+  }
   const workState = driver.workState;
   evidence.work_state =
     workState === undefined

@@ -8,7 +8,7 @@ import { detectAuthEnvironment } from "../../config/auth-startup-config";
 export const LIVE_MAP_FIXTURE_DRIVER_ID = "drv-demo-002";
 const logger = new Logger("LiveMapFixture");
 
-type Refusal =
+export type LiveMapFixtureRefusal =
   | "LIVE_MAP_FIXTURE_ENVIRONMENT_FORBIDDEN"
   | "LIVE_MAP_FIXTURE_DATABASE_REQUIRED"
   | "LIVE_MAP_FIXTURE_DRIVER_UNSAFE"
@@ -16,22 +16,13 @@ type Refusal =
   | "LIVE_MAP_FIXTURE_BOUND"
   | "LIVE_MAP_FIXTURE_INVITATION_PENDING"
   | "LIVE_MAP_FIXTURE_READBACK_UNSAFE"
-  | "LIVE_MAP_FIXTURE_CONTEXT_UNAVAILABLE";
+  | "LIVE_MAP_FIXTURE_CONTEXT_UNAVAILABLE"
+  | "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED";
 
 export type LiveMapFixtureResult =
   | { status: "disabled" }
-  | { status: "refused"; reason: Refusal }
+  | { status: "refused"; reason: LiveMapFixtureRefusal }
   | { status: "created" | "unchanged" };
-
-export class LiveMapFixtureProvisioningError extends Error {
-  constructor(
-    reason:
-      | Refusal
-      | "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED" = "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
-  ) {
-    super(reason);
-  }
-}
 
 type StoredDriver = { record: DriverRegistryRecord; work_state: string };
 type IsolationContext = {
@@ -43,7 +34,7 @@ type IsolationContext = {
   has_tracking_context: boolean;
 };
 
-function refuse(reason: Refusal): LiveMapFixtureResult {
+function refuse(reason: LiveMapFixtureRefusal): LiveMapFixtureResult {
   // Never log rows, names, tokens, connection errors or arbitrary server values.
   logger.warn(reason);
   return { status: "refused", reason };
@@ -109,7 +100,9 @@ async function readIsolationContext(client: PoolClient) {
   return result.rows[0];
 }
 
-function contextRefusal(context: IsolationContext | undefined): Refusal | null {
+function contextRefusal(
+  context: IsolationContext | undefined,
+): LiveMapFixtureRefusal | null {
   if (
     !context ||
     [
@@ -229,8 +222,8 @@ export async function ensureLiveMapFixture(
         /* Fixed error below. */
       }
     }
-    // An opted-in failed durable ensure must not fall back to in-memory seeds.
-    throw new LiveMapFixtureProvisioningError();
+    // Fixture availability must never decide application availability.
+    return refuse("LIVE_MAP_FIXTURE_PERSISTENCE_FAILED");
   } finally {
     client?.release();
   }

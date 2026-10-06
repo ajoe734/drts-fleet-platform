@@ -98,7 +98,7 @@ describe("durable live-map fixture safeguards", () => {
     },
     { reason: "LIVE_MAP_FIXTURE_READBACK_UNSAFE" },
   ])(
-    "refuses an unavailable or missing durable readback after ensure: $reason",
+    "keeps startup alive and marks an unavailable durable readback: $reason",
     async ({ reason, ...options }) => {
       const db = fixtureRepository(options);
       const audit = new AuditNotificationService();
@@ -108,7 +108,11 @@ describe("durable live-map fixture safeguards", () => {
         new DriverProfileService(audit),
         db.repository,
       );
-      await expect(service.onModuleInit()).rejects.toThrow(reason);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+      expect(service.getLiveMapFixtureStatus()).toEqual({
+        status: "refused",
+        reason,
+      });
     },
   );
   it.each([
@@ -125,7 +129,7 @@ describe("durable live-map fixture safeguards", () => {
       reason: "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
     },
   ])(
-    "stops opted-in startup rather than using fallback seeds: $reason",
+    "keeps startup alive with an unavailable fixture: $reason",
     async ({ reason, ...options }) => {
       const db = fixtureRepository(options);
       const audit = new AuditNotificationService();
@@ -135,10 +139,16 @@ describe("durable live-map fixture safeguards", () => {
         new DriverProfileService(audit),
         db.repository,
       );
-      await expect(service.onModuleInit()).rejects.toThrow(reason);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+      expect(service.getLiveMapFixtureStatus()).toEqual({
+        status: "refused",
+        reason,
+      });
       expect(
-        db.query.mock.calls.some(([sql]) =>
-          sql.includes("INSERT INTO reg.phase1_registry_drivers"),
+        db.query.mock.calls.some(
+          ([sql, values]) =>
+            sql.includes("INSERT INTO reg.phase1_registry_drivers") &&
+            values?.[0] === "drv-demo-002",
         ),
       ).toBe(false);
     },
@@ -376,9 +386,10 @@ describe("durable live-map fixture safeguards", () => {
     "rolls back %s failure and reports only a fixed error",
     async (failAt) => {
       const db = fixtureRepository({ failAt });
-      await expect(db.repository.ensureLiveMapTestDriver()).rejects.toThrow(
-        "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
-      );
+      await expect(db.repository.ensureLiveMapTestDriver()).resolves.toEqual({
+        status: "refused",
+        reason: "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
+      });
       expect(db.query).toHaveBeenCalledWith("ROLLBACK");
       expect(db.release).toHaveBeenCalledOnce();
       expect(

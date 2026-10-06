@@ -67,7 +67,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import {
   LIVE_MAP_FIXTURE_DRIVER_ID,
   isIsolatedLiveMapFixture,
-  LiveMapFixtureProvisioningError,
+  type LiveMapFixtureResult,
 } from "./live-map-fixture";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -543,7 +543,9 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
 ];
 
 @Injectable()
-export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy {
+export class RegulatoryRegistryService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(RegulatoryRegistryService.name);
   private expiryReconciliationTimer: NodeJS.Timeout | null = null;
   private expiryReconciliationInFlight: Promise<unknown> | null = null;
@@ -634,11 +636,30 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     });
   }
 
+  private liveMapFixtureStatus: LiveMapFixtureResult = { status: "disabled" };
+
+  getLiveMapFixtureStatus(): LiveMapFixtureResult {
+    return { ...this.liveMapFixtureStatus };
+  }
+
+  private markLiveMapFixtureUnavailable(
+    reason: Extract<LiveMapFixtureResult, { status: "refused" }>["reason"],
+  ) {
+    this.liveMapFixtureStatus = { status: "refused", reason };
+    this.logger.warn(reason);
+  }
+
   async onModuleInit() {
     if (!this.regulatoryRegistryRepository) {
       return;
     }
 
+    if (process.env.DRTS_E2E_PROVISIONING === "true") {
+      this.liveMapFixtureStatus = {
+        status: "refused",
+        reason: "LIVE_MAP_FIXTURE_CONTEXT_UNAVAILABLE",
+      };
+    }
     let liveMapFixtureReady = false;
     try {
       const latestDriverLocations =
@@ -652,16 +673,17 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         this.runInMemoryIdempotentBackfill();
       }
 
-      const liveMapFixture =
-        await this.regulatoryRegistryRepository.ensureLiveMapTestDriver?.();
-      if (
-        liveMapFixture?.status === "refused" &&
-        liveMapFixture.reason !== "LIVE_MAP_FIXTURE_ENVIRONMENT_FORBIDDEN"
-      ) {
-        // An opted-in dev startup must not expose an unsafe existing identity
-        // as an acceptance fixture or silently substitute the demo seed.
-        throw new LiveMapFixtureProvisioningError(liveMapFixture.reason);
+      try {
+        this.liveMapFixtureStatus =
+          (await this.regulatoryRegistryRepository.ensureLiveMapTestDriver?.()) ?? {
+            status: "disabled",
+          };
+      } catch {
+        this.markLiveMapFixtureUnavailable(
+          "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
+        );
       }
+      const liveMapFixture = this.liveMapFixtureStatus;
       liveMapFixtureReady =
         liveMapFixture?.status === "created" ||
         liveMapFixture?.status === "unchanged";
@@ -678,9 +700,10 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
             (pair) => pair.driverId === LIVE_MAP_FIXTURE_DRIVER_ID,
           )
         ) {
-          throw new LiveMapFixtureProvisioningError(
+          this.markLiveMapFixtureUnavailable(
             "LIVE_MAP_FIXTURE_READBACK_UNSAFE",
           );
+          liveMapFixtureReady = false;
         }
       }
       const hasPersistedState =
@@ -691,6 +714,16 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         persistedState.policies.length > 0 ||
         persistedState.exclusivities.length > 0;
 
+      if (this.liveMapFixtureStatus.status === "refused") {
+        // Keep real persisted identities intact, but never bootstrap a demo
+        // substitute after an opted-in fixture check could not establish safety.
+        this.drivers = this.drivers.filter(
+          (driver) => driver.driverId !== LIVE_MAP_FIXTURE_DRIVER_ID,
+        );
+        this.supplyPairs = this.supplyPairs.filter(
+          (pair) => pair.driverId !== LIVE_MAP_FIXTURE_DRIVER_ID,
+        );
+      }
       if (!hasPersistedState) {
         this.persistChanges(
           {
@@ -723,11 +756,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
           ...pair,
         }));
       }
-      if (
-        persistedState.supplyPairs.length === 0 &&
-        (liveMapFixture?.status === "created" ||
-          liveMapFixture?.status === "unchanged")
-      ) {
+      if (persistedState.supplyPairs.length === 0 && liveMapFixtureReady) {
         // The durable check proved this fixture has no supply pair. Do not
         // invent one from the demo fallback when the stored pair list is empty.
         this.supplyPairs = this.supplyPairs.filter(
@@ -773,8 +802,10 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
       // Bounded startup catch-up for expired credentials and policies
       try {
         if (
-          typeof (this.regulatoryRegistryRepository as any)?.scanExpiredDrivers === "function" &&
-          typeof (this.regulatoryRegistryRepository as any)?.withTransaction === "function"
+          typeof (this.regulatoryRegistryRepository as any)
+            ?.scanExpiredDrivers === "function" &&
+          typeof (this.regulatoryRegistryRepository as any)?.withTransaction ===
+            "function"
         ) {
           await this.reconcileExpiredCredentials({ limit: 100 });
         }
@@ -791,8 +822,12 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         this.startExpiryReconciliationLoop();
       }
     } catch (error) {
-      if (error instanceof LiveMapFixtureProvisioningError) throw error;
-      if (liveMapFixtureReady) throw new LiveMapFixtureProvisioningError();
+      if (this.liveMapFixtureStatus.status !== "disabled") {
+        this.markLiveMapFixtureUnavailable(
+          "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
+        );
+        return;
+      }
       this.regulatoryRegistryRepository.reportPersistenceFailure?.(
         error,
         "module init",
@@ -851,9 +886,13 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
   }
 
   listDrivers() {
-    return this.drivers.map((driver) =>
-      this.cloneDriver(this.decorateDriver(driver)),
-    );
+    return this.drivers.map((driver) => ({
+      ...this.cloneDriver(this.decorateDriver(driver)),
+      ...(driver.driverId === LIVE_MAP_FIXTURE_DRIVER_ID &&
+      this.liveMapFixtureStatus.status !== "disabled"
+        ? { liveMapFixture: this.getLiveMapFixtureStatus() }
+        : {}),
+    }));
   }
 
   listSupplyPairs() {
@@ -3796,7 +3835,10 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     driverId: string,
     command: UpdateDriverLicensesCommand,
   ): Promise<void> {
-    if (!this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity) return;
+    if (
+      !this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity
+    )
+      return;
     const now = Date.now();
     if (command.licenseExpiry && Date.parse(command.licenseExpiry) > now) {
       await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
@@ -4101,8 +4143,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         if (!locked) continue;
 
         const policyNo = locked.policyNo || policyId;
-        const insuranceType =
-          locked.insuranceType || "commercial_liability";
+        const insuranceType = locked.insuranceType || "commercial_liability";
         const startAt = locked.startAt || locked.createdAt;
         const endAt = locked.endAt;
         const status = locked.status || "active";
