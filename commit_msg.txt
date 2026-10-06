@@ -1,0 +1,7 @@
+C125-REAL-UPLOAD-STORAGE-20261005-UNBLOCK-HISTORY-REPAIR: unblock parent task history and dependency
+
+Repair parent task machine truth and update artifact.
+
+LLM-Agent: Gemini
+Task-ID: C125-REAL-UPLOAD-STORAGE-20261005-UNBLOCK-HISTORY-REPAIR
+Reviewer: Claude2
