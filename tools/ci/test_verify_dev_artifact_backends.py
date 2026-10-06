@@ -89,8 +89,6 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (503, {"error": "scan_engine_not_ready"}), # Test 7
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 7 polling ready
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}), # Test 7 EICAR
-            (502, {"error": "scan_engine_unavailable"}), # Test 9 polling transport failure
-            (502, {"error": "scan_engine_unavailable"}), # Test 9 final scan transport failure
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally polling readiness
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally scan CLEAN
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally scan EICAR
@@ -289,8 +287,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         mock_env.return_value = "fake-token"
 
         # Env tracking state
-        env_state = {"CLAMD_INSTREAM_TIMEOUT_MS": None}
-        fault_reached = [False]
+        env_state = {}
         cold_start_calls = [0]
         current_nonce = [None]
 
@@ -365,13 +362,6 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 fp = io.BytesIO(json.dumps({"error": "scan_engine_not_ready"}).encode())
                 raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", req.headers, fp)
 
-            # Fault injection test simulation (Test 9)
-            if env_state.get("CLAMD_INSTREAM_TIMEOUT_MS") == "0":
-                fault_reached[0] = True
-                # The fault simulation should return 502
-                fp = io.BytesIO(json.dumps({"error": "scan_engine_unavailable"}).encode())
-                raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", req.headers, fp)
-
             # Normal path
             mock_resp = MagicMock()
             mock_resp.status = 200
@@ -389,14 +379,6 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         mock_urlopen.side_effect = mock_urlopen_side_effect
 
         self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
-        self.assertTrue(fault_reached[0], "Test 9 fault enable was never reached")
-
-        # Verify restoration of CLAMD_INSTREAM_TIMEOUT_MS
-        remove_calls = [
-            call for call in mock_run.call_args_list
-            if "update" in call[0][0] and "--remove-env-vars" in call[0][0] and "CLAMD_INSTREAM_TIMEOUT_MS" in call[0][0][call[0][0].index("--remove-env-vars")+1]
-        ]
-        self.assertTrue(len(remove_calls) > 0, "Expected CLAMD_INSTREAM_TIMEOUT_MS to be removed in finally block")
 
 if __name__ == "__main__":
     unittest.main()

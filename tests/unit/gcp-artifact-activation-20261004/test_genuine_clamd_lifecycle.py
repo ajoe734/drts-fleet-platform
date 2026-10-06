@@ -14,7 +14,7 @@ def wait_for_log(container, pattern, timeout, stream="stdout", since=None):
     if since:
         cmd.extend(["--since", since])
     cmd.append(container)
-    
+
     start = time.time()
     while time.time() - start < timeout:
         res = run_cmd(cmd)
@@ -76,7 +76,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # Wait for next unchanged check
         success = wait_for_log(self.container_name, "database is up-to-date", 30, "stdout", since=start_time)
         self.assertTrue(success, "Failed to observe verified-unchanged renewal")
-        
+
         # Verify marker version is still the real one from daily.cld, not daily.cvd's 1
         res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
         self.assertEqual(res.stdout.strip(), marker_version)
@@ -93,7 +93,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
             f.write(b':'.join(parts))
         update_time = run_cmd(["date", "-Iseconds"]).stdout.strip()
         run_cmd(["docker", "cp", "/tmp/daily.cld", f"{self.container_name}:/var/lib/clamav/daily.cld"])
-        
+
         success = wait_for_log(self.container_name, "updated (version:", 60, "stdout", since=update_time)
         self.assertTrue(success, "Failed to observe genuine update after downgrade")
         time.sleep(2)
