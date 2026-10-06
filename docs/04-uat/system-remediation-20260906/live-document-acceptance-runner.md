@@ -161,7 +161,7 @@ The following specific missing role session cookies trigger a non-zero fail-clos
 
 ### Execution Evidence
 
-Runner validation executes identically using the immutable PR candidate SHA (`eafcef6f1be9703a4b063ec330898146d129f70d`) to verify resolution (note: pending hosted live verification).
+Runner validation executes identically using the current immutable PR candidate SHA (`2622d88d066513226515bf70ef8ed689f4264dad` / `$CANDIDATE_SHA`) to verify resolution (note: pending hosted live verification).
 
 ```sh
 pnpm exec vitest run tests/unit/system-remediation/sr-live-doc-001/ tests/e2e/system-remediation/sr-live-doc-001/ --no-file-parallelism --maxConcurrency=1

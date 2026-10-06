@@ -34,6 +34,25 @@ import {
   sha256Hex,
 } from "./live-document-runner";
 
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
+  const task = getDocument({
+    data: new Uint8Array(pdfBuffer),
+    useSystemFonts: false,
+    disableFontFace: true,
+  });
+  const pdf = await task.promise;
+  const text: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const strings = content.items.map((item: any) => item.str);
+    text.push(strings.join(" "));
+  }
+  return text.join("\n");
+}
+
 const VERIFIER_SCRIPT_PATH = join(
   __dirname,
   "../../../unit/system-remediation/sr-bank-003/verify_artifact.py",
@@ -834,6 +853,10 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(expiredErrorData).toBeTruthy();
         expect(expiredErrorData.subjectId).toBe(targetInvoiceId);
 
+        // Ensure manifest_hash in the expired path matches the fresh hash (original hash preservation)
+        const expiredUrlObj = new URL(expiredPath!, "http://localhost");
+        const originalHash = expiredUrlObj.searchParams.get("manifest_hash");
+        expect(originalHash).toBeTruthy();
 
         // 2. Fetch fresh metadata from BFF using authorized tenant cookie + WIF token
         const tenantIdToken = await getGoogleIdToken(tenantConsoleOrigin!);
@@ -847,7 +870,6 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(bffRes.status).toBe(200);
         expect(bffRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const bffJson = await bffRes.json();
-        // Use formal data.items for parsing
         const invoices = bffJson.data.items;
         expect(invoices.length).toBeGreaterThan(0);
 
@@ -870,24 +892,37 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const manifestHash = detail.artifactDownloadMetadata.manifestHash;
         expect(freshUrl).toBeTruthy();
         expect(manifestHash).toBeTruthy();
+        expect(manifestHash, "Original manifest hash must be preserved upon renewal").toBe(originalHash);
 
         // 3. Successful download of expected bytes
-        const downloadUrl = freshUrl.startsWith("http") ? freshUrl : `${apiOrigin}${freshUrl}`;
+        let downloadUrl = freshUrl;
+        let downloadHeaders = apiHeaders;
+        if (!freshUrl.startsWith("http")) {
+            // Append /api to relative routes if missing, and resolve against apiOrigin
+            downloadUrl = freshUrl.startsWith("/api") ? `${apiOrigin}${freshUrl}` : `${apiOrigin}/api${freshUrl.startsWith("/") ? "" : "/"}${freshUrl}`;
+        } else {
+            const urlObj = new URL(freshUrl);
+            if (urlObj.origin === tenantConsoleOrigin) {
+                downloadHeaders = tenantHeaders;
+            } else if (urlObj.origin === apiOrigin) {
+                downloadHeaders = apiHeaders;
+            }
+        }
+
         const freshOutcome = await downloadArtifact(downloadUrl, {
-          headers: apiHeaders,
+          headers: downloadHeaders,
         });
         expect(freshOutcome.status).toBe(200);
         expect(freshOutcome.bytes).not.toBeNull();
         expect(freshOutcome.bytes!.length).toBeGreaterThan(0);
         expect(sha256Hex(freshOutcome.bytes!)).toBe(manifestHash);
 
-        // R4 real PDF/amount verification
-        const pdfText = freshOutcome.bytes!.toString("latin1");
-        expect(pdfText.startsWith("%PDF-")).toBe(true);
+        // R4 real PDF/amount verification using extractPdfText helper
+        const pdfText = await extractPdfText(freshOutcome.bytes!);
         // Verify amount exists in the uncompressed PDF text based on authoritative amount
         const amountFormatted = (detail.amountMinor / 100).toFixed(2);
-        const amountRegex = new RegExp(`TWD ${amountFormatted}`);
-        expect(pdfText).toMatch(amountRegex);
+        expect(pdfText).toContain(amountFormatted);
+        expect(pdfText).toContain(targetInvoiceId);
 
         expect(freshOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
@@ -896,6 +931,14 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           cookie: `drts_tenant_session=${crossTenantCookie}`,
         };
         if (tenantIdToken) crossTenantHeaders["authorization"] = `Bearer ${tenantIdToken}`;
+
+        // Cross-tenant list must verify SHA
+        const crossListRes = await fetch(
+          `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices`,
+          { headers: crossTenantHeaders },
+        );
+        expect(crossListRes.status).toBe(200);
+        expect(crossListRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
 
         const crossRes = await fetch(
           `${tenantConsoleOrigin}/control-plane-proxy/tenant/invoices/${invoiceId}`,
@@ -949,13 +992,27 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(reportOutcome.status).toBe(200);
         expect(reportOutcome.bytes).not.toBeNull();
         expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
-        // R5: CSV/XLSX/PDF - wait, test was requiring application/json.
-        expect(["text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/pdf"]).toContain(reportOutcome.contentType?.split(";")[0]);
+        
+        const contentType = reportOutcome.contentType?.split(";")[0];
+        expect(["text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/pdf"]).toContain(contentType);
         expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+
+        // Verify report content actually matches expected report/job
+        const reportMatch = reportPath!.match(/([^/]+)$/);
+        const reportId = reportMatch ? reportMatch[1].split('?')[0] : "";
+        if (reportId) {
+            if (contentType === "application/pdf") {
+                const reportText = await extractPdfText(reportOutcome.bytes!);
+                expect(reportText).toContain(reportId);
+            } else if (contentType === "text/csv") {
+                const csvText = reportOutcome.bytes!.toString("utf-8");
+                expect(csvText).toContain(reportId);
+            }
+        }
 
         // R5: Prove actual expiry of the given placard path
         const expiredPlacardOutcome = await downloadArtifact(
-          placardPath!.startsWith("http") ? placardPath! : `${apiOrigin}${placardPath}`,
+          placardPath!.startsWith("http") ? placardPath! : `${apiOrigin}${placardPath.startsWith("/") ? "" : "/"}${placardPath}`,
           { headers: apiHeaders }
         );
         expect(expiredPlacardOutcome.status).toBe(410);
@@ -980,7 +1037,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
           expect(manifestHash, "Materialized hash should be unchanged after refresh").toBe(oldManifestHash);
         }
 
-        const downloadUrl = freshUrl.startsWith("http") ? freshUrl : `${apiOrigin}${freshUrl}`;
+        const downloadUrl = freshUrl.startsWith("http") ? freshUrl : `${apiOrigin}${freshUrl.startsWith("/") ? "" : "/"}${freshUrl}`;
         const placardOutcome = await downloadArtifact(downloadUrl, { headers: apiHeaders });
         expect(placardOutcome.status).toBe(200);
         expect(placardOutcome.bytes).not.toBeNull();
@@ -988,8 +1045,8 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(sha256Hex(placardOutcome.bytes!)).toBe(manifestHash);
         expect(placardOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
 
-        // Verify version/public info with printable content
-        const placardText = placardOutcome.bytes!.toString("utf-8");
+        // Verify version/public info with printable content using real PDF parser
+        const placardText = await extractPdfText(placardOutcome.bytes!);
         expect(placardText).toContain(placard.versionCode);
         expect(placardText).toContain(placard.publicInfoVersionId);
 
@@ -1007,7 +1064,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const refreshedUrl = refreshedPlacard.downloadMetadata.downloadUrl;
         const refreshedHash = refreshedPlacard.downloadMetadata.manifestHash;
 
-        const refreshDownloadUrl = refreshedUrl.startsWith("http") ? refreshedUrl : `${apiOrigin}${refreshedUrl}`;
+        const refreshDownloadUrl = refreshedUrl.startsWith("http") ? refreshedUrl : `${apiOrigin}${refreshedUrl.startsWith("/") ? "" : "/"}${refreshedUrl}`;
         const refreshOutcome = await downloadArtifact(refreshDownloadUrl, { headers: apiHeaders });
         expect(refreshOutcome.status).toBe(200);
         expect(refreshOutcome.bytes).not.toBeNull();
