@@ -26,4 +26,13 @@ Since the previous candidate is already merged into `dev`, the non-destructive r
 ## Unblocked Next Step
 The parent task owner (`Codex`) should continue implementation on a new branch `codex/c125-real-upload-storage-20261005-r4` branched from `dev`, focusing on the missing real GCS/ClamAV and identity prerequisites.
 
-Crucially, the stale `candidate_generation` (`5c24dde8bab64e78b7f2a31f4acc49ca`) that caused the terminal loop remains on the parent task. The orchestrator or Chairman needs to reset `candidate_generation` to `null` to ensure `Codex` will stop diffing against the merged `-r2` candidate metadata.
+Crucially, the stale `candidate_generation` (`5c24dde8bab64e78b7f2a31f4acc49ca`) that caused the terminal loop remains on the parent task.
+
+**Attempted Repair Actions (Failed due to permission)**:
+In this cycle, we explicitly attempted to run the minimum repair unit: updating the parent task `C125-REAL-UPLOAD-STORAGE-20261005`'s machine truth to set the branch to `codex/c125-real-upload-storage-20261005-r4` and clear `candidate_generation`.
+```bash
+AI_NAME=Gemini /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-d4cb3eb62a8d/tools/development-orchestrator/bin/ai-status.sh note C125-REAL-UPLOAD-STORAGE-20261005 "clearing candidate_generation and updating branch" --branch codex/c125-real-upload-storage-20261005-r4 --candidate-generation null
+```
+**Failure Reason**: The command exited with code 1 and output `Dispatched worker cannot mutate a different task`. A dispatched worker is isolated and does not have the permission to modify a different task's status.
+
+Because we cannot directly mutate the parent task as a worker, the orchestrator or Chairman (who holds the necessary permissions) must reset `candidate_generation` to `null` and update the `branch` to `codex/c125-real-upload-storage-20261005-r4` to ensure `Codex` will stop diffing against the merged `-r2` candidate metadata.
