@@ -49,7 +49,9 @@ function deltaOf(
 export default async function ReferralDashboardPage(props: {
   searchParams?: Promise<{ period?: string }>;
 }) {
-  const searchParams = props.searchParams ? await props.searchParams : undefined;
+  const searchParams = props.searchParams
+    ? await props.searchParams
+    : undefined;
   const requestedPeriod = searchParams?.period?.trim();
   const locale = await getServerLocale();
   const theme = buildFleetTheme();

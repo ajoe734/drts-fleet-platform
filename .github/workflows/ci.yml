@@ -59,9 +59,11 @@ jobs:
           python3 -m unittest tools/ci/test_canonical_consistency.py
           python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_dev_artifact_providers.py
+          python3 -m unittest tools/ci/test_verify_dev_artifact_backends.py
           python3 -m unittest tools/ci/test_driver_web_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_data_acceptance_workflow.py
+          python3 -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: classify

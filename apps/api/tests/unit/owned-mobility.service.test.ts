@@ -7469,7 +7469,9 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
     expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe(
       "eta_changed",
     );
-    expect(persistedChanges[1].consumerNotificationOutbox[0].payload.oldEtaMinutes).toBe(10);
+    expect(
+      persistedChanges[1].consumerNotificationOutbox[0].payload.oldEtaMinutes,
+    ).toBe(10);
   });
 
   it("completeTask produces receipt_ready outbox", async () => {
