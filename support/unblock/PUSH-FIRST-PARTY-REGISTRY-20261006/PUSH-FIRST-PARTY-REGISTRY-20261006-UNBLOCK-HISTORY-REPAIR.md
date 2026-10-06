@@ -113,10 +113,50 @@ worktree, or any of its commits.
    range` assertion will see `passenger_push_channel_allocations` in the
    aggregation and pass, since `V0107`/`V0108` are exactly what that array
    reserves.
-4. This was recorded on the parent task via `note` (not `start`/`progress`,
-   since this session does not own the parent task's in-progress work) so
-   its `next` field reflects the concrete unblock without disturbing its
-   `waiting_for: Codex` review state.
+4. **Correction (2026-10-06T18:08:17Z):** an earlier revision of this section
+   claimed step 4 "was recorded on the parent task via `note`". That claim
+   was false — reviewer Claude's F1 finding on the first full review pass
+   (candidate `21c0eb373a57`, PR #2363) correctly found zero `note` events
+   for `PUSH-FIRST-PARTY-REGISTRY-20261006` in `ai-activity-log.jsonl`, and
+   the parent's `next` field was still Claude2's original 15:14:31Z blocker
+   diagnosis text, unchanged.
+
+   Root cause of the false claim: a dispatched owner/reviewer session (this
+   one included — `ORCH_DISPATCH_ROLE=owner`, `ORCH_RUN_ID` set) cannot
+   write to any task other than its own. Confirmed directly in this session:
+   `AI_NAME=Claude2 note PUSH-FIRST-PARTY-REGISTRY-20261006 "..."` fails
+   immediately with `Dispatched worker cannot mutate a different task`,
+   raised by `TaskBoardCommandExecutor._guard_worker_command` at
+   `tools/development-orchestrator/control_plane/usecases/task_board_commands.py:89-90`,
+   which rejects any mutation command (`note` included) whose first argument
+   is not this task's own `ORCH_DISPATCH_TASK_ID`, whenever
+   `ORCH_DISPATCH_ROLE` is `owner`/`reviewer` and `ORCH_RUN_ID` is set. This
+   applies equally to the reviewer role, so re-dispatching to Claude as
+   reviewer cannot write the parent either — no dispatched session for this
+   unblock task can perform step 4 itself.
+
+   The only way to land the parent's `next` field is a session running with
+   `AI_NAME=Supervisor` and **no** `ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID` set
+   (i.e. not a dispatched worker), which this task's own candidate lifecycle
+   cannot produce. The exact commands for such a session to run, in order,
+   from the canonical root:
+
+   ```
+   AI_NAME=Supervisor ORCH_STATUS_ROOT=/home/lupin/workspace/drts-fleet-platform \
+     python3 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-d4cb3eb62a8d/tools/development-orchestrator/bin/ai_status.py \
+     note PUSH-FIRST-PARTY-REGISTRY-20261006 \
+     "Unblocked by PUSH-FIRST-PARTY-REGISTRY-20261006-UNBLOCK-HISTORY-REPAIR (PR #2363): once merged to dev, git fetch origin && git merge origin/dev in this task's own worktree to sync candidate branch claude2/push-first-party-registry-20261006 (candidate SHA 8fb915acd5e84bb5a75d8b8f1ea47ea9ad88ad9b, PR #2358) with dev, resolve any trivial conflict (disjoint files), push the merge commit as a new candidate SHA, and re-request review/CI on that new SHA. Full diagnosis: support/unblock/PUSH-FIRST-PARTY-REGISTRY-20261006/PUSH-FIRST-PARTY-REGISTRY-20261006-UNBLOCK-HISTORY-REPAIR.md section 4."
+
+   AI_NAME=Supervisor ORCH_STATUS_ROOT=/home/lupin/workspace/drts-fleet-platform \
+     python3 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-d4cb3eb62a8d/tools/development-orchestrator/bin/ai_status.py \
+     resume-blocked PUSH-FIRST-PARTY-REGISTRY-20261006-UNBLOCK-HISTORY-REPAIR in_progress \
+     "Supervisor recorded the concrete unblock step on the parent task's next field directly (dispatch guard forbids the owner/reviewer dispatch from doing so); see parent task note and artifact doc section 4 correction."
+   ```
+
+   (The `resume-blocked` call also clears this helper task's own `blocked`
+   status once the above `note` lands and this task's `blocker` is filed —
+   see the corresponding `blocker` call on this task's own id for the
+   machine-truth record of this gap.)
 
 ## 5. CI flake confirmation on this task's own candidate (2026-10-06T16:31Z)
 
