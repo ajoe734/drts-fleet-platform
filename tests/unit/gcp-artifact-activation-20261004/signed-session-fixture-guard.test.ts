@@ -399,6 +399,15 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
         opsToken: "test-ops-token",
         driverId: "drv-unknown-999",
         periodMonth: "2026-01",
+        // Must be explicit: this test's intent is the no-eligible-trip path
+        // past a confirmed-persisted plan, not the DB-persistence guard
+        // itself. Omitting this relies on DatabaseService's env-based
+        // isEnabled() defaulting to false, which is only true when
+        // DATABASE_URL is unset -- false in CI's `unit` job, where a real
+        // Postgres is up for other tests in this same file/run and this
+        // case would otherwise hit it and fail on the unrelated
+        // "not found in billing.phase1_driver_fee_plans" guard instead.
+        databaseService: fakeDatabaseService([{ status: "published" }]),
       }),
     ).rejects.toThrow(/produced no reimbursement batch/);
   });
