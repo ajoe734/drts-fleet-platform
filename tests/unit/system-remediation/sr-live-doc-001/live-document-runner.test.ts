@@ -245,7 +245,8 @@ describe("fetchAndValidateReport (R5-A regressions)", () => {
   const validCsvBytes = Buffer.from(recordsToCsv(validJobDetail.rows));
 
   const mockFetch = (metadataOverride: any, artifactOverride: { status?: number, bytes?: Buffer, headers?: Record<string, string> } = {}) => {
-    return async (url: string) => {
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
       if (url.endsWith("/artifact")) {
         return {
           status: artifactOverride.status ?? 200,

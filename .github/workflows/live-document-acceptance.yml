@@ -65,7 +65,7 @@ on:
   push:
     branches:
       - gemini2/doc-live-runner-upgrade-20261005
-      - gemini2/doc-live-runner-upgrade-20261005
+      - gemini2/doc-live-runner-upgrade-20261005-*
     paths:
       - .github/workflows/live-document-acceptance.yml
       - tests/e2e/system-remediation/sr-live-doc-001/**

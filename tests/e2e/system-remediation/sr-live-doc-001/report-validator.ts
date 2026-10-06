@@ -24,11 +24,13 @@ export async function validateReportArtifact(
   contentType: string,
   bytes: Buffer
 ) {
+  const normalizedContentType = contentType.toLowerCase().split(";")[0]!.trim();
   let expectedFormat = "csv";
-  if (contentType === "application/pdf") expectedFormat = "pdf";
-  else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") expectedFormat = "xlsx";
+  if (normalizedContentType === "application/pdf") expectedFormat = "pdf";
+  else if (normalizedContentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") expectedFormat = "xlsx";
+  else if (normalizedContentType === "text/csv") expectedFormat = "csv";
+  else throw new Error(`Unsupported MIME type: ${contentType}`);
   expect(jobDetail.format).toBe(expectedFormat);
-
   if (!jobDetail.rows) {
       throw new Error("Missing rows evidence in metadata");
   }
@@ -40,20 +42,20 @@ export async function validateReportArtifact(
       }
   }
 
-  if (contentType === "application/pdf") {
+  if (normalizedContentType === "application/pdf") {
       const { recordsToPdf } = await import("../../../../apps/api/src/modules/reporting-filing/report-renderers");
       const title = jobDetail.jobType ? `${jobDetail.jobType} — ${jobId}` : undefined;
       const expectedPdf = await recordsToPdf(jobDetail.rows, title);
       const expectedText = await extractPdfText(expectedPdf);
       const actualText = await extractPdfText(bytes);
       expect(actualText).toBe(expectedText);
-  } else if (contentType === "text/csv") {
+  } else if (normalizedContentType === "text/csv") {
       const { recordsToCsv } = await import("../../../../apps/api/src/common/csv");
       const expectedCsv = recordsToCsv(jobDetail.rows);
       const csvText = bytes.toString("utf-8");
       expect(csvText.trim().startsWith("<html>")).toBe(false);
       expect(csvText).toBe(expectedCsv);
-  } else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+  } else if (normalizedContentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
       const ExcelJS = (await import("exceljs")).default || await import("exceljs");
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(bytes as any);
@@ -105,7 +107,8 @@ export async function fetchAndValidateReport(
   candidateSha: string | undefined,
   fetchFn: typeof fetch = fetch
 ) {
-  const jobId = reportPath.split("/").find((s, i, a) => a[i - 1] === "jobs");
+  const reportMatch = reportPath.match(/\/reports\/([^/?]+)\/artifact/);
+  const jobId = reportMatch ? reportMatch[1] : null;
   if (!jobId) throw new Error("Could not find jobId in reportPath");
 
   const jobUrl = `${platformAdminOriginStrict}${reportPath.replace(/\/artifact.*$/, "")}`;
