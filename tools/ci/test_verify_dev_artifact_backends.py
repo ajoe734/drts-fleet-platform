@@ -88,7 +88,11 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             (503, {"error": "scan_engine_not_ready"}), # Test 6 readiness failure
             (503, {"error": "scan_engine_not_ready"}), # Test 7
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 7 polling ready
-            (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}), # Test 7 EICAR
+                        (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}), # Test 7 EICAR
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 9 readiness poll
+            (502, {"error": "scan_engine_unavailable"}), # Test 9 large payload transport failure
+            (503, {"error": "scan_engine_not_ready"}), # Test 10 failed refresh
+            (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # Test 10 successful refresh
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally polling readiness
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.CLEAN).hexdigest(), "sizeBytes": len(self.mod.CLEAN), "verdict": "clean"}), # finally scan CLEAN
             (200, {"sha256": self.mod.hashlib.sha256(self.mod.EICAR).hexdigest(), "sizeBytes": len(self.mod.EICAR), "verdict": "infected"}) # finally scan EICAR
@@ -137,8 +141,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     mock_res.stdout = '[{"textPayload": "Fetching ClamAV signatures"}]'
                 elif "freshclam refresh failed" in cmd[3]:
                     mock_res.stdout = '[{"textPayload": "freshclam refresh failed; marking not ready"}]'
-                elif "database is up-to-date" in cmd[3]:
-                    mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 5)"}]'
+                elif "daily.cvd database is up-to-date" in cmd[3] or "daily.cld database is up-to-date" in cmd[3] or "daily.cld updated (version:" in cmd[3] or "daily.cvd updated (version:" in cmd[3]:
+                    mock_res.stdout = '[{"textPayload": "daily.cvd database is up-to-date (version: 5, sigs: 1234, f-level: 90, builder: tests)"}]'
                 else:
                     mock_res.stdout = '[]'
             else:
@@ -252,28 +256,33 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     raise err
                 state["generation"] += 1
 
+            elif "cp" in cmd and "--access-token-file=/dev/null" in cmd:
+                err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
+                raise err
+
             return res
 
         mock_run.side_effect = side_effect
-        self.mod.test_gcs("fake-bucket", "fake-sa")
+        result = self.mod.test_gcs("fake-bucket", "fake-sa")
+        self.assertTrue(result, "test_gcs should return True when all scenarios pass")
 
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main(self):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:
             mock_scanner.return_value = True
+            mock_gcs.return_value = True
             self.mod.main()
             mock_scanner.assert_called_once_with("s", "ss", "p", "rg")
             mock_gcs.assert_any_call("d", "sa")
             mock_gcs.assert_any_call("r", "sa")
 
-
-
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main_rejects_incomplete(self):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:
-            mock_scanner.return_value = False
+            mock_scanner.return_value = True
+            mock_gcs.side_effect = [True, False]
             with self.assertRaises(SystemExit) as cm:
                 self.mod.main()
             self.assertEqual(cm.exception.code, 1)
@@ -336,6 +345,21 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 fp = io.BytesIO(json.dumps({"error": "content_sha256_mismatch"}).encode())
                 raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", req.headers, fp)
 
+            # Test 4: Oversized (11MB)
+            if size > 10 * 1024 * 1024:
+                # 413 or 502 based on payload type
+                if data == self.mod.ENGINE_LIMIT_PAYLOAD:
+                    fp = io.BytesIO(json.dumps({"error": "scan_engine_indeterminate"}).encode())
+                    raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", req.headers, fp)
+                fp = io.BytesIO(json.dumps({"error": "payload_too_large"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 413, "Payload Too Large", req.headers, fp)
+            
+            # Test 9: Transport failure due to short timeout and large (9MB) payload
+            if env_state.get("CLAMD_TIMEOUT_MS") == "150" and size > 8 * 1024 * 1024:
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_unavailable"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", req.headers, fp)
+
+
             # Test 4: Oversized file
             if size > 10 * 1024 * 1024:
                 fp = io.BytesIO(json.dumps({"error": "payload_too_large"}).encode())
@@ -359,6 +383,11 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             # Test 7/8: Cold start injection
             if cold_start_calls[0] > 0:
                 cold_start_calls[0] -= 1
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_not_ready"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", req.headers, fp)
+
+            # Test 10: Failed refresh
+            if env_state.get("http_proxy") == "http://127.0.0.1:9999":
                 fp = io.BytesIO(json.dumps({"error": "scan_engine_not_ready"}).encode())
                 raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", req.headers, fp)
 

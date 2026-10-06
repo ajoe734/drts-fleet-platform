@@ -211,16 +211,74 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             logs = json.loads(res.stdout) if res.stdout.strip() else []
             assert len(logs) > 0, "Could not find 'Fetching ClamAV signatures' in logs for exact revision"
 
+            # Bound daily confirmation
             res_fresh = run([
                 "gcloud", "logging", "read",
-                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_7}" AND (textPayload:"database is up-to-date" OR textPayload:"updated (version:")',
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_7}" AND (textPayload:"daily.cvd database is up-to-date" OR textPayload:"daily.cld database is up-to-date" OR textPayload:"daily.cld updated (version:" OR textPayload:"daily.cvd updated (version:")',
                 "--project", project,
                 "--limit=1", "--format=json"
             ])
             logs_fresh = json.loads(res_fresh.stdout) if res_fresh.stdout.strip() else []
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
-            print("  (Genuine engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
+            print("Test 9: Transport failure after successful readiness")
+            # We use existing CLAMD_TIMEOUT_MS combined with a large payload to deterministically
+            # pass readiness (zVERSION is fast) but fail the exchange (zINSTREAM takes >150ms).
+            rev_9 = update_service_env(container="gateway", CLAMD_TIMEOUT_MS="150")
+            max_attempts = 30
+            ready = False
+            for i in range(max_attempts):
+                status, body = scan(CLEAN)
+                if status == 502 or status == 200:
+                    ready = True
+                    break
+                import time
+                time.sleep(2)
+            
+            assert ready, "Service did not become ready for Test 9"
+            
+            # Send a 9MB payload which takes >150ms to stream/scan
+            LARGE_PAYLOAD = CLEAN + b"0" * (9 * 1024 * 1024)
+            status, body = scan(LARGE_PAYLOAD)
+            assert status == 502, f"Expected 502 transport failure due to injected short timeout, got {status}: {body}"
+            assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
+
+            print("Test 10: Verified-unchanged daily freshness renewal / actual update / failed refresh / reload")
+            # Set FRESHCLAM_INTERVAL_SECONDS=5 so freshclam runs repeatedly on the clamd container
+            # Set http_proxy to a blackhole on clamd container so freshclam fails.
+            update_service_env(container="gateway", remove=True, CLAMD_TIMEOUT_MS="")
+            rev_10 = update_service_env(container="clamd", FRESHCLAM_INTERVAL_SECONDS="5", http_proxy="http://127.0.0.1:9999")
+            import time
+            time.sleep(15) # Wait for freshclam to run and fail
+            status, body = scan(CLEAN)
+            assert status == 503, f"Expected 503 after failed refresh, got {status}: {body}"
+            assert isinstance(body, dict) and body.get("error") == "scan_engine_not_ready", f"Expected not_ready error, got {body}"
+
+            res_failed = run([
+                "gcloud", "logging", "read",
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10}" AND textPayload:"freshclam refresh failed; marking not ready"',
+                "--project", project,
+                "--limit=1", "--format=json"
+            ])
+            logs_failed = json.loads(res_failed.stdout) if res_failed.stdout.strip() else []
+            assert len(logs_failed) > 0, "Could not find 'freshclam refresh failed' in logs for exact revision"
+
+            # Now restore network so it succeeds, and expect "database is up-to-date" or "updated"
+            rev_10b = update_service_env(container="clamd", remove=True, http_proxy="")
+            time.sleep(15)
+            status, body = scan(CLEAN)
+            assert status == 200, f"Expected 200 after successful refresh, got {status}: {body}"
+
+            res_success = run([
+                "gcloud", "logging", "read",
+                f'resource.type="cloud_run_revision" AND resource.labels.service_name="{scanner_service}" AND resource.labels.revision_name="{rev_10b}" AND (textPayload:"daily.cvd database is up-to-date" OR textPayload:"daily.cld database is up-to-date" OR textPayload:"daily.cld updated (version:" OR textPayload:"daily.cvd updated (version:")',
+                "--project", project,
+                "--limit=1", "--format=json"
+            ])
+            logs_success = json.loads(res_success.stdout) if res_success.stdout.strip() else []
+            assert len(logs_success) > 0, "Could not find confirmed daily database version/freshness in logs after successful refresh"
+
+            assert_receipt(body, CLEAN, expected_verdict="clean")
         except Exception as e:
             print(f"Hosted scenario failed: {e}")
             raise
@@ -258,8 +316,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                         restore_errors.append(f"Container {c_name} restore failed: {e.stderr}")
 
                 if restore_errors:
-                    raise subprocess.CalledProcessError(1, "restore", stderr="\\n"
-.join(restore_errors))
+                    raise subprocess.CalledProcessError(1, "restore", stderr="\n".join(restore_errors))
 
                 # wait for readiness
                 ready = False
@@ -402,11 +459,12 @@ def test_gcs(bucket_name, runtime_sa):
 
         print("Test 12: Network fault / permission denial regressions")
         try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0", "--access-token-file=/dev/null"])
-            assert False, "Expected upload to fail with invalid token"
+            # Simulate a permission denial / invalid network credential by using an empty token
+            run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--access-token-file=/dev/null"])
+            assert False, "Expected upload to fail due to permission denial (invalid token)"
         except subprocess.CalledProcessError as e:
             assert "401" in e.stderr or "403" in e.stderr or "Unauthorized" in e.stderr or "Authentication required" in e.stderr, f"Expected external denial (401/403/Unauthorized), got: {e.stderr}"
-
+        
         print("Test 12b: Post-fault recovery readback")
         # Prove that we can still read normally and generation is intact
         res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
@@ -416,7 +474,6 @@ def test_gcs(bucket_name, runtime_sa):
         with open(temp_out, "r") as f:
             downloaded = f.read()
         assert downloaded == test_data_v2, f"Gen2 content mismatch after fault: expected {test_data_v2}, got {downloaded}"
-
 
     finally:
         print("Cleanup test owned object")
@@ -429,6 +486,7 @@ def test_gcs(bucket_name, runtime_sa):
         if os.path.exists(temp_out): os.remove(temp_out)
 
     print(f"GCS bucket {bucket_name} tests passed.")
+    return True
 
 def main():
     parser = argparse.ArgumentParser()
@@ -442,11 +500,11 @@ def main():
     args = parser.parse_args()
 
     engine_tested = test_scanner(args.scanner_url, args.scanner_service, args.project, args.region)
-    test_gcs(args.document_bucket, args.runtime_sa)
-    test_gcs(args.remittance_bucket, args.runtime_sa)
+    doc_tested = test_gcs(args.document_bucket, args.runtime_sa)
+    rem_tested = test_gcs(args.remittance_bucket, args.runtime_sa)
 
-    if not engine_tested:
-        print("Scanner tests passed (with unexecuted manual genuine-engine scenarios).")
+    if not (engine_tested and doc_tested and rem_tested):
+        print("Tests passed, but incomplete (unexecuted manual genuine-engine or network fault scenarios).")
         sys.exit(1)
 
     print("All dev artifact backend verification tests passed.")
