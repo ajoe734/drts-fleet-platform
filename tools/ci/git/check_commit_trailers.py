@@ -44,9 +44,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def commits_in_range(base: str, head: str) -> list[str]:
-    # Exception for known bad commit in PR #2313 that cannot be force-pushed out
-    BYPASSED_SHAS = {"1fa843531cae1edfd5fced53bd347692fb444a41"}
-    
     out = subprocess.run(
         # A merge commit authors nothing: its content arrives through its
         # parents, and each parent is validated on its own when it is in range.
@@ -64,7 +61,7 @@ def commits_in_range(base: str, head: str) -> list[str]:
         # If base doesn't exist locally (CI runs sometimes don't fetch it),
         # silently treat as empty rather than fail.
         return []
-    return [sha for sha in out.stdout.splitlines() if sha.strip() and sha not in BYPASSED_SHAS]
+    return [sha for sha in out.stdout.splitlines() if sha.strip()]
 
 
 def commit_message(sha: str) -> str:
@@ -116,11 +113,6 @@ def main() -> int:
         return 0
 
     shas = commits_in_range(args.base, args.head)
-
-    # Allowed historical exceptions (e.g. historical trailers missing before strict enforcement)
-    ALLOWED_SHAS = {"8d17ac517cfa410d5ac43a39b3ec863ed2ea56b9"}
-    shas = [s for s in shas if s not in ALLOWED_SHAS]
-
     if not shas:
         print(f"check_commit_trailers: no commits in {args.base}..{args.head}; nothing to check.")
         return 0
