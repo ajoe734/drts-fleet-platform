@@ -131,6 +131,12 @@
       "amended_at": "2026-09-18",
       "scope": "Appended `partner_notification_allocations` only; all prior allocations, amendments, additional_allocations and launch_allocations entries above are unchanged",
       "reason": "SR-PARTNER-NOTIFY-CON-20260917 finalizes the wire contract, entry binding and order-route shapes for routing passenger notifications to the partner app's own native push (docs/02-architecture/partner-notification-20260917/01_system_sa_sd.md §11), and allocates migration numbers for that design's four new tables. At inspected base (origin/dev, fixed baseline 38a68a79959619faa5a10b9782e77dd7ca41f4c2) the highest canonical infra migration is V0103__notification_mail_outbox.sql (infra/migrations/); V0104-V0105 below are reserved by this task and were unclaimed by any other allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 precedent, this task supplies typed contracts (packages/contracts/src/partner-passenger-notification.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement transport, and does not change DI wiring or webhook-dispatch.service.ts. The four tables are grouped into two migration files by which downstream backend task owns their write path: V0104 (binding + route + sequence counter) for SR-PARTNER-NOTIFY-ROUTE-20260917, and V0105 (delivery context) for SR-PARTNER-NOTIFY-TRANSPORT-20260917/SR-PARTNER-NOTIFY-ACK-20260917, mirroring how V0098-V0100 were grouped by consuming task rather than one file per table."
+    },
+    {
+      "amended_by_task_id": "PUSH-CHANNEL-SD-20261006",
+      "amended_at": "2026-10-06",
+      "scope": "Appended `passenger_push_channel_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations and partner_notification_allocations entries above are unchanged",
+      "reason": "PUSH-CHANNEL-SD-20261006 finalizes per-order passenger notification channel routing and a dormant first-party push receiver (docs/02-architecture/passenger-notification-channel-routing-20261006.md; docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md), and allocates migration numbers for its two new first-party push tables. At inspected base (origin/dev, fixed baseline 446228cbc771a4ced774126a7d4aaddea4db73e6) the highest migration registered in this ledger is V0106__voice_dialogue_snapshot.sql (voice_application_allocations, added by AUDIT-VOICE-APPLICATION-WIRING-20261003). V0107-V0108 below were unclaimed by any allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 / SR-PARTNER-NOTIFY-CON-20260917 precedent, this task supplies typed contracts (packages/contracts/src/passenger-notification-channel.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement the channel router, the device registry service, or the FCM transport, and does not change DI wiring. The two tables are grouped into two migration files by which downstream backend task owns their write path: V0107 (first-party device registry + first-party order route) for PUSH-FIRST-PARTY-REGISTRY-20261006, and V0108 (first-party delivery context) for PUSH-FIRST-PARTY-FCM-20261006, mirroring how V0104-V0105 were grouped by consuming task."
     }
   ],
   "voice_application_allocations": [
@@ -378,6 +384,69 @@
         "SR-PARTNER-NOTIFY-ACK-20260917",
         "SR-PARTNER-NOTIFY-TRANSPORT-20260917",
         "SR-PARTNER-NOTIFY-QA-20260917"
+      ]
+    }
+  ],
+  "passenger_push_channel_allocations": [
+    {
+      "task_id": "PUSH-CHANNEL-SD-20261006",
+      "version": "V0107",
+      "migration_filename": "V0107__push_channel_first_party_registry_and_routing.sql",
+      "domain": "passenger_push_first_party_registry_and_routing",
+      "target_schema": "iam + mobility",
+      "primary_tables": [
+        "iam.phase1_passenger_push_devices",
+        "mobility.phase1_order_first_party_notification_routes"
+      ],
+      "referenced_tables": [],
+      "table_invariants": [
+        "iam.phase1_passenger_push_devices: device_id uuid PRIMARY KEY DEFAULT gen_random_uuid() — server-generated only. drts_passenger_id varchar(100) NOT NULL, platform varchar(10) NOT NULL CHECK (platform IN ('ios','android')), provider varchar(20) NOT NULL DEFAULT 'fcm_v1' CHECK (provider = 'fcm_v1') — fixed for v1, matches PassengerPushDeviceProvider in packages/contracts/src/passenger-notification-channel.ts.",
+        "app_id varchar(150) NOT NULL, app_version varchar(50) NOT NULL, token text NOT NULL, token_sha256 varchar(64) NOT NULL, UNIQUE (provider, token_sha256) — the token column exists for the transport to actually call FCM with; application code must never log it or return it from any API response, only device_id or the first 8 characters of token_sha256 (design doc D4).",
+        "status varchar(10) NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked','invalid')), status_reason text NULL, notification_consent_version varchar(50) NOT NULL.",
+        "registered_at timestamptz NOT NULL DEFAULT now(), last_seen_at timestamptz NULL, invalidated_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now() — a device past 60 days without last_seen_at is unusable for selection but is never deleted by this migration; row deletion is out of scope.",
+        "Re-registration transaction: re-registering an already-bound token_sha256 under a different drts_passenger_id must, in one transaction, set the prior row's status='revoked' (status_reason recording the hand-off) and insert a new row for the new passenger — never UPDATE drts_passenger_id in place on the existing row, preserving the historical binding for audit. A token rotation likewise inserts a new row and revokes the old one rather than overwriting the token/token_sha256 columns of an existing row (content-identity immutable, same precedent as V0098's remittance-proof content fields).",
+        "Active-device cap: a transaction that would leave a passenger with more than 10 'active' rows must first revoke the 'active' row with the oldest last_seen_at (nulls treated as oldest) for that drts_passenger_id, enforced in application logic, not a DB trigger, consistent with this ledger's existing precedent of application-layer transaction invariants (e.g. V0098, V0100).",
+        "mobility.phase1_order_first_party_notification_routes: order_id varchar(255) PRIMARY KEY — one immutable route per order (design D2/D5), no history table, mirroring mobility.phase1_order_partner_notification_routes (V0104) but as a fully independent table — a caller must check both tables for the same order_id before dispatch and treat finding both as route_ambiguous (manual_only), never a merge or a fanout.",
+        "tenant_id varchar(100) NOT NULL, drts_passenger_id varchar(100) NOT NULL, passenger_subject_ref varchar(255) NOT NULL — internal reconciliation only, must never be copied into the outbound wire payload (design D6), same boundary as the partner route's passenger_subject_ref.",
+        "app_id varchar(150) NOT NULL, notification_policy_version varchar(50) NOT NULL DEFAULT 'first_party_notification_v1' CHECK (notification_policy_version = 'first_party_notification_v1'), consent_version varchar(50) NOT NULL, ride_ref varchar(255) NOT NULL UNIQUE — not usable as a bearer credential, created_at timestamptz NOT NULL DEFAULT now().",
+        "No writer exists yet for this table in this wave: no first-party passenger identity or booking path calls it (SD-DP-20260422-001 is still in force; design D8). This migration only creates the schema; PUSH-FIRST-PARTY-REGISTRY-20261006 and a later first-party booking path are the eventual callers."
+      ],
+      "description": "第一方乘客裝置登錄表與第一方訂單通知路由快照 migration；本波只建表，無呼叫端",
+      "downstream_tasks": [
+        "PUSH-FIRST-PARTY-REGISTRY-20261006",
+        "PUSH-CHANNEL-ROUTER-20261006",
+        "PUSH-CHANNEL-PG-QA-20261006"
+      ]
+    },
+    {
+      "task_id": "PUSH-CHANNEL-SD-20261006",
+      "version": "V0108",
+      "migration_filename": "V0108__push_channel_first_party_delivery_context.sql",
+      "domain": "passenger_push_first_party_delivery_context",
+      "target_schema": "mobility",
+      "primary_tables": [
+        "mobility.phase1_first_party_notification_delivery_contexts"
+      ],
+      "referenced_tables": [
+        "ops.consumer_notification_outbox",
+        "mobility.phase1_order_first_party_notification_routes",
+        "iam.phase1_passenger_push_devices"
+      ],
+      "table_invariants": [
+        "mobility.phase1_first_party_notification_delivery_contexts: outbox_id varchar(255) PRIMARY KEY REFERENCES ops.consumer_notification_outbox(outbox_id) — one immutable context per outbox row, written before the first send attempt (design D6); never rewritten with a different device list/payload for a retry.",
+        "order_id varchar(255) NOT NULL REFERENCES mobility.phase1_order_first_party_notification_routes(order_id), tenant_id varchar(100) NOT NULL — denormalised from the route row at insert time for ownership checks without a join; never re-derived from caller input.",
+        "target_devices jsonb NOT NULL — the device_id + token_sha256 snapshot targeted at first-attempt time (design D6); a retry only re-sends to still-'active' entries from this list, never re-resolving the recipient from iam.phase1_passenger_push_devices directly. Never stores a raw token.",
+        "wire_message jsonb NOT NULL, wire_message_hash text NOT NULL — the exact FirstPartyPushMessage (packages/contracts/src/passenger-notification-channel.ts) already sent or about to be sent; a retry re-sends these exact bytes. event_sequence bigint NOT NULL, expires_at timestamptz NOT NULL.",
+        "delivery_target varchar(30) NOT NULL DEFAULT 'first_party_device' CHECK (delivery_target = 'first_party_device'). delivery_stage varchar(20) NULL CHECK (delivery_stage IN ('outbox_persisted','provider_accepted','device_received','opened')) — null until a completed attempt sets it; this design version's own code paths may only ever write 'provider_accepted' or leave it null on failure — 'device_received'/'opened' are reserved for a future, separately versioned device-callback task and must not be written speculatively.",
+        "retry_disposition varchar(30) NULL CHECK (retry_disposition IN ('automatic','configuration_blocked','manual_only','terminal','none')), failure_reason varchar(50) NULL CHECK (failure_reason IN ('no_notification_channel','no_active_device','credential_rejected','configuration_blocked','provider_transient_error')) — set together from one completed attempt's outcome, per FIRST_PARTY_PUSH_FAILURE_REASON_RETRY_DISPOSITIONS in packages/contracts/src/passenger-notification-channel.ts; a worker selecting rows to retry must filter on the existing outbox status, next_attempt_at, this retry_disposition and expires_at together, same boundary as V0105's partner delivery context.",
+        "receipt_id text NULL — must equal FCM's own response message name (design D6); never a synthesized value. created_at timestamptz NOT NULL DEFAULT now(), delivered_at timestamptz NULL — set only when this transport's own ack validation completes, never the attempt's start time or FCM's self-reported time.",
+        "Fencing ownership: ops.consumer_notification_outbox (existing, unchanged) retains sole claim/fence/retry-timer ownership; this table records receipt/outcome inside that same fence transaction, introducing no second claim mechanism or independent retry timer, same boundary as V0105.",
+        "No writer exists yet for this table in this wave: PASSENGER_PUSH_FIRST_PARTY_ENABLED defaults to false (design D6/D8) and no FCM project/credential is configured. This migration only creates the schema; PUSH-FIRST-PARTY-FCM-20261006 is the eventual caller."
+      ],
+      "description": "每筆 outbox 首次準備第一方裝置派送前寫入的不可變送達內文、裝置清單雜湊與失敗分類 migration；本波只建表，功能旗標預設關閉",
+      "downstream_tasks": [
+        "PUSH-FIRST-PARTY-FCM-20261006",
+        "PUSH-CHANNEL-PG-QA-20261006"
       ]
     }
   ]
