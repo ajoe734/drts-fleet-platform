@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { join } from "node:path";
 
-import {
-  buildArtifactText,
-} from "../../../../apps/bank-console-web/app/artifacts/artifact-crypto";
+import { buildArtifactText } from "../../../../apps/bank-console-web/app/artifacts/artifact-crypto";
 import {
   downloadArtifact,
   liveSigningGatePassed,
@@ -54,7 +52,10 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
 
     it("never returns bytes for a non-2xx response and extracts the platform error code", async () => {
       const response = new Response(
-        JSON.stringify({ ok: false, error: { code: "FORBIDDEN", message: "nope" } }),
+        JSON.stringify({
+          ok: false,
+          error: { code: "FORBIDDEN", message: "nope" },
+        }),
         { status: 403, headers: { "content-type": "application/json" } },
       );
       const outcome = await downloadArtifact(
@@ -88,7 +89,10 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
         privateKeyEncoding: { type: "pkcs8", format: "pem" },
       });
       const artifactText = buildArtifactText("STATEMENT PAYLOAD: TWD 1,200", {
-        signingConfig: { privateKeyPem: keyPair.privateKey, keyId: "test-key-1" },
+        signingConfig: {
+          privateKeyPem: keyPair.privateKey,
+          keyId: "test-key-1",
+        },
       });
 
       const outcome = runIndependentBankVerifier({
@@ -131,7 +135,10 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
         privateKeyEncoding: { type: "pkcs8", format: "pem" },
       });
       const artifactText = buildArtifactText("STATEMENT PAYLOAD: TWD 1,200", {
-        signingConfig: { privateKeyPem: keyPair.privateKey, keyId: "test-key-1" },
+        signingConfig: {
+          privateKeyPem: keyPair.privateKey,
+          keyId: "test-key-1",
+        },
       });
 
       const outcome = runIndependentBankVerifier({
@@ -154,7 +161,10 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
         privateKeyEncoding: { type: "pkcs8", format: "pem" },
       });
       const artifactText = buildArtifactText("STATEMENT PAYLOAD: TWD 1,200", {
-        signingConfig: { privateKeyPem: keyPair.privateKey, keyId: "test-key-1" },
+        signingConfig: {
+          privateKeyPem: keyPair.privateKey,
+          keyId: "test-key-1",
+        },
       });
       const tamperedText = artifactText.replace("1,200", "9,999");
 
@@ -194,6 +204,33 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
       const binding = resolveRuntimeShaBinding({} as NodeJS.ProcessEnv);
       expect(binding.runtimeSha).toBe("unknown");
       expect(binding.workflowSha).toBe("unknown");
+    });
+  });
+
+  describe("getGoogleIdToken", () => {
+    it("returns injected ID token from environment when matching audience", async () => {
+      const { getGoogleIdToken } =
+        await import("../../../e2e/system-remediation/sr-live-doc-001/live-document-runner");
+      process.env.SR_LIVE_DOC_LIVE_TARGET_ORIGIN = "https://target.local";
+      process.env.SR_LIVE_DOC_ID_TOKEN_TARGET = "token123";
+
+      const token = await getGoogleIdToken("https://target.local");
+      expect(token).toBe("token123");
+
+      delete process.env.SR_LIVE_DOC_LIVE_TARGET_ORIGIN;
+      delete process.env.SR_LIVE_DOC_ID_TOKEN_TARGET;
+    });
+
+    it("throws when missing WIF credentials instead of returning null", async () => {
+      const { getGoogleIdToken } =
+        await import("../../../e2e/system-remediation/sr-live-doc-001/live-document-runner");
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = "/tmp/fake.json";
+
+      await expect(getGoogleIdToken("https://missing.local")).rejects.toThrow(
+        "Missing injected WIF ID token for audience",
+      );
+
+      delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     });
   });
 });
