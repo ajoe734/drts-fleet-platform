@@ -214,10 +214,10 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
       periodMonth: "2026-03",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const [publishUrl, publishInit] = fetchMock.mock.calls[0];
+    const [publishUrl, publishInit] = fetchMock.mock.calls[0]!;
     expect(publishUrl).toBe("https://fixture.example.test/api/driver-fee-plans/publish");
     expect(publishInit.headers.authorization).toBe("Bearer test-ops-token");
-    const [generateUrl, generateInit] = fetchMock.mock.calls[1];
+    const [generateUrl, generateInit] = fetchMock.mock.calls[1]!;
     expect(generateUrl).toBe("https://fixture.example.test/api/driver-statements/generate");
     expect(generateInit.headers["idempotency-key"]).toBe(
       "fixture-driver-statements-drv-demo-001-2026-03",

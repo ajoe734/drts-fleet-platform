@@ -326,11 +326,11 @@ async function callApi(
   if (options.idempotencyKey) {
     headers["idempotency-key"] = options.idempotencyKey;
   }
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: options.method,
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  const init: RequestInit = { method: options.method, headers };
+  if (options.body !== undefined) {
+    init.body = JSON.stringify(options.body);
+  }
+  const response = await fetch(`${baseUrl}${path}`, init);
   const text = await response.text();
   let body: any = null;
   try {
@@ -480,9 +480,11 @@ export async function verifyPublicInfoVersionFixture(
 if (require.main === module) {
   const kind = process.argv[2];
   if (kind === "reimbursement-batch") {
+    const cliDriverId = process.argv[3];
+    const cliPeriodMonth = process.argv[4];
     ensureDriverReimbursementBatchFixture({
-      driverId: process.argv[3],
-      periodMonth: process.argv[4],
+      ...(cliDriverId !== undefined ? { driverId: cliDriverId } : {}),
+      ...(cliPeriodMonth !== undefined ? { periodMonth: cliPeriodMonth } : {}),
     })
       .then((fixture) => {
         console.error(
@@ -495,7 +497,10 @@ if (require.main === module) {
         process.exitCode = 1;
       });
   } else if (kind === "public-info-version") {
-    verifyPublicInfoVersionFixture({ versionId: process.argv[3] })
+    const cliVersionId = process.argv[3];
+    verifyPublicInfoVersionFixture(
+      cliVersionId !== undefined ? { versionId: cliVersionId } : {},
+    )
       .then((fixture) => {
         console.error(`Verified public info version ${fixture.versionId}`);
         process.stdout.write(`${fixture.versionId}\n`);
