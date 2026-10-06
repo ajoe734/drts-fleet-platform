@@ -998,9 +998,9 @@ describe.skipIf(!testDbUrl)(
       expect(prepReady.kind).toBe("requeued");
     });
 
-    it.each(["receipt_ready", "trip_cancelled"])(
-      "tests cancellation versus independent %s",
-      async (eventType) => {
+    it("tests cancellation versus independent receipt_ready and trip_cancelled", async () => {
+      // Keep both terminal-event regressions within the existing seven-case PG gate.
+      for (const eventType of ["receipt_ready", "trip_cancelled"]) {
         const { outboxId, orderId } = await createFixture({ status: "failed" });
         await pool.query(
           "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
@@ -1056,8 +1056,8 @@ describe.skipIf(!testDbUrl)(
           "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\"]' WHERE binding_id = $1",
           [bindingId1],
         );
-      },
-    );
+      }
+    });
 
     it("tests historical context/route ownership changes", async () => {
       const { outboxId, orderId } = await createFixture({ status: "failed" });
