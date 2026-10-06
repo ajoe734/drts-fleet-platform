@@ -121,7 +121,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                         c_env[env["name"]] = env["value"]
                 original_env_by_container[c_name] = c_env
 
-        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_TIMEOUT_MS", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "FAULT_INJECT_TRANSPORT"]
+        mutated_keys = ["MAX_SIGNATURE_AGE_MS", "CLAMD_PORT", "COLD_START_NONCE", "CLAMD_INSTREAM_TIMEOUT_MS", "FRESHCLAM_INTERVAL_SECONDS", "http_proxy", "FAULT_INJECT_TRANSPORT"]
         original_max_age = original_env_by_container.get("gateway", {}).get("MAX_SIGNATURE_AGE_MS", "")
         original_clamd_port = original_env_by_container.get("gateway", {}).get("CLAMD_PORT", "")
 
@@ -221,11 +221,11 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert len(logs_fresh) > 0, "Could not find confirmed daily database version/freshness in logs for exact revision"
 
             print("Test 9: Transport failure after successful readiness")
-            # We use a short timeout to fail transport (exchangeWithClamd) while polling for 502.
-            # zVERSION might occasionally time out (503), but zINSTREAM (PDF payload) will reliably time out (502).
-            rev_9 = update_service_env(container="gateway", CLAMD_TIMEOUT_MS="1")
+            # We use a 0ms instream timeout to deterministically fail transport (exchangeWithClamd).
+            # zVERSION still uses default timeout, so readiness proves successful.
+            rev_9 = update_service_env(container="gateway", CLAMD_INSTREAM_TIMEOUT_MS="0")
 
-            # We can now use a normal clean payload, the fault is injected at the transport boundary
+            # We can now use a normal clean payload, the fault is injected at the transport boundary deterministically
             max_attempts = 30
             ready = False
             for i in range(max_attempts):
@@ -234,21 +234,16 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
                     ready = True
                     break
                 time.sleep(2)
-
             assert ready, "Service did not become ready (or fault did not trigger)"
             status, body = scan(CLEAN)
-            if status == 503:
-                # If readiness timed out this exact millisecond, try again once
-                time.sleep(1)
-                status, body = scan(CLEAN)
             assert status == 502, f"Expected 502 transport failure due to injected fault, got {status}: {body}"
             assert isinstance(body, dict) and body.get("error") == "scan_engine_unavailable", f"Expected scan_engine_unavailable, got {body}"
 
             # Recovery after fault
-            if original_env_by_container.get("gateway", {}).get("CLAMD_TIMEOUT_MS"):
-                update_service_env(container="gateway", CLAMD_TIMEOUT_MS=original_env_by_container["gateway"]["CLAMD_TIMEOUT_MS"])
+            if original_env_by_container.get("gateway", {}).get("CLAMD_INSTREAM_TIMEOUT_MS"):
+                update_service_env(container="gateway", CLAMD_INSTREAM_TIMEOUT_MS=original_env_by_container["gateway"]["CLAMD_INSTREAM_TIMEOUT_MS"])
             else:
-                update_service_env(container="gateway", remove=True, CLAMD_TIMEOUT_MS="")
+                update_service_env(container="gateway", remove=True, CLAMD_INSTREAM_TIMEOUT_MS="")
 
             print("  (Genuine engine lifecycle is tested in a separate workflow step via test_genuine_clamd_lifecycle.py)")
         except Exception as e:

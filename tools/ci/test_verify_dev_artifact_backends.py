@@ -288,6 +288,12 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
     def test_scanner_hosted_restoration_regression(self, mock_env, mock_urlopen, mock_sleep, mock_run):
         mock_env.return_value = "fake-token"
 
+        # Env tracking state
+        env_state = {"CLAMD_INSTREAM_TIMEOUT_MS": None}
+        fault_reached = [False]
+        cold_start_calls = [0]
+        current_nonce = [None]
+
         def mock_run_side_effect(cmd, *args, **kwargs):
             mock_res = MagicMock()
             mock_res.stdout = "fake-output\n"
@@ -296,6 +302,23 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 mock_res.stdout = '{"spec": {"template": {"spec": {"containers": [{"name": "gateway", "env": []}, {"name": "clamd", "env": []}]}}}}'
             elif "logging" in cmd:
                 mock_res.stdout = '[{"textPayload": "database is up-to-date (version: 27315)"}]'
+            elif "update" in cmd:
+                # Track env updates
+                if "--update-env-vars" in cmd:
+                    idx = cmd.index("--update-env-vars")
+                    env_str = cmd[idx+1]
+                    for kv in env_str.split(","):
+                        k, v = kv.split("=")
+                        env_state[k] = v
+                        if k == "COLD_START_NONCE":
+                            if v != current_nonce[0]:
+                                current_nonce[0] = v
+                                cold_start_calls[0] = 3 # Return 503 for 3 calls
+                elif "--remove-env-vars" in cmd:
+                    idx = cmd.index("--remove-env-vars")
+                    env_str = cmd[idx+1]
+                    for k in env_str.split(","):
+                        env_state[k] = None
             return mock_res
 
         mock_run.side_effect = mock_run_side_effect
@@ -305,7 +328,6 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             import io
             import json
 
-            # Try to get header directly or iterate over headers for case-insensitivity
             client_sha256 = req.get_header("X-content-sha256")
 
             data = getattr(req, "data", b"")
@@ -327,15 +349,33 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 fp = io.BytesIO(json.dumps({"error": "scan_engine_indeterminate"}).encode())
                 raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", req.headers, fp)
 
-            # Fault injection test simulation (Test 9)
-            if data == self.mod.CLEAN and mock_urlopen.call_count > 10:
-                raise urllib.error.URLError("Simulated network failure after fault enable")
+            # Test 5: Stale signature rejection
+            if env_state.get("MAX_SIGNATURE_AGE_MS") == "1":
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_not_ready"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", req.headers, fp)
 
+            # Test 6: Unavailable port
+            if env_state.get("CLAMD_PORT") == "9999":
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_not_ready"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", req.headers, fp)
+
+            # Test 7/8: Cold start injection
+            if cold_start_calls[0] > 0:
+                cold_start_calls[0] -= 1
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_not_ready"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", req.headers, fp)
+
+            # Fault injection test simulation (Test 9)
+            if env_state.get("CLAMD_INSTREAM_TIMEOUT_MS") == "0":
+                fault_reached[0] = True
+                # The fault simulation should return 502
+                fp = io.BytesIO(json.dumps({"error": "scan_engine_unavailable"}).encode())
+                raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", req.headers, fp)
+
+            # Normal path
             mock_resp = MagicMock()
             mock_resp.status = 200
-
             verdict = "clean" if data == self.mod.CLEAN else "infected"
-
             mock_resp.read.return_value = json.dumps({
                 "status": "ready",
                 "verdict": verdict,
@@ -348,15 +388,15 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
         mock_urlopen.side_effect = mock_urlopen_side_effect
 
-        with self.assertRaises(Exception):
-            self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
+        self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
+        self.assertTrue(fault_reached[0], "Test 9 fault enable was never reached")
 
-        # Verify restoration of CLAMD_TIMEOUT_MS and error propagation
+        # Verify restoration of CLAMD_INSTREAM_TIMEOUT_MS
         remove_calls = [
             call for call in mock_run.call_args_list
-            if "update" in call[0][0] and "--remove-env-vars" in call[0][0] and "CLAMD_TIMEOUT_MS" in call[0][0][call[0][0].index("--remove-env-vars")+1]
+            if "update" in call[0][0] and "--remove-env-vars" in call[0][0] and "CLAMD_INSTREAM_TIMEOUT_MS" in call[0][0][call[0][0].index("--remove-env-vars")+1]
         ]
-        self.assertTrue(len(remove_calls) > 0, "Expected CLAMD_TIMEOUT_MS to be removed in finally block")
+        self.assertTrue(len(remove_calls) > 0, "Expected CLAMD_INSTREAM_TIMEOUT_MS to be removed in finally block")
 
 if __name__ == "__main__":
     unittest.main()
