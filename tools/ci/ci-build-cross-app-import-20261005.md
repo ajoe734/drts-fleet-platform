@@ -76,3 +76,50 @@ preserve assertions and CI execution, adjust relative imports and artifact
 paths, then run the complete guard again. Do not hide the failures by excluding
 tests or adding an allowlist. The unrelated booking fixtures above also need
 explicit disposition; a passing scoped regression does not make them pass.
+
+## Resumed checkpoint — 2026-10-06
+
+Source checkpoint before this repair:
+`c9fb5a65e636ec8c47508130472b6af5f10cf676`, matching the published task branch.
+`origin/dev` remained `b20895a17085681eb0974864be53eae8d726b343`; no PR or
+candidate existed. This is an owner self-check, not an independent review or
+a candidate handoff. Auth/package/app sources are unchanged in this checkpoint.
+
+| Finding / acceptance                | Source and repair                                                                                                                                            | Before → after                                                                         | Command / evidence                                                                                                                                                                                     | Remaining limits                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Guard misses computed literal paths | `check-cross-app-imports.mjs:literalPrefix`: unwrap parentheses and TS assertions; combine known string/template segments until the first unknown expression | Four added probes incorrectly exit 0 on `c9fb5a65e`; all correctly exit 1 after repair | `pnpm exec vitest run tests/unit/cross-app-imports.test.ts`; `.local/ci-build-cross-app-import/guard-before-hardening.log` (5 failures total, exit 1), `guard-after-hardening.log` (34 passed, exit 0) | Static guard does not evaluate arbitrary runtime variables                                      |
+| Guard misses unquoted CSS URLs      | Stylesheet reference scanner accepts `@import url(../../b/theme.css)` alongside quoted forms                                                                 | Added probe incorrectly exits 0 before; correctly exits 1 after                        | Same guard logs; actual CLI executed against temporary source trees, with no mocked scanner                                                                                                            | Same-app/external imports and commented examples stay accepted                                  |
+| Auth behavior and guard regression  | Existing real app route suites plus guard fixtures                                                                                                           | 79 passed in 7 files, exit 0                                                           | Same seven-file Vitest command as the initial checkpoint; `resumed-auth-and-guard.log`; Node v22.23.2, pnpm 10.33.0, Vitest 4.1.4                                                                      | In-memory unit tests only; no browser, service, or Docker                                       |
+| Root typecheck / lint               | Updated test and guard                                                                                                                                       | Exit 0 for both                                                                        | `pnpm typecheck:root` (`resumed-root-typecheck.log`); `pnpm exec eslint tools/ci/check-cross-app-imports.mjs tests/unit/cross-app-imports.test.ts --max-warnings=0`                                    | No new app/package source changes                                                               |
+| No cross-app imports / same-SHA CI  | Complete repository scan                                                                                                                                     | Still fails on exactly the six API-test imports listed above, exit 1                   | `node tools/ci/check-cross-app-imports.mjs`; `full-guard-resumed.log`                                                                                                                                  | Requires Supervisor scope coordination before relocation; CI/review/merge/deploy remain pending |
+
+The previous dispatch's machine-local logs were not present in the resumed
+worktree. The initial checkpoint results above remain historical recorded
+evidence, not checks re-executed in this dispatch. Regenerate retained clean
+build evidence for the eventual candidate before handoff.
+
+### Concrete next repair unit for Supervisor coordination
+
+The released status CLI still showed no expanded scope after the owner's
+renewed request. AI_COLLABORATION_GUIDE §0.7 requires Supervisor to check
+parallel ownership and update scopes for the five exact `apps/api/tests/`
+files above. Once coordinated:
+
+1. Move those files under `tests/unit/cross-app/`, preserving their assertions
+   and fixing paths to the actual API and UI modules. Root `vitest.config.ts`
+   already includes `tests/unit/**/*.test.ts`; both product smoke and ci-integ
+   run root `test:unit`, so these remain mandatory CI tests.
+2. Resolve API-owned Nest dependencies with the existing root-test
+   `createRequire(new URL(...apps/api/package.json, import.meta.url))` pattern
+   (see `sr-mail-retry-schedule-20261001.test.ts`). Nest is not installed in root
+   `node_modules`; blindly copying bare imports would introduce setup failures.
+3. Correct `map-fleets-closeout-proof.test.ts`'s `process.cwd()/../..` artifact
+   root assumption and the two owned-mobility tests' recorded replay commands.
+   Preserve artifact names and assertions; root execution must not write
+   outside the workspace. The owned-mobility root-discovery helpers already
+   locate `pnpm-workspace.yaml`.
+4. Run the relocated suites, root typecheck/lint, full guard and the original
+   auth regressions. Resolve the pre-existing booking-fixture disposition,
+   then generate final isolated-build evidence, push and open the candidate
+   PR for Codex2. Do not waive guard failures or use these checkpoints as CI
+   or independent review evidence.

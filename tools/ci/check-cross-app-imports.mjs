@@ -27,16 +27,36 @@ function checkReference(file, sourceApp, specifier, line) {
 
 // A literal prefix can already identify a foreign app in a dynamic import.
 function literalPrefix(node) {
-  if (!node) return null;
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isTemplateExpression(node)) return node.head.text;
+  if (!node) return { text: "", complete: false };
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
+  ) {
+    return literalPrefix(node.expression);
+  }
+  if (ts.isStringLiteralLike(node)) return { text: node.text, complete: true };
+  if (ts.isTemplateExpression(node)) {
+    let text = node.head.text;
+    for (const span of node.templateSpans) {
+      const part = literalPrefix(span.expression);
+      text += part.text;
+      if (!part.complete) return { text, complete: false };
+      text += span.literal.text;
+    }
+    return { text, complete: true };
+  }
   if (
     ts.isBinaryExpression(node) &&
     node.operatorToken.kind === ts.SyntaxKind.PlusToken
   ) {
-    return literalPrefix(node.left);
+    const left = literalPrefix(node.left);
+    if (!left.complete) return left;
+    const right = literalPrefix(node.right);
+    return { text: left.text + right.text, complete: right.complete };
   }
-  return null;
+  return { text: "", complete: false };
 }
 
 function scan(file, sourceApp) {
@@ -47,12 +67,12 @@ function scan(file, sourceApp) {
       comment.replace(/[^\n]/g, " "),
     );
     const references =
-      /@(?:import|use|forward)\s+(?:url\(\s*)?["']([^"']+)["']/g;
+      /@(?:import|use|forward)\s+(?:["']([^"']+)["']|url\(\s*(?:["']([^"']+)["']|([^"'()\s]+))\s*\))/gi;
     for (const match of uncommented.matchAll(references)) {
       checkReference(
         file,
         sourceApp,
-        match[1],
+        match[1] ?? match[2] ?? match[3],
         text.slice(0, match.index).split("\n").length,
       );
     }
@@ -83,8 +103,8 @@ function scan(file, sourceApp) {
         reference = node.arguments[0];
       }
     }
-    const specifier = literalPrefix(reference);
-    if (specifier !== null) {
+    const specifier = literalPrefix(reference).text;
+    if (specifier) {
       const { line } = source.getLineAndCharacterOfPosition(
         reference.getStart(source),
       );

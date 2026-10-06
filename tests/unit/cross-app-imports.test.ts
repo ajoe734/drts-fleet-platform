@@ -36,6 +36,10 @@ describe("cross-app import CI guard", () => {
     "const value = import(`../../b/missing`);",
     "const value = import(`../../b/${name}`);",
     'const value = import("../../b/" + name);',
+    'const value = import("../../" + "b/missing");',
+    'const value = require(("../../b/missing"));',
+    'const value = import(("../../" + "b/") + name);',
+    'const value = import(`../../${"b"}/missing`);',
     'import "./nested/../../../b/missing?raw";',
     'import "../../../apps/b/missing";',
   ])(
@@ -60,6 +64,7 @@ describe("cross-app import CI guard", () => {
   it.each([
     '@import "../../b/theme.css";',
     '@import url("../../b/theme.css");',
+    "@import url(../../b/theme.css);",
     '@use "../../b/theme";',
     '@forward "../../b/theme";',
   ])("checks stylesheet references: %s", (source) => {
@@ -67,18 +72,35 @@ describe("cross-app import CI guard", () => {
   });
 
   it("accepts same-app, package and external imports without matching comments or strings", () => {
-    const result = runGuard(`
-      import "../local";
-      import "../../../apps/a/local";
-      import "../../../packages/shared/src";
-      import { value } from "@drts/shared";
-      import "next/server";
-      // import "../../b/missing";
-      /* export * from "../../b/missing"; */
-      const example = 'import "../../b/missing"';
-    `);
+    const result = runGuard(
+      [
+        'import "../local";',
+        'import "../../../apps/a/local";',
+        'import "../../../packages/shared/src";',
+        'import { value } from "@drts/shared";',
+        'import "next/server";',
+        'const local = import("../../b/" + "../a/local");',
+        'const templateLocal = import(`../../${"a"}/local`);',
+        'const dynamicLocal = import("../local/" + name);',
+        '// import "../../b/missing";',
+        '/* export * from "../../b/missing"; */',
+        "const example = 'import \"../../b/missing\"';",
+      ].join("\n"),
+    );
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("guard passed");
+  });
+
+  it("accepts same-app and external stylesheet imports and ignores comments", () => {
+    const result = runGuard(
+      `
+      @import url(../local.css);
+      @import url("https://example.com/theme.css");
+      /* @import url(../../b/theme.css); */
+    `,
+      "css",
+    );
+    expect(result.status, result.stderr).toBe(0);
   });
 
   it("reports the deployed nested auth-route failure", () => {
