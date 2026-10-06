@@ -12,8 +12,7 @@ export function validatePutDocumentArtifactCommand(
 ): { subjectId: string; mimeType: string; bytes: Buffer } {
   if (!isDocumentArtifactKind(command.kind)) {
     throw new Error(
-      `DocumentArtifactStore does not accept kind "${command.kind}". ` +
-        "Only tenant-invoice, placard, and report are in scope this period.",
+      `DocumentArtifactStore does not accept kind "${command.kind}". `,
     );
   }
   const subjectId = command.subjectId?.trim();
