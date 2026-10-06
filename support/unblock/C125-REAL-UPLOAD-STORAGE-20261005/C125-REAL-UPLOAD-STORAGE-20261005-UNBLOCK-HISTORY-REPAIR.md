@@ -103,8 +103,72 @@ machine-truth mutation on the parent is required from this helper task. The
 parent owner should continue implementation (real GCS/ClamAV wiring per the
 parent's `integration_notes`) directly on `-r4`.
 
+## Finding: this candidate's own CI failure (new this cycle)
+
+This helper task's own candidate (`6dd29f9dcd1823a262de5abd6204b47ee417d8f8`,
+PR #2380) rebuilt its single commit fresh from `origin/dev` and in doing so
+dropped the `tools/ci/dependency-security-exceptions.json` entry for advisory
+`1241339` (`@modelcontextprotocol/sdk`) that an earlier round on the
+superseded `gemini/...` branch had already added and that reviewer `Claude2`
+had already validated as correctly formatted (e.g. reopen at
+`2026-10-06T18:17:16Z`: "dependency-security-exceptions.json 新增項...無問題，可保留不動").
+Both `Dependency security` and `dependency-security` checks on PR #2380
+failed identically:
+
+```
+Found unexcepted vulnerabilities:
+[high] ID: 1241339 (@modelcontextprotocol/sdk): MCP TypeScript SDK: OAuth
+client could send credentials to an authorization server chosen by the MCP
+server (No exception found)
+```
+
+(jobs `112487526923` and `112487985522`, confirmed via
+`gh api repos/ajoe734/drts-fleet-platform/actions/jobs/<id>/logs`.)
+
+### Repair
+
+Re-added the exact exception entry (same `advisory_id`/`module_name`/
+`versions`/`paths`/`reason` previously validated, copied from
+`git show 852a901f2a8792173ec3af22bbc707b56b7e2975:tools/ci/dependency-security-exceptions.json`)
+to `tools/ci/dependency-security-exceptions.json`, in `advisory_id` order
+between `1147955` and `1239765`. No other file changed. `python3 -c
+"import json; json.load(open('tools/ci/dependency-security-exceptions.json'))"`
+confirms the file is still valid JSON with 20 entries (was 19).
+
+This is a task-scoped fix to this helper task's own candidate only; it does
+not touch the parent task's machine truth (already correct per the section
+above: `branch=codex/c125-real-upload-storage-20261005-r4`,
+`candidate_generation=null`).
+
+## Re-verified parent status (this cycle)
+
+Re-checked parent `C125-REAL-UPLOAD-STORAGE-20261005` read-only via
+`ai-status.sh show` immediately before this fix:
+
+```
+branch               = codex/c125-real-upload-storage-20261005-r4
+candidate_generation = null
+owner                = Gemini2
+status               = blocked
+last_update          = 2026-10-06T20:31:54Z
+next                 = Blocked on infrastructure readiness (GCS, ClamAV) and
+                        test fixtures. CI is not PASS (failed on commit
+                        trailer validation and E2E gate cancelled). Code
+                        changes were merged via PR #2347.
+```
+
+The parent's `branch`/`candidate_generation` fields remain the correct,
+non-contaminated values this helper task repaired earlier in the saga. The
+parent is now `blocked`, but on a different, real blocker (GCS/ClamAV
+infrastructure readiness and test fixtures for its own implementation work)
+— not on the branch/worktree/commit history contamination this helper task
+was created to fix. No further history-repair action is needed on the
+parent; this cycle's only actionable defect was the helper task's own CI
+failure above.
+
 ## Hand-off
 
 Handing off to reviewer `Claude2` for review of this helper task's own
-candidate (this artifact file only; no other tracked changes). No local
-servers, Docker, or cloud resources were started or created.
+candidate (this artifact file + `tools/ci/dependency-security-exceptions.json`
+only; no other tracked changes). No local servers, Docker, or cloud resources
+were started or created.
