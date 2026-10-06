@@ -44,7 +44,8 @@ allowed_sorted="$(
   printf '%s\n' \
     "${active_services[@]}" \
     "$paused_service" \
-    "$tolerated_retired_service" |
+    "$tolerated_retired_service" \
+    "drts-dev-scanner" |
     LC_ALL=C sort
 )"
 
