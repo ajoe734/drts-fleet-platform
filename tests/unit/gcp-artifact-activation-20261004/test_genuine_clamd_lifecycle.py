@@ -557,14 +557,16 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, "Readiness version marker missing after seeded startup")
                 self.assertEqual(res.stdout.strip(), seed_version, "Readiness marker did not publish the seeded stale version")
 
-                # Restore real connectivity, but disable freshclam's own
-                # automatic clamd notification (a real, documented
-                # freshclam.conf directive) so the genuine update this
-                # triggers writes a newer file to disk WITHOUT instantly
-                # reloading the already-running engine -- a real, observable
-                # pending/not-yet-activated window, not a timing accident.
+                # Restore real connectivity, but leave freshclam's own
+                # clamd-notification directive (`NotifyClamd <path-to-clamd.conf>`
+                # in the real freshclam.conf.sample -- a path value, not a
+                # yes/no boolean) OMITTED, which is its documented default-off
+                # state, so the genuine update this triggers writes a newer
+                # file to disk WITHOUT instantly reloading the already-running
+                # engine -- a real, observable pending/not-yet-activated
+                # window, not a timing accident.
                 res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
-                                "printf 'DatabaseMirror database.clamav.net\\nNotifyClamd no\\n' > /etc/clamav/freshclam.conf"])
+                                "printf 'DatabaseMirror database.clamav.net\\n' > /etc/clamav/freshclam.conf"])
                 self.assertEqual(res.returncode, 0, f"Failed to restore freshclam.conf: {res.stderr}")
             finally:
                 # The local mirror is only needed for the initial seeded
@@ -594,7 +596,7 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
 
             # Pending window: the watchdog's freshclam already wrote the
             # newer file and republished the marker/version-file from it,
-            # but clamd itself was never notified (NotifyClamd no) and
+            # but clamd itself was never notified (NotifyClamd omitted) and
             # SelfCheck (clamd.conf, 1800s) is far away -- so the live
             # engine must still be serving the OLD version right now. This
             # is exactly the readiness.ts#isEngineActivated mismatch the
@@ -603,7 +605,7 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             self.assertEqual(
                 pending_loaded, seed_version,
                 "Expected clamd to still be serving the OLD version during the deliberately "
-                "un-notified pending window (NotifyClamd no)",
+                "un-notified pending window (NotifyClamd omitted)",
             )
             self.assertNotEqual(
                 pending_loaded, new_expected_version,
@@ -612,7 +614,7 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
 
             # Force the real, documented clamd RELOAD command (clamd/
             # session.c's zRELOAD) rather than waiting out SelfCheck's
-            # 1800s bound or re-enabling NotifyClamd for a second genuine
+            # 1800s bound or re-adding NotifyClamd for a second genuine
             # update that may not be available.
             res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
                             "printf 'zRELOAD\\0' | nc -w 3 127.0.0.1 3310"])
