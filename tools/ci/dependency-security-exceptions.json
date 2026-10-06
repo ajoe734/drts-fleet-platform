@@ -228,5 +228,55 @@
     "paths": [
       "apps__driver-app>expo>@expo/metro>metro-file-map>micromatch>braces"
     ]
+  },
+  {
+    "advisory_id": "1241202",
+    "module_name": "sprintf-js",
+    "reason": "Build-time tooling vulnerability in mobile driver app test coverage (not exploitable in production bundle)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.0.3"
+    ],
+    "paths": [
+      "apps__driver-app>react-native>babel-jest>babel-plugin-istanbul>@istanbuljs/load-nyc-config>js-yaml>argparse>sprintf-js"
+    ]
+  },
+  {
+    "advisory_id": "1241209",
+    "module_name": "source-map-js",
+    "reason": "Build-time tooling vulnerability in web console (not exploitable in production)",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.2.1"
+    ],
+    "paths": [
+      "apps__bank-console-web>next>postcss>source-map-js"
+    ]
+  },
+  {
+    "advisory_id": "1241210",
+    "module_name": "proxy-addr",
+    "reason": "API runs behind GCP Cloud Run trusted load balancer which sanitizes X-Forwarded-For headers, mitigating the proxy-addr vulnerability.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "2.0.7"
+    ],
+    "paths": [
+      "apps__api>@nestjs/platform-express>express>proxy-addr"
+    ]
+  },
+  {
+    "advisory_id": "1241339",
+    "module_name": "@modelcontextprotocol/sdk",
+    "reason": "Used in openclaw tooling, not exposed to untrusted external MCP servers in production.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.0.1",
+      "1.30.0",
+      "1.4.1"
+    ],
+    "paths": [
+      "apps__api>openclaw>@modelcontextprotocol/sdk"
+    ]
   }
 ]
