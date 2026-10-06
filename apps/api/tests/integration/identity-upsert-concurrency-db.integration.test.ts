@@ -37,7 +37,7 @@ async function insertPrincipalFixture(
       INSERT INTO iam.identity_principals (
         principal_id, source_ref, issuer, subject, principal_type, email_normalized, email_verified, display_name, account_status, created_at, updated_at, record
       ) VALUES (
-        $1, $2, 'test_issuer', $3, 'human', $4, true, 'Upsert Concurrency Fixture', 'active', NOW(), NOW(), '{}'::jsonb
+        $1, $2, 'test_issuer', $3, 'human', $4, true, 'Upsert Concurrency Fixture', 'active', NOW() - interval '1 second', NOW() - interval '1 second', '{}'::jsonb
       )
     `,
     [principalId, sourceRef, `sub_${principalId}`, `${principalId}@example.com`],
@@ -55,7 +55,7 @@ async function insertMembershipFixture(
       INSERT INTO iam.identity_memberships (
         membership_id, source_ref, principal_id, realm, scope_ref, membership_status, created_at, updated_at, record
       ) VALUES (
-        $1, $2, $3, 'tenant', $4, 'active', NOW(), NOW(), '{}'::jsonb
+        $1, $2, $3, 'tenant', $4, 'active', NOW() - interval '1 second', NOW() - interval '1 second', '{}'::jsonb
       )
     `,
     [membershipId, sourceRef, principalId, `scope_${membershipId}`],
@@ -1232,7 +1232,7 @@ describe("SR-AUTH-SESSION-SUPERSEDE-20261003 R2: ensure*Record no-op/mutation/co
         INSERT INTO iam.identity_memberships (
           membership_id, source_ref, principal_id, realm, scope_ref, membership_status, created_at, updated_at, record
         ) VALUES (
-          $1, $2, $3, 'tenant', $4, 'active', NOW(), NOW(), '{}'::jsonb
+          $1, $2, $3, 'tenant', $4, 'active', NOW() - interval '1 second', NOW() - interval '1 second', '{}'::jsonb
         )
       `,
       [membershipIdA, sourceRefA, principalId, sharedScopeRef],
