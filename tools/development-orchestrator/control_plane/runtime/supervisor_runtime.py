@@ -6643,6 +6643,12 @@ def choose_chair_reviewer(
         if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
             continue
         normalized = normalize_agent_id(agent_id)
+        # A lane override of 0 is an operator ban. Resource admission applies it
+        # to chair events too (they carry no control_role), so a banned lane
+        # picked as chair never starts and its active_review blocks every later
+        # chair review. Pi sat that way from 2026-10-04 to 2026-10-06.
+        if max_tasks_per_agent_for_lane(settings, normalized) <= 0:
+            continue
         if normalized in pending_agents:
             continue
         if normalized in active_agents:
