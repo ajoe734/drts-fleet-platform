@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import cp from "node:child_process";
 
 export async function getGoogleIdToken(
   audience: string,
@@ -54,7 +58,6 @@ export async function getGoogleIdToken(
 export type FetchLike = typeof fetch;
 
 export interface DownloadOutcome {
-  errorData?: any;
   status: number;
   bytes: Buffer | null;
   contentType: string | null;
@@ -112,8 +115,6 @@ export async function downloadArtifact(
   };
 }
 
-
-
 export function sha256Hex(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -151,22 +152,27 @@ export interface RunIndependentBankVerifierOptions {
 export function runIndependentBankVerifier(
   options: RunIndependentBankVerifierOptions,
 ): IndependentVerifierOutcome {
-  const { verifierScriptPath, artifactBytes, publicKeyPem, pythonBin = "python3" } = options;
+  const {
+    verifierScriptPath,
+    artifactBytes,
+    publicKeyPem,
+    pythonBin = "python3",
+  } = options;
 
   const tempId = Math.random().toString(36).substring(2);
-  const artifactPath = require("node:path").join(require("node:os").tmpdir(), `artifact-${tempId}.txt`);
-  const pubkeyPath = require("node:path").join(require("node:os").tmpdir(), `pubkey-${tempId}.pem`);
+  const artifactPath = path.join(os.tmpdir(), `artifact-${tempId}.txt`);
+  const pubkeyPath = path.join(os.tmpdir(), `pubkey-${tempId}.pem`);
 
   try {
-    require("node:fs").writeFileSync(artifactPath, artifactBytes);
+    fs.writeFileSync(artifactPath, artifactBytes);
 
     const args = [verifierScriptPath, artifactPath];
     if (publicKeyPem) {
-      require("node:fs").writeFileSync(pubkeyPath, publicKeyPem);
+      fs.writeFileSync(pubkeyPath, publicKeyPem);
       args.push("--public-key", pubkeyPath);
     }
 
-    const result = require("node:child_process").spawnSync(pythonBin, args, { encoding: "utf-8" });
+    const result = cp.spawnSync(pythonBin, args, { encoding: "utf-8" });
     const stdout = result.stdout || "";
     const stderr = result.stderr || "";
 
@@ -189,15 +195,19 @@ export function runIndependentBankVerifier(
 
     let signatureStatus: BankSignatureStatus = "UNKNOWN";
     if (stdout.includes("Signature Status: SIGNED")) signatureStatus = "SIGNED";
-    else if (stdout.includes("Signature Status: UNSIGNED")) signatureStatus = "UNSIGNED";
-    if (stdout.includes("TAMPERED") || stdout.includes("FAILED (TAMPERED)")) signatureStatus = "TAMPERED";
+    else if (stdout.includes("Signature Status: UNSIGNED"))
+      signatureStatus = "UNSIGNED";
+    if (stdout.includes("TAMPERED") || stdout.includes("FAILED (TAMPERED)"))
+      signatureStatus = "TAMPERED";
 
     let signatureVerified: boolean | null = null;
     if (signatureStatus === "SIGNED") {
-      signatureVerified = stdout.includes("OpenSSL Cryptographic Signature Verification: PASSED");
+      signatureVerified = stdout.includes(
+        "OpenSSL Cryptographic Signature Verification: PASSED",
+      );
     } else if (signatureStatus === "UNSIGNED") {
       if (stdout.includes("TAMPERED") || stdout.includes("Defect detected")) {
-          signatureVerified = false;
+        signatureVerified = false;
       }
     }
 
@@ -221,8 +231,16 @@ export function runIndependentBankVerifier(
       stderr: error.message,
     };
   } finally {
-    try { require("node:fs").unlinkSync(artifactPath); } catch (e) {}
-    try { require("node:fs").unlinkSync(pubkeyPath); } catch (e) {}
+    try {
+      fs.unlinkSync(artifactPath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(pubkeyPath);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
