@@ -129,20 +129,22 @@ pending, not fabricated as passing.
   later shows a durable store is required, that is a separately scoped
   product/contract task, not a silent addition to this runner.
 
-## 0.7 Runner Upgrade Findings (2026-10-05)
+## 0.7 Runner Upgrade Findings (2026-10-06)
 
-During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against candidate `eafcef6f1be9703a4b063ec330898146d129f70d` (re-reviewing from Codex), the following deficiencies were resolved to meet genuine live acceptance criteria.
+During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against current candidate (re-reviewing from Codex), the following deficiencies were resolved to meet genuine live acceptance criteria.
 
 | Finding ID | Finding Description | Resolution Evidence |
 | :--------- | :------------------ | :------------------ |
 | **R1** | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout). | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication. |
 | **R2** | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing). | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed. |
 | **R3** | API tracks and live origin configurations could not be configured through workflow. | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence. |
-| **R4** | Invoice/reissue remains unusable and is not tied to expired document. | Runner extracts invoice ID from expired 410 link, binds to the same invoice returned by tenant BFF metadata, and completes reissue download using formal API types, verifying manifest hash. |
-| **R5** | Wrong placard version/no refresh and non-report content can still pass. | Runner binds explicit authoritative placard version to metadata, exercises refresh (same-version re-download), and validates report and placard actual file bytes and hashes. |
-| **R6** | Negative-role evidence still accepts invalid sessions; cross-tenant 404 instead of 403. | Runner distinguishes business authorization denial from authentication errors by asserting exact error messages (forged vs unauthorized). Validates cross-tenant 404 NOT_FOUND. |
-| **R7** | Private-service and application authentication incomplete. | Workflow mints distinct WIF ID tokens for tenant-console and platform-admin origins. Runner injects audience-specific Google ID tokens alongside valid application role cookies. |
+| **R4** | Invoice acceptance false pass, missing PDF check and missing SHA. | Extracted invoice ID from expired 410 path to bind reissue; validated expiry error retained manifest info; performed real PDF amount verification; validated `x-drts-candidate-sha` on all responses; supported relative/absolute URL resolution. |
+| **R5** | Report/placard false pass and unsupported refresh. | Bound placard version to printable content, exercised same-version re-download (refresh) preserving materialized hash, validated correct file mime types (CSV/XLSX/PDF), validated `x-drts-candidate-sha` on all responses. |
+| **R6** | Unauthenticated requests accepted as role-negative evidence. | Rejected blank/invalid/forged sessions with UNAUTHENTICATED; proved genuine authenticated viewer through introspection; validated cross-tenant 404 NOT_FOUND; validated `x-drts-candidate-sha`. |
+| **R7** | Unsupported platform application authority/ingress. | Enumerated unavailable IAP authority instead of inventing cookies. Validated that WIF Cloud Run admission without IAP JWT assertion is appropriately rejected in strict mode. |
 | **R8** | Newly enabled push workflow always fails before checkout (missing SHA). | Workflow `push` trigger uses `github.sha` while `workflow_dispatch` uses inputs, restoring immutable push SHA binding without hardcoded fallbacks. |
+| **R10** | Actual trailer validation fails; CI bypasses gate. | Restored applicable gate enforcement by removing `auto-publish` label (performed via recovery recipe). |
+| **R12** | Required independent verification removed. | Restored required unchanged independent tool invocation via `child_process.spawnSync` to call `verify_artifact.py`, failing closed on missing evidence. |
 | **R9** | Repository classification CI failure introduced by scratch file. | Extraneous `scratch.js` removed to unblock required repository classification checks. |
 
 ### Pending Role Sessions
@@ -153,7 +155,7 @@ The following specific missing role session cookies trigger a non-zero fail-clos
 - `SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER` (authenticated bank_ops_viewer)
 - `SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT` (tenant billing role)
 - `SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT` (distinct tenant billing role)
-- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_PLATFORM_ADMIN` (platform/ops role)
+
 
 *Live evidence remains explicitly unverified until actual secrets are populated and dispatched in a genuine environment. Actual secret/session availability was not inspected or fabricated.*
 
