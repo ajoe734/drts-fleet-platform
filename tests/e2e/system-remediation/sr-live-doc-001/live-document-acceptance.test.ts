@@ -999,7 +999,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
         // Verify report content actually matches expected report/job
         const reportMatch = reportPath!.match(/([^/]+)$/);
-        const reportId = reportMatch ? reportMatch[1].split('?')[0] : "";
+        const reportId = reportMatch ? reportMatch[1]?.split('?')[0] ?? "" : "";
         if (reportId) {
             if (contentType === "application/pdf") {
                 const reportText = await extractPdfText(reportOutcome.bytes!);
@@ -1012,7 +1012,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
 
         // R5: Prove actual expiry of the given placard path
         const expiredPlacardOutcome = await downloadArtifact(
-          placardPath!.startsWith("http") ? placardPath! : `${apiOrigin}${placardPath.startsWith("/") ? "" : "/"}${placardPath}`,
+          placardPath!.startsWith("http") ? placardPath! : `${apiOrigin}${placardPath!.startsWith("/") ? "" : "/"}${placardPath}`,
           { headers: apiHeaders }
         );
         expect(expiredPlacardOutcome.status).toBe(410);
