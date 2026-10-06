@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Headers, Logger, Optional, Param, Post, Query, Req } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Logger,
+  Optional,
+  Param,
+  Post,
+  Query,
+  Req,
+} from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
@@ -31,7 +42,11 @@ import {
   RequireRealms,
   RequireScopes,
 } from "../../common/auth";
-import { getTenantRoleScopes, AUTH_SCOPE_PRESETS, AUTH_TENANT_ROLE_SCOPE_PRESETS } from "../../common/auth/auth.constants";
+import {
+  getTenantRoleScopes,
+  AUTH_SCOPE_PRESETS,
+  AUTH_TENANT_ROLE_SCOPE_PRESETS,
+} from "../../common/auth/auth.constants";
 import {
   toPublicPartnerAuthError,
   toPublicTenantAuthError,
@@ -42,7 +57,11 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders, AuthRealm, AuthActorType } from "../../common/auth/auth.types";
+import type {
+  AuthBootstrapHeaders,
+  AuthRealm,
+  AuthActorType,
+} from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
@@ -201,11 +220,14 @@ export class AuthController {
         `Unsupported OIDC realm '${realm}'. Only 'tenant' and 'partner' are supported.`,
       );
     }
-    const result = this.requireOidcPkceService().generateLoginParameters(realm, {
-      redirectUri: redirectUri ?? null,
-      tenantId: tenantId ?? null,
-      partnerId: partnerId ?? null,
-    });
+    const result = this.requireOidcPkceService().generateLoginParameters(
+      realm,
+      {
+        redirectUri: redirectUri ?? null,
+        tenantId: tenantId ?? null,
+        partnerId: partnerId ?? null,
+      },
+    );
     return toApiSuccessEnvelope(result, requestId);
   }
 
@@ -270,10 +292,11 @@ export class AuthController {
       stateToken,
     );
     try {
-      const session = await this.requireOidcPkceService().exchangeTenantCallbackSession(
-        command,
-        meta,
-      );
+      const session =
+        await this.requireOidcPkceService().exchangeTenantCallbackSession(
+          command,
+          meta,
+        );
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
       throw toPublicTenantAuthError(error);
@@ -307,10 +330,11 @@ export class AuthController {
       stateToken,
     );
     try {
-      const session = await this.requireOidcPkceService().exchangePartnerCallbackSession(
-        command,
-        meta,
-      );
+      const session =
+        await this.requireOidcPkceService().exchangePartnerCallbackSession(
+          command,
+          meta,
+        );
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
       throw toPublicPartnerAuthError(error);
@@ -358,8 +382,6 @@ export class AuthController {
       requestId,
     );
   }
-
-
 
   @OpenRoute()
   @Post("token")
@@ -485,7 +507,7 @@ export class AuthController {
           {},
         );
       }
-      
+
       let resolvedGoogle = null;
       try {
         if (!this.googleWorkloadIdentityAdapter) {
@@ -495,18 +517,19 @@ export class AuthController {
             "Google workload identity validation is not configured for this environment.",
           );
         }
-        resolvedGoogle = await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
-          request.headers as Record<string, string | string[] | undefined>,
-          {
-            requestPath: request.originalUrl ?? request.url,
-            requestMethod: request.method,
-          },
-        );
+        resolvedGoogle =
+          await this.googleWorkloadIdentityAdapter.verifyServicePrincipal(
+            request.headers as Record<string, string | string[] | undefined>,
+            {
+              requestPath: request.originalUrl ?? request.url,
+              requestMethod: request.method,
+            },
+          );
       } catch (error) {
         if (
           bootstrapIdentity.actorType !== "system" &&
           (isGoogleWorkloadIdentityNotConfigured(error) ||
-          isGoogleWorkloadIdentityPrincipalNotRegistered(error))
+            isGoogleWorkloadIdentityPrincipalNotRegistered(error))
         ) {
           // Registry not configured yet, or this caller's verified identity
           // has no registry entry yet: ignore the Google assertion and let
@@ -523,47 +546,75 @@ export class AuthController {
       if (resolvedGoogle) {
         if (bootstrapIdentity.actorType === "system") {
           const grant = resolvedGoogle.driverProvisioningGrant;
-          if (!grant || !isCiTenantActorGateEnabled() || strictEnvironment ||
-              bootstrapIdentity.realm !== "system" ||
-              bootstrapIdentity.actorId !== resolvedGoogle.principalId ||
-              bootstrapIdentity.tenantId || bootstrapIdentity.partnerId ||
-              rawAssertion ||
-              (request.headers["x-scopes"] && request.headers["x-scopes"] !== "driver:provision") ||
-              request.headers["x-roles"] || request.headers["x-role-families"]) {
-            throw new ApiRequestError(403, "WORKLOAD_DRIVER_PROVISIONING_DENIED",
-              "The workload is not granted the requested driver provisioning session.");
+          if (
+            !grant ||
+            !isCiTenantActorGateEnabled() ||
+            strictEnvironment ||
+            bootstrapIdentity.realm !== "system" ||
+            bootstrapIdentity.actorId !== resolvedGoogle.principalId ||
+            bootstrapIdentity.tenantId ||
+            bootstrapIdentity.partnerId ||
+            rawAssertion ||
+            (request.headers["x-scopes"] &&
+              request.headers["x-scopes"] !== "driver:provision") ||
+            request.headers["x-roles"] ||
+            request.headers["x-role-families"]
+          ) {
+            throw new ApiRequestError(
+              403,
+              "WORKLOAD_DRIVER_PROVISIONING_DENIED",
+              "The workload is not granted the requested driver provisioning session.",
+            );
           }
           // Never spread bootstrap headers here: all authority comes from the
           // verified registry grant, and the signed target survives JWT decode.
           const expiresIn: JwtExpiresIn = "15m";
-          const issued = await this.issueJwtSession({
-            authMode: "jwt_bearer", actorType: "system",
-            actorId: resolvedGoogle.principalId, principalId: resolvedGoogle.principalId,
-            realm: "system", tenantId: null, roleFamilies: [], roles: [],
-            scopes: ["driver:provision"], requestId: null,
-            driverProvisioningDriverId: grant.driverId,
-          }, {
-            expiresIn, ensurePrincipal: false,
-            principalId: resolvedGoogle.principalId,
-            subject: resolvedGoogle.principalId,
-            authTime: resolvedGoogle.authTime,
-            amr: ["google_workload_identity"], acr: "aal1",
-          });
+          const issued = await this.issueJwtSession(
+            {
+              authMode: "jwt_bearer",
+              actorType: "system",
+              actorId: resolvedGoogle.principalId,
+              principalId: resolvedGoogle.principalId,
+              realm: "system",
+              tenantId: null,
+              roleFamilies: [],
+              roles: [],
+              scopes: ["driver:provision"],
+              requestId: null,
+              driverProvisioningDriverId: grant.driverId,
+            },
+            {
+              expiresIn,
+              ensurePrincipal: false,
+              principalId: resolvedGoogle.principalId,
+              subject: resolvedGoogle.principalId,
+              authTime: resolvedGoogle.authTime,
+              amr: ["google_workload_identity"],
+              acr: "aal1",
+            },
+          );
           return { token: issued.token, expiresIn };
         }
         if (
           (bootstrapIdentity.actorId === resolvedGoogle.principalId ||
-           bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
+            bootstrapIdentity.actorId === resolvedGoogle.actorId) &&
           resolvedGoogle.roles.includes(bootstrapIdentity.actorType) &&
-          (bootstrapIdentity.actorType === "ops_user" || bootstrapIdentity.actorType === "ops_observer") &&
-          bootstrapIdentity.realm === "ops" && !bootstrapIdentity.tenantId && !bootstrapIdentity.partnerId
+          (bootstrapIdentity.actorType === "ops_user" ||
+            bootstrapIdentity.actorType === "ops_observer") &&
+          bootstrapIdentity.realm === "ops" &&
+          !bootstrapIdentity.tenantId &&
+          !bootstrapIdentity.partnerId
         ) {
           // Direct authentication! The Google SA is asking for a token for ITSELF.
           googleCiTenantActorVerified = true;
           googleOpsActorVerified = true;
           bootstrapIdentity.principalId = resolvedGoogle.principalId;
           bootstrapIdentity.roleFamilies = ["ops"];
-        } else if (isCiTenantActorGateEnabled() && bootstrapIdentity.realm === "tenant" && bootstrapIdentity.actorType === "tenant_admin") {
+        } else if (
+          isCiTenantActorGateEnabled() &&
+          bootstrapIdentity.realm === "tenant" &&
+          bootstrapIdentity.actorType === "tenant_admin"
+        ) {
           const grant = resolveCiTenantActorGrant(resolvedGoogle, {
             tenantId: bootstrapIdentity.tenantId ?? "",
             actorType: bootstrapIdentity.actorType,
@@ -695,13 +746,14 @@ export class AuthController {
 
     // Tenant session claims come from the durable user record, rather than
     // caller-controlled bootstrap headers, so later JWT verification agrees.
-    const durableIdentity = tenantUser && durableTenantScopes
-      ? {
-          ...identity,
-          roles: [tenantUser.roleCode],
-          scopes: [...durableTenantScopes],
-        }
-      : identity;
+    const durableIdentity =
+      tenantUser && durableTenantScopes
+        ? {
+            ...identity,
+            roles: [tenantUser.roleCode],
+            scopes: [...durableTenantScopes],
+          }
+        : identity;
 
     // Bootstrap issuance still ensures its principal and needs the post-write
     // timestamp. Google ops issuance instead preserves the verifier's principal
@@ -709,42 +761,63 @@ export class AuthController {
     let workforceVersionTimestamps: string[] | undefined;
     let verifiedGoogleWorkforceVersion: number | undefined;
     if (
-      (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
+      (durableIdentity.realm === "ops" ||
+        durableIdentity.realm === "platform") &&
       !durableIdentity.membershipId &&
       durableIdentity.actorId
     ) {
       if (!this.identityRepository) {
-        throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
+        throw new ApiRequestError(
+          500,
+          "IDENTITY_REPOSITORY_UNAVAILABLE",
+          "Identity repository is required for ops/platform session issuance.",
+        );
       }
-      const principalToLookup = durableIdentity.principalId ?? durableIdentity.actorId;
+      const principalToLookup =
+        durableIdentity.principalId ?? durableIdentity.actorId;
       let verifiedGooglePrincipalUpdatedAt: string | undefined;
       if (googleOpsActorVerified) {
-        const principal = await this.identityRepository.findPrincipalById(
-          principalToLookup,
-        );
+        const principal =
+          await this.identityRepository.findPrincipalById(principalToLookup);
         if (!principal || principal.status !== "active") {
           this.denyWorkloadSessionIdentity("principal_not_active");
         }
         verifiedGooglePrincipalUpdatedAt = principal.updatedAt;
       }
-      const memberships = await this.identityRepository.findMembershipsByPrincipalId(principalToLookup);
-      const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
+      const memberships =
+        await this.identityRepository.findMembershipsByPrincipalId(
+          principalToLookup,
+        );
+      const membership = memberships.find(
+        (m) => m.realm === durableIdentity.realm && m.status === "active",
+      );
       if (!membership) {
         if (googleOpsActorVerified) {
           this.denyWorkloadSessionIdentity("membership_not_active");
         }
-        throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
+        throw new ApiRequestError(
+          401,
+          "MEMBERSHIP_NOT_FOUND",
+          "The requested ops/platform session subject has no active membership.",
+        );
       }
       durableIdentity.membershipId = membership.membershipId;
 
-      const roleBindings = await this.identityRepository.findRoleBindingsByMembershipId(membership.membershipId);
+      const roleBindings =
+        await this.identityRepository.findRoleBindingsByMembershipId(
+          membership.membershipId,
+        );
       const now = new Date();
       const activeBindings = roleBindings.filter(
-        (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
+        (b) =>
+          (!b.validTo || new Date(b.validTo) > now) &&
+          new Date(b.validFrom) <= now,
       );
       if (
         googleOpsActorVerified &&
-        !activeBindings.some((binding) => binding.roleCode === durableIdentity.actorType)
+        !activeBindings.some(
+          (binding) => binding.roleCode === durableIdentity.actorType,
+        )
       ) {
         this.denyWorkloadSessionIdentity("role_binding_not_active");
       }
@@ -752,7 +825,9 @@ export class AuthController {
       const allowedRoles = activeBindings.map((b) => b.roleCode);
       const allowedScopes = new Set<string>();
       for (const binding of activeBindings) {
-        const presets = AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] || AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
+        const presets =
+          AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] ||
+          AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
         if (presets) {
           presets.forEach((s) => allowedScopes.add(s));
         }
@@ -768,7 +843,10 @@ export class AuthController {
       ];
       if (verifiedGooglePrincipalUpdatedAt) {
         verifiedGoogleWorkforceVersion = Math.max(
-          ...[verifiedGooglePrincipalUpdatedAt, ...workforceVersionTimestamps].map(Date.parse),
+          ...[
+            verifiedGooglePrincipalUpdatedAt,
+            ...workforceVersionTimestamps,
+          ].map(Date.parse),
         );
       }
     }
@@ -789,9 +867,9 @@ export class AuthController {
       authTime: issuedAt,
       ...(assurance.amr ? { amr: assurance.amr } : {}),
       ...(assurance.acr ? { acr: assurance.acr } : {}),
-      tokenVersion: verifiedGoogleWorkforceVersion ?? (
-        tenantUser ? Date.parse(tenantUser.updatedAt) : Date.parse(issuedAt)
-      ),
+      tokenVersion:
+        verifiedGoogleWorkforceVersion ??
+        (tenantUser ? Date.parse(tenantUser.updatedAt) : Date.parse(issuedAt)),
       ...(workforceVersionTimestamps && !googleOpsActorVerified
         ? { workforceVersionTimestamps }
         : {}),
@@ -807,7 +885,9 @@ export class AuthController {
   ): never {
     // Detailed reason stays server-side. Never include proof, tokens, headers,
     // database errors or caller identifiers in either the log or response.
-    this.logger.warn(`[WORKLOAD_SESSION_IDENTITY_UNAVAILABLE] reason=${reason}`);
+    this.logger.warn(
+      `[WORKLOAD_SESSION_IDENTITY_UNAVAILABLE] reason=${reason}`,
+    );
     throw new ApiRequestError(
       403,
       "WORKLOAD_SESSION_IDENTITY_UNAVAILABLE",
@@ -825,16 +905,28 @@ export class AuthController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity,
   ) {
     const driverId = identity?.driverProvisioningDriverId;
-    if (driverId && (command.driverId !== driverId || command.registrationCode !== undefined || command.expiresInHours !== undefined)) {
-      throw new ApiRequestError(403, "WORKLOAD_DRIVER_TARGET_DENIED", "Driver provisioning grant does not allow this invitation.");
+    if (
+      driverId &&
+      (command.driverId !== driverId ||
+        command.registrationCode !== undefined ||
+        command.expiresInHours !== undefined)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "WORKLOAD_DRIVER_TARGET_DENIED",
+        "Driver provisioning grant does not allow this invitation.",
+      );
     }
     const result = await this.requireIdempotencyService().execute({
-      scope: identity?.driverProvisioningDriverId ? `auth:driver_invite:issue:${identity.principalId}:${identity.driverProvisioningDriverId}` : "auth:driver_invite:issue",
+      scope: identity?.driverProvisioningDriverId
+        ? `auth:driver_invite:issue:${identity.principalId}:${identity.driverProvisioningDriverId}`
+        : "auth:driver_invite:issue",
       idempotencyKey,
       required: false,
       requestPath: "auth/driver/device/invite",
       payload: command,
-      execute: async () => this.driverDeviceSessionService.issueRegistrationInvitation(command),
+      execute: async () =>
+        this.driverDeviceSessionService.issueRegistrationInvitation(command),
     });
     return toApiSuccessEnvelope(result.data, requestId);
   }
@@ -849,12 +941,18 @@ export class AuthController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity,
   ) {
     const result = await this.requireIdempotencyService().execute({
-      scope: identity?.driverProvisioningDriverId ? `auth:driver_invite:revoke:${identity.principalId}:${identity.driverProvisioningDriverId}` : "auth:driver_invite:revoke",
+      scope: identity?.driverProvisioningDriverId
+        ? `auth:driver_invite:revoke:${identity.principalId}:${identity.driverProvisioningDriverId}`
+        : "auth:driver_invite:revoke",
       idempotencyKey,
       required: false,
       requestPath: "auth/driver/device/invite/revoke",
       payload: command,
-      execute: async () => this.driverDeviceSessionService.revokeInvitation(command, identity?.driverProvisioningDriverId),
+      execute: async () =>
+        this.driverDeviceSessionService.revokeInvitation(
+          command,
+          identity?.driverProvisioningDriverId,
+        ),
     });
     return toApiSuccessEnvelope(result.data, requestId);
   }
@@ -904,8 +1002,6 @@ export class AuthController {
     );
     return toApiSuccessEnvelope(result, requestId);
   }
-
-
 
   @Post("sessions/revoke")
   async revokeSessionSelf(
@@ -1265,10 +1361,21 @@ export class AuthController {
       );
     }
 
-    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as { reason?: string };
-    const reqObj = (typeof request === "object" && request !== null ? request : {}) as TokenRequest;
-    const reqHeaders = reqObj.headers as Record<string, string | string[] | undefined> | undefined;
-    const effectiveRequestId = typeof body === "string" ? body : typeof request === "string" ? request : requestId;
+    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as {
+      reason?: string;
+    };
+    const reqObj = (
+      typeof request === "object" && request !== null ? request : {}
+    ) as TokenRequest;
+    const reqHeaders = reqObj.headers as
+      | Record<string, string | string[] | undefined>
+      | undefined;
+    const effectiveRequestId =
+      typeof body === "string"
+        ? body
+        : typeof request === "string"
+          ? request
+          : requestId;
 
     validateCsrfHeader(reqHeaders);
 
@@ -1344,10 +1451,21 @@ export class AuthController {
       );
     }
 
-    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as { reason?: string };
-    const reqObj = (typeof request === "object" && request !== null ? request : {}) as TokenRequest;
-    const reqHeaders = reqObj.headers as Record<string, string | string[] | undefined> | undefined;
-    const effectiveRequestId = typeof body === "string" ? body : typeof request === "string" ? request : requestId;
+    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as {
+      reason?: string;
+    };
+    const reqObj = (
+      typeof request === "object" && request !== null ? request : {}
+    ) as TokenRequest;
+    const reqHeaders = reqObj.headers as
+      | Record<string, string | string[] | undefined>
+      | undefined;
+    const effectiveRequestId =
+      typeof body === "string"
+        ? body
+        : typeof request === "string"
+          ? request
+          : requestId;
 
     validateCsrfHeader(reqHeaders);
 

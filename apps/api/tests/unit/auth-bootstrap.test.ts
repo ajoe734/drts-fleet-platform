@@ -504,13 +504,14 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
@@ -622,18 +623,23 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
-    const { jwtAuthService, tenantPartnerService, identityRepository, driverDeviceSessionService } =
-      createAuthFixture();
+    const {
+      jwtAuthService,
+      tenantPartnerService,
+      identityRepository,
+      driverDeviceSessionService,
+    } = createAuthFixture();
     const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
       identityRepository,
     );
@@ -746,13 +752,14 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
@@ -868,8 +875,10 @@ describe("auth token issuance", () => {
     delete process.env.WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED;
 
     const audience = "https://api.dev.drts.internal";
-    const registeredEmail = "some-other-caller@dev-project.iam.gserviceaccount.com";
-    const unregisteredEmail = "not-yet-onboarded@dev-project.iam.gserviceaccount.com";
+    const registeredEmail =
+      "some-other-caller@dev-project.iam.gserviceaccount.com";
+    const unregisteredEmail =
+      "not-yet-onboarded@dev-project.iam.gserviceaccount.com";
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
     });
@@ -889,18 +898,23 @@ describe("auth token issuance", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
-    const { jwtAuthService, tenantPartnerService, identityRepository, driverDeviceSessionService } =
-      createAuthFixture();
+    const {
+      jwtAuthService,
+      tenantPartnerService,
+      identityRepository,
+      driverDeviceSessionService,
+    } = createAuthFixture();
     const googleWorkloadIdentityAdapter = new GoogleWorkloadIdentityAdapter(
       identityRepository,
     );
@@ -978,7 +992,10 @@ describe("auth token issuance", () => {
 
     const { controller, identityRepository } = createAuthFixture();
 
-    vi.spyOn(identityRepository, "findMembershipsByPrincipalId").mockResolvedValue([
+    vi.spyOn(
+      identityRepository,
+      "findMembershipsByPrincipalId",
+    ).mockResolvedValue([
       {
         membershipId: "mem-platform-123",
         principalId: "platform-admin-001",
@@ -1875,11 +1892,14 @@ describe("bootstrap auth guard: Cloud Scheduler OIDC token reuse on idempotent s
     const kid = `scheduler-test-key-${schedulerKidCounter++}`;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({ keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }] }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              keys: [{ kty: jwk.kty, kid, n: jwk.n, e: jwk.e }],
+            }),
+            { status: 200 },
+          ),
       ),
     );
     const now = Math.floor(Date.now() / 1000);
@@ -1930,7 +1950,10 @@ describe("bootstrap auth guard: Cloud Scheduler OIDC token reuse on idempotent s
     expect(first.principalId).toBe(SCHEDULER_PRINCIPAL_ID);
 
     await expect(
-      adapter.verifyServicePrincipal({ "x-drts-google-id-token": token }, context),
+      adapter.verifyServicePrincipal(
+        { "x-drts-google-id-token": token },
+        context,
+      ),
     ).rejects.toMatchObject({ code: "WORKLOAD_ASSERTION_REPLAYED" });
   });
 

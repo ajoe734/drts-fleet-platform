@@ -6,7 +6,11 @@ import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 
-function createSignedRsaIdToken(payload: Record<string, unknown>, privateKeyPem: string, kid = "test-rsa-kid-001") {
+function createSignedRsaIdToken(
+  payload: Record<string, unknown>,
+  privateKeyPem: string,
+  kid = "test-rsa-kid-001",
+) {
   const header = { alg: "RS256", typ: "JWT", kid };
   const headerB64 = Buffer.from(JSON.stringify(header)).toString("base64url");
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -32,7 +36,9 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     process.env.OIDC_MOCK_MODE = "true";
 
     jwtAuthService = new JwtAuthService();
-    tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
+    tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
     oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
   });
 
@@ -74,7 +80,8 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
   it("completes partner OIDC PKCE flow issuing partner_user actorType and jwt_bearer authMode", async () => {
     const code = "e2e_valid_partner_code_001";
     const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
-    const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
+    const partnerUserIdentityLinkRepo = (oidcService as any)
+      .partnerUserIdentityLinkRepo;
     await partnerUserIdentityLinkRepo.resolveOrCreate({
       entrySlug: "yuhe-residence",
       partnerUserRef: sub,
@@ -120,11 +127,15 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     };
 
     // 1. Successful first exchange
-    await oidcService.exchangeTenantCallbackSession(validCmd, { stateToken: login.stateToken });
+    await oidcService.exchangeTenantCallbackSession(validCmd, {
+      stateToken: login.stateToken,
+    });
 
     // 2. Reused state token must be rejected
     await expect(
-      oidcService.exchangeTenantCallbackSession(validCmd, { stateToken: login.stateToken }),
+      oidcService.exchangeTenantCallbackSession(validCmd, {
+        stateToken: login.stateToken,
+      }),
     ).rejects.toThrow(ApiRequestError);
 
     // 3. Invalid PKCE verifier length
@@ -145,7 +156,9 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       expect.fail("Should have thrown ApiRequestError");
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
-      expect((err.getResponse() as any)?.error?.message).toMatch(/PKCE code verifier length/);
+      expect((err.getResponse() as any)?.error?.message).toMatch(
+        /PKCE code verifier length/,
+      );
     }
 
     // 4. Nonce mismatch
@@ -185,7 +198,9 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       expect.fail("Should have thrown ApiRequestError");
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
-      expect((err.getResponse() as any)?.error?.message).toMatch(/OIDC issuer mismatch/);
+      expect((err.getResponse() as any)?.error?.message).toMatch(
+        /OIDC issuer mismatch/,
+      );
     }
   });
 
@@ -208,7 +223,9 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       expect.fail("Should have thrown ApiRequestError");
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
-      expect((err.getResponse() as any)?.error?.code).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+      expect((err.getResponse() as any)?.error?.code).toBe(
+        "AUTH_SESSION_EXCHANGE_DENIED",
+      );
     }
 
     // Suspended user subject
@@ -228,7 +245,9 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       expect.fail("Should have thrown ApiRequestError");
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiRequestError);
-      expect((err.getResponse() as any)?.error?.code).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+      expect((err.getResponse() as any)?.error?.code).toBe(
+        "AUTH_SESSION_EXCHANGE_DENIED",
+      );
     }
   });
 
@@ -237,13 +256,17 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
     });
-    const publicJwk = publicKey.export({ format: "jwk" }) as Record<string, unknown>;
+    const publicJwk = publicKey.export({ format: "jwk" }) as Record<
+      string,
+      unknown
+    >;
     publicJwk.kid = "test-rsa-kid-001";
     publicJwk.use = "sig";
     publicJwk.alg = "RS256";
 
     process.env.OIDC_JWKS_JSON = JSON.stringify({ keys: [publicJwk] });
-    process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
+    process.env.OIDC_TOKEN_ENDPOINT =
+      "https://auth.staging.drts.internal/oauth2/v1/token";
     process.env.OIDC_CLIENT_SECRET = "drts_client_secret_test";
     delete process.env.OIDC_MOCK_MODE;
 
@@ -281,24 +304,32 @@ describe("IAM-IDP-001: Managed OIDC PKCE BFF Integration Suite", () => {
       exp: nowSeconds + 3600,
     };
 
-    const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
-    const idToken = createSignedRsaIdToken(idTokenPayload, privateKeyPem, "test-rsa-kid-001");
+    const privateKeyPem = privateKey
+      .export({ format: "pem", type: "pkcs8" })
+      .toString();
+    const idToken = createSignedRsaIdToken(
+      idTokenPayload,
+      privateKeyPem,
+      "test-rsa-kid-001",
+    );
 
     // Mock OIDC token endpoint fetch response
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      if (url.toString().includes("/oauth2/v1/token")) {
-        return new Response(
-          JSON.stringify({
-            access_token: "mock_provider_access_token",
-            id_token: idToken,
-            token_type: "Bearer",
-            expires_in: 3600,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return new Response("Not found", { status: 404 });
-    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url) => {
+        if (url.toString().includes("/oauth2/v1/token")) {
+          return new Response(
+            JSON.stringify({
+              access_token: "mock_provider_access_token",
+              id_token: idToken,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("Not found", { status: 404 });
+      });
 
     const session = await oidcService.exchangeTenantCallbackSession(
       {
