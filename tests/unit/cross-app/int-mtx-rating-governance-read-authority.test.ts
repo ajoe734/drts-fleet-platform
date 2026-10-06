@@ -217,6 +217,9 @@ describe("P5-RATE-UI-001 canonical read integration", () => {
       )
       .catch((caught: unknown) => caught as ApiRequestError);
 
+    if (!(error instanceof ApiRequestError)) {
+      throw new Error("Expected the repository authority read to reject");
+    }
     expect(error.getStatus()).toBe(503);
     expect(error).toMatchObject({
       response: {

@@ -206,7 +206,13 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
 
   // Assert controller consumes the emitted header correctly
   const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
-  const controller = new TenantPartnerController(mockService as any, {} as any);
+  const controller = new TenantPartnerController(
+    mockService as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
 
   controller.listWebhookEndpoints(
     mockRequest.identity,
@@ -292,7 +298,13 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
 
   // Assert controller consumes the emitted header correctly
   const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
-  const controller = new TenantPartnerController(mockService as any, {} as any);
+  const controller = new TenantPartnerController(
+    mockService as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
 
   controller.listWebhookEndpoints(
     mockRequest.identity,
@@ -501,7 +513,13 @@ test("Next GET valid signed IAP assertion -> Guard -> Controller delegates x-ten
 
   // The controller must rely on the x-tenant-id header instead
   const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
-  const controller = new TenantPartnerController(mockService as any, {} as any);
+  const controller = new TenantPartnerController(
+    mockService as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
 
   controller.listWebhookEndpoints(
     mockRequest.identity,
@@ -1267,7 +1285,7 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
     // Assert boundary: B's data is never returned because tenantId is strictly "review-tenant-a"
     expect(result.data).toBeDefined();
     expect(result.data.items).toHaveLength(1);
-    expect(result.data.items[0].url).toBe("https://a.com/webhook");
+    expect(result.data.items[0]?.url).toBe("https://a.com/webhook");
     expect(
       result.data.items.some((i: any) => i.url === "https://b.com/webhook"),
     ).toBe(false);
@@ -1312,7 +1330,7 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
     // Assert boundary: only B's data is returned
     expect(resultB.data).toBeDefined();
     expect(resultB.data.items).toHaveLength(1);
-    expect(resultB.data.items[0].url).toBe("https://b.com/webhook");
+    expect(resultB.data.items[0]?.url).toBe("https://b.com/webhook");
     expect(
       resultB.data.items.some((i: any) => i.url === "https://a.com/webhook"),
     ).toBe(false);

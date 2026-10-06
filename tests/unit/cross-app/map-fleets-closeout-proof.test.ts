@@ -25,6 +25,7 @@ vi.mock("node:crypto", async () => {
 
 import type {
   AuditLogRecord,
+  CreateCallCenterOrderCommand,
   DispatchJobRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
@@ -72,7 +73,7 @@ function createOwnedMobilityService() {
             2,
             "0",
           )}.000Z`,
-          requestId: input.requestId ?? null,
+          requestId: input.requestId ?? "req-closeout-audit",
           actorId: input.actorId,
           actorType: input.actorType,
           tenantId: input.tenantId ?? null,
@@ -80,9 +81,12 @@ function createOwnedMobilityService() {
           actionName: input.actionName,
           resourceType: input.resourceType,
           resourceId: input.resourceId,
-          oldValuesSummary: input.oldValuesSummary ?? null,
-          newValuesSummary: input.newValuesSummary ?? null,
-          metadata: input.metadata ?? null,
+          ...(input.oldValuesSummary
+            ? { oldValuesSummary: input.oldValuesSummary }
+            : {}),
+          ...(input.newValuesSummary
+            ? { newValuesSummary: input.newValuesSummary }
+            : {}),
         };
         auditLogs.unshift(auditLog);
         return auditLog;
@@ -158,7 +162,7 @@ afterEach(() => {
   randomUuidMock.mockReset();
 });
 
-it("writes persisted spatial closeout proof for the fleets closeout task", () => {
+it("writes persisted spatial closeout proof for the fleets closeout task", async () => {
   let orderSequence = 0;
   let snapshotSequence = 0;
   let traceSequence = 0;
@@ -188,7 +192,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
   });
 
   const { service, auditLogs, persistedWrites } = createOwnedMobilityService();
-  const serviceableRequestBody = {
+  const serviceableRequestBody: CreateCallCenterOrderCommand = {
     callId: "CALL-SMOKE-001",
     agentId: "AGENT-OPS-001",
     recordingId: "REC-SMOKE-001",
@@ -240,7 +244,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     },
   };
 
-  const serviceableOrder = service.createCallCenterOrder(
+  const serviceableOrder = await service.createCallCenterOrder(
     serviceableRequestBody,
     "req-map-closeout-serviceable-001",
   );
@@ -277,7 +281,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     resourceId: SERVICEABLE_ORDER_ID,
   });
 
-  const manualReviewRequestBody = {
+  const manualReviewRequestBody: CreateCallCenterOrderCommand = {
     callId: "CALL-MANUAL-001",
     agentId: "AGENT-OPS-001",
     recordingId: "REC-MANUAL-001",
@@ -311,7 +315,7 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     },
   };
 
-  const manualReviewOrder = service.createCallCenterOrder(
+  const manualReviewOrder = await service.createCallCenterOrder(
     manualReviewRequestBody,
     "req-map-closeout-manual-review-001",
   );

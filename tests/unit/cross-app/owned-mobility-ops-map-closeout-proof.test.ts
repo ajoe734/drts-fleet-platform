@@ -77,7 +77,7 @@ describe("FLEETS-CLOSEOUT-004 backend-linked Ops map proof", () => {
 
     const { service, regulatoryRegistryService } = createOwnedMobilityService();
 
-    const order = service.createCallCenterOrder(
+    const order = await service.createCallCenterOrder(
       {
         callId: "CALL-SMOKE-001",
         agentId: "AGENT-OPS-001",
