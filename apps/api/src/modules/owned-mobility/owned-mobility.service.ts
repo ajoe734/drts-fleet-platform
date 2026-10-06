@@ -5489,7 +5489,7 @@ export class OwnedMobilityService
           reason: order.cancelReason,
         }),
       );
-      let consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
+      const consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
       if (order.runtimeProfileCode === "multi_taxi_direct") {
         const outbox: ConsumerNotificationOutboxRecord = {
           outboxId: randomUUID(),

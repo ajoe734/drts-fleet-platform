@@ -465,6 +465,51 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
     expect(report.issues.some((i) => i.code === "FORBIDDEN_MODE")).toBe(true);
   });
 
+  it("fails when DRTS_DEV_MFA_WAIVED=true is supplied in production (ENTRY-IAP-WORKFORCE-AUTH-20261005)", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      DRTS_DEV_MFA_WAIVED: "true",
+    };
+
+    expect(() => validateAuthStartupConfig(env)).toThrowError(
+      AuthConfigurationError,
+    );
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(
+      report.issues.some(
+        (i) =>
+          i.control === "DRTS_DEV_MFA_WAIVED" && i.code === "FORBIDDEN_MODE",
+      ),
+    ).toBe(true);
+  });
+
+  it("fails when DRTS_DEV_MFA_WAIVED=true is supplied in staging", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      DRTS_ENV: "staging",
+      DRTS_DEV_MFA_WAIVED: "true",
+    };
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(
+      report.issues.some(
+        (i) =>
+          i.control === "DRTS_DEV_MFA_WAIVED" && i.code === "FORBIDDEN_MODE",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag DRTS_DEV_MFA_WAIVED outside staging/production", () => {
+    const report = buildAuthStartupConfigReport({
+      DRTS_ENV: "local",
+      DRTS_DEV_MFA_WAIVED: "true",
+    });
+    expect(report.issues.some((i) => i.control === "DRTS_DEV_MFA_WAIVED")).toBe(
+      false,
+    );
+  });
+
   it("fails when mandatory control JWT_ISSUER is missing", () => {
     const env = buildValidProductionEnv();
     delete env.JWT_ISSUER;

@@ -323,7 +323,6 @@ export class BootstrapAuthGuard implements CanActivate {
       ...(expectedAudience ? { expectedAudience } : {}),
       ...(expectedIssuer ? { expectedIssuer } : {}),
       ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
-      autoProvision: !isStrictIap,
     });
 
     const identity: BootstrapRequestIdentity = {
@@ -739,14 +738,31 @@ export class BootstrapAuthGuard implements CanActivate {
     }
   }
 
-  private assertDriverProvisioningRoute(identity: BootstrapRequestIdentity, request: AuthenticatedRequestLike) {
+  private assertDriverProvisioningRoute(
+    identity: BootstrapRequestIdentity,
+    request: AuthenticatedRequestLike,
+  ) {
     if (identity.driverProvisioningDriverId === undefined) return;
-    const path = normalizeRoutePath(request.originalUrl ?? request.url ?? "").replace(/^api\/+/, "");
+    const path = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    ).replace(/^api\/+/, "");
     const route = `${(request.method ?? "GET").toUpperCase()} ${path}`;
-    const allowed = ["GET auth/session", "POST auth/driver/device/invite", "POST auth/driver/device/invite/revoke"];
-    if (identity.actorType !== "system" || identity.realm !== "system" ||
-        !identity.driverProvisioningDriverId || !allowed.includes(route)) {
-      throw new ApiRequestError(403, "AUTH_SCOPE_DENIED", "Driver provisioning sessions cannot access this route.");
+    const allowed = [
+      "GET auth/session",
+      "POST auth/driver/device/invite",
+      "POST auth/driver/device/invite/revoke",
+    ];
+    if (
+      identity.actorType !== "system" ||
+      identity.realm !== "system" ||
+      !identity.driverProvisioningDriverId ||
+      !allowed.includes(route)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_SCOPE_DENIED",
+        "Driver provisioning sessions cannot access this route.",
+      );
     }
   }
 

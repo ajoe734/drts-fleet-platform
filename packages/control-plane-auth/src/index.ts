@@ -1,3 +1,4 @@
+import { createPublicKey } from "crypto";
 import jwt from "jsonwebtoken";
 import { getIamActorScopePreset } from "@drts/contracts";
 
@@ -117,6 +118,24 @@ export function isStrictControlPlaneIapEnvironment(
   }
   const environment = detectControlPlaneAuthEnvironment(env);
   return environment === "production" || environment === "staging";
+}
+
+/**
+ * Whether this deployment has real Cloud IAP enabled in front of the
+ * platform-admin / ops-console control-plane web apps. Staging and
+ * production are always treated as IAP-enabled -- a verified assertion is
+ * mandatory there and no default identity may ever apply (there is no
+ * `CONTROL_PLANE_IAP_ENABLED=false` escape hatch). A dev deployment that has
+ * wired up a real IAP resource (see
+ * docs/02-architecture/entry-iap-workforce-20261005.md) opts in explicitly
+ * with `CONTROL_PLANE_IAP_ENABLED=true` so it gets the same fail-closed
+ * behavior without also inheriting staging/production's MFA requirement.
+ */
+export function isControlPlaneIapEnabled(env: EnvLike = process.env): boolean {
+  if (isStrictControlPlaneIapEnvironment(env)) {
+    return true;
+  }
+  return (env.CONTROL_PLANE_IAP_ENABLED ?? "").trim().toLowerCase() === "true";
 }
 
 export type HeaderRecord =
@@ -305,6 +324,146 @@ export function extractIapJwtAssertion(headers: HeaderRecord): string | null {
   return null;
 }
 
+/**
+ * Google publishes the rotating ES256 public keys Identity-Aware Proxy signs
+ * its `x-goog-iap-jwt-assertion` JWTs with at this fixed JWKS endpoint (see
+ * docs/02-architecture/entry-iap-workforce-20261005.md, which cites Google's
+ * "Validating the JWT" IAP documentation). This is not a per-deployment
+ * secret: every DRTS deployment fetches the same public keyset from Google
+ * and caches it, refetching on an unrecognized `kid` (key rotation) or after
+ * the cache TTL expires.
+ */
+export const IAP_GOOGLE_JWKS_URL =
+  "https://www.gstatic.com/iap/verify/public_key-jwk";
+const IAP_JWKS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+interface GoogleEcJwk {
+  kty: string;
+  kid: string;
+  crv: string;
+  x: string;
+  y: string;
+}
+
+interface GoogleEcJwks {
+  keys: GoogleEcJwk[];
+}
+
+let cachedIapJwks: { fetchedAt: number; jwks: GoogleEcJwks } | null = null;
+
+/** Test-only: forces the next verification to refetch the JWKS. */
+export function resetIapJwksCacheForTests(): void {
+  cachedIapJwks = null;
+}
+
+async function fetchIapJwks(
+  jwksUrl: string,
+  forceRefresh = false,
+): Promise<GoogleEcJwks> {
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedIapJwks &&
+    now - cachedIapJwks.fetchedAt < IAP_JWKS_CACHE_TTL_MS
+  ) {
+    return cachedIapJwks.jwks;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(jwksUrl);
+  } catch (err) {
+    throw new Error(
+      `Unable to retrieve Google's IAP public JWKS: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `Unable to retrieve Google's IAP public JWKS (status ${response.status}).`,
+    );
+  }
+
+  const jwks = (await response.json()) as GoogleEcJwks;
+  cachedIapJwks = { fetchedAt: now, jwks };
+  return jwks;
+}
+
+/**
+ * Resolves the Google-published ES256 public key for a real Cloud IAP
+ * assertion's `kid`, fetching (and caching) Google's rotating IAP JWKS as
+ * needed. Returns a PEM-encoded public key usable as
+ * `VerifyIapAssertionOptions.jwtSecretOrPublicKey`.
+ *
+ * This is deliberately a separate async step rather than folded into
+ * `verifyIapJwtAssertion` itself: network I/O can't be synchronous, and
+ * `verifyIapJwtAssertion` is called from many synchronous call sites across
+ * the control-plane web apps and their tests that always pin an explicit
+ * key (dev/test fixtures, or a per-deployment override). Only callers that
+ * need real Google-managed key rotation call this first.
+ */
+export async function resolveGoogleIapJwtVerificationKey(
+  token: string,
+  jwksUrl: string = IAP_GOOGLE_JWKS_URL,
+): Promise<string> {
+  const trimmed = token.replace(/^Bearer\s+/i, "").trim();
+  let decoded: { header: { kid?: string; alg?: string } } | null;
+  try {
+    decoded = jwt.decode(trimmed, { complete: true }) as {
+      header: { kid?: string; alg?: string };
+    } | null;
+  } catch {
+    decoded = null;
+  }
+  if (!decoded?.header?.kid || decoded.header.alg !== "ES256") {
+    throw new Error(
+      "IAP JWT assertion signature verification failed: expected an ES256-signed token with a key id (Google IAP JWKS verification).",
+    );
+  }
+  const kid = decoded.header.kid;
+
+  let jwks = await fetchIapJwks(jwksUrl);
+  let jwk = jwks.keys.find((key) => key.kid === kid);
+  if (!jwk) {
+    jwks = await fetchIapJwks(jwksUrl, true);
+    jwk = jwks.keys.find((key) => key.kid === kid);
+  }
+  if (!jwk) {
+    throw new Error(
+      "IAP JWT assertion signature verification failed: signing key is not recognized in Google's published IAP JWKS.",
+    );
+  }
+
+  try {
+    return createPublicKey({
+      key: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y },
+      format: "jwk",
+    })
+      .export({ type: "spki", format: "pem" })
+      .toString();
+  } catch {
+    throw new Error(
+      "IAP JWT assertion signature verification failed: signing key could not be parsed.",
+    );
+  }
+}
+
+/**
+ * Real Cloud IAP assertions are always ES256; `jwtSecretOrPublicKey` is
+ * always required here (callers resolve it explicitly, pinning a dev/test
+ * secret or calling `resolveGoogleIapJwtVerificationKey` first for the real
+ * Google-managed key). The algorithm family accepted is inferred from the
+ * key material itself (HMAC secret vs. PEM-encoded asymmetric key) so a
+ * token cannot switch algorithms to defeat the intended verification path
+ * (alg-confusion).
+ */
+function looksLikePemKey(value: string): boolean {
+  return /BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY|EC PUBLIC KEY)/.test(
+    value,
+  );
+}
+
 export function verifyIapJwtAssertion(
   token: string,
   options: VerifyIapAssertionOptions = {},
@@ -316,11 +475,25 @@ export function verifyIapJwtAssertion(
 
   let payload: IapJwtPayload;
   if (options.jwtSecretOrPublicKey) {
+    const algorithms: jwt.Algorithm[] = looksLikePemKey(
+      options.jwtSecretOrPublicKey,
+    )
+      ? [
+          "RS256",
+          "RS384",
+          "RS512",
+          "ES256",
+          "ES384",
+          "ES512",
+          "PS256",
+          "PS384",
+          "PS512",
+        ]
+      : ["HS256", "HS384", "HS512"];
     try {
-      payload = jwt.verify(
-        trimmed,
-        options.jwtSecretOrPublicKey,
-      ) as IapJwtPayload;
+      payload = jwt.verify(trimmed, options.jwtSecretOrPublicKey, {
+        algorithms,
+      }) as IapJwtPayload;
     } catch (err) {
       throw new Error(
         `IAP JWT assertion signature verification failed: ${
@@ -434,7 +607,7 @@ export function stripControlPlaneAuthQueryParams(targetUrl: URL) {
   }
 }
 
-export function issueControlPlaneRequestAuth(options: {
+export async function issueControlPlaneRequestAuth(options: {
   actorType: ControlPlaneActorType;
   headers?: HeaderRecord | undefined;
   defaultEmail?: string | undefined;
@@ -444,32 +617,31 @@ export function issueControlPlaneRequestAuth(options: {
   expiresIn?: JwtExpiresIn | undefined;
   requestId?: string | null;
   strictIapMode?: boolean | undefined;
+  /** When true, no default identity is ever applied without a verified assertion -- see `isControlPlaneIapEnabled`. */
+  iapEnabled?: boolean | undefined;
   iapJwtSecretOrPublicKey?: string | undefined;
   expectedIapAudience?: string | undefined;
   expectedIapIssuer?: string | undefined;
   assumeTenantId?: string | null;
-}): ControlPlaneRequestAuth {
+}): Promise<ControlPlaneRequestAuth> {
   let verifiedSubject: string | null = null;
   let verifiedEmail: string | null = null;
-  let verifiedGroups: string[] | null = null;
 
   if (options.headers) {
     const assertion = extractIapJwtAssertion(options.headers);
     if (assertion) {
       try {
+        const verificationKey =
+          options.iapJwtSecretOrPublicKey ??
+          (await resolveGoogleIapJwtVerificationKey(assertion));
         const payload = verifyIapJwtAssertion(assertion, {
           expectedAudience: options.expectedIapAudience,
           expectedIssuer: options.expectedIapIssuer,
-          jwtSecretOrPublicKey: options.iapJwtSecretOrPublicKey,
+          jwtSecretOrPublicKey: verificationKey,
         });
         verifiedSubject = payload.sub;
         if (payload.email) {
           verifiedEmail = normalizeAuthenticatedUserEmail(payload.email);
-        }
-        if (Array.isArray(payload.gcp_ia_groups)) {
-          verifiedGroups = payload.gcp_ia_groups;
-        } else if (Array.isArray(payload.groups)) {
-          verifiedGroups = payload.groups;
         }
       } catch (err: any) {
         if (options.strictIapMode || extractIapJwtAssertion(options.headers)) {
@@ -487,52 +659,27 @@ export function issueControlPlaneRequestAuth(options: {
     }
   }
 
-  // Derive authority strictly from verified subject group membership when assertion/groups present or in strict IAP mode
-  let overrideRoles: string[] | undefined = undefined;
-
-  if (options.strictIapMode || verifiedGroups !== null) {
-    if (verifiedGroups === null) {
-      throw new Error(
-        "Verified IAP subject has no valid workforce group membership.",
-      );
-    }
-
-    const isPlatformAdmin = verifiedGroups.includes(
-      "platform-admins@platform.drts",
-    );
-    const isOpsUser = verifiedGroups.includes("ops-users@platform.drts");
-
-    if (!isPlatformAdmin && !isOpsUser) {
-      throw new Error(
-        "Verified IAP subject has no valid workforce group membership.",
-      );
-    }
-
-    if (options.actorType === "platform_admin") {
-      if (!isPlatformAdmin) {
-        throw new Error(
-          "Verified IAP subject does not possess required platform-admins group membership.",
-        );
-      }
-      overrideRoles = ["superadmin"];
-    } else if (options.actorType === "ops_user") {
-      if (!isOpsUser && !isPlatformAdmin) {
-        throw new Error(
-          "Verified IAP subject does not possess required ops-users group membership.",
-        );
-      }
-      overrideRoles = isPlatformAdmin ? ["operator"] : ["ops_user"];
-    }
-  }
-
+  // Roles are never derived here from assertion content (a real IAP JWT
+  // carries no group/role claim): the API's IAPSubjectAdapter is the sole
+  // authority, resolving effective roles from persisted role bindings keyed
+  // by the verified email. This proxy only needs to know whether a verified
+  // identity is present, not what it's allowed to do.
   const assertionPresent = Boolean(
     options.headers && extractIapJwtAssertion(options.headers),
   );
+  // Once this deployment has IAP enabled (`options.iapEnabled`), a missing or
+  // unverifiable assertion must never fall back to trusting the raw
+  // x-goog-authenticated-user-email / x-goog-authenticated-user-id headers --
+  // those are exactly what a real IAP strips from untrusted inbound traffic,
+  // but nothing stops a caller that reaches this app directly from setting
+  // them. Only a deployment that has no IAP configured at all (`iapEnabled`
+  // false) may trust them, matching the pre-IAP bootstrap-header behavior.
+  const requireVerifiedAssertion = options.strictIapMode || options.iapEnabled;
   let authenticatedUserEmail: string | null =
     verifiedEmail ||
     extractAuthenticatedUserEmail(options.headers, {
-      ...(options.strictIapMode !== undefined && {
-        strictIapMode: options.strictIapMode,
+      ...(requireVerifiedAssertion !== undefined && {
+        strictIapMode: requireVerifiedAssertion,
       }),
       ...(options.expectedIapAudience !== undefined && {
         expectedAudience: options.expectedIapAudience,
@@ -551,6 +698,14 @@ export function issueControlPlaneRequestAuth(options: {
         "Control-plane strict IAP mode requires a verified user email in assertion.",
       );
     }
+    if (options.iapEnabled) {
+      // ENTRY-IAP-WORKFORCE-AUTH-20261005 acceptance (3): once IAP is
+      // enabled for this deployment, an absent assertion never falls back to
+      // a default identity, even outside staging/production.
+      throw new Error(
+        "Control-plane IAP is enabled; a verified x-goog-iap-jwt-assertion is required and no default identity is applied.",
+      );
+    }
     authenticatedUserEmail =
       normalizeAuthenticatedUserEmail(options.defaultEmail ?? null) ||
       CONTROL_PLANE_DEFAULT_EMAILS[options.actorType];
@@ -567,8 +722,8 @@ export function issueControlPlaneRequestAuth(options: {
     options.requestId,
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
     verifiedSubject,
-    overrideRoles,
-    options.assumeTenantId
+    undefined,
+    options.assumeTenantId,
   );
 
   const rawAssertion = options.headers

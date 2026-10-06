@@ -66,7 +66,7 @@ function operationalRecord(
   };
 }
 
-function installRecordsTransport(
+async function installRecordsTransport(
   records: MultiTaxiTripOperationalAdminView[],
   scopes = ["foundation:read", "multi_taxi_records:read"],
 ) {
@@ -121,7 +121,7 @@ function installRecordsTransport(
     }
   });
   vi.stubGlobal("fetch", transport);
-  const auth = issueControlPlaneRequestAuth({
+  const auth = await issueControlPlaneRequestAuth({
     actorType: "platform_admin",
     requestId: REQUEST_ID,
   });
@@ -146,7 +146,7 @@ afterEach(() => {
 });
 
 describe("SR-ADMIN-VERIFY-001 P5 current authority and API boundary", () => {
-  it("keeps the merged P5 read/export scopes grantable only to the platform preset", () => {
+  it("keeps the merged P5 read/export scopes grantable only to the platform preset", async () => {
     for (const scope of [
       "multi_taxi_records:read",
       "multi_taxi_records:export",
@@ -159,8 +159,8 @@ describe("SR-ADMIN-VERIFY-001 P5 current authority and API boundary", () => {
       expect(getIamActorScopePreset("ops_user")).not.toContain(scope);
       expect(getIamActorScopePreset("tenant_admin")).not.toContain(scope);
       expect(
-        issueControlPlaneRequestAuth({ actorType: "platform_admin" }).identity
-          .scopes,
+        (await issueControlPlaneRequestAuth({ actorType: "platform_admin" }))
+          .identity.scopes,
       ).toContain(scope);
     }
   });
@@ -168,7 +168,7 @@ describe("SR-ADMIN-VERIFY-001 P5 current authority and API boundary", () => {
   it("queries with read authority and unwraps the real controller list envelope", async () => {
     const record = operationalRecord();
     const { client, listTripOperationalRecords, transport } =
-      installRecordsTransport([record]);
+      await installRecordsTransport([record]);
     const path = buildRecordsQueryPath({
       month: " 2026-09 ",
       q: ` ${ORDER_ID} `,
@@ -197,7 +197,7 @@ describe("SR-ADMIN-VERIFY-001 P5 current authority and API boundary", () => {
   });
 
   it("loads a genuine empty response as zero rows without inventing 100% coverage", async () => {
-    const { client } = installRecordsTransport([]);
+    const { client } = await installRecordsTransport([]);
     const response = await client.get<{
       items: MultiTaxiTripOperationalAdminView[];
     }>(buildRecordsQueryPath({}));
@@ -210,10 +210,8 @@ describe("SR-ADMIN-VERIFY-001 P5 current authority and API boundary", () => {
   });
 
   it("rejects foundation-only authority before querying records and preserves the permission error", async () => {
-    const { client, listTripOperationalRecords } = installRecordsTransport(
-      [operationalRecord()],
-      ["foundation:read"],
-    );
+    const { client, listTripOperationalRecords } =
+      await installRecordsTransport([operationalRecord()], ["foundation:read"]);
     const error = await client
       .get(buildRecordsQueryPath({}))
       .catch((value: unknown) => value);
@@ -229,7 +227,8 @@ describe("SR-ADMIN-VERIFY-001 P5 current authority and API boundary", () => {
   });
 
   it("keeps authority source failure distinct from permission or a successful empty list", async () => {
-    const { client, listTripOperationalRecords } = installRecordsTransport([]);
+    const { client, listTripOperationalRecords } =
+      await installRecordsTransport([]);
     listTripOperationalRecords.mockRejectedValueOnce(
       new ApiRequestError(
         503,

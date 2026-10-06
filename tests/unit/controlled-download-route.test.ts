@@ -62,7 +62,7 @@ async function codeOf(call: () => unknown): Promise<string> {
 }
 
 describe("controlled download links", () => {
-  it("issues a link on the API's own origin rather than a host that does not resolve", () => {
+  it("issues a relative link for the consoles' API proxy rewrites", () => {
     const metadata = issue("tenant-invoice", "invoice-1");
 
     // Was `https://downloads.drts.local`, which fails at DNS -- a network fault

@@ -70,6 +70,12 @@ function isAllowedTenantPath(path: string[], method: string) {
     return false;
   }
 
+  // The API's signed URL is the credential for this read-only endpoint. It
+  // still verifies HMAC, expiry and the stored artifact hash before serving.
+  if (path[0] === "downloads") {
+    return path.length === 3 && method === "GET";
+  }
+
   if (path.length === 1 && path[0] === "health" && method === "GET") {
     return true;
   }

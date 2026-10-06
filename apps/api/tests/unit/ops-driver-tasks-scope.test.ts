@@ -56,9 +56,11 @@ describe("ops can read driver tasks (dispatch board dependency)", () => {
 // the proxy-minted `ops_user` identity must carry the same grant the API defines
 // for that actor type. These cases assert the identity the proxy actually mints.
 describe("control-plane proxy mints the ops grant the driver-task board needs", () => {
-  it("bootstrap-header identity from the proxy satisfies GET /api/driver/tasks", () => {
+  it("bootstrap-header identity from the proxy satisfies GET /api/driver/tasks", async () => {
     const policy = opsPolicy();
-    const minted = issueControlPlaneRequestAuth({ actorType: "ops_user" });
+    const minted = await issueControlPlaneRequestAuth({
+      actorType: "ops_user",
+    });
 
     const identity = extractBootstrapRequestIdentity(minted.headers, {
       allowAnonymous: false,
@@ -73,8 +75,8 @@ describe("control-plane proxy mints the ops grant the driver-task board needs", 
     }
   });
 
-  it("jwt_bearer identity from the proxy carries the same scopes", () => {
-    const minted = issueControlPlaneRequestAuth({
+  it("jwt_bearer identity from the proxy carries the same scopes", async () => {
+    const minted = await issueControlPlaneRequestAuth({
       actorType: "ops_user",
       jwtSecret: "test-control-plane-secret",
     });
@@ -95,8 +97,10 @@ describe("control-plane proxy mints the ops grant the driver-task board needs", 
     }
   });
 
-  it("proxy ops_user preset stays in parity with the API ops_user preset", () => {
-    const minted = issueControlPlaneRequestAuth({ actorType: "ops_user" });
+  it("proxy ops_user preset stays in parity with the API ops_user preset", async () => {
+    const minted = await issueControlPlaneRequestAuth({
+      actorType: "ops_user",
+    });
     expect([...minted.identity.scopes].sort()).toEqual(
       [...AUTH_SCOPE_PRESETS.ops_user].sort(),
     );
@@ -106,7 +110,7 @@ describe("control-plane proxy mints the ops grant the driver-task board needs", 
   // The guard is the only writer of that row, so assert it at the source: the
   // board's request, carrying exactly the headers the proxy mints, must pass
   // the guard without emitting an authorization-denial audit entry.
-  it("guard admits the board request without writing a reject_authorization audit row", () => {
+  it("guard admits the board request without writing a reject_authorization audit row", async () => {
     const auditNotificationService = new AuditNotificationService();
     const recordAuditLog = vi
       .spyOn(auditNotificationService, "recordAuditLog")
@@ -119,7 +123,8 @@ describe("control-plane proxy mints the ops grant the driver-task board needs", 
     );
 
     const request: AuthenticatedRequestLike = {
-      headers: issueControlPlaneRequestAuth({ actorType: "ops_user" }).headers,
+      headers: (await issueControlPlaneRequestAuth({ actorType: "ops_user" }))
+        .headers,
       method: "GET",
       originalUrl: DRIVER_TASKS_ROUTE,
     };
@@ -138,8 +143,8 @@ describe("control-plane proxy mints the ops grant the driver-task board needs", 
     ).toEqual([]);
   });
 
-  it("proxy platform_admin preset never over-grants beyond the API preset", () => {
-    const minted = issueControlPlaneRequestAuth({
+  it("proxy platform_admin preset never over-grants beyond the API preset", async () => {
+    const minted = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
     });
     const apiGranted = new Set(AUTH_SCOPE_PRESETS.platform_admin);

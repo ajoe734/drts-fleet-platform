@@ -1,4 +1,4 @@
-import { createTenantAuthHandlers } from "../../../../lib/auth/route-handlers";
+import { createTenantAuthHandlers } from "@drts/tenant-auth";
 
 export const dynamic = "force-dynamic";
 export const { GET, POST } = createTenantAuthHandlers();

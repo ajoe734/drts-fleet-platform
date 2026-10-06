@@ -127,27 +127,41 @@ export class DriverDeviceSessionService implements OnModuleInit {
   ): Promise<{ revoked: boolean }> {
     const code = command.registrationCode.trim();
     if (!code) return { revoked: false };
-    
+
     const hash = this.hashToken(code);
     let invitation = this.invitationsByHash.get(hash) ?? undefined;
     if (!invitation && this.repository) {
-      invitation = (await this.repository.findInvitationByCodeHash(hash)) ?? undefined;
-    }
-    
-    if (allowedDriverId && invitation && invitation.driverId !== allowedDriverId) {
-      throw new ApiRequestError(403, "WORKLOAD_DRIVER_TARGET_DENIED", "Driver provisioning grant does not allow this invitation.");
+      invitation =
+        (await this.repository.findInvitationByCodeHash(hash)) ?? undefined;
     }
 
-    if (!invitation || (invitation.status !== "pending" && invitation.status !== "used" && invitation.status !== "revoked")) {
+    if (
+      allowedDriverId &&
+      invitation &&
+      invitation.driverId !== allowedDriverId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "WORKLOAD_DRIVER_TARGET_DENIED",
+        "Driver provisioning grant does not allow this invitation.",
+      );
+    }
+
+    if (
+      !invitation ||
+      (invitation.status !== "pending" &&
+        invitation.status !== "used" &&
+        invitation.status !== "revoked")
+    ) {
       return { revoked: false };
     }
-    
+
     let newlyRevoked = false;
     if (invitation.status !== "revoked") {
       invitation.status = "revoked";
       invitation.revokedAt = new Date().toISOString();
       invitation.updatedAt = invitation.revokedAt;
-      
+
       if (this.repository) {
         await this.repository.saveInvitation(invitation);
       }
@@ -156,16 +170,31 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
 
     if (invitation.boundBindingId) {
-      const binding = (await this.repository?.findBindingById?.(invitation.boundBindingId)) ?? this.bindingsById.get(invitation.boundBindingId);
+      const binding =
+        (await this.repository?.findBindingById?.(invitation.boundBindingId)) ??
+        this.bindingsById.get(invitation.boundBindingId);
       if (binding) {
+        const revokedAt = invitation.revokedAt ?? new Date().toISOString();
         await this.revokeBindingAndFamily(
           invitation.boundBindingId,
-          invitation.revokedAt ?? new Date().toISOString(),
+          revokedAt,
           "INVITATION_REVOKED",
+        );
+        // Keep the driver profile's embedded binding summary in sync; it is
+        // read independently (e.g. isolation checks) from the IAM table, and
+        // was previously left stale by this path. Called unconditionally,
+        // same as the manual revoke() path: binding.status can already read
+        // "revoked" here from an earlier attempt that failed after mutating
+        // it but before this profile sync ran, so that flag cannot gate it.
+        this.driverProfileService.recordDeviceBindingRevocation(
+          binding.driverId,
+          invitation.boundBindingId,
+          revokedAt,
+          { actorId: binding.driverId, actorType: "system", tenantId: null },
         );
       }
     }
-    
+
     return { revoked: newlyRevoked || invitation.status === "revoked" };
   }
 

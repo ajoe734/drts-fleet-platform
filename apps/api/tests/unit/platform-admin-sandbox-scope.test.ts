@@ -204,7 +204,7 @@ describe("control-plane proxy mints the platform_admin sandbox grant", () => {
     expect(sandboxRoutes.length).toBeGreaterThanOrEqual(15);
   });
 
-  it("mints every sandbox scope any platform-admin route demands", () => {
+  it("mints every sandbox scope any platform-admin route demands", async () => {
     // The drift detector this task exists for: a `sandbox.*` scope added to a
     // controller but not to the proxy preset is invisible to every other test
     // and fails only in the browser, as a 403.
@@ -216,16 +216,16 @@ describe("control-plane proxy mints the platform_admin sandbox grant", () => {
     expect(requiredByRoutes.size).toBeGreaterThan(0);
 
     const minted = new Set(
-      issueControlPlaneRequestAuth({ actorType: "platform_admin" }).identity
-        .scopes,
+      (await issueControlPlaneRequestAuth({ actorType: "platform_admin" }))
+        .identity.scopes,
     );
-    expect(
-      [...requiredByRoutes].filter((scope) => !minted.has(scope)),
-    ).toEqual([]);
+    expect([...requiredByRoutes].filter((scope) => !minted.has(scope))).toEqual(
+      [],
+    );
   });
 
-  it("mints every sandbox.* scope the API grants platform_admin", () => {
-    const minted = issueControlPlaneRequestAuth({
+  it("mints every sandbox.* scope the API grants platform_admin", async () => {
+    const minted = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
     });
 
@@ -234,8 +234,8 @@ describe("control-plane proxy mints the platform_admin sandbox grant", () => {
     }
   });
 
-  it("holds exact parity with the API platform_admin preset", () => {
-    const minted = issueControlPlaneRequestAuth({
+  it("holds exact parity with the API platform_admin preset", async () => {
+    const minted = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
     });
     // Two-way: neither an under-grant (the bug this task fixes) nor an
@@ -245,8 +245,8 @@ describe("control-plane proxy mints the platform_admin sandbox grant", () => {
     );
   });
 
-  it("carries the same sandbox scopes on the jwt_bearer path", () => {
-    const minted = issueControlPlaneRequestAuth({
+  it("carries the same sandbox scopes on the jwt_bearer path", async () => {
+    const minted = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       jwtSecret: "test-control-plane-secret",
     });
@@ -273,11 +273,12 @@ describe("control-plane proxy mints the platform_admin sandbox grant", () => {
   // pass the guard without emitting an authorization-denial audit entry.
   it.each(sandboxRoutes.map((route) => [route.label, route] as const))(
     "%s admits the proxy identity with no reject_authorization audit row",
-    (_label, route) => {
+    async (_label, route) => {
       const { guard, recordAuditLog } = buildGuard();
       const request: AuthenticatedRequestLike = {
-        headers: issueControlPlaneRequestAuth({ actorType: "platform_admin" })
-          .headers,
+        headers: (
+          await issueControlPlaneRequestAuth({ actorType: "platform_admin" })
+        ).headers,
         method: route.httpMethod,
         originalUrl: route.requestUrl,
       };
@@ -300,15 +301,15 @@ describe("platform_admin dual-control survives the widened proxy grant", () => {
   // id load-bearing: if it ever collapsed to a constant, two different humans
   // would share one actor id and the maker-checker rule would stop
   // distinguishing them.
-  it("mints a distinct actorId per IAP-authenticated email", () => {
-    const requester = issueControlPlaneRequestAuth({
+  it("mints a distinct actorId per IAP-authenticated email", async () => {
+    const requester = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       headers: {
         "x-goog-authenticated-user-email":
           "accounts.google.com:compliance.maker@drts.example",
       },
     });
-    const approver = issueControlPlaneRequestAuth({
+    const approver = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       headers: {
         "x-goog-authenticated-user-email":
@@ -327,13 +328,17 @@ describe("platform_admin dual-control survives the widened proxy grant", () => {
     );
   });
 
-  it("collapses to one actorId when no IAP header is present", () => {
+  it("collapses to one actorId when no IAP header is present", async () => {
     // Fail-closed, not fail-open: with no IAP identity the requester and the
     // approver are the same actor, so
     // `SANDBOX_EXPORT_SELF_APPROVAL_FORBIDDEN` blocks the approval rather than
     // the widened scope waving it through.
-    const first = issueControlPlaneRequestAuth({ actorType: "platform_admin" });
-    const second = issueControlPlaneRequestAuth({ actorType: "platform_admin" });
+    const first = await issueControlPlaneRequestAuth({
+      actorType: "platform_admin",
+    });
+    const second = await issueControlPlaneRequestAuth({
+      actorType: "platform_admin",
+    });
 
     expect(first.identity.actorId).toBe(second.identity.actorId);
   });

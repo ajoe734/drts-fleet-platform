@@ -20,7 +20,6 @@ export interface AuthConfigurationIssue {
   code: AuthIssueCode;
 }
 
-
 export interface AuthStartupConfig {
   environment: AuthEnvironment;
   isStrictEnvironment: boolean;
@@ -200,7 +199,9 @@ export type OrdinaryLoginMfaPolicy = "v1_not_required" | "required";
  *   `step-up-proof.service.ts`, which continue to reject
  *   `tenant_bootstrap_fixture` in production/staging regardless of this flag
  */
-export function isOrdinaryLoginMfaRequired(env: EnvLike = process.env): boolean {
+export function isOrdinaryLoginMfaRequired(
+  env: EnvLike = process.env,
+): boolean {
   const override = normalizeString(
     env.AUTH_REQUIRE_ORDINARY_LOGIN_MFA,
   )?.toLowerCase();
@@ -357,6 +358,21 @@ export function buildAuthStartupConfigReport(
       control: "ALLOW_INSECURE_DEV_AUTH",
       issue:
         "ALLOW_INSECURE_DEV_AUTH=true is strictly forbidden in staging/production environment",
+      code: "FORBIDDEN_MODE",
+    });
+  }
+
+  // Dev-only workforce MFA waiver (ENTRY-IAP-WORKFORCE-AUTH-20261005, product
+  // decision 2026-10-05): DRTS_DEV_MFA_WAIVED lets StepUpProofService clear
+  // the platform/ops step-up gate without a real MFA signal. Staging and
+  // production must reject the flag outright, mirroring ALLOW_INSECURE_DEV_AUTH.
+  const devMfaWaived =
+    (env.DRTS_DEV_MFA_WAIVED ?? "").trim().toLowerCase() === "true";
+  if (isStrictEnvironment && devMfaWaived) {
+    issues.push({
+      control: "DRTS_DEV_MFA_WAIVED",
+      issue:
+        "DRTS_DEV_MFA_WAIVED=true is strictly forbidden in staging/production environment",
       code: "FORBIDDEN_MODE",
     });
   }

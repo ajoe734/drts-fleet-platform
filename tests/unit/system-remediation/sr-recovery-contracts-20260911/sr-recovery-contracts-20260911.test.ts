@@ -172,6 +172,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.launch_allocations || []),
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
+        ...(content.passenger_push_channel_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
@@ -235,7 +236,11 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         driverId: "drv-001",
         uploadedByActorId: null,
         originalFilename: "remittance-2.png",
-        content: { contentHash: "abc123", contentType: "image/png", sizeBytes: 1024 },
+        content: {
+          contentHash: "abc123",
+          contentType: "image/png",
+          sizeBytes: 1024,
+        },
         scanState: "clean",
         scanCompletedAt: "2026-09-11T00:05:00.000Z",
         rejectionReason: null,
@@ -309,9 +314,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         "recorded",
         "persistence_unknown",
       ]);
-      expect(PUSH_DELIVERY_ERROR_CODES).toContain(
-        "PUSH_DELIVERY_FENCE_STALE",
-      );
+      expect(PUSH_DELIVERY_ERROR_CODES).toContain("PUSH_DELIVERY_FENCE_STALE");
     });
 
     it("validates PushDeliveryClaim fencing shape and a stale-fence rejection scenario", () => {
@@ -420,7 +423,12 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
     it("keeps the new PlatformAdapter/UpdatePlatformAdapterCommand fields optional so pre-existing producers still type-check (back-compat regression guard)", () => {
       const bareAdapterFields: Pick<
         PlatformAdapter,
-        "id" | "platformCode" | "name" | "description" | "createdAt" | "updatedAt"
+        | "id"
+        | "platformCode"
+        | "name"
+        | "description"
+        | "createdAt"
+        | "updatedAt"
       > = {
         id: "adapter-legacy-001",
         platformCode: "legacy",
@@ -831,9 +839,9 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
           idempotencyKey: "idem-201",
         };
         expect(validatePay(valid)).toBe(true);
-        expect(validatePay({ batchId: "batch-001", proofId: "proof-201" })).toBe(
-          false,
-        );
+        expect(
+          validatePay({ batchId: "batch-001", proofId: "proof-201" }),
+        ).toBe(false);
       });
 
       it("validates RemittanceProofPaymentReceipt with positive and negative fixtures", () => {

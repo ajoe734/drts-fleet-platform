@@ -469,7 +469,9 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...content.additional_allocations.map((a: any) => a.version),
         ...content.launch_allocations.map((a: any) => a.version),
         ...content.partner_notification_allocations.map((a: any) => a.version),
-        ...(content.voice_application_allocations || []).map((a: any) => a.version),
+        ...(content.voice_application_allocations || []).map(
+          (a: any) => a.version,
+        ),
       ];
       expect(new Set(allVersions).size).toBe(allVersions.length);
     });

@@ -22,15 +22,62 @@ function signTestIapToken(payload: Record<string, any>): string {
 }
 
 describe("IAPSubjectAdapter", () => {
-  it("resolves a verified IAP subject to durable membership", async () => {
+  it("resolves a verified IAP subject to durable membership by verified email, binding it to the IAP subject on first login", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
 
+    // Pre-provisioned by an operator before the person's first real IAP
+    // login (e.g. via an invite flow): issuer is not yet "google_iap"
+    // because no IAP subject has bound to it yet.
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_pre_provisioned_001",
+        sourceRef: "pre_provisioned:admin@platform.drts",
+        issuer: "workforce_directory",
+        subject: "admin@platform.drts",
+        principalType: "human",
+        email: "admin@platform.drts",
+        emailVerified: true,
+        displayName: "Admin",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_pre_provisioned_001",
+        sourceRef: "pre_provisioned_membership:admin@platform.drts",
+        principalId: "principal_pre_provisioned_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_pre_provisioned_001",
+          sourceRef: "rb_pre_provisioned_001",
+          membershipId: "membership_pre_provisioned_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
     const token = signTestIapToken({
       sub: "accounts.google.com:1001",
       email: "admin@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
     });
 
     const result = await adapter.resolveSubject(
@@ -40,7 +87,6 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
-        autoProvision: true,
       },
     );
 
@@ -53,15 +99,26 @@ describe("IAPSubjectAdapter", () => {
     expect(result.effectiveScopes).toContain("reports:write");
     expect(result.effectiveScopes).toContain("forwarder:read");
     expect(result.effectiveScopes).toContain("multi_taxi_ratings:read");
-    expect(result.driftDetected).toBe(false);
 
     const recentEvents = await securityEventsService.listEvents(null, {
       eventType: "iap_subject.resolved",
     });
     expect(recentEvents.length).toBeGreaterThan(0);
+
+    // Re-login with the same verified subject finds the now-bound principal
+    // directly (no re-provisioning), and keeps resolving the same role.
+    const second = await adapter.resolveSubject(
+      { "x-goog-iap-jwt-assertion": token },
+      {
+        expectedAudience: EXPECTED_AUDIENCE,
+        jwtSecretOrPublicKey: TEST_SECRET,
+      },
+    );
+    expect(second.principal.principalId).toBe(result.principal.principalId);
+    expect(second.effectiveRoles).toContain("superadmin");
   });
 
-  it("fails closed when unmapped subject attempts login without autoProvision", async () => {
+  it("fails closed when a verified email has no persisted workforce account (deny-by-default, no auto-provisioning)", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
@@ -150,7 +207,7 @@ describe("IAPSubjectAdapter", () => {
     expect(caught?.code).toBe("IAP_AUDIENCE_MISMATCH");
   });
 
-  it("fails closed when unmapped subject attempts autoProvision without valid workforce group", async () => {
+  it("fails closed for an external email with no persisted account, regardless of any group claim on the assertion", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
@@ -158,7 +215,6 @@ describe("IAPSubjectAdapter", () => {
     const token = signTestIapToken({
       sub: "unmapped_sub_99",
       email: "guest@external.com",
-      gcp_ia_groups: ["unmapped-group@external.com"],
     });
 
     let caught: ApiRequestError | null = null;
@@ -168,7 +224,6 @@ describe("IAPSubjectAdapter", () => {
         {
           expectedAudience: EXPECTED_AUDIENCE,
           jwtSecretOrPublicKey: TEST_SECRET,
-          autoProvision: true,
         },
       );
     } catch (err) {
@@ -182,7 +237,7 @@ describe("IAPSubjectAdapter", () => {
     expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
     const resp = caught?.getResponse() as any;
     expect(resp?.error?.message).toContain(
-      "Unmapped workforce user subject has no valid group membership.",
+      "Workforce user identity is not provisioned.",
     );
   });
 
@@ -314,7 +369,7 @@ describe("IAPSubjectAdapter", () => {
     expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
   });
 
-  it("detects group drift, applies least privilege downgrade, and emits alert event", async () => {
+  it("ignores a gcp_ia_groups/groups claim entirely and resolves roles only from persisted role bindings (a real IAP assertion carries no such claim)", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
@@ -322,22 +377,22 @@ describe("IAPSubjectAdapter", () => {
     const now = new Date().toISOString();
     await identityRepo.upsertWorkforceIdentity(
       {
-        principalId: "principal_drift_001",
-        sourceRef: "iap_subject:drift_user_sub",
+        principalId: "principal_no_groups_001",
+        sourceRef: "iap_subject:no_groups_sub",
         issuer: "google_iap",
-        subject: "drift_user_sub",
+        subject: "no_groups_sub",
         principalType: "human",
-        email: "drifted@platform.drts",
+        email: "no-groups@platform.drts",
         emailVerified: true,
-        displayName: "Drifted User",
+        displayName: "No Groups User",
         status: "active",
         createdAt: now,
         updatedAt: now,
       },
       {
-        membershipId: "membership_drift_platform_001",
-        sourceRef: "iap_membership:drift_user_sub_platform",
-        principalId: "principal_drift_001",
+        membershipId: "membership_no_groups_001",
+        sourceRef: "iap_membership:no_groups_sub",
+        principalId: "principal_no_groups_001",
         realm: "platform",
         scopeRef: "platform:control_plane",
         tenantId: null,
@@ -350,9 +405,9 @@ describe("IAPSubjectAdapter", () => {
       },
       [
         {
-          roleBindingId: "rb_drift_001",
-          sourceRef: "rb_drift_001",
-          membershipId: "membership_drift_platform_001",
+          roleBindingId: "rb_no_groups_001",
+          sourceRef: "rb_no_groups_001",
+          membershipId: "membership_no_groups_001",
           roleCode: "superadmin",
           grantedByPrincipalId: null,
           approvalId: null,
@@ -364,80 +419,27 @@ describe("IAPSubjectAdapter", () => {
       ],
     );
 
-    await identityRepo.upsertWorkforceIdentity(
-      {
-        principalId: "principal_drift_001",
-        sourceRef: "iap_subject:drift_user_sub",
-        issuer: "google_iap",
-        subject: "drift_user_sub",
-        principalType: "human",
-        email: "drifted@platform.drts",
-        emailVerified: true,
-        displayName: "Drifted User",
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        membershipId: "membership_drift_ops_001",
-        sourceRef: "iap_membership:drift_user_sub_ops",
-        principalId: "principal_drift_001",
-        realm: "ops",
-        scopeRef: "platform:control_plane",
-        tenantId: null,
-        partnerId: null,
-        status: "active",
-        invitedByPrincipalId: null,
-        invitationId: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-      [
-        {
-          roleBindingId: "rb_drift_002",
-          sourceRef: "rb_drift_002",
-          membershipId: "membership_drift_ops_001",
-          roleCode: "ops_user",
-          grantedByPrincipalId: null,
-          approvalId: null,
-          validFrom: now,
-          validTo: null,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    );
-
+    // A real Cloud IAP assertion never carries gcp_ia_groups/groups; this
+    // token deliberately omits it to pin that the persisted superadmin
+    // binding is still granted in full, with no downgrade.
     const token = signTestIapToken({
-      sub: "drift_user_sub",
-      email: "drifted@platform.drts",
-      gcp_ia_groups: ["ops-users@platform.drts"],
+      sub: "no_groups_sub",
+      email: "no-groups@platform.drts",
     });
 
     const result = await adapter.resolveSubject(
-      {
-        "x-goog-iap-jwt-assertion": token,
-      },
+      { "x-goog-iap-jwt-assertion": token },
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
       },
     );
 
-    expect(result.driftDetected).toBe(true);
-    expect(result.effectiveRoles).not.toContain("superadmin");
-    expect(result.effectiveRoles).toContain("ops_user");
-    expect(result.membership.membershipId).toBe("membership_drift_ops_001");
-    expect(result.membership.realm).toBe("ops");
-    expect(result.driftDetails?.missingGroups).toContain(
-      "platform-admins@platform.drts",
-    );
-
-    const driftEvents = await securityEventsService.listEvents(null, {
-      eventType: "iap_group_drift.detected",
-    });
-    expect(driftEvents.length).toBeGreaterThan(0);
-    expect(driftEvents[0]?.actorId).toBe("principal_drift_001");
+    expect(result.effectiveRoles).toEqual(["superadmin"]);
+    expect(result.membership.realm).toBe("platform");
+    expect(
+      (result as unknown as { driftDetected?: unknown }).driftDetected,
+    ).toBeUndefined();
   });
 
   it("fails closed when IAP assertion lacks email in strict IAP mode", async () => {
@@ -488,11 +490,56 @@ describe("IAPSubjectAdapter", () => {
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
 
-    // First, resolve user A (sub_A)
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_shared_email_001",
+        sourceRef: "pre_provisioned:shared-email@platform.drts",
+        issuer: "workforce_directory",
+        subject: "shared-email@platform.drts",
+        principalType: "human",
+        email: "shared-email@platform.drts",
+        emailVerified: true,
+        displayName: "Shared Email User",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_shared_email_001",
+        sourceRef: "pre_provisioned_membership:shared-email@platform.drts",
+        principalId: "principal_shared_email_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_shared_email_001",
+          sourceRef: "rb_shared_email_001",
+          membershipId: "membership_shared_email_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
+    // First login from sub_A binds the pre-provisioned principal to that
+    // IAP subject (issuer becomes "google_iap", subject becomes sub_A).
     const tokenA = signTestIapToken({
       sub: "accounts.google.com:sub_A",
       email: "shared-email@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
     });
 
     const resA = await adapter.resolveSubject(
@@ -500,17 +547,18 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
-        autoProvision: true,
       },
     );
 
     expect(resA.principal.subject).toBe("accounts.google.com:sub_A");
 
-    // Second, attempt resolve for user B (sub_B) with same email but autoProvision: false
+    // A second, different IAP subject presenting the same email must not
+    // inherit sub_A's now-bound identity: findPrincipalBySubject misses (different
+    // subject) and findProvisionedControlPlanePrincipalByEmail skips it too
+    // (its issuer is already "google_iap").
     const tokenB = signTestIapToken({
       sub: "accounts.google.com:sub_B",
       email: "shared-email@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
     });
 
     let caught: ApiRequestError | null = null;
@@ -520,7 +568,6 @@ describe("IAPSubjectAdapter", () => {
         {
           expectedAudience: EXPECTED_AUDIENCE,
           jwtSecretOrPublicKey: TEST_SECRET,
-          autoProvision: false,
         },
       );
     } catch (err: any) {
@@ -529,7 +576,6 @@ describe("IAPSubjectAdapter", () => {
       }
     }
 
-    // Must fail closed because sub_B identity is not provisioned (it cannot inherit sub_A's identity)
     expect(caught).not.toBeNull();
     expect(caught?.getStatus()).toBe(403);
     expect(caught?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
@@ -635,120 +681,6 @@ describe("IAPSubjectAdapter", () => {
     expect(res.membership.realm).toBe("platform");
     expect(res.membership.membershipId).toBe("membership_platform_001");
     expect(res.effectiveRoles).toContain("superadmin");
-  });
-
-  it("switches membership realm from platform to ops when assertion loses platform-admins group", async () => {
-    const identityRepo = new IdentityRepository();
-    const securityEventsService = new SecurityEventsService();
-    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
-
-    const now = new Date().toISOString();
-    await identityRepo.upsertWorkforceIdentity(
-      {
-        principalId: "principal_stale_platform_001",
-        sourceRef: "iap_subject:stale_platform_sub",
-        issuer: "google_iap",
-        subject: "stale_platform_sub",
-        principalType: "human",
-        email: "stale-platform@platform.drts",
-        emailVerified: true,
-        displayName: "Stale Platform User",
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        membershipId: "membership_stale_platform_001",
-        sourceRef: "iap_membership:stale_platform_sub",
-        principalId: "principal_stale_platform_001",
-        realm: "platform",
-        scopeRef: "platform:control_plane",
-        tenantId: null,
-        partnerId: null,
-        status: "active",
-        invitedByPrincipalId: null,
-        invitationId: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-      [
-        {
-          roleBindingId: "rb_stale_platform_001",
-          sourceRef: "rb_stale_platform_001",
-          membershipId: "membership_stale_platform_001",
-          roleCode: "superadmin",
-          grantedByPrincipalId: null,
-          approvalId: null,
-          validFrom: now,
-          validTo: null,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    );
-
-    await identityRepo.upsertWorkforceIdentity(
-      {
-        principalId: "principal_stale_platform_001",
-        sourceRef: "iap_subject:stale_platform_sub",
-        issuer: "google_iap",
-        subject: "stale_platform_sub",
-        principalType: "human",
-        email: "stale-platform@platform.drts",
-        emailVerified: true,
-        displayName: "Stale Platform User",
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        membershipId: "membership_stale_ops_001",
-        sourceRef: "iap_membership:stale_ops_sub",
-        principalId: "principal_stale_platform_001",
-        realm: "ops",
-        scopeRef: "platform:control_plane",
-        tenantId: null,
-        partnerId: null,
-        status: "active",
-        invitedByPrincipalId: null,
-        invitationId: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-      [
-        {
-          roleBindingId: "rb_stale_ops_001",
-          sourceRef: "rb_stale_ops_001",
-          membershipId: "membership_stale_ops_001",
-          roleCode: "ops_user",
-          grantedByPrincipalId: null,
-          approvalId: null,
-          validFrom: now,
-          validTo: null,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    );
-
-    const token = signTestIapToken({
-      sub: "stale_platform_sub",
-      email: "stale-platform@platform.drts",
-      gcp_ia_groups: ["ops-users@platform.drts"],
-    });
-
-    const res = await adapter.resolveSubject(
-      { "x-goog-iap-jwt-assertion": token },
-      {
-        expectedAudience: EXPECTED_AUDIENCE,
-        jwtSecretOrPublicKey: TEST_SECRET,
-      },
-    );
-
-    expect(res.driftDetected).toBe(true);
-    expect(res.effectiveRoles).toEqual(["ops_user"]);
-    expect(res.membership.membershipId).toBe("membership_stale_ops_001");
-    expect(res.membership.realm).toBe("ops");
   });
 
   it("fails closed with 403 IAP_WORKFORCE_USER_INACTIVE when active control-plane membership has zero durable role bindings", async () => {
@@ -912,10 +844,54 @@ describe("IAPSubjectAdapter", () => {
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
 
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_ops_subject_sec_001",
+        sourceRef: "iap_subject:ops_subject_sec_001",
+        issuer: "google_iap",
+        subject: "ops_subject_sec_001",
+        principalType: "human",
+        email: "operator1@platform.drts",
+        emailVerified: true,
+        displayName: "Operator One",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_ops_subject_sec_001",
+        sourceRef: "iap_membership:ops_subject_sec_001",
+        principalId: "principal_ops_subject_sec_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_ops_subject_sec_001",
+          sourceRef: "rb_ops_subject_sec_001",
+          membershipId: "membership_ops_subject_sec_001",
+          roleCode: "operator",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
     const token = signTestIapToken({
       sub: "ops_subject_sec_001",
       email: "operator1@platform.drts",
-      gcp_ia_groups: ["ops-users@platform.drts"],
     });
 
     const result = await adapter.resolveSubject(
@@ -923,7 +899,6 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
-        autoProvision: true,
       },
     );
 
@@ -1164,8 +1139,6 @@ describe("IAPSubjectAdapter", () => {
     expect(result.membership.realm).toBe("ops");
     expect(result.membership.membershipId).toBe("membership_ops_user_001");
     expect(result.effectiveRoles).toEqual(["ops_user"]);
-    expect(result.driftDetected).toBe(false);
-    expect(result.driftDetails).toBeUndefined();
   });
 
   it("resolves to platform membership for dual-group admin when requestedRealm is omitted, even when ops membership is created first", async () => {
@@ -1288,7 +1261,6 @@ describe("IAPSubjectAdapter", () => {
       "membership_platform_second_001",
     );
     expect(result.effectiveRoles).toEqual(["superadmin"]);
-    expect(result.driftDetected).toBe(false);
   });
 
   it("fails closed when platform realm is requested but platform membership only possesses ops-only durable role bindings", async () => {
@@ -1458,15 +1430,64 @@ describe("IAPSubjectAdapter", () => {
     );
   });
 
+  async function provisionAdminWorkforceIdentity(
+    identityRepo: IdentityRepository,
+  ) {
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_amr_projection_001",
+        sourceRef: "pre_provisioned:admin@platform.drts",
+        issuer: "workforce_directory",
+        subject: "admin@platform.drts",
+        principalType: "human",
+        email: "admin@platform.drts",
+        emailVerified: true,
+        displayName: "Admin",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_amr_projection_001",
+        sourceRef: "pre_provisioned_membership:admin@platform.drts",
+        principalId: "principal_amr_projection_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_amr_projection_001",
+          sourceRef: "rb_amr_projection_001",
+          membershipId: "membership_amr_projection_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+  }
+
   it("projects null authTime, empty amr, and aal1 assurance when assertion has fresh iat but lacks auth_time, amr, and acr", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    await provisionAdminWorkforceIdentity(identityRepo);
 
     const token = signTestIapToken({
       sub: "accounts.google.com:1001",
       email: "admin@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
       iat: Math.floor(Date.now() / 1000), // fresh iat (now)
       // auth_time, amr, acr intentionally omitted
     });
@@ -1476,7 +1497,6 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
-        autoProvision: true,
       },
     );
 
@@ -1489,6 +1509,7 @@ describe("IAPSubjectAdapter", () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    await provisionAdminWorkforceIdentity(identityRepo);
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const staleAuthTimeSeconds = nowSeconds - 7200; // 2 hours ago
@@ -1496,7 +1517,6 @@ describe("IAPSubjectAdapter", () => {
     const token = signTestIapToken({
       sub: "accounts.google.com:1001",
       email: "admin@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
       iat: nowSeconds, // fresh iat
       auth_time: staleAuthTimeSeconds, // stale auth_time
       amr: ["mfa", "totp"],
@@ -1508,11 +1528,12 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
-        autoProvision: true,
       },
     );
 
-    expect(result.authTime).toBe(new Date(staleAuthTimeSeconds * 1000).toISOString());
+    expect(result.authTime).toBe(
+      new Date(staleAuthTimeSeconds * 1000).toISOString(),
+    );
     expect(result.authTime).not.toBe(new Date(nowSeconds * 1000).toISOString());
     expect(result.authMethods).toEqual(["mfa", "totp"]);
     expect(result.assurance).toBe("aal2");
@@ -1522,13 +1543,13 @@ describe("IAPSubjectAdapter", () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+    await provisionAdminWorkforceIdentity(identityRepo);
 
     const nowSeconds = Math.floor(Date.now() / 1000);
 
     const token = signTestIapToken({
       sub: "accounts.google.com:1001",
       email: "admin@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
       iat: nowSeconds,
       auth_time: nowSeconds - 60,
       amr: ["fido2"],
@@ -1540,11 +1561,12 @@ describe("IAPSubjectAdapter", () => {
       {
         expectedAudience: EXPECTED_AUDIENCE,
         jwtSecretOrPublicKey: TEST_SECRET,
-        autoProvision: true,
       },
     );
 
-    expect(result.authTime).toBe(new Date((nowSeconds - 60) * 1000).toISOString());
+    expect(result.authTime).toBe(
+      new Date((nowSeconds - 60) * 1000).toISOString(),
+    );
     expect(result.authMethods).toEqual(["fido2"]);
     expect(result.assurance).toBe("aal2");
   });
