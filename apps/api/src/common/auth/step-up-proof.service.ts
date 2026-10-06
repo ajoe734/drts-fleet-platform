@@ -129,12 +129,38 @@ export class StepUpProofService {
       !mfaTrusted &&
       (identity.realm === "platform" || identity.realm === "ops") &&
       isDevWorkforceMfaWaiverEnabled();
-    if (authTimeMs === null || (!mfaTrusted && !devWaiverApplies)) {
+    if (!mfaTrusted && !devWaiverApplies) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
         reasonCode:
           authTimeMs === null ? "missing_trusted_auth_time" : "mfa_not_trusted",
+        requestId,
+      });
+      throw new ApiRequestError(
+        403,
+        "MFA_REQUIRED",
+        "Trusted multi-factor authentication is required before step-up proof can be issued.",
+        {
+          actionId: policy.actionId,
+          freshnessSeconds: Math.floor(policy.freshnessWindowMs / 1000),
+        },
+      );
+    }
+
+    // Real MFA evidence must still carry its own auth_time so the freshness
+    // window below is meaningful. The dev waiver's "no second factor" grant
+    // is instead anchored to this request's own clock -- it's an explicit,
+    // audited bypass (not fabricated upstream evidence), and it has to be
+    // able to clear a real IAP assertion that carries no auth_time claim at
+    // all, or the waiver would be unusable on the real IAP path it exists
+    // for (ENTRY-IAP-WORKFORCE-AUTH-20261005).
+    const effectiveAuthTimeMs = devWaiverApplies ? Date.now() : authTimeMs;
+    if (effectiveAuthTimeMs === null) {
+      this.recordEvent("step_up.denied", identity, {
+        actionId: policy.actionId,
+        outcome: "denied",
+        reasonCode: "missing_trusted_auth_time",
         requestId,
       });
       throw new ApiRequestError(
@@ -167,7 +193,7 @@ export class StepUpProofService {
       );
     }
 
-    const expiresAtMs = authTimeMs + policy.freshnessWindowMs;
+    const expiresAtMs = effectiveAuthTimeMs + policy.freshnessWindowMs;
     if (Date.now() > expiresAtMs) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
@@ -197,7 +223,7 @@ export class StepUpProofService {
       tenantId: identity.tenantId ?? null,
       issuedAt,
       expiresAt: new Date(expiresAtMs).toISOString(),
-      authTime: identity.authTime!,
+      authTime: identity.authTime ?? new Date(effectiveAuthTimeMs).toISOString(),
       // Truthfully reflect a dev waiver in the proof's own evidence instead
       // of inheriting whatever (possibly empty) amr the identity carried --
       // a proof minted under the waiver must never look like it came from a

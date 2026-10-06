@@ -657,11 +657,19 @@ export async function issueControlPlaneRequestAuth(options: {
   const assertionPresent = Boolean(
     options.headers && extractIapJwtAssertion(options.headers),
   );
+  // Once this deployment has IAP enabled (`options.iapEnabled`), a missing or
+  // unverifiable assertion must never fall back to trusting the raw
+  // x-goog-authenticated-user-email / x-goog-authenticated-user-id headers --
+  // those are exactly what a real IAP strips from untrusted inbound traffic,
+  // but nothing stops a caller that reaches this app directly from setting
+  // them. Only a deployment that has no IAP configured at all (`iapEnabled`
+  // false) may trust them, matching the pre-IAP bootstrap-header behavior.
+  const requireVerifiedAssertion = options.strictIapMode || options.iapEnabled;
   let authenticatedUserEmail: string | null =
     verifiedEmail ||
     extractAuthenticatedUserEmail(options.headers, {
-      ...(options.strictIapMode !== undefined && {
-        strictIapMode: options.strictIapMode,
+      ...(requireVerifiedAssertion !== undefined && {
+        strictIapMode: requireVerifiedAssertion,
       }),
       ...(options.expectedIapAudience !== undefined && {
         expectedAudience: options.expectedIapAudience,
