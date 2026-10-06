@@ -4,8 +4,11 @@ set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
 source_sha=$(git rev-parse "${1:-HEAD}^{commit}")
-mkdir -p "$repo_root/.local/ci-build-cross-app-import"
-context_dir=$(mktemp -d "$repo_root/.local/ci-build-cross-app-import/context.XXXXXX")
+# A supervisor may recreate its isolated worker worktree between dispatches.
+# Allow evidence to live in the canonical checkout's .local/ directory instead.
+evidence_dir=${DRTS_BUILD_EVIDENCE_DIR:-"$repo_root/.local/ci-build-cross-app-import"}
+mkdir -p "$evidence_dir"
+context_dir=$(mktemp -d "$evidence_dir/context.XXXXXX")
 echo "Source: $source_sha"
 echo "Context (retained for inspection): $context_dir"
 
