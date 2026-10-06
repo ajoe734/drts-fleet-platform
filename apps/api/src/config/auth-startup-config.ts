@@ -20,7 +20,6 @@ export interface AuthConfigurationIssue {
   code: AuthIssueCode;
 }
 
-
 export interface AuthStartupConfig {
   environment: AuthEnvironment;
   isStrictEnvironment: boolean;
@@ -200,7 +199,9 @@ export type OrdinaryLoginMfaPolicy = "v1_not_required" | "required";
  *   `step-up-proof.service.ts`, which continue to reject
  *   `tenant_bootstrap_fixture` in production/staging regardless of this flag
  */
-export function isOrdinaryLoginMfaRequired(env: EnvLike = process.env): boolean {
+export function isOrdinaryLoginMfaRequired(
+  env: EnvLike = process.env,
+): boolean {
   const override = normalizeString(
     env.AUTH_REQUIRE_ORDINARY_LOGIN_MFA,
   )?.toLowerCase();

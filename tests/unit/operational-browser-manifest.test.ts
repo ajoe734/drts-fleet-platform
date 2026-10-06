@@ -200,9 +200,10 @@ describe("operational browser journeys manifest guard", () => {
     const anchorAttributesFor = (filePath: string, marker: string) => {
       const source = readFileSync(path.join(process.cwd(), filePath), "utf8");
       const markerIndex = source.indexOf(marker);
-      expect(markerIndex, `${marker} must exist in ${filePath}`).toBeGreaterThan(
-        -1,
-      );
+      expect(
+        markerIndex,
+        `${marker} must exist in ${filePath}`,
+      ).toBeGreaterThan(-1);
       const tagStart = source.lastIndexOf("<a", markerIndex);
       const tagEnd = source.indexOf(">", markerIndex);
       expect(tagStart).toBeGreaterThan(-1);

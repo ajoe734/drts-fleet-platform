@@ -44,6 +44,7 @@ const activeServices = [
 ] as const;
 const pausedService = "drts-dev-partner-booking-web";
 const retiredService = "drts-passenger-web";
+const scannerService = "drts-dev-scanner";
 
 function runCleanup(inventory: readonly string[]) {
   const directory = mkdtempSync(path.join(tmpdir(), "paused-service-test-"));
@@ -204,8 +205,10 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
   });
 
   it.each([
-    ["without the retired service", activeServices],
-    ["with the retired service", [...activeServices, retiredService]],
+    ["with no optional services", activeServices],
+    ["with only the retired service", [...activeServices, retiredService]],
+    ["with only the scanner", [...activeServices, scannerService]],
+    ["with both optional services", [...activeServices, retiredService, scannerService]],
   ])("deletes only Partner Booking %s", (_label, baseInventory) => {
     const result = runCleanup([pausedService, ...[...baseInventory].reverse()]);
 
@@ -217,8 +220,10 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
   });
 
   it.each([
-    ["without the retired service", activeServices],
-    ["with the retired service", [...activeServices, retiredService]],
+    ["with no optional services", activeServices],
+    ["with only the retired service", [...activeServices, retiredService]],
+    ["with only the scanner", [...activeServices, scannerService]],
+    ["with both optional services", [...activeServices, retiredService, scannerService]],
   ])("is idempotent when Partner Booking is absent %s", (_label, inventory) => {
     const result = runCleanup(inventory);
 
