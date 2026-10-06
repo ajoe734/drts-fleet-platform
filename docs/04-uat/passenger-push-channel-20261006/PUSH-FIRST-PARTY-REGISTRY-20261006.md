@@ -26,10 +26,10 @@
   2. 現有 active 列屬於**同一乘客** → 冪等重註冊，只更新 `app_version`/`notification_consent_version`，不新建列、不 revoke。
   3. 現有 active 列屬於**不同乘客** → 转绑：舊列 `status='revoked', status_reason='rebound_to_new_passenger'`，新列 insert。
   - **token 輪替**走獨立路徑：呼叫端帶 `previousDeviceId`（它自己之前拿到的 device_id），該列被 revoke（`status_reason='token_rotated'`），新 token 的新列照常 insert。這是本 task 自行設計的內部指令形狀（common.md 只說「token 輪替時舊的 revoked」，沒有規定呼叫介面；D4 的 HTTP 契約草案本身也還沒定案，本波不開 HTTP），採這個形狀的原因：`token_sha256` 换了就不可能靠 hash 對應回舊列，只有呼叫端自己知道「這是我之前那個 device_id 在换 token」。
-- **10 台上限**在同一交易內、插入新列**之後**執行：依 `last_seen_at ASC NULLS FIRST, registered_at ASC` 找出第 11 筆起的 active 列並 revoke（`status_reason='active_device_cap_exceeded'`）。新插入的列 `last_seen_at` 恆為 NULL，但在"nulls first"排序下不會被自己擠掉，因為 `OFFSET 10` 之後才是待砍對象，新列若落在前 10 名內自然不受影響；若乘客原本已有 10 台全 active 且全部 `last_seen_at` 也是 NULL（都没 touch 过），`registered_at ASC` 作為 tie-break 保證砍的是最舊註冊的那筆,不是新插入的。
+- ~~**10 台上限**在同一交易內、插入新列**之後**執行：依 `last_seen_at ASC NULLS FIRST, registered_at ASC` 找出第 11 筆起的 active 列並 revoke（`status_reason='active_device_cap_exceeded'`）。新插入的列 `last_seen_at` 恆為 NULL，但在"nulls first"排序下不會被自己擠掉，因為 `OFFSET 10` 之後才是待砍對象，新列若落在前 10 名內自然不受影響；若乘客原本已有 10 台全 active 且全部 `last_seen_at` 也是 NULL（都没 touch 过），`registered_at ASC` 作為 tie-break 保證砍的是最舊註冊的那筆,不是新插入的。~~ **【此段排序方向判斷錯誤，已由 reviewer Codex F1 抓出並於第 1 輪退修修正，見下方「第 1 輪退修」F1。正確排序是 `ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC OFFSET 10`，保留最近使用/最近註冊的 10 筆，`OFFSET` 之後才是待撤銷對象；且 `registerDevice` 現在會在 cap 執行後重讀該列再回傳，不再可能回報失真的 active 狀態。】**
 - **`resolveActiveDevices`** 要求 `last_seen_at IS NOT NULL AND last_seen_at >= now() - 60 days`——嚴格對應 common.md「只回 status=active 且 60 天內有 last_seen 的裝置」，而非「60 天內 OR 從未 touch」。
 - **`writeFirstPartyRoute` 互斥**：同一交易先查 `mobility.phase1_order_partner_notification_routes`，有則整段 `ROLLBACK` 並回 `rejected_partner_route_exists`，**不寫**第一方表。冪等判定逐欄比對（`tenantId`/`drtsPassengerId`/`passengerSubjectRef`/`appId`/`consentVersion`/`rideRef`）；全部相同才算 replay,否則 `rejected_content_mismatch`。
-- **Token 隱私邊界**：repository 全程沒有任何 `Logger`/`console.*` 呼叫（見下方隔離測試），回傳的 `PassengerPushDeviceRecord` 只含 `tokenSha256`,不含 `token`；拋出的錯誤訊息（例如 DB 違規)直接轉傳原始 `Error`,不額外拼接任何欄位值,故不會意外把 token 塞進訊息字串。
+- **Token 隱私邊界**：repository 全程沒有任何 `Logger`/`console.*` 呼叫（見下方隔離測試），回傳的 `PassengerPushDeviceRecord` 只含 `tokenSha256`,不含 `token`；~~拋出的錯誤訊息（例如 DB 違規)直接轉傳原始 `Error`,不額外拼接任何欄位值,故不會意外把 token 塞進訊息字串。~~ **【此段忽略了 pg 錯誤物件本身的 `.detail`/`.hint` 等欄位可能內嵌違規列內容（含 token），已由 reviewer Codex F3 以函式層 fault probe 證實逸出，並於第 1 輪退修修正：所有裝置/路由 mutation 的 catch 區塊改丟 `PassengerPushDeviceOperationError`（只保留 `.code`），見下方「第 1 輪退修」F3。】**
 
 ## 驗收項對照（§0.7 格式）
 
@@ -71,7 +71,48 @@ pnpm exec tsc -p apps/api/tsconfig.json --noEmit
 2. 未啟動完整 Nest 應用驗證 `PassengerPushDevicesModule` 真的能被 `AppModule` boot（本機 `@nestjs/throttler` symlink 缺失，見上）；已用純文字/靜態檢查確認 DI 宣告本身的形狀正確（`@Module` decorator、providers/exports 陣列）。
 3. CI 尚未觸發（本輪尚未 push）；reviewer 需待新 SHA 的 hosted CI 結果。
 
+## 第 1 輪退修（reviewer Codex reopen，2026-10-06T14:33:44Z，candidate ffb60ab8b562）
+
+Codex 核對候選 `ffb60ab8b562f0861403144dfb33a777452a6ad5`（PR #2358）後 reopen，列出 F1–F4，本輪逐項修復如下。全部改動只落在 `apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository.ts` 與對應測試，schema/migration 本身未變。
+
+| # | Finding 摘要 | 修正位置 | 修正內容 | 回歸測試 |
+|---|---|---|---|---|
+| F1 [P2] | `enforceActiveDeviceCap` 排序方向相反：`ORDER BY last_seen_at ASC NULLS FIRST, registered_at ASC OFFSET 10` 保留最舊、撤銷最新；全 NULL 情境下新插入裝置會被立即 revoke，但 `registerDevice` 回傳的 `resultRow` 卻仍標示 active | `passenger-push-devices.repository.ts` `enforceActiveDeviceCap`（排序）與 `registerDevice`（回傳前重讀） | 1) 排序改為 `ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC OFFSET 10`：保留的是 N 筆「最近使用/最近註冊」的裝置，`OFFSET` 之後才是待撤銷的 overflow（最久未 seen 排最後、NULLS LAST 讓從未 touch 過的裝置排在已 seen 裝置之後，符合 docstring「nulls 視為最舊、優先撤銷」）。2) `enforceActiveDeviceCap` 執行後，`registerDevice` 一律重新以 `device_id` 讀回該裝置目前的真實狀態再回傳，不管 cap 是否剛好撤銷了這次異動本身的那一列，都不會回報失真的 `active` | 新增 `apps/api/tests/unit/passenger-push-devices.repository.test.ts`：「F1: keeps the most-recently-seen devices and revokes the least-recently-seen overflow (not the newest)」斷言 SQL 文字為 `ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC` 且撤銷的是 `device-oldest-seen`（非新裝置）；「F1: when the cap enforcement revokes the row this very call just touched, the returned record reflects revoked ...」用 mock 模擬 cap 剛好撤銷本次異動的列，斷言回傳 `status: "revoked"` 而非過期的 `active` 快照 |
+| F2 [P2] | `registerDevice` 未序列化同一乘客的並行登錄：兩個並行交易各自 `SELECT ... FOR UPDATE` 查不到對方未 commit 的列，各自 insert 後各自做 cap 檢查，只看見自己視角的計數，可共同突破 10 台上限；同 token 同時首次登錄其中一方會撞 23505 而非走 upsert 分支 | `passenger-push-devices.repository.ts` `registerDevice`，`BEGIN` 之後、任何列鎖之前 | 加入 `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`，鎖鍵為 `` `passenger-push-device-register:${drtsPassengerId}` ``：序列化同一乘客的所有並行 `registerDevice` 交易（第二個呼叫會等到第一個 COMMIT/ROLLBACK 才繼續，屆時看到的是已提交的裝置數與列狀態），消除 cap 計數競態，也讓同乘客同 token 並行重放改走既有的「同乘客 active 列→更新」分支而非並行 INSERT 衝突。鎖只在交易內持有（`pg_advisory_xact_lock`，非 `_lock`），交易結束自動釋放；單一鎖鍵、在任何列鎖之前取得，不會造成鎖序死鎖 | 新增「F2: serializes registerDevice for a passenger behind a transaction-scoped advisory lock before any row lock」：斷言呼叫序列中 `BEGIN` → `pg_advisory_xact_lock`（鎖鍵含 `passenger-001`）→ `FOR UPDATE` 的相對順序 |
+| F3 [P1] | 交易失敗時 `throw error` 原樣拋出 pg 錯誤物件；pg 的 CHECK/唯一鍵違反等錯誤的 `.detail` 可能包含 `Failing row contains (...)`，內含 token/token_sha256/passenger_subject_ref 等敏感值，`util.inspect` 會印出整個物件（含 `.detail`），不是只看 `.message` 就安全 | `passenger-push-devices.repository.ts`：新增 `PassengerPushDeviceOperationError` 類別與 `toSafeOperationError()`；`registerDevice` 與 `writeFirstPartyRoute` 的 `catch` 區塊都改成 `throw toSafeOperationError(error)` | 任何 DB 錯誤一律被換成全新的 `PassengerPushDeviceOperationError`：固定訊息 `"passenger_push_device_operation_failed"`，只保留 pg 錯誤的 `.code`（錯誤分類碼，非敏感），不帶原始 `.message`/`.detail`/`.hint`/`.cause`/`.stack`。因為是全新物件而非在原物件上 delete 欄位，`util.inspect()` 對外層物件的輸出也不會殘留任何原始欄位 | 新增兩則：`registerDevice` 的「F3: never lets a raw token leak through a DB error's message/detail/cause, even via util.inspect」（mock pg 23514 + `detail` 含真實 raw token，斷言 `util.inspect(caught)` 與 `.message` 都不含 token，且是 `PassengerPushDeviceOperationError` 實例）；`writeFirstPartyRoute` 的「F3: sanitizes a raw DB error on writeFirstPartyRoute too, never surfacing detail/cause」（mock 23505 + `detail` 含 `passenger_subject_ref`，同樣斷言不洩漏且保留 `.code`）。原本「rolls back and rethrows...」測試改寫為「rolls back and rethrows a sanitized error, never the raw DB error object」，斷言改成 `toMatchObject({ message: "passenger_push_device_operation_failed", code: "23505" })` |
+| F4 [P2] | `writeFirstPartyRoute` 對同一 `order_id` 尚無既有列時，並行重放會一起通過 partner 檢查與空的 `FOR UPDATE`（沒有列可鎖），各自嘗試 INSERT：先到者成功，後到者撞 `order_id` 主鍵違反而非被判定為 idempotent replay/content mismatch | `passenger-push-devices.repository.ts` `writeFirstPartyRoute`，`BEGIN` 之後、`FOR UPDATE` 之前 | 加入 `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`，鎖鍵為 `` `passenger-push-first-party-route:${orderId}` ``：序列化同一 order 的所有並行寫入，第二個呼叫會等第一個 COMMIT 後才執行 `FOR UPDATE`，此時能讀到第一個已提交的列，走既有的逐欄比對（`idempotent_replay`/`rejected_content_mismatch`）而不是裸 INSERT 衝突 | 新增「F4: serializes writeFirstPartyRoute for an order_id behind a transaction-scoped advisory lock before the FOR UPDATE read」（斷言 `BEGIN` → 鎖（含 `order-001`）→ `FOR UPDATE` 順序）與「F4: a concurrent second writer for the same never-yet-routed order sees the first writer's committed row instead of racing a PK-violation INSERT」（模擬序列化後第二個寫入者看到第一個已提交列，走 `idempotent_replay`，全程未出現 INSERT） |
+
+### 本輪本機驗證指令與結果
+
+```
+pnpm --filter @drts/contracts build                                                                  # exit 0
+pnpm exec vitest run tests/unit/push-first-party-registry-20261006/                                  # 1 file, 11 passed, exit 0
+pnpm exec vitest run tests/unit/push-first-party-registry-20261006/push-first-party-registry-20261006.test.ts \
+  tests/unit/push-channel-sd-20261006/push-channel-sd-20261006.test.ts \
+  tests/unit/system-remediation/sr-recovery-contracts-20260911/sr-recovery-contracts-20260911.test.ts \
+  tests/unit/system-remediation/sr-partner-notify-route-20260917/multi-taxi-order-partner-notification-route.test.ts \
+  --maxWorkers=1                                                                                      # 4 files, 72 passed, exit 0（未破壞上游/相鄰 task）
+# apps/api 套件測試：symlink 問題依舊存在（見下「環境備忘」延續），沿用同樣的臨時 alias config 繞過，
+# 驗證後已用 find -delete 清除，未落地到 git：
+pnpm exec vitest run --config <alias-config> apps/api/tests/unit/passenger-push-devices.repository.test.ts apps/api/tests/unit/multi-taxi.repository.test.ts
+                                                                                                        # 2 files, 28 passed (21 + 7), exit 0
+cd apps/api && pnpm exec tsc -p tsconfig.json --noEmit
+                                                                                                        # 本模組新增/修改程式碼 0 新增型別錯誤；僅剩環境既有的 `pg` 型別宣告缺失
+                                                                                                        # （exactOptionalPropertyTypes 下 PassengerPushDeviceOperationError.code 一度報 TS2412，
+                                                                                                        #   已改宣告為 `string | undefined`（非 `?:`）修正，非 pre-existing 問題）
+pnpm exec eslint src/modules/passenger-push-devices tests/unit/passenger-push-devices.repository.test.ts --max-warnings=0
+                                                                                                        # exit 0
+```
+
+21 則新 `passenger-push-devices.repository.test.ts` 測試：原 14 則中 1 則（DB 錯誤 rethrow）因 F3 改寫為符合新行為的斷言，其餘 13 則原樣通過；新增 7 則（F1×2、F2×1、F3×1 於 registerDevice；F4×2、F3×1 於 writeFirstPartyRoute）。`tests/unit/push-first-party-registry-20261006/` 11 則（schema/isolation 靜態檢查）不受本輪改動影響，原樣通過。
+
+### 未變更/未新驗項目
+
+- Migration 本身（`infra/migrations/V0107__...sql`）、schema 欄位/CHECK/索引：本輪未改動，沿用上一輪驗收結果。
+- 仍未對真實 Postgres 執行本 migration 或這些並行/排序修正（`pg_advisory_xact_lock` 的真實鎖等待行為、`OFFSET` 排序在真實資料上的結果）——按 common.md 分工，PG 實測留給 `PUSH-CHANNEL-PG-QA-20261006`；本輪的並行/排序修正證據仍是**靜態程式碼修正 + mock-DB 單元測試**，與上一輪 reviewer 對「未冒稱 PG 實測」的提醒一致，此處同樣不冒稱。
+- CI：本輪尚未 push 新 candidate SHA，hosted CI 待新 SHA 產生後觸發，reviewer 需待讀取新 SHA 的結果。
+
 ## candidate
 
-- `CANDIDATE_SHA`：待 commit 後由 `git rev-parse HEAD` 取得。
+- `CANDIDATE_SHA`：待 commit 後由 `git rev-parse HEAD` 取得（本輪退修後的新 SHA，取代 `ffb60ab8b562`）。
 - `CANDIDATE_BRANCH`：`claude2/push-first-party-registry-20261006`

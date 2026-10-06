@@ -76,6 +76,33 @@ type FirstPartyRouteRow = QueryResultRow & {
   created_at: Date | string;
 };
 
+/**
+ * F3 rework (PUSH-FIRST-PARTY-REGISTRY-20261006, reviewer Codex reopen
+ * 2026-10-06): a raw pg error's `detail`/`message` can embed the failing
+ * row's content (token, token_sha256) — e.g. a CHECK-constraint violation's
+ * `detail` is "Failing row contains (...)". `throw error` surfaced that
+ * whole object (including `.detail`) to the caller. Every device/route
+ * mutation now throws this instead: it keeps the pg error `code` (useful,
+ * never sensitive) but drops `message`/`detail`/`hint`/`cause` entirely.
+ */
+export class PassengerPushDeviceOperationError extends Error {
+  readonly code: string | undefined;
+
+  constructor(code?: string) {
+    super("passenger_push_device_operation_failed");
+    this.name = "PassengerPushDeviceOperationError";
+    this.code = code;
+  }
+}
+
+function toSafeOperationError(error: unknown): Error {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : undefined;
+  return new PassengerPushDeviceOperationError(code);
+}
+
 function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
 }
@@ -171,6 +198,18 @@ export class PassengerPushDevicesRepository {
     try {
       await client.query("BEGIN");
 
+      // F2 rework: serialize every registerDevice call for this passenger
+      // behind one transaction-scoped advisory lock, acquired before any
+      // row lock, so concurrent registrations for the same passenger can
+      // never both observe the pre-cap active-device count and together
+      // push it past FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER, and
+      // a same-token concurrent replay never races a plain INSERT into a
+      // unique-violation instead of taking the idempotent-update branch.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`passenger-push-device-register:${command.drtsPassengerId}`],
+      );
+
       if (command.previousDeviceId) {
         await client.query(
           `
@@ -249,11 +288,23 @@ export class PassengerPushDevicesRepository {
 
       await this.enforceActiveDeviceCap(client, command.drtsPassengerId);
 
+      // F1 rework: enforceActiveDeviceCap may have just revoked `resultRow`
+      // itself (it is the active row currently holding the oldest
+      // last_seen_at/registered_at among the passenger's active devices).
+      // Re-read it by device_id so the returned record always reflects the
+      // state actually persisted, instead of the pre-cap row fetched by
+      // the UPDATE/INSERT above.
+      const final = await client.query<DeviceRow>(
+        `SELECT ${DEVICE_COLUMNS} FROM iam.phase1_passenger_push_devices WHERE device_id = $1`,
+        [resultRow.device_id],
+      );
+      resultRow = final.rows[0] ?? resultRow;
+
       await client.query("COMMIT");
       return this.mapDeviceRow(resultRow);
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
+      throw toSafeOperationError(error);
     } finally {
       client.release();
     }
@@ -262,9 +313,21 @@ export class PassengerPushDevicesRepository {
   /**
    * D4 — a passenger may have at most
    * `FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER` active devices;
-   * past that, the least-recently-seen active device is revoked
-   * (nulls — never touched — sort as oldest). Must run inside the same
-   * transaction as the insert that could have pushed the count over.
+   * past that, the least-recently-seen active device is revoked (nulls —
+   * never touched — sort as oldest, i.e. first to be revoked). Must run
+   * inside the same transaction as the insert that could have pushed the
+   * count over.
+   *
+   * F1 rework: this used to `ORDER BY last_seen_at ASC NULLS FIRST,
+   * registered_at ASC OFFSET N` and revoke the *offset* rows — that kept
+   * the N oldest/never-seen devices and revoked the N+1th-and-later most
+   * *recently* seen ones, the exact opposite of the intended policy, and
+   * could immediately revoke the device just inserted by this same call
+   * (any brand-new device sorts last among NULL last_seen_at rows by
+   * registered_at ASC). The fix orders newest/most-recently-seen first
+   * (NULLS LAST, so untouched devices rank behind every touched one, per
+   * the "nulls sort as oldest" rule) and takes the OFFSET tail as the
+   * overflow to revoke — the N most-recently-used devices are always kept.
    */
   private async enforceActiveDeviceCap(
     client: Pick<DatabaseService, "query">,
@@ -275,7 +338,7 @@ export class PassengerPushDevicesRepository {
         SELECT device_id
         FROM iam.phase1_passenger_push_devices
         WHERE drts_passenger_id = $1 AND status = 'active'
-        ORDER BY last_seen_at ASC NULLS FIRST, registered_at ASC
+        ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC
         OFFSET $2
       `,
       [drtsPassengerId, FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER],
@@ -419,6 +482,20 @@ export class PassengerPushDevicesRepository {
     try {
       await client.query("BEGIN");
 
+      // F4 rework: serialize concurrent writes for this order_id behind
+      // one transaction-scoped advisory lock, acquired before the
+      // `FOR UPDATE` row lock below (which locks nothing when no row
+      // exists yet — two concurrent first writes for the same order both
+      // used to pass the partner check and the empty `FOR UPDATE`, then
+      // race a plain INSERT: one succeeds, the other hits the order_id
+      // primary-key violation instead of being compared and treated as an
+      // idempotent replay). With the lock, the second call blocks until
+      // the first commits, then actually sees the just-inserted row.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`passenger-push-first-party-route:${command.orderId}`],
+      );
+
       const partnerRoute = await client.query(
         `SELECT order_id FROM mobility.phase1_order_partner_notification_routes WHERE order_id = $1`,
         [command.orderId],
@@ -481,7 +558,7 @@ export class PassengerPushDevicesRepository {
       return { outcome: "created", route: this.mapRouteRow(inserted.rows[0]!) };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
+      throw toSafeOperationError(error);
     } finally {
       client.release();
     }

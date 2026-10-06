@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
+import * as util from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { PassengerPushDevicesRepository } from "../../src/modules/passenger-push-devices/passenger-push-devices.repository";
+import {
+  PassengerPushDeviceOperationError,
+  PassengerPushDevicesRepository,
+} from "../../src/modules/passenger-push-devices/passenger-push-devices.repository";
 
 function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -293,13 +297,15 @@ describe("PassengerPushDevicesRepository.registerDevice", () => {
     expect(revokeCall![1]).toEqual([["device-stale"]]);
   });
 
-  it("rolls back and rethrows without swallowing the error, never including the raw token", async () => {
+  it("rolls back and rethrows a sanitized error, never the raw DB error object", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
         return { rows: [] };
       }
       if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
-        throw new Error("unique_violation on token_sha256");
+        throw Object.assign(new Error("unique_violation on token_sha256"), {
+          code: "23505",
+        });
       }
       return { rows: [] };
     });
@@ -309,11 +315,247 @@ describe("PassengerPushDevicesRepository.registerDevice", () => {
       connect: vi.fn().mockResolvedValue({ query, release }),
     } as never);
 
-    await expect(repository.registerDevice(baseCommand())).rejects.toThrow(
-      "unique_violation on token_sha256",
-    );
+    await expect(repository.registerDevice(baseCommand())).rejects.toMatchObject({
+      message: "passenger_push_device_operation_failed",
+      code: "23505",
+    });
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("F3: never lets a raw token leak through a DB error's message/detail/cause, even via util.inspect", async () => {
+    const rawToken = "raw-fcm-token-must-never-be-logged";
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+        throw Object.assign(new Error("new row violates check constraint"), {
+          code: "23514",
+          detail: `Failing row contains (${rawToken}).`,
+        });
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    let caught: unknown;
+    try {
+      await repository.registerDevice(baseCommand({ token: rawToken }));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(PassengerPushDeviceOperationError);
+    expect(util.inspect(caught)).not.toContain(rawToken);
+    expect((caught as Error).message).not.toContain(rawToken);
+  });
+
+  it("F2: serializes registerDevice for a passenger behind a transaction-scoped advisory lock before any row lock", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+        return {
+          rows: [
+            {
+              device_id: "device-001",
+              drts_passenger_id: "passenger-001",
+              platform: "ios",
+              provider: "fcm_v1",
+              app_id: "app-first-party-001",
+              app_version: "1.0.0",
+              token_sha256: sha256("raw-fcm-token-must-never-be-logged"),
+              status: "active",
+              status_reason: null,
+              notification_consent_version: "v1",
+              registered_at: "2026-10-06T00:00:00.000Z",
+              last_seen_at: null,
+              invalidated_at: null,
+              created_at: "2026-10-06T00:00:00.000Z",
+              updated_at: "2026-10-06T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    await repository.registerDevice(baseCommand());
+
+    const calls = query.mock.calls.map(([sql]) => sql as string);
+    const beginIndex = calls.indexOf("BEGIN");
+    const lockIndex = calls.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
+    const forUpdateIndex = calls.findIndex((sql) => sql.includes("FOR UPDATE"));
+    expect(beginIndex).toBe(0);
+    expect(lockIndex).toBeGreaterThan(beginIndex);
+    expect(lockIndex).toBeLessThan(forUpdateIndex);
+    const lockCall = query.mock.calls[lockIndex];
+    expect(lockCall[1]).toEqual(["passenger-push-device-register:passenger-001"]);
+  });
+
+  it("F1: keeps the most-recently-seen devices and revokes the least-recently-seen overflow (not the newest)", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+        return {
+          rows: [
+            {
+              device_id: "device-new",
+              drts_passenger_id: "passenger-001",
+              platform: "ios",
+              provider: "fcm_v1",
+              app_id: "app-first-party-001",
+              app_version: "1.0.0",
+              token_sha256: sha256("raw-fcm-token-must-never-be-logged"),
+              status: "active",
+              status_reason: null,
+              notification_consent_version: "v1",
+              registered_at: "2026-10-06T00:00:00.000Z",
+              last_seen_at: null,
+              invalidated_at: null,
+              created_at: "2026-10-06T00:00:00.000Z",
+              updated_at: "2026-10-06T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      if (sql.includes("ORDER BY last_seen_at")) {
+        expect(sql).toContain("ORDER BY last_seen_at DESC NULLS LAST, registered_at DESC");
+        return { rows: [{ device_id: "device-oldest-seen" }] };
+      }
+      if (
+        sql.includes("SELECT") &&
+        sql.includes("WHERE device_id = $1") &&
+        !sql.includes("FOR UPDATE")
+      ) {
+        return {
+          rows: [
+            {
+              device_id: "device-new",
+              drts_passenger_id: "passenger-001",
+              platform: "ios",
+              provider: "fcm_v1",
+              app_id: "app-first-party-001",
+              app_version: "1.0.0",
+              token_sha256: sha256("raw-fcm-token-must-never-be-logged"),
+              status: "active",
+              status_reason: null,
+              notification_consent_version: "v1",
+              registered_at: "2026-10-06T00:00:00.000Z",
+              last_seen_at: null,
+              invalidated_at: null,
+              created_at: "2026-10-06T00:00:00.000Z",
+              updated_at: "2026-10-06T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    const result = await repository.registerDevice(baseCommand());
+
+    expect(result.deviceId).toBe("device-new");
+    expect(result.status).toBe("active");
+
+    const revokeCall = query.mock.calls.find(
+      ([sql]) => (sql as string).includes("status_reason = 'active_device_cap_exceeded'"),
+    );
+    expect(revokeCall![1]).toEqual([["device-oldest-seen"]]);
+  });
+
+  it("F1: when the cap enforcement revokes the row this very call just touched, the returned record reflects revoked — not the stale pre-cap active snapshot", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+        return {
+          rows: [
+            {
+              device_id: "device-new",
+              drts_passenger_id: "passenger-001",
+              platform: "ios",
+              provider: "fcm_v1",
+              app_id: "app-first-party-001",
+              app_version: "1.0.0",
+              token_sha256: sha256("raw-fcm-token-must-never-be-logged"),
+              status: "active",
+              status_reason: null,
+              notification_consent_version: "v1",
+              registered_at: "2026-10-06T00:00:00.000Z",
+              last_seen_at: null,
+              invalidated_at: null,
+              created_at: "2026-10-06T00:00:00.000Z",
+              updated_at: "2026-10-06T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      if (sql.includes("ORDER BY last_seen_at")) {
+        // Simulate the device just inserted by this call ending up as part
+        // of the overflow anyway (e.g. an older row raced last_seen_at
+        // past it between INSERT and the cap check).
+        return { rows: [{ device_id: "device-new" }] };
+      }
+      if (
+        sql.includes("SELECT") &&
+        sql.includes("WHERE device_id = $1") &&
+        !sql.includes("FOR UPDATE")
+      ) {
+        return {
+          rows: [
+            {
+              device_id: "device-new",
+              drts_passenger_id: "passenger-001",
+              platform: "ios",
+              provider: "fcm_v1",
+              app_id: "app-first-party-001",
+              app_version: "1.0.0",
+              token_sha256: sha256("raw-fcm-token-must-never-be-logged"),
+              status: "revoked",
+              status_reason: "active_device_cap_exceeded",
+              notification_consent_version: "v1",
+              registered_at: "2026-10-06T00:00:00.000Z",
+              last_seen_at: null,
+              invalidated_at: null,
+              created_at: "2026-10-06T00:00:00.000Z",
+              updated_at: "2026-10-06T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    const result = await repository.registerDevice(baseCommand());
+
+    expect(result.deviceId).toBe("device-new");
+    expect(result.status).toBe("revoked");
+    expect(result.statusReason).toBe("active_device_cap_exceeded");
   });
 });
 
@@ -579,5 +821,125 @@ describe("PassengerPushDevicesRepository.writeFirstPartyRoute", () => {
     );
     expect(result).toEqual({ outcome: "rejected_content_mismatch" });
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+  });
+
+  it("F4: serializes writeFirstPartyRoute for an order_id behind a transaction-scoped advisory lock before the FOR UPDATE read", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("mobility.phase1_order_partner_notification_routes")) {
+        return { rows: [] };
+      }
+      if (sql.includes("FOR UPDATE")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO mobility.phase1_order_first_party_notification_routes")) {
+        return {
+          rows: [
+            {
+              order_id: "order-001",
+              tenant_id: "tenant-001",
+              drts_passenger_id: "passenger-001",
+              passenger_subject_ref: "subj-001",
+              app_id: "app-001",
+              notification_policy_version: "first_party_notification_v1",
+              consent_version: "v1",
+              ride_ref: "ride-001",
+              created_at: "2026-10-06T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    await repository.writeFirstPartyRoute(routeCommand());
+
+    const calls = query.mock.calls.map(([sql]) => sql as string);
+    const beginIndex = calls.indexOf("BEGIN");
+    const lockIndex = calls.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
+    const forUpdateIndex = calls.findIndex((sql) => sql.includes("FOR UPDATE"));
+    expect(beginIndex).toBe(0);
+    expect(lockIndex).toBeGreaterThan(beginIndex);
+    expect(lockIndex).toBeLessThan(forUpdateIndex);
+    const lockCall = query.mock.calls[lockIndex];
+    expect(lockCall[1]).toEqual(["passenger-push-first-party-route:order-001"]);
+  });
+
+  it("F4: a concurrent second writer for the same never-yet-routed order sees the first writer's committed row instead of racing a PK-violation INSERT", async () => {
+    // Models the serialized outcome the advisory lock produces: by the time
+    // writer B's transaction runs its FOR UPDATE select, writer A has
+    // already committed, so B observes the row A inserted and takes the
+    // idempotent-replay/content-mismatch branch instead of attempting a
+    // second INSERT into the same order_id primary key.
+    const insertedByWriterA = {
+      order_id: "order-001",
+      tenant_id: "tenant-001",
+      drts_passenger_id: "passenger-001",
+      passenger_subject_ref: "subj-001",
+      app_id: "app-001",
+      notification_policy_version: "first_party_notification_v1",
+      consent_version: "v1",
+      ride_ref: "ride-001",
+      created_at: "2026-10-06T00:00:00.000Z",
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("mobility.phase1_order_partner_notification_routes")) {
+        return { rows: [] };
+      }
+      if (sql.includes("FOR UPDATE")) {
+        return { rows: [insertedByWriterA] };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    const writerBResult = await repository.writeFirstPartyRoute(routeCommand());
+
+    expect(writerBResult.outcome).toBe("idempotent_replay");
+    const sql = query.mock.calls.map(([statement]) => statement).join("\n");
+    expect(sql).not.toContain("INSERT INTO mobility.phase1_order_first_party_notification_routes");
+  });
+
+  it("F3: sanitizes a raw DB error on writeFirstPartyRoute too, never surfacing detail/cause", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("mobility.phase1_order_partner_notification_routes")) {
+        return { rows: [] };
+      }
+      if (sql.includes("FOR UPDATE")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO mobility.phase1_order_first_party_notification_routes")) {
+        throw Object.assign(new Error("duplicate key value violates unique constraint"), {
+          code: "23505",
+          detail: 'Key (order_id)=(order-001) already exists, passenger_subject_ref=(subj-001).',
+        });
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    let caught: unknown;
+    try {
+      await repository.writeFirstPartyRoute(routeCommand());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(PassengerPushDeviceOperationError);
+    expect(util.inspect(caught)).not.toContain("subj-001");
+    expect((caught as Error).message).toBe("passenger_push_device_operation_failed");
+    expect((caught as { code?: string }).code).toBe("23505");
   });
 });
