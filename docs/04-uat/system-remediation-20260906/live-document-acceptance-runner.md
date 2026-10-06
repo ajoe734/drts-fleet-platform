@@ -143,7 +143,7 @@ During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against current candidat
 | **R6** | Unauthenticated requests accepted as role-negative evidence. | Rejected blank/invalid/forged sessions with UNAUTHENTICATED; proved genuine authenticated viewer through introspection; validated cross-tenant 404 NOT_FOUND; validated `x-drts-candidate-sha`. |
 | **R7** | Unsupported platform application authority/ingress. | Enumerated unavailable IAP authority instead of inventing cookies. Validated that WIF Cloud Run admission without IAP JWT assertion is appropriately rejected in strict mode. |
 | **R8** | Newly enabled push workflow always fails before checkout (missing SHA). | Workflow `push` trigger uses `github.sha` while `workflow_dispatch` uses inputs, restoring immutable push SHA binding without hardcoded fallbacks. |
-| **R10** | Actual trailer validation fails; CI bypasses gate. | Restored applicable gate enforcement by removing `auto-publish` label (performed via recovery recipe). |
+| **R10** | Actual trailer validation fails; CI bypasses gate. | Pending Supervisor history-recovery recipe to preserve history while passing trailer checks. |
 | **R12** | Required independent verification removed. | Restored required unchanged independent tool invocation via `child_process.spawnSync` to call `verify_artifact.py`, failing closed on missing evidence. |
 | **R9** | Repository classification CI failure introduced by scratch file. | Extraneous `scratch.js` removed to unblock required repository classification checks. |
 
@@ -161,7 +161,7 @@ The following specific missing role session cookies trigger a non-zero fail-clos
 
 ### Execution Evidence
 
-Runner validation executes identically using the current immutable PR candidate SHA (`2622d88d066513226515bf70ef8ed689f4264dad` / `$CANDIDATE_SHA`) to verify resolution (note: pending hosted live verification).
+Runner validation executes identically using the current immutable PR candidate SHA (`96368eb57706719b92c3b1fe1f567c3642cf9365` / `$CANDIDATE_SHA`) to verify resolution (note: pending hosted live verification).
 
 ```sh
 pnpm exec vitest run tests/unit/system-remediation/sr-live-doc-001/ tests/e2e/system-remediation/sr-live-doc-001/ --no-file-parallelism --maxConcurrency=1

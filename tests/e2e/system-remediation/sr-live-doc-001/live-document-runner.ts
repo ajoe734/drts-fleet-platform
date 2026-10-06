@@ -204,7 +204,7 @@ export function runIndependentBankVerifier(
     }
 
     if (
-      stdout.includes("TAMPERED") || 
+      stdout.includes("TAMPERED") ||
       stdout.includes("FAILED (TAMPERED)") ||
       stdout.includes("OpenSSL Signature Verification: FAILED")
     ) {

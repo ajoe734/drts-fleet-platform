@@ -1009,7 +1009,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(reportOutcome.status).toBe(200);
         expect(reportOutcome.bytes).not.toBeNull();
         expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
-        
+
         const contentType = reportOutcome.contentType?.split(";")[0];
         expect(["text/csv", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/pdf"]).toContain(contentType);
         expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
@@ -1024,15 +1024,34 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(jobRes.status).toBe(200);
         expect(jobRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: jobDetail } = await jobRes.json();
-        
+
         expect(jobDetail.jobId).toBe(jobId);
-        
+        expect(jobDetail.status).toBe("completed");
+
+        let expectedFormat = "csv";
+        if (contentType === "application/pdf") expectedFormat = "pdf";
+        else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") expectedFormat = "xlsx";
+        expect(jobDetail.format).toBe(expectedFormat);
+
+        const expectedColumns: string[] = [];
+        if (jobDetail.rows) {
+            for (const record of jobDetail.rows) {
+                for (const key of Object.keys(record)) {
+                    if (!expectedColumns.includes(key)) expectedColumns.push(key);
+                }
+            }
+        }
+
         if (contentType === "application/pdf") {
             const reportText = await extractPdfText(reportOutcome.bytes!);
             if (jobDetail.rows && jobDetail.rows.length > 0) {
                 for (const row of jobDetail.rows) {
-                    expect(reportText).toContain(String(row.orderId));
-                    expect(reportText).toContain(String(row.amountMinor));
+                    for (const col of expectedColumns) {
+                        const val = row[col];
+                        if (val !== undefined && val !== null) {
+                            expect(reportText).toContain(String(val));
+                        }
+                    }
                 }
             } else {
                 expect(reportText).toContain(jobId);
@@ -1040,48 +1059,134 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         } else if (contentType === "text/csv") {
             const csvText = reportOutcome.bytes!.toString("utf-8");
             expect(csvText.trim().startsWith("<html>")).toBe(false);
-            
-            // basic CSV parsing for valid recordsToCsv output
-            const lines = csvText.trim().split("\n").map(l => l.trim());
+
+            const parseCsv = (text: string) => {
+                const records: string[][] = [];
+                let currentRecord: string[] = [];
+                let currentField = "";
+                let inQuotes = false;
+                for (let i = 0; i < text.length; i++) {
+                    const c = text[i];
+                    if (inQuotes) {
+                        if (c === "\"") {
+                            if (i + 1 < text.length && text[i + 1] === "\"") {
+                                currentField += "\"";
+                                i++;
+                            } else {
+                                inQuotes = false;
+                            }
+                        } else {
+                            currentField += c;
+                        }
+                    } else {
+                        if (c === "\"") {
+                            inQuotes = true;
+                        } else if (c === ",") {
+                            currentRecord.push(currentField);
+                            currentField = "";
+                        } else if (c === "\n" || (c === "\r" && text[i + 1] === "\n")) {
+                            if (c === "\r") i++;
+                            currentRecord.push(currentField);
+                            records.push(currentRecord);
+                            currentRecord = [];
+                            currentField = "";
+                        } else {
+                            currentField += c;
+                        }
+                    }
+                }
+                if (currentField !== "" || currentRecord.length > 0) {
+                    currentRecord.push(currentField);
+                    records.push(currentRecord);
+                }
+                if (records.length > 0 && records[records.length - 1]!.length === 1 && records[records.length - 1]![0] === "") {
+                    records.pop();
+                }
+                if (records.length === 0) return [];
+                const headers = records[0]!;
+                return records.slice(1).map(row => {
+                    const obj: Record<string, string> = {};
+                    headers.forEach((h, idx) => {
+                        let val = row[idx] ?? "";
+                        if (val.match(/^'[=+\-@]/)) val = val.substring(1);
+                        obj[h] = val;
+                    });
+                    return obj;
+                });
+            };
+
+            const parsed = parseCsv(csvText);
+
             if (jobDetail.rows && jobDetail.rows.length > 0) {
-                expect(lines.length).toBe(jobDetail.rows.length + 1);
-                const header = lines[0]!;
-                expect(header).toContain("orderId");
-                expect(header).toContain("amountMinor");
+                expect(parsed.length).toBe(jobDetail.rows.length);
+                const firstRowObj = parsed[0];
+                if (firstRowObj) {
+                    expect(Object.keys(firstRowObj)).toEqual(expectedColumns);
+                }
+
                 for (let i = 0; i < jobDetail.rows.length; i++) {
-                    const row = jobDetail.rows[i]!;
-                    const line = lines[i + 1]!;
-                    expect(line).toContain(String(row.orderId));
-                    expect(line).toContain(String(row.amountMinor));
+                    const expectedRow = jobDetail.rows[i]!;
+                    const actualRow = parsed[i]!;
+                    for (const col of expectedColumns) {
+                        const expectedVal = expectedRow[col] === null || expectedRow[col] === undefined
+                            ? ""
+                            : (typeof expectedRow[col] === "object" ? JSON.stringify(expectedRow[col]) : String(expectedRow[col]));
+                        expect(actualRow[col]).toBe(expectedVal);
+                    }
                 }
             } else {
                 expect(csvText).toContain(jobId);
+                expect(parsed.length).toBeLessThanOrEqual(1); // Maybe only header or empty
             }
         } else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
             const ExcelJS = await import("exceljs");
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.load(reportOutcome.bytes! as any);
             expect(workbook.worksheets.length).toBeGreaterThan(0);
-            
+
             const worksheet = workbook.worksheets[0]!;
+
             if (jobDetail.rows && jobDetail.rows.length > 0) {
                 expect(worksheet.rowCount).toBe(jobDetail.rows.length + 1);
                 const headerRow = worksheet.getRow(1);
-                let orderIdCol = -1;
-                let amountMinorCol = -1;
+
+                const sheetColumns: Record<string, number> = {};
                 headerRow.eachCell((cell, colNumber) => {
-                    if (String(cell.value) === "orderId") orderIdCol = colNumber;
-                    if (String(cell.value) === "amountMinor") amountMinorCol = colNumber;
+                    sheetColumns[String(cell.value)] = colNumber;
                 });
-                expect(orderIdCol).toBeGreaterThan(0);
-                expect(amountMinorCol).toBeGreaterThan(0);
-                
+
+                for (const col of expectedColumns) {
+                    expect(sheetColumns[col]).toBeGreaterThan(0);
+                }
+
                 for (let i = 0; i < jobDetail.rows.length; i++) {
                     const row = jobDetail.rows[i]!;
                     const sheetRow = worksheet.getRow(i + 2);
-                    expect(String(sheetRow.getCell(orderIdCol).value)).toContain(String(row.orderId));
-                    expect(String(sheetRow.getCell(amountMinorCol).value)).toContain(String(row.amountMinor));
+                    for (const col of expectedColumns) {
+                        const colNumber = sheetColumns[col]!;
+                        const cellValue = sheetRow.getCell(colNumber).value;
+                        let actualVal = "";
+                        if (cellValue !== null && cellValue !== undefined) {
+                            if (typeof cellValue === "object" && "text" in cellValue) {
+                                actualVal = String(cellValue.text);
+                            } else if (typeof cellValue === "object" && "formula" in cellValue && "result" in cellValue) {
+                                actualVal = String(cellValue.result);
+                            } else {
+                                actualVal = String(cellValue);
+                            }
+                            if (actualVal.match(/^'[=+\-@]/)) actualVal = actualVal.substring(1);
+                        }
+                        const expectedVal = row[col] === null || row[col] === undefined
+                            ? ""
+                            : (typeof row[col] === "object" ? JSON.stringify(row[col]) : String(row[col]));
+
+                        if (expectedVal !== "") {
+                            expect(actualVal).toBe(expectedVal);
+                        }
+                    }
                 }
+            } else {
+                expect(worksheet.rowCount).toBeLessThanOrEqual(1);
             }
         }
 
@@ -1170,4 +1275,3 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
     );
   });
 });
-
