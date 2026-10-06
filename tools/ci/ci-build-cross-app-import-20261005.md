@@ -24,8 +24,10 @@ tests call the real route handlers; only external HTTP is mocked.
 | CI加入防止跨app匯入的檢查                             | `check-cross-app-imports.mjs`, `cross-app-imports.test.ts`, `ci.yml` product smoke gate | 28 guard fixtures pass; full-repo scan fails on pre-existing tests (exit 1)                              | JS/TS import, re-export, dynamic import, require, type import and stylesheet references                                 | No exemptions added; awaiting Supervisor scope coordination for test relocation   |
 | 同候選SHA CI通過且獨立reviewer審查                    | candidate lifecycle, reviewer Codex2                                                    | Pending final candidate and hosted CI                                                                    | SHA/PR recorded by handoff after final push                                                                             | Owner does not approve/merge/close; Supervisor deploys after merge                |
 
-Machine-local logs and retained clean contexts live under
-`.local/ci-build-cross-app-import/` in the assigned task worktree. The reusable
+Machine-local logs and retained clean contexts default to
+`.local/ci-build-cross-app-import/` in the assigned task worktree. Set
+`DRTS_BUILD_EVIDENCE_DIR` to a persistent canonical `.local/` directory when
+the supervisor may recreate the worker worktree (see the refresh below). The reusable
 build script archives a named commit and the Dockerfile's source inputs into a
 new directory, installs with a frozen lockfile, and runs its exact four build
 commands. It retains the context for inspection and never launches a service.
@@ -123,3 +125,72 @@ files above. Once coordinated:
    then generate final isolated-build evidence, push and open the candidate
    PR for Codex2. Do not waive guard failures or use these checkpoints as CI
    or independent review evidence.
+
+## Durable evidence refresh — 2026-10-06
+
+Resumed `2dfd5e41bf363b8054f60fc34a896196d8cbd943`. The task branch and
+remote matched, there was no PR or candidate, and the task still had no expanded
+`write_scopes`. Fetched `origin/dev` at
+`446228cbc771a4ced774126a7d4aaddea4db73e6`; no merge was needed for this
+evidence refresh. The published history was preserved.
+
+The previous worktree-local evidence was again absent on resume. Checkpoint
+`077b48132fbab4411bfd81b515f29bd90fe9d74c` adds only the optional
+`DRTS_BUILD_EVIDENCE_DIR` override to the build script. It changes no archived
+build inputs, app/package sources, tests, or CI behavior. This dispatch retained
+all new logs and contexts outside the disposable worktree at:
+
+`/home/lupin/workspace/drts-fleet-platform/.local/ci-build-cross-app-import/dispatch-20261006T0016Z/`
+
+The directory name is an evidence label; actual execution timestamps are in
+the logs. Checks used Node `v22.23.2`, pnpm `10.33.0`, Next `16.3.8` and Vitest
+`4.1.4`. `SHA256SUMS` records the log hashes. This is still an owner checkpoint,
+not independent review or a locked candidate.
+
+| Finding / acceptance                                  | Source and result at this checkpoint                                                                                                                                                                 | Command / exit / retained evidence                                                                                                                                                                                                                                    | Remaining limit                                                                                           |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| enterprise-dispatch-web可在自己的Docker建置脈絡中建置 | Baseline `b20895a17085681eb0974864be53eae8d726b343` fails with the original missing tenant-console auth module; `077b48132fbab4411bfd81b515f29bd90fe9d74c` passes all four Dockerfile build commands | `DRTS_BUILD_EVIDENCE_DIR=<directory above> bash tools/ci/verify-enterprise-build-context.sh <SHA>`; baseline exit 1 (`baseline-build.log`, `context.QFdvhA`), fixed exit 0 (`fixed-build.log`, `context.MDYMuG`)                                                      | No Docker, product server, browser or deployment was run                                                  |
+| Isolated artifact contents                            | Fixed context has only `apps/enterprise-dispatch-web`; tenant-console is absent; `.next/standalone/apps/enterprise-dispatch-web/server.js` exists                                                    | `find <fixed-context>/apps -mindepth 1 -maxdepth 1 -type d`; `test ! -e <fixed-context>/apps/tenant-console-web`; `test -f <fixed-context>/apps/enterprise-dispatch-web/.next/standalone/apps/enterprise-dispatch-web/server.js`; exit 0                              | The generated server was inspected, never started                                                         |
+| Auth behavior / CI guard regression                   | Same seven-file command from the initial checkpoint, including both real auth route entrypoints and all 34 guard cases: **79 passed**, 7 files                                                       | Exit 0, `auth-and-guard.log`                                                                                                                                                                                                                                          | Scoped in-memory tests only                                                                               |
+| Root typecheck                                        | Current task checkout                                                                                                                                                                                | `pnpm typecheck:root`; exit 0, `root-typecheck.log`                                                                                                                                                                                                                   | Full app suites were not repeated in this dispatch                                                        |
+| 不再跨app相對路徑匯入 / CI加入防止跨app匯入的檢查     | The full guard again reports exactly the six pre-existing references in the five API tests above                                                                                                     | `node tools/ci/check-cross-app-imports.mjs`; exit 1, terminal output matches the outstanding-scope table                                                                                                                                                              | Supervisor must check parallel ownership and update the task scope before relocation; no exemptions added |
+| Existing booking fixture failures                     | Baseline and current checkout both fail at production `ApiClient.listTenantBookings`, `packages/api-client/src/index.ts:1262`: `paged.items is not iterable`                                         | In each app directory: `pnpm exec vitest run tests/unit/api-client.test.ts` (tenant: 2 failures) or `pnpm exec vitest run tests/unit/enterprise-booking-lifecycle.test.ts` (enterprise: 1 failure); all exit 1; `{baseline-,}{tenant,enterprise}-booking-fixture.log` | These are reproduced baseline failures, not passing regression evidence; disposition remains pending      |
+| 同候選SHA CI通過且獨立reviewer審查                    | No PR, candidate or handoff; reviewer remains Codex2                                                                                                                                                 | Released status CLI `progress` records the scope request and current evidence                                                                                                                                                                                         | Same-SHA hosted CI/review, merge and Supervisor deployment are pending                                    |
+
+The enterprise fixture baseline ran inside the retained baseline enterprise
+context. The tenant fixture baseline ran from archived baseline app sources in
+`booking-baseline.7askhx`, with `packages` and `node_modules` linked to the
+retained baseline context. This preserves the baseline package implementation
+and installed dependency closure; the only mock is each existing test's HTTP
+fixture. Both baseline runs reached the same production failure as the current
+checkout, without dependency/setup errors.
+
+### Booking fixture disposition requested from Supervisor
+
+Concrete authority and minimum repair boundary:
+
+- `packages/contracts/src/index.ts:3713` defines `TenantBookingsPageRecord`
+  with `items` and `pagination`. Production
+  `OwnedMobilityService.listTenantBookings` builds that object, and
+  `OwnedMobilityController.listTenantBookings` wraps it in the API envelope.
+  `ApiClient.listTenantBookings` requests `page=1&pageSize=100`, then reads
+  `paged.items`. These production files are unchanged by this task.
+- `apps/tenant-console-web/tests/unit/api-client.test.ts:10,32` instead mock
+  `{ data: [] }`. The minimum fixture correction is a valid empty page in
+  `data`, preserving all verified tenant/bearer/realm assertions. This file
+  is outside the current tenant `lib/auth` and `app/api/auth` scope, so include
+  it in Supervisor's ownership/scope coordination if this task should repair it.
+- `apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts:18`
+  instead mocks `{ data: [record] }`; its list URL assertion also predates the
+  paging parameters. The minimum correction is the contracted page envelope
+  plus the actual paging URL, preserving read/update/cancel assertions. This
+  file is inside the enterprise app scope, but the paired baseline-fixture
+  repair unit has not been applied while its disposition is pending.
+- Keep all three failures visible until repaired or explicitly assigned for
+  follow-up by Supervisor. Do not modify the production paging contract to
+  accept stale fixtures or mark the app suites green from the scoped auth pass.
+
+The released CLI's previously observed `blocker ... Supervisor` rejection
+(`Unknown agent: Supervisor`) has no changed prerequisite, so it was not blindly
+retried. `progress` successfully records the continuing §0.7 scope dependency
+without impersonating Supervisor or assigning a different lane as the blocker.
