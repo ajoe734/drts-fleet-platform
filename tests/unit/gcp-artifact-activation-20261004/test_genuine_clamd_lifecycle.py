@@ -1,7 +1,9 @@
+import ast
 import functools
 import hashlib
 import http.server
 import json
+import socket
 import struct
 import subprocess
 import tempfile
@@ -9,6 +11,7 @@ import threading
 import time
 import sys
 import os
+import types
 import unittest
 import re
 import urllib.error
@@ -899,6 +902,7 @@ import threading
 listen_port = int(sys.argv[1])
 target_port = int(sys.argv[2])
 FAULT_FLAG = "/relay-control/fault-instream"
+INSTREAM_NEEDLE = b"zINSTREAM\\0"
 
 def pipe(src, dst):
     try:
@@ -916,13 +920,31 @@ def pipe(src, dst):
             pass
 
 def handle(conn):
+    # A real TCP sender is free to split "zINSTREAM\\0" across more than
+    # one write/segment; one recv(4096) can legally return as little as
+    # its first byte. A single recv()+startswith() check then sees a
+    # short, non-matching prefix on a split frame and silently falls
+    # through to genuine passthrough even while the fault flag is
+    # present. Accumulate up to exactly len(INSTREAM_NEEDLE) bytes,
+    # bailing out the moment what's been read so far can no longer be a
+    # prefix of INSTREAM_NEEDLE, so a non-INSTREAM command (which always
+    # diverges within its first couple of bytes) is still decided with
+    # minimal buffering, and a split INSTREAM frame is still recognized
+    # once all of its bytes arrive.
     try:
         conn.settimeout(10)
-        first = conn.recv(4096)
+        first = b""
+        while len(first) < len(INSTREAM_NEEDLE):
+            chunk = conn.recv(len(INSTREAM_NEEDLE) - len(first))
+            if not chunk:
+                break
+            first += chunk
+            if not INSTREAM_NEEDLE.startswith(first):
+                break
     except OSError:
         conn.close()
         return
-    if first.startswith(b"zINSTREAM\\0") and os.path.exists(FAULT_FLAG):
+    if first == INSTREAM_NEEDLE and os.path.exists(FAULT_FLAG):
         # Deliberate, immediate transport failure for scan requests, ONLY
         # while the fault flag file is present: never forwarded to clamd,
         # so no reply (partial or otherwise) is ever possible -- matching
@@ -1179,6 +1201,155 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
                 "Genuine readiness-success-then-INSTREAM-transport-failure-then-recovery path "
                 "confirmed through the real gateway's own HTTP contract."
             )
+
+
+class _FakeRelayConn:
+    """Stands in for a relay-side socket: `chunks` are delivered to
+    `recv()` one TCP segment at a time (never coalesced, and truncated to
+    the requested bufsize), so a test can force a command to arrive split
+    across reads exactly the way a real TCP sender is free to do."""
+
+    def __init__(self, chunks):
+        self._data = b"".join(chunks)
+        self._boundaries = []
+        pos = 0
+        for chunk in chunks:
+            pos += len(chunk)
+            self._boundaries.append(pos)
+        if not self._boundaries:
+            self._boundaries = [0]
+        self._pos = 0
+        self._bidx = 0
+        self.closed = False
+        self.sent = bytearray()
+
+    def settimeout(self, _value):
+        pass
+
+    def recv(self, bufsize):
+        if self._pos >= len(self._data):
+            return b""
+        limit = self._boundaries[self._bidx]
+        end = min(self._pos + bufsize, limit)
+        out = self._data[self._pos:end]
+        self._pos = end
+        if self._pos >= limit and self._bidx < len(self._boundaries) - 1:
+            self._bidx += 1
+        return out
+
+    def sendall(self, data):
+        self.sent.extend(data)
+
+    def setsockopt(self, *_args, **_kwargs):
+        pass
+
+    def shutdown(self, *_args):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+class TestRelayScriptInstreamFraming(unittest.TestCase):
+    """Offline, socket-free regression coverage for RELAY_SCRIPT's INSTREAM
+    detection in handle(). Runs the actual relay source (not a
+    reimplementation of it) against mocked conn/upstream objects, so this
+    executes -- and would have caught the fragmented-frame fault-bypass
+    defect -- even when CLAMD_IMAGE/GATEWAY_IMAGE are unset and
+    TestGenuineGatewayTransportFault above is skipped."""
+
+    INSTREAM_NEEDLE = b"zINSTREAM\0"
+
+    @staticmethod
+    def _load_relay_namespace():
+        tree = ast.parse(RELAY_SCRIPT)
+
+        def _is_main_call(node):
+            return (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and getattr(node.value.func, "id", None) == "main"
+            )
+
+        def _is_argv_assign(node):
+            return (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in ("listen_port", "target_port")
+            )
+
+        # Drop the trailing top-level `main()` call (binds a real
+        # listening socket and loops forever) and the two
+        # `int(sys.argv[N])` assignments (this harness never has a real
+        # argv) -- handle()/pipe() need neither; listen_port/target_port
+        # are set directly in the namespace below instead.
+        tree.body = [
+            node for node in tree.body
+            if not _is_main_call(node) and not _is_argv_assign(node)
+        ]
+        namespace = {"listen_port": 3311, "target_port": 3310}
+        exec(compile(tree, "<relay-script>", "exec"), namespace)
+        return namespace
+
+    def _run_handle(self, namespace, fragments, fault_present):
+        conn = _FakeRelayConn(fragments)
+        dials = []
+
+        def fake_create_connection(_address, timeout=None):
+            upstream = _FakeRelayConn([b"stream: OK\0"])
+            dials.append(upstream)
+            return upstream
+
+        namespace["socket"] = types.SimpleNamespace(
+            create_connection=fake_create_connection,
+            SOL_SOCKET=socket.SOL_SOCKET,
+            SO_LINGER=socket.SO_LINGER,
+            SHUT_WR=socket.SHUT_WR,
+        )
+        namespace["os"] = types.SimpleNamespace(
+            path=types.SimpleNamespace(exists=lambda _path: fault_present)
+        )
+        namespace["handle"](conn)
+        return conn, dials
+
+    def test_full_frame_baseline_fault_and_recovery(self):
+        namespace = self._load_relay_namespace()
+        frame = self.INSTREAM_NEEDLE + b"\0\0\0\x05clean" + b"\0\0\0\0"
+
+        # A completed passthrough closes both ends as normal cleanup (see
+        # handle()'s t1.join()/t2.join() followed by conn.close() and
+        # upstream.close()), so conn.closed is not itself a signal here --
+        # whether upstream was ever dialed is what distinguishes
+        # passthrough from the fault's close-without-dialing.
+        conn, dials = self._run_handle(namespace, [frame], fault_present=False)
+        self.assertEqual(len(dials), 1, "baseline INSTREAM (no fault) must reach upstream")
+
+        conn, dials = self._run_handle(namespace, [frame], fault_present=True)
+        self.assertEqual(dials, [], "fault-present full-frame INSTREAM must never reach upstream")
+        self.assertTrue(conn.closed, "fault branch must close without ever forwarding a reply")
+
+        conn, dials = self._run_handle(namespace, [frame], fault_present=False)
+        self.assertEqual(len(dials), 1, "recovery must resume passthrough on the same relay logic")
+
+    def test_fragmented_frame_still_faults_at_every_split(self):
+        namespace = self._load_relay_namespace()
+        frame = self.INSTREAM_NEEDLE + b"\0\0\0\x05clean" + b"\0\0\0\0"
+        for split in range(1, len(self.INSTREAM_NEEDLE)):
+            fragments = [frame[:split], frame[split:]]
+            conn, dials = self._run_handle(namespace, fragments, fault_present=True)
+            self.assertEqual(
+                dials, [],
+                f"split at byte {split} of the INSTREAM command must still fail closed "
+                f"while the fault flag is present, not fall through to passthrough",
+            )
+            self.assertTrue(conn.closed, f"split at byte {split} must still close without replying")
+
+    def test_version_passthrough_unaffected_by_fault(self):
+        namespace = self._load_relay_namespace()
+        conn, dials = self._run_handle(namespace, [b"zVERSION\0"], fault_present=True)
+        self.assertEqual(len(dials), 1, "VERSION must stay live even while the INSTREAM fault is engaged")
+
 
 if __name__ == "__main__":
     unittest.main()

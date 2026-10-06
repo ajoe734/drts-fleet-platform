@@ -1,11 +1,13 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ensureDriverReimbursementBatchFixture,
   issueDriverSessionFixture,
   issueOpsSessionFixture,
+  verifyPublicInfoVersionFixture,
 } from "../../support/signed-session-fixture";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
 import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
@@ -162,5 +164,162 @@ describe("signed-session-fixture issuance", () => {
     } finally {
       restoreSigningEnv();
     }
+  });
+});
+
+function fakeResponse(status: number, body: unknown): Response {
+  return {
+    status,
+    text: async () => JSON.stringify(body),
+  } as Response;
+}
+
+describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture", () => {
+  const originalBaseUrl = process.env.FIXTURE_API_BASE_URL;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    process.env.FIXTURE_API_BASE_URL = "https://fixture.example.test";
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    if (originalBaseUrl === undefined) delete process.env.FIXTURE_API_BASE_URL;
+    else process.env.FIXTURE_API_BASE_URL = originalBaseUrl;
+  });
+
+  it("throws without a baseUrl/FIXTURE_API_BASE_URL rather than guessing one", async () => {
+    delete process.env.FIXTURE_API_BASE_URL;
+    await expect(
+      ensureDriverReimbursementBatchFixture({ opsToken: "test-ops-token" }),
+    ).rejects.toThrow(/FIXTURE_API_BASE_URL/);
+  });
+
+  it("publishes the fixture fee plan, generates statements, and returns the resulting batch id (eligible-positive)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(fakeResponse(200, { data: { feePlanId: "fee-plan-1" } }))
+      .mockResolvedValueOnce(
+        fakeResponse(200, { data: { items: [], reimbursementBatchIds: ["reimbursement-1"] } }),
+      );
+
+    const fixture = await ensureDriverReimbursementBatchFixture({
+      opsToken: "test-ops-token",
+    });
+
+    expect(fixture).toEqual({
+      batchId: "reimbursement-1",
+      driverId: "drv-demo-001",
+      periodMonth: "2026-03",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [publishUrl, publishInit] = fetchMock.mock.calls[0];
+    expect(publishUrl).toBe("https://fixture.example.test/api/driver-fee-plans/publish");
+    expect(publishInit.headers.authorization).toBe("Bearer test-ops-token");
+    const [generateUrl, generateInit] = fetchMock.mock.calls[1];
+    expect(generateUrl).toBe("https://fixture.example.test/api/driver-statements/generate");
+    expect(generateInit.headers["idempotency-key"]).toBe(
+      "fixture-driver-statements-drv-demo-001-2026-03",
+    );
+  });
+
+  it("treats an already-published fixture fee plan (409 FEE_PLAN_IMMUTABLE) as success, not a failure", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        fakeResponse(409, { error: { code: "FEE_PLAN_IMMUTABLE", message: "immutable" } }),
+      )
+      .mockResolvedValueOnce(
+        fakeResponse(200, { data: { items: [], reimbursementBatchIds: ["reimbursement-1"] } }),
+      );
+
+    const fixture = await ensureDriverReimbursementBatchFixture({
+      opsToken: "test-ops-token",
+    });
+    expect(fixture.batchId).toBe("reimbursement-1");
+  });
+
+  it("surfaces a genuine fee-plan-publish failure without attempting statement generation (unknown/ineligible case)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(403, { error: { code: "FORBIDDEN", message: "no billing:write scope" } }),
+    );
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({ opsToken: "test-ops-token" }),
+    ).rejects.toThrow(/Failed to publish the fixture driver fee plan/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when statement generation produces no reimbursement batch (period/driver with no eligible trip)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(fakeResponse(200, { data: { feePlanId: "fee-plan-1" } }))
+      .mockResolvedValueOnce(
+        fakeResponse(200, { data: { items: [], reimbursementBatchIds: [] } }),
+      );
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({
+        opsToken: "test-ops-token",
+        driverId: "drv-unknown-999",
+        periodMonth: "2026-01",
+      }),
+    ).rejects.toThrow(/produced no reimbursement batch/);
+  });
+
+  it("verifies an existing, published, non-retired public info version (eligible-positive)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(200, {
+        data: {
+          items: [
+            { versionId: "public-info-demo-001", status: "published", effectiveTo: null },
+          ],
+        },
+      }),
+    );
+
+    const fixture = await verifyPublicInfoVersionFixture({ token: "test-ops-token" });
+    expect(fixture).toEqual({ versionId: "public-info-demo-001" });
+  });
+
+  it("rejects an unknown/never-provisioned public info version id", async () => {
+    fetchMock.mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }));
+
+    await expect(
+      verifyPublicInfoVersionFixture({ token: "test-ops-token", versionId: "does-not-exist" }),
+    ).rejects.toThrow(/does not exist on this deployment/);
+  });
+
+  it("rejects a public info version that exists but was never published (draft)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(200, {
+        data: {
+          items: [{ versionId: "public-info-demo-001", status: "draft", effectiveTo: null }],
+        },
+      }),
+    );
+
+    await expect(
+      verifyPublicInfoVersionFixture({ token: "test-ops-token" }),
+    ).rejects.toThrow(/is not published/);
+  });
+
+  it("rejects a public info version that has already been retired", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(200, {
+        data: {
+          items: [
+            {
+              versionId: "public-info-demo-001",
+              status: "published",
+              effectiveTo: "2020-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      verifyPublicInfoVersionFixture({ token: "test-ops-token" }),
+    ).rejects.toThrow(/is retired/);
   });
 });

@@ -248,6 +248,215 @@ export async function issueOpsSessionFixture(
   };
 }
 
+/** `drv-demo-001`'s one trip with a nonzero `platformFundedDiscount`
+ * (`billing-settlement.service.ts`'s `SETTLEMENT_TRIP_SEED`,
+ * `settlement-202603-002`, `completedAt: "2026-03-18"`) is the only seeded
+ * trip `createReimbursementItems` (billing-settlement.service.ts:3543-3561)
+ * turns into a reimbursement item when the active fee plan's
+ * `reimbursementMode` is `"platform_funded"` -- every other seeded trip has
+ * a zero `platformFundedDiscount` and produces nothing. This is a fixed
+ * property of the static seed, not a value to vary per run. */
+const FIXTURE_REIMBURSEMENT_PERIOD_MONTH = "2026-03";
+const FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME = "fixture-platform-funded-reimbursement";
+const FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION = "v1";
+
+export interface ReimbursementBatchFixture {
+  batchId: string;
+  driverId: string;
+  periodMonth: string;
+}
+
+export interface EnsureReimbursementBatchFixtureOptions {
+  baseUrl?: string;
+  opsToken?: string;
+  driverId?: string;
+  periodMonth?: string;
+}
+
+export interface PublicInfoVersionFixture {
+  versionId: string;
+}
+
+export interface VerifyPublicInfoVersionFixtureOptions {
+  baseUrl?: string;
+  token?: string;
+  versionId?: string;
+}
+
+/** The target deployment's own origin -- never a default/guessed URL,
+ * because this fixture must land its mutations (fee plan publish, statement
+ * generation) in the SAME running API instance docs/04-uat's readback steps
+ * call afterward: `billing-settlement.service.ts`'s `driverFeePlans`/
+ * `reimbursementBatches` are cached in that instance's own memory
+ * (`onModuleInit`, :1208-1226) and only reloaded from the database at boot,
+ * so writing through a separate, disconnected process (or raw SQL) would be
+ * invisible to it until a restart. */
+function resolveApiBaseUrl(explicit?: string): string {
+  const baseUrl = explicit ?? process.env.FIXTURE_API_BASE_URL;
+  if (!baseUrl) {
+    throw new Error(
+      "FIXTURE_API_BASE_URL (or an explicit baseUrl) is required: this fixture " +
+        "mutates/reads state through the target deployment's own running API, " +
+        "the same instance docs/04-uat/gcp-artifact-activation-20261004.md's " +
+        "readback steps call afterward -- never a default or a direct database " +
+        "write that instance's in-memory cache would never see.",
+    );
+  }
+  return baseUrl.replace(/\/+$/, "");
+}
+
+interface ApiCallOptions {
+  method: "GET" | "POST";
+  token: string;
+  idempotencyKey?: string;
+  body?: unknown;
+}
+
+async function callApi(
+  baseUrl: string,
+  path: string,
+  options: ApiCallOptions,
+): Promise<{ status: number; body: any }> {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${options.token}`,
+  };
+  if (options.body !== undefined) {
+    headers["content-type"] = "application/json";
+  }
+  if (options.idempotencyKey) {
+    headers["idempotency-key"] = options.idempotencyKey;
+  }
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: options.method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  const text = await response.text();
+  let body: any = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
+  return { status: response.status, body };
+}
+
+/** Ensures `driverId` (default `DEFAULT_DRIVER_FIXTURE_ACTOR_ID`) owns a
+ * reimbursement batch for `periodMonth` (default
+ * `FIXTURE_REIMBURSEMENT_PERIOD_MONTH`) on the target deployment, through
+ * the SAME two formal, documented endpoints the manual runbook would call
+ * by hand (`billing-settlement.controller.ts`'s `driver-fee-plans/publish`
+ * and `driver-statements/generate`) -- never a raw insert into
+ * `reimbursementBatches`. Both calls are idempotent: a fee plan
+ * `(planName, version)` that already exists returns `FEE_PLAN_IMMUTABLE`
+ * (409), treated here as already-done; `driver-statements/generate` is
+ * called with a deterministic `Idempotency-Key` derived from
+ * `driverId`/`periodMonth`, and `generateDriverStatements` itself
+ * (billing-settlement.service.ts:2099-2112) separately returns the SAME
+ * existing batch ids on any later re-run for that driver/period/fee-plan-
+ * version. Throws with the real endpoint's error code/message (never a
+ * generic failure) if either call fails, or if the period genuinely has no
+ * eligible platform-funded trip to turn into a batch. */
+export async function ensureDriverReimbursementBatchFixture(
+  options: EnsureReimbursementBatchFixtureOptions = {},
+): Promise<ReimbursementBatchFixture> {
+  const baseUrl = resolveApiBaseUrl(options.baseUrl);
+  const driverId = options.driverId ?? DEFAULT_DRIVER_FIXTURE_ACTOR_ID;
+  const periodMonth = options.periodMonth ?? FIXTURE_REIMBURSEMENT_PERIOD_MONTH;
+  const token = options.opsToken ?? (await issueOpsSessionFixture()).token;
+
+  const publish = await callApi(baseUrl, "/api/driver-fee-plans/publish", {
+    method: "POST",
+    token,
+    body: {
+      planName: FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME,
+      version: FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION,
+      serviceFeeBps: 0,
+      reimbursementMode: "platform_funded",
+    },
+  });
+  const alreadyPublished =
+    publish.status === 409 && publish.body?.error?.code === "FEE_PLAN_IMMUTABLE";
+  if (publish.status >= 300 && !alreadyPublished) {
+    throw new Error(
+      `Failed to publish the fixture driver fee plan (${publish.status}): ` +
+        `${JSON.stringify(publish.body)}`,
+    );
+  }
+
+  const generate = await callApi(baseUrl, "/api/driver-statements/generate", {
+    method: "POST",
+    token,
+    idempotencyKey: `fixture-driver-statements-${driverId}-${periodMonth}`,
+    body: { driverId, periodMonth },
+  });
+  if (generate.status >= 300) {
+    throw new Error(
+      `Failed to generate driver statements for the fixture batch (${generate.status}): ` +
+        `${JSON.stringify(generate.body)}`,
+    );
+  }
+  const batchId: string | undefined = generate.body?.data?.reimbursementBatchIds?.[0];
+  if (!batchId) {
+    throw new Error(
+      `generateDriverStatements for driver ${driverId}/${periodMonth} produced no ` +
+        `reimbursement batch (response: ${JSON.stringify(generate.body)}); this seed's ` +
+        "platform-funded trip may be missing on this deployment.",
+    );
+  }
+  return { batchId, driverId, periodMonth };
+}
+
+/** Verifies (never creates or mutates) that `versionId` (default
+ * `public-info-demo-001`, `platform-admin.service.ts`'s `PUBLIC_INFO_SEED`)
+ * exists on the target deployment and is still usable --
+ * `PlatformAdminService#onModuleInit` (:602-621) persists that exact seeded
+ * row into the real database the first time this service boots against an
+ * empty one, so it is already a genuinely owned business row on any
+ * deployment that has started at least once; no separate creation step is
+ * needed. Throws a concrete, actionable error (not a silent fallback) if
+ * it is missing or retired (`effectiveTo` in the past), since
+ * `requirePublicInfoVersion` (platform-admin.service.ts:2641-2657) would
+ * reject either the same way the real placard-generation call does. */
+export async function verifyPublicInfoVersionFixture(
+  options: VerifyPublicInfoVersionFixtureOptions = {},
+): Promise<PublicInfoVersionFixture> {
+  const baseUrl = resolveApiBaseUrl(options.baseUrl);
+  const versionId = options.versionId ?? "public-info-demo-001";
+  const token = options.token ?? (await issueOpsSessionFixture()).token;
+
+  const list = await callApi(baseUrl, "/api/platform-admin/public-info", {
+    method: "GET",
+    token,
+  });
+  if (list.status >= 300) {
+    throw new Error(
+      `Failed to list public info versions (${list.status}): ${JSON.stringify(list.body)}`,
+    );
+  }
+  const items: Array<{ versionId: string; status: string; effectiveTo: string | null }> =
+    list.body?.data?.items ?? [];
+  const match = items.find((item) => item.versionId === versionId);
+  if (!match) {
+    throw new Error(
+      `Public info version ${versionId} does not exist on this deployment; ` +
+        "run PlatformAdminService#createPublicInfoVersion + publishPublicInfoVersion " +
+        "through the real API to provision one before using this fixture.",
+    );
+  }
+  if (match.status !== "published") {
+    throw new Error(
+      `Public info version ${versionId} is not published (status: ${match.status}).`,
+    );
+  }
+  if (match.effectiveTo && Date.parse(match.effectiveTo) <= Date.now()) {
+    throw new Error(
+      `Public info version ${versionId} is retired (effectiveTo: ${match.effectiveTo}).`,
+    );
+  }
+  return { versionId };
+}
+
 // Manual runbook entry point (docs/04-uat/gcp-artifact-activation-20261004.md
 // §4's DRIVER_TOKEN/OPS_TOKEN export step): `cd apps/api && pnpm exec tsx
 // ../../tests/support/signed-session-fixture.ts driver [actorId]` (or `ops
@@ -259,22 +468,58 @@ export async function issueOpsSessionFixture(
 // for a hosted run that needs real driver-owned business records. Prints
 // only the bearer token to stdout so it can be captured directly into a
 // shell variable; everything else goes to stderr.
+//
+// Two further subcommands close that gap by provisioning (or verifying) the
+// actual business rows the proof/placard flows need, through the target
+// deployment's own running API (`FIXTURE_API_BASE_URL`, never a direct
+// database write -- see resolveApiBaseUrl above):
+//   `... signed-session-fixture.ts reimbursement-batch [driverId] [periodMonth]`
+//   `... signed-session-fixture.ts public-info-version [versionId]`
+// Both print only the resulting id to stdout; everything else goes to
+// stderr.
 if (require.main === module) {
   const kind = process.argv[2];
-  const actorId = process.argv[3];
-  const run =
-    kind === "ops"
-      ? issueOpsSessionFixture(actorId ? { actorId } : {})
-      : issueDriverSessionFixture(actorId ? { actorId } : {});
-  run
-    .then((fixture) => {
-      console.error(
-        `Issued ${kind === "ops" ? "ops" : "driver"} session ${fixture.sessionId} for actor ${fixture.actorId}`,
-      );
-      process.stdout.write(`${fixture.token}\n`);
+  if (kind === "reimbursement-batch") {
+    ensureDriverReimbursementBatchFixture({
+      driverId: process.argv[3],
+      periodMonth: process.argv[4],
     })
-    .catch((error) => {
-      console.error(error);
-      process.exitCode = 1;
-    });
+      .then((fixture) => {
+        console.error(
+          `Ensured reimbursement batch ${fixture.batchId} for driver ${fixture.driverId}/${fixture.periodMonth}`,
+        );
+        process.stdout.write(`${fixture.batchId}\n`);
+      })
+      .catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+  } else if (kind === "public-info-version") {
+    verifyPublicInfoVersionFixture({ versionId: process.argv[3] })
+      .then((fixture) => {
+        console.error(`Verified public info version ${fixture.versionId}`);
+        process.stdout.write(`${fixture.versionId}\n`);
+      })
+      .catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+  } else {
+    const actorId = process.argv[3];
+    const run =
+      kind === "ops"
+        ? issueOpsSessionFixture(actorId ? { actorId } : {})
+        : issueDriverSessionFixture(actorId ? { actorId } : {});
+    run
+      .then((fixture) => {
+        console.error(
+          `Issued ${kind === "ops" ? "ops" : "driver"} session ${fixture.sessionId} for actor ${fixture.actorId}`,
+        );
+        process.stdout.write(`${fixture.token}\n`);
+      })
+      .catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+  }
 }
