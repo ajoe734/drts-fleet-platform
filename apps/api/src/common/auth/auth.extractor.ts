@@ -207,10 +207,19 @@ export function extractBootstrapRequestIdentity(
     authTime:
       normalizeHeaderValue(headers["x-auth-time"]) ||
       (isStrictAuthEnvironment() ? null : new Date().toISOString()),
+    // The `tenant_bootstrap_fixture` dev default is scoped to `tenant_admin`
+    // only -- it's the documented non-strict login-gate fixture for tenant
+    // high-privilege roles (trusted-mfa.policy.ts). Applying it to every
+    // actor type would make it the amr for platform_admin/ops_user bootstrap
+    // identities too, and `tenant_bootstrap_fixture` is itself a trusted amr
+    // in non-strict environments (NON_STRICT_TRUSTED_AMR): that silently
+    // satisfies the workforce step-up MFA gate's `hasTrustedMfa` check for
+    // every dev bootstrap session regardless of the explicit
+    // DRTS_DEV_MFA_WAIVED waiver (ENTRY-IAP-WORKFORCE-AUTH-20261005).
     amr:
       splitDelimitedList(headers["x-amr"]).length > 0
         ? splitDelimitedList(headers["x-amr"])
-        : isStrictAuthEnvironment()
+        : isStrictAuthEnvironment() || actorType !== "tenant_admin"
           ? []
           : ["tenant_bootstrap_fixture"],
     sessionId:

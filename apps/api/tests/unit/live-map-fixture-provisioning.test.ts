@@ -78,6 +78,17 @@ function fixtureRepository(
       driver = JSON.parse(String(values[5])) as DriverRegistryRecord;
       return { rows: [{ record: driver }] };
     }
+    if (sql.includes("DELETE FROM reg.phase1_registry_drivers")) {
+      driver = undefined;
+      return { rows: [] };
+    }
+    if (sql.includes("FROM reg.phase1_registry_vehicles")) {
+      // A real DB with a refusable isolation signal (binding, supply pair,
+      // etc.) already has other persisted state; this keeps loadState's
+      // "nothing persisted yet" bootstrap path (which is orthogonal to the
+      // live-map fixture) from firing in a way no live environment can hit.
+      return { rows: [{ record: { vehicleId: "veh-baseline" } }] };
+    }
     return { rows: [] };
   });
   const release = vi.fn();
@@ -92,13 +103,10 @@ function fixtureRepository(
 
 describe("durable live-map fixture safeguards", () => {
   it.each([
-    {
-      failAt: "FROM reg.phase1_registry_vehicles",
-      reason: "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
-    },
+    { failAt: "FROM reg.phase1_registry_vehicles" },
     { reason: "LIVE_MAP_FIXTURE_READBACK_UNSAFE" },
   ])(
-    "refuses an unavailable or missing durable readback after ensure: $reason",
+    "never blocks API startup on an unavailable or missing durable readback after ensure: $reason",
     async ({ reason, ...options }) => {
       const db = fixtureRepository(options);
       const audit = new AuditNotificationService();
@@ -108,7 +116,10 @@ describe("durable live-map fixture safeguards", () => {
         new DriverProfileService(audit),
         db.repository,
       );
-      await expect(service.onModuleInit()).rejects.toThrow(reason);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+      if (reason) {
+        expect(Logger.prototype.warn).toHaveBeenCalledWith(reason);
+      }
     },
   );
   it.each([
@@ -125,7 +136,7 @@ describe("durable live-map fixture safeguards", () => {
       reason: "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
     },
   ])(
-    "stops opted-in startup rather than using fallback seeds: $reason",
+    "marks the fixture unavailable, keeps startup running and never falls back to seeds: $reason",
     async ({ reason, ...options }) => {
       const db = fixtureRepository(options);
       const audit = new AuditNotificationService();
@@ -135,7 +146,8 @@ describe("durable live-map fixture safeguards", () => {
         new DriverProfileService(audit),
         db.repository,
       );
-      await expect(service.onModuleInit()).rejects.toThrow(reason);
+      await expect(service.onModuleInit()).resolves.toBeUndefined();
+      expect(Logger.prototype.warn).toHaveBeenCalledWith(reason);
       expect(
         db.query.mock.calls.some(([sql]) =>
           sql.includes("INSERT INTO reg.phase1_registry_drivers"),
@@ -376,9 +388,10 @@ describe("durable live-map fixture safeguards", () => {
     "rolls back %s failure and reports only a fixed error",
     async (failAt) => {
       const db = fixtureRepository({ failAt });
-      await expect(db.repository.ensureLiveMapTestDriver()).rejects.toThrow(
-        "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
-      );
+      await expect(db.repository.ensureLiveMapTestDriver()).resolves.toEqual({
+        status: "refused",
+        reason: "LIVE_MAP_FIXTURE_PERSISTENCE_FAILED",
+      });
       expect(db.query).toHaveBeenCalledWith("ROLLBACK");
       expect(db.release).toHaveBeenCalledOnce();
       expect(
@@ -386,6 +399,103 @@ describe("durable live-map fixture safeguards", () => {
       ).not.toContain("private");
     },
   );
+});
+
+describe("live-map fixture-only reset", () => {
+  it("never requires or touches another driver id: every statement is scoped to the reserved fixture id", async () => {
+    const db = fixtureRepository();
+    await expect(db.repository.resetLiveMapTestDriver()).resolves.toEqual({
+      status: "reset",
+    });
+    const mutating = db.query.mock.calls.filter(([sql]) =>
+      /^\s*DELETE FROM/i.test(sql),
+    );
+    expect(mutating.length).toBeGreaterThan(0);
+    for (const [, values] of mutating) {
+      expect(values).toEqual(["drv-demo-002"]);
+    }
+    expect(db.query).toHaveBeenCalledWith("COMMIT");
+  });
+
+  it.each([undefined, "false", "TRUE", "1"])(
+    "requires the literal provisioning flag before resetting, got %s",
+    async (flag) => {
+      vi.stubEnv("DRTS_E2E_PROVISIONING", flag);
+      const db = fixtureRepository();
+      await expect(db.repository.resetLiveMapTestDriver()).resolves.toEqual({
+        status: "disabled",
+      });
+      expect(db.connect).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["DRTS_ENV", "APP_ENV", "NODE_ENV"])(
+    "refuses to reset in staging/production selected through %s",
+    async (key) => {
+      vi.stubEnv("DRTS_ENV", undefined);
+      vi.stubEnv("APP_ENV", undefined);
+      vi.stubEnv("NODE_ENV", undefined);
+      vi.stubEnv(key, "production");
+      const db = fixtureRepository();
+      await expect(db.repository.resetLiveMapTestDriver()).resolves.toEqual({
+        status: "disabled",
+      });
+      expect(db.connect).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not pretend a reset happened without a database", async () => {
+    const db = fixtureRepository({ enabled: false });
+    await expect(db.repository.resetLiveMapTestDriver()).resolves.toEqual({
+      status: "disabled",
+    });
+    expect(db.connect).not.toHaveBeenCalled();
+  });
+
+  it.each(["iam.driver_device_bindings", "COMMIT"])(
+    "rolls back %s failure and reports only a fixed error",
+    async (failAt) => {
+      const db = fixtureRepository({ failAt });
+      await expect(db.repository.resetLiveMapTestDriver()).resolves.toEqual({
+        status: "failed",
+      });
+      expect(db.query).toHaveBeenCalledWith("ROLLBACK");
+      expect(db.release).toHaveBeenCalledOnce();
+    },
+  );
+});
+
+describe("DEV-OUTAGE-LIVE-MAP-FIXTURE-STARTUP-20261006 regression", () => {
+  it("still starts the API when the fixture is already device-bound from a prior acceptance run", async () => {
+    const db = fixtureRepository({
+      driver: storedFixture(),
+      context: { ...clearContext, has_binding: true },
+    });
+    const audit = new AuditNotificationService();
+    const service = new RegulatoryRegistryService(
+      { publishSupplyLifecycleUpdated: vi.fn() } as never,
+      audit,
+      new DriverProfileService(audit),
+      db.repository,
+    );
+    await expect(service.onModuleInit()).resolves.toBeUndefined();
+    expect(Logger.prototype.warn).toHaveBeenCalledWith(
+      "LIVE_MAP_FIXTURE_BOUND",
+    );
+    // Startup still completes normally; it does not substitute a seed or crash.
+    expect(() => service.listDrivers()).not.toThrow();
+  });
+
+  it("the fixture-only reset clears the bound state so a subsequent ensure succeeds again", async () => {
+    const db = fixtureRepository({ driver: storedFixture() });
+    await expect(db.repository.resetLiveMapTestDriver()).resolves.toEqual({
+      status: "reset",
+    });
+    // After reset, the row no longer exists so ensure creates a fresh one.
+    await expect(db.repository.ensureLiveMapTestDriver()).resolves.toEqual({
+      status: "created",
+    });
+  });
 });
 
 describe("dev live-map fixture provisioning", () => {
