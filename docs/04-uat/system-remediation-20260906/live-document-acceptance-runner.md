@@ -173,3 +173,13 @@ Tests executed include:
 
 - `✓ tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts (20 tests | 5 skipped)`
 - `✓ tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts (13 tests)`
+
+### Update 2026-10-06: Incorporating Independent Review Findings (Task DOC-LIVE-RUNNER-UPGRADE-20261005)
+
+Following the independent review by Codex (REOPEN candidate 49e8c8b5f5dfcb0a25be99f3ac2bb96c5e587d18, generation 6ae04f11d44b46a78b4bd80251b60b9d), the following fixes were implemented:
+
+- **R4 (Invoice):** Repaired `detail.amount` reference to properly bind the authoritative tenant, currency, and total amount. The runner now extracts `detail.amount.currency` and `detail.amount.amountMinor` and formats it appropriately before verifying the uncompressed PDF text.
+- **R5 (Report & Placard):** Repaired report parsing. The runner now derives the actual `jobId` from the URL, queries the report job metadata, and parses supported formats (PDF, CSV, and XLSX using `exceljs`) to verify meaningful rows rather than blindly checking for the word "artifact". For placards, `x-drts-candidate-sha` assertions were added to the expired response, refreshed list, and refreshed download. The URL selection properly resolves `/api` routing, and the refreshed materialized hash is correctly verified against the original hash.
+- **R6 (Viewer Denial):** Restored positive evidence of genuine issued viewer authentication. The test now checks for the specific "Role parameter tampering detected" response (using `?role=bank_finance`) to prove the session is genuinely authenticated, while verifying the ordinary business denial, forged, and blank controls still work.
+- **R10 (Superseded branch):** The trailer gate remains strictly enforced without bypass for the new commits.
+- **Required Acceptance Mapping:** Addressed the gaps regarding WIF identity, explicit tenant boundaries, authenticated viewer proof, report/placard content, and missing evidences triggering non-zero exits.
