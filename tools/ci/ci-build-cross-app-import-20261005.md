@@ -194,3 +194,45 @@ The released CLI's previously observed `blocker ... Supervisor` rejection
 (`Unknown agent: Supervisor`) has no changed prerequisite, so it was not blindly
 retried. `progress` successfully records the continuing §0.7 scope dependency
 without impersonating Supervisor or assigning a different lane as the blocker.
+
+## Enterprise fixture repair — 2026-10-06T00:16Z
+
+Resumed checkpoint `ae413758c02bedfe48f8eb7f8b40886e1150e209` matched the
+published branch. There was still no PR, locked candidate, or expanded scope;
+`origin/dev` remained `446228cbc771a4ced774126a7d4aaddea4db73e6`.
+The enterprise fixture can be repaired independently within the existing
+`apps/enterprise-dispatch-web/` scope, so that part of the previously paired
+fixture repair has now proceeded. The tenant fixture and API test relocations
+still require Supervisor coordination; this does not authorize those changes.
+
+Repair commit: `67f73dedc27b05bb4ea0c1fdd75c8239fd3219cf` (normally pushed,
+checkpoint only). The sole source change is
+`apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts`:
+its mocked HTTP response now satisfies `TenantBookingsPageRecord`, and its
+list URL assertion includes `page=1&pageSize=100`. The test still calls the real
+`EnterpriseDispatchTenantClient` and `ApiClient`, then reads, updates and cancels
+the same booking. Only HTTP is mocked; production code and all existing
+behavior assertions are preserved. No tests were skipped or removed.
+
+Retained evidence directory:
+`/home/lupin/workspace/drts-fleet-platform/.local/ci-build-cross-app-import/enterprise-fixture-20261006.k1HJcT/`.
+`environment.txt` records the pre-repair SHA, Node `v22.23.2`, and pnpm
+`10.33.0`; the test runner is Vitest `4.1.4`. `results.txt` records commands,
+source SHAs and exit codes. `SHA256SUMS` covers these files and every log.
+
+| Finding / acceptance                                  | Source and before → after                                                                                                                                                                           | Command / exit / retained evidence                                                                                                                                                                                                                                 | Remaining limit                                                                                                             |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Enterprise booking fixture mismatch                   | On `ae413758c`, the existing lifecycle test reaches `ApiClient.listTenantBookings` and fails with `paged.items is not iterable`; repaired fixture on `67f73dedc` passes without changing the client | `pnpm --filter @drts/enterprise-dispatch-web test tests/unit/enterprise-booking-lifecycle.test.ts`: exit 1, `enterprise-fixture-before.log`; full `pnpm --filter @drts/enterprise-dispatch-web test`: **32 passed**, 8 files, exit 0, `enterprise-suite-after.log` | Two tenant app fixture failures remain historically reproduced and unresolved; the tenant suite was not rerun this dispatch |
+| Enterprise compile / lint                             | Contract-typed fixture and the full enterprise app compile on `67f73dedc`                                                                                                                           | `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0, `enterprise-typecheck.log`; `pnpm exec eslint apps/enterprise-dispatch-web/tests/unit/enterprise-booking-lifecycle.test.ts --max-warnings=0`: exit 0, `enterprise-fixture-eslint.log`             | No production source changes; no new isolated build required for this fixture checkpoint                                    |
+| 不再跨app相對路徑匯入 / CI加入防止跨app匯入的檢查     | Full scan on `67f73dedc` still rejects exactly the six imports in the five API tests listed above                                                                                                   | `node tools/ci/check-cross-app-imports.mjs`: exit 1, `full-guard.log`                                                                                                                                                                                              | Supervisor must coordinate those source paths and their move into `tests/unit/cross-app/`; no guard exemptions              |
+| enterprise-dispatch-web可在自己的Docker建置脈絡中建置 | Existing baseline-fail / `077b48132`-pass evidence remains under the durable refresh directory above                                                                                                | Build not rerun; prior result retained with its original SHA                                                                                                                                                                                                       | Regenerate at final candidate after remaining repairs; this is not same-SHA acceptance                                      |
+| 同候選SHA CI通過且獨立reviewer審查                    | No candidate / PR / hosted CI / independent review / merge / deploy                                                                                                                                 | Not run; checkpoint has only local verification                                                                                                                                                                                                                    | Owner must complete remaining repairs before handoff; Codex2 reviews and Supervisor deploys after merge                     |
+
+All checks started in this dispatch finished and their results were read. No
+service, browser test server or Docker process was started. No published commit
+was rewritten. The released CLI still cannot represent `waiting_for=Supervisor`
+as documented above, so the owner records the scope dependency with `progress`
+and does not falsely attribute it to another lane. Supervisor's remaining
+decision is to coordinate the five named API test paths and
+`apps/tenant-console-web/tests/unit/api-client.test.ts`, then update this task's
+write scopes (or provide an explicit fixture follow-up disposition).
