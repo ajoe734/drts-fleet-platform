@@ -300,3 +300,39 @@ what changed and where the evidence is.
 **New regression this round, caused by this task's own prior commit, not Codex**: CI's `Product smoke acceptance` job (commit `edd1e75f4`) reported `tests/unit/step-up-iap-path.test.ts`'s and `sr-qa-identity-001/c003-c004-c005-iam-mfa-and-bank.test.ts`'s no-waiver baseline tests as FAIL (`Expected MFA_REQUIRED to be thrown`). Root cause: `6314837cb` added `DRTS_DEV_MFA_WAIVED: "true"` at the `product_smoke_acceptance` **job** level in `ci.yml` to unblock the job's `apps/api` DB-backed tests, but that job-level scope also covered the job's "Unit tests" step (`pnpm run test:unit`, i.e. `tests/unit/**`), which is exactly where this task's own no-waiver baseline tests live — they passed the waiver flag for the wrong reason and would have falsely reported MFA enforcement as working. Fixed by moving the env var to the "API unit tests" step only (`ci.yml`); `ci-integ.yml` already scoped it correctly to its separate `integration` job and was not affected. Verified locally: `pnpm exec vitest run tests/unit/step-up-iap-path.test.ts tests/unit/system-remediation/sr-qa-identity-001/c003-c004-c005-iam-mfa-and-bank.test.ts tests/unit/auth-startup-config.test.ts --no-file-parallelism` (no `DRTS_DEV_MFA_WAIVED` set, matching the corrected CI scope) — all passed (SHA `aa65ed245`).
 
 **Local verification limitations this round**: this worktree shares `node_modules` with other concurrent worktrees (documented hazard from the prior round); `pnpm install` to pick up `dev`'s new `@nestjs/throttler` dependency is blocked by this sandbox's command-approval gate (classified `defer` on every retry), so `apps/api`'s own test suite, root `pnpm run typecheck` (fails on pre-existing, unrelated missing `@types/*` packages across the whole repo), and the newly-relocated cross-app proxy test could not be executed locally this round. No command was reported as passing without actually running it; everything above states exactly what ran and what did not. The hosted CI run on candidate `aa65ed245` is the authoritative check for everything this paragraph lists as not run locally.
+
+### 7.1 Round 4 (candidate `370056c1e`) — hosted CI failures found before reviewer
+
+Candidate `370056c1e` (handed off to Codex) got hosted CI run
+`37495005380`, which failed on 3 of 16 jobs before any reviewer involvement.
+Read via `gh run view`/`gh run view --log` (not re-executed locally — see
+limitations below). All three are CI-wiring/lint defects, not functional
+regressions in the IAP/role/waiver logic itself:
+
+| Job | Failure | Root cause | Fix |
+| --- | --- | --- | --- |
+| `lint` | `apps/api#lint` exit 1: `'hasTrustedMfa' is defined but never used` at `auth.controller.ts:50` (`@typescript-eslint/no-unused-vars`). | Round-3 remediation (F3) moved the `hasTrustedMfa` read for the bootstrap token-assurance decision out of `auth.controller.ts`; the now-dead import from `trusted-mfa.policy` was left behind. | Removed the unused `hasTrustedMfa` import in `auth.controller.ts`. |
+| `iam-negative-matrix` | Job's `run-iam-negative-matrix.sh` → hermetic `E2E-004` sub-run: `POST /platform-admin/tenants` → 403 `STEP_UP_REQUIRED` instead of 200/201. | Same root cause as `cross-surface-e2e` below — this job's "Run IAM negative matrix" step also shells out to `tests/e2e/run-e2e-hermetic.sh 004 018`. | Added `DRTS_DEV_MFA_WAIVED: "true"` at job level in `ci-integ.yml`'s `iam-negative-matrix` job (the `tests/security/*.test.ts` cases in the same step don't reference MFA/step-up state, so this is safe at job scope here, unlike the round-3 `product_smoke_acceptance` incident). |
+| `cross-surface-e2e` | 5/19 hermetic scenarios failed: `E2E-004`, `E2E-008`, `E2E-011`, `E2E-015`, `E2E-016`, all `403 STEP_UP_REQUIRED` on a `platform-admin/*` mutation (`platform:tenants:create`, `platform:partner-entries:activate`, `platform:partner-entries:create`, `platform:partner-credentials:issue`). | `tests/e2e/lib/helpers.sh`'s `http_call` unconditionally calls `resolve_step_up_reference` for every mutating request (independent of the opt-in `E2E_ENABLE_RUNTIME_STEP_UP` flag, which only gates minting a fresh bearer token), posting to `/identity/step-up-proofs` with bootstrap `x-actor-type: platform_admin` headers. Round-3's F3 fix correctly stopped fabricating `verified_iap_workforce`/`aal2` on that bootstrap identity, so `StepUpProofService.createProof` now needs `DRTS_DEV_MFA_WAIVED=true` to issue a proof for it — but `ci-integ.yml`'s `cross-surface-e2e` job never set that env var (only the unrelated `ci.yml` `product_smoke_acceptance` job's "API unit tests" step did). Without a proof, `resolve_step_up_reference` returns empty and the real mutating call then fails `assertRequestSatisfied`'s reference check. This is the intended fail-closed behavior working correctly in a job that simply never turned dev's documented waiver on. | Added `DRTS_DEV_MFA_WAIVED: "true"` at job level in `ci-integ.yml`'s `cross-surface-e2e` job. Checked: no `E2E-0*.sh` scenario asserts `STEP_UP_REQUIRED`/`MFA_REQUIRED` as an expected (happy-path) outcome, so this cannot mask a real deny-by-default test. |
+
+**Verification**: read the full `gh run view --log` output for all three
+failing jobs (`lint`, `iam-negative-matrix`'s "Run IAM negative matrix" step,
+`cross-surface-e2e`'s "Run cross-surface E2E suite" step) to the point of
+failure. Traced `resolve_step_up_reference` → `/identity/step-up-proofs` →
+`IdentityController` → `StepUpProofService.createProof` →
+`isDevWorkforceMfaWaiverEnabled` by reading the source, confirming the
+missing env var is sufficient to reproduce exactly the observed `403
+STEP_UP_REQUIRED` (not some other identity/role defect). Confirmed by
+`grep` that none of the 7 test files in the same `iam-negative-matrix` step
+reference MFA/step-up state, so the added job-level env var cannot change
+their outcome. Did not re-run CI or any local service/Docker to confirm the
+fix (forbidden on this VM); the next hosted CI run on the new candidate SHA
+is the authoritative check.
+
+**Local verification limitations this round**: same sandbox `pnpm install`
+block as round 3 (every retry classified `defer`); `eslint`/`vitest` could
+not be invoked locally either (missing `node_modules/eslint`), so the lint
+fix and the workflow env var fix were verified by source reading and `gh
+run view --log` evidence only, not by re-running the lint or E2E commands
+in this worktree. `python3 -c "import yaml; yaml.safe_load(...)"` confirmed
+`ci-integ.yml` still parses as valid YAML after the edit.

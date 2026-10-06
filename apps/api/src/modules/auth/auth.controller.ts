@@ -47,7 +47,6 @@ import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.consta
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
   DEV_MFA_WAIVED_AMR,
-  hasTrustedMfa,
   isDevWorkforceMfaWaiverEnabled,
 } from "../../common/auth/trusted-mfa.policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
