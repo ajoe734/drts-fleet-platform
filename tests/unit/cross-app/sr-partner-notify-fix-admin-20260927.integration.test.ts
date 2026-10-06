@@ -535,7 +535,13 @@ test("Next GET valid signed IAP assertion -> Guard -> Controller delegates x-ten
   process.env = originalEnv;
 });
 
-test("Next GET unauthorized group -> 403 in strict IAP mode", async () => {
+test("Next GET verified assertion with an unrecognized group claim -> proxy forwards (ENTRY-IAP-WORKFORCE-AUTH-20261005: group claims are not role authority)", async () => {
+  // A real Cloud IAP assertion carries no group/role claim at all, so the
+  // proxy no longer derives (or rejects on) role from `gcp_ia_groups`; it
+  // only requires a verified assertion to be present. Role authority is the
+  // API's IAPSubjectAdapter, keyed by verified email against persisted role
+  // bindings (see tests/unit/iap-subject-adapter.test.ts's deny-by-default
+  // coverage for an unprovisioned email) -- not this proxy layer.
   const originalEnv = process.env;
   process.env = {
     ...originalEnv,
@@ -576,10 +582,8 @@ test("Next GET unauthorized group -> 403 in strict IAP mode", async () => {
     params: Promise.resolve({ path: ["tenant", "webhooks"] }),
   } as any);
 
-  expect(response.status).toBe(403);
-  expect(upstreamRequest).toBeUndefined(); // assert zero upstream effects
-  const data = await response.json();
-  expect(data.error.code).toBe("IAP_SUBJECT_FORBIDDEN");
+  expect(response.status).toBe(200);
+  expect(upstreamRequest).toBeDefined();
 
   process.env = originalEnv;
 });

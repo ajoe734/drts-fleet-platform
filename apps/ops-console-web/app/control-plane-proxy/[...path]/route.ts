@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
+  isControlPlaneIapEnabled,
   isStrictControlPlaneIapEnvironment,
   issueControlPlaneRequestAuth,
   stripControlPlaneAuthQueryParams,
@@ -115,21 +116,27 @@ async function applyUpstreamAuth(
   targetUrl: URL,
 ) {
   const strictIapMode = isStrictControlPlaneIapEnvironment();
+  // Deliberately does not fall back to JWT_SECRET: that key signs/verifies
+  // this app's own internal proxy -> API bearer token, a different trust
+  // boundary from Google's IAP assertion. Falling back to it here would let
+  // a deployment's internal signing secret verify a forged IAP assertion
+  // instead of requiring Google's real published JWKS
+  // (ENTRY-IAP-WORKFORCE-AUTH-20261005). Leaving this undefined makes
+  // issueControlPlaneRequestAuth resolve the real Google-managed ES256 key.
   const iapJwtSecretOrPublicKey =
-    process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY ||
-    process.env.IAP_JWT_SECRET ||
-    process.env.JWT_SECRET;
+    process.env.IAP_JWT_SECRET_OR_PUBLIC_KEY || process.env.IAP_JWT_SECRET;
   const expectedIapAudience =
     process.env.IAP_EXPECTED_AUDIENCE ||
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const controlPlaneAuth = issueControlPlaneRequestAuth({
+  const controlPlaneAuth = await issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: request.headers,
     defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
     requestId: request.headers.get("x-request-id"),
     strictIapMode,
+    iapEnabled: isControlPlaneIapEnabled(),
     ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
     ...(expectedIapAudience ? { expectedIapAudience } : {}),
     ...(expectedIapIssuer ? { expectedIapIssuer } : {}),

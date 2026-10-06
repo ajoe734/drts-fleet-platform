@@ -259,7 +259,7 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
         "utf8",
       );
       expect(source).toMatch(
-        /import\s*\{\s*hasTrustedMfa\s*\}\s*from\s*["']\.\.\/\.\.\/common\/auth\/trusted-mfa\.policy["']/,
+        /import\s*\{[^}]*\bhasTrustedMfa\b[^}]*\}\s*from\s*["']\.\.\/\.\.\/common\/auth\/trusted-mfa\.policy["']/,
       );
       expect(source).not.toMatch(/\["mfa",\s*"otp",\s*"webauthn"/);
     });
@@ -270,7 +270,7 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
         "utf8",
       );
       expect(source).toMatch(
-        /import\s*\{\s*hasTrustedMfa\s*\}\s*from\s*["']\.\/trusted-mfa\.policy["']/,
+        /import\s*\{[^}]*\bhasTrustedMfa\b[^}]*\}\s*from\s*["']\.\/trusted-mfa\.policy["']/,
       );
       expect(source).not.toMatch(/const STRICT_TRUSTED_AMR/);
       expect(source).not.toMatch(/const NON_STRICT_TRUSTED_AMR/);
