@@ -1005,12 +1005,28 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const { data: placards } = await metadataRes.json();
 
         // Report
+        const reportMatch = reportPath!.match(new RegExp("reports/([^/?]+)/artifact"));
+        expect(reportMatch, "Could not extract jobId from reportPath").toBeTruthy();
+        const jobId = reportMatch![1];
+
+        const reportMetadataRes = await fetch(`${platformAdminOriginStrict}/control-plane-proxy/reports/${jobId}`, { headers: platformHeaders });
+        expect(reportMetadataRes.status).toBe(200);
+        expect(reportMetadataRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
+        const jobDetail = await reportMetadataRes.json();
+        expect(jobDetail.jobId).toBe(jobId);
+        expect(jobDetail.status).toBe("completed");
+
         const reportOutcome = await downloadArtifact(`${platformAdminOriginStrict}${reportPath}`, { headers: platformHeaders });
         expect(reportOutcome.status).toBe(200);
+        expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
+        const contentType = reportOutcome.contentType || "";
+        const normalizedContentType = contentType.toLowerCase().split(";")[0].trim();
+        const allowedMimes = ["text/csv", "application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
+        expect(allowedMimes).toContain(normalizedContentType);
         expect(reportOutcome.bytes).not.toBeNull();
-        expect(reportOutcome.bytes!.length).toBeGreaterThan(0);
 
-        await validateReportArtifact(jobDetail, jobId, contentType, reportOutcome.bytes!);
+        const { validateReportArtifact } = await import("./report-validator");
+        await validateReportArtifact(jobDetail, jobId, normalizedContentType, reportOutcome.bytes!);
 
         // R5: Prove actual expiry of the given placard path
         const resolveUrlAndHeaders = (url: string) => {

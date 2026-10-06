@@ -24,9 +24,13 @@ export async function validateReportArtifact(
   contentType: string,
   bytes: Buffer
 ) {
+  const normalizedContentType = contentType.toLowerCase().split(";")[0].trim();
   let expectedFormat = "csv";
-  if (contentType === "application/pdf") expectedFormat = "pdf";
-  else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") expectedFormat = "xlsx";
+  if (normalizedContentType === "application/pdf") expectedFormat = "pdf";
+  else if (normalizedContentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") expectedFormat = "xlsx";
+  else if (normalizedContentType === "text/csv") expectedFormat = "csv";
+  else throw new Error(`Unsupported MIME type: ${contentType}`);
+  
   expect(jobDetail.format).toBe(expectedFormat);
 
   const expectedColumns: string[] = [];
@@ -45,30 +49,43 @@ export async function validateReportArtifact(
           ? JSON.stringify(value)
           : String(value);
       const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
-      // We do NOT add quotes here because we are comparing against parsed CSV fields which already had quotes stripped by the parser.
-      // Wait! The production recordsToCsv uses `"..."` around every field! And the CSV parser handles stripping the outer quotes.
-      // So the expected value we compare against the parsed field should just be `safeText`.
       return safeText;
   };
 
-  if (contentType === "application/pdf") {
+  if (normalizedContentType === "application/pdf") {
       const fullText = await extractPdfText(bytes);
       
       if (jobDetail.rows !== undefined) {
           if (jobDetail.rows.length > 0) {
+              const allTokens = fullText.split(/\s+/).filter(Boolean); 
+              
+              let expectedSequence: RegExp[] = [];
+              if (jobDetail.title) expectedSequence.push(...jobDetail.title.split(/\s+/).map(t => new RegExp('^' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
+              expectedSequence.push(new RegExp('^' + jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
+              expectedSequence.push(...expectedColumns.map(c => new RegExp('^' + c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
+              
               for (const row of jobDetail.rows) {
                   for (const col of expectedColumns) {
                       const val = row[col];
-                      if (val !== undefined && val !== null) {
-                          const strVal = typeof val === "object" ? JSON.stringify(val) : String(val);
-                          // Replace exact whitespaces in the expected string with \s+ so it matches extracted PDF text which collapses newlines into spaces
-                          const escapedStrVal = strVal
-                                .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                                .replace(/\s+/g, '\\s+');
-                          const matchExact = new RegExp(`(?:^|\\s|\\b)${escapedStrVal}(?:\\b|\\s|$)`);
-                          expect(fullText).toMatch(matchExact);
+                      const strVal = val === null || val === undefined ? "" : (typeof val === "object" ? JSON.stringify(val) : String(val));
+                      if (strVal !== "") {
+                          expectedSequence.push(...strVal.split(/\s+/).map(t => new RegExp('^' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
                       }
                   }
+              }
+              
+              let tokenIdx = 0;
+              for (const pattern of expectedSequence) {
+                  let found = false;
+                  while (tokenIdx < allTokens.length) {
+                      if (pattern.test(allTokens[tokenIdx]!)) {
+                          found = true;
+                          tokenIdx++;
+                          break;
+                      }
+                      tokenIdx++;
+                  }
+                  expect(found, `Expected token matching ${pattern} in sequence`).toBe(true);
               }
           } else {
               expect(fullText).toContain(jobId);
@@ -76,11 +93,12 @@ export async function validateReportArtifact(
       } else {
           throw new Error("Missing rows evidence in metadata");
       }
-  } else if (contentType === "text/csv") {
+  } else if (normalizedContentType === "text/csv") {
       const csvText = bytes.toString("utf-8");
       expect(csvText.trim().startsWith("<html>")).toBe(false);
 
       const parseCsvStrict = (text: string) => {
+          if (text === "") return [];
           const records: string[][] = [];
           let currentRecord: string[] = [];
           let currentField = "";
@@ -94,12 +112,19 @@ export async function validateReportArtifact(
                           i++;
                       } else {
                           inQuotes = false;
+                          if (i + 1 < text.length) {
+                              const nextC = text[i + 1];
+                              if (nextC !== "," && nextC !== "\r" && nextC !== "\n") {
+                                  throw new Error("Characters after closing quote");
+                              }
+                          }
                       }
                   } else {
                       currentField += c;
                   }
               } else {
                   if (c === "\"") {
+                      if (currentField !== "") throw new Error("Quote in unquoted field");
                       inQuotes = true;
                   } else if (c === ",") {
                       currentRecord.push(currentField);
@@ -137,7 +162,7 @@ export async function validateReportArtifact(
 
       if (jobDetail.rows !== undefined) {
           if (jobDetail.rows.length === 0) {
-              expect(records.length).toBeLessThanOrEqual(1);
+              expect(records.length).toBe(0);
           } else {
               expect(records.length).toBeGreaterThan(0);
               const headers = records[0]!;
@@ -164,11 +189,11 @@ export async function validateReportArtifact(
       } else {
           throw new Error("Missing rows evidence in metadata");
       }
-  } else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+  } else if (normalizedContentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
       const ExcelJS = await import("exceljs");
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(bytes as any);
-      expect(workbook.worksheets.length).toBeGreaterThan(0);
+      expect(workbook.worksheets.length).toBe(1);
 
       const worksheet = workbook.worksheets[0]!;
 
@@ -181,11 +206,13 @@ export async function validateReportArtifact(
 
               const sheetColumns: Record<string, number> = {};
               let headerCount = 0;
-              headerRow.eachCell((cell, colNumber) => {
-                  const val = String(cell.value);
-                  expect(sheetColumns).not.toHaveProperty(val);
-                  sheetColumns[val] = colNumber;
-                  headerCount++;
+              headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                  const val = String(cell.value || "");
+                  if (val) {
+                      expect(sheetColumns).not.toHaveProperty(val);
+                      sheetColumns[val] = colNumber;
+                      headerCount++;
+                  }
               });
               
               expect(headerCount).toBe(expectedColumns.length);
@@ -197,8 +224,7 @@ export async function validateReportArtifact(
               for (let i = 0; i < jobDetail.rows.length; i++) {
                   const row = jobDetail.rows[i]!;
                   const sheetRow = worksheet.getRow(i + 2);
-                  for (const col of expectedColumns) {
-                      const colNumber = sheetColumns[col]!;
+                  for (let colNumber = 1; colNumber <= headerCount; colNumber++) {
                       const cellValue = sheetRow.getCell(colNumber).value;
                       let actualVal = "";
                       if (cellValue !== null && cellValue !== undefined) {
@@ -211,6 +237,12 @@ export async function validateReportArtifact(
                           }
                       }
                       
+                      const col = expectedColumns.find(c => sheetColumns[c] === colNumber);
+                      if (!col) {
+                          expect(actualVal).toBe("");
+                          continue;
+                      }
+
                       const expectedVal = row[col] === null || row[col] === undefined
                           ? ""
                           : (typeof row[col] === "object" ? JSON.stringify(row[col]) : String(row[col]));
