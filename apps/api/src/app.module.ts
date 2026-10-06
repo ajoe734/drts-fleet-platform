@@ -44,6 +44,7 @@ import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
 import { MultiTaxiModule } from "./modules/multi-taxi/multi-taxi.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
+import { PassengerPushDevicesModule } from "./modules/passenger-push-devices/passenger-push-devices.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
 import { PlatformAdminAssistantModule } from "./modules/platform-admin-assistant/platform-admin-assistant.module";
 import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
@@ -96,6 +97,7 @@ import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
     DriverSosModule,
     OwnedMobilityModule,
     OperationalObservabilityModule,
+    PassengerPushDevicesModule,
     PlatformAdminModule,
     PlatformAdminAssistantModule,
     BillingSettlementModule,
