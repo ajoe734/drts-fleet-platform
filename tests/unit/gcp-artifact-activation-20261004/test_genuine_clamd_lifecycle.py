@@ -1,5 +1,6 @@
 import struct
 import subprocess
+import tempfile
 import time
 import sys
 import os
@@ -78,6 +79,27 @@ def cvd_version(container_name, path):
     if len(fields) < 3 or not fields[2].isdigit():
         return None
     return fields[2]
+
+def wait_for_ping(container_name, timeout=60):
+    """Polls clamd's own real zPING idle command (not a log line, which can
+    print before clamd is actually accepting connections) until it answers
+    PONG, or the bound expires."""
+    start = time.time()
+    while time.time() - start < timeout:
+        res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zPING\\0' | nc 127.0.0.1 3310"])
+        if res.returncode == 0 and "PONG" in res.stdout:
+            return True
+        time.sleep(1)
+    return False
+
+def query_loaded_version(container_name):
+    """Real, null-terminated zVERSION query -- the same live proof
+    readiness.ts#createIsReady itself requires, not a parsed log line."""
+    res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
+    if res.returncode != 0:
+        return None
+    match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
+    return match.group(1) if match else None
 
 def file_exists(container_name, path):
     return run_cmd(["docker", "exec", container_name, "test", "-f", path]).returncode == 0
@@ -346,6 +368,202 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
             "on-disk header/version/mtime and coexistence-selection rule against whatever "
             "daily.cvd/.cld the live upstream mirror actually served."
         )
+
+# R5b.2-lifecycle, REOPEN round 3's remaining gap: the test above never
+# exercises a REAL old-loaded -> newer-on-disk-but-not-yet-activated ->
+# newer-activated transition, because the entrypoint's own first
+# `freshclam --stdout` call (clamd-entrypoint.sh line ~223) always runs
+# BEFORE clamd ever starts, so whatever daily.cvd/.cld clamd loads at
+# startup is already whichever version that first call resolved to.
+# Manufacturing a higher-version CVD/CLD ourselves is not an option
+# (ClamAV's private signing keys are unavailable to this harness, and a
+# forged header would not be real engine behavior); the only legitimate
+# source of a genuinely-signed OLDER daily database is a real file that
+# Cisco Talos actually published and that still exists somewhere on disk.
+# `clamav/clamav:1.3` is exactly that: this project's own
+# Dockerfile.clamd already documents it as EOL ("database-download support
+# ended 2026-02-07") and explicitly rejected for THIS task's own runtime
+# image -- which also means that tag's own image layers are frozen and no
+# longer rebuilt with a fresh database, so whatever daily.cvd/.cld it
+# baked at its own last build is a real, authentically-signed snapshot
+# that must be older than whatever today's live mirror serves. This never
+# starts or runs freshclam inside that EOL image (whose client-side
+# database-download protocol is itself the rejected/unsupported part) --
+# only `docker cp`s the static file off its layers, matching this
+# harness's own write-scope boundary (gateway/runtime sources, including
+# clamd-entrypoint.sh and clamd.conf, stay untouched; every write below is
+# runtime `docker create`/`docker cp`/`docker exec` orchestration, like
+# the rest of this file).
+#
+# Known precondition this Docker-less VM cannot verify locally (documented
+# per Guide 0.7 rather than assumed silently): that `clamav/clamav:1.3`
+# actually ships a readable daily.cvd/.cld in its image layers, and that
+# the copied file's ownership/permissions remain usable by the target
+# container's freshclam/clamd processes. If either does not hold, the
+# assertions below fail with a specific, attributable message identifying
+# which precondition was missing -- not a false pass.
+SEED_IMAGE = "clamav/clamav:1.3"
+
+class TestGenuineClamdVersionTransition(unittest.TestCase):
+    def setUp(self):
+        self.image = os.environ.get("CLAMD_IMAGE")
+        self.container_name = "test_clamd_version_transition"
+        self.seed_container_name = "test_clamd_version_transition_seed"
+        self.db_dir = "/var/lib/clamav"
+        if not self.image:
+            self.skipTest("CLAMD_IMAGE environment variable not set")
+        run_cmd(["docker", "rm", "-f", self.container_name])
+        run_cmd(["docker", "rm", "-f", self.seed_container_name])
+
+    def tearDown(self):
+        run_cmd(["docker", "rm", "-f", self.container_name])
+        run_cmd(["docker", "rm", "-f", self.seed_container_name])
+
+    def _extract_seed_database(self, tmp_dir):
+        pull = run_cmd(["docker", "pull", SEED_IMAGE], timeout=180)
+        self.assertEqual(pull.returncode, 0, f"Failed to pull seed image {SEED_IMAGE}: {pull.stderr}")
+        create = run_cmd(["docker", "create", "--name", self.seed_container_name, SEED_IMAGE])
+        self.assertEqual(create.returncode, 0, f"Failed to create seed container: {create.stderr}")
+        found = {}
+        for name in ("daily.cvd", "daily.cld"):
+            dest = os.path.join(tmp_dir, name)
+            cp = run_cmd(["docker", "cp", f"{self.seed_container_name}:{self.db_dir}/{name}", dest])
+            if cp.returncode == 0 and os.path.isfile(dest) and os.path.getsize(dest) > 0:
+                found[name] = dest
+        run_cmd(["docker", "rm", "-f", self.seed_container_name])
+        self.assertTrue(
+            found,
+            f"Precondition not met: seed image {SEED_IMAGE} does not ship a readable "
+            f"daily.cvd/daily.cld at {self.db_dir}. This harness cannot manufacture a "
+            "genuinely-signed historical database without one; a different concrete seed "
+            "source is needed before this control can run.",
+        )
+        return found
+
+    def test_genuine_old_to_new_version_and_activation_lag(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            seed_files = self._extract_seed_database(tmp_dir)
+
+            seed_name = "daily.cvd" if "daily.cvd" in seed_files else "daily.cld"
+            header = run_cmd(["sh", "-c", f"head -c 512 '{seed_files[seed_name]}' | cat -v"]).stdout
+            self.assertTrue(header.startswith("ClamAV-VDB:"), f"Seed {seed_name} has no readable ClamAV-VDB header")
+            fields = header.split(":")
+            self.assertTrue(len(fields) >= 3 and fields[2].isdigit(), f"Seed {seed_name} header has no numeric version: {header!r}")
+            seed_version = fields[2]
+
+            # Create (but do not start) the real target container, then
+            # seed BOTH the stale database AND a deliberately unreachable
+            # freshclam.conf into its writable layer before the
+            # entrypoint's first (pre-clamd) freshclam call ever runs, so
+            # that call fails fast and clamd starts up loading the stale
+            # seed rather than a live download silently overwriting it.
+            create = run_cmd([
+                "docker", "create", "--name", self.container_name,
+                "-e", "FRESHCLAM_INTERVAL_SECONDS=5", self.image,
+            ])
+            self.assertEqual(create.returncode, 0, f"Failed to create container: {create.stderr}")
+
+            cp = run_cmd(["docker", "cp", seed_files[seed_name], f"{self.container_name}:{self.db_dir}/{seed_name}"])
+            self.assertEqual(cp.returncode, 0, f"Failed to seed {seed_name}: {cp.stderr}")
+
+            broken_conf = os.path.join(tmp_dir, "freshclam.broken.conf")
+            with open(broken_conf, "w") as f:
+                f.write("DatabaseMirror 127.0.0.1\nConnectTimeout 1\nMaxAttempts 1\n")
+            cp = run_cmd(["docker", "cp", broken_conf, f"{self.container_name}:/etc/clamav/freshclam.conf"])
+            self.assertEqual(cp.returncode, 0, f"Failed to seed broken freshclam.conf: {cp.stderr}")
+
+            start = run_cmd(["docker", "start", self.container_name])
+            self.assertEqual(start.returncode, 0, f"Failed to start seeded container: {start.stderr}")
+
+            self.assertTrue(wait_for_ping(self.container_name, 60), "clamd never answered a live PING after seeded startup")
+            time.sleep(2)
+
+            initial_loaded = query_loaded_version(self.container_name)
+            self.assertIsNotNone(initial_loaded, "Could not parse initial loaded version")
+            self.assertEqual(
+                initial_loaded, seed_version,
+                "Precondition not met: clamd did not load the seeded stale version at startup "
+                "(the broken-mirror precondition for observing a genuine old->new transition "
+                "was not satisfied) -- this is a missing condition, not a fabricated pass.",
+            )
+            res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            self.assertEqual(res.returncode, 0, "Readiness version marker missing after seeded startup")
+            self.assertEqual(res.stdout.strip(), seed_version, "Readiness marker did not publish the seeded stale version")
+
+            # Restore real connectivity, but disable freshclam's own
+            # automatic clamd notification (a real, documented
+            # freshclam.conf directive) so the genuine update this
+            # triggers writes a newer file to disk WITHOUT instantly
+            # reloading the already-running engine -- a real, observable
+            # pending/not-yet-activated window, not a timing accident.
+            res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
+                            "printf 'DatabaseMirror database.clamav.net\\nNotifyClamd no\\n' > /etc/clamav/freshclam.conf"])
+            self.assertEqual(res.returncode, 0, f"Failed to restore freshclam.conf: {res.stderr}")
+
+            # The entrypoint's own watchdog (FRESHCLAM_INTERVAL_SECONDS=5)
+            # performs the next freshclam pass and republishes the marker
+            # from whatever is genuinely on disk afterward -- the same
+            # mechanism the sibling test above already relies on for its
+            # "unchanged" assertion, not a new invented path.
+            new_expected_version = None
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
+                if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != seed_version:
+                    new_expected_version = res.stdout.strip()
+                    break
+                time.sleep(2)
+            self.assertIsNotNone(
+                new_expected_version,
+                "Readiness marker never advanced past the seeded stale version -- no genuine "
+                "update was available from the live mirror against this seed within the bound",
+            )
+
+            # Pending window: the watchdog's freshclam already wrote the
+            # newer file and republished the marker/version-file from it,
+            # but clamd itself was never notified (NotifyClamd no) and
+            # SelfCheck (clamd.conf, 1800s) is far away -- so the live
+            # engine must still be serving the OLD version right now. This
+            # is exactly the readiness.ts#isEngineActivated mismatch the
+            # REOPEN review asked this harness to actually produce.
+            pending_loaded = query_loaded_version(self.container_name)
+            self.assertEqual(
+                pending_loaded, seed_version,
+                "Expected clamd to still be serving the OLD version during the deliberately "
+                "un-notified pending window (NotifyClamd no)",
+            )
+            self.assertNotEqual(
+                pending_loaded, new_expected_version,
+                "isEngineActivated must see a genuine mismatch during this pending window",
+            )
+
+            # Force the real, documented clamd RELOAD command (clamd/
+            # session.c's zRELOAD) rather than waiting out SelfCheck's
+            # 1800s bound or re-enabling NotifyClamd for a second genuine
+            # update that may not be available.
+            res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
+                            "printf 'zRELOAD\\0' | nc -w 3 127.0.0.1 3310"])
+            self.assertEqual(res.returncode, 0, f"Failed to issue RELOAD: {res.stderr}")
+            time.sleep(3)
+
+            activated_loaded = query_loaded_version(self.container_name)
+            self.assertEqual(
+                activated_loaded, new_expected_version,
+                "clamd did not activate the newer on-disk version after a real RELOAD command",
+            )
+
+            # Scans succeed again once genuinely activated, via the exact
+            # gateway-facing INSTREAM framing (clamd-protocol.ts#encodeInstream).
+            clean_reply = clamd_instream(self.container_name, b"clean data")
+            self.assertEqual(clean_reply, "stream: OK", f"Unexpected INSTREAM reply after activation: {clean_reply!r}")
+            eicar = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+            eicar_reply = clamd_instream(self.container_name, eicar.encode())
+            self.assertRegex(eicar_reply, r"^stream: .+ FOUND$", f"Unexpected INSTREAM reply after activation: {eicar_reply!r}")
+
+            print(
+                f"Genuine version transition confirmed: {seed_version} -> {new_expected_version}, "
+                "including an observed pending/not-yet-activated window before a real RELOAD."
+            )
 
 if __name__ == "__main__":
     unittest.main()
