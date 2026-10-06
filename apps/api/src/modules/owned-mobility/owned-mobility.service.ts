@@ -5432,6 +5432,7 @@ export class OwnedMobilityService
     const now = new Date().toISOString();
     const prepare = (bundle: {
       order: OwnedOrderRecord;
+      assignmentVersion?: number;
       assignment: DispatchAssignmentRecord | null | undefined;
       task: DriverTaskRecord | null;
       dispatchJobs: DispatchJobRecord[];
@@ -5488,7 +5489,33 @@ export class OwnedMobilityService
           reason: order.cancelReason,
         }),
       );
-      return { order, assignment, task, dispatchJobs, traceLogs };
+      const consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
+      if (order.runtimeProfileCode === "multi_taxi_direct") {
+        const outbox: ConsumerNotificationOutboxRecord = {
+          outboxId: randomUUID(),
+          orderId: order.orderId,
+          passengerSubjectRef: resolvePassengerSubjectRef(order.passenger),
+          eventType: "trip_cancelled",
+          assignmentVersion: bundle.assignmentVersion ?? 1,
+          payload: {
+            cancelReason: "passenger_cancelled",
+          },
+          status: "pending",
+          attemptCount: 0,
+          nextAttemptAt: now,
+          createdAt: now,
+          deliveredAt: null,
+        };
+        consumerNotificationOutbox.push(outbox);
+      }
+      return {
+        order,
+        assignment,
+        task,
+        dispatchJobs,
+        traceLogs,
+        consumerNotificationOutbox,
+      };
     };
     const repository = this.ownedMobilityRepository;
     if (repository?.isEnabled()) {
@@ -5510,6 +5537,7 @@ export class OwnedMobilityService
               : [],
             driverTasks: prepared.task ? [prepared.task] : [],
             dispatchTraceLogs: prepared.traceLogs,
+            consumerNotificationOutbox: prepared.consumerNotificationOutbox,
           });
           if (prepared.assignment) {
             await repository.releaseDispatchResourceReservations(
@@ -5560,7 +5588,14 @@ export class OwnedMobilityService
           }),
           quotaRelease: null,
         };
-    const { order, assignment, task, dispatchJobs, traceLogs } = committed;
+    const {
+      order,
+      assignment,
+      task,
+      dispatchJobs,
+      traceLogs,
+      consumerNotificationOutbox,
+    } = committed;
     if (
       repository?.isEnabled() &&
       committed.quotaRelease &&
@@ -5625,6 +5660,12 @@ export class OwnedMobilityService
         ),
       ];
     this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+    if (consumerNotificationOutbox?.length) {
+      this.consumerNotificationOutbox = [
+        ...consumerNotificationOutbox,
+        ...this.consumerNotificationOutbox,
+      ];
+    }
     this.recordAudit(
       {
         actorId: null,
