@@ -197,11 +197,26 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
     ).rejects.toThrow(/FIXTURE_API_BASE_URL/);
   });
 
-  it("publishes the fixture fee plan, generates statements, and returns the resulting batch id (eligible-positive)", async () => {
+  // The globally registered SnakeCaseInterceptor serializes every real HTTP
+  // response snake_case (apps/api/src/common/snake-case.interceptor.ts);
+  // these fixtures mirror that wire shape (fee_plan_id/plan_name/version_id/
+  // effective_to/reimbursement_batch_ids), never the internal camelCase
+  // service field names -- a camelCase mock here would hide the exact P1
+  // wire-format mismatch this test file exists to catch.
+  const ourActivePlan = {
+    fee_plan_id: "fee-plan-1",
+    plan_name: "fixture-platform-funded-reimbursement",
+    version: "v1",
+    status: "published",
+  };
+
+  it("publishes the fixture fee plan when none exists, confirms activation via readback, generates statements, and returns the resulting batch id (eligible-positive / first publish)", async () => {
     fetchMock
-      .mockResolvedValueOnce(fakeResponse(200, { data: { feePlanId: "fee-plan-1" } }))
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }))
+      .mockResolvedValueOnce(fakeResponse(201, {}))
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [ourActivePlan] } }))
       .mockResolvedValueOnce(
-        fakeResponse(200, { data: { items: [], reimbursementBatchIds: ["reimbursement-1"] } }),
+        fakeResponse(200, { data: { items: [], reimbursement_batch_ids: ["reimbursement-1"] } }),
       );
 
     const fixture = await ensureDriverReimbursementBatchFixture({
@@ -213,48 +228,86 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
       driverId: "drv-demo-001",
       periodMonth: "2026-03",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const [publishUrl, publishInit] = fetchMock.mock.calls[0]!;
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const [firstListUrl, firstListInit] = fetchMock.mock.calls[0]!;
+    expect(firstListUrl).toBe("https://fixture.example.test/api/driver-fee-plans");
+    expect(firstListInit.headers.authorization).toBe("Bearer test-ops-token");
+    const [publishUrl] = fetchMock.mock.calls[1]!;
     expect(publishUrl).toBe("https://fixture.example.test/api/driver-fee-plans/publish");
-    expect(publishInit.headers.authorization).toBe("Bearer test-ops-token");
-    const [generateUrl, generateInit] = fetchMock.mock.calls[1]!;
+    const [confirmListUrl] = fetchMock.mock.calls[2]!;
+    expect(confirmListUrl).toBe("https://fixture.example.test/api/driver-fee-plans");
+    const [generateUrl, generateInit] = fetchMock.mock.calls[3]!;
     expect(generateUrl).toBe("https://fixture.example.test/api/driver-statements/generate");
     expect(generateInit.headers["idempotency-key"]).toBe(
       "fixture-driver-statements-drv-demo-001-2026-03",
     );
   });
 
-  it("treats an already-published fixture fee plan (409 FEE_PLAN_IMMUTABLE) as success, not a failure", async () => {
+  it("reuses an already-active fixture fee plan without publishing again (repeat)", async () => {
     fetchMock
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [ourActivePlan] } }))
       .mockResolvedValueOnce(
-        fakeResponse(409, { error: { code: "FEE_PLAN_IMMUTABLE", message: "immutable" } }),
-      )
-      .mockResolvedValueOnce(
-        fakeResponse(200, { data: { items: [], reimbursementBatchIds: ["reimbursement-1"] } }),
+        fakeResponse(200, { data: { items: [], reimbursement_batch_ids: ["reimbursement-1"] } }),
       );
 
     const fixture = await ensureDriverReimbursementBatchFixture({
       opsToken: "test-ops-token",
     });
+
     expect(fixture.batchId).toBe("reimbursement-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls).not.toContain("https://fixture.example.test/api/driver-fee-plans/publish");
   });
 
-  it("surfaces a genuine fee-plan-publish failure without attempting statement generation (unknown/ineligible case)", async () => {
+  it("rejects when a different, more recently published fee plan shadows the fixture plan (conflicting existing plan)", async () => {
     fetchMock.mockResolvedValueOnce(
-      fakeResponse(403, { error: { code: "FORBIDDEN", message: "no billing:write scope" } }),
+      fakeResponse(200, {
+        data: {
+          items: [
+            { fee_plan_id: "fee-plan-2", plan_name: "someone-elses-plan", version: "v9", status: "published" },
+            ourActivePlan,
+          ],
+        },
+      }),
     );
 
     await expect(
       ensureDriverReimbursementBatchFixture({ opsToken: "test-ops-token" }),
-    ).rejects.toThrow(/Failed to publish the fixture driver fee plan/);
+    ).rejects.toThrow(/different, more recently published fee plan/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects when publishing the fixture fee plan does not take effect by the confirmation readback (persistence failure)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }))
+      .mockResolvedValueOnce(fakeResponse(201, {}))
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }));
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({ opsToken: "test-ops-token" }),
+    ).rejects.toThrow(/did not take effect/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("surfaces a genuine fee-plan readback failure without attempting publish (unknown/ineligible case)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse(403, { error: { code: "FORBIDDEN", message: "no billing:read scope" } }),
+    );
+
+    await expect(
+      ensureDriverReimbursementBatchFixture({ opsToken: "test-ops-token" }),
+    ).rejects.toThrow(/Failed to list driver fee plans/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("throws when statement generation produces no reimbursement batch (period/driver with no eligible trip)", async () => {
     fetchMock
-      .mockResolvedValueOnce(fakeResponse(200, { data: { feePlanId: "fee-plan-1" } }))
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [] } }))
+      .mockResolvedValueOnce(fakeResponse(201, {}))
+      .mockResolvedValueOnce(fakeResponse(200, { data: { items: [ourActivePlan] } }))
       .mockResolvedValueOnce(
-        fakeResponse(200, { data: { items: [], reimbursementBatchIds: [] } }),
+        fakeResponse(200, { data: { items: [], reimbursement_batch_ids: [] } }),
       );
 
     await expect(
@@ -271,7 +324,7 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
       fakeResponse(200, {
         data: {
           items: [
-            { versionId: "public-info-demo-001", status: "published", effectiveTo: null },
+            { version_id: "public-info-demo-001", status: "published", effective_to: null },
           ],
         },
       }),
@@ -293,7 +346,7 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
     fetchMock.mockResolvedValueOnce(
       fakeResponse(200, {
         data: {
-          items: [{ versionId: "public-info-demo-001", status: "draft", effectiveTo: null }],
+          items: [{ version_id: "public-info-demo-001", status: "draft", effective_to: null }],
         },
       }),
     );
@@ -309,9 +362,9 @@ describe("ensureDriverReimbursementBatchFixture / verifyPublicInfoVersionFixture
         data: {
           items: [
             {
-              versionId: "public-info-demo-001",
+              version_id: "public-info-demo-001",
               status: "published",
-              effectiveTo: "2020-01-01T00:00:00.000Z",
+              effective_to: "2020-01-01T00:00:00.000Z",
             },
           ],
         },

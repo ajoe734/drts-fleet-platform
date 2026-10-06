@@ -341,21 +341,79 @@ async function callApi(
   return { status: response.status, body };
 }
 
+/** Every HTTP response is serialized snake_case by the globally registered
+ * `SnakeCaseInterceptor` (apps/api/src/app.module.ts,
+ * common/snake-case.interceptor.ts#deepToSnakeCase); these mirror the wire
+ * shape (`fee_plan_id`/`plan_name`/`version_id`/`effective_to`), never the
+ * internal camelCase service/controller field names. */
+interface DriverFeePlanWireRecord {
+  fee_plan_id: string;
+  plan_name: string;
+  version: string;
+  status: string;
+}
+
+interface PublicInfoVersionWireRecord {
+  version_id: string;
+  status: string;
+  effective_to: string | null;
+}
+
+/** Reads the real, always-synchronously-awaited `GET driver-fee-plans`
+ * readback (billing-settlement.controller.ts:307-312 ->
+ * listDriverFeePlans(), not `async`) -- the only reliable way to observe
+ * fee-plan state; see `ensureDriverReimbursementBatchFixture` below for why
+ * the sibling `publish` endpoint's own HTTP response cannot be trusted. */
+async function listDriverFeePlansWire(
+  baseUrl: string,
+  token: string,
+): Promise<DriverFeePlanWireRecord[]> {
+  const list = await callApi(baseUrl, "/api/driver-fee-plans", {
+    method: "GET",
+    token,
+  });
+  if (list.status >= 300) {
+    throw new Error(
+      `Failed to list driver fee plans (${list.status}): ${JSON.stringify(list.body)}`,
+    );
+  }
+  return list.body?.data?.items ?? [];
+}
+
 /** Ensures `driverId` (default `DEFAULT_DRIVER_FIXTURE_ACTOR_ID`) owns a
  * reimbursement batch for `periodMonth` (default
  * `FIXTURE_REIMBURSEMENT_PERIOD_MONTH`) on the target deployment, through
- * the SAME two formal, documented endpoints the manual runbook would call
- * by hand (`billing-settlement.controller.ts`'s `driver-fee-plans/publish`
- * and `driver-statements/generate`) -- never a raw insert into
- * `reimbursementBatches`. Both calls are idempotent: a fee plan
- * `(planName, version)` that already exists returns `FEE_PLAN_IMMUTABLE`
- * (409), treated here as already-done; `driver-statements/generate` is
- * called with a deterministic `Idempotency-Key` derived from
- * `driverId`/`periodMonth`, and `generateDriverStatements` itself
+ * the SAME formal, documented endpoints the manual runbook would call by
+ * hand (`billing-settlement.controller.ts`'s `driver-fee-plans/publish`,
+ * `driver-fee-plans` and `driver-statements/generate`) -- never a raw
+ * insert into `reimbursementBatches`.
+ *
+ * `publishDriverFeePlan`'s controller action (billing-settlement.
+ * controller.ts:314-326) is NOT `async` and never awaits the service's
+ * `Promise` before handing it to `toApiSuccessEnvelope`; the global
+ * `SnakeCaseInterceptor` then serializes that un-awaited `Promise` (via
+ * `Object.entries`, which a `Promise` has none of) to `{}` before it ever
+ * settles. The HTTP response is therefore identical -- same status, empty
+ * `data` -- whether the publish succeeds, hits the real `FEE_PLAN_IMMUTABLE`
+ * (409) conflict (billing-settlement.service.ts:2003-2017), or fails
+ * persistence; none of that is observable from the response. This function
+ * never reads the publish response. Instead it treats the sibling, properly
+ * synchronous `GET driver-fee-plans` readback as the single source of
+ * truth: skip publishing if our plan is already the active
+ * (`driverFeePlans[0]`, billing-settlement.service.ts:2081) one; fail fast
+ * if a DIFFERENT plan already shadows ours (publishing again would only
+ * hit the real 409 invisibly and leave the wrong plan active for
+ * `generateDriverStatements`); otherwise publish once and re-read to
+ * confirm it actually became active before proceeding.
+ *
+ * `driver-statements/generate`'s controller action IS properly `async`/
+ * awaited (billing-settlement.controller.ts:331,344-348), so its response is
+ * reliable; it is called with a deterministic `Idempotency-Key` derived
+ * from `driverId`/`periodMonth`, and `generateDriverStatements` itself
  * (billing-settlement.service.ts:2099-2112) separately returns the SAME
  * existing batch ids on any later re-run for that driver/period/fee-plan-
  * version. Throws with the real endpoint's error code/message (never a
- * generic failure) if either call fails, or if the period genuinely has no
+ * generic failure) if that call fails, or if the period genuinely has no
  * eligible platform-funded trip to turn into a batch. */
 export async function ensureDriverReimbursementBatchFixture(
   options: EnsureReimbursementBatchFixtureOptions = {},
@@ -365,23 +423,57 @@ export async function ensureDriverReimbursementBatchFixture(
   const periodMonth = options.periodMonth ?? FIXTURE_REIMBURSEMENT_PERIOD_MONTH;
   const token = options.opsToken ?? (await issueOpsSessionFixture()).token;
 
-  const publish = await callApi(baseUrl, "/api/driver-fee-plans/publish", {
-    method: "POST",
-    token,
-    body: {
-      planName: FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME,
-      version: FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION,
-      serviceFeeBps: 0,
-      reimbursementMode: "platform_funded",
-    },
-  });
-  const alreadyPublished =
-    publish.status === 409 && publish.body?.error?.code === "FEE_PLAN_IMMUTABLE";
-  if (publish.status >= 300 && !alreadyPublished) {
-    throw new Error(
-      `Failed to publish the fixture driver fee plan (${publish.status}): ` +
-        `${JSON.stringify(publish.body)}`,
+  const existingPlans = await listDriverFeePlansWire(baseUrl, token);
+  const activePlan = existingPlans[0];
+  const isActivePlanOurs =
+    activePlan !== undefined &&
+    activePlan.plan_name === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
+    activePlan.version === FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION;
+
+  if (!isActivePlanOurs) {
+    const shadowedByOtherActivePlan = existingPlans.some(
+      (plan) =>
+        plan.plan_name === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
+        plan.version === FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION,
     );
+    if (shadowedByOtherActivePlan) {
+      throw new Error(
+        `Fixture fee plan ${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION} ` +
+          "already exists but a different, more recently published fee plan " +
+          `(${activePlan ? `${activePlan.plan_name}/${activePlan.version}` : "none"}) is now active; ` +
+          "generateDriverStatements always selects driverFeePlans[0], so publishing " +
+          "again would only hit the real (invisible) FEE_PLAN_IMMUTABLE conflict and " +
+          "leave the wrong plan active. Use a fresh fixture plan name/version.",
+      );
+    }
+
+    await callApi(baseUrl, "/api/driver-fee-plans/publish", {
+      method: "POST",
+      token,
+      body: {
+        planName: FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME,
+        version: FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION,
+        serviceFeeBps: 0,
+        reimbursementMode: "platform_funded",
+      },
+    });
+
+    const confirmedPlans = await listDriverFeePlansWire(baseUrl, token);
+    const confirmedActive = confirmedPlans[0];
+    const published =
+      confirmedActive !== undefined &&
+      confirmedActive.plan_name === FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME &&
+      confirmedActive.version === FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION;
+    if (!published) {
+      throw new Error(
+        `Publishing the fixture driver fee plan did not take effect: expected ` +
+          `${FIXTURE_REIMBURSEMENT_FEE_PLAN_NAME}/${FIXTURE_REIMBURSEMENT_FEE_PLAN_VERSION} ` +
+          "to become the active plan, but the active plan is now " +
+          `${confirmedActive ? `${confirmedActive.plan_name}/${confirmedActive.version}` : "none"} ` +
+          "(the publish endpoint's own HTTP response cannot be used to detect this -- " +
+          "see this function's doc comment).",
+      );
+    }
   }
 
   const generate = await callApi(baseUrl, "/api/driver-statements/generate", {
@@ -396,7 +488,8 @@ export async function ensureDriverReimbursementBatchFixture(
         `${JSON.stringify(generate.body)}`,
     );
   }
-  const batchId: string | undefined = generate.body?.data?.reimbursementBatchIds?.[0];
+  const batchId: string | undefined =
+    generate.body?.data?.reimbursement_batch_ids?.[0];
   if (!batchId) {
     throw new Error(
       `generateDriverStatements for driver ${driverId}/${periodMonth} produced no ` +
@@ -434,9 +527,8 @@ export async function verifyPublicInfoVersionFixture(
       `Failed to list public info versions (${list.status}): ${JSON.stringify(list.body)}`,
     );
   }
-  const items: Array<{ versionId: string; status: string; effectiveTo: string | null }> =
-    list.body?.data?.items ?? [];
-  const match = items.find((item) => item.versionId === versionId);
+  const items: PublicInfoVersionWireRecord[] = list.body?.data?.items ?? [];
+  const match = items.find((item) => item.version_id === versionId);
   if (!match) {
     throw new Error(
       `Public info version ${versionId} does not exist on this deployment; ` +
@@ -449,9 +541,9 @@ export async function verifyPublicInfoVersionFixture(
       `Public info version ${versionId} is not published (status: ${match.status}).`,
     );
   }
-  if (match.effectiveTo && Date.parse(match.effectiveTo) <= Date.now()) {
+  if (match.effective_to && Date.parse(match.effective_to) <= Date.now()) {
     throw new Error(
-      `Public info version ${versionId} is retired (effectiveTo: ${match.effectiveTo}).`,
+      `Public info version ${versionId} is retired (effective_to: ${match.effective_to}).`,
     );
   }
   return { versionId };
