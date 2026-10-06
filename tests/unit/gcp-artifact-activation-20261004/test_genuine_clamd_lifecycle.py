@@ -185,8 +185,14 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
             expected_pattern.search(res.stdout) is not None,
             f"Manual freshclam pass did not confirm '{expected_ref}' version {expected_ref_version} as up-to-date: {res.stdout}",
         )
-        # Give the background watchdog loop time to observe this exact
-        # output and republish the marker before asserting on it.
+        # The manual freshclam call above runs as a one-off `docker exec` and
+        # its own stdout is never consumed by the entrypoint -- the real
+        # republish comes from the watchdog's OWN, independent periodic
+        # `freshclam --stdout` invocation (clamd-entrypoint.sh's background
+        # loop, interval FRESHCLAM_INTERVAL_SECONDS=5 set at container
+        # start). Sleeping past that interval lets the watchdog's own pass
+        # observe the same still-unchanged on-disk database and republish
+        # the marker; this does not depend on the manual call's output.
         time.sleep(7)
         daily_file_mtime_after_unchanged = stat_mtime(self.container_name, f"{self.db_dir}/{expected_ref}")
         self.assertEqual(daily_file_mtime_after_unchanged, daily_file_mtime_1,
@@ -292,14 +298,20 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
                           f"Recovered marker version {recovered_version} does not match on-disk "
                           f"{expected_ref_2}'s header version {expected_ref_version_2}")
 
-        # Verify marker mtime has advanced (if actual update) or matches (if unchanged)
+        # Verify marker mtime has advanced past the LATEST known-good
+        # pre-failure value. `marker_mtime_1` is from the initial startup,
+        # long before the later refresh-failure injection; comparing
+        # against it would let a recovery that merely restored that old,
+        # untouched marker pass. `marker_mtime_after_unchanged` is the
+        # marker's mtime immediately before the fault was injected, so this
+        # is the correct baseline to prove recovery actually republished.
         res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
         self.assertEqual(res.returncode, 0)
         marker_mtime_2 = res.stdout.strip()
-        self.assertGreater(int(marker_mtime_2), int(marker_mtime_1),
-                            "Readiness marker mtime must advance past its pre-failure value once recovery "
-                            "is confirmed, proving the failed/pending window actually ended in a fresh "
-                            "republish rather than a marker that merely survived untouched")
+        self.assertGreater(int(marker_mtime_2), int(marker_mtime_after_unchanged),
+                            "Readiness marker mtime must advance past its latest pre-failure value once "
+                            "recovery is confirmed, proving the failed/pending window actually ended in a "
+                            "fresh republish rather than a marker that merely survived untouched")
 
         # Verify equality
         res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
