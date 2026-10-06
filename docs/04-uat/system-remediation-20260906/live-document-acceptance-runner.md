@@ -176,10 +176,9 @@ Tests executed include:
 
 ### Update 2026-10-06: Incorporating Independent Review Findings (Task DOC-LIVE-RUNNER-UPGRADE-20261005)
 
-Following the independent review by Codex (REOPEN candidate 49e8c8b5f5dfcb0a25be99f3ac2bb96c5e587d18, generation 6ae04f11d44b46a78b4bd80251b60b9d), the following fixes were implemented:
+Following the independent review by Codex (REOPEN candidate bd609b35ae9c63eba35444fd7164eb50de2c6a71, generation 849e9193e236491db91d9f3e80b26461), the following status applies:
 
-- **R4 (Invoice):** Repaired `detail.amount` reference to properly bind the authoritative tenant, currency, and total amount. The runner now extracts `detail.amount.currency` and `detail.amount.amountMinor` and formats it appropriately before verifying the uncompressed PDF text.
-- **R5 (Report & Placard):** Repaired report parsing. The runner now derives the actual `jobId` from the URL, queries the report job metadata, and parses supported formats (PDF, CSV, and XLSX using `exceljs`) to verify meaningful rows rather than blindly checking for the word "artifact". For placards, `x-drts-candidate-sha` assertions were added to the expired response, refreshed list, and refreshed download. The URL selection properly resolves `/api` routing, and the refreshed materialized hash is correctly verified against the original hash.
-- **R6 (Viewer Denial):** Restored positive evidence of genuine issued viewer authentication. The test now checks for the specific "Role parameter tampering detected" response (using `?role=bank_finance`) to prove the session is genuinely authenticated, while verifying the ordinary business denial, forged, and blank controls still work.
-- **R10 (Superseded branch):** The trailer gate remains strictly enforced without bypass for the new commits.
-- **Required Acceptance Mapping:** Addressed the gaps regarding WIF identity, explicit tenant boundaries, authenticated viewer proof, report/placard content, and missing evidences triggering non-zero exits.
+- **R5 (Report & Placard):** [FIXED] Repaired report parsing. The runner now derives the actual `jobId` from the URL, queries the report job metadata, validates `x-drts-candidate-sha` on the metadata response, and properly parses CSV and XLSX to compare headers, rows, counts, and amounts, preserving valid production-renderer positives and rejecting malformed/mislabeled HTML or missing rows.
+- **R10 (Superseded branch & Trailer gate):** [UNRESOLVED] The machine branch remains on the original PR #2330 with the trailer gate bypassed. The existing six invalid commits (03242efa08a4, e61ac000f698, af0987047eea, 2569ee56b656, c606265d2cff, 4efcceffcf90) fail the strict trailer check. Supervisor coordination is required to follow the authorized history-recovery recipe (e.g., using recovery branch `gemini2/doc-live-runner-upgrade-20261005-r2`) to preserve published history and require real trailer-check exit 0. Owner has not forced push or changed the gate.
+
+Adjacent-candidate evidence and acceptance mapping updated per Codex review. Supervisor must verify the next focused repair unit (R10), scopes and dependencies before another handoff.

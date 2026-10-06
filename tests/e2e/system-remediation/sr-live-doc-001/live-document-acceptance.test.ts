@@ -1022,32 +1022,67 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         const jobUrl = `${platformAdminOriginStrict}${reportPath!.replace(/\/artifact.*$/, "")}`;
         const jobRes = await fetch(jobUrl, { headers: platformHeaders });
         expect(jobRes.status).toBe(200);
+        expect(jobRes.headers.get("x-drts-candidate-sha")).toBe(process.env.CANDIDATE_SHA);
         const { data: jobDetail } = await jobRes.json();
         
-        let expectedContent = jobId;
-        if (jobDetail.rows && jobDetail.rows.length > 0) {
-            expectedContent = String(Object.values(jobDetail.rows[0])[0]);
-        }
+        expect(jobDetail.jobId).toBe(jobId);
         
         if (contentType === "application/pdf") {
             const reportText = await extractPdfText(reportOutcome.bytes!);
-            expect(reportText).toContain(expectedContent);
+            if (jobDetail.rows && jobDetail.rows.length > 0) {
+                for (const row of jobDetail.rows) {
+                    expect(reportText).toContain(String(row.orderId));
+                    expect(reportText).toContain(String(row.amountMinor));
+                }
+            } else {
+                expect(reportText).toContain(jobId);
+            }
         } else if (contentType === "text/csv") {
             const csvText = reportOutcome.bytes!.toString("utf-8");
-            expect(csvText).toContain(expectedContent);
+            expect(csvText.trim().startsWith("<html>")).toBe(false);
+            
+            // basic CSV parsing for valid recordsToCsv output
+            const lines = csvText.trim().split("\n").map(l => l.trim());
+            if (jobDetail.rows && jobDetail.rows.length > 0) {
+                expect(lines.length).toBe(jobDetail.rows.length + 1);
+                const header = lines[0]!;
+                expect(header).toContain("orderId");
+                expect(header).toContain("amountMinor");
+                for (let i = 0; i < jobDetail.rows.length; i++) {
+                    const row = jobDetail.rows[i]!;
+                    const line = lines[i + 1]!;
+                    expect(line).toContain(String(row.orderId));
+                    expect(line).toContain(String(row.amountMinor));
+                }
+            } else {
+                expect(csvText).toContain(jobId);
+            }
         } else if (contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
             const ExcelJS = await import("exceljs");
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.load(reportOutcome.bytes! as any);
-            let found = false;
-            workbook.eachSheet((worksheet) => {
-                worksheet.eachRow((row) => {
-                    row.eachCell((cell) => {
-                        if (String(cell.value).includes(expectedContent)) found = true;
-                    });
+            expect(workbook.worksheets.length).toBeGreaterThan(0);
+            
+            const worksheet = workbook.worksheets[0]!;
+            if (jobDetail.rows && jobDetail.rows.length > 0) {
+                expect(worksheet.rowCount).toBe(jobDetail.rows.length + 1);
+                const headerRow = worksheet.getRow(1);
+                let orderIdCol = -1;
+                let amountMinorCol = -1;
+                headerRow.eachCell((cell, colNumber) => {
+                    if (String(cell.value) === "orderId") orderIdCol = colNumber;
+                    if (String(cell.value) === "amountMinor") amountMinorCol = colNumber;
                 });
-            });
-            expect(found).toBe(true);
+                expect(orderIdCol).toBeGreaterThan(0);
+                expect(amountMinorCol).toBeGreaterThan(0);
+                
+                for (let i = 0; i < jobDetail.rows.length; i++) {
+                    const row = jobDetail.rows[i]!;
+                    const sheetRow = worksheet.getRow(i + 2);
+                    expect(String(sheetRow.getCell(orderIdCol).value)).toContain(String(row.orderId));
+                    expect(String(sheetRow.getCell(amountMinorCol).value)).toContain(String(row.amountMinor));
+                }
+            }
         }
 
         // R5: Prove actual expiry of the given placard path
