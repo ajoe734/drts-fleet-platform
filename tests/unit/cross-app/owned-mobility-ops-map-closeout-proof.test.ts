@@ -1,8 +1,14 @@
+import { proofArtifactPath } from "./proof-artifacts";
+import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { EventEmitter2 } from "@nestjs/event-emitter";
+// Resolve API-owned dependencies from their workspace package.
+const apiRequire = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+);
+const { EventEmitter2 } = apiRequire("@nestjs/event-emitter");
 import type { DispatchCandidate } from "@drts/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -19,34 +25,29 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
-import {
-  IdempotencyRepository,
-  IdempotencyService,
-} from "../../src/common/idempotency";
-import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
-import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
-import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
-import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
-import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
+import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
+import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
+import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
+import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 import {
   buildOpsMapBoardModel,
   buildOpsMapTileViewport,
   normalizeOpsMapBounds,
   projectOpsMapPointToViewport,
-} from "../../../ops-console-web/app/dispatch/ops-map-board";
+} from "../../../apps/ops-console-web/app/dispatch/ops-map-board";
 
 const SERVICEABLE_ORDER_ID = "ORD-SMOKE-001";
 const ARTIFACT_RELATIVE_PATH =
-  "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json";
-const ARTIFACT_PATH = path.join(findWorkspaceRoot(), ARTIFACT_RELATIVE_PATH);
+  "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json";
+const ARTIFACT_PATH = proofArtifactPath(ARTIFACT_RELATIVE_PATH);
 
 afterEach(() => {
   randomUuidMock.mockReset();
 });
 
-describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
-  it("exports controller envelope order, dispatch, candidate, trace, and Ops map readback evidence", async () => {
+describe("FLEETS-CLOSEOUT-004 backend-linked Ops map proof", () => {
+  it("exports backend order, dispatch, candidate, and Ops map readback evidence", async () => {
     let createdOrderId = false;
     let snapshotSequence = 0;
     let traceSequence = 0;
@@ -55,36 +56,28 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
       const stack = new Error().stack ?? "";
       if (stack.includes("buildSpatialAuditSnapshot")) {
         snapshotSequence += 1;
-        return `snapshot-fleets-closeout-004-api-${String(
+        return `snapshot-fleets-closeout-004-${String(
           snapshotSequence,
         ).padStart(3, "0")}`;
       }
       if (stack.includes("appendTrace")) {
         traceSequence += 1;
-        return `trace-fleets-closeout-004-api-${String(traceSequence).padStart(
+        return `trace-fleets-closeout-004-${String(traceSequence).padStart(
           3,
           "0",
         )}`;
       }
-      if (
-        !createdOrderId &&
-        stack.includes("OwnedMobilityService.createCallCenterOrder")
-      ) {
+      if (!createdOrderId && stack.includes("createCallCenterOrder")) {
         createdOrderId = true;
         return SERVICEABLE_ORDER_ID;
       }
       fallbackSequence += 1;
-      return `misc-fleets-closeout-004-api-${fallbackSequence}`;
+      return `misc-fleets-closeout-004-${fallbackSequence}`;
     });
 
     const { service, regulatoryRegistryService } = createOwnedMobilityService();
-    const idempotencyService = new IdempotencyService(
-      new IdempotencyRepository(),
-    );
-    const controller = new OwnedMobilityController(service, idempotencyService);
 
-    const { response } = fakeResponse();
-    const createResponse = await controller.createCallCenterOrder(
+    const order = service.createCallCenterOrder(
       {
         callId: "CALL-SMOKE-001",
         agentId: "AGENT-OPS-001",
@@ -135,81 +128,44 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
           name: "Smoke Caller",
           phone: "0912-000-301",
         },
-        notes: "FLEETS-CLOSEOUT-004 API envelope Ops map proof",
+        notes: "FLEETS-CLOSEOUT-004 backend-linked Ops map proof",
       },
-      response,
-      "idem-fleets-closeout-004-api-create",
-      "req-fleets-closeout-004-api-create",
+      "req-fleets-closeout-004-create",
     );
-    const orderId = createResponse.data.orderId;
-    const dispatchResponse = await controller.dispatchOrder(
-      orderId,
+
+    const dispatchJob = service.dispatchOrder(
+      order.orderId,
       { mode: "auto" },
-      "req-fleets-closeout-004-api-dispatch",
-      "idem-fleets-closeout-004-api-dispatch",
+      "req-fleets-closeout-004-dispatch",
     );
-    const orderResponse = controller.getOrder(
-      orderId,
-      "req-fleets-closeout-004-api-order",
+    const orderDetail = service.getOrder(order.orderId);
+    const dispatchJobs = service.listDispatchJobs();
+    const storedDispatchJob = dispatchJobs.find(
+      (candidate) => candidate.dispatchJobId === dispatchJob.dispatchJobId,
     );
-    const jobsResponse = controller.listDispatchJobs(
-      "req-fleets-closeout-004-api-jobs",
+    const candidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+      true,
     );
-    const dispatchJob = jobsResponse.data.items.find(
-      (job) => job.orderId === orderId,
-    );
-    expect(orderId).toBe(SERVICEABLE_ORDER_ID);
-    expect(dispatchJob).toMatchObject({
-      dispatchJobId: dispatchResponse.data.dispatchJobId,
-      orderId,
+
+    expect(order.orderId).toBe(SERVICEABLE_ORDER_ID);
+    expect(storedDispatchJob).toMatchObject({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      orderId: order.orderId,
       status: "matching",
     });
-
-    const candidatesResponse = await controller.listDispatchCandidates(
-      dispatchJob!.dispatchJobId,
-      "true",
-      "req-fleets-closeout-004-api-candidates",
-    );
-    const traceResponse = controller.listOrderDispatchTrace(
-      orderId,
-      "req-fleets-closeout-004-api-trace",
-    );
-
+    expect(candidates).toHaveLength(3);
     expect(
       regulatoryRegistryService.getEligibleCandidates,
     ).toHaveBeenCalledWith("standard_taxi", { lat: 25.037519, lng: 121.56368 });
-    expect(createResponse.meta.requestId).toBe(
-      "req-fleets-closeout-004-api-create",
-    );
-    expect(orderResponse.meta.requestId).toBe(
-      "req-fleets-closeout-004-api-order",
-    );
-    expect(jobsResponse.meta.requestId).toBe(
-      "req-fleets-closeout-004-api-jobs",
-    );
-    expect(candidatesResponse.meta.requestId).toBe(
-      "req-fleets-closeout-004-api-candidates",
-    );
-    expect(traceResponse.meta.requestId).toBe(
-      "req-fleets-closeout-004-api-trace",
-    );
-    expect(orderResponse.data.spatialAudit).toMatchObject({
-      decision: "serviceable",
-      serviceAreaCodes: ["TAIPEI_CORE"],
-      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
-    });
-    expect(
-      candidatesResponse.data.items.map((candidate) => candidate.locationState),
-    ).toEqual(["fresh", "low_accuracy", "missing"]);
-    expect(traceResponse.data.items.length).toBeGreaterThan(0);
 
     const model = buildOpsMapBoardModel({
-      orders: [orderResponse.data],
+      orders: [orderDetail],
       orderJobMap: {
-        [orderId]: dispatchJob,
+        [order.orderId]: storedDispatchJob,
       },
       candidatesByJobId: {
-        [dispatchJob!.dispatchJobId]: candidatesResponse.data.items,
+        [dispatchJob.dispatchJobId]: candidates,
       },
     });
     const bounds = normalizeOpsMapBounds(model.points);
@@ -220,6 +176,7 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
     });
 
     expect(model.providerStatus).toBe("degraded_projection");
+    expect(model.fallbackReason).toBe("missing_coordinates");
     expect(model.points.map((point) => point.kind)).toEqual([
       "pickup",
       "dropoff",
@@ -229,41 +186,25 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
     expect(model.candidateSupplyPoints).toBe(2);
     expect(model.staleCandidatePoints).toBe(1);
     expect(model.noLocationCandidateCount).toBe(1);
+    expect(model.overlays.serviceAreaCodes).toEqual(["TAIPEI_CORE"]);
+    expect(model.overlays.geometryVersionRefs).toEqual([
+      "service_area:TAIPEI_CORE@1",
+    ]);
 
     const artifact = {
       generatedAt: new Date().toISOString(),
       branchSha: currentBranchSha(),
       closeoutTask: "FLEETS-CLOSEOUT-004",
       scope:
-        "repo-local controller/API-envelope plus Ops map model evidence; final E2E-MAP-006 promotion composes this readback with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, and MAP-OBS-001 final evidence.",
+        "repo-local backend service-layer plus Ops map model evidence; final E2E-MAP-006 promotion composes this readback with FLEETS-CLOSEOUT-001 persisted snapshot proof, browser DOM screenshot evidence, and MAP-OBS-001 final evidence.",
       command:
-        "pnpm --filter @drts/api exec vitest run tests/unit/owned-mobility-ops-map-api-closeout-proof.test.ts --reporter=verbose",
+        "pnpm exec vitest run tests/unit/cross-app/owned-mobility-ops-map-closeout-proof.test.ts --reporter=verbose",
       sameOrderIdsAsCallcenterProof: [SERVICEABLE_ORDER_ID],
-      apiEnvelopeReadback: {
-        create: {
-          requestId: createResponse.meta.requestId,
-          data: createResponse.data,
-        },
-        order: {
-          requestId: orderResponse.meta.requestId,
-          data: summarizeOrder(orderResponse.data),
-        },
-        dispatch: {
-          requestId: dispatchResponse.meta.requestId,
-          data: dispatchResponse.data,
-        },
-        dispatchJobs: {
-          requestId: jobsResponse.meta.requestId,
-          matchedJob: dispatchJob,
-        },
-        candidates: {
-          requestId: candidatesResponse.meta.requestId,
-          items: candidatesResponse.data.items.map(summarizeCandidate),
-        },
-        dispatchTrace: {
-          requestId: traceResponse.meta.requestId,
-          items: traceResponse.data.items,
-        },
+      backendReadback: {
+        order: summarizeOrder(orderDetail),
+        dispatchJob: storedDispatchJob,
+        dispatchTrace: service.listDispatchTrace(order.orderId),
+        candidates: candidates.map(summarizeCandidate),
       },
       opsBoard: {
         providerStatus: model.providerStatus,
@@ -299,10 +240,10 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
       },
       finalEvidencePromotion: {
         canSupportRows: [
-          "E2E-MAP-006 controller/API envelope readback to Ops map",
-          "same order ID across callcenter create, order detail, dispatch tasks, candidates, trace, and Ops map",
-          "dispatch candidate freshness/no-location handling through API envelope",
-          "service-area overlay from API-read order spatial audit",
+          "E2E-MAP-006 backend/API readback to Ops map",
+          "same persisted order ID across callcenter, dispatch, and Ops map",
+          "dispatch candidate location freshness and no-location handling",
+          "service-area overlay from backend spatial audit",
         ],
         promotedRows: [
           "MAP-QA-002 E2E-MAP-006 final PASS row",
@@ -310,15 +251,15 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
         ],
         composedAuthority: [
           "FLEETS-CLOSEOUT-001 persisted API/DB snapshot proof for ORD-SMOKE-001",
-          "FLEETS-CLOSEOUT-004 browser DOM screenshot and backend service readback for the same order/dispatch/candidate chain",
+          "FLEETS-CLOSEOUT-004 browser DOM screenshot and API-envelope readback for the same order/dispatch/candidate chain",
           "MAP-OBS-001 final evidence for degraded projection, freshness, and audit signals",
         ],
         finalArtifactLinks: [
           "support/sidecars/MAP-REL-001/artifacts/map-fleets-closeout-backend-proof-20260708T050500Z.json",
           "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.json",
           "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-browser-dom-proof.png",
-          "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-backend-linked-ops-proof.json",
           ARTIFACT_RELATIVE_PATH,
+          "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-api-envelope-ops-proof.json",
           "support/sidecars/MAP-QA-002/artifacts/closeout-20260708/fleets-closeout-004-ops-visibility-proof.json",
           "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
           "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
@@ -326,12 +267,12 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
         ],
       },
       assertions: [
-        "api_create_callcenter_order_envelope_returns_order_id_and_request_id",
-        "api_order_detail_envelope_preserves_spatial_audit_and_coordinates",
-        "api_dispatch_tasks_envelope_links_job_to_same_order_id",
-        "api_dispatch_candidates_envelope_returns_fresh_low_accuracy_and_missing_location_supply",
-        "api_dispatch_trace_envelope_returns_same_order_dispatch_events",
-        "ops_map_model_renders_from_api_envelope_readback",
+        "backend_order_readback_preserves_pickup_dropoff_coordinates",
+        "backend_dispatch_job_links_to_same_order_id",
+        "backend_candidate_api_returns_fresh_low_accuracy_and_missing_location_supply",
+        "ops_map_model_renders_backend_order_pickup_dropoff_and_visible_candidates",
+        "ops_map_model_exposes_service_area_overlay_from_backend_spatial_audit",
+        "ops_map_model_marks_missing_candidate_location_as_degraded_projection",
       ],
     };
 
@@ -340,58 +281,43 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
   });
 });
 
-function fakeResponse() {
-  const headers: Record<string, string> = {};
-  return {
-    response: {
-      status() {
-        return this;
-      },
-      setHeader(name: string, value: string) {
-        headers[name] = value;
-        return this;
-      },
-    },
-  };
-}
-
 function createOwnedMobilityService() {
   const regulatoryCandidates: DispatchCandidate[] = [
     {
-      driverId: "driver-map-closeout-004-api-fresh",
-      vehicleId: "vehicle-map-closeout-004-api-fresh",
+      driverId: "driver-map-closeout-004-fresh",
+      vehicleId: "vehicle-map-closeout-004-fresh",
       etaMinutes: 4,
       operatingArea: "taipei",
       serviceBuckets: ["standard_taxi"],
       locationState: "fresh",
       currentLocation: {
-        driverId: "driver-map-closeout-004-api-fresh",
+        driverId: "driver-map-closeout-004-fresh",
         lat: 25.0381,
         lng: 121.5646,
         accuracyM: 12,
-        recordedAt: "2026-07-08T07:02:00.000Z",
-        updatedAt: "2026-07-08T07:02:00.000Z",
+        recordedAt: "2026-07-08T06:02:00.000Z",
+        updatedAt: "2026-07-08T06:02:00.000Z",
       },
     },
     {
-      driverId: "driver-map-closeout-004-api-low-accuracy",
-      vehicleId: "vehicle-map-closeout-004-api-low-accuracy",
+      driverId: "driver-map-closeout-004-low-accuracy",
+      vehicleId: "vehicle-map-closeout-004-low-accuracy",
       etaMinutes: 7,
       operatingArea: "taipei",
       serviceBuckets: ["standard_taxi"],
       locationState: "low_accuracy",
       currentLocation: {
-        driverId: "driver-map-closeout-004-api-low-accuracy",
+        driverId: "driver-map-closeout-004-low-accuracy",
         lat: 25.0387,
         lng: 121.5654,
         accuracyM: 85,
-        recordedAt: "2026-07-08T07:02:00.000Z",
-        updatedAt: "2026-07-08T07:02:00.000Z",
+        recordedAt: "2026-07-08T06:02:00.000Z",
+        updatedAt: "2026-07-08T06:02:00.000Z",
       },
     },
     {
-      driverId: "driver-map-closeout-004-api-missing",
-      vehicleId: "vehicle-map-closeout-004-api-missing",
+      driverId: "driver-map-closeout-004-missing",
+      vehicleId: "vehicle-map-closeout-004-missing",
       etaMinutes: 9,
       operatingArea: "taipei",
       serviceBuckets: ["standard_taxi"],
@@ -532,18 +458,4 @@ function currentBranchSha() {
   } catch {
     return "unknown";
   }
-}
-
-function findWorkspaceRoot() {
-  let current = process.cwd();
-
-  while (!existsSync(path.join(current, "pnpm-workspace.yaml"))) {
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return process.cwd();
-    }
-    current = parent;
-  }
-
-  return current;
 }

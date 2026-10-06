@@ -1,7 +1,13 @@
+import { proofArtifactPath } from "./proof-artifacts";
+import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname } from "node:path";
 
-import { EventEmitter2 } from "@nestjs/event-emitter";
+// Resolve API-owned dependencies from their workspace package.
+const apiRequire = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+);
+const { EventEmitter2 } = apiRequire("@nestjs/event-emitter");
 import { afterEach, expect, it, vi } from "vitest";
 
 const { randomUuidMock } = vi.hoisted(() => ({
@@ -22,13 +28,13 @@ import type {
   DispatchJobRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
-import { ApiRequestError } from "../../src/common/api-envelope";
-import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
-import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
-import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
-import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
-import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
-import { buildOpsMapBoardModel } from "../../../ops-console-web/app/dispatch/ops-map-board";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
+import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
+import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
+import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
+import { buildOpsMapBoardModel } from "../../../apps/ops-console-web/app/dispatch/ops-map-board";
 
 const SERVICEABLE_ORDER_ID = "ORD-SMOKE-001";
 const MANUAL_REVIEW_ORDER_ID = "ORD-MAP-MANUAL-001";
@@ -344,23 +350,8 @@ it("writes persisted spatial closeout proof for the fleets closeout task", () =>
     },
   });
 
-  const artifactPath = resolve(
-    process.cwd(),
-    "..",
-    "..",
-    BACKEND_ARTIFACT_RELATIVE_PATH,
-  );
-  mkdirSync(
-    resolve(
-      process.cwd(),
-      "..",
-      "..",
-      "support/sidecars/MAP-REL-001/artifacts",
-    ),
-    {
-      recursive: true,
-    },
-  );
+  const artifactPath = proofArtifactPath(BACKEND_ARTIFACT_RELATIVE_PATH);
+  mkdirSync(dirname(artifactPath), { recursive: true });
   writeFileSync(
     artifactPath,
     JSON.stringify(
