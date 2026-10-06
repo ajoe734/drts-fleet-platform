@@ -172,16 +172,16 @@ pnpm exec vitest run tests/unit/system-remediation/sr-live-doc-001/ tests/e2e/sy
 Tests executed include:
 
 - `✓ tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts (20 tests | 5 skipped)`
-- `✓ tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts (22 tests)`
+- `✓ tests/unit/system-remediation/sr-live-doc-001/live-document-runner.test.ts (27 tests)`
 
 ### Update 2026-10-06: Resolving Reviewer (Codex) Findings
 
 Following the independent reviews by Codex (REOPEN candidate `ad500bbba967c871b5b03fc929e2175cf91b736b` and `1b1bb760e95ac7b045dc1d53ea1dacf0d5110d08`), the following status applies:
 
 - **R5-A (Live Caller Report Route):** [FIXED] Restored actual `jobId` parsing from the report path and live integration with `/reports/:jobId`. Added validation for nonempty metadata shape, expected CSV MIME type normalization, and asserted `x-drts-candidate-sha` on both metadata and artifact payloads.
-- **R5-B (Validator Loose Binding):** [FIXED] Updated `validateReportArtifact` inside `report-validator.ts` to strictly validate full report structures. PDF checking uses strict positional token validation against the entire extracted text array; CSV uses exact parser constraints against empty, unquoted/malformed quotes, unsupported MIME, and duplicate columns; XLSX accurately inspects precise row counts and valid non-empty worksheet cells. Empty-report generation bounds are properly asserted. 
+- **R5-B (Validator Loose Binding):** [FIXED] Restored complete structured/content binding in `validateReportArtifact`. PDF checking uses strict positional token validation against the entire extracted text array without skipping arbitrary tokens; CSV uses exact parser constraints against empty, unquoted/malformed quotes, unsupported MIME, and duplicate columns; XLSX accurately inspects actual empty workbook contents against the production renderer's empty state. Authentic empty and populated variants properly reject sparse-null extra cells.
 - **R8 (Workflow Missing Recovery Branch):** [FIXED] Corrected the push trigger in `.github/workflows/live-document-acceptance.yml` to trigger on any recovery branches matching the `gemini2/doc-live-runner-upgrade-20261005-*` glob, restoring the narrow automation trigger.
-- **R10 (History Recovery):** [FIXED] Executed Supervisor-authorized history-recovery recipe creating commits with all required trailers.
+- **R10 (History Recovery):** [PENDING] Supervisor must reconcile candidate_branch/PR with the authorized history-preserving recovery and verify scope/dependencies before owner continues. Current branch PR #2330 contains invalid ancestors that cannot be fixed by adding a compliant tip. Owner is prohibited from rebasing/force-pushing to correct the history.
 
 **Required Acceptance Evidence Limits:**
 - WIF validation and missing identity roles (bank_ops_viewer, tenant billing roles) remain actively monitored and unverified without dispatching a live host target.
