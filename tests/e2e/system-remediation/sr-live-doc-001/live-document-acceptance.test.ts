@@ -1007,7 +1007,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         // Report
         const reportMatch = reportPath!.match(new RegExp("reports/([^/?]+)/artifact"));
         expect(reportMatch, "Could not extract jobId from reportPath").toBeTruthy();
-        const jobId = reportMatch![1];
+        const jobId = reportMatch![1]!;
 
         const reportMetadataRes = await fetch(`${platformAdminOriginStrict}/control-plane-proxy/reports/${jobId}`, { headers: platformHeaders });
         expect(reportMetadataRes.status).toBe(200);
@@ -1020,7 +1020,7 @@ describe("SR-LIVE-DOC-RUNNER-001: authenticated remote artifact download + indep
         expect(reportOutcome.status).toBe(200);
         expect(reportOutcome.candidateSha).toBe(process.env.CANDIDATE_SHA);
         const contentType = reportOutcome.contentType || "";
-        const normalizedContentType = contentType.toLowerCase().split(";")[0].trim();
+        const normalizedContentType = contentType.toLowerCase().split(";")[0]!.trim();
         const allowedMimes = ["text/csv", "application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
         expect(allowedMimes).toContain(normalizedContentType);
         expect(reportOutcome.bytes).not.toBeNull();

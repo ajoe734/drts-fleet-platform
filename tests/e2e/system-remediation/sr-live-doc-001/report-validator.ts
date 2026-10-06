@@ -24,7 +24,7 @@ export async function validateReportArtifact(
   contentType: string,
   bytes: Buffer
 ) {
-  const normalizedContentType = contentType.toLowerCase().split(";")[0].trim();
+  const normalizedContentType = contentType.toLowerCase().split(";")[0]!.trim();
   let expectedFormat = "csv";
   if (normalizedContentType === "application/pdf") expectedFormat = "pdf";
   else if (normalizedContentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") expectedFormat = "xlsx";
@@ -59,8 +59,8 @@ export async function validateReportArtifact(
           if (jobDetail.rows.length > 0) {
               const allTokens = fullText.split(/\s+/).filter(Boolean); 
               
-              let expectedSequence: RegExp[] = [];
-              if (jobDetail.title) expectedSequence.push(...jobDetail.title.split(/\s+/).map(t => new RegExp('^' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
+              const expectedSequence: RegExp[] = [];
+              if (jobDetail.title) expectedSequence.push(...jobDetail.title.split(/\s+/).map((t: string) => new RegExp('^' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
               expectedSequence.push(new RegExp('^' + jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
               expectedSequence.push(...expectedColumns.map(c => new RegExp('^' + c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
               
@@ -69,7 +69,7 @@ export async function validateReportArtifact(
                       const val = row[col];
                       const strVal = val === null || val === undefined ? "" : (typeof val === "object" ? JSON.stringify(val) : String(val));
                       if (strVal !== "") {
-                          expectedSequence.push(...strVal.split(/\s+/).map(t => new RegExp('^' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
+                          expectedSequence.push(...strVal.split(/\s+/).map((t: string) => new RegExp('^' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$')));
                       }
                   }
               }
