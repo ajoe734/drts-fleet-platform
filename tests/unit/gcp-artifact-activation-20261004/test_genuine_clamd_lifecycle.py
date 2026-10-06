@@ -1,5 +1,7 @@
 import functools
+import hashlib
 import http.server
+import json
 import struct
 import subprocess
 import tempfile
@@ -9,6 +11,8 @@ import sys
 import os
 import unittest
 import re
+import urllib.error
+import urllib.request
 
 def run_cmd(cmd, timeout=10):
     print(f"Running: {' '.join(cmd)}")
@@ -112,6 +116,68 @@ def stat_mtime(container_name, path):
     if res.returncode != 0:
         return None
     return res.stdout.strip()
+
+def container_logs_since(container_name, since):
+    """Real `docker logs --since <ts>` capture (stdout+stderr), used to bind
+    an assertion to a SPECIFIC invocation's own output rather than any
+    invocation's generic exit code or a later, indirect side effect."""
+    res = run_cmd(["docker", "logs", "--since", since, container_name], timeout=15)
+    return (res.stdout or "") + (res.stderr or "")
+
+def container_published_port(container_name, container_port):
+    """Reads back the host port Docker actually published for
+    `container_port` on `container_name` (set via `-p 0:<container_port>` at
+    creation) -- the same readback a real caller would use, not a value
+    this harness invents."""
+    res = run_cmd(["docker", "port", container_name, str(container_port)])
+    if res.returncode != 0 or not res.stdout.strip():
+        return None
+    line = res.stdout.strip().splitlines()[0]
+    return int(line.rsplit(":", 1)[1])
+
+def start_gateway_sidecar(gateway_image, gateway_container_name, clamd_container_name, ready_host_dir):
+    """Starts the real gateway image (operations/artifact-scanner/gateway,
+    unmodified) joined to `clamd_container_name`'s own network namespace via
+    Docker's `--network container:<name>` -- the faithful local equivalent
+    of provision-dev-artifact-backends.py's multi-container Cloud Run
+    service, where both containers share one instance's loopback network --
+    plus the SAME host directory bind-mounted at the readiness marker's
+    directory, mirroring that script's shared in-memory `clamav-ready`
+    volume (`--add-volume-mount` on both containers). Only gateway/server.ts's
+    own documented env vars (CLAMD_HOST/CLAMD_PORT) are set; no gateway
+    source is touched."""
+    return run_cmd([
+        "docker", "run", "-d", "--name", gateway_container_name,
+        "--network", f"container:{clamd_container_name}",
+        "-v", f"{ready_host_dir}:/var/run/clamav-ready",
+        "-e", "CLAMD_HOST=127.0.0.1",
+        "-e", "CLAMD_PORT=3310",
+        gateway_image,
+    ])
+
+def gateway_scan(host_port, data, content_type="application/pdf", timeout=10):
+    """Real HTTP POST /scan against the gateway's own documented contract
+    (gateway/handler.ts#createRequestHandler): Content-Type must be an
+    allowed MIME type and X-Content-SHA256 must match the body. Returns
+    (status, parsed-JSON-body-or-None), exactly what a real caller sees --
+    not a value this harness invents."""
+    digest = hashlib.sha256(data).hexdigest()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{host_port}/scan",
+        data=data,
+        method="POST",
+        headers={"Content-Type": content_type, "X-Content-SHA256": digest},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+            return resp.status, (json.loads(body) if body else None)
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        try:
+            return exc.code, (json.loads(body) if body else None)
+        except (ValueError, TypeError):
+            return exc.code, None
 
 # Mirrors clamd-entrypoint.sh#daily_reference_file's tie-break: equal
 # versions -> .cld (incremental patch) wins; otherwise the strictly
@@ -231,6 +297,23 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
             "mtime to now (clamd-entrypoint.sh#publish_marker_from_signatures verified branch), "
             "or MAX_SIGNATURE_AGE_MS would eventually age out a genuinely current engine",
         )
+        # The marker-mtime advance above only proves SOME invocation took the
+        # verified branch; it does not by itself prove it was the
+        # watchdog's OWN periodic pass (rather than, say, a coincidental
+        # second signal) that affirmatively named this exact selected
+        # file/version. A real `docker exec` never writes to `docker logs`
+        # (its stdout is the exec session's own, captured above as
+        # `res.stdout`), so anything the entrypoint's backgrounded watchdog
+        # loop itself printed since `unchanged_time` is -- uniquely --
+        # the watchdog's own invocation, not the manual call already
+        # checked above.
+        watchdog_output = container_logs_since(self.container_name, unchanged_time)
+        self.assertTrue(
+            expected_pattern.search(watchdog_output) is not None,
+            f"Watchdog's own periodic freshclam pass did not itself confirm '{expected_ref}' "
+            f"version {expected_ref_version} as up-to-date (checked docker logs since "
+            f"{unchanged_time}): {watchdog_output!r}",
+        )
 
         # Test scan of EICAR and CLEAN using clamdscan (real protocol)
         eicar = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
@@ -322,6 +405,26 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         self.assertEqual(recovered_version, expected_ref_version_2,
                           f"Recovered marker version {recovered_version} does not match on-disk "
                           f"{expected_ref_2}'s header version {expected_ref_version_2}")
+
+        # The generic `wait_for_log` above only proves SOME "up-to-date"/
+        # "updated" line appeared since `recover_time`; a message naming a
+        # stale, non-selected sibling file (clamd-entrypoint.sh's own
+        # documented hazard -- see `daily_check_verified`) would also match
+        # it. Now that the real recovered file/version is known, bind the
+        # same invocation's own output to that exact selected identity, the
+        # same way `daily_check_verified` itself requires, rather than
+        # accepting any generic database message as proof of THIS recovery.
+        recovery_pattern = re.compile(
+            re.escape(expected_ref_2) + r" (database is up-to-date|updated) \(version: "
+            + re.escape(expected_ref_version_2) + r"[,)]"
+        )
+        recovery_output = container_logs_since(self.container_name, recover_time)
+        self.assertTrue(
+            recovery_pattern.search(recovery_output) is not None,
+            f"No freshclam invocation since {recover_time} affirmatively confirmed the recovered "
+            f"'{expected_ref_2}' version {expected_ref_version_2} by name (checked docker logs): "
+            f"{recovery_output!r}",
+        )
 
         # Verify marker mtime has advanced past the LATEST known-good
         # pre-failure value. `marker_mtime_1` is from the initial startup,
@@ -442,15 +545,21 @@ SEED_DB_FILES = (
 class TestGenuineClamdVersionTransition(unittest.TestCase):
     def setUp(self):
         self.image = os.environ.get("CLAMD_IMAGE")
+        self.gateway_image = os.environ.get("GATEWAY_IMAGE")
         self.container_name = "test_clamd_version_transition"
         self.seed_container_name = "test_clamd_version_transition_seed"
+        self.gateway_container_name = "test_clamd_version_transition_gateway"
         self.db_dir = "/var/lib/clamav"
         if not self.image:
             self.skipTest("CLAMD_IMAGE environment variable not set")
+        if not self.gateway_image:
+            self.skipTest("GATEWAY_IMAGE environment variable not set")
         run_cmd(["docker", "rm", "-f", self.container_name])
         run_cmd(["docker", "rm", "-f", self.seed_container_name])
+        run_cmd(["docker", "rm", "-f", self.gateway_container_name])
 
     def tearDown(self):
+        run_cmd(["docker", "rm", "-f", self.gateway_container_name])
         run_cmd(["docker", "rm", "-f", self.container_name])
         run_cmd(["docker", "rm", "-f", self.seed_container_name])
 
@@ -507,6 +616,24 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             self.assertTrue(len(fields) >= 3 and fields[2].isdigit(), f"Seed {seed_name} header has no numeric version: {header!r}")
             seed_version = fields[2]
 
+            # Shared readiness-marker directory, bind-mounted into BOTH this
+            # container and the real gateway sidecar started below at the
+            # same path -- the local equivalent of
+            # provision-dev-artifact-backends.py's shared in-memory
+            # `clamav-ready` volume mounted into both the real `gateway` and
+            # `clamd` Cloud Run containers (R5b.2-lifecycle REOPEN: the
+            # gateway must observe the SAME marker files this container
+            # publishes, not a copy).
+            ready_dir = os.path.join(tmp_dir, "clamav-ready")
+            os.makedirs(ready_dir, exist_ok=True)
+            # World-writable: the real clamd and gateway images may run as
+            # different internal users (neither of which is this test
+            # process's own host uid), the same way Cloud Run's in-memory
+            # `--add-volume` is writable by both containers regardless of
+            # their own uid. Bounded to this one ephemeral, test-owned
+            # temp directory only.
+            os.chmod(ready_dir, 0o777)
+
             # Create (but do not start) the real target container, then
             # seed BOTH the stale database AND a freshclam.conf pointed at
             # this test process's own local HTTP mirror (see the
@@ -516,10 +643,21 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             # call ever runs, so that call resolves "up-to-date" against
             # the byte-identical seed and exits 0, and clamd starts up
             # loading the still-stale seed rather than a live download
-            # silently overwriting it.
+            # silently overwriting it. `-p 0:8080` publishes a host port
+            # into this container's own network namespace for a container
+            # port nothing in THIS image listens on -- that is deliberate:
+            # the real gateway sidecar below joins this exact namespace via
+            # `--network container:<name>` (Docker's equivalent of Cloud
+            # Run's shared-instance network, matching `Dockerfile.clamd`'s
+            # own "reachable solely by the gateway container inside this
+            # same Cloud Run instance" comment) and listens on 8080 itself;
+            # Docker's port-publish is a namespace/port-level NAT rule, not
+            # tied to which specific container issued the `listen()` call.
             create = run_cmd([
                 "docker", "create", "--name", self.container_name,
                 "--add-host", "host.docker.internal:host-gateway",
+                "-p", "0:8080",
+                "-v", f"{ready_dir}:/var/run/clamav-ready",
                 "-e", "FRESHCLAM_INTERVAL_SECONDS=5", self.image,
             ])
             self.assertEqual(create.returncode, 0, f"Failed to create container: {create.stderr}")
@@ -556,6 +694,26 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
                 self.assertEqual(res.returncode, 0, "Readiness version marker missing after seeded startup")
                 self.assertEqual(res.stdout.strip(), seed_version, "Readiness marker did not publish the seeded stale version")
+
+                # Start the REAL gateway image (operations/artifact-scanner/
+                # gateway, unmodified), joined to this container's own
+                # network namespace and sharing its readiness-marker
+                # directory, for the rest of this test -- R5b.2-lifecycle
+                # REOPEN's actual ask: a genuine HTTP caller through
+                # gateway/handler.ts, not just direct clamd protocol probes.
+                gw = start_gateway_sidecar(
+                    self.gateway_image, self.gateway_container_name,
+                    self.container_name, ready_dir,
+                )
+                self.assertEqual(gw.returncode, 0, f"Failed to start gateway sidecar: {gw.stderr}")
+                gateway_port = None
+                port_deadline = time.time() + 30
+                while time.time() < port_deadline:
+                    gateway_port = container_published_port(self.container_name, 8080)
+                    if gateway_port:
+                        break
+                    time.sleep(1)
+                self.assertIsNotNone(gateway_port, "Gateway's published port 8080 never became available")
 
                 # Restore real connectivity, but leave freshclam's own
                 # clamd-notification directive (`NotifyClamd <path-to-clamd.conf>`
@@ -612,6 +770,27 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 "isEngineActivated must see a genuine mismatch during this pending window",
             )
 
+            # R5b.2-lifecycle REOPEN's actual ask: prove the REAL gateway
+            # (not just a direct clamd probe) refuses to scan during this
+            # exact pending window, through its own HTTP contract
+            # (handler.ts: isReady() check before exchange()). A gateway
+            # that scanned successfully despite the version mismatch above
+            # would fail this assertion; the direct-clamd checks above
+            # cannot detect that bug because they never call the gateway at
+            # all.
+            print("Verifying the real gateway refuses to scan during the pending window...")
+            pending_status, pending_body = gateway_scan(gateway_port, b"clean data")
+            self.assertEqual(
+                pending_status, 503,
+                f"Expected the real gateway to refuse a scan while pending (version mismatch), "
+                f"got {pending_status}: {pending_body}",
+            )
+            self.assertIsInstance(pending_body, dict, f"Expected a JSON error body, got {pending_body!r}")
+            self.assertEqual(
+                pending_body.get("error"), "scan_engine_not_ready",
+                f"Expected scan_engine_not_ready during the pending window, got {pending_body}",
+            )
+
             # Force the real, documented clamd RELOAD command (clamd/
             # session.c's zRELOAD) rather than waiting out SelfCheck's
             # 1800s bound or re-adding NotifyClamd for a second genuine
@@ -635,9 +814,35 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             eicar_reply = clamd_instream(self.container_name, eicar.encode())
             self.assertRegex(eicar_reply, r"^stream: .+ FOUND$", f"Unexpected INSTREAM reply after activation: {eicar_reply!r}")
 
+            # Same activation, through the real gateway's own HTTP contract:
+            # a genuine clean/infected receipt, matching the refusal check
+            # above and closing the R5b.2-lifecycle REOPEN gap end-to-end.
+            print("Verifying the real gateway serves genuine receipts after activation...")
+            clean_status, clean_body = gateway_scan(gateway_port, b"clean data")
+            self.assertEqual(
+                clean_status, 200,
+                f"Expected the real gateway to scan successfully after activation, got "
+                f"{clean_status}: {clean_body}",
+            )
+            self.assertEqual(
+                clean_body.get("verdict"), "clean",
+                f"Expected a clean verdict from the real gateway after activation, got {clean_body}",
+            )
+            eicar_gw_status, eicar_gw_body = gateway_scan(gateway_port, eicar.encode())
+            self.assertEqual(
+                eicar_gw_status, 200,
+                f"Expected the real gateway to return a definitive verdict for EICAR after "
+                f"activation, got {eicar_gw_status}: {eicar_gw_body}",
+            )
+            self.assertEqual(
+                eicar_gw_body.get("verdict"), "infected",
+                f"Expected an infected verdict from the real gateway for EICAR, got {eicar_gw_body}",
+            )
+
             print(
                 f"Genuine version transition confirmed: {seed_version} -> {new_expected_version}, "
-                "including an observed pending/not-yet-activated window before a real RELOAD."
+                "including an observed pending/not-yet-activated window before a real RELOAD, "
+                "and real gateway refusal/receipt evidence for both."
             )
 
 if __name__ == "__main__":

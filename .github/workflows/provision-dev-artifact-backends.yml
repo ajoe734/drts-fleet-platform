@@ -204,5 +204,6 @@ jobs:
       - name: Verify Genuine Clamd Lifecycle
         env:
           CLAMD_IMAGE: "${{ steps.build_push.outputs.clamd_image }}"
+          GATEWAY_IMAGE: "${{ steps.build_push.outputs.gateway_image }}"
         run: |
           python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_genuine_clamd_lifecycle.py -v
