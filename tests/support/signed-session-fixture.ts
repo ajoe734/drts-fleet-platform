@@ -1,8 +1,25 @@
 import { randomUUID } from "node:crypto";
 
+import type { CanonicalIdentityPrincipalRecord } from "@drts/contracts";
+import { DEFAULT_CONTROL_PLANE_JWT_ISSUER } from "@drts/control-plane-auth";
+
 import { DatabaseService } from "../../apps/api/src/common/db";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+
+/** The regulatory registry's own built-in offline demo seed
+ * (regulatory-registry.service.ts's `DRIVER_SEED`, reused verbatim by
+ * driver-profile/platform-earnings/billing-settlement's own demo mappings),
+ * the only driver identity `JwtAuthService#validateDurableState`'s
+ * `driver_user` branch (:987-995) can resolve via
+ * `RegulatoryRegistryService#assertDriverAuthEligible` without a real,
+ * pre-provisioned driver record. Reusing it is a deliberate, test-owned
+ * default -- not proof that this driver also owns a reimbursement batch or
+ * public-info version on a real shared-dev database. A hosted acceptance
+ * run against real driver-owned business records must pass an explicit
+ * `actorId` (or `DRIVER_FIXTURE_ACTOR_ID`) for a driver actually provisioned
+ * in that environment; see docs/04-uat/gcp-artifact-activation-20261004.md. */
+export const DEFAULT_DRIVER_FIXTURE_ACTOR_ID = "drv-demo-001";
 
 /**
  * Test-only signed-session issuance through the REAL
@@ -72,7 +89,14 @@ export async function issueDriverSessionFixture(
 ): Promise<SignedSessionFixture> {
   const repo = resolveRepository(options.identityRepository);
   const service = new JwtAuthService(repo);
-  const actorId = options.actorId ?? `fixture-driver-${randomUUID()}`;
+  // A freshly invented "fixture-driver-<uuid>" actor can never pass
+  // assertDriverAuthEligible (requireDriver does an exact driverId lookup
+  // against the registry's own records, driver_user auth is rejected
+  // DRIVER_NOT_FOUND before the signature is even checked): default to the
+  // registry's pre-existing offline demo seed instead of silently signing
+  // an unknown actor. Callers targeting real driver-owned business records
+  // must pass an explicit, pre-provisioned actorId.
+  const actorId = options.actorId ?? DEFAULT_DRIVER_FIXTURE_ACTOR_ID;
   const principalId = options.principalId ?? `principal_${actorId}`;
   const bindingId = `fixture-binding-${randomUUID()}`;
   const deviceId = `fixture-device-${randomUUID()}`;
@@ -120,9 +144,11 @@ export async function issueDriverSessionFixture(
  * `identity_role_bindings` row with `roleCode: "platform_admin"` (whose
  * catalog preset covers the billing/foundation scopes above,
  * packages/contracts/src/iam-policy-catalog.ts:631-660) via the same
- * repository path a real workforce invitation uses, and signs the
- * `workforceVersionTimestamps` option so the token's `tokenVersion` matches
- * what `validateDurableState` recomputes from the persisted rows. */
+ * repository path a real workforce invitation uses, ensuring the principal
+ * row exists first (the FK order V0068 requires), then signs the token's
+ * `tokenVersion` as the max of the principal/membership/role-binding
+ * timestamps it just persisted, matching what `validateDurableState`
+ * recomputes from those same rows. */
 export async function issueOpsSessionFixture(
   options: IssueOpsSessionFixtureOptions = {},
 ): Promise<SignedSessionFixture> {
@@ -131,6 +157,31 @@ export async function issueOpsSessionFixture(
   const actorId = options.actorId ?? `fixture-ops-${randomUUID()}`;
   const principalId = options.principalId ?? `principal_${actorId}`;
   const now = new Date().toISOString();
+  // infra/migrations/V0068__canonical_identity_authority.sql makes
+  // iam.identity_memberships.principal_id an immediate FK to
+  // iam.identity_principals: the principal row must exist before
+  // ensureMembershipRecord below, not after it (the order
+  // issueSessionToken's own internal `ensurePrincipal` upsert would
+  // otherwise produce, since that call only runs once this function has
+  // already returned its finished membership/role-binding rows). Ensure it
+  // here instead, then pass `ensurePrincipal: false` + an explicit
+  // `tokenVersion` to issueSessionToken below so it signs the version this
+  // function actually persisted rather than re-running (and potentially
+  // duplicating) that upsert itself.
+  const principalRecord: CanonicalIdentityPrincipalRecord = {
+    principalId,
+    sourceRef: `jwt_principal:platform:${principalId}`,
+    issuer: DEFAULT_CONTROL_PLANE_JWT_ISSUER,
+    subject: `platform:${actorId}`,
+    principalType: "human",
+    email: null,
+    emailVerified: false,
+    displayName: null,
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await repo.ensurePrincipalRecord(principalRecord);
   const membership = await repo.ensureMembershipRecord({
     membershipId: `fixture-membership-${randomUUID()}`,
     sourceRef: `fixture:ops:${actorId}:membership`,
@@ -178,9 +229,14 @@ export async function issueOpsSessionFixture(
     {
       principalId,
       subject: `platform:${actorId}`,
-      ensurePrincipal: true,
+      ensurePrincipal: false,
       membershipId: membership.membershipId,
-      workforceVersionTimestamps: [membership.updatedAt, roleBinding.updatedAt],
+      // computeWorkforceTokenVersion is Math.max(...timestamps.map(Date.parse));
+      // principal/membership/roleBinding were all persisted with the SAME
+      // `now`, so signing that directly reproduces exactly what
+      // validateDurableState recomputes from the persisted rows, without
+      // re-running ensurePrincipal's own upsert a second time.
+      tokenVersion: Date.parse(now),
     },
   );
   return {
@@ -194,14 +250,22 @@ export async function issueOpsSessionFixture(
 
 // Manual runbook entry point (docs/04-uat/gcp-artifact-activation-20261004.md
 // §4's DRIVER_TOKEN/OPS_TOKEN export step): `cd apps/api && pnpm exec tsx
-// ../../tests/support/signed-session-fixture.ts driver` (or `ops`), with
-// `DATABASE_URL` set to the target deployment's database. Prints only the
-// bearer token to stdout so it can be captured directly into a shell
-// variable; everything else goes to stderr.
+// ../../tests/support/signed-session-fixture.ts driver [actorId]` (or `ops
+// [actorId]`), with `DATABASE_URL` set to the target deployment's database.
+// `driver` with no actorId defaults to the registry's offline demo seed
+// (DEFAULT_DRIVER_FIXTURE_ACTOR_ID) -- that only proves the auth/registry
+// boundary, not that this actor owns a reimbursement batch or public-info
+// version on the target database; pass an explicit, pre-provisioned actorId
+// for a hosted run that needs real driver-owned business records. Prints
+// only the bearer token to stdout so it can be captured directly into a
+// shell variable; everything else goes to stderr.
 if (require.main === module) {
   const kind = process.argv[2];
+  const actorId = process.argv[3] || undefined;
   const run =
-    kind === "ops" ? issueOpsSessionFixture() : issueDriverSessionFixture();
+    kind === "ops"
+      ? issueOpsSessionFixture({ actorId })
+      : issueDriverSessionFixture({ actorId });
   run
     .then((fixture) => {
       console.error(

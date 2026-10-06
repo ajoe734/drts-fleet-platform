@@ -865,12 +865,18 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
 # its own container sharing the real clamd container's network namespace
 # (the same `--network container:<name>` composition `start_gateway_sidecar`
 # already uses for the gateway), which passes clamd's `zVERSION\0`/`zPING\0`
-# idle commands straight through to the real clamd untouched, but resets
-# the connection immediately for any `zINSTREAM\0` scan request before
-# clamd ever sees it. The gateway is pointed at the relay's port instead of
-# clamd's own 3310 -- gateway/clamd-transport.ts and handler.ts are not
-# modified; only the test-only relay sits on the wire. No Cloud Run TCP
-# ingress, public infrastructure or production-source fault branch is
+# idle commands straight through to the real clamd untouched. Whether a
+# `zINSTREAM\0` scan request is ALSO passed through or reset immediately
+# before clamd ever sees it is governed entirely by a single bind-mounted
+# control-file flag the test toggles from the host side (the same directory
+# both the host and the relay container see, bound via `-v`) -- never a
+# fixed, from-startup behavior -- so the test can prove a genuine healthy
+# baseline through the relay, then a genuine INSTREAM-only fault, then
+# genuine recovery, all through the exact same relay/config and the real
+# gateway's own HTTP contract. The gateway is pointed at the relay's port
+# instead of clamd's own 3310 -- gateway/clamd-transport.ts and handler.ts
+# are not modified; only the test-only relay sits on the wire. No Cloud Run
+# TCP ingress, public infrastructure or production-source fault branch is
 # involved; everything here is container-local Docker networking on the
 # GitHub runner, matching this harness's existing write-scope boundary.
 RELAY_IMAGE = "python:3.12-alpine"
@@ -879,16 +885,20 @@ RELAY_IMAGE = "python:3.12-alpine"
 # subtleties to reason about for a tiny, bounded number of connections):
 # accept a connection, peek at the first bytes the client sent, and either
 # proxy the whole bidirectional byte stream to the real clamd (anything
-# that is not a scan request) or close immediately without ever dialing
-# clamd (a scan request) -- the one and only behavioral difference between
-# "VERSION succeeds" and "INSTREAM fails" that this test needs.
+# that is not a scan request, or a scan request while the fault flag file
+# is absent) or close immediately without ever dialing clamd (a scan
+# request while the fault flag file is present) -- the one and only
+# behavioral difference between "VERSION succeeds" and "INSTREAM fails"
+# that this test needs, toggled live via /relay-control/fault-instream.
 RELAY_SCRIPT = """
+import os
 import socket
 import sys
 import threading
 
 listen_port = int(sys.argv[1])
 target_port = int(sys.argv[2])
+FAULT_FLAG = "/relay-control/fault-instream"
 
 def pipe(src, dst):
     try:
@@ -912,11 +922,13 @@ def handle(conn):
     except OSError:
         conn.close()
         return
-    if first.startswith(b"zINSTREAM\\0"):
-        # Definitive, immediate transport failure for scan requests only:
-        # never forwarded to clamd, so no reply (partial or otherwise) is
-        # ever possible -- matching clamd-transport.ts#exchangeWithClamd's
-        # own close-without-reply rejection branch.
+    if first.startswith(b"zINSTREAM\\0") and os.path.exists(FAULT_FLAG):
+        # Deliberate, immediate transport failure for scan requests, ONLY
+        # while the fault flag file is present: never forwarded to clamd,
+        # so no reply (partial or otherwise) is ever possible -- matching
+        # clamd-transport.ts#exchangeWithClamd's own close-without-reply
+        # rejection branch. Absent the flag, INSTREAM is genuinely
+        # passed through below like any other command.
         try:
             conn.setsockopt(
                 socket.SOL_SOCKET, socket.SO_LINGER,
@@ -961,16 +973,20 @@ main()
 RELAY_LISTEN_PORT = 3311
 
 
-def start_clamd_relay(relay_container_name, clamd_container_name, listen_port=RELAY_LISTEN_PORT, target_port=3310):
+def start_clamd_relay(relay_container_name, clamd_container_name, control_dir, listen_port=RELAY_LISTEN_PORT, target_port=3310):
     """Starts the protocol-aware relay above as its own container, joined
     to `clamd_container_name`'s network namespace exactly like the gateway
     sidecar joins it -- so the relay, clamd and (once started) the gateway
     all reach each other over that one shared loopback, the same topology
     Cloud Run's multi-container instance gives the real gateway/clamd
-    pair."""
+    pair -- plus `control_dir` bind-mounted at `/relay-control`, the same
+    host directory the test toggles its fault-flag file in, so the one
+    running relay process genuinely observes that toggle instead of the
+    test guessing at timing."""
     return run_cmd([
         "docker", "run", "-d", "--name", relay_container_name,
         "--network", f"container:{clamd_container_name}",
+        "-v", f"{control_dir}:/relay-control",
         RELAY_IMAGE, "python3", "-c", RELAY_SCRIPT,
         str(listen_port), str(target_port),
     ])
@@ -999,6 +1015,13 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             ready_dir = os.path.join(tmp_dir, "clamav-ready")
             os.makedirs(ready_dir, exist_ok=True)
             os.chmod(ready_dir, 0o777)
+            control_dir = os.path.join(tmp_dir, "relay-control")
+            os.makedirs(control_dir, exist_ok=True)
+            os.chmod(control_dir, 0o777)
+            fault_flag = os.path.join(control_dir, "fault-instream")
+            eicar = (
+                r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+            ).encode()
 
             print("Starting real clamd container...")
             res = run_cmd([
@@ -1016,8 +1039,9 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             self.assertTrue(wait_for_ping(self.clamd_container_name, 60), "clamd never answered a live PING after startup")
 
             print("Starting protocol-aware relay sharing clamd's network namespace...")
-            res = start_clamd_relay(self.relay_container_name, self.clamd_container_name)
+            res = start_clamd_relay(self.relay_container_name, self.clamd_container_name, control_dir)
             self.assertEqual(res.returncode, 0, f"Failed to start relay: {res.stderr}")
+            self.assertFalse(os.path.exists(fault_flag), "Fault flag must start absent: the baseline below needs genuine INSTREAM passthrough")
 
             # The relay must itself be accepting connections before the
             # gateway is pointed at it -- poll its own passthrough path
@@ -1071,6 +1095,13 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
                 f"passthrough before the fault is engaged, got {ok_status}: {ok_body}",
             )
             self.assertEqual(ok_body.get("verdict"), "clean", f"Expected a clean verdict, got {ok_body}")
+            eicar_status, eicar_body = gateway_scan(gateway_port, eicar)
+            self.assertEqual(
+                eicar_status, 200,
+                f"Expected the real gateway to return a definitive verdict for EICAR through the "
+                f"relay's baseline passthrough, got {eicar_status}: {eicar_body}",
+            )
+            self.assertEqual(eicar_body.get("verdict"), "infected", f"Expected an infected verdict, got {eicar_body}")
 
             # The actual ask: readiness (VERSION, via the SAME relay/config)
             # keeps succeeding -- the relay never touches non-INSTREAM
@@ -1078,7 +1109,14 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             # definitively, through the gateway's own HTTP contract
             # (handler.ts:140-146's isReady()-true-then-exchange()-throws
             # branch), never once falling back to 503 scan_engine_not_ready
-            # or a successful 200.
+            # or a successful 200. Only now does the relay's behavior
+            # change at all -- toggled live via the fault-flag file, not a
+            # fixed from-startup difference the baseline above could never
+            # have passed through in the first place.
+            print("Engaging the INSTREAM-only fault via the relay's control file...")
+            open(fault_flag, "w").close()
+            self.assertTrue(os.path.exists(fault_flag), "Failed to create the relay's fault flag file")
+
             print("Verifying the real gateway fails closed with scan_engine_unavailable while readiness still succeeds...")
             for payload in (b"clean data", b"clean data", b"clean data"):
                 status, body = gateway_scan(gateway_port, payload)
@@ -1105,9 +1143,41 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
             self.assertIn("ClamAV", res.stdout, f"Expected a live VERSION reply via the relay during the fault, got {res.stdout!r}")
 
+            # Recovery: disengage the fault flag and prove the SAME relay
+            # genuinely resumes passing INSTREAM through -- not that the
+            # fault was ever a one-way, unrecoverable state, and not merely
+            # that readiness alone recovers while scans stay broken.
+            print("Disengaging the INSTREAM fault and verifying genuine recovery...")
+            os.remove(fault_flag)
+            self.assertFalse(os.path.exists(fault_flag), "Failed to remove the relay's fault flag file")
+
+            recovered_status, recovered_body = None, None
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                recovered_status, recovered_body = gateway_scan(gateway_port, b"clean data")
+                if recovered_status == 200:
+                    break
+                time.sleep(2)
+            self.assertEqual(
+                recovered_status, 200,
+                f"Expected the real gateway to resume scanning successfully through the relay "
+                f"after the fault is disengaged, got {recovered_status}: {recovered_body}",
+            )
+            self.assertEqual(recovered_body.get("verdict"), "clean", f"Expected a clean verdict, got {recovered_body}")
+            recovered_eicar_status, recovered_eicar_body = gateway_scan(gateway_port, eicar)
+            self.assertEqual(
+                recovered_eicar_status, 200,
+                f"Expected the real gateway to return a definitive verdict for EICAR after "
+                f"recovery, got {recovered_eicar_status}: {recovered_eicar_body}",
+            )
+            self.assertEqual(
+                recovered_eicar_body.get("verdict"), "infected",
+                f"Expected an infected verdict after recovery, got {recovered_eicar_body}",
+            )
+
             print(
-                "Genuine readiness-success-then-INSTREAM-transport-failure path confirmed through "
-                "the real gateway's own HTTP contract."
+                "Genuine readiness-success-then-INSTREAM-transport-failure-then-recovery path "
+                "confirmed through the real gateway's own HTTP contract."
             )
 
 if __name__ == "__main__":
