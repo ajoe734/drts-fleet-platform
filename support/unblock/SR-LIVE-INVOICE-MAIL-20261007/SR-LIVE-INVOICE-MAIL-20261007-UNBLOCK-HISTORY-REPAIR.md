@@ -12,7 +12,7 @@ To resolve this without force-pushing or modifying shared history:
 3. We committed the restored state cleanly to generate a new commit object (`8eca7ccff`).
 4. We pushed the new clean branch successfully to the remote.
 
-This approach preserves the entire unpushed diff in a new commit object, side-stepping the GitHub 500 error while leaving the observed original remote ref intact. 
+This approach preserves the entire unpushed diff in a new commit object, side-stepping the GitHub 500 error while leaving the observed original remote ref intact.
 
 **Clean Successor Branch:** `gemini2/sr-live-invoice-mail-20261007-clean`
 **Clean Successor Commit:** `8eca7ccffecc797bb454a4f92bfdc7c97fc524fb`

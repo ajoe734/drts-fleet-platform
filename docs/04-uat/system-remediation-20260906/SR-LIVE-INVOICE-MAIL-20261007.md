@@ -288,3 +288,13 @@ This document records the completion and verification of the live invoice mail E
 **Completed Local Verification**:
 - Python unittest discovery scoped to task: PASS 13/13 exit 0.
 - `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: PASS 38/38 exit 0.
+
+## Codex Review Rejection (Candidate: 271e853cbb959f6966fe8f690a635b5b71cc5c26 / Generation: b8c599e8c6d24d2faf1292d4045a891a)
+
+- **F12 (P1 NEW: automatic live execution bypasses the task's authorized dispatch boundary)**:
+  - Repaired by removing the `push` trigger from `.github/workflows/live-invoice-mail-acceptance.yml` and reverting `github.sha` fallbacks, preserving the operator-only `workflow_dispatch` requirement. This prevents unauthorized automatic cloud execution and enforces the strict genuine operator execution boundary on the default branch.
+- **F13 (integration blocker: new candidate cannot merge or obtain required ordinary PR CI)**:
+  - Repaired by successfully resolving merge conflicts via `git merge origin/dev`. Kept all target Python unit test commands in `.github/workflows/ci.yml`.
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean (exit 0).
