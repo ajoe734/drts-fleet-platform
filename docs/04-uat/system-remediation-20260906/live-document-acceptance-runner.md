@@ -133,19 +133,19 @@ pending, not fabricated as passing.
 
 During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against current candidate (re-reviewing from Codex), the following deficiencies were resolved to meet genuine live acceptance criteria.
 
-| Finding ID | Finding Description | Resolution Evidence |
-| :--------- | :------------------ | :------------------ |
-| **R1** | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout). | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication. |
-| **R2** | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing). | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed. |
-| **R3** | API tracks and live origin configurations could not be configured through workflow. | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence. |
-| **R4** | Invoice acceptance false pass, missing PDF check and missing SHA. | Extracted invoice ID from expired 410 path to bind reissue; validated expiry error retained manifest info; performed real PDF amount verification; validated `x-drts-candidate-sha` on all responses; supported relative/absolute URL resolution. |
-| **R5** | Report/placard false pass and unsupported refresh. | Bound placard version to printable content, exercised same-version re-download (refresh) preserving materialized hash, validated correct file mime types (CSV/XLSX/PDF), validated `x-drts-candidate-sha` on all responses. |
-| **R6** | Unauthenticated requests accepted as role-negative evidence. | Rejected blank/invalid/forged sessions with UNAUTHENTICATED; proved genuine authenticated viewer through introspection; validated cross-tenant 404 NOT_FOUND; validated `x-drts-candidate-sha`. |
-| **R7** | Unsupported platform application authority/ingress. | Enumerated unavailable IAP authority instead of inventing cookies. Validated that WIF Cloud Run admission without IAP JWT assertion is appropriately rejected in strict mode. |
-| **R8** | Newly enabled push workflow always fails before checkout (missing SHA). | Workflow `push` trigger uses `github.sha` while `workflow_dispatch` uses inputs, restoring immutable push SHA binding without hardcoded fallbacks. |
-| **R10** | Actual trailer validation fails; CI bypasses gate. | Pending Supervisor history-recovery recipe to preserve history while passing trailer checks. |
-| **R12** | Required independent verification removed. | Restored required unchanged independent tool invocation via `child_process.spawnSync` to call `verify_artifact.py`, failing closed on missing evidence. |
-| **R9** | Repository classification CI failure introduced by scratch file. | Extraneous `scratch.js` removed to unblock required repository classification checks. |
+| Finding ID | Finding Description                                                                   | Resolution Evidence                                                                                                                                                                                                                               |
+| :--------- | :------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **R1**     | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout).    | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication.                                                                                                                                            |
+| **R2**     | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing). | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed.                                                                                               |
+| **R3**     | API tracks and live origin configurations could not be configured through workflow.   | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence.                                                                                                                           |
+| **R4**     | Invoice acceptance false pass, missing PDF check and missing SHA.                     | Extracted invoice ID from expired 410 path to bind reissue; validated expiry error retained manifest info; performed real PDF amount verification; validated `x-drts-candidate-sha` on all responses; supported relative/absolute URL resolution. |
+| **R5**     | Report/placard false pass and unsupported refresh.                                    | Bound placard version to printable content, exercised same-version re-download (refresh) preserving materialized hash, validated correct file mime types (CSV/XLSX/PDF), validated `x-drts-candidate-sha` on all responses.                       |
+| **R6**     | Unauthenticated requests accepted as role-negative evidence.                          | Rejected blank/invalid/forged sessions with UNAUTHENTICATED; proved genuine authenticated viewer through introspection; validated cross-tenant 404 NOT_FOUND; validated `x-drts-candidate-sha`.                                                   |
+| **R7**     | Unsupported platform application authority/ingress.                                   | Enumerated unavailable IAP authority instead of inventing cookies. Validated that WIF Cloud Run admission without IAP JWT assertion is appropriately rejected in strict mode.                                                                     |
+| **R8**     | Newly enabled push workflow always fails before checkout (missing SHA).               | Workflow `push` trigger uses `github.sha` while `workflow_dispatch` uses inputs, restoring immutable push SHA binding without hardcoded fallbacks.                                                                                                |
+| **R10**    | Actual trailer validation fails; CI bypasses gate.                                    | Pending Supervisor history-recovery recipe to preserve history while passing trailer checks.                                                                                                                                                      |
+| **R12**    | Required independent verification removed.                                            | Restored required unchanged independent tool invocation via `child_process.spawnSync` to call `verify_artifact.py`, failing closed on missing evidence.                                                                                           |
+| **R9**     | Repository classification CI failure introduced by scratch file.                      | Extraneous `scratch.js` removed to unblock required repository classification checks.                                                                                                                                                             |
 
 ### Pending Role Sessions
 
@@ -156,8 +156,7 @@ The following specific missing role session cookies trigger a non-zero fail-clos
 - `SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT` (tenant billing role)
 - `SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT` (distinct tenant billing role)
 
-
-*Live evidence remains explicitly unverified until actual secrets are populated and dispatched in a genuine environment. Actual secret/session availability was not inspected or fabricated.*
+_Live evidence remains explicitly unverified until actual secrets are populated and dispatched in a genuine environment. Actual secret/session availability was not inspected or fabricated._
 
 ### Execution Evidence
 
@@ -183,3 +182,17 @@ Following the independent review by Codex (REOPEN candidate `70491e47e7092d2be17
 - **R10 (Superseded History / Trailer Gate):** [FIXED] Migrated off the superseded PR #2330 (`gemini2/doc-live-runner-upgrade-20261005`) back to the authorized recovery branch `gemini2/doc-live-runner-upgrade-20261005-r2`. The subsequent commits properly include `LLM-Agent: Gemini2`, `Task-ID: DOC-LIVE-RUNNER-UPGRADE-20261005`, and `Reviewer: Codex` to satisfy `check_commit_trailers.py` without bypasses.
 
 Adjacent-candidate evidence and acceptance mapping updated per Codex review.
+
+### Update 2026-10-07: Resolving Reviewer (Codex) Findings (Candidate a36d68f REOPEN)
+
+Following the independent review by Codex (REOPEN candidate `a36d68fff967453fb8af5cee890902ef8e01a586`), the following repairs were made to ensure scope compliance and resolve open findings on the authorized recovery branch (`gemini2/doc-live-runner-upgrade-20261005-r3`):
+
+- **R5-C (Missing Report Content-Type Regression):** [FIXED] Repaired to require a nonempty supported actual response MIME and fail closed on missing/empty MIME (`report-validator.ts:146-149`).
+- **R13 (Unused parameter lint failure):** [FIXED] Removed the unused `init` parameter in `mockFetch` to resolve the scoped ESLint failure.
+- **R5-A REGRESSION (Actual live caller bypasses tested helper):** [FIXED] Restored the shared tested live path `fetchAndValidateReport` in `live-document-acceptance.test.ts`, retaining MIME/envelope/job/SHA checks.
+- **R10 REGRESSION & R14 (Superseded branch restored and Hosted runner install failure):** [FIXED] Reconciled candidate on the Supervisor-authorized recovery lineage (`-r3`), reverted unrelated `pnpm-lock.yaml`, `dependency-security-exceptions.json`, and API integration test changes that were causing the frozen install failure and scope violations.
+
+**Execution Evidence:**
+
+- Unit tests (`live-document-runner.test.ts`): 37 passed.
+- Linter (`eslint` on runner files): 0 warnings/errors.

@@ -235,72 +235,217 @@ describe("SR-LIVE-DOC-RUNNER-001: live-document-runner adapters (test doubles on
   });
 });
 
-import { validateReportArtifact, fetchAndValidateReport } from "../../../e2e/system-remediation/sr-live-doc-001/report-validator";
+import {
+  validateReportArtifact,
+  fetchAndValidateReport,
+} from "../../../e2e/system-remediation/sr-live-doc-001/report-validator";
 import { recordsToCsv } from "../../../../apps/api/src/common/csv";
-import { recordsToXlsx, recordsToPdf } from "../../../../apps/api/src/modules/reporting-filing/report-renderers";
+import {
+  recordsToXlsx,
+  recordsToPdf,
+} from "../../../../apps/api/src/modules/reporting-filing/report-renderers";
 
 describe("fetchAndValidateReport (R5-A regressions)", () => {
   const jobId = "job-1";
-  const validJobDetail = { jobId, status: "completed", format: "csv", jobType: "trip_report", rows: [{ orderId: "1", amountMinor: 100 }] };
+  const validJobDetail = {
+    jobId,
+    status: "completed",
+    format: "csv",
+    jobType: "trip_report",
+    rows: [{ orderId: "1", amountMinor: 100 }],
+  };
   const validCsvBytes = Buffer.from(recordsToCsv(validJobDetail.rows));
 
-  const mockFetch = (metadataOverride: any, artifactOverride: { status?: number, bytes?: Buffer, headers?: Record<string, string> } = {}) => {
-    return async (input: RequestInfo | URL, init?: RequestInit) => {
+  const mockFetch = (
+    metadataOverride: any,
+    artifactOverride: {
+      status?: number;
+      bytes?: Buffer;
+      headers?: Record<string, string>;
+    } = {},
+  ) => {
+    return async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.endsWith("/artifact")) {
         return {
           status: artifactOverride.status ?? 200,
-          headers: { get: (k: string) => (artifactOverride.headers || { "content-type": "text/csv", "x-drts-candidate-sha": "sha123" })[k] },
-          arrayBuffer: async () => artifactOverride.bytes ?? validCsvBytes
+          headers: {
+            get: (k: string) =>
+              (artifactOverride.headers || {
+                "content-type": "text/csv",
+                "x-drts-candidate-sha": "sha123",
+              })[k],
+          },
+          arrayBuffer: async () => artifactOverride.bytes ?? validCsvBytes,
         } as any;
       }
       return {
         status: metadataOverride === "404" ? 404 : 200,
         headers: { get: () => "sha123" },
-        json: async () => metadataOverride
+        json: async () => metadataOverride,
       } as any;
     };
   };
 
   it("accepts an enveloped production completed job", async () => {
     const fetchFn = mockFetch({ data: validJobDetail });
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).resolves.toBeUndefined();
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        fetchFn,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("accepts empty and nonempty valid reports", async () => {
     const emptyJob = { ...validJobDetail, rows: [] };
     const emptyCsv = Buffer.from(recordsToCsv([]));
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: emptyJob }, { bytes: emptyCsv }))).resolves.toBeUndefined();
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        mockFetch({ data: emptyJob }, { bytes: emptyCsv }),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("rejects missing data (missing envelope)", async () => {
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch(validJobDetail))).rejects.toThrow("Missing data in job response envelope");
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        mockFetch(validJobDetail),
+      ),
+    ).rejects.toThrow("Missing data in job response envelope");
   });
 
   it("rejects missing jobId", async () => {
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, jobId: undefined } }))).rejects.toThrow("Missing jobId in job detail");
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        mockFetch({ data: { ...validJobDetail, jobId: undefined } }),
+      ),
+    ).rejects.toThrow("Missing jobId in job detail");
   });
 
   it("rejects mismatched jobId", async () => {
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, jobId: "wrong" } }))).rejects.toThrow("Mismatch jobId");
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        mockFetch({ data: { ...validJobDetail, jobId: "wrong" } }),
+      ),
+    ).rejects.toThrow("Mismatch jobId");
   });
 
   it("rejects missing status", async () => {
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, status: undefined } }))).rejects.toThrow("Job not completed");
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        mockFetch({ data: { ...validJobDetail, status: undefined } }),
+      ),
+    ).rejects.toThrow("Job not completed");
   });
 
   it("rejects missing rows", async () => {
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", mockFetch({ data: { ...validJobDetail, rows: undefined } }))).rejects.toThrow("Missing rows in job detail");
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        mockFetch({ data: { ...validJobDetail, rows: undefined } }),
+      ),
+    ).rejects.toThrow("Missing rows in job detail");
   });
 
   it("rejects wrong SHA", async () => {
-    const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "text/csv", "x-drts-candidate-sha": "wrong-sha" } });
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow("Mismatch x-drts-candidate-sha in artifact response");
+    const fetchFn = mockFetch(
+      { data: validJobDetail },
+      {
+        headers: {
+          "content-type": "text/csv",
+          "x-drts-candidate-sha": "wrong-sha",
+        },
+      },
+    );
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        fetchFn,
+      ),
+    ).rejects.toThrow("Mismatch x-drts-candidate-sha in artifact response");
   });
 
   it("rejects wrong MIME mismatch", async () => {
-    const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "application/pdf" } });
-    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow();
+    const fetchFn = mockFetch(
+      { data: validJobDetail },
+      {
+        headers: {
+          "content-type": "application/pdf",
+          "x-drts-candidate-sha": "sha123",
+        },
+      },
+    );
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        fetchFn,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("rejects missing MIME", async () => {
+    const fetchFn = mockFetch(
+      { data: validJobDetail },
+      { headers: { "x-drts-candidate-sha": "sha123" } },
+    );
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        fetchFn,
+      ),
+    ).rejects.toThrow("Missing content-type in artifact response");
+  });
+
+  it("rejects empty MIME", async () => {
+    const fetchFn = mockFetch(
+      { data: validJobDetail },
+      { headers: { "content-type": "   ", "x-drts-candidate-sha": "sha123" } },
+    );
+    await expect(
+      fetchAndValidateReport(
+        `/control-plane-proxy/reports/${jobId}/artifact`,
+        "http://origin",
+        {},
+        "sha123",
+        fetchFn,
+      ),
+    ).rejects.toThrow("Missing content-type in artifact response");
   });
 });
 
@@ -311,46 +456,70 @@ describe("validateReportArtifact (R5-B adversarial regressions)", () => {
     jobId,
     jobType,
     format: "csv",
-    rows: [
-      { orderId: "order-1", amountMinor: 120000, note: null }
-    ]
+    rows: [{ orderId: "order-1", amountMinor: 120000, note: null }],
   };
 
   describe("PDF validation", () => {
     const pdfJob = { ...jobDetail, format: "pdf" };
 
     it("accepts real renderer positive", async () => {
-      const pdfBuffer = await recordsToPdf(pdfJob.rows, `${jobType} — ${jobId}`);
-      await expect(validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer)).resolves.toBeUndefined();
+      const pdfBuffer = await recordsToPdf(
+        pdfJob.rows,
+        `${jobType} — ${jobId}`,
+      );
+      await expect(
+        validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer),
+      ).resolves.toBeUndefined();
     });
 
     it("accepts empty-report state", async () => {
       const emptyJob = { ...pdfJob, rows: [] };
       const pdfBuffer = await recordsToPdf([], `${jobType} — ${jobId}`);
-      await expect(validateReportArtifact(emptyJob, jobId, "application/pdf", pdfBuffer)).resolves.toBeUndefined();
+      await expect(
+        validateReportArtifact(emptyJob, jobId, "application/pdf", pdfBuffer),
+      ).resolves.toBeUndefined();
     });
 
     it("rejects note changes to UNEXPECTED", async () => {
-      const wrongRows = [{ orderId: "order-1", amountMinor: 120000, note: "UNEXPECTED" }];
+      const wrongRows = [
+        { orderId: "order-1", amountMinor: 120000, note: "UNEXPECTED" },
+      ];
       const pdfBuffer = await recordsToPdf(wrongRows, `${jobType} — ${jobId}`);
-      await expect(validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer)).rejects.toThrow();
+      await expect(
+        validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer),
+      ).rejects.toThrow();
     });
 
     it("rejects appended extra rows", async () => {
-      const wrongRows = [...pdfJob.rows, { orderId: "extra-order", amountMinor: 999, note: "EXTRA" }];
+      const wrongRows = [
+        ...pdfJob.rows,
+        { orderId: "extra-order", amountMinor: 999, note: "EXTRA" },
+      ];
       const pdfBuffer = await recordsToPdf(wrongRows, `${jobType} — ${jobId}`);
-      await expect(validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer)).rejects.toThrow();
+      await expect(
+        validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer),
+      ).rejects.toThrow();
     });
 
     it("rejects wrong authoritative title", async () => {
-      const pdfBuffer = await recordsToPdf(pdfJob.rows, `wrong_report — ${jobId}`);
-      await expect(validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer)).rejects.toThrow();
+      const pdfBuffer = await recordsToPdf(
+        pdfJob.rows,
+        `wrong_report — ${jobId}`,
+      );
+      await expect(
+        validateReportArtifact(pdfJob, jobId, "application/pdf", pdfBuffer),
+      ).rejects.toThrow();
     });
 
     it("rejects nonempty PDF validated against empty metadata", async () => {
       const emptyJob = { ...pdfJob, rows: [] };
-      const pdfBuffer = await recordsToPdf(pdfJob.rows, `${jobType} — ${jobId}`);
-      await expect(validateReportArtifact(emptyJob, jobId, "application/pdf", pdfBuffer)).rejects.toThrow();
+      const pdfBuffer = await recordsToPdf(
+        pdfJob.rows,
+        `${jobType} — ${jobId}`,
+      );
+      await expect(
+        validateReportArtifact(emptyJob, jobId, "application/pdf", pdfBuffer),
+      ).rejects.toThrow();
     });
   });
 
@@ -359,28 +528,51 @@ describe("validateReportArtifact (R5-B adversarial regressions)", () => {
 
     it("accepts real renderer positive", async () => {
       const xlsxBuffer = await recordsToXlsx(xlsxJob.rows);
-      await expect(validateReportArtifact(xlsxJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)).resolves.toBeUndefined();
+      await expect(
+        validateReportArtifact(
+          xlsxJob,
+          jobId,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          xlsxBuffer,
+        ),
+      ).resolves.toBeUndefined();
     });
 
     it("accepts authentic empty XLSX", async () => {
       const emptyJob = { ...xlsxJob, rows: [] };
       const xlsxBuffer = await recordsToXlsx([]);
-      await expect(validateReportArtifact(emptyJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBuffer)).resolves.toBeUndefined();
+      await expect(
+        validateReportArtifact(
+          emptyJob,
+          jobId,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          xlsxBuffer,
+        ),
+      ).resolves.toBeUndefined();
     });
 
     it("rejects unexpected additional column content", async () => {
       const xlsxBuffer = await recordsToXlsx(xlsxJob.rows);
-      const ExcelJS = (await import("exceljs")).default || await import("exceljs");
+      const ExcelJS =
+        (await import("exceljs")).default || (await import("exceljs"));
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(xlsxBuffer as any);
       workbook.worksheets[0]!.getRow(2).getCell(4).value = "UNEXPECTED";
       const badBuffer = await workbook.xlsx.writeBuffer();
-      await expect(validateReportArtifact(xlsxJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Buffer.from(badBuffer))).rejects.toThrow();
+      await expect(
+        validateReportArtifact(
+          xlsxJob,
+          jobId,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          Buffer.from(badBuffer),
+        ),
+      ).rejects.toThrow();
     });
 
     it("rejects shifted or wrong headers", async () => {
       const xlsxBuffer = await recordsToXlsx(xlsxJob.rows);
-      const ExcelJS = (await import("exceljs")).default || await import("exceljs");
+      const ExcelJS =
+        (await import("exceljs")).default || (await import("exceljs"));
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(xlsxBuffer as any);
       const ws = workbook.worksheets[0]!;
@@ -391,17 +583,32 @@ describe("validateReportArtifact (R5-B adversarial regressions)", () => {
       ws.getRow(2).getCell(2).value = "order-1";
       ws.getRow(2).getCell(3).value = "WRONG AMOUNT";
       const badBuffer = await workbook.xlsx.writeBuffer();
-      await expect(validateReportArtifact(xlsxJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Buffer.from(badBuffer))).rejects.toThrow();
+      await expect(
+        validateReportArtifact(
+          xlsxJob,
+          jobId,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          Buffer.from(badBuffer),
+        ),
+      ).rejects.toThrow();
     });
 
     it("rejects metadata rows=[] but one worksheet with ERROR", async () => {
       const emptyJob = { ...xlsxJob, rows: [] };
-      const ExcelJS = (await import("exceljs")).default || await import("exceljs");
+      const ExcelJS =
+        (await import("exceljs")).default || (await import("exceljs"));
       const workbook = new ExcelJS.Workbook();
       const ws = workbook.addWorksheet("Report");
       ws.getCell("A1").value = "ERROR: export unavailable";
       const badBuffer = await workbook.xlsx.writeBuffer();
-      await expect(validateReportArtifact(emptyJob, jobId, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Buffer.from(badBuffer))).rejects.toThrow();
+      await expect(
+        validateReportArtifact(
+          emptyJob,
+          jobId,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          Buffer.from(badBuffer),
+        ),
+      ).rejects.toThrow();
     });
   });
 
@@ -410,12 +617,16 @@ describe("validateReportArtifact (R5-B adversarial regressions)", () => {
 
     it("accepts real renderer positive", async () => {
       const csvBuffer = Buffer.from(recordsToCsv(csvJob.rows));
-      await expect(validateReportArtifact(csvJob, jobId, "text/csv", csvBuffer)).resolves.toBeUndefined();
+      await expect(
+        validateReportArtifact(csvJob, jobId, "text/csv", csvBuffer),
+      ).resolves.toBeUndefined();
     });
 
     it("rejects wrong CSV bytes", async () => {
       const badCsv = "orderId,amountMinor,note\norder-10,91200009,line1";
-      await expect(validateReportArtifact(csvJob, jobId, "text/csv", Buffer.from(badCsv))).rejects.toThrow();
+      await expect(
+        validateReportArtifact(csvJob, jobId, "text/csv", Buffer.from(badCsv)),
+      ).rejects.toThrow();
     });
   });
 });
