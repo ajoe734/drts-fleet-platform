@@ -17,7 +17,7 @@ describe.each([apiRoot, root])("controller async lint from %s", (cwd) => {
       `
       import { Post } from "@nestjs/common";
       import { toApiSuccessEnvelope as wrap } from "../../common/api-envelope";
-      async function load() { return { id: "record" }; }
+      export async function load() { return { id: "record" }; }
       export class ExampleController {
         @Post("example")
         async handle() { ${body} }

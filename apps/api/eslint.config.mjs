@@ -26,7 +26,8 @@ const noPromiseInResponse = {
           if (found !== null) return found;
         }
       }
-      if (checker.getPromisedTypeOfPromise(type)) return "";
+      const awaited = checker.getAwaitedType(type);
+      if (awaited && awaited !== type) return "";
       const constraint = checker.getBaseConstraintOfType(type);
       if (constraint && constraint !== type) {
         return findPromise(constraint, location, seen);

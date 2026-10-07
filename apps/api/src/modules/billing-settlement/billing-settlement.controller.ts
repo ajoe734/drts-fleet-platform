@@ -320,7 +320,10 @@ export class BillingSettlementController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.billingSettlementService.publishDriverFeePlan(command, requestId),
+      await this.billingSettlementService.publishDriverFeePlan(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
