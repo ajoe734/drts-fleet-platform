@@ -5258,6 +5258,28 @@ export class OwnedMobilityService
             options,
             ratingSummary,
           );
+          if (
+            order.runtimeProfileCode === "business_dispatch" &&
+            current.referralPassengerSubjectRef
+          ) {
+            const assignmentVersion = current.assignmentVersion + 1;
+            bundle.consumerNotificationOutbox = {
+              outboxId: `referral-assignment:${bundle.assignment.assignmentId}`,
+              orderId: order.orderId,
+              passengerSubjectRef: current.referralPassengerSubjectRef,
+              eventType:
+                assignmentVersion === 1
+                  ? "assignment_disclosure_ready"
+                  : "assignment_replaced",
+              assignmentVersion,
+              payload: {},
+              status: "pending",
+              attemptCount: 0,
+              nextAttemptAt: bundle.assignment.createdAt,
+              createdAt: bundle.assignment.createdAt,
+              deliveredAt: null,
+            };
+          }
           await this.assertAssignmentEligibilityRecheck(
             bundle.order,
             dispatchJob.dispatchJobId,
@@ -5469,6 +5491,7 @@ export class OwnedMobilityService
     const prepare = (bundle: {
       order: OwnedOrderRecord;
       assignmentVersion?: number;
+      referralPassengerSubjectRef?: string | null;
       assignment: DispatchAssignmentRecord | null | undefined;
       task: DriverTaskRecord | null;
       dispatchJobs: DispatchJobRecord[];
@@ -5526,11 +5549,21 @@ export class OwnedMobilityService
         }),
       );
       const consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
-      if (order.runtimeProfileCode === "multi_taxi_direct") {
+      const isRoutedReferral =
+        order.runtimeProfileCode === "business_dispatch" &&
+        !!bundle.referralPassengerSubjectRef;
+      if (
+        order.runtimeProfileCode === "multi_taxi_direct" ||
+        isRoutedReferral
+      ) {
         const outbox: ConsumerNotificationOutboxRecord = {
-          outboxId: randomUUID(),
+          outboxId: isRoutedReferral
+            ? `referral-cancelled:${order.orderId}`
+            : randomUUID(),
           orderId: order.orderId,
-          passengerSubjectRef: resolvePassengerSubjectRef(order.passenger),
+          passengerSubjectRef: isRoutedReferral
+            ? bundle.referralPassengerSubjectRef!
+            : resolvePassengerSubjectRef(order.passenger),
           eventType: "trip_cancelled",
           assignmentVersion: bundle.assignmentVersion ?? 1,
           payload: {
