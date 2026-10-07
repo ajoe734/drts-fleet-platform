@@ -64,6 +64,7 @@ jobs:
           python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_data_acceptance_workflow.py
           python3 -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
+          python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p test_*.py -v
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: classify
