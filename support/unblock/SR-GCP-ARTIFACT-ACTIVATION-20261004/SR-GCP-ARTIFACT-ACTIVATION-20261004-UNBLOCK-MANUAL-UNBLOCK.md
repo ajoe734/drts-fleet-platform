@@ -1,4 +1,38 @@
-# SR-GCP-ARTIFACT-ACTIVATION-20261004 unblock audit (2026-10-07, update 3)
+# SR-GCP-ARTIFACT-ACTIVATION-20261004 unblock audit (2026-10-07, update 4)
+
+## Update 4: fixed own CI-detected drift (cited-paths), synced branch to dev
+
+PR #2390's `Canonical consistency` check (`cited-paths`) failed on candidate
+`8eb12b5bed81`: this doc's own update-2/3 text cites
+`` `.github/workflows/provision-dev-artifact-backends.yml` `` as now existing
+on `origin/dev`, which was true of `origin/dev` itself but not of this
+branch's own checked-out tree — `check_cited_paths` in
+`tools/ci/git/check_canonical_consistency.py` verifies the literal path
+against `HEAD`, not against `origin/dev`, and this branch's base predated
+the `0be15c0ad` merge that added that workflow file (this branch was 9
+commits behind `origin/dev`, including `0be15c0ad` and the `2467f88a2` await
+fix both already discussed above as "resolved on `origin/dev`" without this
+branch itself having picked them up). That mismatch was a real, task-scoped
+defect in this candidate, not a flake — the fix is in this task's own scope
+(this doc's own citation), so handled here rather than deferred.
+
+Fix: `git merge origin/dev --no-edit` into this branch. Clean, no conflicts
+(this task's own change is a single new/updated doc file; the 9 incoming
+commits touch unrelated areas). Re-ran the check locally post-merge:
+
+```
+python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD
+[consistency] cited-paths: 0 finding(s)
+[consistency] OK
+```
+
+`.github/workflows/provision-dev-artifact-backends.yml` is now present in
+this branch's own tree, confirmed with `ls`. No other finding was introduced.
+This is a documentation-sync fix only; no product source file changed, and
+no live GCP/cloud action was taken. The underlying diagnosis (both prior
+decisions resolved; parent blocked only on the live hosted-activation chain)
+is unchanged — this update fixes this *candidate's* mechanical CI failure,
+not the parent's blocker.
 
 ## Update 3: independent sibling-helper cross-check, no new blocker
 
