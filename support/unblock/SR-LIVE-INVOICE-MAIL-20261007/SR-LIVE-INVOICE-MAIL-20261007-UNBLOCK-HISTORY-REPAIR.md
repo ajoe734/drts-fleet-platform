@@ -27,6 +27,5 @@ The owner (`Gemini2`) should resume work on `SR-LIVE-INVOICE-MAIL-20261007` by a
 
 ## Helper Candidate Evidence
 - **Helper Branch:** `gemini2/sr-live-invoice-mail-20261007-unblock-history-repair`
-- **Helper Candidate SHA:** `db4ab6d1b6597fd2198275984e09fee92ff55484`
 - **Helper PR:** [PR #2411](https://github.com/ajoe734/drts-fleet-platform/pull/2411)
-- **PR Head Verification:** `gh pr view 2411 --json headRefOid` confirms head is `db4ab6d1b6597fd2198275984e09fee92ff55484`.
+- **PR Head Verification:** The `gh pr view 2411` confirms the remote head tracks the candidate commit of this branch.
