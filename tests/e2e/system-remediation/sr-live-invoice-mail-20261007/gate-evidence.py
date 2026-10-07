@@ -94,6 +94,15 @@ def evaluate(env, evidence, provider):
         for k in ["signed_at", "expires_at", "key_id", "sig_v"]:
             if k not in param_dict or not param_dict[k]:
                 return False
+        import re
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$", param_dict["signed_at"]):
+            return False
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$", param_dict["expires_at"]):
+            return False
+        if not param_dict["key_id"].strip():
+            return False
+        if not param_dict["sig_v"].isdigit():
+            return False
         return True
 
     # F4: enforce download proof is valid object

@@ -196,7 +196,7 @@ import { evaluateDownloadResponse, observeAndEvaluateDownload } from "../../../.
 
 describe("F4/F6 evaluateDownloadResponse", () => {
   const validManifestHash = "3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63"; // echo -n '%PDF-test' | sha256sum
-  const validQuery = `?signed_at=1&expires_at=2&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1`;
+  const validQuery = `?signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1`;
   const createMockResponse = (overrides: any = {}) => {
     const { headers: headersOverride, ...otherOverrides } = overrides;
     return {
@@ -240,14 +240,29 @@ describe("F4/F6 evaluateDownloadResponse", () => {
   });
 
   it("throws on contradictory hash claim", async () => {
-    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=1&expires_at=2&key_id=3&manifest_hash=wrong&sig=valid&sig_v=1` });
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=wrong&sig=valid&sig_v=1` });
     await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Contradictory manifest hash in download link");
+  });
+
+  it("throws on duplicate claims", async () => {
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=${validManifestHash}&manifest_hash=wrong&sig=valid&sig_v=1` });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Duplicate signed claims");
+  });
+
+  it("throws on invalid timestamp format", async () => {
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=invalid&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1` });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Invalid signed_at");
+  });
+
+  it("throws on invalid sig_v format", async () => {
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1a` });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Invalid sig_v");
   });
 });
 
 describe("F4/F6 observeAndEvaluateDownload regressions", () => {
   const validManifestHash = "3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63";
-  const validQuery = `?signed_at=1&expires_at=2&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1`;
+  const validQuery = `?signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1`;
   const createMockResponse = (overrides: any = {}) => {
     const { headers: headersOverride, ...otherOverrides } = overrides;
     return {

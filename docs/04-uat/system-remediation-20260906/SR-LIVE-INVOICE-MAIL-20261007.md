@@ -230,3 +230,20 @@ This document records the completion and verification of the live invoice mail E
 - `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit0
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: 0d451c7e635bfcd06f4ed12a5d5bdb8aeebf32a1 / Generation: ca4ceb12c0d6477dba122302da07bcdd)
+
+- **F3/F5 (P1 REPEATED: ambiguous/invalid signed claims still accepted across the producer-to-gate boundary)**:
+  - Repaired `evaluateDownloadResponse` in `live-invoice-mail.spec.ts` to strictly validate query parameter multiplicity, rejecting duplicate keys before normalization. Additionally, added type and format validation (valid ISO dates for `signed_at` and `expires_at`, numeric for `sig_v`, and non-empty `key_id`).
+  - Repaired `gate-evidence.py` to independently reject malformed persisted claims. `is_valid_download_query` now explicitly validates the format of ISO timestamps and other signed metadata values.
+- **F4/F6 (P2 REPEATED: remaining regression gap supporting the same defect)**:
+  - Added new regression cases to `spec-guards.test.ts` to cover duplicate claims, invalid timestamp formats, and invalid `sig_v` formats, ensuring the emitted proofs correctly fail when metadata is malformed.
+  - Updated `bootstrap.test.ts` and `test_hosted_gate.py` to emit and test against properly formatted literal ISO date strings, mirroring the strict validations and establishing an actual emitted proof-to-Python-gate regression.
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task (`tests/unit/system-remediation/sr-live-invoice-mail-20261007`): PASS 12/12 exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: PASS 35/35 exit 0.
+- `git diff --check HEAD^ HEAD`: clean (exit 0).
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit 0.
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*

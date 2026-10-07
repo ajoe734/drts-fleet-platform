@@ -747,19 +747,32 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
     const searchParams = actualUrlObj.searchParams;
 
     // Validate required claims
-    const sig = searchParams.get('sig');
-    const manifestHashParam = searchParams.get('manifest_hash');
-    const signedAt = searchParams.get('signed_at');
-    const expiresAt = searchParams.get('expires_at');
-    const keyId = searchParams.get('key_id');
-    const sigV = searchParams.get('sig_v');
-
-    if (!sig || !manifestHashParam || !signedAt || !expiresAt || !keyId || !sigV) {
-        throw new Error("Missing signed claims in download link");
+    const requiredKeys = ['sig', 'manifest_hash', 'signed_at', 'expires_at', 'key_id', 'sig_v'];
+    for (const key of requiredKeys) {
+        const values = searchParams.getAll(key);
+        if (values.length === 0 || !values[0]) {
+            throw new Error(`Missing signed claims in download link: ${key}`);
+        }
+        if (values.length > 1) {
+            throw new Error(`Duplicate signed claims in download link: ${key}`);
+        }
     }
+
+    const sig = searchParams.get('sig') as string;
+    const manifestHashParam = searchParams.get('manifest_hash') as string;
+    const signedAt = searchParams.get('signed_at') as string;
+    const expiresAt = searchParams.get('expires_at') as string;
+    const keyId = searchParams.get('key_id') as string;
+    const sigV = searchParams.get('sig_v') as string;
+
     if (manifestHashParam !== manifestHash) {
         throw new Error("Contradictory manifest hash in download link");
     }
+
+    if (Number.isNaN(Date.parse(signedAt))) throw new Error("Invalid signed_at");
+    if (Number.isNaN(Date.parse(expiresAt))) throw new Error("Invalid expires_at");
+    if (keyId.trim() === '') throw new Error("Invalid key_id");
+    if (!/^\d+$/.test(sigV)) throw new Error("Invalid sig_v");
 
     // Produce redacted safe query
     const safeParams = new URLSearchParams();
