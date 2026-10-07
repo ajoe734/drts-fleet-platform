@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { FcmFirstPartyPushProvider } from "../../../apps/api/src/modules/multi-taxi/fcm-push.provider";
-import { FirstPartyNotificationTransport } from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
 
 describe("FirstPartyNotification FCM Transport", () => {
   let provider: FcmFirstPartyPushProvider;

@@ -32,3 +32,9 @@
 
 - Unit Tests: 補足針對上述 FCM 錯誤碼、重試邏輯、多裝置發送場景的驗證，測試不涉及真實對外網路連線。
 - Reviewer checks: 程式碼符合 UAT 文件要求與架構。
+
+| Finding／驗收項                                | 原始碼依據與修改位置   | 舊版重現 → 修正版結果                     | 命令、退出碼、執行版本與證據位置                            | 未驗項與具體限制               |
+| ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| push-first-party-fcm_transport_and_error_mapping | `apps/api/src/modules/multi-taxi/fcm-push.provider.ts` 及 `first-party-notification.transport.ts` | 修正 typecheck 錯誤與重試狀態對齊 | 本機 `npm run test:unit` pass | postgres 整合測試未驗 |
+| push-first-party-fcm_dormant_by_default_and_privacy | `PASSENGER_PUSH_FIRST_PARTY_ENABLED` 及只存 `tokenSha256` 在 DB | 旗標已預設隱藏並在沒專案ID時回 configuration_blocked | 本機源碼審查與測試通過 | UI e2e 未驗 |
+
