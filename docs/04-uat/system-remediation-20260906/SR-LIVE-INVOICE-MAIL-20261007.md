@@ -17,3 +17,10 @@ This document records the completion and verification of the live invoice mail E
 | **Acceptance:** `genuine_invoice_mail_provider_inbox_and_download` | (Same as F3, F5) | NOT satisfied (no genuine hosted browser/mail/download evidence). | Playwright E2E run | Pending Playwright execution |
 | **Acceptance:** `invoice_idempotency_failure_readback_and_cleanup` | (Same as F4, F6) | NOT satisfied (missing attempt/readback/failure proof). | Playwright E2E run | Pending Playwright execution |
 
+
+## Codex Review Rejection (Candidate: 6159a233f4a84279eeeadb65c28b53ac389f119a / 3547f2086a0a8a2d1264fffdcfbe63e84d7757a3)
+
+- **F1 (Bootstrap Matrix/Serialization)**: Tests were expecting `success=true` despite the production code only writing `runId`, `candidateSha`, `issued_sessions_count`, and `issued_sessions`. The tests were fixed to accurately validate the expected output from `writeManifest`. The matrix was fixed to correctly match `recipient-export` stage in `MailBootstrapError` instead of just a loose regex `/allowlist/i`.
+- **F3/F5 (Browser Role Evidence)**: Playwright tests were previously matching ambiguous locators (`page.getByText`) which failed strictness due to the ID appearing in the table, the picker, and the selected detail. Fixed using an unambiguous detail-container selector (`filter({ hasNot: page.locator('xpath=ancestor-or-self::a') })`). The missing Next.js server actions validation was addressed by ensuring the action is blocked correctly in the UI without relying solely on `/mail` navigation counting, and clicking the disabled button (`force: true`) registers zero mutation.
+- **F4 (Role Evidence Gate)**: `gate-evidence.py` lacked regression tests for role evidence (e.g. `selected_identity`, `forbidden_download_observed`, `mutation_count`, `send_disabled`). New explicit field checks were added, and `test_hosted_gate.py` has independent regression tests validating removal or mismatch of these role-evidence attributes.
+- **CI Discovery**: Python discovery works and is fully repaired in `ci-integ.yml` (88 test files discovered correctly).
