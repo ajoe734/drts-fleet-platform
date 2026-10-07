@@ -1,0 +1,116 @@
+# CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 — planning decision and delivery evidence
+
+- Task: `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION`
+- Parent: `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`
+- Owner / reviewer: Claude2 / Codex
+- Branch: `claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+- Audited base: parent candidate `13656eb14818edc0c9ed85358d360e2fa588c764` /
+  merge `f8725220d0ee67e90b185cf0dd339b250bcb3d2b` via PR #2331
+- Decision: [SD-DP-20261007-002](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md)
+- Delivery: planning documents only; no product, workflow, or test code
+  changed. The parent's `真實deploy-dev綠燈` acceptance remains blocked.
+
+## Finding history and decision
+
+The chairman's blocked-task triage auto-generated this helper on the
+assumption that the parent's blocker is a missing product/contract decision.
+Re-reading the parent's own acceptance text and `next` field, and the two
+sibling helpers already completed on this same parent
+(`CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-HISTORY-REPAIR`, done
+2026-10-06; `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK`,
+done 2026-10-07), shows that premise does not hold: the four-item acceptance
+contract is already fully specified, including the one scope-shaped question
+it contains (keep `referral-embed-web` and the API public, item 3), and
+nothing in this candidate's diff is defective. What blocks progress is an
+infrastructure-activation dependency chain — a scanner cold-start fix, then
+real GCS/ClamAV resource activation, then real-store upload verification,
+then a fresh full-suite `deploy-dev` run — each already identified and
+assigned to a named owner on its own task.
+
+[SD-DP-20261007-002](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md)
+records that finding and the exact chain with current status per node; it
+authorizes no scope cut, no credential, and no implementation reopen on this
+parent. The parent's merged candidate and Codex's independent review stand as
+the audited base.
+
+## §0.7 verification and acceptance ledger
+
+| Finding / acceptance                                               | Source and change                                                              | Previous → this delivery                                                                                                       | Verification / evidence                                                                                                                                              | Remaining limitation                                                                                                         |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Resolve or route the missing product/contract decision             | Parent acceptance text items 1–4; SD-DP-20261007-002 §"Decision and authority" | Chairman assumed a spec ambiguity → confirmed none exists; routed to the scanner/GCS activation chain                          | Re-read of parent `ai-status.sh show` output, `deploy-dev.yml` identity-token steps, sibling `UNBLOCK-MANUAL-UNBLOCK` source trace                                   | No code/harness reviewed beyond what the sibling helper and Codex already verified on the parent candidate                   |
+| Record decision, scope cut, or explicit follow-up                  | SD-DP-20261007-002                                                             | No canonical planning record for this helper → named chain with owners (Claude/Claude2/Gemini2/Supervisor) and no scope cut    | Content/link checks below                                                                                                                                            | Chain timeline depends on scanner-readiness and GCP-provisioning owners, not recorded here                                   |
+| Task-scoped commit / push / PR                                     | This branch, decision and helper ledgers                                       | New tracked planning delivery                                                                                                  | Final SHA/PR-head comparison recorded after push, below                                                                                                              | Draft hold until canonical metadata/parent-note writes land (see limitation below)                                           |
+| Update parent with concrete unblocked next step                    | Canonical parent note + helper `resolved_parent_*` metadata                    | Dispatch-guard rejection for direct writes (reproduced below) → Supervisor operator-command block provided in the decision doc | Active-release CLI: parent `note` exit 1, helper `assign` exit 1; logs below                                                                                         | Machine-truth parent update is pending Supervisor action, not full helper completion by itself                               |
+| Parent `真實deploy-dev綠燈`                                        | `deploy-dev.yml`; `required_acceptance`                                        | Pending → pending                                                                                                              | `ai-status.sh show CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`: `required_acceptance` lists it as the sole item without recorded evidence                               | Full 16/16 operational-acceptance run against a live-provisioned store is absent; depends on the chain in SD-DP-20261007-002 |
+| Parent items 1 and 3 (identity-token wiring; same-SHA CI + review) | `deploy-dev.yml` lines ~1438-1480; CI runs 37334127377/381                     | Done → unchanged                                                                                                               | Re-confirmed `candidate_sha=reviewed_sha=ci_sha=13656eb14818edc0c9ed85358d360e2fa588c764`, `merge_sha=f8725220d0ee67e90b185cf0dd339b250bcb3d2b`, `ci_status=success` | None; fully evidenced, not reopened                                                                                          |
+
+## Verification observations (2026-10-07)
+
+- Re-read parent task snapshot via `bash <active-release>/ai-status.sh show
+CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`: exit 0; confirmed `status=blocked`,
+  `waiting_for=Claude2`, `candidate_sha=reviewed_sha=ci_sha=
+13656eb14818edc0c9ed85358d360e2fa588c764`, `merge_sha=
+f8725220d0ee67e90b185cf0dd339b250bcb3d2b`, `ci_status=success`, and
+  `required_acceptance` listing all three items with the deploy-green item
+  still open.
+- Re-read the parent's own acceptance text (four enumerated items) in full:
+  confirmed each is a concrete, checkable outcome, including the one
+  scope-shaped item (keep `referral-embed-web`/API public), with no open
+  interpretation question.
+- Read the two completed sibling helpers'
+  (`...-UNBLOCK-HISTORY-REPAIR`, `...-UNBLOCK-MANUAL-UNBLOCK`) full artifacts
+  and their recorded `worker_outcomes`: both independently diagnosed the same
+  root cause (unprovisioned `DOCUMENT_ARTIFACT_STORE` → `upload-url` 503s in
+  the operational-acceptance suite) and the same chain, from first-principles
+  source tracing (`fleet-partner.controller.ts` →
+  `supply-document.service.ts` → `fleet-document-storage.service.ts` →
+  `document-artifact-runtime.config.ts`), not from each other's prose.
+- Freshly re-fetched `ai-status.sh show` for the three chain nodes
+  (`SR-GCP-SCANNER-COLD-READINESS-20261007`: `todo`;
+  `SR-GCP-ARTIFACT-ACTIVATION-20261004`: `blocked`, `depends_on` includes the
+  scanner task; `C125-REAL-UPLOAD-STORAGE-20261005`: `blocked`) and confirmed
+  their own `next` fields independently corroborate the same chain and
+  current blocking reason (first clean hosted scan returned `503
+scan_engine_not_ready`, Cloud Run "ready" probe ≠ engine ready).
+- No new VM product server, browser, database, secret/variable write,
+  workflow dispatch, or deployment was performed. No source, harness, or test
+  file was modified; only the two documents listed under Delivery were added.
+
+## Canonical routing write limitation and operator action
+
+As a dispatched worker (`ORCH_DISPATCH_ROLE=owner`, `ORCH_RUN_ID` set,
+`ORCH_DISPATCH_TASK_ID=CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION`),
+the active-release CLI rejected these task intentions, re-confirmed fresh this
+round:
+
+1. `note CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 "test write attempt from
+planning-decision helper"`: exit 1, `Dispatched worker cannot mutate a
+different task`.
+2. `TASK_METADATA_JSON=<blocked disposition> assign
+CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION Claude2
+Codex`: exit 1, `Dispatched workers must use their assigned task lifecycle
+commands`.
+
+No role/dispatch environment variable was removed or impersonated to bypass
+these guards. An own-task `start` succeeded and routes this helper's own
+status into `in_progress`. Before approving or merging this candidate,
+Supervisor must run, in its own operator context (not this dispatch), the
+exact command block in
+[SD-DP-20261007-002 §"Parent disposition and acceptance"](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md#parent-disposition-and-acceptance),
+writing `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Claude2`
+and the itemized `resolved_parent_next` onto this helper, and the same text as
+a direct `note` on the parent. Do not set `resolved_parent_at` manually; merge
+lifecycle owns that field.
+
+`tools/development-orchestrator/github_bus.py` makes a draft PR ready once
+`handoff` locks its candidate. This helper's content does not depend on that
+metadata write to be correct or reviewable, so the owner hands off normally
+once published; but Supervisor should still perform the metadata/parent-note
+write at or before this candidate's merge reconciliation, because
+`apply_unblock_parent_resolution`'s default (`resolved_parent_status` absent →
+`todo`) would otherwise wrongly resume the parent for fresh owner dispatch the
+moment this helper merges, despite none of the chain's prerequisites existing.
+
+## Publication and final checks
+
+(to be completed after commit/push, below)
