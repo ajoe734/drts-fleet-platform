@@ -34,7 +34,7 @@ describe('F1 bootstrap and teardown adapter', () => {
     await bootstrapMailSession(env, deps, true);
     
     // Test teardown with same env
-    env['DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN'] = 'test-token';
+    (env as any)['DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN'] = 'test-token';
     const tdFetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: { revoked: true, logged_out: true } })
