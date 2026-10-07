@@ -221,3 +221,107 @@ candidate lifecycle — no `done` is claimed directly.
    `required_acceptance` items `四個私有網站的健康檢查與營運驗收改用身分token`
    and `同候選SHA CI通過且獨立reviewer審查` remain fully evidenced and
    unchanged from the prior helper's findings.
+
+## Round 2 (2026-10-07, after Codex REOPEN on generation `acfb91b9689b4af3ba18ce4c280c4dbf`)
+
+Codex reopened the first candidate (`093156b8700b337a6ba557cc0daae64c148a8bf8`) for two
+delivery/lifecycle gaps, not the upload-url diagnosis itself. Both are addressed below
+with re-verified evidence, not just prose.
+
+### R1 — `resolved_parent_*` write: guard-confirmed structural block, plus a landmine in the
+    literal suggested fix
+
+Re-confirmed empirically (not just by re-attempting the earlier failed `note` call) that
+this dispatch cannot perform the write Codex asked for:
+
+- This session's own dispatch environment: `ORCH_DISPATCH_ROLE=owner`,
+  `ORCH_RUN_ID=claude2-20261007T084204Z-83684bc9`,
+  `ORCH_DISPATCH_TASK_ID=CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK`,
+  `ORCH_DISPATCH_AGENT=Claude2`.
+- `TaskBoardCommandExecutor._guard_worker_command`
+  (`control_plane/usecases/task_board_commands.py:82-98`) runs whenever
+  `ORCH_DISPATCH_ROLE` is `owner`/`reviewer` and `ORCH_RUN_ID` is set — true here. It
+  allows only `{start, progress, note, handoff, approve, reopen, blocker, system-block,
+  record-acceptance}`, and only with `args[0]` equal to this task's own id. `assign` is
+  not in that set at all, and `note`/`progress`/`blocker` on any id other than this
+  helper's own raise `"Dispatched worker cannot mutate a different task"`. Since writing
+  `resolved_parent_status` / `resolved_parent_next` / `resolved_parent_waiting_for` onto
+  *this* helper task's own canonical metadata is only possible via `assign
+  <task> <owner> <reviewer>` with `TASK_METADATA_JSON` (`bin/ai_status.py:1752-1758`,
+  `task_metadata_from_env` at `:1023-1047`; `assign` is the only caller), and `assign` is
+  categorically forbidden to a dispatched owner/reviewer, there is no CLI invocation this
+  session can run — as owner, reviewer, or both — that lands this write. This matches and
+  re-confirms the standing finding from
+  `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-HISTORY-REPAIR` (2026-10-06) and
+  `SEC-INTERNAL-KEY-WIF-MIGRATION-20260930-UNBLOCK-HISTORY-REPAIR` (2026-09-30): this is a
+  structural guard property of the current release, not a one-off CLI mistake.
+
+- **Second, independent finding: Codex's literal suggested value
+  `resolved_parent_waiting_for=Supervisor` would itself break the merge-time resolution,
+  even run by a correctly Supervisor-privileged session.** `apply_unblock_parent_resolution`
+  (`bin/ai_status.py:1097-1164`) does, at line 1129-1131:
+  `parent_waiting_for = canonical_agent_name(parent_waiting_for_raw); if parent_waiting_for:
+  ensure_agent(parent_waiting_for)`. `ensure_agent` (`:953-957`) raises
+  `SystemExit(f"Unknown agent: {name}")` whenever the canonical name is not a key of
+  `KNOWN_AGENTS`. `KNOWN_AGENTS` (`:48-90`) contains exactly `Claude, Claude2, Gemini,
+  Gemini2, Codex, Codex2, Copilot, Pi`; `AGENT_ALIASES` (`:91-101`) maps only
+  `copilot/copilot host/copilot_host, claude2, claude 2, gemini2, gemini 2, codex2, codex
+  2`. `"Supervisor"` is in neither, and `canonical_agent_name` (`:691-707`) falls through to
+  returning the trimmed input unchanged when no match is found — so
+  `canonical_agent_name("Supervisor")` is literally `"Supervisor"`, and
+  `ensure_agent("Supervisor")` raises. This function runs inside `transition_after_merge`
+  (`:662-684`), itself inside the same `task_board_transaction` as the merge-driven status
+  write, so setting `resolved_parent_waiting_for` to the literal string `"Supervisor"` would
+  make that transaction raise at merge time — a worse outcome than today's silent
+  default-to-`todo`, and exactly the same `Unknown agent` failure mode already recorded for
+  `blocker`'s third argument, now rediscovered in this second, independent code path.
+  - **Corrected recipe:** omit `resolved_parent_waiting_for` entirely.
+    `apply_unblock_parent_resolution:1130-1133` falls back automatically to
+    `canonical_agent_name(parent.get("waiting_for")) or
+    canonical_agent_name(parent.get("owner"))` whenever the field is absent and
+    `resume_status == "blocked"`. The parent's current owner is `Claude2` — a valid
+    `KNOWN_AGENTS` entry — so the fallback resolves safely with no explicit agent chosen by
+    this helper.
+  - Exact commands for a genuinely Supervisor-privileged session (no `ORCH_DISPATCH_ROLE`/
+    `ORCH_RUN_ID`), corrected to drop the unsafe `resolved_parent_waiting_for` value:
+    ```
+    TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_next":"SR-GCP-ARTIFACT-ACTIVATION-20261004 needs user-authorized real GCP resource creation (bucket, IAM bindings, Cloud Run ClamAV scanner) plus the DEV_DOCUMENT_ARTIFACT_STORAGE_PROVIDER / DEV_DOCUMENT_ARTIFACT_GCS_BUCKET / DEV_REMITTANCE_PROOF_* GitHub variables and a provision-dev-artifact-backends.yml dispatch; then C125-REAL-UPLOAD-STORAGE-20261005 needs its own positive/negative scan plus role-ownership plus readback verification against the real store; then Supervisor must dispatch a fresh deploy-dev.yml run against the immutable merged SHA and confirm the full 16/16 operational-acceptance suite (not health-only) before recording 真實deploy-dev綠燈 for CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 and moving it toward done."}' \
+      AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py assign CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK Claude2 Codex
+
+    AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py note CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 'SR-GCP-ARTIFACT-ACTIVATION-20261004 -> C125-REAL-UPLOAD-STORAGE-20261005 -> fresh deploy-dev.yml full 16/16 operational acceptance, in that order; see UNBLOCK-MANUAL-UNBLOCK artifact for detail. Do not dispatch this task directly; it is not the cause.'
+
+    AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py resume-blocked CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK in_progress 'resolved_parent_status/next recorded; parent kept blocked. Claude2: re-handoff this helper to Codex with PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2398 and the current CANDIDATE_SHA/CANDIDATE_BRANCH.'
+    ```
+    (Never hand-set `resolved_parent_at`; the lifecycle stamps it on resolution.)
+
+- Because neither this task's own metadata write nor the parent's `next` field can be
+  landed from inside this dispatch, and because a worker-level `blocker`/`note` aimed at
+  the parent id is rejected by the same guard, this round raises a `blocker` on this
+  helper's **own** task id, `waiting_for=Codex` (a valid `KNOWN_AGENTS` lane — `Supervisor`
+  and `human` are not valid third arguments to `blocker` either, same `ensure_agent`
+  check), carrying this exact corrected recipe in the message body, so a
+  Supervisor-privileged session picks it up. The parent is **not** touched by this helper;
+  it remains `blocked` exactly as Codex required.
+
+### R2 — PR evidence
+
+`gh pr list --head claude2/ci-deploy-dev-private-consoles-20261005-unblock-manual-unblock
+--state all --json number,state,url,headRefOid` now returns one entry: `#2398`, `OPEN`,
+`headRefOid=093156b8700b337a6ba557cc0daae64c148a8bf8` — exactly the generation-1 candidate
+SHA Codex reviewed. The task's own `pr_url` field is still unset because `pr_url` is only
+ever written by `command_handoff` reading `PR_URL` (`bin/ai_status.py:2093-2095`), and this
+round deliberately does not call `handoff` (see R1: handing this candidate to review risks
+an auto-merge landing before Supervisor's metadata write, recreating R1's exact hazard).
+`pr_url=https://github.com/ajoe734/drts-fleet-platform/pull/2398` will be recorded the next
+time this helper is handed off to Codex, once Supervisor's `resume-blocked` message above
+authorizes that re-handoff, carrying the (by-then-current) `CANDIDATE_SHA`/
+`CANDIDATE_BRANCH` of whatever this file's final commit is.
+
+### What this round did and did not do
+
+- Only this file changed again; no product code, workflow file, GitHub variable, IAM
+  binding, or GCP resource was touched, dispatched, or created.
+- No local service, Docker, or Playwright/browser run was started on this VM.
+- This helper's own task is moved to `blocked` (`waiting_for=Codex`) by this round's
+  `blocker` call so the review/merge flow cannot land this candidate ahead of the
+  Supervisor-privileged metadata write; the parent task's status/next are untouched.
