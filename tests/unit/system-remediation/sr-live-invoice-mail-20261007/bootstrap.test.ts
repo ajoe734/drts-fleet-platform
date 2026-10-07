@@ -11,16 +11,7 @@ describe('F1 bootstrap and teardown adapter', () => {
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       GITHUB_ACTIONS: "true",
       GITHUB_ENV: "/tmp/env",
     };
@@ -51,12 +42,6 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       GITHUB_ACTIONS: "true",
       GITHUB_ENV: "/tmp/env",
     };
@@ -87,9 +72,6 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
     };
     
     const deps = {
@@ -112,12 +94,6 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID: "10000000-0000-0000-0000-000000000202",
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID: "10000000-0000-0000-0000-000000000902",
       DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID: "10000000-0000-0000-0000-000000000203",
@@ -130,8 +106,9 @@ describe('F1 bootstrap and teardown adapter', () => {
     const tokensMap: Record<string, any> = {};
     
     const fetchMock = vi.fn().mockImplementation(async (url, opts) => {
-      let parsedBody = {};
-      try { parsedBody = opts.body ? JSON.parse(opts.body) : {}; } catch(e) {}
+      let parsedBody: any = {};
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      try { parsedBody = opts.body ? JSON.parse(opts.body) : {}; } catch(_e) { /* ignore */ }
       
       const defaultHeaders = new Headers({ 'x-drts-candidate-sha': "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
 
@@ -179,16 +156,11 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       GITHUB_ACTIONS: "true",
       GITHUB_ENV: "/tmp/env",
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const fetchMock = vi.fn().mockImplementation(async (url, opts) => {
       const defaultHeaders = new Headers({ 'x-drts-candidate-sha': "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
       if (url.includes('auth/token')) {
@@ -234,8 +206,8 @@ describe('F1 bootstrap and teardown adapter', () => {
     
     await teardown(env, tdFetchMock as any);
     expect(tdFetchMock).toHaveBeenCalledTimes(3);
-    expect(tdFetchMock.mock.calls[0][1].headers.authorization).toBe("Bearer token1");
-    expect(tdFetchMock.mock.calls[1][1].headers.authorization).toBe("Bearer token2");
-    expect(tdFetchMock.mock.calls[2][1].headers.authorization).toBe("Bearer token3");
+    expect((tdFetchMock.mock.calls[0]?.[1] as any)?.headers?.authorization).toBe("Bearer token1");
+    expect((tdFetchMock.mock.calls[1]?.[1] as any)?.headers?.authorization).toBe("Bearer token2");
+    expect((tdFetchMock.mock.calls[2]?.[1] as any)?.headers?.authorization).toBe("Bearer token3");
   });
 });

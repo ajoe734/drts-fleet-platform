@@ -23,6 +23,7 @@ const evidenceData = {
   httpCalls: [] as any[],
   trackedResources: [] as any[],
   mailboxEvidence: {} as any,
+  resendMailboxEvidence: {} as any,
   downloadProof: false,
   durableHistoryCount: 0,
   tenantId: "",
@@ -272,6 +273,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       method: "GET", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "durable_get", status: getMailResponse.status(),
     });
     expect(getMailResponse.status()).toBe(200);
+    const resendAttempt = mailData.data?.deliveries?.find((d: any) => d.id === resendResult.data?.deliveryId);
     expect(resendAttempt).toBeTruthy();
     const successfulAttempt = resendAttempt.attempts?.find((a: any) => a.outcome === "sent" || (a.acceptedAt && !a.errorCode));
     expect(successfulAttempt).toBeTruthy();
@@ -322,6 +324,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
           return route.abort("blockedbyclient");
         }
         return route.continue();
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (e) {
          return route.abort("blockedbyclient");
       }
@@ -387,7 +390,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
     // Expected to reject mismatched SHA if it enforces it (might be 400 or 403)
     // Actually the doc says "portal deployed-SHA verification remain unimplemented."
     // If it's unimplemeted, we just verify it exists if we need to.
-    
+    expect(badShaResponse).toBeDefined();
   });
 });
 

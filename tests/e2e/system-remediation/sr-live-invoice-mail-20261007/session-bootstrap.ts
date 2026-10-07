@@ -388,7 +388,6 @@ export async function bootstrapMailSession(
     }
     stage = "assertion-configuration";
     const assertions = deps.assertions(config);
-    let minted: MintedMailSession | undefined;
 
     async function tryMint(cfg: MailSessionConfig, actType: string, tokenExportKey: string) {
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -413,18 +412,18 @@ export async function bootstrapMailSession(
         throw new Error("Assertion collisions exhausted bounded retries for " + actType);
     }
 
-    minted = await tryMint(config, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN");
+    const mintedSession = await tryMint(config, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN");
     stage = "step-up-export";
-    deps.appendEnvironment(envPath!, `DRTS_LIVE_INVOICE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`);
+    deps.appendEnvironment(envPath!, `DRTS_LIVE_INVOICE_MAIL_STEP_UP_REFERENCE=${mintedSession.stepUpReference}\n`);
 
     if (env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID && env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID) {
       const roConfig = { ...config, tenantId: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID, actorId: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID };
-      const roMinted = await tryMint(roConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN");
+      await tryMint(roConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN");
     }
 
     if (env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID && env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID) {
       const naConfig = { ...config, tenantId: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID, actorId: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID };
-      const naMinted = await tryMint(naConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN");
+      await tryMint(naConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN");
     }
 
     stage = "mailbox-read";
