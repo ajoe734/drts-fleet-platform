@@ -18,6 +18,7 @@ import type {
   OrderFirstPartyNotificationRoute,
 } from "@drts/contracts";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import type { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import type { PassengerNotificationRouteResolution } from "../../../apps/api/src/modules/multi-taxi/passenger-notification-channel-router";
 import { harness as partnerHarness } from "../system-remediation/sr-partner-notify-transport-20260918/transport-harness";
 
@@ -61,7 +62,7 @@ function nonPartnerHarness(resolution: PassengerNotificationRouteResolution) {
   const resolvePassengerNotificationChannel = vi.fn(
     async () => resolution,
   );
-  const claimPartnerNotification = vi.fn(async () => {
+  const claimPartnerNotification = vi.fn<MultiTaxiRepository["claimPartnerNotification"]>(async () => {
     const metadata = row.payload.channelRouting as
       | { retryDisposition?: string }
       | undefined;
