@@ -27,8 +27,6 @@ try {
     console.log(JSON.stringify({ success: false, error: e.message }));
 }
 """
-        with open('scratch_test.ts', 'w') as f:
-            f.write(script.replace('.ts', '.js')) # Assuming we compile it
         # However, a simpler way is to just read the source and ensure adapter is used
         with open('tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-bootstrap.ts', 'r') as f:
             content = f.read()

@@ -11,12 +11,10 @@ def load(name):
     spec.loader.exec_module(module)
     return module
 
-
 gate = load('gate-evidence')
 metadata = load('provider-metadata')
 mailbox = load('mailbox_observer')
 SHA = 'a' * 40
-
 
 class HostedGateTest(unittest.TestCase):
     def setUp(self):
@@ -24,17 +22,18 @@ class HostedGateTest(unittest.TestCase):
         self.env.update(CANDIDATE_SHA=SHA, WORKFLOW_SHA=SHA, BASE_SHA='b' * 40)
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [], 
-                         'mailboxEvidence': {'matched_content': True},
+                         'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': 'rm1', 'body_sha256': 'bs1'},
+                         'downloadProof': True,
+                         'durableHistoryCount': 1,
                          'httpCalls': [
-                             {'path': 'tenant/billing/profile'},
-                             {'path': '/api/tenant/invoices/1', 'method': 'GET'},
-                             {'path': 'artifactUrl'},
-                             {'idempotency': True},
-                             {'path': '/api/tenant/invoices/1/mail', 'method': 'GET'},
-                             {'scenario': 'read_only'},
-                             {'scenario': 'wrong_tenant'},
-                             {'scenario': 'non_allowlisted'},
-                             {'scenario': 'intentional_resend'}
+                             {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
+                             {'path': '/api/tenant/invoices/', 'method': 'GET', 'status': 200},
+                             {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
+                             {'path': '/api/tenant/invoices/', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
+                             {'path': '/api/tenant/invoices/', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
+                             {'path': '/api/tenant/invoices/', 'method': 'POST', 'scenario': 'intentional_resend', 'status': 201, 'delivery_id': 'd2'},
+                             {'scenario': 'durable_get', 'method': 'GET', 'status': 200},
+                             {'scenario': 'wrong_tenant', 'method': 'POST', 'status': 403},
                          ],
                          'trackedResources': [{'type': 'provider_receipt', 'id': 'test'}]}
         self.provider = {'candidate_sha': SHA, 'alias_revision_fresh': True}
@@ -60,7 +59,6 @@ class HostedGateTest(unittest.TestCase):
     def test_revocation_gate_requires_live_provider_freshness(self):
         self.assertEqual(gate.evaluate(self.env, self.evidence, {'candidate_sha': SHA, 'alias_revision_fresh': False})['status'], 'failed')
 
-
 class ProviderMetadataTest(unittest.TestCase):
     def test_old_revision_and_split_traffic_fail_before_secret_payload_access(self):
         def gcloud(*args):
@@ -73,17 +71,12 @@ class ProviderMetadataTest(unittest.TestCase):
 
 class MailboxObserverTest(unittest.TestCase):
     def test_derive_alias_recipient_only_allows_invoice(self):
-        # valid invoice alias
         recipient = mailbox.derive_alias_recipient('test@mycompany.org', 'invoice')
         self.assertEqual(recipient, 'test+invoice@mycompany.org')
-
-        # reject other flows like invite or approve
         with self.assertRaisesRegex(ValueError, 'Unauthorized alias'):
             mailbox.derive_alias_recipient('test@mycompany.org', 'invite')
         with self.assertRaisesRegex(ValueError, 'Unauthorized alias'):
             mailbox.derive_alias_recipient('test@mycompany.org', 'approve')
-        
-        # reject invalid base mailboxes
         with self.assertRaisesRegex(ValueError, 'Invalid dedicated mailbox'):
             mailbox.derive_alias_recipient('test.mycompany.org', 'invoice')
         with self.assertRaisesRegex(ValueError, 'Invalid dedicated mailbox'):
