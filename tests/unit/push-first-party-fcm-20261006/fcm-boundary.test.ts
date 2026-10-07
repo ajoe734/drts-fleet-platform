@@ -72,7 +72,7 @@ describe("FCM production provider boundary", () => {
       kind: "accepted",
       messageId: name,
     });
-    const [url, request] = fetchStub.mock.calls[0];
+    const [url, request] = fetchStub.mock.calls[0]!;
     const body = JSON.parse(request.body).message;
     expect(url).toBe(
       "https://fcm.googleapis.com/v1/projects/test-project/messages:send",

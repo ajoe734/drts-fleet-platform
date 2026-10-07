@@ -1333,7 +1333,7 @@ export class MultiTaxiService implements OnModuleInit {
       if (!(error instanceof FirstPartyPushFailure)) {
         throw new PassengerPushPersistenceUnknownError(outboxId, error);
       }
-      
+
       const failure = error.failure;
       const context = error.deliveryContext;
       let expiresAt: string;

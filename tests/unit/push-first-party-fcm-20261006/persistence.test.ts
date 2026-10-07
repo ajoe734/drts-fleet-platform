@@ -112,11 +112,11 @@ describe("first-party production repository transactions", () => {
     expect(result.wireMessageHash).toBe("hash");
     expect(result.retryPolicySnapshot).toEqual({ maxAttempts: 5 });
     const calls = h.query.mock.calls;
-    expect(calls[1][0]).toContain("ops.consumer_notification_outbox");
-    expect(calls[2][0]).toContain("ops.phase1_push_delivery_claims");
-    expect(calls[2][0]).toContain("lease_expires_at > clock_timestamp()");
-    expect(calls[2][1]).toEqual(["o1", 7]);
-    expect(calls[3][0]).toContain("ON CONFLICT (outbox_id) DO NOTHING");
+    expect(calls[1]![0]).toContain("ops.consumer_notification_outbox");
+    expect(calls[2]![0]).toContain("ops.phase1_push_delivery_claims");
+    expect(calls[2]![0]).toContain("lease_expires_at > clock_timestamp()");
+    expect(calls[2]![1]).toEqual(["o1", 7]);
+    expect(calls[3]![0]).toContain("ON CONFLICT (outbox_id) DO NOTHING");
     expect(calls.at(-1)?.[0]).toBe("COMMIT");
     expect(h.release).toHaveBeenCalledOnce();
   });
@@ -197,7 +197,7 @@ describe("first-party production repository transactions", () => {
         7,
       ),
     ).toBe("synthetic-token");
-    const [sql, params] = h.query.mock.calls[0];
+    const [sql, params] = h.query.mock.calls[0]!;
     expect(params).toEqual(["o1", "d1", 7, "hash1"]);
     // Static query inspection only; hosted PG must exercise these predicates.
     for (const predicate of [
@@ -312,7 +312,9 @@ describe("first-party production service routing and outcome", () => {
         record: row,
         fenceToken: 7,
       })),
-      recordPushDeliveryOutcome: vi.fn(async () => ({ recorded: true })),
+      recordPushDeliveryOutcome: vi
+        .fn<(input: any) => Promise<{ recorded: boolean }>>()
+        .mockResolvedValue({ recorded: true }),
     };
     const partnerSend = vi.fn();
     const service = new MultiTaxiService(
@@ -328,7 +330,7 @@ describe("first-party production service routing and outcome", () => {
       { send } as any,
     );
     const result = await service.deliverPassengerNotification(row);
-    const saved: any = repo.recordPushDeliveryOutcome.mock.calls[0][0];
+    const saved: any = repo.recordPushDeliveryOutcome.mock.calls[0]![0];
     expect(saved.firstPartyMetadata.deviceOutcomes).toEqual(
       metadata.deviceOutcomes,
     );
