@@ -1,3 +1,4 @@
+import { persistOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
@@ -12,6 +13,7 @@ import type {
   DriverTaskRecord,
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
+  OrderPartnerNotificationRoute,
   PassengerDispatchDisclosureSnapshot,
   TenantBookingListQuery,
 } from "@drts/contracts";
@@ -684,6 +686,44 @@ export class OwnedMobilityRepository {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  /** A failed notification setup must not abort the enclosing booking.
+   * Roll back both route and sequence together before allowing it to commit.
+   * A lost connection/failed savepoint recovery remains a booking DB failure.
+   */
+  async writeOrderPartnerNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+    tx?: OwnedMobilityQueryExecutor,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) return null;
+    if (!tx) {
+      try {
+        return await this.withTransaction((executor) =>
+          this.writeOrderPartnerNotificationRoute(route, executor),
+        );
+      } catch (error) {
+        this.reportPersistenceFailure(
+          error,
+          "write order partner notification route",
+        );
+        return null;
+      }
+    }
+    await tx.query("SAVEPOINT partner_notification_route");
+    try {
+      const stored = await persistOrderPartnerNotificationRoute(tx, route);
+      await tx.query("RELEASE SAVEPOINT partner_notification_route");
+      return stored;
+    } catch (error) {
+      await tx.query("ROLLBACK TO SAVEPOINT partner_notification_route");
+      await tx.query("RELEASE SAVEPOINT partner_notification_route");
+      this.reportPersistenceFailure(
+        error,
+        "write order partner notification route",
+      );
+      return null;
     }
   }
 
