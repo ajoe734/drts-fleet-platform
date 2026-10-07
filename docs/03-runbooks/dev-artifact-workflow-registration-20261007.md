@@ -24,10 +24,32 @@ repair, not a promotion of the product release or evidence of live storage/scann
 
 The bootstrap branch starts at main and copies only the **byte-identical**
 already-reviewed provisioning workflow from the pinned source above, plus this
-runbook. Opening its protected PR does not execute provisioning. No product
-code, deployment gate, IAM policy, default-branch setting or dashboard mirror
-is changed. Require exact-SHA independent review and all normal main checks;
-never use an admin bypass or force-push.
+runbook and the bounded security prerequisite below. Opening its protected PR
+does not execute provisioning. No product feature source, deployment gate, IAM
+policy, default-branch setting or dashboard mirror is changed. Require exact-SHA
+independent review and all normal main checks; never use an admin bypass or
+force-push.
+
+### Baseline dependency-security prerequisite
+
+The first main-stage CI run #37608909117 failed the unchanged Dependency security
+gate on advisory IDs 1241202 (`sprintf-js`), 1241209 (`source-map-js`), 1241210
+(`proxy-addr`) and 1241339 (`@modelcontextprotocol/sdk`). The first three already
+have reviewed repairs on dev via PR #2357. A fresh audit also confirms SDK 1.30.0
+in **both** branches is affected by GHSA-6qxp-vccf-f47h (fixed in 1.31.0).
+
+The explicitly scoped prerequisite adds only the three established override
+repairs and an SDK 1.31.0 override, plus the affected lock graph. It does not
+change direct workspace dependency declarations, security scripts, exceptions
+or gate behavior. The fresh dev backport must retain the new SDK repair.
+Offline regressions resolve the actual API → OpenClaw → GenAI SDK dependency:
+bound credentials must not be sent to a foreign issuer in auth or direct token
+exchange; an authorized exchange still succeeds and stamps the issuer. All
+HTTP is in-memory mocked with synthetic credentials; these are library/code
+regressions, not real MCP, Google login or application live acceptance.
+
+A fresh review and CI are required for the updated source; the earlier
+workflow-only source review does not approve this dependency change.
 
 After main merge, verify the actual default-branch workflow blob and GitHub
 workflow metadata. Then cherry-pick the bootstrap merge back to a fresh dev
