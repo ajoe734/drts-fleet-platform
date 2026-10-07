@@ -168,9 +168,40 @@ git status --porcelain                                                          
 
 - Migration 本身、schema 欄位/CHECK/索引、F1/F4/同乘客 F2 的修正：本輪未改動，reviewer 本輪已核對相符，沿用前兩輪驗收結果。
 - 真實 Postgres 下 `pg_advisory_xact_lock` 的實際等待/序列化行為、partial unique index 的真實 constraint violation 時機：仍是靜態程式碼修正 + mock-DB/原始碼 probe 證據，按 common.md 分工留給 `PUSH-CHANNEL-PG-QA-20261006`，不冒稱 PG 實測。
-- CI：待本輪 commit push 後的新 candidate SHA 觸發，尚未讀取結果。
+
+## 第 4 輪（同 owner Claude2，承接第 3 輪的 commit `6cc3fdbbf`，無新程式碼變更，補跑第 3 輪記載為「未能執行」的真實 vitest/eslint/tsc）
+
+第 3 輪開工時 canonical root `node_modules` 頂層套件 symlink 全部指向一個已被回收的 sibling worktree，導致 `vitest`/`eslint`/`typescript` 的一般呼叫方式（`pnpm exec`、`node node_modules/<pkg>/...`）在模組解析階段就失敗，當輪因此改用原始碼層級 probe（`.scratch-f2-f3-probe.js`，未納入 commit）佐證 F2/F3 修復邏輯，並如實記錄「未能執行 vitest/eslint/tsc」。
+
+本輪接手後重新檢查：該 symlink 損壞只發生在 `node_modules` 最上層的套件入口（例如 `node_modules/vitest` → 一個已不存在的 sibling worktree路徑），但各套件實際安裝內容仍完整存在於 `node_modules/.pnpm/<pkg>@<version>.../node_modules/<pkg>` 這個 content-addressable store 底下，且这些套件自身宣告的依賴（它们私有 `node_modules` 下的相對 symlink）未受影響。因此可以不修改、不重建共享的 canonical root `node_modules`（避免影響其他並行 session），改用 `NODE_PATH` 指向對應套件在 `.pnpm` store 內的真實 `node_modules` 目錄作為 Node 模組解析的額外搜尋路徑，讓 `vitest.config.ts` 內的 `import "vitest/config"`、`tsconfig.json` 的 `tsc` 等裸 specifier 解析成功，直接執行真正的 vitest/eslint/tsc（非 probe，非重寫邏輯），結果如下：
+
+```
+NODE_PATH=<.pnpm>/vitest@4.1.4.../node_modules node <同一路徑>/vitest/vitest.mjs run \
+  tests/unit/push-first-party-registry-20261006/push-first-party-registry-20261006.test.ts \
+  tests/unit/push-channel-sd-20261006/push-channel-sd-20261006.test.ts \
+  tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts \
+  --maxWorkers=1
+# Test Files  3 passed (3)
+#      Tests  59 passed (59)
+
+# 同法改用 vitest/node 的 startVitest({ config: "vitest.config.ts", include: ["apps/api/tests/unit/*.test.ts"] })
+# 執行 apps/api/tests/unit/passenger-push-devices.repository.test.ts + multi-taxi.repository.test.ts
+# Test Files  2 passed (2)
+#      Tests  34 passed (34)   # 含本輪新增的 6 則 F2/F3 reopen 回歸（28 既有 + 6 新）
+
+NODE_PATH=<.pnpm>/eslint@9.39.4.../node_modules node <同一路徑>/eslint/bin/eslint.js \
+  src/modules/passenger-push-devices src/app.module.ts tests/unit/passenger-push-devices.repository.test.ts --max-warnings=0
+# exit 0，無輸出（乾淨）
+
+NODE_PATH=<.pnpm>/typescript@5.9.3/node_modules node <同一路徑>/typescript/bin/tsc -p apps/api/tsconfig.json --noEmit
+# exit 0，無錯誤
+```
+
+至此，第 3 輪記載為「未能執行」的三項（既有 11+28 則回歸、eslint、tsc）已用真正的工具（非 probe、非模擬）全數補跑並通過，與第 3 輪 probe 的 6 個 PASS 結論一致，互相佐證。`.scratch-f2-f3-probe.js` 與本輪新增的臨時 `NODE_PATH` 包裝腳本均為本機驗證用暫存檔，不納入 commit。真實 PostgreSQL 下的鎖等待/隔離/約束行為仍按原分工留給 `PUSH-CHANNEL-PG-QA-20261006`。
+
+CI：待本輪 commit push 後的新 candidate SHA 觸發，尚未讀取結果。
 
 ## candidate
 
-- `CANDIDATE_SHA`：待本次（第 3 輪）commit 後由 `git rev-parse HEAD` 取得（取代 `b8aa1dfa8`）。
+- `CANDIDATE_SHA`：待本次（第 4 輪）commit 後由 `git rev-parse HEAD` 取得（取代 `6cc3fdbbf`）。
 - `CANDIDATE_BRANCH`：`claude2/push-first-party-registry-20261006`
