@@ -437,6 +437,7 @@ export class PassengerPushDevicesRepository {
   async invalidateDevice(
     deviceId: string,
     reason: string,
+    expectedTokenSha256?: string,
   ): Promise<PassengerPushDeviceRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -450,9 +451,10 @@ export class PassengerPushDevicesRepository {
               invalidated_at = now(),
               updated_at = now()
           WHERE device_id = $1 AND status <> 'invalid'
+            AND ($3::text IS NULL OR (status = 'active' AND token_sha256 = $3))
           RETURNING ${DEVICE_COLUMNS}
         `,
-        [deviceId, reason],
+        [deviceId, reason, expectedTokenSha256 ?? null],
       );
       if (updated.rows[0]) {
         return this.mapDeviceRow(updated.rows[0]);

@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, Global } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { FIRST_PARTY_PUSH_DEVICE_RESOLVER } from "./passenger-push-devices.port";
@@ -13,6 +13,7 @@ import { PassengerPushDevicesService } from "./passenger-push-devices.service";
  * exported so that later task can inject it without this module needing to
  * know about multi-taxi.
  */
+@Global()
 @Module({
   imports: [DatabaseModule],
   providers: [

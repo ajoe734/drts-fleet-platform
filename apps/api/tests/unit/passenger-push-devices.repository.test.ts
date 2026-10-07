@@ -975,7 +975,7 @@ describe("PassengerPushDevicesRepository.touchDevice/revokeDevice/invalidateDevi
     const result = await repository.invalidateDevice("device-001", "UNREGISTERED");
     expect(result?.status).toBe("invalid");
     expect(result?.statusReason).toBe("UNREGISTERED");
-    expect(query.mock.calls[0][1]).toEqual(["device-001", "UNREGISTERED"]);
+    expect(query.mock.calls[0][1]).toEqual(["device-001", "UNREGISTERED", null]);
   });
 
   it("F3 reopen: touchDevice never lets a raw DB error's message/detail/cause reach the caller", async () => {

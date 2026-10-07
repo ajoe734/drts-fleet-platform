@@ -30,6 +30,7 @@ import type {
   PartnerDeliveryMetadata,
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
+import type { StoredFirstPartyContext, FirstPartyDeliveryMetadata } from "./first-party-notification.transport";
 import type { PassengerNotificationRouteResolution } from "./passenger-notification-channel-router";
 
 import {
@@ -227,6 +228,7 @@ export interface RecordPushDeliveryOutcomeInput {
   providerMessageRef: string | null;
   deliveryOutcome: PassengerPushDeliveryOutcome;
   partnerMetadata?: PartnerDeliveryMetadata;
+  firstPartyMetadata?: FirstPartyDeliveryMetadata;
   channelMetadata?: PassengerNotificationChannelMetadata;
 }
 
@@ -496,6 +498,124 @@ export class MultiTaxiRepository {
     }
   }
 
+  async findOrderFirstPartyNotificationRoute(
+    orderId: string,
+  ): Promise<OrderFirstPartyNotificationRoute | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<any>(
+      `
+      SELECT order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
+        app_id, notification_policy_version, consent_version, ride_ref, created_at
+      FROM mobility.phase1_order_first_party_notification_routes
+      WHERE order_id = $1
+      `,
+      [orderId]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      drtsPassengerId: row.drts_passenger_id,
+      passengerSubjectRef: row.passenger_subject_ref,
+      appId: row.app_id,
+      notificationPolicyVersion: row.notification_policy_version,
+      consentVersion: row.consent_version,
+      rideRef: row.ride_ref,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    };
+  }
+
+  private mapFirstPartyContext(row: Record<string, any>): StoredFirstPartyContext {
+    return {
+      outboxId: row.outbox_id, orderId: row.order_id, tenantId: row.tenant_id,
+      routeSnapshot: row.route_snapshot, targetDevices: row.target_devices,
+      wireMessage: row.wire_message, wireMessageHash: row.wire_message_hash,
+      retryPolicySnapshot: row.retry_policy_snapshot, deviceOutcomes: row.device_outcomes,
+      eventSequence: Number(row.event_sequence), expiresAt: new Date(row.expires_at).toISOString(),
+      deliveryTarget: row.delivery_target, deliveryStage: row.delivery_stage,
+      retryDisposition: row.retry_disposition, failureReason: row.failure_reason,
+      receiptId: row.receipt_id, createdAt: new Date(row.created_at).toISOString(),
+      deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+    };
+  }
+
+  async findFirstPartyNotificationContextAndTokens(
+    outboxId: string,
+  ): Promise<{ context: StoredFirstPartyContext } | null> {
+    if (!this.isEnabled()) return null;
+    // Tokens are resolved separately immediately before each device IO, never
+    // bundled into the durable context or a long-lived batch cache.
+    const result = await this.databaseService!.query(
+      `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`, [outboxId]);
+    return result.rows[0] ? { context: this.mapFirstPartyContext(result.rows[0]) } : null;
+  }
+
+  async findFirstPartyNotificationDeviceToken(
+    context: StoredFirstPartyContext,
+    target: StoredFirstPartyContext["targetDevices"][number],
+    fenceToken: number,
+  ): Promise<string | null> {
+    if (!this.isEnabled()) throw new Error("First-party persistence unavailable");
+    const result = await this.databaseService!.query<{ fence_valid: boolean; token: string | null }>(`
+      SELECT EXISTS (
+        SELECT 1 FROM ops.phase1_push_delivery_claims
+        WHERE outbox_id=$1 AND fence_token=$3 AND claim_state='claimed'
+          AND lease_expires_at > clock_timestamp()
+      ) AS fence_valid, (
+        SELECT d.token
+        FROM mobility.phase1_first_party_notification_delivery_contexts c
+        CROSS JOIN LATERAL jsonb_to_recordset(c.target_devices) AS t("deviceId" uuid, "tokenSha256" text)
+        JOIN iam.phase1_passenger_push_devices d ON d.device_id=t."deviceId" AND d.token_sha256=t."tokenSha256"
+        WHERE c.outbox_id=$1 AND d.device_id=$2 AND d.token_sha256=$4 AND d.status='active'
+          AND d.drts_passenger_id=c.route_snapshot->>'drtsPassengerId'
+          AND d.app_id=c.route_snapshot->>'appId'
+          AND d.last_seen_at >= now() - interval '60 days'
+      ) AS token
+    `, [context.outboxId, target.deviceId, fenceToken, target.tokenSha256]);
+    if (!result.rows[0]?.fence_valid) throw new Error("First-party notification fence lost before send");
+    return result.rows[0].token;
+  }
+
+  async prepareFirstPartyNotificationContext(
+    context: Omit<StoredFirstPartyContext, "createdAt" | "deliveredAt">,
+    fenceToken: number,
+  ): Promise<StoredFirstPartyContext> {
+    if (!this.isEnabled()) throw new Error("First-party persistence unavailable");
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      // Match claim/outcome lock order; concurrent preparations serialize here.
+      const outbox = await client.query(
+        `SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 AND order_id=$2 AND status='sending' FOR UPDATE`,
+        [context.outboxId, context.orderId]);
+      const claim = await client.query(
+        `SELECT fence_token FROM ops.phase1_push_delivery_claims
+         WHERE outbox_id=$1 AND fence_token=$2 AND claim_state='claimed'
+           AND lease_expires_at > clock_timestamp() FOR UPDATE`, [context.outboxId, fenceToken]);
+      if (!outbox.rows.length || !claim.rows.length) throw new Error("First-party notification fence lost before preparation");
+      await client.query(`
+        INSERT INTO mobility.phase1_first_party_notification_delivery_contexts (
+          outbox_id, order_id, tenant_id, route_snapshot, target_devices, wire_message, wire_message_hash,
+          event_sequence, expires_at, retry_policy_snapshot
+        ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8,$9,$10::jsonb)
+        ON CONFLICT (outbox_id) DO NOTHING
+      `, [context.outboxId, context.orderId, context.tenantId, JSON.stringify(context.routeSnapshot),
+        JSON.stringify(context.targetDevices), JSON.stringify(context.wireMessage), context.wireMessageHash,
+        context.eventSequence, context.expiresAt, JSON.stringify(context.retryPolicySnapshot)]);
+      const result = await client.query(
+        `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`, [context.outboxId]);
+      const stored = this.mapFirstPartyContext(result.rows[0]);
+      await client.query("COMMIT");
+      return stored;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
   async findOrderPartnerNotificationRoute(
     orderId: string,
   ): Promise<OrderPartnerNotificationRoute | null> {
@@ -617,6 +737,7 @@ export class MultiTaxiRepository {
       WHERE o.status IN ('pending','sending','failed') AND o.next_attempt_at <= now()
         AND COALESCE(
           o.payload->'channelRouting'->>'retryDisposition',
+          o.payload->'firstPartyNotification'->>'retryDisposition',
           c.retry_disposition,
           o.payload->'partnerNotification'->>'retryDisposition',
           'automatic'
@@ -675,6 +796,7 @@ export class MultiTaxiRepository {
       // clears channelRouting, can reopen a row the router has stopped.
       const disposition =
         channelMetadata?.retryDisposition ??
+        (record.payload.firstPartyNotification as FirstPartyDeliveryMetadata | undefined)?.retryDisposition ??
         context.rows[0]?.retry_disposition ??
         metadata?.retryDisposition;
       if (
@@ -997,7 +1119,7 @@ export class MultiTaxiRepository {
       // fenced claimPartnerNotification() as the partner path (D7: one
       // shared claim/fence owner for every channel), so they re-validate
       // the lease at write time identically.
-      const fencedClaim = Boolean(input.partnerMetadata || input.channelMetadata);
+      const fencedClaim = Boolean(input.partnerMetadata || input.firstPartyMetadata || input.channelMetadata);
       if (fencedClaim) {
         // Same lock order as claimPartnerNotification (outbox before claim)
         // for every fenced channel, partner or router-sealed, avoids a
@@ -1068,6 +1190,22 @@ export class MultiTaxiRepository {
           `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{partnerNotification}', $2::jsonb) WHERE outbox_id=$1`,
           [input.outboxId, JSON.stringify(m)],
         );
+      }
+
+      if (input.firstPartyMetadata) {
+        const m = input.firstPartyMetadata;
+        await client.query(`
+          UPDATE mobility.phase1_first_party_notification_delivery_contexts
+          SET delivery_stage=$2, retry_disposition=$3, failure_reason=$4,
+              receipt_id=$5, delivered_at=$6, device_outcomes=$7::jsonb
+          WHERE outbox_id=$1
+        `, [input.outboxId, m.deliveryStage, m.retryDisposition, m.failureReason,
+          m.receiptId, input.deliveryOutcome.deliveredAt, JSON.stringify(m.deviceOutcomes)]);
+        // Also persist pre-context configuration/route failures. This metadata
+        // is read by the same outbox scheduler/claim path as durable contexts.
+        await client.query(
+          `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{firstPartyNotification}', $2::jsonb) WHERE outbox_id=$1`,
+          [input.outboxId, JSON.stringify(m)]);
       }
 
       if (input.channelMetadata) {
