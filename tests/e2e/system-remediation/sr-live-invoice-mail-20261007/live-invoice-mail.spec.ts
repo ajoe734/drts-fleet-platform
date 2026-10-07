@@ -545,7 +545,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
             const href = await anyDownloadLink.first().getAttribute('href');
             if (href) {
                 const parts = href.split('/');
-                fallbackSelectedId = parts[parts.length - 1];
+                fallbackSelectedId = parts[parts.length - 1] ?? "";
             }
         }
         await expect(page.locator(`a[href*="${invoiceId}"]`)).not.toBeVisible();
