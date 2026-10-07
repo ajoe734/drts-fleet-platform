@@ -1814,7 +1814,9 @@ export class MultiTaxiRepository {
         deliveredAt: row.deliveredAt ? this.toIso(row.deliveredAt) : null,
         expiresAt: row.expiresAt ? this.toIso(row.expiresAt) : null,
         nextAttemptAt: row.nextAttemptAt ? this.toIso(row.nextAttemptAt) : null,
-        leaseExpiresAt: row.leaseExpiresAt ? this.toIso(row.leaseExpiresAt) : null,
+        leaseExpiresAt: row.leaseExpiresAt
+          ? this.toIso(row.leaseExpiresAt)
+          : null,
       })),
       total: parseInt(countResult.rows[0]?.cnt || "0", 10),
     };
@@ -1923,7 +1925,10 @@ export class MultiTaxiRepository {
         : outbox.payload?.partnerNotification?.retryDisposition;
       if (
         retryDisp === "terminal" ||
-        (retryDisp && !["manual_only", "automatic", "configuration_blocked"].includes(retryDisp))
+        (retryDisp &&
+          !["manual_only", "automatic", "configuration_blocked"].includes(
+            retryDisp,
+          ))
       ) {
         await client.query("ROLLBACK");
         return {
@@ -2125,7 +2130,10 @@ export class MultiTaxiRepository {
         };
       }
 
-      if (internalEvent !== "receipt_ready") {
+      if (
+        internalEvent !== "receipt_ready" &&
+        internalEvent !== "trip_cancelled"
+      ) {
         if (
           ["cancelled", "completed", "closed", "rejected"].includes(
             relevance.status,
