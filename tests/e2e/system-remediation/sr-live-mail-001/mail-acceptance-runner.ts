@@ -167,7 +167,10 @@ export interface MailRunnerDeps {
   approval?: () => Promise<void>;
   expiryVerified?: boolean;
   retryVerified?: boolean;
-  retryEvidence?: (deliveryId: string, receipt: DeliveryReceipt) => Promise<boolean>;
+  retryEvidence?: (
+    deliveryId: string,
+    receipt: DeliveryReceipt,
+  ) => Promise<boolean>;
 }
 export interface MailRunnerResult {
   status: "passed" | "failed";
@@ -501,10 +504,12 @@ async function main(): Promise<void> {
         : {}),
       expiryVerified,
       retryVerified,
-      ...(!retryDeliveryId ? {
-        retryEvidence: (id: string, receipt: DeliveryReceipt) =>
-          observeDisclosedRetry(config, id, receipt, recorder),
-      } : {}),
+      ...(!retryDeliveryId
+        ? {
+            retryEvidence: (id: string, receipt: DeliveryReceipt) =>
+              observeDisclosedRetry(config, id, receipt, recorder),
+          }
+        : {}),
       recorder,
     });
     evidence = result.evidence;
