@@ -40,3 +40,17 @@ This document records the completion and verification of the live invoice mail E
 - `tsc` and `eslint`: exit 0
 
 *Pending real external Playwright execution and genuine hosted environment verification.*
+
+## Supervisor/Gemini2 Review Rejection (Candidate: 571b65da415bea8abd6d46c3363c087ad1e3429c)
+
+- **F1/F3 (Executable failure & Missing observed fallback identity)**: `live-invoice-mail.spec.ts` had a `ReferenceError` for `fallbackSelectedId`. The script now correctly observes the actual fallback identity from the DOM, and asserts it matches the `nonAllowlistInvoiceId` own invoice, removing the uninitialized variable defect. Added enforcement of the dedicated fixture precondition before mutations.
+- **F3/F5 (Read-vs-send mutation defect)**: The previous spec falsely incremented `wtMutationCount` on every POST including the initial `readInvoiceMail` server action. The boundary is repaired by extracting the `Next-Action` ID from the valid page load and filtering it out during mutation counting for the `wrong_tenant` and `read_only` roles, observing actual sends independently.
+- **F3/F5 (Authority fail-open and forbidden-download regression)**: `gate-evidence.py` fell back from missing expected env to evidence self-attestation. Fixed by removing `or evidence.get(...)` self-attestation, strictly enforcing expected environment variables and explicit role-fixture ID shapes/tenant/actor/scopes bound to it. Restored `forbidden_download_observed` check (asserting `False`) on both role calls in the gate and updated `live-invoice-mail.spec.ts` to emit `forbidden_download_observed: false`. Independent Python probes in `test_hosted_gate.py` confirm legitimate positives and block removed configuration authority.
+- **F4/F6 (Inaccurate handoff)**: Updated the original artifact with exact old/new candidates, commands/exit codes, and limitations. Preserved F2 billing-profile mismatch/zero-send regression gap explicitly acknowledged. Cleaned new trailing whitespace in `live-invoice-mail.spec.ts` and `test_hosted_gate.py`.
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean (exit 0)
+- `python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p test_*.py`: exit 0 (11/11 tests pass)
+- TypeScript/Eslint: Skipped local modules checks (MODULE_NOT_FOUND) as dependency links are broken on this isolated worktree.
+
+*Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*

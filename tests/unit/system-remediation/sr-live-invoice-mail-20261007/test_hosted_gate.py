@@ -46,8 +46,8 @@ class HostedGateTest(unittest.TestCase):
                              {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
-                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_resource': '20000000-0000-0000-0000-000000000456', 'mutation_count': 0},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True},
+                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_resource': '20000000-0000-0000-0000-000000000456', 'mutation_count': 0, 'forbidden_download_observed': False},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True, 'forbidden_download_observed': False},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -178,7 +178,7 @@ class HostedGateTest(unittest.TestCase):
         ev4 = copy.deepcopy(self.evidence)
         next(c for c in ev4["httpCalls"] if c.get("path") == "read_only_portal")["mutation_count"] = 1
         self.assertEqual(gate.evaluate(self.env, ev4, self.provider)["status"], "failed")
-        
+
         # Missing forbidden_resource
         ev5 = copy.deepcopy(self.evidence)
         next(c for c in ev5["httpCalls"] if c.get("path") == "wrong_tenant_portal")["forbidden_resource"] = "bad"

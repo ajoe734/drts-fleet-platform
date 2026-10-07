@@ -29,7 +29,15 @@ def evaluate(env, evidence, provider):
     invoice = evidence.get("invoiceId")
     identity = evidence.get("identityEmail")
     has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and (UUID_RE.match(invoice) or (invoice.startswith("invoice-") and UUID_RE.match(invoice[8:]))) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
-
+    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and (UUID_RE.match(invoice) or (invoice.startswith("invoice-") and UUID_RE.match(invoice[8:]))) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
+    has_authority = has_authority and bool(
+        env.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID") and UUID_RE.match(env.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID")) and
+        env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID") and UUID_RE.match(env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID")) and
+        env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID") and UUID_RE.match(env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID")) and
+        env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID") and
+        env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID") and
+        env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID")
+    )
     # Check statuses strictly: no generic checks, validate the exact expected scenarios
     first_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="normal_send")
     retry_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="idempotent_retry")
@@ -63,14 +71,16 @@ def evaluate(env, evidence, provider):
     has_download = bool(
         get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
         and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") == 404 and get_call("GET", path="wrong_tenant_portal").get("ui_isolated") is True
-        and bool(env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID") or evidence.get("nonAllowlistInvoiceId"))
-        and get_call("GET", path="wrong_tenant_portal").get("forbidden_resource") == (env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID") or evidence.get("invoiceId"))
-        and get_call("GET", path="wrong_tenant_portal").get("selected_identity") == (env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID") or evidence.get("nonAllowlistInvoiceId"))
+        and bool(env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID"))
+        and get_call("GET", path="wrong_tenant_portal").get("forbidden_resource") == env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID")
+        and get_call("GET", path="wrong_tenant_portal").get("selected_identity") == env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID")
         and get_call("GET", path="wrong_tenant_portal").get("mutation_count") == 0
+        and get_call("GET", path="wrong_tenant_portal").get("forbidden_download_observed") is False
         and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") == 200 and get_call("GET", path="read_only_portal").get("ui_readonly") is True
-        and bool(env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID") or evidence.get("readOnlyInvoiceId"))
-        and get_call("GET", path="read_only_portal").get("selected_identity") == (env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID") or evidence.get("readOnlyInvoiceId"))
+        and bool(env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID"))
+        and get_call("GET", path="read_only_portal").get("selected_identity") == env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID")
         and get_call("GET", path="read_only_portal").get("mutation_count") == 0
+        and get_call("GET", path="read_only_portal").get("forbidden_download_observed") is False
         and get_call("GET", path="read_only_portal").get("send_disabled") is True
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
         and dl_proof.get("matched") is True

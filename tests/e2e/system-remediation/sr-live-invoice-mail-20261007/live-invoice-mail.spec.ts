@@ -503,30 +503,35 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
         const getDetailTitle = (id: string) => page.getByText(id, { exact: true }).filter({ hasNot: page.locator('xpath=ancestor-or-self::a') });
 
+        let readActionId: string | null = null;
+        const learnReadAction = (req: any) => { if (req.method() === 'POST' && (!readActionId || req.headers()['next-action'] !== readActionId)) { const actionId = req.headers()['next-action']; if (actionId) readActionId = actionId; } };
+
 
         // Explicitly validating a dedicated single-invoice fixture before mutations
         const ownInvoiceUiUrl = new URL(`/invoices?invoiceId=${nonAllowlistInvoiceId}`, portalOrigin).href;
+        page.on('request', learnReadAction);
         const ownUiResp = await page.goto(ownInvoiceUiUrl, { waitUntil: "networkidle" });
         expect(ownUiResp?.status()).toBe(200);
+        page.off('request', learnReadAction);
         await expect(getDetailTitle(nonAllowlistInvoiceId)).toBeVisible();
-        
+
         // Assert it's the ONLY invoice in the list
         const invoiceLinks = page.locator('a[href*="/invoices?invoiceId="]');
         const count = await invoiceLinks.count();
         if (count > 0) {
-            // we are in the list view, check we only have 1 (the test might render differently if single)
-            // or just ensure we don't click a wrong fallback
-            // We just ensure we export nonAllowlistInvoiceId as the fallback.
+            const firstHref = await invoiceLinks.first().getAttribute('href');
+            expect(firstHref).toContain(nonAllowlistInvoiceId);
         }
-        
+
         const wtOwnResource = new URL(`/control-plane-proxy/tenant/invoices/${nonAllowlistInvoiceId}`, portalOrigin).href;
         const wtOwnResponse = await page.request.get(wtOwnResource);
         expect(wtOwnResponse.status()).toBe(200);
 
         // Verify authenticated cross-tenant 404 (and fallback in UI)
         let wtMutationCount = 0;
+        let fallbackSelectedId = "";
         const wtRequestListener = (req: any) => {
-            if (req.method() === 'POST') {
+            if (req.method() === 'POST' && (!readActionId || req.headers()['next-action'] !== readActionId)) {
                 wtMutationCount++;
             }
         };
@@ -540,10 +545,13 @@ test.describe("Live Invoice Mail Acceptance", () => {
             const href = await anyDownloadLink.first().getAttribute('href');
             if (href) {
                 const parts = href.split('/');
-                fallbackSelectedId = parts[parts.length - 1] || "fallback_authorized";
+                fallbackSelectedId = parts[parts.length - 1];
             }
         }
         await expect(page.locator(`a[href*="${invoiceId}"]`)).not.toBeVisible();
+
+        // The selected fallback MUST be the own invoice
+        expect(fallbackSelectedId).toBe(nonAllowlistInvoiceId);
 
         page.off('request', wtRequestListener);
 
@@ -552,7 +560,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
         expect(wtResponse.status()).toBe(404);
         const errBody = await wtResponse.json().catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
-        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount });
+        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: false });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
             evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
@@ -567,8 +575,13 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
         // Read-only role CAN view the invoice
         const roInvoiceUiUrl = new URL(`/invoices?invoiceId=${readOnlyInvoiceId}`, portalOrigin).href;
+                let readActionId: string | null = null;
+        const learnReadAction = (req: any) => { if (req.method() === 'POST') { const actionId = req.headers()['next-action']; if (actionId) readActionId = actionId; } };
+        page.on('request', learnReadAction);
+
         const roUiResp = await page.goto(roInvoiceUiUrl, { waitUntil: "networkidle" });
         expect(roUiResp?.status()).toBe(200);
+        page.off('request', learnReadAction);
 
         await expect(getDetailTitle(readOnlyInvoiceId)).toBeVisible();
         const sendBtn = page.locator('button').filter({ hasText: /Send invoice email|Retry pending delivery|Send another copy|寄送帳單信件|重試待寄信件|再寄一份/ });
@@ -577,7 +590,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
         let mutationCount = 0;
         const requestListener = (req: any) => {
-            if (req.method() === 'POST') {
+            if (req.method() === 'POST' && (!readActionId || req.headers()['next-action'] !== readActionId)) {
                 mutationCount++;
             }
         };
@@ -591,15 +604,16 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const roApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${readOnlyInvoiceId}`, portalOrigin).href;
         const roResponse = await page.request.get(roApiUrl);
         expect(roResponse.status()).toBe(200);
-        
-        evidenceData.httpCalls.push({ 
-            method: "GET", 
-            path: "read_only_portal", 
-            status: roResponse.status(), 
+
+        evidenceData.httpCalls.push({
+            method: "GET",
+            path: "read_only_portal",
+            status: roResponse.status(),
             ui_readonly: true,
             selected_identity: readOnlyInvoiceId,
             mutation_count: mutationCount,
-            send_disabled: true
+            send_disabled: true,
+            forbidden_download_observed: false
         });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
