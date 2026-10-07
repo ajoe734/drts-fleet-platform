@@ -60,7 +60,7 @@ with `git diff --exit-code <parent-sha> HEAD -- <four paths>` (exit 0).
 
 This is precise static localization, **not a new dynamic reproduction or a
 claimed repair**. The owner must place the old-SHA failing and new-SHA passing
-probes in the original `docs/04-uat/gcp-artifact-activation-20261004.md`, retaining
+probes in the original [parent UAT artifact](https://github.com/ajoe734/drts-fleet-platform/blob/60376bf155eb60c8e60d3bfa318629356d1d5533/docs/04-uat/gcp-artifact-activation-20261004.md), retaining
 the adjacent candidate/reviewer history above. Minimum regressions: controlled
 pending persistence produces no early success or visible new plan; rejected
 persistence propagates and preserves prior cache; retry after rejection succeeds;
@@ -101,7 +101,7 @@ or waived to close the task.
    retain unmet live gates in `acceptance`. Do not demand completed live
    acceptance as a prerequisite for registering a new workflow through that rail.
    GitHub's workflow inventory currently has no entry for
-   `.github/workflows/provision-dev-artifact-backends.yml`. Supervisor/operator
+   [parent provisioning workflow](https://github.com/ajoe734/drts-fleet-platform/blob/60376bf155eb60c8e60d3bfa318629356d1d5533/.github/workflows/provision-dev-artifact-backends.yml). Supervisor/operator
    must verify registration and coordinate normal promotion if needed; do not
    push directly to protected/default branches or bypass review.
 3. The authorized operator uses the registered provisioning workflow with its
@@ -186,3 +186,20 @@ This is a documentation-only change. No product/PG/browser/engine/server or
 cloud mutation was started. Product tests are not applicable to the helper;
 source inspection is not dynamic product acceptance. Verification and publication
 results follow after the task-scoped anchor.
+
+### Publication and documentation checks
+
+Anchor `52bb0d32e` was committed and normally pushed to
+`codex/sr-gcp-artifact-activation-20261004-unblock-planning-decision` (exit 0).
+At that anchor, whitespace and commit-trailer checks passed (one commit, exit 0),
+and all 12 local Markdown link targets existed. Canonical consistency initially
+failed (exit 1): two references named files present only in the unmerged parent
+candidate. Both now use immutable parent-SHA GitHub links; no parent source file
+was copied or gate bypass introduced. The corrected check results, final full
+SHA, remote/PR equality and draft PR URL are recorded in the helper's canonical
+progress/blocker receipt. This document cannot embed its own final commit hash.
+
+The draft is held from candidate handoff while the state-write blocker above
+remains. Supervisor must record the parent next step and helper disposition,
+then the owner can hand off the verified published head to Claude2. No CI,
+review, merge or live acceptance is inferred from this planning delivery.
