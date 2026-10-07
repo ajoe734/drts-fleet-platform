@@ -63,12 +63,13 @@ def evaluate(env, evidence, provider):
     has_download = bool(
         get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
         and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") == 404 and get_call("GET", path="wrong_tenant_portal").get("ui_isolated") is True
-        and get_call("GET", path="wrong_tenant_portal").get("selected_identity") == evidence.get("nonAllowlistInvoiceId")
-        and get_call("GET", path="wrong_tenant_portal").get("forbidden_download_observed") is False
+        and bool(env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID") or evidence.get("nonAllowlistInvoiceId"))
+        and get_call("GET", path="wrong_tenant_portal").get("forbidden_resource") == (env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID") or evidence.get("invoiceId"))
+        and get_call("GET", path="wrong_tenant_portal").get("selected_identity") == (env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID") or evidence.get("nonAllowlistInvoiceId"))
         and get_call("GET", path="wrong_tenant_portal").get("mutation_count") == 0
         and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") == 200 and get_call("GET", path="read_only_portal").get("ui_readonly") is True
-        and get_call("GET", path="read_only_portal").get("selected_identity") == evidence.get("readOnlyInvoiceId")
-        and get_call("GET", path="read_only_portal").get("forbidden_download_observed") is False
+        and bool(env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID") or evidence.get("readOnlyInvoiceId"))
+        and get_call("GET", path="read_only_portal").get("selected_identity") == (env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID") or evidence.get("readOnlyInvoiceId"))
         and get_call("GET", path="read_only_portal").get("mutation_count") == 0
         and get_call("GET", path="read_only_portal").get("send_disabled") is True
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403

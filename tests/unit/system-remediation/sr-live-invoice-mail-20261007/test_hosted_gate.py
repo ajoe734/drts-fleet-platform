@@ -20,6 +20,14 @@ class HostedGateTest(unittest.TestCase):
     def setUp(self):
         self.env = {key: 'success' for key in ('DEPLOYMENT_GUARD_OUTCOME', 'SESSION_GUARD_OUTCOME', 'INSTALL_OUTCOME', 'PREFLIGHT_OUTCOME', 'RESOURCES_OUTCOME', 'SESSIONS_OUTCOME', 'RUNNER_OUTCOME', 'TEARDOWN_OUTCOME')}
         self.env.update(CANDIDATE_SHA=SHA, WORKFLOW_SHA=SHA, BASE_SHA='b' * 40)
+        self.env.update(
+            DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID='20000000-0000-0000-0000-000000000456',
+            DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID='20000000-0000-0000-0000-000000000789',
+            DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID='20000000-0000-0000-0000-000000000abc',
+            DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID='10000000-0000-0000-0000-000000000123',
+            DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID='10000000-0000-0000-0000-000000000789',
+            DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID='10000000-0000-0000-0000-000000000abc'
+        )
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [],
                          'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'identityEmail': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -38,8 +46,8 @@ class HostedGateTest(unittest.TestCase):
                              {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
-                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_download_observed': False, 'mutation_count': 0},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'forbidden_download_observed': False, 'mutation_count': 0, 'send_disabled': True},
+                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_resource': '20000000-0000-0000-0000-000000000456', 'mutation_count': 0},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -130,13 +138,37 @@ class HostedGateTest(unittest.TestCase):
     def test_f3_f5_role_evidence_regressions(self):
         import copy
         # Baseline passes
-        gate.evaluate(self.env, self.evidence, self.provider)
-        
+        self.assertEqual(gate.evaluate(self.env, self.evidence, self.provider)["status"], "passed")
+
+        # Both pairs missing
+        ev_missing = copy.deepcopy(self.evidence)
+        del ev_missing["nonAllowlistInvoiceId"]
+        del ev_missing["readOnlyInvoiceId"]
+        next(c for c in ev_missing["httpCalls"] if c.get("path") == "wrong_tenant_portal")["selected_identity"] = ""
+        next(c for c in ev_missing["httpCalls"] if c.get("path") == "read_only_portal")["selected_identity"] = ""
+        self.assertEqual(gate.evaluate(self.env, ev_missing, self.provider)["status"], "failed")
+
+        # Both pairs empty string
+        ev_empty = copy.deepcopy(self.evidence)
+        ev_empty["nonAllowlistInvoiceId"] = ""
+        ev_empty["readOnlyInvoiceId"] = ""
+        next(c for c in ev_empty["httpCalls"] if c.get("path") == "wrong_tenant_portal")["selected_identity"] = ""
+        next(c for c in ev_empty["httpCalls"] if c.get("path") == "read_only_portal")["selected_identity"] = ""
+        self.assertEqual(gate.evaluate(self.env, ev_empty, self.provider)["status"], "failed")
+
+        # Both pairs unrelated
+        ev_unrelated = copy.deepcopy(self.evidence)
+        ev_unrelated["nonAllowlistInvoiceId"] = "unrelated"
+        ev_unrelated["readOnlyInvoiceId"] = "unrelated"
+        next(c for c in ev_unrelated["httpCalls"] if c.get("path") == "wrong_tenant_portal")["selected_identity"] = "unrelated"
+        next(c for c in ev_unrelated["httpCalls"] if c.get("path") == "read_only_portal")["selected_identity"] = "unrelated"
+        self.assertEqual(gate.evaluate(self.env, ev_unrelated, self.provider)["status"], "failed")
+
         # Missing wrong_tenant selected_identity
         ev2 = copy.deepcopy(self.evidence)
         next(c for c in ev2["httpCalls"] if c.get("path") == "wrong_tenant_portal")["selected_identity"] = "bad"
         self.assertEqual(gate.evaluate(self.env, ev2, self.provider)["status"], "failed")
-        
+
         # Missing read_only send_disabled
         ev3 = copy.deepcopy(self.evidence)
         next(c for c in ev3["httpCalls"] if c.get("path") == "read_only_portal")["send_disabled"] = False
@@ -146,6 +178,11 @@ class HostedGateTest(unittest.TestCase):
         ev4 = copy.deepcopy(self.evidence)
         next(c for c in ev4["httpCalls"] if c.get("path") == "read_only_portal")["mutation_count"] = 1
         self.assertEqual(gate.evaluate(self.env, ev4, self.provider)["status"], "failed")
+        
+        # Missing forbidden_resource
+        ev5 = copy.deepcopy(self.evidence)
+        next(c for c in ev5["httpCalls"] if c.get("path") == "wrong_tenant_portal")["forbidden_resource"] = "bad"
+        self.assertEqual(gate.evaluate(self.env, ev5, self.provider)["status"], "failed")
 
     def test_green_runner_cannot_hide_missing_stale_or_partial_artifacts(self):
         for override in ({'status': 'failed'}, {'candidateSha': 'b' * 40}, {'headSha': 'b' * 40},
