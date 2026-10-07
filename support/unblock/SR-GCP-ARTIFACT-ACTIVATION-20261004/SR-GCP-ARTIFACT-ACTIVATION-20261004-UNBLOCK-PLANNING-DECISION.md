@@ -27,7 +27,7 @@ bypass is necessary from this worker; lifecycle owns `resolved_parent_at`.
 | R8-doc unawaited controller | `API-UNAWAITED-ASYNC-CONTROLLERS-20261007` is `done`, [PR #2392](https://github.com/ajoe734/drts-fleet-platform/pull/2392), merge `2467f88a2e64ccc2204bb99f1356fdeb997bda13`. `git show` confirms `billing-settlement.controller.ts#publishDriverFeePlan` is async and awaits the service before its envelope. | Fixed by the separately owned task; do not repeat the old scope request. Its unit/CI evidence is not a new live HTTP/PG claim. |
 | Historical cache-before-persistence concern | Earlier helper statically localized the service/cache order, but supplied no dynamic reproduction. The API fix's changed-file list does not include the service. | Retain the historical finding below; do not claim that await changed cache ordering or dynamically disproved the concern. Supervisor's current disposition does not require another repair here. This helper neither closes a new product defect nor creates unregistered implementation work. |
 | Latest observed full deployment | [Run 37602185882](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37602185882), `publish/v2026.10.07.0`, source `3ecd55d6cf18ec4bdc2d3c28c527d2b3d7555f1f`: completed **failure**. Build, migration, deploy and health jobs succeeded; `Candidate SHA operational acceptance` failed at `Execute candidate-bound operational journeys`. | Do not report a current API startup timeout or full-release success. This readback identifies the failed job/step, not an independently diagnosed HTTP cause for every journey. |
-| Provisioning registration | Fresh Actions workflow inventory contains no `.github/workflows/provision-dev-artifact-backends.yml` entry; parent records it absent on default main. | Registration/bootstrap is the first concrete operator step. Source merge does not establish dispatchability or live resources. |
+| Provisioning registration | Fresh Actions workflow inventory contains no [provisioning workflow](https://github.com/ajoe734/drts-fleet-platform/blob/0be15c0adfb6b228d92c18a3263b45b8086dcbb6/.github/workflows/provision-dev-artifact-backends.yml) entry; parent records it absent on default main. | Registration/bootstrap is the first concrete operator step. Source merge does not establish dispatchability or live resources. |
 
 The dependency audits are `done` (provider merge `c0f5d66c6b90d8c2e9bf2107e73fef999fc2d5ac`,
 infra merge `0e4b93191e039acabf71549495bd07c0cfa618ee`). Their offline/source
@@ -92,6 +92,14 @@ PG, genuine engine and browser execution is not applicable to this documentation
 helper and is not claimed. New hosted CI/review/merge remain separate lifecycle
 gates. This helper may hand off without claiming live activation or resuming the
 blocked parent.
+
+Local verification: anchor `d1c9fad60` passed whitespace and the three-commit
+trailer check (exit 0); all 12 scoped local Markdown references existed.
+Canonical consistency initially failed (exit 1) on a workflow path absent from
+this older helper base. The reference now points to the immutable merged parent
+source above; no workflow copy or gate exemption was added. The corrected
+consistency run passed (exit 0). Final publication checks and exact candidate
+identity are recorded in the helper handoff receipt, not inferred from old CI.
 
 ## Historical 02:42 UTC artifact — superseded execution instructions
 
