@@ -395,13 +395,156 @@ describe("PassengerPushDevicesRepository.registerDevice", () => {
 
     const calls = query.mock.calls.map(([sql]) => sql as string);
     const beginIndex = calls.indexOf("BEGIN");
-    const lockIndex = calls.findIndex((sql) => sql.includes("pg_advisory_xact_lock"));
+    const lockIndexes = calls.reduce<number[]>((acc, sql, index) => {
+      if (sql.includes("pg_advisory_xact_lock")) {
+        acc.push(index);
+      }
+      return acc;
+    }, []);
     const forUpdateIndex = calls.findIndex((sql) => sql.includes("FOR UPDATE"));
     expect(beginIndex).toBe(0);
-    expect(lockIndex).toBeGreaterThan(beginIndex);
-    expect(lockIndex).toBeLessThan(forUpdateIndex);
-    const lockCall = query.mock.calls[lockIndex];
-    expect(lockCall[1]).toEqual(["passenger-push-device-register:passenger-001"]);
+    expect(lockIndexes).toHaveLength(2);
+    const [passengerLockIndex, tokenLockIndex] = lockIndexes;
+    expect(passengerLockIndex).toBeGreaterThan(beginIndex);
+    expect(passengerLockIndex).toBeLessThan(tokenLockIndex);
+    expect(tokenLockIndex).toBeLessThan(forUpdateIndex);
+    expect(query.mock.calls[passengerLockIndex][1]).toEqual([
+      "passenger-push-device-register:passenger-001",
+    ]);
+    expect(query.mock.calls[tokenLockIndex][1]).toEqual([
+      `passenger-push-device-token:fcm_v1:${sha256("raw-fcm-token-must-never-be-logged")}`,
+    ]);
+  });
+
+  it("F2 reopen: serializes registerDevice for the same (provider, token hash) across different passengers behind a second advisory lock, acquired after the passenger lock in a fixed order", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+        return {
+          rows: [
+            {
+              device_id: "device-002",
+              drts_passenger_id: "passenger-002",
+              platform: "ios",
+              provider: "fcm_v1",
+              app_id: "app-first-party-001",
+              app_version: "1.0.0",
+              token_sha256: sha256("raw-fcm-token-shared-across-passengers"),
+              status: "active",
+              status_reason: null,
+              notification_consent_version: "v1",
+              registered_at: "2026-10-07T00:00:00.000Z",
+              last_seen_at: null,
+              invalidated_at: null,
+              created_at: "2026-10-07T00:00:00.000Z",
+              updated_at: "2026-10-07T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    await repository.registerDevice(
+      baseCommand({
+        drtsPassengerId: "passenger-002",
+        token: "raw-fcm-token-shared-across-passengers",
+      }),
+    );
+
+    const lockCalls = query.mock.calls.filter(([sql]) =>
+      (sql as string).includes("pg_advisory_xact_lock"),
+    );
+    expect(lockCalls).toHaveLength(2);
+    expect(lockCalls[0][1]).toEqual(["passenger-push-device-register:passenger-002"]);
+    expect(lockCalls[1][1]).toEqual([
+      `passenger-push-device-token:fcm_v1:${sha256("raw-fcm-token-shared-across-passengers")}`,
+    ]);
+  });
+
+  it("F2 reopen: a concurrent second passenger registering the same token sees the first passenger's committed active row and rebinds, instead of racing a unique-violation INSERT", async () => {
+    // Models the serialized outcome the token-hash advisory lock produces:
+    // by the time passenger B's transaction runs its `FOR UPDATE` select,
+    // passenger A has already committed, so B observes the row A inserted
+    // and takes the revoke-then-insert rebind branch instead of attempting
+    // a second plain INSERT for the same (provider, token_sha256).
+    const insertedByPassengerA = {
+      device_id: "device-a",
+      drts_passenger_id: "passenger-A",
+      platform: "ios",
+      provider: "fcm_v1",
+      app_id: "app-first-party-001",
+      app_version: "1.0.0",
+      token_sha256: sha256("raw-fcm-token-shared-across-passengers"),
+      status: "active",
+      status_reason: null,
+      notification_consent_version: "v1",
+      registered_at: "2026-10-07T00:00:00.000Z",
+      last_seen_at: null,
+      invalidated_at: null,
+      created_at: "2026-10-07T00:00:00.000Z",
+      updated_at: "2026-10-07T00:00:00.000Z",
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+        return { rows: [insertedByPassengerA] };
+      }
+      if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+        return {
+          rows: [
+            {
+              ...insertedByPassengerA,
+              device_id: "device-b",
+              drts_passenger_id: "passenger-B",
+            },
+          ],
+        };
+      }
+      if (
+        sql.includes("SELECT") &&
+        sql.includes("WHERE device_id = $1") &&
+        !sql.includes("FOR UPDATE")
+      ) {
+        return {
+          rows: [
+            {
+              ...insertedByPassengerA,
+              device_id: "device-b",
+              drts_passenger_id: "passenger-B",
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+    const release = vi.fn();
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue({ query, release }),
+    } as never);
+
+    const passengerBResult = await repository.registerDevice(
+      baseCommand({
+        drtsPassengerId: "passenger-B",
+        token: "raw-fcm-token-shared-across-passengers",
+      }),
+    );
+
+    expect(passengerBResult.drtsPassengerId).toBe("passenger-B");
+    const calls = query.mock.calls.map(([sql]) => sql as string);
+    expect(calls.some((sql) => sql.includes("status_reason = 'rebound_to_new_passenger'"))).toBe(
+      true,
+    );
+    expect(
+      calls.filter((sql) => sql.includes("INSERT INTO iam.phase1_passenger_push_devices")),
+    ).toHaveLength(1);
   });
 
   it("F1: keeps the most-recently-seen devices and revokes the least-recently-seen overflow (not the newest)", async () => {
@@ -660,6 +803,85 @@ describe("PassengerPushDevicesRepository.touchDevice/revokeDevice/invalidateDevi
     expect(result?.statusReason).toBe("UNREGISTERED");
     expect(query.mock.calls[0][1]).toEqual(["device-001", "UNREGISTERED"]);
   });
+
+  it("F3 reopen: touchDevice never lets a raw DB error's message/detail/cause reach the caller", async () => {
+    const rawToken = "raw-token-from-fault-probe-touch";
+    const query = vi.fn().mockRejectedValue(
+      Object.assign(new Error(`database failure ${rawToken}`), {
+        code: "23514",
+        detail: `Failing row contains (${rawToken}).`,
+        cause: new Error(rawToken),
+      }),
+    );
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    let caught: unknown;
+    try {
+      await repository.touchDevice("device-001");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(PassengerPushDeviceOperationError);
+    expect((caught as PassengerPushDeviceOperationError).code).toBe("23514");
+    expect(util.inspect(caught)).not.toContain(rawToken);
+    expect((caught as Error).message).not.toContain(rawToken);
+  });
+
+  it("F3 reopen: revokeDevice never lets a raw DB error's message/detail/cause reach the caller", async () => {
+    const rawToken = "raw-token-from-fault-probe-revoke";
+    const query = vi.fn().mockRejectedValue(
+      Object.assign(new Error(`database failure ${rawToken}`), {
+        code: "23514",
+        detail: `Failing row contains (${rawToken}).`,
+        cause: new Error(rawToken),
+      }),
+    );
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    let caught: unknown;
+    try {
+      await repository.revokeDevice("device-001");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(PassengerPushDeviceOperationError);
+    expect(util.inspect(caught)).not.toContain(rawToken);
+    expect((caught as Error).message).not.toContain(rawToken);
+  });
+
+  it("F3 reopen: invalidateDevice never lets a raw DB error's message/detail/cause reach the caller", async () => {
+    const rawToken = "raw-token-from-fault-probe-invalidate";
+    const query = vi.fn().mockRejectedValue(
+      Object.assign(new Error(`database failure ${rawToken}`), {
+        code: "23514",
+        detail: `Failing row contains (${rawToken}).`,
+        cause: new Error(rawToken),
+      }),
+    );
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    let caught: unknown;
+    try {
+      await repository.invalidateDevice("device-001", "UNREGISTERED");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(PassengerPushDeviceOperationError);
+    expect(util.inspect(caught)).not.toContain(rawToken);
+    expect((caught as Error).message).not.toContain(rawToken);
+  });
 });
 
 describe("PassengerPushDevicesRepository.resolveActiveDevices", () => {
@@ -677,6 +899,32 @@ describe("PassengerPushDevicesRepository.resolveActiveDevices", () => {
     expect(sql).toContain("last_seen_at IS NOT NULL");
     expect(sql).toContain("make_interval(days => $2)");
     expect(params).toEqual(["passenger-001", 60]);
+  });
+
+  it("F3 reopen: never lets a raw DB error's message/detail/cause reach the caller", async () => {
+    const rawToken = "raw-token-from-fault-probe-resolve";
+    const query = vi.fn().mockRejectedValue(
+      Object.assign(new Error(`database failure ${rawToken}`), {
+        code: "23514",
+        detail: `Failing row contains (${rawToken}).`,
+        cause: new Error(rawToken),
+      }),
+    );
+    const repository = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    let caught: unknown;
+    try {
+      await repository.resolveActiveDevices("passenger-001");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(PassengerPushDeviceOperationError);
+    expect(util.inspect(caught)).not.toContain(rawToken);
+    expect((caught as Error).message).not.toContain(rawToken);
   });
 });
 

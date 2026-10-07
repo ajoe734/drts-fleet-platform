@@ -202,12 +202,29 @@ export class PassengerPushDevicesRepository {
       // behind one transaction-scoped advisory lock, acquired before any
       // row lock, so concurrent registrations for the same passenger can
       // never both observe the pre-cap active-device count and together
-      // push it past FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER, and
-      // a same-token concurrent replay never races a plain INSERT into a
-      // unique-violation instead of taking the idempotent-update branch.
+      // push it past FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER.
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         [`passenger-push-device-register:${command.drtsPassengerId}`],
+      );
+
+      // F2 reopen rework (Codex 2026-10-07): the passenger lock above only
+      // serializes calls for the *same* passenger. Two different passengers
+      // registering the same (provider, token_sha256) concurrently each
+      // take their own passenger lock, both see no active row under the
+      // `FOR UPDATE` below, and race a plain INSERT into the
+      // `active_token_uq` partial unique index instead of one of them
+      // observing the other's committed row and taking the rebind branch.
+      // A second advisory lock keyed by the token hash closes that: every
+      // caller acquires it in the same fixed order (passenger lock, then
+      // token lock), so no two locks can ever form a wait cycle, and the
+      // second caller for a given token blocks here until the first
+      // commits — at which point its `FOR UPDATE` select actually sees the
+      // just-inserted row and takes the rebind branch instead of racing
+      // the unique index.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`passenger-push-device-token:${command.provider}:${tokenSha256}`],
       );
 
       if (command.previousDeviceId) {
@@ -364,17 +381,21 @@ export class PassengerPushDevicesRepository {
     if (!this.isEnabled()) {
       return null;
     }
-    const result = await this.databaseService!.query<DeviceRow>(
-      `
-        UPDATE iam.phase1_passenger_push_devices
-        SET last_seen_at = now(), updated_at = now()
-        WHERE device_id = $1 AND status = 'active'
-        RETURNING ${DEVICE_COLUMNS}
-      `,
-      [deviceId],
-    );
-    const row = result.rows[0];
-    return row ? this.mapDeviceRow(row) : null;
+    try {
+      const result = await this.databaseService!.query<DeviceRow>(
+        `
+          UPDATE iam.phase1_passenger_push_devices
+          SET last_seen_at = now(), updated_at = now()
+          WHERE device_id = $1 AND status = 'active'
+          RETURNING ${DEVICE_COLUMNS}
+        `,
+        [deviceId],
+      );
+      const row = result.rows[0];
+      return row ? this.mapDeviceRow(row) : null;
+    } catch (error) {
+      throw toSafeOperationError(error);
+    }
   }
 
   /** D4 logout — idempotent: revoking an already-revoked/invalid device is a no-op success. */
@@ -385,25 +406,29 @@ export class PassengerPushDevicesRepository {
     if (!this.isEnabled()) {
       return null;
     }
-    const updated = await this.databaseService!.query<DeviceRow>(
-      `
-        UPDATE iam.phase1_passenger_push_devices
-        SET status = 'revoked', status_reason = $2, updated_at = now()
-        WHERE device_id = $1 AND status = 'active'
-        RETURNING ${DEVICE_COLUMNS}
-      `,
-      [deviceId, reason],
-    );
-    if (updated.rows[0]) {
-      return this.mapDeviceRow(updated.rows[0]);
-    }
+    try {
+      const updated = await this.databaseService!.query<DeviceRow>(
+        `
+          UPDATE iam.phase1_passenger_push_devices
+          SET status = 'revoked', status_reason = $2, updated_at = now()
+          WHERE device_id = $1 AND status = 'active'
+          RETURNING ${DEVICE_COLUMNS}
+        `,
+        [deviceId, reason],
+      );
+      if (updated.rows[0]) {
+        return this.mapDeviceRow(updated.rows[0]);
+      }
 
-    const existing = await this.databaseService!.query<DeviceRow>(
-      `SELECT ${DEVICE_COLUMNS} FROM iam.phase1_passenger_push_devices WHERE device_id = $1`,
-      [deviceId],
-    );
-    const row = existing.rows[0];
-    return row ? this.mapDeviceRow(row) : null;
+      const existing = await this.databaseService!.query<DeviceRow>(
+        `SELECT ${DEVICE_COLUMNS} FROM iam.phase1_passenger_push_devices WHERE device_id = $1`,
+        [deviceId],
+      );
+      const row = existing.rows[0];
+      return row ? this.mapDeviceRow(row) : null;
+    } catch (error) {
+      throw toSafeOperationError(error);
+    }
   }
 
   /** D4 provider-reported failure — idempotent: already-`invalid` is a no-op success. */
@@ -414,28 +439,32 @@ export class PassengerPushDevicesRepository {
     if (!this.isEnabled()) {
       return null;
     }
-    const updated = await this.databaseService!.query<DeviceRow>(
-      `
-        UPDATE iam.phase1_passenger_push_devices
-        SET status = 'invalid',
-            status_reason = $2,
-            invalidated_at = now(),
-            updated_at = now()
-        WHERE device_id = $1 AND status <> 'invalid'
-        RETURNING ${DEVICE_COLUMNS}
-      `,
-      [deviceId, reason],
-    );
-    if (updated.rows[0]) {
-      return this.mapDeviceRow(updated.rows[0]);
-    }
+    try {
+      const updated = await this.databaseService!.query<DeviceRow>(
+        `
+          UPDATE iam.phase1_passenger_push_devices
+          SET status = 'invalid',
+              status_reason = $2,
+              invalidated_at = now(),
+              updated_at = now()
+          WHERE device_id = $1 AND status <> 'invalid'
+          RETURNING ${DEVICE_COLUMNS}
+        `,
+        [deviceId, reason],
+      );
+      if (updated.rows[0]) {
+        return this.mapDeviceRow(updated.rows[0]);
+      }
 
-    const existing = await this.databaseService!.query<DeviceRow>(
-      `SELECT ${DEVICE_COLUMNS} FROM iam.phase1_passenger_push_devices WHERE device_id = $1`,
-      [deviceId],
-    );
-    const row = existing.rows[0];
-    return row ? this.mapDeviceRow(row) : null;
+      const existing = await this.databaseService!.query<DeviceRow>(
+        `SELECT ${DEVICE_COLUMNS} FROM iam.phase1_passenger_push_devices WHERE device_id = $1`,
+        [deviceId],
+      );
+      const row = existing.rows[0];
+      return row ? this.mapDeviceRow(row) : null;
+    } catch (error) {
+      throw toSafeOperationError(error);
+    }
   }
 
   /**
@@ -450,19 +479,23 @@ export class PassengerPushDevicesRepository {
     if (!this.isEnabled()) {
       return [];
     }
-    const result = await this.databaseService!.query<DeviceRow>(
-      `
-        SELECT ${DEVICE_COLUMNS}
-        FROM iam.phase1_passenger_push_devices
-        WHERE drts_passenger_id = $1
-          AND status = 'active'
-          AND last_seen_at IS NOT NULL
-          AND last_seen_at >= now() - make_interval(days => $2)
-        ORDER BY last_seen_at DESC
-      `,
-      [drtsPassengerId, FIRST_PARTY_PUSH_DEVICE_STALE_AFTER_DAYS],
-    );
-    return result.rows.map((row: DeviceRow) => this.mapDeviceRow(row));
+    try {
+      const result = await this.databaseService!.query<DeviceRow>(
+        `
+          SELECT ${DEVICE_COLUMNS}
+          FROM iam.phase1_passenger_push_devices
+          WHERE drts_passenger_id = $1
+            AND status = 'active'
+            AND last_seen_at IS NOT NULL
+            AND last_seen_at >= now() - make_interval(days => $2)
+          ORDER BY last_seen_at DESC
+        `,
+        [drtsPassengerId, FIRST_PARTY_PUSH_DEVICE_STALE_AFTER_DAYS],
+      );
+      return result.rows.map((row: DeviceRow) => this.mapDeviceRow(row));
+    } catch (error) {
+      throw toSafeOperationError(error);
+    }
   }
 
   /**

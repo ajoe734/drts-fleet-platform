@@ -127,7 +127,50 @@ docs/04-uat/passenger-push-channel-20261006/PUSH-FIRST-PARTY-REGISTRY-20261006.m
 
 `CI (integration trunk)`（run 37481797802）：`unit`/`build`/`ui-route-e2e`/`cross-surface-e2e` 等 job 於 14:49 檢視時仍在執行中，尚未讀取完整結果；本次文件修正後需等待新 commit 的新 candidate SHA 重新觸發兩個 workflow，完整讀取後再更新。
 
+## 第 3 輪退修（reviewer Codex reopen #2，REVIEWED_SHA=b8aa1dfa8，generation=366a9b24f791452d8c27ec1e48f761ad，PR #2358）
+
+Codex 核對候選 `b8aa1dfa8edd0829501477b65713b950c2b55394`（第 1 輪退修修正 + 一次未在本文件記錄的範圍延伸 commit——`b8aa1dfa8` 把 `sr-partner-notify-con-20260917` 的 `allAllocations` 聚合新增一行 `passenger_push_channel_allocations`，未放寬既有斷言/bounds，reviewer 已核對相符，本輪不重複記錄其細節，只在此補記這個缺口：該 commit 本身沒有對應的本文件章節，供之後查閱者知悉）後第二次 reopen，確認 F1 全部消除、F2（同乘客 cap/重放）與 F4（同 order 寫入鎖）已修正相符，但抓出 F2 的另一半（**跨乘客**同 token 並行登錄）仍未序列化，以及 F3 的修復範圍只蓋到 `registerDevice`/`writeFirstPartyRoute`，其餘四個裝置方法（`touchDevice`/`revokeDevice`/`invalidateDevice`/`resolveActiveDevices`）仍把原始 DB 錯誤（含 `.message`/`.detail`/`.cause`，可能內嵌 token）原樣拋出。本輪逐項修復如下。
+
+| # | Finding 摘要 | 修正位置 | 修正內容 | 回歸測試 |
+|---|---|---|---|---|
+| F2 reopen [P2] | `registerDevice` 的鎖鍵只有 `passenger-push-device-register:<drtsPassengerId>`，只序列化同一乘客的呼叫。兩個不同乘客併發登錄同一 `(provider, token_sha256)`：各自拿到各自的 passenger lock（不衝突）、各自的 `FOR UPDATE` 都查到空（尚無 active 列）、各自嘗試對 `active_token_uq` 這個 partial unique index 做 plain INSERT——先到者成功，後到者撞 23505，被 `toSafeOperationError` 洗成 `operation_failed`，而不是依 D4 走「撤銷前者、保留歷史、插入新列」的轉綁分支 | `passenger-push-devices.repository.ts` `registerDevice`，在既有 passenger lock 之後、`previousDeviceId` 分支與 `FOR UPDATE` 之前 | 加入第二個 `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`，鎖鍵為 `` `passenger-push-device-token:${provider}:${tokenSha256}` ``。所有呼叫固定先拿 passenger lock、再拿 token lock（同一順序，不會形成等待環），因此不會死鎖；對同一 `(provider, token_sha256)` 的任何並行呼叫（不論是否同一乘客）都被這第二個鎖序列化：後到者會等到先到者 COMMIT/ROLLBACK 才繼續，此時 `FOR UPDATE` 能讀到先到者剛 commit 的 active 列，走既有的「同乘客→更新」或「不同乘客→撤銷舊列再插入新列（轉綁）」分支，不再有裸 INSERT 競爭唯一索引的機會 | 新增兩則 vitest 案例（`apps/api/tests/unit/passenger-push-devices.repository.test.ts`）：「F2 reopen: serializes registerDevice for the same (provider, token hash) across different passengers behind a second advisory lock, acquired after the passenger lock in a fixed order」斷言恰好兩個 `pg_advisory_xact_lock` 呼叫、鎖鍵依序為 `passenger-push-device-register:passenger-002` 與 `` passenger-push-device-token:fcm_v1:<hash> ``；「F2 reopen: a concurrent second passenger registering the same token sees the first passenger's committed active row and rebinds, instead of racing a unique-violation INSERT」模擬序列化後第二個乘客的 `FOR UPDATE` 直接讀到第一個乘客已提交的 active 列，斷言結果 `drtsPassengerId` 為新乘客、SQL 序列含恰一次 `status_reason = 'rebound_to_new_passenger'`、恰一次 INSERT（無第二次裸 INSERT 競爭）。既有的「F2: serializes registerDevice for a passenger...」單測同步更新為斷言兩個鎖依序出現（passenger lock 在前、token lock 在後），不再只斷言一個鎖 |
+| F3 reopen [P1] | `touchDevice`、`revokeDevice`、`invalidateDevice`、`resolveActiveDevices` 四個方法直接 `return this.databaseService!.query(...)` 的 Promise，沒有任何 try/catch；一旦底層 pg 丟出帶 `.detail`/`.cause`（可能內嵌 token/token_sha256，例如 CHECK 違反的 `Failing row contains (...)`）的錯誤物件，會原樣穿透到呼叫端——UAT 的「log 不洩漏 token」與第 1 輪退修 docstring 寫的「任何 DB 錯誤一律被換成安全錯誤」只對 `registerDevice`/`writeFirstPartyRoute` 成立，不適用於其餘四個方法 | `passenger-push-devices.repository.ts`：`touchDevice`、`revokeDevice`、`invalidateDevice`、`resolveActiveDevices` 四個方法本體都包進 `try { ... } catch (error) { throw toSafeOperationError(error); }` | 沿用第 1 輪退修 F3 已有的 `toSafeOperationError()`（只保留 pg 錯誤的 `.code`，拋出全新的 `PassengerPushDeviceOperationError`，不帶原始 `.message`/`.detail`/`.hint`/`.cause`/`.stack`），補齊到這四個方法，使全部 6 個公開方法（含 `registerDevice`/`writeFirstPartyRoute`）的 DB 錯誤出口行為一致 | 新增四則 vitest 案例，各自用 `Object.assign(new Error(...), { code: "23514", detail: "...(token)...", cause: new Error(token) })` 讓底層 `query` reject，斷言 `catch` 到的是 `PassengerPushDeviceOperationError` 實例，且 `util.inspect(caught)` 與 `.message` 都不含合成 token：「F3 reopen: touchDevice never lets a raw DB error's message/detail/cause reach the caller」、「...revokeDevice...」、「...invalidateDevice...」（三則在 `describe("...touchDevice/revokeDevice/invalidateDevice")` 內）與「F3 reopen: never lets a raw DB error's message/detail/cause reach the caller」（`describe("...resolveActiveDevices")` 內） |
+
+### 本輪本機驗證指令與結果（誠實記錄：共享 node_modules 於本輪開工時已損壞，改用等效的原始碼層級 probe）
+
+本 worktree 開工時，canonical root 的 `node_modules` 頂層套件 symlink（`vitest`/`@nestjs/common`/`pg`/`typescript` 的 `.bin` 轉接層等）已全部指向一個在本 session 開工前就被 supervisor 回收的 sibling worktree（`.artifacts/worktrees/auto/codex-sr-live-mail-001`，`ls`/`git worktree list` 核對已不存在），導致任何 `pnpm exec vitest`/`node node_modules/vitest/vitest.mjs` 呼叫都會因 `Cannot find module` 直接在啟動階段失敗（連 `vitest.config.ts` 內的 `import "vitest/config"` 都無法解析）。這與第 1/2 輪記錄的「`apps/api/node_modules/@drts/*` symlink 損壞」是同一類根因（sibling worktree 被回收後，指向它的 symlink 全部失效），但本次影響範圍擴大到 canonical root 的頂層 `node_modules/*`，已無法再用當時「臨時 alias vitest config」繞過（因為 `vitest` 這個套件本身的頂層入口就解析不到）。`rm`/一般 `pnpm install` 等修復/重建指令同樣被本機 permission broker 歸類為 `defer`（`orchestrator_approval_broker` 連線逾時，核可不會解決），因此**沒有**嘗試直接修復或重新安裝共享的 canonical root `node_modules`（風險：影響其他並行 session、且核可不會回應）。
+
+改用等效的原始碼層級驗證（與 reviewer 本輪 F3 finding 所用的「正式函式 fault probe」同一方法論，差異只在改用本機仍完整存在於 `.pnpm` content-addressable store 內的 `typescript` 套件本身直接 `transpileModule` 兩個受影響原始檔，不經過 vitest/vite）：
+
+```
+node .scratch-f2-f3-probe.js
+# PASS: F2 reopen: rebind branch taken for cross-passenger same-token race
+# PASS: F2 reopen: two distinct advisory locks acquired, passenger lock before token lock
+# PASS: F3 reopen: touchDevice sanitizes raw DB error
+# PASS: F3 reopen: revokeDevice sanitizes raw DB error
+# PASS: F3 reopen: invalidateDevice sanitizes raw DB error
+# PASS: F3 reopen: resolveActiveDevices sanitizes raw DB error
+# ALL PROBE ASSERTIONS PASSED（exit 0）
+```
+
+此 probe 直接 `require` 本機 `.pnpm` store 裡仍完整的 `typescript@5.9.3`，對 `passenger-push-devices.repository.ts` 原始碼執行 `ts.transpileModule`（`experimentalDecorators`/`emitDecoratorMetadata`，CommonJS/ES2022，與 vitest.config.ts 的 TS 編譯選項一致），用一個暫時性 `Module._load` 補丁把 `@nestjs/common`（`Injectable`/`Optional` 在沒有 DI container 時本來就是 no-op decorator，vitest 單測本身也是 `new Repository({...} as never)` 繞過 DI 直接建構）與 `@drts/contracts` 需要的三個常數（`FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER=10`、`FIRST_PARTY_PUSH_DEVICE_STALE_AFTER_DAYS=60`、`FIRST_PARTY_NOTIFICATION_ROUTE_POLICY_VERSION`，三者皆從 `packages/contracts/src/passenger-notification-channel.ts` 原文抄錄，非憑空假造）換成行內常數，其餘邏輯（鎖鍵字串、SQL 分支、`toSafeOperationError`）都是被測原始檔案本身真實執行的程式碼，不是重寫或模擬被測邏輯本身。斷言內容與新增的 6 則 vitest 案例一一對應（同樣的 mock `query`/`connect`、同樣的鎖呼叫序列檢查、同樣的 `util.inspect`/`.message` 不含 token 檢查）。**此 probe 腳本（`.scratch-f2-f3-probe.js`）只是本輪驗證用的暫存檔，未加入任何 git 操作、未 `git add`，不會出現在這次 commit 的 diff 裡**；因為前述同一個 permission broker 問題，連刪除它用的 `rm` 指令也被 defer，它會以 untracked 檔案的狀態留在這個 worktree 裡，供下一個直接操作此 worktree 的人視情況清理（不影響任何分支、任何 git 歷史、任何提交內容）。
+
+除此 probe 外，另外跑了：
+
+```
+git diff --check origin/dev...HEAD                                                                    # exit 0（無空白/合併標記問題）
+git status --porcelain                                                                                # 只有本輪真正改動的 2 個追蹤中檔案 + 1 個已知的 untracked probe 檔
+```
+
+**未能執行、如實記錄**：`vitest run`（含 schema/isolation 的既有 11 則、`multi-taxi`/`sr-partner-notify-con` 既有迴歸）、`tsc --noEmit`、`eslint`——三者都需要 canonical root 頂層 `node_modules` 可解析，本輪因上述共享環境損壞而無法執行，不是本輪程式碼改動造成，也不冒稱已執行或已通過。新增/修改的 6 則 vitest 測試原始碼本身已寫入 `apps/api/tests/unit/passenger-push-devices.repository.test.ts`，其斷言邏輯與上面 probe 的 6 個 PASS 一一對應，一旦共享 `node_modules` 修復（下一個能執行 `pnpm install`/有 shell 權限的 session，或 hosted CI 的乾淨 checkout），`pnpm exec vitest run apps/api/tests/unit/passenger-push-devices.repository.test.ts` 應該可以重新驗證這 6 則（連同原有 21 則一起，預期 27 則全過；未在本機實測，留給下一個環境健康的驗證者）。Hosted CI 在乾淨環境執行 `pnpm install --frozen-lockfile` 後不受本機這個 symlink 問題影響。
+
+### 本輪未變更/未新驗項目
+
+- Migration 本身、schema 欄位/CHECK/索引、F1/F4/同乘客 F2 的修正：本輪未改動，reviewer 本輪已核對相符，沿用前兩輪驗收結果。
+- 真實 Postgres 下 `pg_advisory_xact_lock` 的實際等待/序列化行為、partial unique index 的真實 constraint violation 時機：仍是靜態程式碼修正 + mock-DB/原始碼 probe 證據，按 common.md 分工留給 `PUSH-CHANNEL-PG-QA-20261006`，不冒稱 PG 實測。
+- CI：待本輪 commit push 後的新 candidate SHA 觸發，尚未讀取結果。
+
 ## candidate
 
-- `CANDIDATE_SHA`：待本次文件修正 commit 後由 `git rev-parse HEAD` 取得（取代 `661983ed8`）。
+- `CANDIDATE_SHA`：待本次（第 3 輪）commit 後由 `git rev-parse HEAD` 取得（取代 `b8aa1dfa8`）。
 - `CANDIDATE_BRANCH`：`claude2/push-first-party-registry-20261006`
