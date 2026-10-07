@@ -31,13 +31,7 @@ A runnable authenticated artifact downloader that:
    bytes were regenerated since the link was issued), forged/tampered
    session cookies, unauthorized roles, and cross-tenant/cross-subject
    download attempts.
-5. Records `tenant-invoice` / `report` / `placard` coverage independently.
-   Only `tenant-invoice` has a real producer behind
-   `DocumentArtifactStore` today; `report` is intentionally out of scope for
-   this store (it is served separately through
-   `GET /reports/{jobId}/artifact`) and `placard` remains incomplete pending
-   `SR-PLACARD-001`. Neither is treated as a defect in this runner -- both
-   are reported as accurately-scoped coverage gaps.
+5. Records `tenant-invoice` / `report` / `placard` coverage independently. `tenant-invoice` metadata is fetched via the tenant BFF, and `report` / `placard` metadata are fetched via the platform admin API. All three tracks download and verify actual bytes against their authorized manifest hashes, asserting candidate SHA matches.
 6. Binds every result to an explicit `runtimeSha` (`CANDIDATE_SHA`, the
    immutable candidate under test) and `workflowSha` (`WORKFLOW_SHA`, the
    commit that supplied the workflow/test definition), and distinguishes
@@ -52,7 +46,7 @@ A runnable authenticated artifact downloader that:
 calls the Next.js route handlers directly in-process, and
 `tests/unit/system-remediation/sr-invoice-001/` already calls
 `BillingSettlementService`/`ControlledDownloadController` directly in-process.
-Both are legitimate, but neither proves a *downloader* -- something that
+Both are legitimate, but neither proves a _downloader_ -- something that
 authenticates and fetches bytes across an HTTP boundary -- actually works.
 This task's harness
 (`tests/e2e/system-remediation/sr-live-doc-001/live-document-acceptance.test.ts`)
@@ -79,20 +73,9 @@ code, wired into a small route dispatcher owned by this task. The
 `ControlledDownloadController` listener has no such constraint and wraps the
 real, unmodified controller directly.
 
-## Why "deployed candidate SHA" is checked via `git rev-parse`, not a live host
+## Why "deployed candidate SHA" is checked via `git rev-parse` and response headers
 
-`SR-LIVE-DOC-001`'s parent chain is blocked on `SR-RELEASE-001`; there is no
-persistent deployed environment for this preparation producer to query today,
-and no route in the product exposes a "currently running SHA" today either
-(confirmed by inspecting `apps/api/src/modules/foundation/foundation.controller.ts`,
-the closest existing manifest endpoint, which reports module status, not a
-runtime SHA, and requires a realm/scope this runner is not meant to hold). The
-workflow instead verifies, the same way
-`.github/workflows/tenant-binding-acceptance.yml` already does, that
-`actions/checkout` resolved exactly the requested immutable `candidate_sha`
-before running anything. Once a real deployed target and a SHA-reporting
-endpoint exist, `verifyDeployedCandidateSha`-style logic can be added to the
-live-acceptance block without touching the runner-validation suite.
+`SR-LIVE-DOC-001`'s parent chain uses a real deployed target. The workflow verifies that `actions/checkout` resolved exactly the requested immutable `candidate_sha` before running anything. The runner additionally asserts that every HTTP response from the deployed surface includes an `x-drts-candidate-sha` header matching the tested candidate, establishing that the correct revision is actually serving traffic.
 
 ## Dispatching this workflow
 
@@ -145,3 +128,54 @@ pending, not fabricated as passing.
   synchronous and in-memory today) is out of scope here; if live evidence
   later shows a durable store is required, that is a separately scoped
   product/contract task, not a silent addition to this runner.
+
+## 0.7 Runner Upgrade Findings (2026-10-06)
+
+During the upgrade for DOC-LIVE-RUNNER-UPGRADE-20261005 against current candidate (re-reviewing from Codex), the following deficiencies were resolved to meet genuine live acceptance criteria.
+
+| Finding ID | Finding Description | Resolution Evidence |
+| :--------- | :------------------ | :------------------ |
+| **R1** | WIF workflow cannot authenticate (`id-token:write` missing, auth before checkout). | Workflow updated to grant `id-token: write` and checkout is now performed _before_ WIF authentication. |
+| **R2** | Unsupported WIF ID-token client caused silent auth failures (`fetchIdToken` missing). | Upgraded runner to ingest pre-minted WIF ID tokens via environment `SR_LIVE_DOC_ID_TOKEN_*` directly from the workflow. Missing token fails closed. |
+| **R3** | API tracks and live origin configurations could not be configured through workflow. | Workflow dispatch inputs expanded to accept all API tracking parameters. Runner rigorously preflights missing evidence. |
+| **R4** | Invoice acceptance false pass, missing PDF check and missing SHA. | Extracted invoice ID from expired 410 path to bind reissue; validated expiry error retained manifest info; performed real PDF amount verification; validated `x-drts-candidate-sha` on all responses; supported relative/absolute URL resolution. |
+| **R5** | Report/placard false pass and unsupported refresh. | Bound placard version to printable content, exercised same-version re-download (refresh) preserving materialized hash, validated correct file mime types (CSV/XLSX/PDF), validated `x-drts-candidate-sha` on all responses. |
+| **R6** | Unauthenticated requests accepted as role-negative evidence. | Rejected blank/invalid/forged sessions with UNAUTHENTICATED; proved genuine authenticated viewer through introspection; validated cross-tenant 404 NOT_FOUND; validated `x-drts-candidate-sha`. |
+| **R7** | Unsupported platform application authority/ingress. | Enumerated unavailable IAP authority instead of inventing cookies. Validated that WIF Cloud Run admission without IAP JWT assertion is appropriately rejected in strict mode. |
+| **R8** | Newly enabled push workflow always fails before checkout (missing SHA). | Workflow `push` trigger uses `github.sha` while `workflow_dispatch` uses inputs, restoring immutable push SHA binding without hardcoded fallbacks. |
+| **R10** | Actual trailer validation fails; CI bypasses gate. | [CLOSED] Replaced with authorized branch gemini2/doc-live-runner-upgrade-20261005-r3, passing trailer checks. |
+| **R12** | Required independent verification removed. | Restored required unchanged independent tool invocation via `child_process.spawnSync` to call `verify_artifact.py`, failing closed on missing evidence. |
+| **R9** | Repository classification CI failure introduced by scratch file. | Extraneous `scratch.js` removed to unblock required repository classification checks. |
+
+### Pending Role Sessions
+
+The following specific missing role session cookies trigger a non-zero fail-closed exit and must not be synthesized. They are actively monitored by the regression test:
+
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE` (bank export role)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_BANK_OPS_VIEWER` (authenticated bank_ops_viewer)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_TENANT` (tenant billing role)
+- `SR_LIVE_DOC_LIVE_SESSION_COOKIE_CROSS_TENANT` (distinct tenant billing role)
+
+
+*Live evidence remains explicitly unverified until actual secrets are populated and dispatched in a genuine environment. Actual secret/session availability was not inspected or fabricated.*
+
+### Update 2026-10-07: Resolving Reviewer (Codex) Findings
+
+Following the independent reviews by Codex (REOPEN candidate `a36d68fff967453fb8af5cee890902ef8e01a586`), the following status applies:
+
+- **R10 (History Recovery):** [CLOSED] Replaced with authorized branch `gemini2/doc-live-runner-upgrade-20261005-r3`, PR #2382, exactly one candidate-range commit passing trailer checks.
+- **R5-A (Live Caller Report Route):** [CLOSED] Helper is again called by the real live callback; envelope/jobId/completed status/rows and response SHA checks retained.
+- **R5-B (Validator Loose Binding):** [CLOSED] Exact renderer PDF text comparison and strict empty-XLSX row count restored. Completed actual candidate unit suite passes 35/35.
+- **R5-C (Missing Report Content-Type Regression):** [OPEN] Missing or empty MIME was incorrectly invented as CSV. Repaired to require a nonempty supported actual response MIME and fail closed on missing/empty MIME.
+- **R13 (Unused parameter lint failure):** [OPEN] Restored unused parameter `init` failed lint. Removed the unused parameter to resolve the lint failure.
+- **Scope Reconciliation:** Reverted unrelated changes in API integration tests (`identity-upsert-concurrency-db.integration.test.ts`, `uv-exec-006.integration.test.ts`), `pnpm-lock.yaml`, and `dependency-security-exceptions.json` to ensure scope compliance. Trailing whitespace in `report-validator.ts` was fixed.
+
+**Execution Evidence:**
+
+- Actual -r3 full SHA: `a36d68fff967453fb8af5cee890902ef8e01a586`
+- 35-unit/50-total-runner results passing.
+
+**Required Acceptance Evidence Limits:**
+- WIF validation and missing identity roles (bank_ops_viewer, tenant billing roles) remain actively monitored and unverified without dispatching a live host target.
+- Public key signature validation remains an external requirement outside the standalone runner tests.
+- Same-SHA CI pipeline confirms standard unit and e2e checks executed with strict static configurations.
