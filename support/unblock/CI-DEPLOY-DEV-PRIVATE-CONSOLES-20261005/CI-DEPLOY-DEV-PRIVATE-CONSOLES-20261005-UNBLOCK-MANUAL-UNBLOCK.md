@@ -441,3 +441,51 @@ reached the task board as a `worker_outcomes` entry. This round re-attempted tha
   `handoff CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK Codex "..."` with
   `CANDIDATE_SHA`/`CANDIDATE_BRANCH` set to this branch's current HEAD and
   `PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2398`.
+
+## Round 5 (2026-10-07, resumed dispatch; re-tested broker, confirmed outage persists)
+
+This dispatch's own system-reminder at session start again reports
+`orchestrator_approval_broker (CONNECT_TIMEOUT): "MCP server orchestrator_approval_broker
+connection timed out after 30000ms"` — the same condition Round 4 diagnosed. `show` on this
+task still succeeded (confirmed current state: `status=in_progress`, `resolved_parent_status=
+blocked`, `resolved_parent_waiting_for=Claude2`, `resolved_parent_next` matches the chain
+Round 3 verified; `worker_outcomes` still ends at Round 2's `blocker`, i.e. no Round 3/4
+handoff ever landed on the task board, consistent with both rounds' own notes).
+
+Re-verified `origin/dev`/PR state fresh, independent of the artifact's own prose:
+`gh pr view 2398 --json state,headRefOid,url` → `OPEN`,
+`headRefOid=544470f3a94baf4698967d4141359575aca2efad` (Round 4's commit, HEAD of this branch
+at the start of this round) — branch and PR still exact and current, no drift.
+
+Attempted the exact handoff this task needs, with fresh `CANDIDATE_SHA`/`CANDIDATE_BRANCH`
+and `PR_URL`:
+```
+PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2398 \
+CANDIDATE_SHA=<HEAD> CANDIDATE_BRANCH=claude2/ci-deploy-dev-private-consoles-20261005-unblock-manual-unblock \
+AI_NAME=Claude2 .../ai-status.sh handoff CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK Codex "..."
+```
+→ rejected before execution: `Bash command classified as defer`. Retried with a minimal
+isolating call, `ai-status.sh progress CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK
+"Round 5 retry: checking broker"` → same `classified as defer`, no CLI execution, no
+task-board write. This is the third consecutive round (3, 4, 5) in which every mutating
+`ai-status.sh` call defers identically while `show`/`gh pr view`/`git fetch`/`git log` all
+succeed — a sustained, not transient, outage of `orchestrator_approval_broker` across at
+least three separate dispatch sessions over the same task.
+
+### What this round did and did not do
+
+- No product code, workflow file, GitHub variable, IAM binding, or GCP resource was touched.
+  No local service, Docker, or Playwright/browser run was started.
+- Attempted and confirmed-blocked: `ai-status.sh handoff`/`progress` (both deferred by the
+  broker outage, not by task-scope or guard logic — same symptom as Round 4, now a third
+  data point).
+- This file is updated and will be committed/pushed with plain `git` (itself untested this
+  round for defer-classification until attempted next) to keep PR #2398 current for whichever
+  session next finds the broker reachable.
+- Task's machine-truth state remains exactly as Round 3 left it:
+  `status=in_progress`, owner `Claude2`, reviewer `Codex`, `resolved_parent_*` already
+  correctly recorded by Supervisor. No handoff, progress, or blocker call could be landed.
+  The next session (this agent, on resume, or a session where the broker has recovered) should
+  retry exactly the Round 4/5 `handoff` command with that session's then-current
+  `CANDIDATE_SHA`; no further diagnosis is needed on this point, only a working broker
+  connection.
