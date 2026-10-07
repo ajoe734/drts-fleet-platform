@@ -267,7 +267,7 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
     let predicateFn: any;
     let eventResolve: any;
     let registered = false;
-    
+
     const context = {
       waitForEvent: vi.fn().mockImplementation((event, options) => {
         registered = true;
@@ -319,7 +319,7 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
     };
 
     const wrongOriginResponse = createMockResponse({ url: () => 'http://wrong.invalid/downloads/tenant-invoice/inv1' + validQuery });
-    
+
     const locator = {
       click: vi.fn().mockImplementation(async () => {
         if (!registered) throw new Error("Clicked before registered");
@@ -345,7 +345,7 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
     let predicateFn: any;
     let eventResolve: any;
     let registered = false;
-    
+
     const context = {
       waitForEvent: vi.fn().mockImplementation((event, options) => {
         registered = true;
@@ -376,5 +376,61 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
       "inv1",
       "tenant1"
     )).rejects.toThrow("Invalid mime");
+  });
+
+  it("ignores wrong resource and wrong query, then accepts valid event", async () => {
+    let predicateFn: any;
+    let eventResolve: any;
+    let registered = false;
+
+    const context = {
+      waitForEvent: vi.fn().mockImplementation((event, options) => {
+        registered = true;
+        predicateFn = options.predicate;
+        return new Promise((resolve) => {
+          eventResolve = resolve;
+        });
+      })
+    };
+
+    const wrongResourceResponse = createMockResponse({ url: () => 'http://portal.invalid/downloads/tenant-invoice/wrong' + validQuery });
+    const wrongQueryResponse = createMockResponse({ url: () => 'http://portal.invalid/downloads/tenant-invoice/inv1?wrong=1' });
+    const validResponse = createMockResponse();
+
+    const locator = {
+      click: vi.fn().mockImplementation(async () => {
+        if (!registered) throw new Error("Clicked before registered");
+
+        // Emulate wrong resource
+        expect(predicateFn(wrongResourceResponse)).toBe(false);
+        // Emulate wrong query
+        expect(predicateFn(wrongQueryResponse)).toBe(false);
+        // Emulate valid
+        if (predicateFn(validResponse)) {
+          eventResolve(validResponse);
+        }
+      })
+    };
+
+    const proof = await observeAndEvaluateDownload(
+      context,
+      locator,
+      "/downloads/tenant-invoice/inv1" + validQuery,
+      "http://portal.invalid",
+      "a".repeat(40),
+      validManifestHash,
+      "inv1",
+      "tenant1"
+    );
+
+    expect(proof.matched).toBe(true);
+    expect(proof.query).toContain("sig=REDACTED");
+  });
+
+  it("discards unknown query keys and emits explicit allowlist", async () => {
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=1&expires_at=2&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1&token=SYNTHETIC_TOKEN_SENTINEL` });
+    const proof = await evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1");
+    expect(proof.query).toBe(`?manifest_hash=${validManifestHash}&signed_at=1&expires_at=2&key_id=3&sig_v=1&sig=REDACTED`);
+    expect(proof.query).not.toContain("SYNTHETIC_TOKEN_SENTINEL");
   });
 });

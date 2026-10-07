@@ -68,6 +68,20 @@ This document records the completion and verification of the live invoice mail E
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
 
+## Codex Review Rejection (Candidate: 4288d3eae7be8625ff1eeb7ac8e9602d67dd120d / Generation: 8041e80a909342cabb58be0b3e8a014a)
+
+- **F1/F4/F6 (P1 new executable positive-regression break from this candidate)**: Updated `bootstrap.test.ts` to supply the required authoritative `tenantId` and `invoiceId` in both `invoiceData.data` and `roInvoiceData.data` fixtures. Additionally, updated the literal test queries to include all required fields matching the gate's strict signature checks.
+- **F3/F5 (P1 REPEATED, durable signed-claim validation still fail-open)**: Updated `gate-evidence.py` to strictly parse the persisted `query` string (using `urllib.parse.parse_qsl`) instead of a single regex check. Gate now rigorously checks that the query contains exactly the allowlisted signed fields, enforces that `manifest_hash` correlates with authoritative metadata and proof, and rejects missing/duplicate/ambiguous claims for BOTH roles.
+- **F7 (P1 REGRESSION, unrestricted query parameters again persisted)**: Repaired `live-invoice-mail.spec.ts` helper to construct `safeParams` using an explicit allowlist of validated safe fields rather than cloning the entire `URLSearchParams`. Unknown query keys (like synthetic sentinels) are safely discarded before artifact creation. Added regression test in `spec-guards.test.ts` confirming synthetic tokens are stripped.
+- **F4/F6 (P2 REPEATED, remaining bounded regression/evidence gaps)**: Rewrote the event-boundary regression unit tests in `spec-guards.test.ts` to cover the unmatched-then-valid event sequence logic (wrong resource/wrong query ignored until valid event resolves) and tested the actual emitted proof format. Removed incidental trailing whitespace from `live-invoice-mail.spec.ts` and `spec-guards.test.ts`.
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task (`tests/unit/system-remediation/sr-live-invoice-mail-20261007`): PASS 12/12 exit 0.
+- `git diff --check HEAD^ HEAD`: clean
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit 0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
 ## Codex Review Rejection (Candidate: b4426e79562de986d9f657cff1e205ac37096019 / Generation: dde8a554ef094de5bfe7a84d33e743c1)
 
 - **F1/F3 (Executable regression / production identity contract mismatch)**: Addressed token parsing in `session-bootstrap.ts` to properly handle roles array and camelCase `tenantId` according to production JWT shapes (`observed_role: payload.roles?.[0] || payload.role`, `observed_tenant_id: payload.tenantId`). Updated `gate-evidence.py` to correctly expect `tenant:billing:read/write` for the primary role rather than just `billing.write`. Fixed the strict assignment typing and optional mapping issues that caused `tsc` failures.

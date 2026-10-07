@@ -745,7 +745,7 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
 
     const actualUrlObj = new URL(popupResponse.url());
     const searchParams = actualUrlObj.searchParams;
-    
+
     // Validate required claims
     const sig = searchParams.get('sig');
     const manifestHashParam = searchParams.get('manifest_hash');
@@ -762,7 +762,12 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
     }
 
     // Produce redacted safe query
-    const safeParams = new URLSearchParams(searchParams);
+    const safeParams = new URLSearchParams();
+    safeParams.set('manifest_hash', manifestHashParam);
+    safeParams.set('signed_at', signedAt);
+    safeParams.set('expires_at', expiresAt);
+    safeParams.set('key_id', keyId);
+    safeParams.set('sig_v', sigV);
     safeParams.set('sig', 'REDACTED');
 
     return {

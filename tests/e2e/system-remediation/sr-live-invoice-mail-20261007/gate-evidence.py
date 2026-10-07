@@ -77,6 +77,25 @@ def evaluate(env, evidence, provider):
                        isinstance(rfc2, str) and rfc2 == f"<{resend.get('delivery_id')}@notification.drts.invalid>" and
                        isinstance(sha256_2, str) and len(sha256_2) == 64 and all(c in "0123456789abcdef" for c in sha256_2))
 
+    def is_valid_download_query(query, expected_manifest_hash):
+        if not isinstance(query, str) or not query.startswith("?"):
+            return False
+        from urllib.parse import parse_qsl
+        params = parse_qsl(query[1:], keep_blank_values=True)
+        if len(params) != 6:
+            return False
+        param_dict = dict(params)
+        if len(param_dict) != 6:
+            return False
+        if param_dict.get("sig") != "REDACTED":
+            return False
+        if param_dict.get("manifest_hash") != expected_manifest_hash:
+            return False
+        for k in ["signed_at", "expires_at", "key_id", "sig_v"]:
+            if k not in param_dict or not param_dict[k]:
+                return False
+        return True
+
     # F4: enforce download proof is valid object
     dl_proof = evidence.get("downloadProof")
     if not isinstance(dl_proof, dict):
@@ -108,7 +127,7 @@ def evaluate(env, evidence, provider):
         and get_call("GET", path="read_only_portal").get("download_proof").get("contentType") == "application/pdf"
         and get_call("GET", path="read_only_portal").get("download_proof").get("origin") == env.get("DRTS_LIVE_INVOICE_MAIL_PORTAL_ORIGIN")
         and get_call("GET", path="read_only_portal").get("download_proof").get("path") == f"/downloads/tenant-invoice/{env.get('DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID')}"
-        and isinstance(get_call("GET", path="read_only_portal").get("download_proof").get("query"), str) and bool(re.search(r"(^|[?&])sig=REDACTED(&|$)", get_call("GET", path="read_only_portal").get("download_proof").get("query")))
+        and is_valid_download_query(get_call("GET", path="read_only_portal").get("download_proof").get("query"), get_call("GET", path="read_only_portal").get("download_proof").get("manifestHash"))
         and get_call("GET", path="read_only_portal").get("download_proof").get("status") == 200
         and get_call("GET", path="read_only_portal").get("download_proof").get("candidateSha") == env.get("CANDIDATE_SHA")
         and get_call("GET", path="read_only_portal").get("download_proof").get("invoiceId") == env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID")
@@ -125,7 +144,7 @@ def evaluate(env, evidence, provider):
         and dl_proof.get("contentType") == "application/pdf"
         and dl_proof.get("origin") == env.get("DRTS_LIVE_INVOICE_MAIL_PORTAL_ORIGIN")
         and dl_proof.get("path") == f"/downloads/tenant-invoice/{env.get('DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID')}"
-        and isinstance(dl_proof.get("query"), str) and bool(re.search(r"(^|[?&])sig=REDACTED(&|$)", dl_proof.get("query")))
+        and is_valid_download_query(dl_proof.get("query"), dl_proof.get("manifestHash"))
         and dl_proof.get("status") == 200
         and dl_proof.get("candidateSha") == env.get("CANDIDATE_SHA")
         and dl_proof.get("invoiceId") == env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID")
