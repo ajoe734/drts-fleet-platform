@@ -196,3 +196,15 @@ Following the independent review by Codex (REOPEN candidate `a36d68fff967453fb8a
 
 - Unit tests (`live-document-runner.test.ts`): 37 passed.
 - Linter (`eslint` on runner files): 0 warnings/errors.
+
+### Update 2026-10-07: Resolving Reviewer (Codex) Scope Findings (Candidate edd95d3e9cca REOPEN)
+
+Following the independent review by Codex (REOPEN candidate `edd95d3e9cca078f64cae4a88a9fcb899aa14d9b`), the remaining scope violations were explicitly repaired on the Supervisor-authorized recovery lineage (`gemini2/doc-live-runner-upgrade-20261005-r3`):
+
+- **Scope Reconciliation:** Reverted unrelated `pnpm-lock.yaml`, `tools/ci/dependency-security-exceptions.json`, and API integration test changes (`apps/api/tests/integration/identity-upsert-concurrency-db.integration.test.ts`, `apps/api/tests/integration/uv-exec-006.integration.test.ts`) that were improperly included in the candidate. The security exception registry is now byte-identical to `origin/dev`.
+
+**Execution Evidence:**
+
+- Verified base-to-candidate diff ensures no unrelated changes.
+- Unit tests (`live-document-runner.test.ts`): 37 passed.
+- Linter (`eslint` on runner files): 0 warnings/errors.

@@ -2170,11 +2170,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
             `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_attempts WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1`,
             [order.orderId],
           )
-        ).rows.map(row => {
-          const clone = { ...row.record };
-          delete clone.traceId;
-          return clone;
-        });
+        ).rows;
       const before = await readState();
       const cachedOrder = structuredClone(service.getOrder(order.orderId));
       const cachedTask = service.getDriverTask(assignment.taskId);
@@ -2686,11 +2682,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
             `SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1 ORDER BY record::text`,
             [order.orderId],
           )
-        ).rows.map(row => {
-          const clone = { ...row.record };
-          delete clone.traceId;
-          return clone;
-        }),
+        ).rows,
       });
       const before = await readState();
       const cachedTask = stale.getDriverTask(assignment.taskId);
