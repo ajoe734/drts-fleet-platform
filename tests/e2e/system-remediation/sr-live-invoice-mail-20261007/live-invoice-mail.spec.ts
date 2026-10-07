@@ -103,6 +103,70 @@ export async function runInvoiceMailPreflight(request: any, config: any, evidenc
     return { invoiceData, allowedEntries };
 }
 
+export async function runReadOnlyPreflight(request: any, config: any) {
+    const { apiOrigin, readOnlyToken, readOnlyTenantId, readOnlyInvoiceId, readOnlyRecipient } = config;
+    const roSessionCheck = await request.get(`${apiOrigin}/api/auth/session`, {
+      headers: { authorization: `Bearer ${readOnlyToken}` },
+    });
+    expect(roSessionCheck.status()).toBe(200);
+    const roSessionData = await roSessionCheck.json();
+    const scopes = roSessionData.data?.identity?.scopes || [];
+    expect(scopes).toContain("tenant:billing:read");
+    expect(scopes).not.toContain("tenant:billing:write");
+
+    const roInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}`, {
+      headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
+    });
+    expect(roInvoiceCheck.status()).toBe(200);
+    const roInvoiceData = await roInvoiceCheck.json();
+    if (roInvoiceData.data?.tenantId !== readOnlyTenantId || roInvoiceData.data?.invoiceId !== readOnlyInvoiceId) {
+      throw new Error("Read-only invoice fixture mismatch");
+    }
+    const roProfileCheck = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
+      headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
+    });
+    expect(roProfileCheck.status()).toBe(200);
+    const roProfileData = await roProfileCheck.json();
+    if (roProfileData.data?.tenantId !== readOnlyTenantId || roProfileData.data?.email !== readOnlyRecipient) {
+      throw new Error("Read-only recipient mismatch");
+    }
+}
+
+export async function runNonAllowlistPreflight(request: any, config: any, allowedEntries: string[]) {
+    const { apiOrigin, nonAllowlistedToken, nonAllowlistTenantId, nonAllowlistInvoiceId, nonAllowlistedRecipient } = config;
+    const naInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}`, {
+      headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
+    });
+    expect(naInvoiceCheck.status()).toBe(200);
+    const naInvoiceData = await naInvoiceCheck.json();
+    if (naInvoiceData.data?.tenantId !== nonAllowlistTenantId || naInvoiceData.data?.invoiceId !== nonAllowlistInvoiceId) {
+      throw new Error("Non-allowlist invoice fixture mismatch");
+    }
+
+    const naInvoiceListCheck = await request.get(`${apiOrigin}/api/tenant/invoices`, {
+      headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
+    });
+    expect(naInvoiceListCheck.status()).toBe(200);
+    const naInvoiceListData = await naInvoiceListCheck.json();
+    if (naInvoiceListData.data?.items?.length !== 1 || naInvoiceListData.data?.items[0].invoiceId !== nonAllowlistInvoiceId) {
+      throw new Error("Non-allowlist test tenant must have exactly ONE invoice for dedicated fixture verification.");
+    }
+
+    const naProfileCheck = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
+      headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
+    });
+    expect(naProfileCheck.status()).toBe(200);
+    const naProfileData = await naProfileCheck.json();
+    if (naProfileData.data?.email !== nonAllowlistedRecipient) {
+      throw new Error("Non-allowlist fixture email does not match reserved negative recipient");
+    }
+    const negLower = naProfileData.data?.email?.toLowerCase() || "";
+    const negDomain = negLower.split("@")[1] || "";
+    if (allowedEntries.includes(negLower) || allowedEntries.includes(negDomain)) {
+       throw new Error("Non-allowlist negative fixture mistakenly overlaps with positive allowlist domain/address");
+    }
+}
+
 test.describe("Live Invoice Mail Acceptance", () => {
   test.afterEach((_, testInfo) => {
     if (testInfo.status !== "passed") {
@@ -178,31 +242,8 @@ test.describe("Live Invoice Mail Acceptance", () => {
     (evidenceData as any).readOnlyInvoiceId = readOnlyInvoiceId;
     const readOnlyRecipient = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_RECIPIENT;
     if (readOnlyToken && readOnlyTenantId && readOnlyInvoiceId && readOnlyRecipient) {
-      const roSessionCheck = await request.get(`${apiOrigin}/api/auth/session`, {
-        headers: { authorization: `Bearer ${readOnlyToken}` },
-      });
-      expect(roSessionCheck.status()).toBe(200);
-      const roSessionData = await roSessionCheck.json();
-      const scopes = roSessionData.data?.identity?.scopes || [];
-      expect(scopes).toContain("tenant:billing:read");
-      expect(scopes).not.toContain("tenant:billing:write");
+      await runReadOnlyPreflight(request, { apiOrigin, readOnlyToken, readOnlyTenantId, readOnlyInvoiceId, readOnlyRecipient });
 
-      const roInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}`, {
-        headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
-      });
-      expect(roInvoiceCheck.status()).toBe(200);
-      const roInvoiceData = await roInvoiceCheck.json();
-      if (roInvoiceData.data?.tenantId !== readOnlyTenantId || roInvoiceData.data?.invoiceId !== readOnlyInvoiceId) {
-        throw new Error("Read-only invoice fixture mismatch");
-      }
-      const roProfileCheck = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
-        headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
-      });
-      expect(roProfileCheck.status()).toBe(200);
-      const roProfileData = await roProfileCheck.json();
-      if (roProfileData.data?.tenantId !== readOnlyTenantId || roProfileData.data?.email !== readOnlyRecipient) {
-        throw new Error("Read-only recipient mismatch");
-      }
       const readOnlyResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
       });
@@ -218,38 +259,10 @@ test.describe("Live Invoice Mail Acceptance", () => {
     const nonAllowlistTenantId = process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID;
     const nonAllowlistInvoiceId = process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID;
     (evidenceData as any).nonAllowlistInvoiceId = nonAllowlistInvoiceId;
-    if (nonAllowlistedToken && nonAllowlistTenantId && nonAllowlistInvoiceId) {
-      const naInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}`, {
-        headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
-      });
-      expect(naInvoiceCheck.status()).toBe(200);
-      const naInvoiceData = await naInvoiceCheck.json();
-      if (naInvoiceData.data?.tenantId !== nonAllowlistTenantId || naInvoiceData.data?.invoiceId !== nonAllowlistInvoiceId) {
-        throw new Error("Non-allowlist invoice fixture mismatch");
-      }
+    const nonAllowlistedRecipient = process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_RECIPIENT;
+    if (nonAllowlistedToken && nonAllowlistTenantId && nonAllowlistInvoiceId && nonAllowlistedRecipient) {
+      await runNonAllowlistPreflight(request, { apiOrigin, nonAllowlistedToken, nonAllowlistTenantId, nonAllowlistInvoiceId, nonAllowlistedRecipient }, allowedEntries);
 
-      const naInvoiceListCheck = await request.get(`${apiOrigin}/api/tenant/invoices`, {
-        headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
-      });
-      expect(naInvoiceListCheck.status()).toBe(200);
-      const naInvoiceListData = await naInvoiceListCheck.json();
-      if (naInvoiceListData.data?.items?.length !== 1 || naInvoiceListData.data?.items[0].invoiceId !== nonAllowlistInvoiceId) {
-        throw new Error("Non-allowlist test tenant must have exactly ONE invoice for dedicated fixture verification.");
-      }
-
-      const naProfileCheck = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
-        headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
-      });
-      expect(naProfileCheck.status()).toBe(200);
-      const naProfileData = await naProfileCheck.json();
-      if (naProfileData.data?.email !== process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_RECIPIENT) {
-        throw new Error("Non-allowlist fixture email does not match reserved negative recipient");
-      }
-      const negLower = naProfileData.data?.email?.toLowerCase() || "";
-      const negDomain = negLower.split("@")[1] || "";
-      if (allowedEntries.includes(negLower) || allowedEntries.includes(negDomain)) {
-        throw new Error("Non-allowlist fixture email is actually in the effective allowlist");
-      }
       const nonAllowlistResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId, "idempotency-key": "na-" + Date.now() },
       });
@@ -544,9 +557,17 @@ test.describe("Live Invoice Mail Acceptance", () => {
         // Assert it's the ONLY invoice in the list
         const invoiceLinks = page.locator('a[href*="/invoices?invoiceId="]');
         const count = await invoiceLinks.count();
-        expect(count).toBe(1);
-        const firstHref = await invoiceLinks.first().getAttribute('href');
-        expect(firstHref).toContain(nonAllowlistInvoiceId);
+        const seenIds = new Set<string>();
+        for (let i = 0; i < count; i++) {
+            const href = await invoiceLinks.nth(i).getAttribute('href');
+            if (href) {
+                const url = new URL(href, 'http://localhost');
+                const id = url.searchParams.get('invoiceId');
+                if (id) seenIds.add(id);
+            }
+        }
+        expect(seenIds.size).toBe(1);
+        expect(Array.from(seenIds)[0]).toBe(nonAllowlistInvoiceId);
 
         const wtOwnResource = new URL(`/control-plane-proxy/tenant/invoices/${nonAllowlistInvoiceId}`, portalOrigin).href;
         const wtOwnResponse = await page.request.get(wtOwnResource);
@@ -555,9 +576,13 @@ test.describe("Live Invoice Mail Acceptance", () => {
         // Verify authenticated cross-tenant 404 (and fallback in UI)
         let wtMutationCount = 0;
         let fallbackSelectedId = "";
+        let wrongDownloadObserved = false;
         const wtRequestListener = (req: any) => {
             if (req.method() === 'POST' && (!readActionId || req.headers()['next-action'] !== readActionId)) {
                 wtMutationCount++;
+            }
+            if (req.url().includes(`/downloads/tenant-invoice/${invoiceId}`)) {
+                wrongDownloadObserved = true;
             }
         };
         page.on('request', wtRequestListener);
@@ -579,8 +604,14 @@ test.describe("Live Invoice Mail Acceptance", () => {
             }
         }
         const wrongDownloadLinkCount = await page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`).count();
-        // forbidden_download_absent was unused
         await expect(page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`)).not.toBeVisible();
+
+        // Explicitly attempt to fetch the forbidden download to ensure backend protection works even if URL is guessed
+        const forbiddenDownloadResponse = await page.request.get(new URL(`/api/tenant/downloads/tenant-invoice/${invoiceId}`, apiOrigin).href);
+        if (forbiddenDownloadResponse.status() === 200 || forbiddenDownloadResponse.status() === 302) {
+             wrongDownloadObserved = true; // should be 403 or 404
+        }
+        expect([403, 404]).toContain(forbiddenDownloadResponse.status());
 
         // The selected fallback MUST be the own invoice
         expect(fallbackSelectedId).toBe(nonAllowlistInvoiceId);
@@ -592,11 +623,8 @@ test.describe("Live Invoice Mail Acceptance", () => {
         expect(wtResponse.status()).toBe(404);
         const errBody = await wtResponse.json().catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
-        
-        if (!evidenceData.unimplementedLiveSurfaces.includes("browser_download_observation")) {
-            evidenceData.unimplementedLiveSurfaces.push("browser_download_observation");
-        }
-        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: wrongDownloadLinkCount > 0 });
+
+        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: wrongDownloadObserved || (wrongDownloadLinkCount > 0) });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
             evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
@@ -612,7 +640,11 @@ test.describe("Live Invoice Mail Acceptance", () => {
         // Read-only role CAN view the invoice
         const roInvoiceUiUrl = new URL(`/invoices?invoiceId=${readOnlyInvoiceId}`, portalOrigin).href;
                 let readActionId: string | null = null;
-        const learnReadAction = (req: any) => { if (req.method() === 'POST') { const actionId = req.headers()['next-action']; if (actionId) readActionId = actionId; } };
+        let roForeignDownloadObserved = false;
+        let roOwnDownloadObserved = false;
+        const learnReadAction = (req: any) => {
+            if (req.method() === 'POST') { const actionId = req.headers()['next-action']; if (actionId) readActionId = actionId; }
+        };
         page.on('request', learnReadAction);
 
         const roUiResp = await page.goto(roInvoiceUiUrl, { waitUntil: "networkidle" });
@@ -629,12 +661,23 @@ test.describe("Live Invoice Mail Acceptance", () => {
             if (req.method() === 'POST' && (!readActionId || req.headers()['next-action'] !== readActionId)) {
                 mutationCount++;
             }
+            if (req.url().includes(`/downloads/tenant-invoice/`) && !req.url().includes(readOnlyInvoiceId)) {
+                roForeignDownloadObserved = true;
+            }
+            if (req.url().includes(`/downloads/tenant-invoice/${readOnlyInvoiceId}`)) {
+                roOwnDownloadObserved = true;
+            }
         };
         page.on('request', requestListener);
 
         await sendBtn.click({ force: true }); // attempt to click anyway
         await page.waitForTimeout(500); // give it a moment to catch any async network
         expect(mutationCount).toBe(0); // no Next.js server action POST should be emitted
+
+        // attempt own legitimate download network call to prove path works
+        const ownDownloadCheck = await page.request.get(new URL(`/api/tenant/downloads/tenant-invoice/${readOnlyInvoiceId}`, apiOrigin).href);
+        if (ownDownloadCheck.status() === 200 || ownDownloadCheck.status() === 302) roOwnDownloadObserved = true;
+
         page.off('request', requestListener);
 
         const roApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${readOnlyInvoiceId}`, portalOrigin).href;
@@ -647,7 +690,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
         // Verify no foreign download links are present
         const roForeignDownloadCount = await page.locator(`a[href*="/downloads/tenant-invoice/"]`).count();
-        const roForbidden_download_observed = (roForeignDownloadCount > roOwnDownloadCount);
+        const roForbidden_download_observed = roForeignDownloadObserved || (roForeignDownloadCount > roOwnDownloadCount);
 
         evidenceData.httpCalls.push({
             method: "GET",

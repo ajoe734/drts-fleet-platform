@@ -299,6 +299,18 @@ class HostedGateTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(data["status"], "failed")
 
+        b8_2 = {**base_bootstrap, "issued_sessions_count": 2, "issued_sessions": [valid_objects[1], valid_objects[2]]}
+        t8_2 = {**base_teardown, "attempted": 2, "sessions": [{"key": valid_keys[0], "status": "not_issued"}, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "success"}]}
+        code, data = run_main(b8_2, t8_2)
+        self.assertEqual(code, 1)
+        self.assertEqual(data["status"], "failed")
+
+        b8_3 = {**base_bootstrap, "issued_sessions_count": 2, "issued_sessions": [valid_objects[0], valid_objects[2]]}
+        t8_3 = {**base_teardown, "attempted": 2, "sessions": [{"key": valid_keys[0], "status": "success"}, {"key": valid_keys[1], "status": "not_issued"}, {"key": valid_keys[2], "status": "success"}]}
+        code, data = run_main(b8_3, t8_3)
+        self.assertEqual(code, 1)
+        self.assertEqual(data["status"], "failed")
+
         # 9. Attempted count mismatch
         t9 = {**base_teardown, "attempted": 2} # issued is 3
         code, data = run_main(base_bootstrap, t9)

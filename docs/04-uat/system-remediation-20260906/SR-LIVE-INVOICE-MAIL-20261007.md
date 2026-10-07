@@ -98,3 +98,18 @@ This document records the completion and verification of the live invoice mail E
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p test_*.py -v`: exit 0
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: 4d14c6ef31ec27859636449e41d72691adc38eee / Generation: 7d0ec6cd9b27470f9f98d818d8af152b)
+
+- **F3 (P1 REPEATED executable legitimate single-invoice browser failure)**: The spec assumed exactly one anchor link matched the invoice ID. Fixed `live-invoice-mail.spec.ts` to deduplicate identity collection and only fail if distinct identities exist.
+- **F3/F5 (P2 REPEATED required download observation remains unimplemented)**: Replaced unconditional `browser_download_observation` marker logic with actual network request observations for expected forbidden and legitimate download traffic.
+- **F2/F4/F6 (P2 REPEATED regression and evidence handoff omissions)**:
+  - Vitest: Added `runReadOnlyPreflight` and `runNonAllowlistPreflight` in `spec-guards.test.ts` to cover legal-positive preflight and read-only/non-allowlisted invoice/recipient mismatch zero-send cases. Added an integration regression test in `bootstrap.test.ts` that spawns `gate-evidence.py` to evaluate the generated sessions, and removed the mock of `fs.writeFileSync` around the gate integration logic. Fixed test data `rfc_message_id`s in `bootstrap.test.ts` to match `<delivery_id>@notification.drts.invalid` expectations.
+  - Python: Updated `test_hosted_gate.py` to include independent missing-role tests for all roles (`b8_2` and `b8_3` partial role examples).
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean (exit 0)
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v`: exit 0
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: exit 0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*

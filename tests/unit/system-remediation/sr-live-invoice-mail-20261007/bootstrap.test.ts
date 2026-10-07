@@ -567,4 +567,177 @@ describe("F1 bootstrap and teardown adapter", () => {
     expect(session2.status).toBe("failed");
     expect(session2.token).toBeUndefined(); // redacted
   });
+
+  it("feeds generated session observations into actual gate in a regression", async () => {
+    const fs = await import("node:fs");
+    const cp = await import("node:child_process");
+    const path = await import("node:path");
+    const os = await import("node:os");
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-regression-"));
+    const artifactsDir = path.join(tmpDir, ".artifacts", "live-invoice-mail-acceptance");
+    const realMkdirSync = (await vi.importActual("node:fs") as typeof fs).mkdirSync;
+    realMkdirSync(artifactsDir, { recursive: true });
+
+    // Mock the actual bootstrap output for a successful case
+    const mockEnv = {
+      DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
+      DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: path.join(tmpDir, "env"),
+      DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
+      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID: "10000000-0000-0000-0000-000000000202",
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID: "10000000-0000-0000-0000-000000000902",
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID: "10000000-0000-0000-0000-000000000203",
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID: "10000000-0000-0000-0000-000000000903",
+      DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST: "billing+invoice@company.com",
+    };
+
+    const tokensMap: Record<string, any> = {};
+    const fetchMock = vi.fn().mockImplementation(async (url, opts) => {
+      let parsedBody: any = {};
+      try { parsedBody = opts.body ? JSON.parse(opts.body) : {}; } catch { /* ignore */ }
+      const defaultHeaders = new Headers({ "x-drts-candidate-sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
+      if (url.includes("auth/token")) {
+        const tenantId = opts.headers["x-tenant-id"] || parsedBody.tenant_id;
+        const actorId = opts.headers["x-actor-id"] || parsedBody.actor_id;
+        const isReadOnly = actorId === "10000000-0000-0000-0000-000000000902";
+        const expectedRole = isReadOnly ? "tenant_viewer" : "tenant_admin";
+        const scopes = isReadOnly ? ["tenant:billing:read"] : ["tenant:billing:read", "tenant:billing:write"];
+        const payloadObj = { roles: [expectedRole], scopes, tenantId, sub: actorId };
+        const token = "dummy." + Buffer.from(JSON.stringify(payloadObj)).toString("base64") + ".dummy";
+        tokensMap[token] = { tenant_id: tenantId, actor_id: actorId };
+        return { ok: true, headers: defaultHeaders, json: async () => ({ token }) };
+      }
+      if (url.includes("auth/session")) {
+        const authHeader = opts.headers["authorization"];
+        const token = authHeader ? authHeader.split(" ")[1] : "";
+        const ctx = tokensMap[token] || { tenant_id: "", actor_id: "" };
+        const role = ctx.actor_id === "10000000-0000-0000-0000-000000000902" ? "tenant_viewer" : "tenant_admin";
+        const scopes = ctx.actor_id === "10000000-0000-0000-0000-000000000902" ? ["tenant:billing:read"] : ["tenant:billing:read", "tenant:billing:write"];
+        return { ok: true, headers: defaultHeaders, json: async () => ({ data: { active: true, identity: { realm: "tenant", actor_type: "tenant_admin", actor_id: ctx.actor_id, tenant_id: ctx.tenant_id, roles: [role], scopes } } }) };
+      }
+      if (url.includes("identity/step-up-proofs")) {
+        return { ok: true, headers: defaultHeaders, json: async () => ({ data: { required: true, step_up_reference: "mock-step-up-ref", action_id: "tenant:users:create" } }) };
+      }
+      return { ok: true, headers: defaultHeaders, json: async () => ({}) };
+    });
+
+    const realWriteFileSync = (await vi.importActual("node:fs") as typeof fs).writeFileSync;
+    let emittedBootstrap: any;
+    let emittedTeardown: any;
+    const writeFileSyncMock = vi.fn((pathStr: string, data: any) => {
+      if (pathStr.includes("evidence-bootstrap.json")) emittedBootstrap = JSON.parse(data);
+      if (pathStr.includes("evidence-teardown.json")) emittedTeardown = JSON.parse(data);
+    });
+
+    // We can't easily hook node:fs inside the actual run if we want to run python,
+    // so let's just use real node fs to write it to our tmpDir instead of mocking.
+    vi.mocked(fs.writeFileSync).mockImplementation((pathStr, data) => {
+       const basename = path.basename(pathStr as string);
+       realWriteFileSync(path.join(artifactsDir, basename), data);
+    });
+
+    const deps = {
+      fetch: fetchMock as any,
+      mask: vi.fn(),
+      appendEnvironment: vi.fn(),
+      readMailbox: vi.fn().mockReturnValue("billing@company.com"),
+      assertions: vi.fn().mockReturnValue({ next: vi.fn().mockResolvedValue("mocked-token") }),
+      onSessionIssued: vi.fn(),
+    };
+
+    try {
+      await bootstrapMailSession(mockEnv, deps, false);
+    } catch(err: any) {
+      console.error("INNER ERROR:", err.originalError?.message, err.originalError?.stack);
+      throw err;
+    }
+    const tdFetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { revoked: true, logged_out: true } }),
+    });
+    await teardown({
+      ...mockEnv,
+      DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN: "t1",
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN: "t2",
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN: "t3"
+    }, tdFetchMock as any);
+
+    // Provide the rest of the valid gate files
+    const validEvidence = {
+      candidateSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", status: "passed", exitCode: 0,
+      unimplementedLiveSurfaces: [], errors: [],
+      tenantId: "10000000-0000-0000-0000-000000000201", invoiceId: "20000000-0000-0000-0000-000000000456", identityEmail: "a".repeat(64),
+      nonAllowlistInvoiceId: "20000000-0000-0000-0000-000000000789", readOnlyInvoiceId: "20000000-0000-0000-0000-000000000abc",
+      resendMailboxEvidence: { matched_content: true, candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", delivery_id: "d2", rfc_message_id: "<d2@notification.drts.invalid>", body_sha256: "a".repeat(64) },
+      mailboxEvidence: { matched_content: true, candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", delivery_id: "d1", rfc_message_id: "<d1@notification.drts.invalid>", body_sha256: "a".repeat(64) },
+      downloadProof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 123, contentType: "application/pdf" },
+      durableDeliveries: [
+        { scenario: "first_send", deliveryId: "d1", idempotencyKey: "k1", acceptedAt: "2026-10-07T00:00:00Z", attemptsCount: 1, status: "sent", attemptOutcome: "sent" },
+        { scenario: "intentional_resend", deliveryId: "d2", idempotencyKey: "k2", acceptedAt: "2026-10-07T00:01:00Z", attemptsCount: 1, status: "sent", attemptOutcome: "sent" },
+        { scenario: "idempotent_retry", deliveryId: "d1", idempotencyKey: "k1", initialAttemptsCount: 1, afterRetryAttemptsCount: 1, status: "sent" },
+        { scenario: "non_allowlisted", deliveryId: "d3", status: "failed", errorCode: "SMTP_RECIPIENT_NOT_ALLOWLISTED", outcome: "failed", acceptedAt: null, retryable: false }
+      ],
+      durableHistoryCount: 2,
+      httpCalls: [
+        { path: "tenant/billing/profile", method: "GET", status: 200 },
+        { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456", method: "GET", status: 200 },
+        { path: "artifactUrl", method: "GET", status: 200 },
+        { path: "wrong_tenant_portal", method: "GET", status: 404, ui_isolated: true, selected_identity: "20000000-0000-0000-0000-000000000789", forbidden_resource: "20000000-0000-0000-0000-000000000456", mutation_count: 0, forbidden_download_observed: false },
+        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false },
+        { path: "bad_sig_api", method: "GET", status: 403 },
+        { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "normal_send", status: 201, delivery_id: "d1" },
+        { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "idempotent_retry", status: 201, delivery_id: "d1" },
+        { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "intentional_resend", status: 201, delivery_id: "d2" },
+        { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", scenario: "durable_get", method: "GET", status: 200 },
+        { scenario: "wrong_tenant", method: "POST", status: 403 },
+        { scenario: "wrong_invoice", method: "POST", status: 403 },
+        { scenario: "read_only", method: "POST", status: 403 },
+        { scenario: "non_allowlisted", method: "POST", status: 201, delivery_id: "d3" }
+      ],
+      trackedResources: [{ type: "provider_receipt", id: "test" }]
+    };
+    realWriteFileSync(path.join(artifactsDir, "evidence-mail.json"), JSON.stringify(validEvidence));
+    realWriteFileSync(path.join(artifactsDir, "evidence-provider.json"), JSON.stringify({ candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", alias_revision_fresh: true }));
+
+    const gatePath = path.resolve(__dirname, "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/gate-evidence.py");
+    const gateEnv = {
+      ...process.env,
+      GITHUB_RUN_ID: "12345",
+      CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      WORKFLOW_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      BASE_SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      DEPLOYMENT_GUARD_OUTCOME: "success", SESSION_GUARD_OUTCOME: "success", INSTALL_OUTCOME: "success",
+      PREFLIGHT_OUTCOME: "success", RESOURCES_OUTCOME: "success", SESSIONS_OUTCOME: "success",
+      RUNNER_OUTCOME: "success", TEARDOWN_OUTCOME: "success",
+      DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID: "20000000-0000-0000-0000-000000000456",
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID: "20000000-0000-0000-0000-000000000789",
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID: "20000000-0000-0000-0000-000000000abc",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID: "10000000-0000-0000-0000-000000000203",
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID: "10000000-0000-0000-0000-000000000202",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID: "10000000-0000-0000-0000-000000000902",
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID: "10000000-0000-0000-0000-000000000903"
+    };
+
+    try {
+      cp.execSync(`python3 ${gatePath}`, { env: gateEnv, cwd: tmpDir });
+    } catch (e: any) {
+      console.error("GATE FAILURE STDOUT:", e.stdout?.toString());
+      console.error("GATE FAILURE STDERR:", e.stderr?.toString());
+    }
+    const runStatusStr = fs.readFileSync(path.join(artifactsDir, "run-status.json"), "utf8");
+    const runStatus = JSON.parse(runStatusStr);
+    if (runStatus.status !== "passed") {
+      console.error("GATE FAILURE STATUS:", runStatusStr);
+    }
+    expect(runStatus.status).toBe("passed");
+  });
 });

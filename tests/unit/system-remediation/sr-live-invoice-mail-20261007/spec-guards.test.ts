@@ -34,4 +34,55 @@ describe("F2/F4/F6 spec guards", () => {
     await expect(runInvoiceMailPreflight(request, { apiOrigin: "http://test", sessionToken: "token", tenantId: "tenant", authorizedRecipient: "test@test.com", invoiceId: "invoice" }, evidenceData)).rejects.toThrow("Billing profile email does not match authorized recipient");
     expect(request.post).not.toHaveBeenCalled(); // zero sends
   });
+
+  it("passes legally positive runInvoiceMailPreflight case", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("billing/profile")) {
+          return { status: () => 200, json: async () => ({ data: { email: "test@test.com" } }) };
+        }
+        if (!url.includes("invoice") || url.match(/[0-9a-f]{8}-[0-9a-f]{4}/)) { // A basic check for the random UUID generated
+          return { status: () => 404, json: async () => ({}) };
+        }
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant", invoiceId: "invoice", items: [{invoiceId: "invoice"}] } }) };
+      }),
+      post: vi.fn().mockResolvedValue({ status: () => 404, json: async () => ({}) })
+    };
+    const evidenceData = { httpCalls: [], unimplementedLiveSurfaces: [], errors: [] };
+    process.env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED = "true";
+    process.env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST = "test.com";
+    const result = await runInvoiceMailPreflight(request, { apiOrigin: "http://test", sessionToken: "token", tenantId: "tenant", authorizedRecipient: "test@test.com", invoiceId: "invoice" }, evidenceData);
+    expect(result).toHaveProperty("invoiceData");
+    expect(result).toHaveProperty("allowedEntries");
+    expect(result.allowedEntries).toContain("test.com");
+  });
+});
+
+import { runReadOnlyPreflight, runNonAllowlistPreflight } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+
+describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
+  it("throws on read-only mismatch and performs zero sends", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("auth/session")) return { status: () => 200, json: async () => ({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", email: "wrong@ro.com" } }) }; // mismatch here
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", invoiceId: "invoice-ro" } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runReadOnlyPreflight(request, { apiOrigin: "http://test", readOnlyToken: "token", readOnlyTenantId: "tenant-ro", readOnlyInvoiceId: "invoice-ro", readOnlyRecipient: "ro@test.com" })).rejects.toThrow("Read-only recipient mismatch");
+    expect(request.post).not.toHaveBeenCalled();
+  });
+
+  it("throws on non-allowlisted mismatch and performs zero sends", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { email: "wrong@na.com" } }) }; // mismatch here
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-na", invoiceId: "invoice-na", items: [{invoiceId: "invoice-na"}] } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runNonAllowlistPreflight(request, { apiOrigin: "http://test", nonAllowlistedToken: "token", nonAllowlistTenantId: "tenant-na", nonAllowlistInvoiceId: "invoice-na", nonAllowlistedRecipient: "na@test.com" }, ["allow.com"])).rejects.toThrow("Non-allowlist fixture email does not match reserved negative recipient");
+    expect(request.post).not.toHaveBeenCalled();
+  });
 });
