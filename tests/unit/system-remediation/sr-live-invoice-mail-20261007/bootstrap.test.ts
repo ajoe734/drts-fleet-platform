@@ -629,12 +629,6 @@ describe("F1 bootstrap and teardown adapter", () => {
     });
 
     const realWriteFileSync = (await vi.importActual("node:fs") as typeof fs).writeFileSync;
-    let emittedBootstrap: any;
-    let emittedTeardown: any;
-    const writeFileSyncMock = vi.fn((pathStr: string, data: any) => {
-      if (pathStr.includes("evidence-bootstrap.json")) emittedBootstrap = JSON.parse(data);
-      if (pathStr.includes("evidence-teardown.json")) emittedTeardown = JSON.parse(data);
-    });
 
     // We can't easily hook node:fs inside the actual run if we want to run python,
     // so let's just use real node fs to write it to our tmpDir instead of mocking.

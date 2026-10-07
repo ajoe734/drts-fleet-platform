@@ -683,6 +683,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const roApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${readOnlyInvoiceId}`, portalOrigin).href;
         const roResponse = await page.request.get(roApiUrl);
         expect(roResponse.status()).toBe(200);
+        expect(roOwnDownloadObserved).toBe(true);
 
         // Verify the legitimate download link exists
         const roOwnDownloadCount = await page.locator(`a[href*="/downloads/tenant-invoice/${readOnlyInvoiceId}"]`).count();
