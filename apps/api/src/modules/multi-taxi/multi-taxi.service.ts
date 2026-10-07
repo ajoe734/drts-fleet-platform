@@ -475,12 +475,20 @@ export class MultiTaxiService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ) {
     const route = await resolveOrderPartnerNotificationRoute(
-      order, identity, this.partnerUserIdentityLinkRepository, this.tenantPartnerService,
+      order,
+      identity,
+      this.partnerUserIdentityLinkRepository,
+      this.tenantPartnerService,
     );
     if (!route) return;
-    await this.repository?.writeOrderPartnerNotificationRoute(route).catch((error) =>
-      this.repository?.reportPersistenceFailure(error, "write order partner notification route"),
-    );
+    await this.repository
+      ?.writeOrderPartnerNotificationRoute(route)
+      .catch((error) =>
+        this.repository?.reportPersistenceFailure(
+          error,
+          "write order partner notification route",
+        ),
+      );
   }
 
   async getPassengerRide(

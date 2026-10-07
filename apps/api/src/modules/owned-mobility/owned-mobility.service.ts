@@ -1873,18 +1873,25 @@ export class OwnedMobilityService
     const writeReferralRoute = async (tx?: OwnedMobilityQueryExecutor) => {
       if (!options?.writeReferralNotificationRoute) return;
       const route = await resolveOrderPartnerNotificationRoute(
-        order, identity, this.partnerUserIdentityLinkRepository, this.tenantPartnerService,
+        order,
+        identity,
+        this.partnerUserIdentityLinkRepository,
+        this.tenantPartnerService,
       );
       if (route) {
-        await this.ownedMobilityRepository?.writeOrderPartnerNotificationRoute(route, tx);
+        await this.ownedMobilityRepository?.writeOrderPartnerNotificationRoute(
+          route,
+          tx,
+        );
       }
     };
     const finalizeWithRoute = (
       previous: TenantBookingApprovalState,
       approval: TenantBookingApprovalRequestRecord | null,
-    ) => options?.writeReferralNotificationRoute
-      ? writeReferralRoute().then(() => finalizeCreation(previous, approval))
-      : finalizeCreation(previous, approval);
+    ) =>
+      options?.writeReferralNotificationRoute
+        ? writeReferralRoute().then(() => finalizeCreation(previous, approval))
+        : finalizeCreation(previous, approval);
 
     const previousApprovalState = order.approvalState;
     const governanceSnapshot = this.captureTenantGovernanceSnapshot();
@@ -1914,7 +1921,9 @@ export class OwnedMobilityService
 
     if (
       this.ownedMobilityRepository?.isEnabled() &&
-      (this.tenantPartnerService?.isPersistenceEnabled() || options?.writeReferralNotificationRoute)
+      (this.tenantPartnerService?.isPersistenceEnabled() ||
+        (options?.writeReferralNotificationRoute &&
+          this.partnerUserIdentityLinkRepository))
     ) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
@@ -1943,13 +1952,6 @@ export class OwnedMobilityService
           }
           return approvalRequest;
         })
-        // Publish into the in-memory order feed and dispatch events only after
-        // commit: readers must not race the frozen route/sequence setup.
-        .then((approvalRequest) => finalizeCreation(
-          previousApprovalState,
-          approvalRequest,
-          false,
-        ))
         .catch((error) => {
           // The DB transaction rolls back persisted rows, but the in-memory
           // governance state (quota ledger / approval requests) is mutated
@@ -1958,7 +1960,12 @@ export class OwnedMobilityService
           // hard block) leaves no residue in the in-memory read models.
           this.restoreTenantGovernanceSnapshot(governanceSnapshot);
           throw error;
-        });
+        })
+        // Publish into the in-memory order feed and dispatch events only after
+        // commit: readers must not race the frozen route/sequence setup.
+        .then((approvalRequest) =>
+          finalizeCreation(previousApprovalState, approvalRequest, false),
+        );
     }
 
     return this.withRollback(

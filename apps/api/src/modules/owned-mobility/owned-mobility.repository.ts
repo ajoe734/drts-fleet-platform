@@ -704,7 +704,10 @@ export class OwnedMobilityRepository {
           this.writeOrderPartnerNotificationRoute(route, executor),
         );
       } catch (error) {
-        this.reportPersistenceFailure(error, "write order partner notification route");
+        this.reportPersistenceFailure(
+          error,
+          "write order partner notification route",
+        );
         return null;
       }
     }
@@ -716,7 +719,10 @@ export class OwnedMobilityRepository {
     } catch (error) {
       await tx.query("ROLLBACK TO SAVEPOINT partner_notification_route");
       await tx.query("RELEASE SAVEPOINT partner_notification_route");
-      this.reportPersistenceFailure(error, "write order partner notification route");
+      this.reportPersistenceFailure(
+        error,
+        "write order partner notification route",
+      );
       return null;
     }
   }
