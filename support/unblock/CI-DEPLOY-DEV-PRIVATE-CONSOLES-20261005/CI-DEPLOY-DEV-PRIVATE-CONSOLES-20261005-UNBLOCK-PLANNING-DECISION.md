@@ -173,23 +173,24 @@ captured earlier because the write has not happened yet as of this handoff.
 
 ## Publication and final checks
 
-- Round 2 commit `24cf1c0ee31ff48945a42885ff487667790b6ea4` on
-  `claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`,
-  pushed to `origin` with a normal (non-force) push from
-  `a9a765986d94c657fb451c39952a450b9d0f07e7`.
-- `git rev-parse HEAD` and
+- Round 2 repair landed as two commits on
+  `claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+  off prior reviewed candidate `a9a765986d94c657fb451c39952a450b9d0f07e7`: the
+  F1/F2 fix itself, then this publication-evidence note. Each was pushed to
+  `origin` with a normal (non-force) push immediately after committing, and
+  `git rev-parse HEAD` was confirmed equal to
   `git rev-parse origin/claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
-  both equal `24cf1c0ee31ff48945a42885ff487667790b6ea4`; local and remote
-  branch heads match.
+  after each push (local/remote branch heads matched, no divergence). Per the
+  prior round's own note on avoiding self-referential SHA edits, the final
+  candidate SHA for this handoff is read off `git rev-parse HEAD` /
+  `CANDIDATE_SHA` at handoff time rather than hand-copied into this file.
 - `git status --short` showed only the two intended files
-  (`docs/01-decisions/SD-DP-20261007-002-...md`, this artifact) touched; no
-  unrelated files staged. `git diff --check` on the staged change exited
-  clean (no whitespace errors).
+  (`docs/01-decisions/SD-DP-20261007-002-...md`, this artifact) touched across
+  both commits; no unrelated files staged. `git diff --check` on each staged
+  change exited clean (no whitespace errors).
 - No source, workflow, or test file modified this round; only the two
   planning documents, consistent with this task's scope.
-- Existing open PR #2418 (`head`/`base` = this branch/`dev`) carries this new
-  commit once GitHub syncs; no new PR opened. Hosted CI for this round has not
-  been separately polled as of this writing — treat as pending/unknown, not
-  claimed green, until Codex's next review round confirms.
-- Handoff to Codex uses `CANDIDATE_SHA=24cf1c0ee31ff48945a42885ff487667790b6ea4`,
-  `CANDIDATE_BRANCH=claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`.
+- Existing open PR #2418 (`head`/`base` = this branch/`dev`) carries these new
+  commits once GitHub syncs; no new PR opened. Hosted CI for this round has
+  not been separately polled as of this writing — treat as pending/unknown,
+  not claimed green, until Codex's next review round confirms.
