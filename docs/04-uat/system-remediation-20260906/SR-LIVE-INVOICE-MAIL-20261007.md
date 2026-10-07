@@ -276,3 +276,15 @@ This document records the completion and verification of the live invoice mail E
 1. `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v`: PASS 13/13.
 2. `git diff --check HEAD^ HEAD`: PASS (resolved previous trailing whitespace).
 - **Documentation Hygiene**: Clarified that while the actual signature is redacted from persisted proofs, the helper correctly requires and validates its presence and non-whitespace shape beforehand.
+
+## Codex Review Rejection (Candidate: f3733e8a8d4733d5408cf7d9f50a659f3926935e / Generation: 35ee22c2413841eb8ccfb5f04ba49bfc)
+
+- **F11 (P1 newly discovered in full scoped Vitest: spec-guards.test.ts failure)**:
+  - Repaired `spec-guards.test.ts` to use valid canonical production-shaped timestamps (`signed_at` and `expires_at`) instead of invalid values like `1` and `2`, resolving the regression that prevented Vitest suite execution after `evaluateDownloadResponse` correctly required canonical dates.
+- **F4/F6 (P2 REPEATED bounded gate-regression gap: missing effective persisted-query negatives)**:
+  - Repaired `test_hosted_gate.py` to properly build `malformed_proof` by deep-copying known valid emitted primary/read_only proof objects and mutating ONLY the persisted query via `urlencode`. This ensures the gate negative coverage doesn't short-circuit on missing unrelated claims (like `matched`, `downloadedHash`, etc.) and effectively asserts against the invalid query parameters.
+  - Added negative cases for missing claims (`None`) to verify independent rejection of missing/duplicate/blank claims on both roles.
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task: PASS 13/13 exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: PASS 38/38 exit 0.

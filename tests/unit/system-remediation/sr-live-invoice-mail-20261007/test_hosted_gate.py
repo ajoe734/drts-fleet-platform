@@ -298,12 +298,12 @@ class HostedGateTest(unittest.TestCase):
         async function run() {
             const input = JSON.parse(fs.readFileSync(0, 'utf8'));
             const searchParams = new URLSearchParams();
-            searchParams.append('manifest_hash', input.manifest_hash);
-            searchParams.append('signed_at', input.signed_at);
-            searchParams.append('expires_at', input.expires_at);
-            searchParams.append('key_id', input.key_id);
-            searchParams.append('sig_v', input.sig_v);
-            searchParams.append('sig', input.sig);
+            if (input.manifest_hash !== null) searchParams.append('manifest_hash', input.manifest_hash);
+            if (input.signed_at !== null) searchParams.append('signed_at', input.signed_at);
+            if (input.expires_at !== null) searchParams.append('expires_at', input.expires_at);
+            if (input.key_id !== null) searchParams.append('key_id', input.key_id);
+            if (input.sig_v !== null) searchParams.append('sig_v', input.sig_v);
+            if (input.sig !== null) searchParams.append('sig', input.sig);
 
             if (input.duplicate_sig) {
                 searchParams.append('sig', input.sig);
@@ -374,15 +374,27 @@ class HostedGateTest(unittest.TestCase):
         negatives = [
             {'sig': '   '},
             {'sig': ''},
+            {'sig': None},
             {'duplicate_sig': True},
             {'duplicate_hash': True},
             {'signed_at': '2026-02-30T19:00:00.000Z'},
             {'signed_at': '2026-10-07'},
             {'signed_at': '2026-W41-3'},
             {'signed_at': '2026-10-07T19:00:00'},
+            {'signed_at': ''},
+            {'signed_at': None},
+            {'expires_at': '2026-02-30T19:00:00.000Z'},
+            {'expires_at': '2026-10-07'},
+            {'expires_at': '2026-W41-3'},
             {'expires_at': 'invalid'},
+            {'expires_at': ''},
+            {'expires_at': None},
             {'key_id': '   '},
-            {'sig_v': 'not_int'}
+            {'key_id': ''},
+            {'key_id': None},
+            {'sig_v': 'not_int'},
+            {'sig_v': ''},
+            {'sig_v': None}
         ]
 
         roles = [
@@ -407,34 +419,38 @@ class HostedGateTest(unittest.TestCase):
                     self.assertFalse(res['success'], f"Helper should reject {neg} for {role}")
 
                     # 2. Test independent gate rejection with persisted malformed proof
-                    query_params = []
+                    from urllib.parse import urlencode
+
+                    gate_kwargs = kwargs.copy()
+                    if 'sig' not in neg:
+                        gate_kwargs['sig'] = 'REDACTED'
+                    
+                    q_params = []
                     for k in ['manifest_hash', 'signed_at', 'expires_at', 'key_id', 'sig_v', 'sig']:
-                        query_params.append(f"{k}={kwargs[k]}")
-                    if kwargs.get('duplicate_sig'): query_params.append(f"sig={kwargs['sig']}")
-                    if kwargs.get('duplicate_hash'): query_params.append(f"manifest_hash={kwargs['manifest_hash']}")
+                        if gate_kwargs[k] is not None:
+                            q_params.append((k, gate_kwargs[k]))
+                    if gate_kwargs.get('duplicate_sig'): q_params.append(('sig', gate_kwargs['sig']))
+                    if gate_kwargs.get('duplicate_hash'): q_params.append(('manifest_hash', gate_kwargs['manifest_hash']))
 
-                    malformed_url = f"http://portal.invalid/downloads/tenant-invoice/{inv_id}?{'&'.join(query_params)}"
-
-                    malformed_proof = {
-                        'url': malformed_url,
-                        'status': 200,
-                        'headers': {'content-type': 'application/pdf', 'x-drts-candidate-sha': candidate_sha},
-                        'manifestHash': kwargs['manifest_hash']
-                    }
+                    malformed_query = "?" + urlencode(q_params)
 
                     ev = copy.deepcopy(self.evidence)
                     ev['invoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
                     ev['roInvoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
 
                     if role == 'primary':
+                        malformed_proof = copy.deepcopy(res_primary['proof'])
+                        malformed_proof['query'] = malformed_query
                         ev['downloadProof'] = malformed_proof
                         for c in ev['httpCalls']:
                             if c.get('path') == 'read_only_portal':
-                                c['download_proof'] = res_ro['proof'] # valid ro proof
+                                c['download_proof'] = copy.deepcopy(res_ro['proof']) # valid ro proof
                     else:
-                        ev['downloadProof'] = res_primary['proof'] # valid primary proof
+                        ev['downloadProof'] = copy.deepcopy(res_primary['proof']) # valid primary proof
                         for c in ev['httpCalls']:
                             if c.get('path') == 'read_only_portal':
+                                malformed_proof = copy.deepcopy(res_ro['proof'])
+                                malformed_proof['query'] = malformed_query
                                 c['download_proof'] = malformed_proof
 
                     self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed', f"Gate should reject {neg} for {role}")

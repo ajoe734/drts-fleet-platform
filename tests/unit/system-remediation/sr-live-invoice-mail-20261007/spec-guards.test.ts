@@ -443,9 +443,9 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
   });
 
   it("discards unknown query keys and emits explicit allowlist", async () => {
-    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=1&expires_at=2&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1&token=SYNTHETIC_TOKEN_SENTINEL` });
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1&token=SYNTHETIC_TOKEN_SENTINEL` });
     const proof = await evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1");
-    expect(proof.query).toBe(`?manifest_hash=${validManifestHash}&signed_at=1&expires_at=2&key_id=3&sig_v=1&sig=REDACTED`);
+    expect(proof.query).toBe(`?manifest_hash=${validManifestHash}&signed_at=2026-10-07T19%3A00%3A00.000Z&expires_at=2026-10-07T19%3A15%3A00.000Z&key_id=3&sig_v=1&sig=REDACTED`);
     expect(proof.query).not.toContain("SYNTHETIC_TOKEN_SENTINEL");
   });
 });
