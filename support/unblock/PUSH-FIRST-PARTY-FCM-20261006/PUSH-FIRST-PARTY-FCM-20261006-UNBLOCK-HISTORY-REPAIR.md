@@ -319,3 +319,69 @@ force-push, product repair, acceptance or runtime was performed. The H1
 documentation result needs fresh independent review on the new candidate;
 old e11/0cf7 hosted checks cannot qualify it. Local format/trailer checks and
 exact publication identity are recorded in the new candidate handoff.
+
+## 7. CI composition repair after H1 approval — 2026-10-07
+
+Historical candidate `23e6284a03216beb0a56734f4d76c941041e55de`, generation
+`7b4e33197293481d82eec7d7d39de4b9`, received Codex2 approval at 16:06:44Z.
+That approval resolved H1, but its hosted integration run
+[37648852953](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37648852953)
+finished **failure**: 313 tests passed and one UV-EXEC atomicity snapshot
+comparison failed because an identical trace row changed position. The old
+approval and failing run remain historical evidence; neither is assigned to
+the successor candidate. This is a separate CI composition blockage, not a
+second H1 rejection or a successful FCM privacy regression.
+
+Dependency `SR-CI-UV-EXEC-SNAPSHOT-ORDER-20261007` is now canonically `done`.
+Its exact candidate `dc467d7eeebe87c2cdd8ac4351b6409aebfd4b99` has actual
+assigned-reviewer **Codex** approval, same-SHA successful hosted runs
+[37659068458](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37659068458)
+and [37659068307](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37659068307),
+both required acceptance keys, and real merge
+`19f351a86592d38f4edcb7c01de58145817e19f9` through
+[PR #2422](https://github.com/ajoe734/drts-fleet-platform/pull/2422).
+The dependency's committed document/trailer still names Pi; the actual review
+identity above comes from its canonical task record, not that stale label.
+
+Read source: `apps/api/tests/integration/uv-exec-006.integration.test.ts`,
+`readState` at lines 2173–2189. The merged fix adds deterministic ordering by
+source discriminator and each table's primary key to the six-branch snapshot,
+retaining complete record payloads, multiplicity and atomicity comparisons.
+The dependency's saved hosted integration log reports 132 UV tests, 314 total
+integration tests, and 5 separately executed PostgreSQL UAT tests passing.
+These are **dependency-SHA** results, not CI results for this helper successor.
+Sources in the canonical repository:
+`.local/full-system-completion-20261007/round4/uv-snapshot-task-done-readback.json`
+and `uv-snapshot-pg-integration.log` in the same directory. Live PR/run/task
+readbacks independently confirm the candidate, successful conclusions and merge.
+
+Before synchronization, local HEAD, live helper branch and open PR #2410 head
+all equalled `23e6284a...`; cached local/remote comparison was `0 0` and the
+worktree was clean. `git fetch --no-prune origin` selected dev
+`19f351a86592d38f4edcb7c01de58145817e19f9`. An ordinary
+`git merge --no-ff origin/dev` completed without conflicts as
+`0f0b88197366176aabb12827310c338d6ee7c8a1`, with task-scoped trailers.
+Both the old helper candidate and the dependency merge are ancestors.
+The diff against that dev base contains only this helper artifact. Other
+files introduced by the merge are already accepted trunk changes; this helper
+does not independently edit product code, tests, workflows or operator tooling.
+Publication uses the existing PR #2410 and normal non-force push, with exact
+local/live-remote/PR identity and check results bound in the new handoff.
+
+| Finding / acceptance | Source and repair boundary | Completed verification / limits |
+| --- | --- | --- |
+| Failed helper CI composition | Old 23e6284a run failure; merged dependency's `readState` repair | Live dependency PR/run/status readbacks exit 0; source diff and saved hosted summaries read. New helper review/CI/merge remain required; no unchanged-old-SHA rerun. |
+| Preserve H1 history classification | Sections 1–6 retained; live parent ref and PR events queried again | Exact parent `ls-remote --exit-code` still exits 2 with empty output; PR #2408 merge/deletion events retained. No pruning, reset, amend, rebase or force push. |
+| Preserve parent containment and next step | Release CLI parent/helper slices; original candidate/review/merge; section 3 continuation | Assertions exit 0: parent and helper disposition blocked/Codex2; a10 candidate/review and 5c09 merge retained; privacy acceptance key empty. Parent's newer 16:11:49Z Supervisor note explicitly requests independent adjudication/reopen and original-owner repair. Its wording differs from the historical helper resolution next; section 4's earlier equality is not claimed as current equality. Both still describe the same blocked continuation. |
+| Task-scoped canonical delivery | Ordinary merge plus artifact evidence update in PR #2410 | Ancestry and artifact-only diff assertions exit 0. Same-SHA publication, local checks and fresh generation are recorded in handoff. Old 23e6284a approval/failure stay in history. |
+| Product/privacy regression boundary | Original provider and transport compared to successor | `git diff --exit-code a10e0b230... HEAD --` both source paths exits 0. Existing revoked/cancelled counterexamples remain unresolved; no product fix or new privacy acceptance is asserted. |
+
+Machine-specific command arrays, exit codes, UTC timestamps and readbacks for
+this round are stored at
+`.local/push-fcm-history-repair/composition-20261007/evidence.json` in this
+owner worktree. Content/whitespace and existing commit-trailer checks run on
+the final commit before handoff; results belong to the exact SHA recorded
+there. Hosted CI triggered by publication is a separate pending lifecycle
+gate, not a locally executed test. No product, PG, browser or development
+server is started on this VM. FCM remains default-disabled; the helper does
+not adjudicate/reopen the parent or grant either outstanding acceptance key.
