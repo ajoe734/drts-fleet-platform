@@ -45,28 +45,53 @@ def evaluate(env, evidence, provider):
     sha256 = mb.get("body_sha256")
     has_inbox_proof = (mb.get("matched_content") is True and mb.get("candidate_sha") == sha and
                        mb.get("delivery_id") == dl_id and dl_id is not None and 
-                       isinstance(rfc, str) and len(rfc) > 5 and "@" in rfc and
+                       isinstance(rfc, str) and rfc == f"<{dl_id}@notification.drts.invalid>" and
                        isinstance(sha256, str) and len(sha256) == 64 and all(c in "0123456789abcdef" for c in sha256))
                        
     rfc2 = mb2.get("rfc_message_id")
     sha256_2 = mb2.get("body_sha256")
     has_resend_inbox_proof = (mb2.get("matched_content") is True and mb2.get("candidate_sha") == sha and
                        resend and mb2.get("delivery_id") == resend.get("delivery_id") and resend.get("delivery_id") is not None and 
-                       isinstance(rfc2, str) and len(rfc2) > 5 and "@" in rfc2 and
+                       isinstance(rfc2, str) and rfc2 == f"<{resend.get('delivery_id')}@notification.drts.invalid>" and
                        isinstance(sha256_2, str) and len(sha256_2) == 64 and all(c in "0123456789abcdef" for c in sha256_2))
     
-    # F4: downloadProof must be strict True
-    has_download = bool(get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200 and evidence.get("downloadProof") is True)
+    # F4: enforce download proof is valid object
+    dl_proof = evidence.get("downloadProof")
+    if not isinstance(dl_proof, dict):
+        dl_proof = {}
+    has_download = bool(
+        get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
+        and dl_proof.get("matched") is True
+        and isinstance(dl_proof.get("manifestHash"), str) and len(dl_proof.get("manifestHash")) == 64
+        and isinstance(dl_proof.get("downloadedBytes"), int) and dl_proof.get("downloadedBytes") > 0
+        and isinstance(dl_proof.get("contentType"), str) and "pdf" in dl_proof.get("contentType")
+    )
     
+    # F5: Bind durable deliveries
+    durable_deliveries = evidence.get("durableDeliveries") or []
+    def get_delivery(scenario):
+        return next((d for d in durable_deliveries if d.get("scenario") == scenario), None)
+        
+    first_send_del = get_delivery("first_send")
+    resend_del = get_delivery("intentional_resend")
+    na_del = get_delivery("non_allowlisted")
+    
+    # Check normal send and retry correlation
+    has_normal_send = bool(first_send and first_send.get("status") == 201)
     has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and dl_id is not None)
     
-    # F4: enforce path on durable_get
-    durable_get_call = get_call("GET", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="durable_get")
-    has_durable_get = bool(durable_get_call and durable_get_call.get("status") == 200 and evidence.get("durableHistoryCount", 0) > 0)
+    # Check intentional resend
+    has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
+    
+    # Check durable delivery correlations
+    has_durable_get = bool(
+        first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") is not None and first_send_del.get("attemptsCount", 0) > 0 and
+        resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") is not None and
+        na_del and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED"
+    )
     
     has_wrong_tenant = bool(get_call("POST", scenario="wrong_tenant") and get_call("POST", scenario="wrong_tenant").get("status") == 403)
-    has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
-    has_normal_send = bool(first_send and first_send.get("status") == 201)
+
 
     # Missing fixture/role authority remains pending rather than fabricated pass.
     # F4: strictly require the key to be present and empty
@@ -97,6 +122,12 @@ def main():
             return value if isinstance(value, dict) else {}
         except (OSError, ValueError):
             return {}
+            
+    teardown_ev = read("evidence-teardown.json")
+    if not (teardown_ev.get("success") is True and teardown_ev.get("attempted", 0) > 0 and teardown_ev.get("failures", -1) == 0):
+        print("Mail acceptance: failed - missing or failed cleanup evidence")
+        raise SystemExit(1)
+        
     result = evaluate(os.environ, read("evidence-mail.json"), read("evidence-provider.json"))
     (directory / "run-status.json").write_text(json.dumps(result, indent=2) + "\n")
     print("Mail acceptance: " + result["status"])

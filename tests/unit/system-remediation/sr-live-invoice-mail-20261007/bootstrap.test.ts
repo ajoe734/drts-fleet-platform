@@ -2,6 +2,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { bootstrapMailSession } from '../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-bootstrap';
 import { teardown } from '../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-teardown';
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    appendFileSync: actual.appendFileSync
+  };
+});
+
 describe('F1 bootstrap and teardown adapter', () => {
   it('maps invoice env vars properly and mocks IO without credential issuance on mismatch', async () => {
     const env = {
@@ -123,7 +133,8 @@ describe('F1 bootstrap and teardown adapter', () => {
         const authHeader = opts.headers['authorization'];
         const token = authHeader ? authHeader.split(' ')[1] : '';
         const ctx = tokensMap[token] || { tenant_id: '', actor_id: '' };
-        return { ok: true, headers: defaultHeaders, json: async () => ({ data: { active: true, identity: { realm: 'tenant', actor_type: 'tenant_admin', actor_id: ctx.actor_id, tenant_id: ctx.tenant_id, roles: ['tenant_admin'] } } }) };
+        const role = ctx.actor_id === '10000000-0000-0000-0000-000000000902' ? 'tenant_viewer' : 'tenant_admin';
+        return { ok: true, headers: defaultHeaders, json: async () => ({ data: { active: true, identity: { realm: 'tenant', actor_type: 'tenant_admin', actor_id: ctx.actor_id, tenant_id: ctx.tenant_id, roles: [role] } } }) };
       }
       if (url.includes('identity/step-up-proofs')) {
         return { ok: true, headers: defaultHeaders, json: async () => ({ data: { required: true, step_up_reference: "mock-step-up-ref", action_id: "tenant:users:create" } }) };
@@ -209,5 +220,46 @@ describe('F1 bootstrap and teardown adapter', () => {
     expect((tdFetchMock.mock.calls[0]?.[1] as any)?.headers?.authorization).toBe("Bearer token1");
     expect((tdFetchMock.mock.calls[1]?.[1] as any)?.headers?.authorization).toBe("Bearer token2");
     expect((tdFetchMock.mock.calls[2]?.[1] as any)?.headers?.authorization).toBe("Bearer token3");
+  });
+  
+  it('does not leak raw upstream errors to console.error', async () => {
+    const env = {
+      DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
+      DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
+      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
+    };
+
+    const fetchMock = vi.fn().mockRejectedValue(new Error("SYNTHETIC_UPSTREAM_SECRET_SENTINEL"));
+    
+    const deps = {
+      fetch: fetchMock as any,
+      mask: vi.fn(),
+      appendEnvironment: vi.fn(),
+      readMailbox: vi.fn().mockReturnValue("billing@company.com"),
+      assertions: vi.fn().mockReturnValue({ next: vi.fn().mockResolvedValue("mocked-token") })
+    };
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    
+    let caughtError: any;
+    try {
+      await bootstrapMailSession(env, deps, false);
+    } catch (e) {
+      caughtError = e;
+    }
+    
+    expect(caughtError).toBeDefined();
+    expect(caughtError.message).toContain("Mail session bootstrap failed");
+    expect(caughtError.message).not.toContain("SYNTHETIC_UPSTREAM_SECRET_SENTINEL");
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("SYNTHETIC_UPSTREAM_SECRET_SENTINEL") }));
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+    
+    consoleErrorSpy.mockRestore();
   });
 });

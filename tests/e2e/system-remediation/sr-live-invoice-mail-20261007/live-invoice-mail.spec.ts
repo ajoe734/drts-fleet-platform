@@ -24,7 +24,8 @@ const evidenceData = {
   trackedResources: [] as any[],
   mailboxEvidence: {} as any,
   resendMailboxEvidence: {} as any,
-  downloadProof: false,
+  downloadProof: null as any,
+  durableDeliveries: [] as any[],
   durableHistoryCount: 0,
   tenantId: "",
   invoiceId: "",
@@ -110,6 +111,12 @@ test.describe("Live Invoice Mail Acceptance", () => {
       throw new Error("Billing profile email does not match authorized recipient");
     }
 
+    if (process.env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED !== "true") {
+      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
+      evidenceData.errors.push("Missing explicit authorization for the target fixture");
+      throw new Error("Missing explicit DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED=true");
+    }
+
     
     // 2a. Wrong invoice mismatch
     const generatedMissingId = crypto.randomUUID();
@@ -144,6 +151,10 @@ test.describe("Live Invoice Mail Acceptance", () => {
       if (roInvoiceData.data?.tenantId !== readOnlyTenantId || roInvoiceData.data?.invoiceId !== readOnlyInvoiceId) {
         throw new Error("Read-only invoice fixture mismatch");
       }
+      const roProfileCheck = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
+        headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
+      });
+      expect(roProfileCheck.status()).toBe(200);
       const readOnlyResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
       });
@@ -193,6 +204,12 @@ test.describe("Live Invoice Mail Acceptance", () => {
            const dDel = dData.data?.deliveries?.find((d: any) => d.deliveryId === naDeliveryId);
            if (dDel?.status === "failed" && dDel?.attempts?.some((a: any) => a.outcome === "failed" && a.errorCode === "SMTP_RECIPIENT_NOT_ALLOWLISTED" && a.acceptedAt === null && a.retryable === false)) {
              isRejected = true;
+             evidenceData.durableDeliveries.push({
+               scenario: "non_allowlisted",
+               deliveryId: naDeliveryId,
+               status: dDel.status,
+               errorCode: "SMTP_RECIPIENT_NOT_ALLOWLISTED"
+             });
              break;
            }
          }
@@ -273,11 +290,37 @@ test.describe("Live Invoice Mail Acceptance", () => {
       method: "GET", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "durable_get", status: getMailResponse.status(),
     });
     expect(getMailResponse.status()).toBe(200);
-    const resendAttempt = mailData.data?.deliveries?.find((d: any) => d.id === resendResult.data?.deliveryId);
+    
+    const firstDelivery = mailData.data?.deliveries?.find((d: any) => d.deliveryId === deliveryId);
+    expect(firstDelivery).toBeTruthy();
+    const successfulFirstAttempt = firstDelivery.attempts?.find((a: any) => a.outcome === "sent" || (a.acceptedAt && !a.errorCode));
+    expect(successfulFirstAttempt).toBeTruthy();
+    expect(successfulFirstAttempt.acceptedAt).toBeTruthy();
+    
+    evidenceData.durableDeliveries.push({
+      scenario: "first_send",
+      deliveryId: deliveryId,
+      idempotencyKey: idempotencyKey,
+      status: firstDelivery.status,
+      attemptsCount: firstDelivery.attempts?.length,
+      acceptedAt: successfulFirstAttempt.acceptedAt
+    });
+
+    const resendAttempt = mailData.data?.deliveries?.find((d: any) => d.deliveryId === resendResult.data?.deliveryId);
     expect(resendAttempt).toBeTruthy();
     const successfulAttempt = resendAttempt.attempts?.find((a: any) => a.outcome === "sent" || (a.acceptedAt && !a.errorCode));
     expect(successfulAttempt).toBeTruthy();
     expect(successfulAttempt.acceptedAt).toBeTruthy(); // Correlation validation
+    
+    evidenceData.durableDeliveries.push({
+      scenario: "intentional_resend",
+      deliveryId: resendResult.data?.deliveryId,
+      idempotencyKey: newIdempotencyKey,
+      status: resendAttempt.status,
+      attemptsCount: resendAttempt.attempts?.length,
+      acceptedAt: successfulAttempt.acceptedAt
+    });
+    
     evidenceData.durableHistoryCount = mailData.data?.deliveries?.length || 0;
 
     // Mailbox observation
@@ -340,11 +383,10 @@ test.describe("Live Invoice Mail Acceptance", () => {
     expect(artifactUrlPath).toMatch(/^\/downloads\/(invoice|receipt)\//);
     
     // UI Download
-    const popupPromise = page.waitForEvent('popup');
-    const downloadLocator = page.locator('a[href^="/downloads/invoice/"], a[href^="/downloads/receipt/"], button[data-testid*="download"], button:has-text("Download")').first();
+    const responsePromise = context.waitForEvent('response', res => res.url().includes(artifactUrlPath));
+    const downloadLocator = page.locator(`a[href^="${artifactUrlPath}"], button[data-testid*="download"], button:has-text("Download")`).first();
     await downloadLocator.click();
-    const popup = await popupPromise;
-    const response = await popup.waitForResponse(res => res.url().includes("/downloads/"));
+    const response = await responsePromise;
     expect(response.status()).toBe(200);
     const contentType = response.headers()['content-type'];
     expect(contentType).toMatch(/application\/pdf/);
@@ -358,18 +400,27 @@ test.describe("Live Invoice Mail Acceptance", () => {
     const downloadedHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
     expect(downloadedHash).toBe(manifestHash);
     
-    evidenceData.downloadProof = true;
+    evidenceData.downloadProof = {
+      matched: true,
+      manifestHash: manifestHash,
+      downloadedBytes: bodyBuffer.length,
+      contentType: contentType,
+    };
     
-    // Check missing token isolation
-    const privateResponse = await request.get(response.url(), { maxRedirects: 0 });
+    // Check missing token isolation on portal
+    const unauthPortalResponse = await request.get(response.url(), { maxRedirects: 0 });
+    expect([302, 307]).toContain(unauthPortalResponse.status());
+    expect(unauthPortalResponse.headers()['location']).toMatch(/\/login/);
+    
+    // Check missing token isolation on API directly
+    const apiDownloadUrl = new URL(artifactUrlPath, apiOrigin).href;
+    const privateResponse = await request.get(apiDownloadUrl, { maxRedirects: 0 });
     expect(privateResponse.status()).toBe(401);
-
     
-    const fullArtifactUrl = new URL(artifactUrlPath, portalOrigin).href;
     evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
     
-    // Invalid link scenario (F3)
-    const fullArtifactUrlObj = new URL(fullArtifactUrl);
+    // Invalid link scenario (F3) - API directly
+    const fullArtifactUrlObj = new URL(apiDownloadUrl);
     if (fullArtifactUrlObj.searchParams.has("sig")) {
       fullArtifactUrlObj.searchParams.set("sig", "invalid");
     } else {
@@ -379,18 +430,17 @@ test.describe("Live Invoice Mail Acceptance", () => {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
       maxRedirects: 0
     });
-    // Signature mutation should result in 403 Forbidden
     expect(invalidDownloadResponse.status()).toBe(403);
+    const errorBody = await invalidDownloadResponse.json().catch(() => ({}));
+    expect(errorBody.error?.code).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
     
     // Missing portal deployed-SHA verification header check
-    const badShaResponse = await request.get(fullArtifactUrlObj.toString(), {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId, "x-drts-candidate-sha": "invalidsha" },
+    const badShaResponse = await request.get(response.url(), {
+      headers: { "x-drts-candidate-sha": "invalidsha" },
       maxRedirects: 0
     });
-    // Expected to reject mismatched SHA if it enforces it (might be 400 or 403)
-    // Actually the doc says "portal deployed-SHA verification remain unimplemented."
-    // If it's unimplemeted, we just verify it exists if we need to.
-    expect(badShaResponse).toBeDefined();
+    // Record negative observation
+    evidenceData.httpCalls.push({ method: "GET", path: "bad_sha_portal", status: badShaResponse.status() });
   });
 });
 

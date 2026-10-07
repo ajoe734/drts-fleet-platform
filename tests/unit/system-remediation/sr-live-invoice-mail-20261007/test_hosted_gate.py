@@ -23,10 +23,15 @@ class HostedGateTest(unittest.TestCase):
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [], 
                          'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'identityEmail': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                         'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': 'valid@message.id', 'body_sha256': 'a' * 64},
-                         'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': 'valid@message.id', 'body_sha256': 'a' * 64},
-                         'downloadProof': True,
-                         'durableHistoryCount': 1,
+                         'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': '<d2@notification.drts.invalid>', 'body_sha256': 'a' * 64},
+                         'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': '<d1@notification.drts.invalid>', 'body_sha256': 'a' * 64},
+                         'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf'},
+                         'durableDeliveries': [
+                             {'scenario': 'first_send', 'deliveryId': 'd1', 'acceptedAt': '2026-10-07T00:00:00Z', 'attemptsCount': 1, 'status': 'sent'},
+                             {'scenario': 'intentional_resend', 'deliveryId': 'd2', 'acceptedAt': '2026-10-07T00:01:00Z', 'attemptsCount': 1, 'status': 'sent'},
+                             {'scenario': 'non_allowlisted', 'deliveryId': 'd3', 'status': 'failed', 'errorCode': 'SMTP_RECIPIENT_NOT_ALLOWLISTED'}
+                         ],
+                         'durableHistoryCount': 2,
                          'httpCalls': [
                              {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
