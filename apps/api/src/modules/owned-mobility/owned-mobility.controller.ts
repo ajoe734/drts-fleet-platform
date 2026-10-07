@@ -663,14 +663,14 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/resolve-exception-hold")
-  resolveExceptionHold(
+  async resolveExceptionHold(
     @Param("orderId") orderId: string,
     @Body() command: ResolveExceptionHoldCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.resolveExceptionHold(
+      await this.ownedMobilityService.resolveExceptionHold(
         orderId,
         command,
         identity,
@@ -699,14 +699,14 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/approve-override")
-  approveExceptionOverride(
+  async approveExceptionOverride(
     @Param("orderId") orderId: string,
     @Body() command: ApproveExceptionOverrideCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.approveExceptionOverride(
+      await this.ownedMobilityService.approveExceptionOverride(
         orderId,
         command,
         identity,
