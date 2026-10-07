@@ -146,6 +146,40 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         # some fixed/unbounded timeout.
         self.assertEqual(calls[0], 3)
 
+    def test_late_response_after_deadline_is_rejected_even_with_a_valid_200(self):
+        """Regression for the captured counterexample against the prior
+        cut (.local/full-system-completion-20261007/round3/
+        cold-postresponse-counterexample.json): a single attempt starts at
+        t=0 with a 3s deadline/timeout, but the call itself does not
+        actually return until t=4s -- past the deadline -- with a
+        perfectly well-formed clean 200 receipt. The supplied `timeout=`
+        only bounds a socket operation, not the whole call, so this must
+        still fail closed instead of being accepted as a pass."""
+        clock = {"now": 1000.0}
+        calls = []
+
+        def fake_monotonic():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += seconds
+
+        def scan_fn(content, timeout=None):
+            calls.append(timeout)
+            clock["now"] += 4  # resolves at t=4s despite a 3s deadline/timeout
+            return 200, {"sha256": "abc", "sizeBytes": 3, "verdict": "clean"}
+
+        with patch.object(verify, "SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", 3.0), \
+             patch.object(verify.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(verify.time, "sleep", side_effect=fake_sleep), \
+             self.assertRaises(AssertionError) as error:
+            verify.wait_for_initial_clean_scan(scan_fn, b"clean-bytes")
+
+        self.assertIn("after the total deadline had already expired", str(error.exception))
+        # Only the one, late-resolving attempt was ever made.
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0], 3)
+
     def test_single_clock_retry_still_passes_comfortably_inside_the_deadline(self):
         """Same single-clock shape as the counterexample regression, but
         with slack to spare, so the stricter pre-attempt deadline check
@@ -377,6 +411,49 @@ class TestScannerInitialReadinessIntegrationTest(unittest.TestCase):
 
         self.assertIn("deadline expired before another attempt could start", str(error.exception))
         # The would-be-clean second request must never have been issued.
+        self.assertEqual(len(calls), 1)
+
+    @patch("urllib.request.urlopen")
+    @patch("os.environ.get")
+    def test_late_response_after_deadline_is_rejected_through_the_real_entrypoint(self, mock_env, mock_urlopen):
+        """Same counterexample clock shape as
+        WaitForInitialCleanScanTest.test_late_response_after_deadline_is_rejected_even_with_a_valid_200,
+        driven through the real `test_scanner()` entrypoint (urlopen
+        mocked) -- proves a single attempt that resolves after the
+        deadline is rejected in the actual call path Test 1 uses, even
+        though urlopen returns a well-formed clean 200."""
+        mock_env.return_value = "fake-token"
+        clock = {"now": 1000.0}
+        calls = []
+
+        def fake_monotonic():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += seconds
+
+        def urlopen_side_effect(req, timeout=30):
+            calls.append(timeout)
+            clock["now"] += 4  # resolves at t=4s despite a 3s deadline/timeout
+            resp = MagicMock()
+            resp.status = 200
+            resp.read = MagicMock(return_value=json.dumps({
+                "sha256": verify.hashlib.sha256(verify.CLEAN).hexdigest(),
+                "sizeBytes": len(verify.CLEAN), "verdict": "clean",
+            }).encode())
+            cm = MagicMock()
+            cm.__enter__.return_value = resp
+            return cm
+
+        mock_urlopen.side_effect = urlopen_side_effect
+
+        with patch.object(verify, "SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", 3.0), \
+             patch.object(verify.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(verify.time, "sleep", side_effect=fake_sleep), \
+             self.assertRaises(AssertionError) as error:
+            verify.test_scanner("http://fake")
+
+        self.assertIn("after the total deadline had already expired", str(error.exception))
         self.assertEqual(len(calls), 1)
 
 

@@ -62,6 +62,16 @@ def wait_for_initial_clean_scan(scan_fn, content):
     pass. The remaining budget is also threaded into `scan_fn` as
     `timeout=`, so a single slow request cannot itself run past the
     deadline, and the poll sleep is capped to whatever budget is left.
+
+    The deadline is checked AGAIN immediately after `scan_fn` returns, for
+    the exact same reason a single attempt is given `remaining` instead of
+    an unbounded timeout: the `timeout=` passed to `scan_fn` only bounds
+    individual socket operations (connect/read), not the attempt's whole
+    wall-clock duration -- a response whose headers/body arrive just past
+    that per-socket-op budget can still complete and look like a perfectly
+    valid 200 receipt. Without this second check, that stale result would
+    be accepted as success even though it answered after the deadline had
+    already expired.
     """
     deadline = time.monotonic() + SCANNER_INITIAL_READINESS_DEADLINE_SECONDS
     attempt = 0
@@ -80,6 +90,12 @@ def wait_for_initial_clean_scan(scan_fn, content):
         attempt += 1
         status, body = scan_fn(content, timeout=min(remaining, 30))
         last_status, last_body = status, body
+        if time.monotonic() > deadline:
+            fail(
+                "attempt completed after the total deadline had already expired "
+                f"(status={status}, body={body}); the supplied timeout bounds a "
+                "single socket operation, not the whole call"
+            )
         if status != 503 or not isinstance(body, dict) or body.get("error") != "scan_engine_not_ready":
             return status, body
         if attempt >= SCANNER_INITIAL_READINESS_MAX_ATTEMPTS:

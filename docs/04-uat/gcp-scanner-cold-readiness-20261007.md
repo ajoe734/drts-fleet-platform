@@ -78,6 +78,21 @@ after (not an auth regression).
     (`scan()`'s own `urllib.request.urlopen` timeout, capped at the
     pre-existing 30s), and the poll sleep is capped to whatever budget is
     actually left instead of always sleeping the full poll interval.
+  - **Round-4 fix to the round-3 cut**: a further counterexample
+    (`.local/full-system-completion-20261007/round3/cold-postresponse-counterexample.json`)
+    showed the round-3 cut still checked the deadline only *before* each
+    attempt starts, not after it returns: a single attempt begun at `t=0`
+    with a 3s deadline/timeout can still take 4s of real wall-clock time
+    to actually complete (the supplied `timeout=` bounds one socket
+    operation inside `urlopen`, not the whole connect+send+receive+parse
+    sequence), and come back with a perfectly well-formed clean `200`
+    receipt after the deadline has already passed. The deadline is now
+    checked a second time immediately after `scan_fn` returns and before
+    any result (success or otherwise) is handed back; a result that
+    arrives past the deadline fails closed with an explicit "after the
+    total deadline had already expired" error instead of being accepted.
+    Attempts that complete inside the deadline (the existing 503-retry and
+    on-time-success paths) are unaffected.
 
 ## Regression coverage
 
@@ -92,15 +107,20 @@ after (not an auth regression).
   immediately instead of retried away, the round-3 single-clock
   counterexample itself (a would-be-late clean receipt is never issued and
   the attempt is given the remaining budget as its `timeout`), the same
-  clock shape passing cleanly with slack to spare, and the poll sleep
-  capped below the configured interval when less time remains than that.
+  clock shape passing cleanly with slack to spare, the poll sleep capped
+  below the configured interval when less time remains than that, and the
+  round-4 post-response counterexample (a single attempt that itself
+  resolves 1s past the deadline with a valid clean `200` is still rejected,
+  `test_late_response_after_deadline_is_rejected_even_with_a_valid_200`).
 - `TestScannerInitialReadinessIntegrationTest`: drives the real
   `test_scanner()` entrypoint end-to-end with a cold-start
   pending-to-healthy sequence followed by the existing Tests 2-4b, a
-  permanently-pending sequence that fails the whole run, and the round-3
+  permanently-pending sequence that fails the whole run, the round-3
   single-clock counterexample (proving the fix holds through the actual
   `scan()`/`urlopen` call path, not only when the helper is driven
-  directly).
+  directly), and the round-4 post-response counterexample through that same
+  real call path
+  (`test_late_response_after_deadline_is_rejected_through_the_real_entrypoint`).
 - `ProvisionScannerCpuAndProbePolicyTest`: the scanner deploy call carries
   `--no-cpu-throttling` (including when reusing already-existing
   resources), while private IAM, exact-digest images, per-container memory,
@@ -119,9 +139,16 @@ after the existing `gcp-artifact-activation-20261004` line. Nothing else in
 that job, the invoice task's separate discovery step, or any other
 workflow/gate changed. Without this line the new test file sat on no path
 CI runs and `tools/ci/check_test_coverage.py` would fail the PR; with it,
-`check_test_coverage.py` reports all 87 tracked test files yield tests CI
-runs, and the three local runs above (new 15, activation 7, and the 156
-`tools/ci/test_*` cases) are all green.
+`check_test_coverage.py` reports all tracked test files yield tests CI
+runs.
+
+## Evidence ledger (round 4, this candidate)
+
+| Finding / acceptance key | Source basis and fix location | Prior SHA → this candidate | Command, exit code, evidence | Unverified / limits |
+| --- | --- | --- | --- | --- |
+| `cold-postresponse-counterexample.json`: a single attempt that itself resolves past the total deadline with a valid clean `200` was accepted as a pass | `operations/verification/verify-dev-artifact-backends.py::wait_for_initial_clean_scan` — added a `time.monotonic() > deadline` check immediately after `scan_fn` returns, before any terminal `return`, with explanatory docstring addendum | `b6630d53c` (round-3 cut) reproduced: pre-attempt check at `t=0` sees 3s remaining, issues the call, call resolves at `t=4` with a valid clean `200`, round-3 code returns it as success with no post-call check. This candidate: same clock shape raises `AssertionError: ... attempt completed after the total deadline had already expired ...` instead of returning the stale `200` | `python3 -m unittest discover -s tests/unit/gcp-scanner-cold-readiness-20261007 -p 'test_*.py'` → 17 tests, exit 0, local VM run (this session). New cases: `WaitForInitialCleanScanTest.test_late_response_after_deadline_is_rejected_even_with_a_valid_200`, `TestScannerInitialReadinessIntegrationTest.test_late_response_after_deadline_is_rejected_through_the_real_entrypoint` | No hosted rerun performed by this task (parent-owned); Test 9 / storage-gateway / `gcloud logging read` limitations below are unchanged and not addressed here |
+| `cold_readiness_executable_regression_and_private_bounds` | Same file/function as above, plus unchanged `operations/deployment/provision-dev-artifact-backends.py` `--no-cpu-throttling` surface from the prior round | n/a (regression-prevention, not a prior failure) | `python3 -m unittest discover -s tests/unit/gcp-scanner-cold-readiness-20261007 -p 'test_*.py'` → 17/17 pass, exit 0; `python3 -m unittest tools.ci.test_dev_artifact_providers tools.ci.test_verify_dev_artifact_backends` → 51/51 pass, exit 0, unmodified and still green against both edited files | Local unittest only; no hosted Cloud Run deploy or live scan performed from this task |
+| `cold_readiness_exact_sha_review_ci_and_merge` | `.github/workflows/ci.yml` discovery line (unchanged from round 3, re-verified still present and scoped) | n/a | Reviewer/CI/merge evidence to be recorded against this candidate's exact pushed SHA once handed off; not fabricated here | Pending: CI run and reviewer verdict against the SHA in this handoff |
 
 ## What this does not fix (preserved limitations, unchanged from the parent)
 
