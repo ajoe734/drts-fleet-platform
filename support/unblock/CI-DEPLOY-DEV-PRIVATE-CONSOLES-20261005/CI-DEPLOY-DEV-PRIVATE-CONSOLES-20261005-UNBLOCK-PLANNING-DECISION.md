@@ -114,8 +114,7 @@ moment this helper merges, despite none of the chain's prerequisites existing.
 ## Round 2 — reviewer findings and repair (2026-10-07)
 
 Codex reopened generation `9578b50ccf654edf919877e1e0da9e6e` (candidate
-`a9a765986d94c657fb451c39952a450b9d0f07e7`) with two findings. Both repaired
-in this candidate; no code, workflow, or test file touched — planning
+`a9a765986d94c657fb451c39952a450b9d0f07e7`) with two findings. F1 fixed, F2 blocked on Supervisor; no code, workflow, or test file touched — planning
 documents only, per this task's own scope.
 
 **F1 [P1] — deploy-dev dispatch-target loophole (fixed).**
@@ -185,7 +184,7 @@ captured earlier because the write has not happened yet as of this handoff.
   candidate SHA for this handoff is read off `git rev-parse HEAD` /
   `CANDIDATE_SHA` at handoff time rather than hand-copied into this file.
 - `git status --short` showed only the two intended files
-  (`docs/01-decisions/SD-DP-20261007-002-...md`, this artifact) touched across
+  (`docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md`, this artifact) touched across
   both commits; no unrelated files staged. `git diff --check` on each staged
   change exited clean (no whitespace errors).
 - No source, workflow, or test file modified this round; only the two
@@ -194,3 +193,14 @@ captured earlier because the write has not happened yet as of this handoff.
   commits once GitHub syncs; no new PR opened. Hosted CI for this round has
   not been separately polled as of this writing — treat as pending/unknown,
   not claimed green, until Codex's next review round confirms.
+
+## Round 3 — reviewer findings and repair (2026-10-07)
+
+Codex2 reopened candidate `3a00e44c54076f5b3339f3db140b90a89f27dd06` with two findings (F2 repeated, F3 new). This task was reassigned to Gemini due to availability-first reassignment.
+
+**F3 [P2] — missing-path finding (fixed).**
+The original artifact cited a nonexistent literal `docs/01-decisions/SD-DP-20261007-002-...md` which broke the Canonical consistency CI gate. The abbreviation has been replaced with the full real decision path `docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md`.
+
+**F2 [P2] — stale `resolved_parent_next` (blocked on Supervisor).**
+Codex2 requires: "Repair boundary: Supervisor, in its legitimate operator context through the specified release CLI, updates helper metadata and parent note, preserving blocked disposition... Original owner Claude2 then appends both successful readbacks and this repeated-finding evidence to the SAME artifact... and only then hands off."
+However, the Supervisor dispatch did not perform this canonical metadata update. As of this dispatch, `ai-status.sh show` confirms the parent and helper `next` fields remain the stale old message. A dispatched worker cannot impersonate the Supervisor to perform the readbacks, so the worker is explicitly blocked waiting for the Supervisor to run the required command block, after which the worker can resume to append the readbacks and `handoff`.
