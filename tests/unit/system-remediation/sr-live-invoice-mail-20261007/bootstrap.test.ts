@@ -154,9 +154,17 @@ describe("F1 bootstrap and teardown adapter", () => {
       });
 
       if (url.includes("auth/token")) {
-        const token = "mock-session-token-" + ++tokenIndex;
         const tenantId = opts.headers["x-tenant-id"] || parsedBody.tenant_id;
         const actorId = opts.headers["x-actor-id"] || parsedBody.actor_id;
+        const expectedRole = parsedBody.expected_role || "tenant_admin";
+        const scopes = expectedRole === "tenant_viewer" ? ["tenant:billing:read"] : ["tenant:billing:read", "tenant:billing:write"];
+        const payloadObj = {
+          roles: [expectedRole],
+          scopes,
+          tenantId,
+          actorId
+        };
+        const token = "dummy." + Buffer.from(JSON.stringify(payloadObj)).toString("base64") + ".dummy";
         tokensMap[token] = { tenant_id: tenantId, actor_id: actorId };
         return {
           ok: true,
@@ -243,13 +251,15 @@ describe("F1 bootstrap and teardown adapter", () => {
     expect(firstEmitted.runId).toBeDefined();
     expect(firstEmitted.candidateSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     expect(firstEmitted.issued_sessions_count).toBe(1);
-    expect(firstEmitted.issued_sessions).toEqual(["DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN"]);
+    expect(firstEmitted.issued_sessions).toEqual([
+      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN" })
+    ]);
     const finalEmitted = JSON.parse(writeCalls[writeCalls.length - 1][1]);
     expect(finalEmitted.issued_sessions_count).toBe(3);
     expect(finalEmitted.issued_sessions).toEqual([
-      "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN",
-      "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN",
-      "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN"
+      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN" }),
+      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN" }),
+      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN" })
     ]);
     expect(finalEmitted.success).toBeUndefined();
     (fs.writeFileSync as any).mockClear();
@@ -321,7 +331,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     expect(writeCall).toBeDefined();
     const emittedJson = JSON.parse(writeCall[1]);
     expect(emittedJson.success).toBeUndefined();
-    expect(emittedJson.issued_sessions).toContain("DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN");
+    expect(emittedJson.issued_sessions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN" })])
+    );
     (fs.writeFileSync as any).mockClear();
   });
 

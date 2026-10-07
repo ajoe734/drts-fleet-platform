@@ -28,15 +28,28 @@ def evaluate(env, evidence, provider):
     tenant = evidence.get("tenantId")
     invoice = evidence.get("invoiceId")
     identity = evidence.get("identityEmail")
-    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and (UUID_RE.match(invoice) or (invoice.startswith("invoice-") and UUID_RE.match(invoice[8:]))) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
-    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and (UUID_RE.match(invoice) or (invoice.startswith("invoice-") and UUID_RE.match(invoice[8:]))) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
-    has_authority = has_authority and bool(
-        env.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID") and UUID_RE.match(env.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID")) and
-        env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID") and UUID_RE.match(env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID")) and
-        env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID") and UUID_RE.match(env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID")) and
-        env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID") and
-        env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID") and
-        env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID")
+    test_tenant = env.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID")
+    na_tenant = env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID")
+    ro_tenant = env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID")
+    test_invoice = env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID")
+    na_invoice = env.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID")
+    ro_invoice = env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID")
+
+    def is_valid_invoice_id(inv_id):
+        if not inv_id or not isinstance(inv_id, str): return False
+        return bool(UUID_RE.match(inv_id)) or (inv_id.startswith("invoice-") and bool(UUID_RE.match(inv_id[8:])))
+
+    has_authority = bool(
+        tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and
+        UUID_RE.match(tenant) and is_valid_invoice_id(invoice) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity) and
+        test_tenant and UUID_RE.match(test_tenant) and
+        na_tenant and UUID_RE.match(na_tenant) and
+        ro_tenant and UUID_RE.match(ro_tenant) and
+        is_valid_invoice_id(test_invoice) and
+        is_valid_invoice_id(na_invoice) and
+        is_valid_invoice_id(ro_invoice) and
+        tenant == test_tenant and
+        invoice == test_invoice
     )
     # Check statuses strictly: no generic checks, validate the exact expected scenarios
     first_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="normal_send")
@@ -183,18 +196,29 @@ def main():
             k = entry.get("exportKey")
             if not isinstance(k, str) or k not in expected_keys:
                 raise ValueError("malformed or unknown issued key")
-                
+
             role = entry.get("observed_role")
             scopes = entry.get("observed_scopes", [])
             actor_id = entry.get("observed_actor_id")
             tenant_id = entry.get("observed_tenant_id")
             if not role or not isinstance(scopes, list) or not actor_id or not tenant_id:
                 raise ValueError("missing observed token payload details")
-            if k == "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN" and (role != "tenant_admin" or "billing.write" not in scopes):
-                raise ValueError("primary token role/scopes mismatch")
-            if k == "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN" and (role != "tenant_viewer" or "billing.write" in scopes):
-                raise ValueError("read_only token role/scopes mismatch")
-                
+            if k == "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN":
+                if role != "tenant_admin" or "tenant:billing:write" not in scopes or "tenant:billing:read" not in scopes:
+                    raise ValueError("primary token role/scopes mismatch")
+                if tenant_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID") or actor_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_TEST_ACTOR_ID"):
+                    raise ValueError("primary token identity mismatch")
+            elif k == "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN":
+                if role != "tenant_viewer" or "tenant:billing:write" in scopes or "tenant:billing:read" not in scopes:
+                    raise ValueError("read_only token role/scopes mismatch")
+                if tenant_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID") or actor_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID"):
+                    raise ValueError("read_only token identity mismatch")
+            elif k == "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN":
+                if role != "tenant_admin" or "tenant:billing:write" not in scopes or "tenant:billing:read" not in scopes:
+                    raise ValueError("non_allowlisted token role/scopes mismatch")
+                if tenant_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID") or actor_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID"):
+                    raise ValueError("non_allowlisted token identity mismatch")
+
             issued_keys.append(k)
 
         if len(set(issued_keys)) != len(issued_keys):

@@ -26,7 +26,10 @@ class HostedGateTest(unittest.TestCase):
             DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID='20000000-0000-0000-0000-000000000abc',
             DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID='10000000-0000-0000-0000-000000000123',
             DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID='10000000-0000-0000-0000-000000000789',
-            DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID='10000000-0000-0000-0000-000000000abc'
+            DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID='10000000-0000-0000-0000-000000000abc',
+            DRTS_LIVE_INVOICE_MAIL_TEST_ACTOR_ID='a1',
+            DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID='a2',
+            DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID='a3'
         )
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [],
@@ -228,9 +231,9 @@ class HostedGateTest(unittest.TestCase):
             "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN"
         ]
         valid_objects = [
-            {"exportKey": "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN", "observed_role": "tenant_admin", "observed_scopes": ["billing.write"], "observed_actor_id": "a1", "observed_tenant_id": "t1"},
-            {"exportKey": "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN", "observed_role": "tenant_viewer", "observed_scopes": [], "observed_actor_id": "a2", "observed_tenant_id": "t1"},
-            {"exportKey": "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN", "observed_role": "tenant_admin", "observed_scopes": ["billing.write"], "observed_actor_id": "a3", "observed_tenant_id": "t2"}
+            {"exportKey": "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN", "observed_role": "tenant_admin", "observed_scopes": ["tenant:billing:read", "tenant:billing:write"], "observed_actor_id": "a1", "observed_tenant_id": "10000000-0000-0000-0000-000000000123"},
+            {"exportKey": "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN", "observed_role": "tenant_viewer", "observed_scopes": ["tenant:billing:read"], "observed_actor_id": "a2", "observed_tenant_id": "10000000-0000-0000-0000-000000000abc"},
+            {"exportKey": "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN", "observed_role": "tenant_admin", "observed_scopes": ["tenant:billing:read", "tenant:billing:write"], "observed_actor_id": "a3", "observed_tenant_id": "10000000-0000-0000-0000-000000000789"}
         ]
         base_bootstrap = {"runId": "run1", "candidateSha": SHA, "issued_sessions_count": 3, "issued_sessions": valid_objects.copy()}
         base_teardown = {"runId": "run1", "candidateSha": SHA, "success": True, "attempted": 3, "failures": 0, "sessions": [{"key": k, "status": "success"} for k in valid_keys]}
@@ -277,7 +280,7 @@ class HostedGateTest(unittest.TestCase):
         self.assertEqual(data["status"], "failed")
 
         # 6. Unknown key in manifests
-        b6 = {**base_bootstrap, "issued_sessions": [{"exportKey": "UNKNOWN_KEY", "observed_role": "tenant_admin", "observed_scopes": ["billing.write"], "observed_actor_id": "a1", "observed_tenant_id": "t1"}, valid_objects[1], valid_objects[2]]}
+        b6 = {**base_bootstrap, "issued_sessions": [{"exportKey": "UNKNOWN_KEY", "observed_role": "tenant_admin", "observed_scopes": ["tenant:billing:read", "tenant:billing:write"], "observed_actor_id": "a1", "observed_tenant_id": "10000000-0000-0000-0000-000000000123"}, valid_objects[1], valid_objects[2]]}
         code, data = run_main(b6, base_teardown)
         self.assertEqual(code, 1)
         t6 = {**base_teardown, "sessions": [{"key": "UNKNOWN_KEY", "status": "success"}, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "success"}]}

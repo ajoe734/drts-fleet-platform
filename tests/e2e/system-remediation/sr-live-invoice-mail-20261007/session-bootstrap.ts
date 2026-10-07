@@ -425,16 +425,16 @@ export async function bootstrapMailSession(
                         let payload: any = {};
                         try {
                            const parts = token.split('.');
-                           if (parts.length >= 2) {
+                           if (parts.length >= 2 && parts[1]) {
                                payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
                            }
                         } catch (e) {}
                         issuedSessions.push({
                            exportKey: tokenExportKey,
-                           observed_role: payload.role,
+                           observed_role: (payload.roles && payload.roles[0]) || payload.role,
                            observed_scopes: payload.scopes || [],
-                           observed_actor_id: payload.actor_id || payload.sub,
-                           observed_tenant_id: payload.tenant_id
+                           observed_actor_id: payload.actorId || payload.actor_id || payload.sub,
+                           observed_tenant_id: payload.tenantId || payload.tenant_id
                         });
                         writeManifest();
                         deps.onSessionIssued?.(token, tokenExportKey);

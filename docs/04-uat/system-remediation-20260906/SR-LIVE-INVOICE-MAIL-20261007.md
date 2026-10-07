@@ -67,3 +67,19 @@ This document records the completion and verification of the live invoice mail E
 - `createControlledDownloadMetadata` probe behavior preserved correctly for testing
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: b4426e79562de986d9f657cff1e205ac37096019 / Generation: dde8a554ef094de5bfe7a84d33e743c1)
+
+- **F1/F3 (Executable regression / production identity contract mismatch)**: Addressed token parsing in `session-bootstrap.ts` to properly handle roles array and camelCase `tenantId` according to production JWT shapes (`observed_role: payload.roles?.[0] || payload.role`, `observed_tenant_id: payload.tenantId`). Updated `gate-evidence.py` to correctly expect `tenant:billing:read/write` for the primary role rather than just `billing.write`. Fixed the strict assignment typing and optional mapping issues that caused `tsc` failures.
+- **F3/F5 (Repeated authority fail-open)**: Tightened `gate-evidence.py` to strictly bind `tenant_id` and `actor_id` values from the JWT (and matched invoice IDs) against expected environment variables. Improved the UUID shape checking to prevent malformed string fallbacks, addressing the issue where setting all tenants to FFFFFFFF passed.
+- **F3/F5 (New wrong-tenant evidence polarity)**: Fixed the polarity in `live-invoice-mail.spec.ts` where `forbidden_download_observed` was incorrectly mapped. Safe pages emitting zero forbidden links now evaluate correctly as `false` instead of failing the gate requirements.
+- **F1/F3 (Repeated selected fallback failure)**: Updated the language locator in `live-invoice-mail.spec.ts` to `/Artifact URL|產出檔案|檔案 URL/` explicitly targeting the `檔案 URL` default locale string which prevented the selected fallback ID from resolving successfully. Fixed the URL parsing logic to handle undefined trailing path parts smoothly.
+- **F2/F4/F6 (Failing required checks and regression handoff)**: Updated `bootstrap.test.ts` to properly mock JWT shapes with base64 encoded token bodies, fixing the missing producer identity validation and passing the required object-format `issued_sessions` assertions. Trailing whitespace across `gate-evidence.py` and `live-invoice-mail.spec.ts` was stripped. Python and TypeScript verification steps now pass locally.
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: exit 0 (all passed)
+- `pnpm exec tsc -p tests/e2e/system-remediation/sr-live-invoice-mail-20261007/tsconfig.live.json --noEmit`: exit 0
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v`: exit 0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
