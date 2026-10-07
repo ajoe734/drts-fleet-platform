@@ -7,8 +7,13 @@ export async function teardown(
   env: Record<string, string | undefined>,
   fetcher = fetch,
 ) {
-  const token = env.DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN;
-  if (!token) return;
+  const tokens = [
+    env.DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN,
+    env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN,
+    env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN
+  ];
+  for (const token of tokens) {
+    if (!token) continue;
   const { origin } = validateTarget(createInvoiceMailEnvAdapter(env));
   const response = await fetcher(`${origin}/api/auth/logout`, {
     method: "POST",
@@ -26,7 +31,8 @@ export async function teardown(
     data?: { revoked?: boolean; logged_out?: boolean };
   };
   if (body.data?.revoked !== true || body.data.logged_out !== true)
-    throw new Error("Session cleanup did not confirm revocation");
+      throw new Error("Session cleanup did not confirm revocation");
+  }
 }
 if (
   process.argv[1] &&
