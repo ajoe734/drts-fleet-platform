@@ -325,3 +325,73 @@ authorizes that re-handoff, carrying the (by-then-current) `CANDIDATE_SHA`/
 - This helper's own task is moved to `blocked` (`waiting_for=Codex`) by this round's
   `blocker` call so the review/merge flow cannot land this candidate ahead of the
   Supervisor-privileged metadata write; the parent task's status/next are untouched.
+
+## Round 3 (2026-10-07, after Supervisor recorded `resolved_parent_*` and resumed this
+    helper to `in_progress`)
+
+By the time this round started, a genuinely Supervisor-privileged session had already run
+(a close variant of) Round 2's corrected recipe: this helper task's own canonical metadata
+now carries `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Claude2` (a valid
+`KNOWN_AGENTS` entry, unlike the literal `"Supervisor"` Round 2 flagged as unsafe), and a
+`resolved_parent_next` that updates the chain with information newer than anything this
+helper had verified so far — then called `resume-blocked ... in_progress`, explicitly
+instructing: "Helper may finish truthful scoped artifact and handoff; not another product
+implementation or live-done assertion." This round verifies that newer information
+first-hand (all read-only) before acting on the instruction.
+
+### Independent verification of Supervisor's newer claims
+
+- **`merged0be15c0a`** — `git log -1 --oneline 0be15c0a` =
+  `fix(SR-GCP-ARTIFACT-ACTIVATION-20261004): rebuild activation candidate as one clean
+  commit off dev (#2384)`. Confirmed on `origin/dev`.
+- **`fixed2467f88a`** — `git log -1 --oneline 2467f88a` =
+  `API-UNAWAITED-ASYNC-CONTROLLERS-20261007: await async controller responses (#2392)`.
+  Confirmed on `origin/dev`; unrelated to this chain's own diffs but confirms the SHA is
+  real and already merged, as Supervisor's note claims.
+- **`deploy37602185882 failed`** — `gh run view 37602185882 --json conclusion,headSha,headBranch`
+  confirms `conclusion=failure`, `headBranch=publish/v2026.10.07.0`,
+  `headSha=3ecd55d6cf18ec4bdc2d3c28c527d2b3d7555f1f` (matches `source3ecd55d6` in the note).
+  `--json jobs` shows every job green except `Candidate SHA operational acceptance`.
+  `--log-failed` shows the **same four `upload-url` → `503` failures** as every prior run
+  examined in Rounds 1-2 (`fleet-submit-read-withdraw-resubmit` and
+  `admin-review-approve-readback`, each counted twice) — i.e. this is not a new regression
+  and not "the old startup timeout"; it is the identical already-diagnosed unprovisioned-
+  GCS-store cause, now reproduced on the freshest publish snapshot too. Matches Supervisor's
+  explicit instruction: "never claim old startup timeout is current or full release green."
+- **"provision workflow absent from workflow registry/default main"** — confirmed two ways:
+  1. `git show origin/dev:.github/workflows/provision-dev-artifact-backends.yml` returns the
+     file (it is on `dev`, merged via `0be15c0ad`/#2384).
+  2. `gh workflow list --all | grep -i provision` and
+     `gh api repos/ajoe734/drts-fleet-platform/actions/workflows --jq '.workflows[] |
+     select(.path | test("provision"))'` both return **nothing** — GitHub Actions has not
+     registered this `workflow_dispatch` workflow at all, because it only registers
+     `workflow_dispatch` workflows that exist on the repository's **default branch**
+     (`main`), not `dev`. `gh pr list --base main --state all` shows `promote/v2026.10.05.0`
+     (#2342) and `promote/v2026.10.04.0` (#2309) both still `OPEN` — the publish→main
+     auto-promotion pipeline is already stalled on two earlier snapshots (consistent with the
+     known rule that a red `deploy-dev` run stalls promotion, and new `workflow_dispatch`
+     workflows only become dispatchable once their snapshot reaches `main`). So
+     `SR-GCP-ARTIFACT-ACTIVATION-20261004` genuinely cannot dispatch
+     `provision-dev-artifact-backends.yml` yet — not a permissions gap, not something this
+     helper or its parent can work around, and exactly what Supervisor's note states:
+     "cannot bypass full-dev-deploy gate by promoting whole failed snapshot."
+
+All of Supervisor's newer claims check out against first-hand evidence. Nothing in this
+round contradicts or needs correcting.
+
+### What this round did and did not do
+
+- Confirmed (read-only, as above) that the chain Supervisor recorded is accurate; made no
+  attempt to touch `SR-GCP-ARTIFACT-ACTIVATION-20261004`, `C125-REAL-UPLOAD-STORAGE-20261005`,
+  the promotion PRs, any GitHub Actions workflow registration, or any GCP resource — all
+  outside this task's scope and, per every one of those tasks' own guardrails, not something
+  owner/reviewer/helper may perform from this VM.
+- No local service, Docker, or Playwright/browser run was started.
+- Only this file changed again.
+- Per the explicit Supervisor instruction, this round does not re-implement anything on the
+  product side and does not assert the parent is live/done. It closes out this helper by
+  re-handing off the current candidate to reviewer Codex, carrying `PR_URL`
+  (`https://github.com/ajoe734/drts-fleet-platform/pull/2398`, already open against this
+  branch) and this round's own `CANDIDATE_SHA`/`CANDIDATE_BRANCH`, so Codex can review the
+  now-fully-delivered artifact (R1/R2 delivery gaps closed by Supervisor's own metadata
+  write; R3 adds only independent verification) to merge.
