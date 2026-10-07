@@ -24,7 +24,7 @@ Actual call path: `operations/artifact-scanner/Dockerfile.clamd` copies
 `clamd --config-file=/etc/clamav/clamd.conf &` with inherited output.
 [ClamAV 1.4.6 common/output.c](https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/common/output.c)
 `logg` opens configured files with `O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW`
-(line 351), and uses `mprintf` for foreground output (lines 438–452).
+(line 348), and uses `mprintf` for foreground output (lines 438–452).
 [clamd/clamd.c](https://github.com/Cisco-Talos/clamav/blob/clamav-1.4.6/clamd/clamd.c)
 initializes the file logger only when `LogFile` is enabled, otherwise sets
 `logg_file = NULL` (lines 250–266); `Foreground` controls daemonization
