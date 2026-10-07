@@ -75,7 +75,7 @@ only `Authorization: Bearer <platform ID token>`. Its first request is
 `/control-plane-proxy/platform-admin/placards`; 401/403 throws
 `IAP authority missing for runner on platform admin ingress`.
 `getGoogleIdToken` in `live-document-runner.ts` selects a token minted for the
-configured service origin. The real proxy's `buildRequestAuth` in
+configured service origin. The real proxy's `applyUpstreamAuth` in
 `apps/platform-admin-web/app/control-plane-proxy/[...path]/route.ts` calls
 `issueControlPlaneRequestAuth` with strict IAP configuration. Cloud Run
 admission alone does not establish that application's IAP authority.
@@ -143,3 +143,10 @@ Docker or a `done` command as a substitute.
 No tests that start listeners were run on this VM. No workflow was manually
 dispatched, no secrets/resources were created, and no acceptance key was marked
 passed by this helper.
+
+Local documentation checks: `git diff --check` passed. Prettier was attempted
+but could not execute (`MODULE_NOT_FOUND` for `prettier/bin/prettier.cjs`,
+Node v22.23.2, exit 1); this is a tooling limitation, not a formatting pass.
+The final trailer check and exact local/remote/PR SHA comparison are recorded
+in the candidate handoff. No product unit tests are needed for this report-only
+change; historical runner results above retain their original candidate SHA.
