@@ -3,7 +3,9 @@
 Owner: Codex. Reviewer: Codex2. Inspection date: 2026-10-07 UTC.
 
 The auto-generated history-repair classification does not match the current
-parent blocker. No local/published divergence was found. The delivered FCM
+parent blocker. No product-history divergence or lost commit was demonstrated.
+The parent remote branch was deleted after merge; its local branch and stale
+remote-tracking ref remain. The delivered FCM
 candidate is already merged; its remaining blocker is a reproduced recipient
 eligibility/relevance race during metadata-token acquisition. This helper
 documents a non-destructive continuation; it does not repair product code or
@@ -18,19 +20,27 @@ the reproduced product defect or either parent acceptance key.
 
 ## 1. Exact history inventory
 
-`git fetch origin` completed successfully. Inspection base and helper initial
-HEAD: `b81c9f096da71330db9714a5c6c2691d85fb680d` (`origin/dev`).
+Initial `git fetch origin` completed successfully but did not prune stale
+tracking refs and cannot establish remote branch existence. Inspection base
+and helper initial HEAD: `b81c9f096da71330db9714a5c6c2691d85fb680d` (`origin/dev`).
 
-| Branch suffix (under the named lane) | Local and origin SHA | Published disposition |
-| --- | --- | --- |
-| `claude2/push-first-party-fcm-20261006` | `d3ccba40cfcb84381f5407ac4108be02bab9415c` | [PR #2404](https://github.com/ajoe734/drts-fleet-platform/pull/2404), open, historical alternative |
-| `gemini2/push-first-party-fcm-20261006` | `325532631e277b2f641ab3ed76632d334bd42313` | [PR #2406](https://github.com/ajoe734/drts-fleet-platform/pull/2406), open, rejected predecessor |
-| `codex/push-first-party-fcm-20261006` | `a10e0b23032a2ae1176f59f02660dedd25dd7fdf` | [PR #2408](https://github.com/ajoe734/drts-fleet-platform/pull/2408), merged 2026-10-07T14:13:53Z |
-| `pi/push-first-party-fcm-20261006` | `3272b83b1aefdd64030ba77d229fd3787d287315` | No PR found for this head; published partial checkpoint |
+Live refs were independently queried with `git ls-remote` on 2026-10-07 at
+15:59 UTC (section 6). Local refs and tracking caches are inventoried separately
+from those live responses:
+
+| Branch (under the named lane) | Local branch / cached `origin/` SHA | Live remote branch | Published disposition |
+| --- | --- | --- | --- |
+| `claude2/push-first-party-fcm-20261006` | `d3ccba40cfcb84381f5407ac4108be02bab9415c` / same | Present at that SHA | [PR #2404](https://github.com/ajoe734/drts-fleet-platform/pull/2404), historical alternative |
+| `gemini2/push-first-party-fcm-20261006` | `325532631e277b2f641ab3ed76632d334bd42313` / same | Present at that SHA | [PR #2406](https://github.com/ajoe734/drts-fleet-platform/pull/2406), rejected predecessor |
+| `codex/push-first-party-fcm-20261006` | `a10e0b23032a2ae1176f59f02660dedd25dd7fdf` / same, **stale cache** | **Absent**, exact `ls-remote --exit-code` returns 2, no output | [PR #2408](https://github.com/ajoe734/drts-fleet-platform/pull/2408), merged 2026-10-07T14:13:53Z; head branch deleted 14:13:55Z |
+| `pi/push-first-party-fcm-20261006` | `3272b83b1aefdd64030ba77d229fd3787d287315` / same | Present at that SHA | Initial inspection found no PR for this head; published partial checkpoint |
 
 For each branch, `git rev-list --left-right --count <branch>...origin/<branch>`
-returned `0 0` (exit 0). These separate alternatives must not be mistaken for
-local/remote divergence on the authoritative Codex branch. Codex versus Pi is
+returned `0 0` (exit 0) in the earlier inspection. This compares two local refs;
+it does **not** prove four live local/remote pairs. The Codex tracking reflog's
+last update is 13:56:07 UTC, before the remote deletion. Preserve that cache as
+historical evidence, without pruning it to manufacture agreement. Separate
+alternatives do not establish divergence on the authoritative branch. Codex versus Pi is
 `4 1`; Pi's commit explicitly says it preserves an incomplete contribution after
 Supervisor reassignment and is **not** a delivered candidate.
 
@@ -46,10 +56,14 @@ of the Codex candidate (exit 0), followed by these four preserved commits:
 - `b85fd261fde3b6686e2d240e138415aeb8700a6d`: fenced storage/recipient repair anchor.
 - `a10e0b23032a2ae1176f59f02660dedd25dd7fdf`: regression/evidence closeout.
 
-`git worktree list --porcelain` finds only this helper worktree and the locked,
+Initial `git worktree list --porcelain` found this helper worktree and the locked,
 clean Pi worktree `.local/pi-first-party-fcm-20261007` for these FCM branches.
+The saved 15:59 UTC H1 inventory still finds those two FCM worktrees.
 No worktree currently checks out the authoritative parent Codex branch. Its
-local and remote refs still preserve the candidate. The helper's assigned
+local branch preserves the candidate; the cached `origin/` ref is stale and
+the live remote branch is absent. PR #2408's recorded head and merge, together
+with merge ancestry, preserve immutable delivered-history evidence independently
+of that branch's existence. The helper's assigned
 worktree started clean and stays on
 `codex/push-first-party-fcm-20261006-unblock-history-repair`.
 
@@ -122,7 +136,13 @@ reproduction and cannot discharge it.
    back to an isolated parent worktree, reusing the existing Codex branch at
    `a10e0b230...`. Provisioning a missing worktree must attach that existing
    branch; it must not recreate or reset it from dev or use the Pi worktree.
-3. Only after reopen, inspect fresh remote/PR/candidate state. If synchronization
+3. Only after reopen, inspect fresh remote/PR/candidate state with read-only
+   `git ls-remote --exit-code origin refs/heads/codex/push-first-party-fcm-20261006`
+   and PR #2408 events. Exit 2 with no output means absent; authentication or
+   transport errors do not. Do not use the stale tracking ref as a live head.
+   If the name has been recreated, record its actual SHA and existing PR/candidate
+   state, compare ancestry and preserve both histories; route any divergence
+   through history recovery before publishing. If synchronization
    is needed, merge `origin/dev` in that parent worktree, resolve conflicts and
    verify. Preserve both published histories; never rebase, amend, reset or
    force-push them. This helper neither needs nor performs a parent merge.
@@ -138,8 +158,17 @@ reproduction and cannot discharge it.
    deadline/TTL and previously accepted-device regressions, then rerun the
    affected suites from the existing UAT ledger. Formal-schema hosted PG
    evidence remains separate; no product/PG/browser servers on this VM.
-6. Ordinary push and a new PR/candidate/review/CI cycle are required because
-   #2408 is already merged. Preserve the old SHA/generation/merge as history;
+6. Immediately before publishing, repeat the exact live-ref query to detect
+   concurrent recreation of the deleted parent branch. If still absent, an
+   ordinary non-force push of the repaired existing local branch creates the
+   remote branch anew; this is not an update to a surviving remote a10 ref.
+   If recreated, reconcile its SHA/PR/candidate state as in step 3 first. Use
+   only a normal push, never force or force-with-lease; a rejected push requires
+   renewed inspection, not an overwrite. Recheck the resulting live head and
+   new PR head against the exact candidate before handoff. A concurrent change
+   invalidates that identity check and must be resolved before handoff.
+   A new PR/candidate/review/CI cycle is required because #2408 is already merged.
+   Preserve the old SHA/generation/merge as history;
    do not relabel old CI or merge evidence as applying to the repair.
 
 ## 4. Supervisor coordination and verified resolution
@@ -161,7 +190,9 @@ remaining defect in this Markdown or a handoff message is insufficient.
 The original coordination request required an actual Supervisor session to use
 the dispatch-specified release CLI to:
 
-1. Write a parent `note`: history audit found no local/origin divergence;
+1. Write a parent `note`: history audit found no demonstrated product-history
+   divergence or lost commit (the earlier local/origin equality checks alone
+   did not establish live branch existence; see H1 below);
    candidate `a10e0b230...` merged via #2408 / `5c09db37...`; preserve
    containment waiting for Codex2 to adjudicate/reopen the metadata-await
    revoke/cancel defect; then follow section 3 with the original owner.
@@ -205,8 +236,10 @@ helper `resolved_parent_next`; parent remains blocked for Codex2; the selected
 candidate/review SHA and merge are unchanged. No `resolved_parent_at` was
 invented and no acceptance was recorded.
 
-Fresh `git fetch origin` completed with exit 0. All four section 1 branch pairs
-still return `0 0`; the parent merge remains an ancestor of current dev
+During the receipt verification, `git fetch origin` completed with exit 0 and
+all four local/tracking-cache pairs returned `0 0`. H1 invalidates the inference
+that these were four live remote pairs: the parent remote was already deleted.
+The parent merge remains an ancestor of inspected dev
 `7a0d2cd6d4f809f4d857243acdd4622f8b7fb558`. PR #2408 still reports merged head
 `a10e0b23032a2ae1176f59f02660dedd25dd7fdf` and merge
 `5c09db37f1824b6565a7546280c8b6fadabd6450`. The provider and transport files
@@ -215,9 +248,11 @@ was reread. The worktree inventory is unchanged. No new runtime probe was
 needed for this receipt/documentation change; the earlier reproduction remains
 evidence of an unresolved defect, not a passing regression.
 
-Before this update, helper local/origin/PR #2410 all selected
-`0cf7eaf07318d46ee251e283dbfa6368fbedeb4a`. This update appends a normal commit
-on the existing branch. Final local/origin/PR identity, push and check results
+Before the receipt update, helper local/origin/PR #2410 all selected
+`0cf7eaf07318d46ee251e283dbfa6368fbedeb4a`; its normal successor was
+`e11f4a99794901600668198f2c9ce7d54426c96a`, subsequently reopened for H1.
+This H1 update appends a normal commit on that existing branch.
+Final local/live-remote/PR identity, push and check results
 are recorded in the release CLI handoff for the exact new candidate; review,
 CI and merge must use that identity. Old helper CI results do not qualify the
 new candidate. The report's delivery can proceed while the parent product
@@ -227,9 +262,9 @@ repair remains blocked for its independent adjudication.
 
 | Finding / acceptance | Source and change | Reproduction / result | Evidence and limits |
 | --- | --- | --- | --- |
-| Identify exact contamination | Section 1; git refs, worktree inventory, parent task and PR #2408 | All four local/origin pairs `0 0`; rejected head preserved; merge ancestor of dev; no contamination found | Read-only git/gh checks exit 0. Open stale PRs distinguished from selected candidate. |
-| Non-destructive repair path | Sections 2–3; production `send` methods | Both single-mutation races reproduced; product fix remains outstanding | `cmp` and node exit 0; synthetic IO only, no live or PG acceptance. No history mutation. |
-| Canonical commit/push/PR evidence | This helper artifact only; PR #2410 | Preserve old report 0cf7eaf07318d46ee251e283dbfa6368fbedeb4a; append task-scoped commit and normal push | Final exact local/origin/PR SHA is bound by helper machine-truth handoff. Independent review/CI/merge remain separate gates. |
+| Identify exact contamination / H1 | Sections 1 and 6; live `ls-remote`, cached refs, worktree inventory, PR #2408 events | Local a10 branch preserved, tracking cache stale, GitHub branch absent; merged head/merge retained, merge ancestor of dev; no product-history divergence or lost commit demonstrated | Exact absent-ref query exit 2 with no output; other git/gh checks exit 0. Cached equality is not published-branch identity. |
+| Non-destructive repair path | Sections 2–3; production `send` methods; H1 publication boundary | Both single-mutation races previously reproduced; product fix remains outstanding. Continuation accounts for deleted remote and concurrent recreation | Prior `cmp` and node exit 0; synthetic IO only, no live or PG acceptance. Preserve local a10; parent adjudication/reopen precedes product repair and normal push/new PR. |
+| Canonical commit/push/PR evidence | This helper artifact only; PR #2410 | Preserve reports 0cf7eaf07318d46ee251e283dbfa6368fbedeb4a and e11f4a99794901600668198f2c9ce7d54426c96a; append H1 task-scoped commit and normal push | Final exact local/live-remote/PR SHA is bound by helper machine-truth handoff. Independent review/CI/merge remain separate gates. |
 | Parent concrete next step | Section 4; release dispatch guard and resolution handler | Earlier worker `note` exit 1; subsequent Supervisor note/metadata/resume receipts exit 0; owner readback assertions exit 0; SATISFIED | Parent remains blocked for Codex2, with identical parent next / helper resolution next. Product defect and acceptance remain outstanding. |
 | Content/format verification | This artifact; existing source references | `git diff --check` and repository commit-trailer check required before publication | Documentation-only change; product regression rerun not applicable. The diagnostic probe confirms the existing defect, not a fix. |
 
@@ -237,3 +272,50 @@ No deployment, secrets, real FCM messages, local development servers, browser
 servers or Docker infrastructure were started. No other task worktree or
 published branch was changed. Machine-specific reproduction files stay under
 this worktree's `.local/push-fcm-history-repair/`.
+
+## 6. H1 review repair — stale tracking ref mistaken for live branch
+
+Review source: Codex2's canonical `reopen` at 2026-10-07T15:57:58Z for
+candidate `e11f4a99794901600668198f2c9ce7d54426c96a`, generation
+`6e8a0fb4933a4455a79f5004746d286c`, PR #2410. This is the first H1 rejection;
+the earlier delivery hold concerned Supervisor containment receipts. Preserve
+both candidates and their distinct findings.
+
+Minimal reproduction: the old candidate's sections 1/4/5 inferred live branch
+identity from `fetch` without pruning and `rev-list` against a cached ref.
+Expected: distinguish local branch, stale tracking ref, absent GitHub branch
+and immutable merged PR/commit evidence. Actual: lines 24–33, 51–52 and
+208–209 called the remote ref preserved after it had already been deleted.
+No product-history divergence or lost commit was demonstrated by this finding.
+
+Owner reran read-only checks at 15:59 UTC, after `git fetch --no-prune origin`
+(exit 0), in the assigned helper worktree at e11f4a997949:
+
+| Command / evidence | Completed result |
+| --- | --- |
+| `git ls-remote --exit-code origin refs/heads/codex/push-first-party-fcm-20261006` | Exit 2, empty stdout/stderr: remote parent branch absent. |
+| `git for-each-ref --format='%(refname) %(objectname)' 'refs/heads/*/push-first-party-fcm-20261006' 'refs/remotes/origin/*/push-first-party-fcm-20261006'` | Exit 0: local Codex and cached origin refs both a10e0b23032a2ae1176f59f02660dedd25dd7fdf. |
+| `git reflog -1 --date=iso-strict refs/remotes/origin/codex/push-first-party-fcm-20261006` | Exit 0: cached ref last updated 2026-10-07T13:56:07+00:00, `update by push`. |
+| `gh api repos/ajoe734/drts-fleet-platform/issues/2408/events --paginate` (select merged/deleted/restored events) | Exit 0: merged at 14:13:53Z, head_ref_deleted at 14:13:55Z; no restoration event returned. Both precede helper commits at 15:21:38Z and 15:52:15Z. |
+| `gh pr view 2408 --json url,state,headRefName,headRefOid,mergeCommit,mergedAt` | Exit 0: MERGED, head a10e0b23032a2ae1176f59f02660dedd25dd7fdf, merge 5c09db37f1824b6565a7546280c8b6fadabd6450. |
+| `git ls-remote --heads origin` limited to the three alternative branches, helper and dev | Exit 0: alternatives match section 1; helper e11f4a99794901600668198f2c9ce7d54426c96a; dev 7a0d2cd6d4f809f4d857243acdd4622f8b7fb558. |
+| `git merge-base --is-ancestor 5c09db37f1824b6565a7546280c8b6fadabd6450 origin/dev` | Exit 0; provider/transport candidate-to-dev diff also exits 0 with no paths. |
+| Release CLI `show` parent/helper plus readback assertions | Exit 0: parent blocked/Codex2 equals helper resolution; next strings identical; a10 candidate/review, original generation and 5c09 merge retained. |
+
+Machine-specific command arrays, UTC times, stdout/stderr and exit codes are at
+`.local/push-fcm-history-repair/h1-20261007/evidence.json` in this owner worktree.
+The table embeds the decisive results so review does not depend on that local
+directory being mounted in a detached reviewer worktree. Earlier probe/receipt
+paths remain historical evidence; this H1 round does not claim to rerun the
+product probe or make its failing privacy cases pass.
+
+Correction boundary: sections 1/4/5 now separate live and cached evidence;
+section 3 preserves local a10 and merged history, requires independent parent
+adjudication/reopen, and accounts for remote recreation before ordinary
+publication/new PR. The section 4 historical Supervisor request and actual
+receipt metadata are retained; this documentation correction does not rewrite
+parent containment or impersonate an operator. No pruning, reset, rebase,
+force-push, product repair, acceptance or runtime was performed. The H1
+documentation result needs fresh independent review on the new candidate;
+old e11/0cf7 hosted checks cannot qualify it. Local format/trailer checks and
+exact publication identity are recorded in the new candidate handoff.
