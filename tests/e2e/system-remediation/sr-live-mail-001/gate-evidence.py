@@ -6,6 +6,7 @@ from pathlib import Path
 
 def evaluate(env, evidence, provider):
     steps = {key: env.get(key, "missing") for key in (
+        "DEPLOYMENT_GUARD_OUTCOME", "SESSION_GUARD_OUTCOME",
         "INSTALL_OUTCOME", "PREFLIGHT_OUTCOME", "RESOURCES_OUTCOME",
         "SESSIONS_OUTCOME", "RUNNER_OUTCOME", "TEARDOWN_OUTCOME",
     )}

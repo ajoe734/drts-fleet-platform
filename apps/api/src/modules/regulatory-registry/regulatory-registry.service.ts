@@ -64,6 +64,11 @@ import type {
 import { PHASE1_SERVICE_BUCKETS } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  LIVE_MAP_FIXTURE_DRIVER_ID,
+  isIsolatedLiveMapFixture,
+  type LiveMapFixtureResult,
+} from "./live-map-fixture";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
@@ -538,7 +543,9 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
 ];
 
 @Injectable()
-export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy {
+export class RegulatoryRegistryService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(RegulatoryRegistryService.name);
   private expiryReconciliationTimer: NodeJS.Timeout | null = null;
   private expiryReconciliationInFlight: Promise<unknown> | null = null;
@@ -634,6 +641,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
       return;
     }
 
+    let liveMapFixtureReady = false;
     try {
       const latestDriverLocations =
         (await this.regulatoryRegistryRepository.listLatestDriverLocations?.()) ??
@@ -646,8 +654,32 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         this.runInMemoryIdempotentBackfill();
       }
 
+      // The opted-in dev acceptance fixture is a convenience, never a startup
+      // dependency: ensureLiveMapTestDriver resolves to "refused" rather than
+      // throwing, so a refusal or failure here only gets recorded (it already
+      // logs its own reason) and the test driver stays marked unavailable.
+      const liveMapFixture: LiveMapFixtureResult | undefined =
+        await this.regulatoryRegistryRepository.ensureLiveMapTestDriver?.();
+      liveMapFixtureReady =
+        liveMapFixture?.status === "created" ||
+        liveMapFixture?.status === "unchanged";
       const persistedState =
         await this.regulatoryRegistryRepository.loadState();
+      if (liveMapFixtureReady) {
+        const fixtures = persistedState.drivers.filter(
+          (driver) => driver.driverId === LIVE_MAP_FIXTURE_DRIVER_ID,
+        );
+        if (
+          fixtures.length !== 1 ||
+          !isIsolatedLiveMapFixture(fixtures[0]) ||
+          persistedState.supplyPairs.some(
+            (pair) => pair.driverId === LIVE_MAP_FIXTURE_DRIVER_ID,
+          )
+        ) {
+          this.logger.warn("LIVE_MAP_FIXTURE_READBACK_UNSAFE");
+          liveMapFixtureReady = false;
+        }
+      }
       const hasPersistedState =
         persistedState.vehicles.length > 0 ||
         persistedState.drivers.length > 0 ||
@@ -688,6 +720,17 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
           ...pair,
         }));
       }
+      if (
+        persistedState.supplyPairs.length === 0 &&
+        (liveMapFixture?.status === "created" ||
+          liveMapFixture?.status === "unchanged")
+      ) {
+        // The durable check proved this fixture has no supply pair. Do not
+        // invent one from the demo fallback when the stored pair list is empty.
+        this.supplyPairs = this.supplyPairs.filter(
+          (pair) => pair.driverId !== LIVE_MAP_FIXTURE_DRIVER_ID,
+        );
+      }
       if (persistedState.contracts.length > 0) {
         this.contracts = persistedState.contracts.map((contract) =>
           this.hydrateContract(contract),
@@ -727,8 +770,10 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
       // Bounded startup catch-up for expired credentials and policies
       try {
         if (
-          typeof (this.regulatoryRegistryRepository as any)?.scanExpiredDrivers === "function" &&
-          typeof (this.regulatoryRegistryRepository as any)?.withTransaction === "function"
+          typeof (this.regulatoryRegistryRepository as any)
+            ?.scanExpiredDrivers === "function" &&
+          typeof (this.regulatoryRegistryRepository as any)?.withTransaction ===
+            "function"
         ) {
           await this.reconcileExpiredCredentials({ limit: 100 });
         }
@@ -3748,7 +3793,10 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
     driverId: string,
     command: UpdateDriverLicensesCommand,
   ): Promise<void> {
-    if (!this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity) return;
+    if (
+      !this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity
+    )
+      return;
     const now = Date.now();
     if (command.licenseExpiry && Date.parse(command.licenseExpiry) > now) {
       await this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
@@ -4053,8 +4101,7 @@ export class RegulatoryRegistryService implements OnModuleInit, OnModuleDestroy 
         if (!locked) continue;
 
         const policyNo = locked.policyNo || policyId;
-        const insuranceType =
-          locked.insuranceType || "commercial_liability";
+        const insuranceType = locked.insuranceType || "commercial_liability";
         const startAt = locked.startAt || locked.createdAt;
         const endAt = locked.endAt;
         const status = locked.status || "active";

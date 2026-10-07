@@ -320,7 +320,7 @@ http_call() {
     --max-time "$E2E_TIMEOUT"
     --write-out "\n__HTTP_STATUS__%{http_code}"
     -X "$method"
-    -H "Content-Type: application/json"
+    -H "Content-Type: ${4:-application/json}"
     -H "X-Request-ID: ${request_id}"
   )
 
@@ -379,7 +379,7 @@ http_call() {
   fi
 
   if [[ -n "$body_file" ]]; then
-    curl_args+=(--data "@$body_file")
+    curl_args+=(--data-binary "@$body_file")
   fi
 
   local raw

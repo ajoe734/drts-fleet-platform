@@ -13,6 +13,11 @@ import {
 import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../../../apps/api/src/modules/auth/auth.controller";
+import { OidcPkceService } from "../../../../apps/api/src/modules/auth/oidc-pkce.service";
+import {
+  IdentityRepository,
+  type OidcBoundTenantUser,
+} from "../../../../apps/api/src/modules/identity/identity.repository";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 /**
@@ -40,16 +45,48 @@ const DEMO_TENANT_ID = "tenant-demo-001";
 describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware and unified", () => {
   const ORIGINAL_ENV = { ...process.env };
 
-  function createController() {
+  async function createController() {
+    const repository = new IdentityRepository();
     const auditNotificationService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(
       auditNotificationService,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      repository,
+      repository,
     );
+    for (const subject of ["sub_oidc_admin_acme", "sub_oidc_ops_acme"]) {
+      const admin = subject === "sub_oidc_admin_acme";
+      const now = new Date().toISOString();
+      const user: OidcBoundTenantUser = {
+        userId: subject,
+        tenantId: DEMO_TENANT_ID,
+        email: admin ? "admin@acme.example" : "ops@acme.example",
+        displayName: "MFA fixture",
+        roleCode: admin ? "tenant_admin" : "tenant_ops_admin",
+        status: "active",
+        invitedAt: now,
+        updatedAt: now,
+        approvalNotificationOptOut: false,
+        oidcIssuer: process.env.TENANT_OIDC_ISSUER!,
+        subjectId: subject,
+      };
+      await repository.syncLegacyTenantUserRole(user);
+    }
     const jwtAuthService = new JwtAuthService(undefined, tenantPartnerService);
     return new AuthController(
       jwtAuthService,
       tenantPartnerService,
       {} as never,
+      undefined,
+      undefined,
+      undefined,
+      repository,
+      new OidcPkceService(jwtAuthService, tenantPartnerService),
     );
   }
 
@@ -106,7 +143,7 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
   describe("1. dev/test accepts tenant_bootstrap_fixture for the high-privilege gate", () => {
     it("APP_ENV=local: tenant_admin login succeeds with amr=[tenant_bootstrap_fixture]", async () => {
       process.env.APP_ENV = "local";
-      const controller = createController();
+      const controller = await createController();
       const idToken = signTenantIdToken({
         sub: "sub_oidc_admin_acme",
         email: "admin@acme.example",
@@ -123,7 +160,7 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
 
     it("APP_ENV=local: tenant_ops_admin login succeeds with amr=[tenant_bootstrap_fixture]", async () => {
       process.env.APP_ENV = "local";
-      const controller = createController();
+      const controller = await createController();
       const idToken = signTenantIdToken({
         sub: "sub_oidc_ops_acme",
         email: "ops@acme.example",
@@ -142,7 +179,7 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
   describe("2. production/staging still require real trusted MFA", () => {
     it("APP_ENV=production: rejects tenant_admin login with amr=[tenant_bootstrap_fixture]", async () => {
       process.env.APP_ENV = "production";
-      const controller = createController();
+      const controller = await createController();
       const idToken = signTenantIdToken({
         sub: "sub_oidc_admin_acme",
         email: "admin@acme.example",
@@ -151,14 +188,17 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
 
       await expectApiRequestError(
         () =>
-          controller.issueTenantOidcSession({ idToken, tenantId: DEMO_TENANT_ID }),
+          controller.issueTenantOidcSession({
+            idToken,
+            tenantId: DEMO_TENANT_ID,
+          }),
         (apiError) => expect(apiError.getStatus()).toBe(403),
       );
     });
 
     it("APP_ENV=staging: rejects tenant_ops_admin login with amr=[tenant_bootstrap_fixture]", async () => {
       process.env.APP_ENV = "staging";
-      const controller = createController();
+      const controller = await createController();
       const idToken = signTenantIdToken({
         sub: "sub_oidc_ops_acme",
         email: "ops@acme.example",
@@ -167,7 +207,10 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
 
       await expectApiRequestError(
         () =>
-          controller.issueTenantOidcSession({ idToken, tenantId: DEMO_TENANT_ID }),
+          controller.issueTenantOidcSession({
+            idToken,
+            tenantId: DEMO_TENANT_ID,
+          }),
         (apiError) => expect(apiError.getStatus()).toBe(403),
       );
     });
@@ -175,9 +218,7 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
 
   describe("3. shared implementation directly (common/auth/trusted-mfa.policy.ts)", () => {
     it("NON_STRICT_TRUSTED_AMR trusts tenant_bootstrap_fixture; STRICT_TRUSTED_AMR does not", () => {
-      expect(NON_STRICT_TRUSTED_AMR.has("tenant_bootstrap_fixture")).toBe(
-        true,
-      );
+      expect(NON_STRICT_TRUSTED_AMR.has("tenant_bootstrap_fixture")).toBe(true);
       expect(STRICT_TRUSTED_AMR.has("tenant_bootstrap_fixture")).toBe(false);
     });
 
@@ -212,30 +253,24 @@ describe("SR-AUTH-ADMIN-MFA-ENV-20260915: admin MFA gate is environment-aware an
   describe("4. no divergent copy: both call sites use the shared module", () => {
     const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
 
-    it("auth.controller.ts imports hasTrustedMfa from trusted-mfa.policy and has no local AMR allow-list literal", () => {
+    it("oidc-pkce.service.ts imports hasTrustedMfa from trusted-mfa.policy and has no local AMR allow-list literal", () => {
       const source = readFileSync(
-        join(
-          REPO_ROOT,
-          "apps/api/src/modules/auth/auth.controller.ts",
-        ),
+        join(REPO_ROOT, "apps/api/src/modules/auth/oidc-pkce.service.ts"),
         "utf8",
       );
       expect(source).toMatch(
-        /import\s*\{\s*hasTrustedMfa\s*\}\s*from\s*["']\.\.\/\.\.\/common\/auth\/trusted-mfa\.policy["']/,
+        /import\s*\{[^}]*\bhasTrustedMfa\b[^}]*\}\s*from\s*["']\.\.\/\.\.\/common\/auth\/trusted-mfa\.policy["']/,
       );
       expect(source).not.toMatch(/\["mfa",\s*"otp",\s*"webauthn"/);
     });
 
     it("step-up-proof.service.ts imports hasTrustedMfa from trusted-mfa.policy and no longer defines its own AMR sets", () => {
       const source = readFileSync(
-        join(
-          REPO_ROOT,
-          "apps/api/src/common/auth/step-up-proof.service.ts",
-        ),
+        join(REPO_ROOT, "apps/api/src/common/auth/step-up-proof.service.ts"),
         "utf8",
       );
       expect(source).toMatch(
-        /import\s*\{\s*hasTrustedMfa\s*\}\s*from\s*["']\.\/trusted-mfa\.policy["']/,
+        /import\s*\{[^}]*\bhasTrustedMfa\b[^}]*\}\s*from\s*["']\.\/trusted-mfa\.policy["']/,
       );
       expect(source).not.toMatch(/const STRICT_TRUSTED_AMR/);
       expect(source).not.toMatch(/const NON_STRICT_TRUSTED_AMR/);

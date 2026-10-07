@@ -82,10 +82,7 @@ function extractPdfTextLines(bytes: Buffer): string[] {
   while ((match = tjPattern.exec(content)) !== null) {
     const raw = match[1] ?? "";
     lines.push(
-      raw
-        .replace(/\\\(/g, "(")
-        .replace(/\\\)/g, ")")
-        .replace(/\\\\/g, "\\"),
+      raw.replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\\\\/g, "\\"),
     );
   }
   return lines;
@@ -127,12 +124,12 @@ describe("SR-INVOICE-001: tenant invoice renders a real, parseable PDF", () => {
     // Full round trip through the real download route, not a shortcut into
     // the store: this is what "有效連結可下載" actually exercises.
     const controller = new ControlledDownloadController(store);
-    const file = resolve(
+    const file = (await resolve(
       controller,
       "tenant-invoice",
       invoice.invoiceId,
       paramsOf(invoice.artifactUrl!),
-    ) as StreamableFileLike;
+    )) as StreamableFileLike;
     const bytes = await drain(file.getStream());
 
     expect(file.getHeaders().type).toBe("application/pdf");
@@ -207,7 +204,7 @@ describe("SR-INVOICE-001: tenant invoice renders a real, parseable PDF", () => {
       },
     );
 
-    const stored = store.get("tenant-invoice", invoice.invoiceId);
+    const stored = await store.get("tenant-invoice", invoice.invoiceId);
     expect(stored).not.toBeNull();
     // The base-14 Helvetica font this minimal writer uses cannot represent
     // CJK glyphs; every byte must still be a single-byte Latin-1 code point

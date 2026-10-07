@@ -267,6 +267,19 @@ it("auth/token accepts ops_user and ops_observer principals through WIF direct l
       };
 
       // Simulate what the real adapter does now
+      await repository.ensurePrincipalRecord({
+        principalId: p.principalId,
+        sourceRef: `google_workload_identity:${p.principalId}`,
+        issuer: "https://accounts.google.com",
+        subject: p.subject,
+        principalType: "service",
+        email: p.email,
+        emailVerified: true,
+        displayName: p.displayName,
+        status: "active",
+        createdAt: p.authTime,
+        updatedAt: p.authTime,
+      });
       const membershipRecord: any = {
         membershipId: `mem_${p.principalId}_ops`,
         principalId: p.principalId,
@@ -386,12 +399,13 @@ it("Driver revoke failure records durable retryable recovery and cleanup is idem
     },
   );
 
+  const driverProfileServiceMock = {
+    recordDeviceBinding: vi.fn(),
+    recordDeviceBindingRevocation: vi.fn(),
+  };
   const deviceService = new DriverDeviceSessionService(
     jwt,
-    {
-      recordDeviceBinding: vi.fn(),
-      recordDeviceBindingRevocation: vi.fn(),
-    } as never,
+    driverProfileServiceMock as never,
     undefined as never,
     undefined as never,
     undefined as never,
@@ -433,6 +447,21 @@ it("Driver revoke failure records durable retryable recovery and cleanup is idem
 
   // The token is no longer usable
   expect(await jwt.verifyAccessToken(accessToken)).toBeNull();
+
+  // DEV-OUTAGE-LIVE-MAP-FIXTURE-STARTUP-20261006 regression: an invitation
+  // revoke (the live-map acceptance teardown path) must sync the driver
+  // profile's embedded device-binding summary, not just the IAM table. A
+  // prior run that only updated the IAM row left the profile's binding
+  // "active", which the live-map fixture isolation check reads independently
+  // and refuses on at the next API startup.
+  expect(
+    driverProfileServiceMock.recordDeviceBindingRevocation,
+  ).toHaveBeenCalledWith(
+    "drv-demo-002",
+    payload!.driverBindingId,
+    expect.any(String),
+    expect.objectContaining({ actorType: "system" }),
+  );
 
   // Third attempt should be idempotent
   const thirdRevoke = await deviceService.revokeInvitation({

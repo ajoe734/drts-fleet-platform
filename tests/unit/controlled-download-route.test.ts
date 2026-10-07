@@ -52,9 +52,9 @@ function resolve(
   );
 }
 
-function codeOf(call: () => unknown): string {
+async function codeOf(call: () => unknown): Promise<string> {
   try {
-    call();
+    await call();
   } catch (error) {
     return (error as ApiRequestError).code;
   }
@@ -62,7 +62,7 @@ function codeOf(call: () => unknown): string {
 }
 
 describe("controlled download links", () => {
-  it("issues a link on the API's own origin rather than a host that does not resolve", () => {
+  it("issues a relative link for the consoles' API proxy rewrites", () => {
     const metadata = issue("tenant-invoice", "invoice-1");
 
     // Was `https://downloads.drts.local`, which fails at DNS -- a network fault
@@ -94,22 +94,24 @@ describe("controlled download links", () => {
     ).toEqual({ ok: true });
   });
 
-  it("refuses a link whose subject was swapped after signing", () => {
+  it("refuses a link whose subject was swapped after signing", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(issue("tenant-invoice", "invoice-1").downloadUrl);
 
     // Same signature, different invoice: the point of signing.
     expect(
-      codeOf(() => resolve(controller, "tenant-invoice", "invoice-2", params)),
+      await codeOf(() =>
+        resolve(controller, "tenant-invoice", "invoice-2", params),
+      ),
     ).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
   });
 
-  it("refuses a link whose expiry was extended after signing", () => {
+  it("refuses a link whose expiry was extended after signing", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(issue("report", "JOB-1").downloadUrl);
 
     expect(
-      codeOf(() =>
+      await codeOf(() =>
         resolve(controller, "report", "JOB-1", {
           ...params,
           expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
@@ -118,7 +120,7 @@ describe("controlled download links", () => {
     ).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
   });
 
-  it("answers a forged link as unverifiable rather than as expired", () => {
+  it("answers a forged link as unverifiable rather than as expired", async () => {
     const controller = new ControlledDownloadController();
     // Forged *and* stale. Saying "expired" would confirm the window was read,
     // which a link that cannot be verified has not earned.
@@ -130,13 +132,13 @@ describe("controlled download links", () => {
     );
 
     expect(
-      codeOf(() =>
+      await codeOf(() =>
         resolve(controller, "report", "JOB-1", { ...params, sig: "00ff" }),
       ),
     ).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
   });
 
-  it("reports a genuine link past its window as expired", () => {
+  it("reports a genuine link past its window as expired", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(
       issue("report", "JOB-1", {
@@ -145,9 +147,9 @@ describe("controlled download links", () => {
       }).downloadUrl,
     );
 
-    expect(codeOf(() => resolve(controller, "report", "JOB-1", params))).toBe(
-      "CONTROLLED_DOWNLOAD_EXPIRED",
-    );
+    expect(
+      await codeOf(() => resolve(controller, "report", "JOB-1", params)),
+    ).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
   });
 
   it("rejects a link signed under a key this deployment does not hold", () => {
@@ -165,21 +167,23 @@ describe("controlled download links", () => {
     ).toEqual({ ok: false, reason: "key_unknown" });
   });
 
-  it("tells a verified caller the file was never produced, naming the kind", () => {
+  it("tells a verified caller the file was never produced, naming the kind", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(issue("tenant-invoice", "invoice-1").downloadUrl);
 
     expect(
-      codeOf(() => resolve(controller, "tenant-invoice", "invoice-1", params)),
+      await codeOf(() =>
+        resolve(controller, "tenant-invoice", "invoice-1", params),
+      ),
     ).toBe("ARTIFACT_NOT_MATERIALISED");
   });
 
-  it("points a verified report link at the route that does serve bytes", () => {
+  it("points a verified report link at the route that does serve bytes", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(issue("report", "JOB-1").downloadUrl);
 
     try {
-      resolve(controller, "report", "JOB-1", params);
+      await resolve(controller, "report", "JOB-1", params);
       throw new Error("expected the call to throw");
     } catch (error) {
       const details = (
@@ -191,12 +195,12 @@ describe("controlled download links", () => {
     }
   });
 
-  it("rejects a link that is missing the fields needed to check it", () => {
+  it("rejects a link that is missing the fields needed to check it", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(issue("report", "JOB-1").downloadUrl);
 
     expect(
-      codeOf(() =>
+      await codeOf(() =>
         resolve(controller, "report", "JOB-1", {
           ...params,
           manifestHash: undefined,

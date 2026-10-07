@@ -37,19 +37,17 @@ function resolveTargetOrigin(): string {
 }
 
 function resolveFleetPartnerId(requestHeaders: Headers): string {
-  const fromHeader = requestHeaders.get(FLEET_PARTNER_ID_HEADER)?.trim();
-  if (fromHeader) {
-    return fromHeader;
-  }
-
-  const fromEnv = process.env.DRTS_FLEET_PARTNER_ID?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
-  throw new Error(
-    "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID environment variable or x-fleet-partner-id header is required.",
-  );
+  // This single-fleet portal binds identity on the server. A browser header
+  // must never be promoted into both the requested scope and auth identity.
+  const configured = process.env.DRTS_FLEET_PARTNER_ID?.trim();
+  const requested = requestHeaders.get(FLEET_PARTNER_ID_HEADER)?.trim();
+  if (!configured)
+    throw new Error(
+      "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID is required.",
+    );
+  if (requested && requested !== configured)
+    throw new Error("Fleet scope is outside this portal's configured partner.");
+  return configured;
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {

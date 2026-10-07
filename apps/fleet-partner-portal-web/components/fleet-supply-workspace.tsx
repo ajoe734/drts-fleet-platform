@@ -1,5 +1,7 @@
 "use client";
 
+import { putFleetDocument } from "../lib/fleet-document-upload";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -1866,6 +1868,7 @@ export function SupplySubmissionDetailView({
         }),
       },
     );
+    await putFleetDocument(uploadIntent, docFile);
     const checksumSha256 = await hashFile(docFile);
     await apiRequest<SupplyDocumentRecord>(
       `fleet-partner/supply-submissions/${detail.submission.submissionId}/documents/confirm`,
@@ -1877,7 +1880,7 @@ export function SupplySubmissionDetailView({
           objectKey: uploadIntent.objectKey,
           originalFileName: docFile.name,
           contentType: docFile.type || "application/octet-stream",
-          fileSize: docFile.size || 1,
+          fileSize: docFile.size,
           checksumSha256,
           effectiveFrom: docFrom || null,
           effectiveUntil: docUntil || null,
@@ -2094,7 +2097,11 @@ export function SupplySubmissionDetailView({
                           fontFamily: theme.monoFamily,
                         }}
                       >
-                        {document.originalFileName}
+                        <a
+                          href={`/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(detail.submission.submissionId)}/documents/${encodeURIComponent(document.documentId)}/download`}
+                        >
+                          {document.originalFileName}
+                        </a>
                       </div>
                       <div style={{ fontSize: 11, color: theme.textMuted }}>
                         {document.effectiveFrom || "—"} →{" "}

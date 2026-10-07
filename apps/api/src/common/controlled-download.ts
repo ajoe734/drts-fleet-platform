@@ -11,10 +11,12 @@ import { resolveControlledDownloadPolicy } from "./sensitive-data-policy";
  * DNS, which reads as a network fault rather than as "this file was never
  * produced".
  *
- * A relative prefix keeps the link on the API's own origin in every
- * environment, where `ControlledDownloadController` answers it. Set
- * `CONTROLLED_DOWNLOAD_HOST` to an absolute origin once artifacts are served
- * from somewhere else.
+ * Relative links resolve against the page displaying them. The tenant,
+ * platform and ops consoles rewrite this prefix through their runtime API
+ * proxy to /api/downloads, where ControlledDownloadController answers it.
+ * A caller issuing absolute links must supply the full download route prefix
+ * (for example https://api.example.test/api/downloads), not just an origin.
+ * CONTROLLED_DOWNLOAD_HOST applies only when the caller omits a host override.
  */
 export const DEFAULT_CONTROLLED_DOWNLOAD_HOST = "/downloads";
 export const DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES = 15;

@@ -30,6 +30,9 @@ const intendedServices = [
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
 ] as const;
+const optionalServices = [
+  "drts-dev-scanner",
+] as const;
 const retiredService = "drts-passenger-web";
 
 function runCleanup(action: string, inventory: readonly string[] = []) {
@@ -147,10 +150,13 @@ describe("retired Cloud Run service cleanup", () => {
     expect(result.stdout).toContain("cleanup disabled");
   });
 
-  it("deletes exactly drts-passenger-web only for the exact allowed inventory", () => {
+  it.each([
+    ["with no optional services", intendedServices],
+    ["with the scanner", [...intendedServices, ...optionalServices]],
+  ])("deletes exactly drts-passenger-web only for the exact allowed inventory %s", (_label, inventory) => {
     const result = runCleanup("delete-drts-passenger-web", [
       retiredService,
-      ...[...intendedServices].reverse(),
+      ...[...inventory].reverse(),
     ]);
 
     expect(result.status).toBe(0);

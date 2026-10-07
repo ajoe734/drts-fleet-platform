@@ -9,6 +9,10 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { ComplaintService } from "../complaint/complaint.service";
+import {
+  FleetDocumentStorageService,
+  MAX_FLEET_DOCUMENT_BYTES,
+} from "./fleet-document-storage.service";
 import { FleetPartnerService } from "./fleet-partner.service";
 
 export interface FleetCaseItem {
@@ -106,20 +110,9 @@ export interface ConfirmCaseAttachmentUploadCommand {
   checksumSha256?: string;
 }
 
-type PendingUploadIntent = {
-  attachmentId: string;
-  caseId: string;
-  fleetPartnerId: string;
-  objectKey: string;
-  fileName: string;
-  fileSize: number;
-  contentType: string;
-  expiresAt: string;
-};
-
 const READBACK_SECRET =
   process.env.DRTS_READBACK_SECRET || "drts-fleet-case-attachment-secret-2026";
-const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024; // 25 MB
+const MAX_ATTACHMENT_SIZE = MAX_FLEET_DOCUMENT_BYTES;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -144,7 +137,7 @@ function verifyAttachmentToken(
   expiresAt: number,
   signature: string,
 ): boolean {
-  if (Date.now() > expiresAt) {
+  if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
     return false;
   }
   const expected = signAttachmentToken(
@@ -169,14 +162,16 @@ export class FleetPartnerCaseService {
   private cases = new Map<string, FleetCaseItem>();
   private timelines = new Map<string, FleetCaseTimelineEvent[]>();
   private attachments = new Map<string, FleetCaseAttachmentRecord>();
-  private pendingUploads = new Map<string, PendingUploadIntent>();
   private replies = new Map<string, FleetCaseReplyRecord>();
   private repliesByIdempotencyKey = new Map<string, FleetCaseReplyRecord>();
 
   constructor(
     @Optional() private readonly complaintService?: ComplaintService,
     @Optional() private readonly fleetPartnerService?: FleetPartnerService,
-    @Optional() private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly storage: FleetDocumentStorageService = new FleetDocumentStorageService(),
   ) {
     this.seedCases();
   }
@@ -505,17 +500,8 @@ export class FleetPartnerCaseService {
     caseFleetPartnerId: string,
     requestFleetPartnerId: string,
   ): boolean {
-    const normCase = caseFleetPartnerId.trim().toUpperCase();
-    const normReq = requestFleetPartnerId.trim().toUpperCase();
-    if (normCase === normReq) return true;
-
-    // Default portal demos: METRO_FLEET / fleet-demo-001 / fp-test-001 represent the primary test partner
-    const primaryPartners = ["METRO_FLEET", "FLEET-DEMO-001", "FP-TEST-001"];
-    if (primaryPartners.includes(normCase) && primaryPartners.includes(normReq)) {
-      return true;
-    }
-
-    return false;
+    // Partner identifiers are authoritative IDs, not demo aliases.
+    return caseFleetPartnerId === requestFleetPartnerId;
   }
 
   private assertFleetScope(caseItem: FleetCaseItem, fleetPartnerId: string) {
@@ -577,12 +563,16 @@ export class FleetPartnerCaseService {
       slaDueAt: complaint.slaDueAt,
       slaBreachedAt: complaint.slaBreach ? complaint.updatedAt : null,
       slaBreach: complaint.slaBreach,
-      slaTone: isClosed ? "neutral" : complaint.slaBreach ? "danger" : "success",
+      slaTone: isClosed
+        ? "neutral"
+        : complaint.slaBreach
+          ? "danger"
+          : "success",
       slaLabel: isClosed
         ? "closed"
         : complaint.slaBreach
-        ? "SLA breached"
-        : "on track",
+          ? "SLA breached"
+          : "on track",
       reopenCount: complaint.reopenCount ?? 0,
       relatedOrder: complaint.relatedOrderId,
       relatedCall: complaint.relatedCallId,
@@ -637,6 +627,7 @@ export class FleetPartnerCaseService {
     const caseItem = this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
+    await this.loadStoredAttachments(caseItem.id);
     // Resolve attachments
     const caseAttachments: FleetCaseAttachmentRecord[] = [];
     for (const att of this.attachments.values()) {
@@ -761,9 +752,22 @@ export class FleetPartnerCaseService {
     // Resolve attachments for timeline
     const resolvedAttachments: FleetCaseTimelineAttachment[] = [];
     if (command.attachmentIds?.length) {
+      await this.loadStoredAttachments(caseItem.id);
       for (const attId of command.attachmentIds) {
         const att = this.attachments.get(attId);
-        if (att) {
+        if (
+          !att ||
+          att.state !== "done" ||
+          (att.caseId !== caseItem.id && att.caseId !== caseItem.caseNo) ||
+          !this.isFleetScopeMatch(att.fleetPartnerId, fleetPartnerId)
+        )
+          throw new ApiRequestError(
+            403,
+            "FLEET_SCOPE_DENIED",
+            "Reply attachment is outside this case scope.",
+          );
+        await this.storage.read(att.objectKey, att);
+        {
           resolvedAttachments.push({
             attachmentId: att.attachmentId,
             name: att.name,
@@ -856,6 +860,62 @@ export class FleetPartnerCaseService {
     return replyRecord;
   }
 
+  private async loadStoredAttachments(caseId: string) {
+    const records =
+      await this.storage.getCaseRecords<FleetCaseAttachmentRecord>(caseId);
+    for (const record of records)
+      this.attachments.set(record.attachmentId, record);
+  }
+
+  async uploadAttachmentContent(
+    fleetPartnerId: string,
+    caseId: string,
+    objectKey: string,
+    stream: AsyncIterable<Uint8Array>,
+    contentType: string,
+  ) {
+    const caseItem = this.resolveCase(caseId);
+    this.assertFleetScope(caseItem, fleetPartnerId);
+    if (caseItem.status === "closed")
+      throw new ApiRequestError(
+        409,
+        "CASE_CLOSED_NO_REPLY",
+        "Closed cases are read-only.",
+      );
+    const intent = await this.storage.intent(
+      objectKey,
+      "case",
+      fleetPartnerId,
+      caseItem.id,
+    );
+    return this.storage.upload(intent, stream, contentType);
+  }
+
+  async downloadAttachmentForReview(caseId: string, attachmentId: string) {
+    const caseItem = this.resolveCase(caseId);
+    await this.loadStoredAttachments(caseItem.id);
+    const attachment = this.attachments.get(attachmentId);
+    if (
+      !attachment ||
+      (attachment.caseId !== caseItem.id &&
+        attachment.caseId !== caseItem.caseNo) ||
+      !this.isFleetScopeMatch(
+        attachment.fleetPartnerId,
+        caseItem.fleetPartnerId,
+      )
+    )
+      throw new ApiRequestError(
+        404,
+        "ATTACHMENT_NOT_FOUND",
+        "Attachment not found.",
+      );
+    const { bytes: fileContent } = await this.storage.read(
+      attachment.objectKey,
+      attachment,
+    );
+    return { attachment, fileContent };
+  }
+
   async createAttachmentUploadUrl(
     fleetPartnerId: string,
     caseId: string,
@@ -867,6 +927,7 @@ export class FleetPartnerCaseService {
     uploadUrl: string;
     expiresAt: string;
     method: string;
+    headers: Record<string, string>;
   }> {
     const caseItem = this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
@@ -885,7 +946,7 @@ export class FleetPartnerCaseService {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "CASE_ATTACHMENT_TOO_LARGE",
-        "附件超過大小限制（上限 25 MB），請壓縮或分件上傳。",
+        "附件超過大小限制（上限 10 MiB），請壓縮或分件上傳。",
         { fileSize: command.fileSize, maxSize: MAX_ATTACHMENT_SIZE },
       );
     }
@@ -897,9 +958,10 @@ export class FleetPartnerCaseService {
     const objectKey = `fleet-partner/${fleetPartnerId}/cases/${caseItem.id}/${attachmentId}-${sanitizedName}`;
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-    this.pendingUploads.set(objectKey, {
+    await this.storage.createIntent({
+      family: "case",
       attachmentId,
-      caseId: caseItem.id,
+      parentId: caseItem.id,
       fleetPartnerId,
       objectKey,
       fileName: command.fileName.trim(),
@@ -911,9 +973,10 @@ export class FleetPartnerCaseService {
     return {
       attachmentId,
       objectKey,
-      uploadUrl: `https://uploads.drts.example/presigned/${encodeURIComponent(objectKey)}`,
+      uploadUrl: `/api/fleet-partner/cases/${encodeURIComponent(caseItem.id)}/attachments/content?objectKey=${encodeURIComponent(objectKey)}`,
       expiresAt,
       method: "PUT",
+      headers: { "content-type": "application/octet-stream" },
     };
   }
 
@@ -935,15 +998,25 @@ export class FleetPartnerCaseService {
       );
     }
 
-    const uploadIntent = this.pendingUploads.get(command.objectKey);
-    if (!uploadIntent || uploadIntent.attachmentId !== command.attachmentId) {
+    const uploadIntent = await this.storage.intent(
+      command.objectKey,
+      "case",
+      fleetPartnerId,
+      caseItem.id,
+    );
+    if (
+      uploadIntent.attachmentId !== command.attachmentId ||
+      uploadIntent.fileName !== command.fileName.trim() ||
+      uploadIntent.fileSize !== command.fileSize ||
+      uploadIntent.contentType !== command.contentType.trim()
+    ) {
       throw new ApiRequestError(
-        HttpStatus.CONFLICT,
+        409,
         "UPLOAD_URL_INVALID",
-        "上傳確認資訊與預簽發意圖不符或已過期。",
-        { objectKey: command.objectKey, attachmentId: command.attachmentId },
+        "Confirmation metadata does not match the upload intent.",
       );
     }
+    await this.storage.read(command.objectKey, command);
 
     const record: FleetCaseAttachmentRecord = {
       attachmentId: command.attachmentId,
@@ -959,10 +1032,9 @@ export class FleetPartnerCaseService {
       objectKey: command.objectKey,
     };
 
-    this.attachments.set(record.attachmentId, record);
-    this.pendingUploads.delete(command.objectKey);
-
-    return record;
+    const saved = await this.storage.saveCaseRecord(caseItem.id, record);
+    this.attachments.set(saved.attachmentId, saved);
+    return saved;
   }
 
   async getAttachmentReadUrl(
@@ -979,8 +1051,12 @@ export class FleetPartnerCaseService {
     const caseItem = this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
+    await this.loadStoredAttachments(caseItem.id);
     const att = this.attachments.get(attachmentId);
-    if (!att || (att.caseId !== caseItem.id && att.caseId !== caseItem.caseNo)) {
+    if (
+      !att ||
+      (att.caseId !== caseItem.id && att.caseId !== caseItem.caseNo)
+    ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "ATTACHMENT_NOT_FOUND",
@@ -1039,8 +1115,13 @@ export class FleetPartnerCaseService {
       );
     }
 
+    await this.loadStoredAttachments(caseItem.id);
     const att = this.attachments.get(attachmentId);
-    if (!att) {
+    if (
+      !att ||
+      (att.caseId !== caseItem.id && att.caseId !== caseItem.caseNo) ||
+      !this.isFleetScopeMatch(att.fleetPartnerId, fleetPartnerId)
+    ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "ATTACHMENT_NOT_FOUND",
@@ -1049,10 +1130,7 @@ export class FleetPartnerCaseService {
       );
     }
 
-    const fileContent = Buffer.from(
-      `Authorized readback content for ${att.name} (Case: ${caseItem.id}, ID: ${att.attachmentId})`,
-      "utf8",
-    );
+    const { bytes: fileContent } = await this.storage.read(att.objectKey, att);
 
     return {
       attachment: att,

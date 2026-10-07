@@ -130,13 +130,51 @@ it.each([{ fail: true }, { wrongSha: true }])(
     );
   },
 );
-it("fails closed without an API call when there is no invite to clean up", async () => {
-  const deps = harness();
-  await expect(
-    teardownMapSessions({ ...env, DRTS_LIVE_MAP_INVITE_CODE: "" }, deps),
-  ).rejects.toThrow();
-  expect(deps.fetch).not.toHaveBeenCalled();
-});
+it.each([undefined, ""])(
+  "records clean no-op without HTTP or WIF when no invitation was attempted: %s",
+  async (code) => {
+    const deps = harness();
+    await teardownMapSessions(
+      { ...env, DRTS_LIVE_MAP_INVITE_CODE: code },
+      deps,
+    );
+    expect(deps.fetch).not.toHaveBeenCalled();
+    expect(deps.readGoogleIdToken).not.toHaveBeenCalled();
+    expect(deps.save).toHaveBeenCalledWith({
+      candidate_sha: sha,
+      deployed_sha: sha,
+      driver_id: "drv-demo-002",
+      status: "passed",
+      recovery: "not-required",
+      revoked: false,
+    });
+  },
+);
+it.each([
+  { DRTS_LIVE_MAP_INVITATION_ATTEMPTED: "true" },
+  { DRTS_LIVE_MAP_INVITATION_ATTEMPTED: "unknown" },
+  { DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN: "private-driver-token" },
+  { DRTS_LIVE_MAP_DRIVER_DEVICE_ID: "live-map-run-123" },
+])(
+  "does not mistake missing recovery data for no mutation: %j",
+  async (override) => {
+    const deps = harness();
+    await expect(
+      teardownMapSessions(
+        { ...env, DRTS_LIVE_MAP_INVITE_CODE: "", ...override },
+        deps,
+      ),
+    ).rejects.toThrow("Map session cleanup failed");
+    expect(deps.fetch).not.toHaveBeenCalled();
+    expect(deps.readGoogleIdToken).not.toHaveBeenCalled();
+    expect(deps.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed", revoked: false }),
+    );
+    expect(JSON.stringify(deps.save.mock.calls)).not.toContain(
+      "private-driver-token",
+    );
+  },
+);
 it("checks hosted authorization before cleanup", async () => {
   const deps = harness();
   await expect(

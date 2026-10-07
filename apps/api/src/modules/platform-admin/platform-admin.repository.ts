@@ -222,6 +222,36 @@ export class PlatformAdminRepository {
       );
     }
 
+    // (R7-followthrough) This path is also used for a placard's own initial,
+    // fire-and-forget draft write, so it can still be in flight when a later
+    // `claimPlacardPublish`/`finalizePlacardPublish` for the SAME row commits
+    // first (e.g. the HTTP response that handed out `placardVersionId`
+    // returned before this write landed). Without a guard, this unconditional
+    // `ON CONFLICT DO UPDATE` would then land *after* the claim and silently
+    // regress the row back to its pre-publish content. `updated_at` only
+    // ever moves forward for a given row in this service, so refusing to
+    // apply a write whose own `updated_at` is older than what is already
+    // persisted is sufficient to make every late/stale writer here (draft
+    // creation, bootstrap seeding, source-drift migration) a safe no-op
+    // against a newer claim/finalize, without needing a separate revision
+    // column.
+    //
+    // (R7-followthrough Codex REOPEN, generation 2b738adf3c2d4a508800cb3a8df0f553)
+    // `updated_at` ordering alone is not enough: a caller whose OWN cached
+    // snapshot is stale (e.g. `migratePlacardArtifactAfterSourceDrift`
+    // recovering a reader's held GET against a placard this instance never
+    // saw get published) can stamp a brand-new `updated_at` on a write that
+    // still carries that stale snapshot's `publishedAt: null`, which would
+    // then legitimately win the ordering fence and erase a sibling
+    // instance's already-finalized publish. `publishedAt` is sticky once a
+    // row has one: this generic writer may only apply when the durable row
+    // is not yet published, or when its own incoming `publishedAt` agrees
+    // exactly with what is already persisted (a legitimate re-write of a
+    // row this caller already knows is published, e.g. the owning
+    // instance's own post-publish source-drift migration). Only the
+    // dedicated `claimPlacardPublish` / `finalizePlacardPublish` /
+    // `releasePlacardPublishClaim` statements are allowed to move
+    // `publishedAt` itself.
     for (const placard of changes.placardVersions ?? []) {
       writes.push(
         this.databaseService!.query(
@@ -242,6 +272,12 @@ export class PlatformAdminRepository {
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
+            WHERE admin.phase1_placard_versions.updated_at <= EXCLUDED.updated_at
+              AND (
+                admin.phase1_placard_versions.record->>'publishedAt' IS NULL
+                OR admin.phase1_placard_versions.record->>'publishedAt'
+                   = EXCLUDED.record->>'publishedAt'
+              )
           `,
           [
             placard.placardVersionId,
@@ -398,6 +434,303 @@ export class PlatformAdminRepository {
         ],
       );
     });
+  }
+
+  /**
+   * Cross-instance fencing for `PlatformAdminService.publishPlacardVersion`
+   * (R7-followthrough/R8/R9): the in-process `placardPublishQueue` only
+   * serializes calls within one Cloud Run instance, so a sibling instance
+   * racing to publish the same never-before-published placard can
+   * independently decide to write durable artifact bytes unless something
+   * stops it *before* either one touches the document-artifact store. This
+   * is that something: an atomic `INSERT ... ON CONFLICT DO UPDATE` claim.
+   *
+   * `claim` carries an internal `__publishClaimToken` (not part of the
+   * public `PlacardVersionRecord` contract -- it never survives
+   * `finalizePlacardPublish`, and callers strip it before returning a
+   * record to anything outside this module). It serves two purposes:
+   *
+   * - R8: if this call's own INSERT commits but the caller never observes
+   *   the result (dropped connection after commit), a later attempt by the
+   *   SAME in-flight caller can tell "the row I'm looking at IS the one I
+   *   just wrote" apart from "someone else already holds this placard" --
+   *   nothing else could produce this exact token.
+   * - R9: a row that still carries a token has not been finalized yet (see
+   *   `finalizePlacardPublish`), so a reader holding such a row knows its
+   *   `artifactManifestHash`/`artifactDownloadUrl` are the pre-publish
+   *   values, not proof of a completed publish, even though `publishedAt`
+   *   is already set.
+   *
+   * The `WHERE` guard normally only admits a never-published row
+   * (`publishedAt IS NULL`), so exactly one concurrent caller wins it and
+   * every other conflicting write affects zero rows. It also admits a row
+   * that still carries a token (never finalized/released) whose
+   * `updated_at` is old enough to be considered abandoned -- a claim whose
+   * owner crashed or lost its network before finalizing/releasing would
+   * otherwise block every future publish of this placard forever. A
+   * finalized row (no token) is never reclaimable through this guard
+   * regardless of age.
+   */
+  async claimPlacardPublish(
+    claim: PlacardVersionRecord,
+  ): Promise<{ claimed: boolean; currentRecord: PlacardVersionRecord | null }> {
+    if (!this.isEnabled()) {
+      return { claimed: true, currentRecord: null };
+    }
+
+    const claimToken = this.readClaimToken(claim);
+
+    let result;
+    try {
+      result = await this.databaseService!.query<JsonRecordRow>(
+        `
+          INSERT INTO admin.phase1_placard_versions (
+            placard_version_id,
+            public_info_version_id,
+            version_code,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6::jsonb
+          )
+          ON CONFLICT (placard_version_id) DO UPDATE SET
+            updated_at = EXCLUDED.updated_at,
+            record = EXCLUDED.record
+          WHERE admin.phase1_placard_versions.record->>'publishedAt' IS NULL
+             OR (
+               admin.phase1_placard_versions.record->>'__publishClaimToken' IS NOT NULL
+               AND admin.phase1_placard_versions.updated_at < NOW() - INTERVAL '2 minutes'
+             )
+          RETURNING record
+        `,
+        [
+          claim.placardVersionId,
+          claim.publicInfoVersionId,
+          claim.versionCode,
+          claim.createdAt,
+          claim.updatedAt,
+          JSON.stringify(claim),
+        ],
+      );
+    } catch (error) {
+      const reconciled = await this.reconcileAmbiguousPlacardClaim(
+        claim.placardVersionId,
+        claimToken,
+      );
+      if (reconciled) {
+        return reconciled;
+      }
+      throw error;
+    }
+
+    if (result.rows.length === 1) {
+      return {
+        claimed: true,
+        currentRecord: this.parseRecord<PlacardVersionRecord>(
+          result.rows[0]!.record,
+          "admin.phase1_placard_versions",
+        ),
+      };
+    }
+
+    const current = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_placard_versions WHERE placard_version_id = $1`,
+      [claim.placardVersionId],
+    );
+    return {
+      claimed: false,
+      currentRecord: current.rows[0]
+        ? this.parseRecord<PlacardVersionRecord>(
+            current.rows[0].record,
+            "admin.phase1_placard_versions",
+          )
+        : null,
+    };
+  }
+
+  /**
+   * Recovers from a claim write whose commit outcome this call never
+   * observed (the INSERT in `claimPlacardPublish` threw instead of
+   * returning). Re-reads the row and only treats it as "mine" when it
+   * carries THIS attempt's own `__publishClaimToken` -- a value nothing
+   * else could have produced -- so a genuinely failed write (no matching
+   * token persisted) is never mistaken for success, and a different
+   * caller's committed claim is never adopted as this one's own.
+   */
+  private async reconcileAmbiguousPlacardClaim(
+    placardVersionId: string,
+    claimToken: string | null,
+  ): Promise<{ claimed: boolean; currentRecord: PlacardVersionRecord } | null> {
+    if (!claimToken) {
+      return null;
+    }
+    try {
+      const current = await this.databaseService!.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_placard_versions WHERE placard_version_id = $1`,
+        [placardVersionId],
+      );
+      if (!current.rows[0]) {
+        return null;
+      }
+      const record = this.parseRecord<PlacardVersionRecord>(
+        current.rows[0].record,
+        "admin.phase1_placard_versions",
+      );
+      if (this.readClaimToken(record) === claimToken) {
+        return { claimed: true, currentRecord: record };
+      }
+      if (record.publishedAt) {
+        return { claimed: false, currentRecord: record };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Reads a single placard row as-is (including a still-pending
+   * `__publishClaimToken`, if any). Used by callers that cached a claim
+   * snapshot that turned out not to be authoritative yet (R9) and need to
+   * check whether it has been finalized since.
+   */
+  async getPlacardVersionRecord(
+    placardVersionId: string,
+  ): Promise<PlacardVersionRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const current = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_placard_versions WHERE placard_version_id = $1`,
+      [placardVersionId],
+    );
+    return current.rows[0]
+      ? this.parseRecord<PlacardVersionRecord>(
+          current.rows[0].record,
+          "admin.phase1_placard_versions",
+        )
+      : null;
+  }
+
+  /**
+   * Reads a single public-info-version row fresh from the durable store,
+   * bypassing any calling service instance's own in-memory
+   * `publicInfoVersions` cache. `publishPublicInfoVersion` mutates that
+   * cache and fire-and-forget `persistChanges`es it on whichever instance
+   * handled the request; a sibling instance's cache never observes that
+   * mutation until its own `loadState()` rehydration, which may never
+   * happen for the lifetime of a given process. Repair/recovery paths that
+   * must reproduce the SAME bytes an authoritative winner already produced
+   * (R10-D) need this instance's own cache to leave the loop entirely, not
+   * just its newest snapshot.
+   */
+  async getPublicInfoVersionRecord(
+    versionId: string,
+  ): Promise<PublicInfoVersionRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const current = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_public_info_versions WHERE version_id = $1`,
+      [versionId],
+    );
+    return current.rows[0]
+      ? this.parseRecord<PublicInfoVersionRecord>(
+          current.rows[0].record,
+          "admin.phase1_public_info_versions",
+        )
+      : null;
+  }
+
+  /**
+   * Commits the fully-rendered publish result over a claim already won by
+   * `claimPlacardPublish`, dropping the `__publishClaimToken` so readers can
+   * tell this row is actually finalized (R9). Guarded by `expectedClaimToken`
+   * and the affected-row count, not just the placard id: between this
+   * call's own claim and this write, nothing else should have been able to
+   * touch the row (the claim's token excludes every other claimant, and the
+   * `persistChanges` placard guard rejects stale writers), but if something
+   * unexpected did, returning `false` instead of silently "succeeding" lets
+   * the caller release/report the conflict instead of reporting success for
+   * a durable record that does not actually reflect it.
+   */
+  async finalizePlacardPublish(
+    record: PlacardVersionRecord,
+    expectedClaimToken: string,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) {
+      return true;
+    }
+
+    const payload: PlacardVersionRecord & {
+      __publishClaimToken?: string | null;
+    } = { ...record };
+    delete payload.__publishClaimToken;
+
+    const result = await this.databaseService!.query(
+      `
+        UPDATE admin.phase1_placard_versions
+        SET updated_at = $2, record = $3::jsonb
+        WHERE placard_version_id = $1 AND record->>'__publishClaimToken' = $4
+      `,
+      [
+        record.placardVersionId,
+        record.updatedAt,
+        JSON.stringify(payload),
+        expectedClaimToken,
+      ],
+    );
+
+    return result.rowCount === 1;
+  }
+
+  /**
+   * Reverts a claim this same call won via `claimPlacardPublish` but then
+   * failed to materialise (render/store failure, or the pre-existing
+   * store-changed-during-publish readback check). Guarded by both
+   * `publishedAt` and `__publishClaimToken` matching this exact claim --
+   * either guard alone would already stop this release from touching a
+   * different claim, but requiring both means a release can never apply
+   * after some other write has touched the row for any reason. Returns
+   * whether the release actually applied so the caller can tell a no-op
+   * (row already moved on) apart from a genuine revert.
+   */
+  async releasePlacardPublishClaim(
+    placardVersionId: string,
+    claimedPublishedAt: string,
+    revertedRecord: PlacardVersionRecord,
+    expectedClaimToken: string,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) {
+      return true;
+    }
+
+    const result = await this.databaseService!.query(
+      `
+        UPDATE admin.phase1_placard_versions
+        SET updated_at = $2, record = $3::jsonb
+        WHERE placard_version_id = $1
+          AND record->>'publishedAt' = $4
+          AND record->>'__publishClaimToken' = $5
+      `,
+      [
+        placardVersionId,
+        revertedRecord.updatedAt,
+        JSON.stringify(revertedRecord),
+        claimedPublishedAt,
+        expectedClaimToken,
+      ],
+    );
+
+    return result.rowCount === 1;
+  }
+
+  private readClaimToken(record: PlacardVersionRecord): string | null {
+    return (
+      (record as PlacardVersionRecord & { __publishClaimToken?: string | null })
+        .__publishClaimToken ?? null
+    );
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

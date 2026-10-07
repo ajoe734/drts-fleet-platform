@@ -28,6 +28,11 @@ import type {
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
 
+import {
+  persistOrderPartnerNotificationRoute,
+  mapOrderPartnerNotificationRoute,
+  type OrderPartnerNotificationRouteRow,
+} from "../tenant-partner/order-partner-notification-route";
 import { DatabaseService } from "../../common/db/database.service";
 import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
 
@@ -215,21 +220,6 @@ type ElectronicReceiptRow = QueryResultRow & {
   currency: string;
   issued_at: Date | string;
   record: unknown;
-};
-
-type OrderPartnerNotificationRouteRow = QueryResultRow & {
-  order_id: string;
-  tenant_id: string;
-  partner_id: string;
-  entry_slug: string;
-  partner_user_ref: string;
-  drts_passenger_id: string;
-  passenger_subject_ref: string;
-  identity_linked_at: Date | string;
-  consent_bundle_version: string;
-  notification_policy_version: string;
-  ride_ref: string;
-  created_at: Date | string;
 };
 
 @Injectable()
@@ -429,66 +419,9 @@ export class MultiTaxiRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const insertResult = await client.query<OrderPartnerNotificationRouteRow>(
-        `
-          INSERT INTO mobility.phase1_order_partner_notification_routes (
-            order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
-            drts_passenger_id, passenger_subject_ref, identity_linked_at,
-            consent_bundle_version, notification_policy_version, ride_ref,
-            created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (order_id) DO NOTHING
-          RETURNING order_id, tenant_id, partner_id, entry_slug,
-            partner_user_ref, drts_passenger_id, passenger_subject_ref,
-            identity_linked_at, consent_bundle_version,
-            notification_policy_version, ride_ref, created_at
-        `,
-        [
-          route.orderId,
-          route.tenantId,
-          route.partnerId,
-          route.entrySlug,
-          route.partnerUserRef,
-          route.drtsPassengerId,
-          route.passengerSubjectRef,
-          route.identityLinkedAt,
-          route.consentBundleVersion,
-          route.notificationPolicyVersion,
-          route.rideRef,
-          route.createdAt,
-        ],
-      );
-
-      let insertedRow = insertResult.rows[0];
-      if (!insertedRow) {
-        const existing = await client.query<OrderPartnerNotificationRouteRow>(
-          `
-            SELECT order_id, tenant_id, partner_id, entry_slug,
-              partner_user_ref, drts_passenger_id, passenger_subject_ref,
-              identity_linked_at, consent_bundle_version,
-              notification_policy_version, ride_ref, created_at
-            FROM mobility.phase1_order_partner_notification_routes
-            WHERE order_id = $1
-          `,
-          [route.orderId],
-        );
-        insertedRow = existing.rows[0];
-      } else {
-        await client.query(
-          `
-            INSERT INTO mobility.phase1_partner_notification_sequences (
-              order_id, next_sequence
-            ) VALUES ($1, 1)
-            ON CONFLICT (order_id) DO NOTHING
-          `,
-          [route.orderId],
-        );
-      }
-
+      const stored = await persistOrderPartnerNotificationRoute(client, route);
       await client.query("COMMIT");
-      return insertedRow
-        ? this.mapOrderPartnerNotificationRoute(insertedRow)
-        : null;
+      return stored;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       this.logger.warn(
@@ -521,7 +454,7 @@ export class MultiTaxiRepository {
         [orderId],
       );
     const row = result.rows[0];
-    return row ? this.mapOrderPartnerNotificationRoute(row) : null;
+    return row ? mapOrderPartnerNotificationRoute(row) : null;
   }
 
   /**
@@ -551,26 +484,6 @@ export class MultiTaxiRepository {
     );
     const row = result.rows[0];
     return row ? Number(row.event_sequence) : null;
-  }
-
-  private mapOrderPartnerNotificationRoute(
-    row: OrderPartnerNotificationRouteRow,
-  ): OrderPartnerNotificationRoute {
-    return {
-      orderId: row.order_id,
-      tenantId: row.tenant_id,
-      partnerId: row.partner_id,
-      entrySlug: row.entry_slug,
-      partnerUserRef: row.partner_user_ref,
-      drtsPassengerId: row.drts_passenger_id,
-      passengerSubjectRef: row.passenger_subject_ref,
-      identityLinkedAt: new Date(row.identity_linked_at).toISOString(),
-      consentBundleVersion: row.consent_bundle_version,
-      notificationPolicyVersion:
-        row.notification_policy_version as OrderPartnerNotificationRoute["notificationPolicyVersion"],
-      rideRef: row.ride_ref,
-      createdAt: new Date(row.created_at).toISOString(),
-    };
   }
 
   /**
@@ -820,7 +733,13 @@ export class MultiTaxiRepository {
       assignment_version: number;
     }>(
       `
-      SELECT o.status, COALESCE((SELECT MAX(assignment_version) FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id=o.order_id), 0) AS assignment_version
+      SELECT o.status, COALESCE(
+        (SELECT MAX(assignment_version)
+         FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id = o.order_id),
+        CASE WHEN o.runtime_profile_code = 'business_dispatch' THEN
+          (SELECT count(*) FROM ops.phase1_dispatch_assignments a WHERE a.order_id = o.order_id)
+        ELSE 0 END
+      ) AS assignment_version
       FROM ops.phase1_owned_orders o WHERE o.order_id=$1
     `,
       [orderId],
@@ -1814,7 +1733,9 @@ export class MultiTaxiRepository {
         deliveredAt: row.deliveredAt ? this.toIso(row.deliveredAt) : null,
         expiresAt: row.expiresAt ? this.toIso(row.expiresAt) : null,
         nextAttemptAt: row.nextAttemptAt ? this.toIso(row.nextAttemptAt) : null,
-        leaseExpiresAt: row.leaseExpiresAt ? this.toIso(row.leaseExpiresAt) : null,
+        leaseExpiresAt: row.leaseExpiresAt
+          ? this.toIso(row.leaseExpiresAt)
+          : null,
       })),
       total: parseInt(countResult.rows[0]?.cnt || "0", 10),
     };
@@ -1923,7 +1844,10 @@ export class MultiTaxiRepository {
         : outbox.payload?.partnerNotification?.retryDisposition;
       if (
         retryDisp === "terminal" ||
-        (retryDisp && !["manual_only", "automatic", "configuration_blocked"].includes(retryDisp))
+        (retryDisp &&
+          !["manual_only", "automatic", "configuration_blocked"].includes(
+            retryDisp,
+          ))
       ) {
         await client.query("ROLLBACK");
         return {
@@ -2125,7 +2049,10 @@ export class MultiTaxiRepository {
         };
       }
 
-      if (internalEvent !== "receipt_ready") {
+      if (
+        internalEvent !== "receipt_ready" &&
+        internalEvent !== "trip_cancelled"
+      ) {
         if (
           ["cancelled", "completed", "closed", "rejected"].includes(
             relevance.status,

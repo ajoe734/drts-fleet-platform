@@ -1,6 +1,30 @@
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { credentials } from "../../../../infra/gcp/dev/ops-drill/db_credentials.mjs";
+
+const apiRequire = createRequire(path.resolve("apps/api/package.json"));
+const { Client } = apiRequire("pg");
+
+it("matches the API pg driver's credentials without opening a connection", () => {
+  const urls = [
+    "postgresql://drill-user:TOP-SECRET-PASSWORD@/drts?host=/cloudsql/private-db",
+    "postgres://drill-user:TOP-SECRET:p@ss+[]@/drts?host=/cloudsql/private-db",
+    "postgresql://drill%40user:TOP-SECRET%40%3A%2F%3F%23%25%5B%5D%5C@/drts?host=/cloudsql/private-db",
+    "postgresql://drill-user:TOP-SECRET-PASSWORD@private-db/drts%20db",
+    "postgresql://ignored:ignored@/drts?host=/cloudsql/private-db&user=drill-user&password=TOP-SECRET%2Bpass",
+    "postgresql://user:TOP-SECRET%xy@/drts?host=/cloudsql/private-db",
+    "postgresql://user:TOP-SECRET pass@/drts%2Fdb?host=/cloudsql/private-db",
+    "postgresql://user:TOP-SECRET@private-db/drts?password=first&password=last",
+  ];
+  for (const url of urls) {
+    const { user, password, database } = new Client({
+      connectionString: url,
+    }).connectionParameters;
+    expect(credentials(url)).toEqual({ user, password, database });
+  }
+});
 
 it("runs the real orchestration against offline CLI boundaries, including cleanup and missing evidence", () => {
   const output = execFileSync(

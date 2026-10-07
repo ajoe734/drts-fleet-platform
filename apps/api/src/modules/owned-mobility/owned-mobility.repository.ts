@@ -1,3 +1,4 @@
+import { persistOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
@@ -12,6 +13,7 @@ import type {
   DriverTaskRecord,
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
+  OrderPartnerNotificationRoute,
   PassengerDispatchDisclosureSnapshot,
   TenantBookingListQuery,
 } from "@drts/contracts";
@@ -687,6 +689,44 @@ export class OwnedMobilityRepository {
     }
   }
 
+  /** A failed notification setup must not abort the enclosing booking.
+   * Roll back both route and sequence together before allowing it to commit.
+   * A lost connection/failed savepoint recovery remains a booking DB failure.
+   */
+  async writeOrderPartnerNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+    tx?: OwnedMobilityQueryExecutor,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) return null;
+    if (!tx) {
+      try {
+        return await this.withTransaction((executor) =>
+          this.writeOrderPartnerNotificationRoute(route, executor),
+        );
+      } catch (error) {
+        this.reportPersistenceFailure(
+          error,
+          "write order partner notification route",
+        );
+        return null;
+      }
+    }
+    await tx.query("SAVEPOINT partner_notification_route");
+    try {
+      const stored = await persistOrderPartnerNotificationRoute(tx, route);
+      await tx.query("RELEASE SAVEPOINT partner_notification_route");
+      return stored;
+    } catch (error) {
+      await tx.query("ROLLBACK TO SAVEPOINT partner_notification_route");
+      await tx.query("RELEASE SAVEPOINT partner_notification_route");
+      this.reportPersistenceFailure(
+        error,
+        "write order partner notification route",
+      );
+      return null;
+    }
+  }
+
   async persistOrderWorkflow(
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
@@ -1043,9 +1083,30 @@ export class OwnedMobilityRepository {
       `SELECT count(*) FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
       [orderId],
     );
+    // ROUTE-WRITE freezes this route only for authenticated referral bookings.
+    // Read it after the order lock, using the same transaction and durable
+    // ownership; caller-provided booking fields cannot opt into notifications.
+    const referralRoute =
+      current.order.runtimeProfileCode === "business_dispatch"
+        ? await executor.query<{ passenger_subject_ref: string }>(
+            `SELECT passenger_subject_ref
+             FROM mobility.phase1_order_partner_notification_routes
+             WHERE order_id = $1 AND tenant_id = $2 AND partner_id = $3
+               AND entry_slug = $4 AND drts_passenger_id = $5`,
+            [
+              orderId,
+              current.order.tenantId,
+              current.order.partnerId,
+              current.order.partnerEntrySlug,
+              current.order.passenger.passengerId,
+            ],
+          )
+        : null;
     return {
       order: current.order,
       assignmentVersion: Number(versions.rows[0]!.count),
+      referralPassengerSubjectRef:
+        referralRoute?.rows[0]?.passenger_subject_ref ?? null,
       assignment,
       task,
       dispatchJobs: jobs.rows.map((row) =>
@@ -1847,6 +1908,29 @@ export class OwnedMobilityRepository {
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
       writes.push(async () => {
+        let assignmentVersion = outbox.assignmentVersion;
+        if (outbox.eventType === "eta_changed" && assignmentVersion === null) {
+          // ETA's task identifies its assignment, including a superseded one.
+          // Reuse that assignment event's durable generation, never the latest
+          // in-memory count (which could attach an old ETA to a replacement).
+          // Other profiles and pre-existing unversioned events stay unchanged.
+          const assignmentEvent = await executor.query<{
+            assignment_version: number;
+          }>(
+            `SELECT n.assignment_version
+             FROM ops.phase1_driver_tasks t
+             JOIN ops.phase1_owned_orders o ON o.order_id = t.order_id
+             JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
+             JOIN ops.consumer_notification_outbox n
+               ON n.outbox_id = 'referral-assignment:' || t.assignment_id
+              AND n.order_id = t.order_id
+             WHERE t.task_id = $1 AND t.order_id = $2
+               AND o.runtime_profile_code = 'business_dispatch'`,
+            [outbox.payload.taskId, outbox.orderId],
+          );
+          assignmentVersion =
+            assignmentEvent.rows[0]?.assignment_version ?? assignmentVersion;
+        }
         // Insert first: the unique key serializes concurrent retries of the
         // same event. Only the winner allocates; NOT EXISTS before an insert
         // can race and consume a sequence even when the insert is a no-op.
@@ -1877,7 +1961,7 @@ export class OwnedMobilityRepository {
             outbox.orderId,
             outbox.passengerSubjectRef,
             outbox.eventType,
-            outbox.assignmentVersion,
+            assignmentVersion,
             JSON.stringify(outbox.payload),
             outbox.status,
             outbox.attemptCount,

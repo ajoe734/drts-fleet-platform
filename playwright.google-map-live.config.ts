@@ -1,8 +1,8 @@
 import { defineConfig } from "@playwright/test";
-import { validateLiveMapGate } from "./tests/e2e/system-remediation/sr-live-map-001/live-map-config";
+import { createOpsConsoleAuthentication } from "./tests/e2e/system-remediation/sr-live-map-001/browser-auth";
 
 // Gate before Playwright can launch Chromium or contact any deployed target.
-const { opsOrigin: baseURL } = validateLiveMapGate(process.env);
+const { opsOrigin: baseURL } = createOpsConsoleAuthentication(process.env);
 
 export default defineConfig({
   testDir: "./tests/live",

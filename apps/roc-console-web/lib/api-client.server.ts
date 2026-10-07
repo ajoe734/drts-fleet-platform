@@ -52,7 +52,7 @@ export async function getServerRocClient(): Promise<ApiClient> {
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const controlPlaneAuth = issueControlPlaneRequestAuth({
+  const controlPlaneAuth = await issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: requestHeaders,
     defaultEmail: ROC_DUTY_OPERATOR_EMAIL,
