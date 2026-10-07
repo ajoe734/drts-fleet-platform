@@ -428,7 +428,9 @@ export async function bootstrapMailSession(
                            if (parts.length >= 2 && parts[1]) {
                                payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
                            }
-                        } catch (e) {}
+                        } catch {
+                           payload = {};
+                        }
                         issuedSessions.push({
                            exportKey: tokenExportKey,
                            observed_role: (payload.roles && payload.roles[0]) || payload.role,

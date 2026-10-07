@@ -138,7 +138,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST: "billing+invoice@company.com",
     };
 
-    let tokenIndex = 0;
     const tokensMap: Record<string, any> = {};
 
     const fetchMock = vi.fn().mockImplementation(async (url, opts) => {

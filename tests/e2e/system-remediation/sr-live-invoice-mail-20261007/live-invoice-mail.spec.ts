@@ -579,7 +579,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
             }
         }
         const wrongDownloadLinkCount = await page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`).count();
-        const forbidden_download_absent = (wrongDownloadLinkCount === 0);
+        // forbidden_download_absent was unused
         await expect(page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`)).not.toBeVisible();
 
         // The selected fallback MUST be the own invoice
