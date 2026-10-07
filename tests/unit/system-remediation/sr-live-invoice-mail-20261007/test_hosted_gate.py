@@ -37,8 +37,8 @@ class HostedGateTest(unittest.TestCase):
                              {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
-                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200},
+                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -108,6 +108,16 @@ class HostedGateTest(unittest.TestCase):
             if c.get('scenario') == 'non_allowlisted':
                 del c['delivery_id']
         self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed')
+
+        # empty negative deliveryId
+        ev_empty = copy.deepcopy(self.evidence)
+        for d in ev_empty['durableDeliveries']:
+            if d.get('scenario') == 'non_allowlisted':
+                d['deliveryId'] = ''
+        for c in ev_empty['httpCalls']:
+            if c.get('scenario') == 'non_allowlisted':
+                c['delivery_id'] = ''
+        self.assertEqual(gate.evaluate(self.env, ev_empty, self.provider)['status'], 'failed')
 
         # change negative POST status to 500
         ev = copy.deepcopy(self.evidence)
@@ -202,6 +212,31 @@ class HostedGateTest(unittest.TestCase):
         code, data = run_main(base_bootstrap, t5)
         self.assertEqual(code, 1)
         self.assertEqual(data["status"], "failed")
+
+        # 6. Unknown key in manifests
+        b6 = {**base_bootstrap, "issued_sessions": ["UNKNOWN_KEY", valid_keys[1], valid_keys[2]]}
+        code, data = run_main(b6, base_teardown)
+        self.assertEqual(code, 1)
+        t6 = {**base_teardown, "sessions": [{"key": "UNKNOWN_KEY", "status": "success"}, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "success"}]}
+        code, data = run_main(base_bootstrap, t6)
+        self.assertEqual(code, 1)
+
+        # 7. Contradiction: issued + not_issued
+        t7 = {**base_teardown, "sessions": [{"key": valid_keys[0], "status": "not_issued"}, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "success"}]}
+        code, data = run_main(base_bootstrap, t7)
+        self.assertEqual(code, 1)
+
+        # 8. Valid partial cleanup
+        b8 = {**base_bootstrap, "issued_sessions_count": 2, "issued_sessions": [valid_keys[0], valid_keys[1]]}
+        t8 = {**base_teardown, "attempted": 2, "sessions": [{"key": valid_keys[0], "status": "success"}, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "not_issued"}]}
+        code, data = run_main(b8, t8)
+        self.assertEqual(code, 0)
+        self.assertEqual(data["status"], "passed")
+
+        # 9. Attempted count mismatch
+        t9 = {**base_teardown, "attempted": 2} # issued is 3
+        code, data = run_main(base_bootstrap, t9)
+        self.assertEqual(code, 1)
 
 class ProviderMetadataTest(unittest.TestCase):
     def test_old_revision_and_split_traffic_fail_before_secret_payload_access(self):

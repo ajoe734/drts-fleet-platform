@@ -62,8 +62,8 @@ def evaluate(env, evidence, provider):
         dl_proof = {}
     has_download = bool(
         get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
-        and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") == 404
-        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") == 200
+        and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") == 404 and get_call("GET", path="wrong_tenant_portal").get("ui_isolated") is True
+        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") == 200 and get_call("GET", path="read_only_portal").get("ui_readonly") is True
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
         and dl_proof.get("matched") is True
         and isinstance(dl_proof.get("manifestHash"), str) and bool(re.match(r"^[0-9a-f]{64}$", dl_proof.get("manifestHash")))

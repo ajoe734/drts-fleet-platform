@@ -508,16 +508,18 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const wtOwnResponse = await page.request.get(wtOwnResource);
         expect(wtOwnResponse.status()).toBe(200);
 
-        // Verify authenticated cross-tenant 404
+        // Verify authenticated cross-tenant 404 (and fallback in UI)
         const wrongTenantUiUrl = new URL(`/invoices?invoiceId=${invoiceId}`, portalOrigin).href;
         await page.goto(wrongTenantUiUrl, { waitUntil: "networkidle" });
+        await expect(page.getByText(invoiceId)).not.toBeVisible();
+        await expect(page.getByText(nonAllowlistInvoiceId)).toBeVisible();
 
         const protectedPortalApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${invoiceId}`, portalOrigin).href;
         const wtResponse = await page.request.get(protectedPortalApiUrl);
         expect(wtResponse.status()).toBe(404);
         const errBody = await wtResponse.json().catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
-        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status() });
+        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
             evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
@@ -529,14 +531,27 @@ test.describe("Live Invoice Mail Acceptance", () => {
         await context.addCookies([{ name: "drts_tenant_session", value: readOnlyToken, domain: portalUrlObj.hostname, path: "/" }]);
 
         // Read-only role CAN view the invoice
+        let mutationCount = 0;
+        page.on('request', req => {
+            if (req.method() === 'POST' && req.url().includes('/mail')) {
+                mutationCount++;
+            }
+        });
+
         const roInvoiceUiUrl = new URL(`/invoices?invoiceId=${readOnlyInvoiceId}`, portalOrigin).href;
         const roUiResp = await page.goto(roInvoiceUiUrl, { waitUntil: "networkidle" });
         expect(roUiResp?.status()).toBe(200);
 
+        await expect(page.getByText(readOnlyInvoiceId)).toBeVisible();
+        const sendBtn = page.locator('button').filter({ hasText: /Send invoice email|Retry pending delivery|Send another copy|寄送帳單信件|重試待寄信件|再寄一份/ });
+        await expect(sendBtn).toBeDisabled();
+        await expect(page.getByText(/Billing write permission is required to send\.|需帳務寫入權限才能寄送。/)).toBeVisible();
+        expect(mutationCount).toBe(0);
+
         const roApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${readOnlyInvoiceId}`, portalOrigin).href;
         const roResponse = await page.request.get(roApiUrl);
         expect(roResponse.status()).toBe(200);
-        evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: roResponse.status() });
+        evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: roResponse.status(), ui_readonly: true });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
             evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
