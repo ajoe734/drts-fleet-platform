@@ -245,7 +245,7 @@ describe("fetchAndValidateReport (R5-A regressions)", () => {
   const validCsvBytes = Buffer.from(recordsToCsv(validJobDetail.rows));
 
   const mockFetch = (metadataOverride: any, artifactOverride: { status?: number, bytes?: Buffer, headers?: Record<string, string> } = {}) => {
-    return async (input: RequestInfo | URL, init?: RequestInit) => {
+    return async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.endsWith("/artifact")) {
         return {
@@ -299,8 +299,18 @@ describe("fetchAndValidateReport (R5-A regressions)", () => {
   });
 
   it("rejects wrong MIME mismatch", async () => {
-    const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "application/pdf" } });
+    const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "application/pdf", "x-drts-candidate-sha": "sha123" } });
     await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow();
+  });
+
+  it("rejects missing MIME", async () => {
+    const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "x-drts-candidate-sha": "sha123" } });
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow("Missing content-type in artifact response");
+  });
+
+  it("rejects empty MIME", async () => {
+    const fetchFn = mockFetch({ data: validJobDetail }, { headers: { "content-type": "   ", "x-drts-candidate-sha": "sha123" } });
+    await expect(fetchAndValidateReport(`/control-plane-proxy/reports/${jobId}/artifact`, "http://origin", {}, "sha123", fetchFn)).rejects.toThrow("Missing content-type in artifact response");
   });
 });
 

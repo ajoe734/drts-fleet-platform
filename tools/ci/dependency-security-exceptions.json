@@ -182,6 +182,18 @@
     ]
   },
   {
+    "advisory_id": "1241339",
+    "module_name": "@modelcontextprotocol/sdk",
+    "reason": "Development tooling/SDK used in internal tools only, not exposed to untrusted external authorization servers.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.30.0"
+    ],
+    "paths": [
+      "apps__api>openclaw>@modelcontextprotocol/sdk"
+    ]
+  },
+  {
     "advisory_id": "1239765",
     "module_name": "image-size",
     "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",
@@ -227,42 +239,6 @@
     ],
     "paths": [
       "apps__driver-app>expo>@expo/metro>metro-file-map>micromatch>braces"
-    ]
-  },
-  {
-    "advisory_id": "1241202",
-    "module_name": "sprintf-js",
-    "reason": "Test tool dependency (istanbul/nyc config). Not exploitable in production.",
-    "expires_at": "2027-01-01T00:00:00Z",
-    "versions": [
-      "1.0.3"
-    ],
-    "paths": [
-      "apps__driver-app>react-native>babel-jest>babel-plugin-istanbul>@istanbuljs/load-nyc-config>js-yaml>argparse>sprintf-js"
-    ]
-  },
-  {
-    "advisory_id": "1241209",
-    "module_name": "source-map-js",
-    "reason": "Build tool dependency (postcss). Not exploitable in production.",
-    "expires_at": "2027-01-01T00:00:00Z",
-    "versions": [
-      "1.2.1"
-    ],
-    "paths": [
-      "apps__bank-console-web>next>postcss>source-map-js"
-    ]
-  },
-  {
-    "advisory_id": "1241210",
-    "module_name": "proxy-addr",
-    "reason": "Platform does not configure trust subnets with IPv4-mapped IPv6 notation.",
-    "expires_at": "2027-01-01T00:00:00Z",
-    "versions": [
-      "2.0.7"
-    ],
-    "paths": [
-      "apps__api>@nestjs/platform-express>express>proxy-addr"
     ]
   }
 ]

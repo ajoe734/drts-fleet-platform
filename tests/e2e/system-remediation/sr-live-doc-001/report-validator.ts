@@ -143,7 +143,10 @@ export async function fetchAndValidateReport(
     throw new Error("Mismatch x-drts-candidate-sha in artifact response");
   }
 
-  const contentType = artifactRes.headers.get("content-type") || "text/csv";
+  const contentType = artifactRes.headers.get("content-type");
+  if (!contentType || contentType.trim() === "") {
+    throw new Error("Missing content-type in artifact response");
+  }
   const arrayBuffer = await artifactRes.arrayBuffer();
   const bytes = Buffer.from(arrayBuffer);
 
