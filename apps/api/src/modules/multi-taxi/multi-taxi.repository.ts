@@ -13,6 +13,7 @@ import type {
   MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
   OrderFirstPartyNotificationRoute,
+  FirstPartyPushDeliveryContext,
   OrderPartnerNotificationRoute,
   PartnerNotificationRetryDisposition,
   PassengerNotificationFailureReason,
@@ -491,6 +492,135 @@ export class MultiTaxiRepository {
         }`,
       );
       return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async findOrderFirstPartyNotificationRoute(
+    orderId: string,
+  ): Promise<OrderFirstPartyNotificationRoute | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<any>(
+      `
+      SELECT order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
+        app_id, notification_policy_version, consent_version, ride_ref, created_at
+      FROM mobility.phase1_order_first_party_notification_routes
+      WHERE order_id = $1
+      `,
+      [orderId]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      drtsPassengerId: row.drts_passenger_id,
+      passengerSubjectRef: row.passenger_subject_ref,
+      appId: row.app_id,
+      notificationPolicyVersion: row.notification_policy_version,
+      consentVersion: row.consent_version,
+      rideRef: row.ride_ref,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    };
+  }
+
+  async findFirstPartyNotificationContextAndTokens(
+    outboxId: string,
+  ): Promise<{ context: FirstPartyPushDeliveryContext; tokensByDeviceId: Map<string, string> } | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      const result = await client.query<any>(
+        `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id = $1`,
+        [outboxId]
+      );
+      if (result.rows.length === 0) return null;
+      const row = result.rows[0];
+      const context: FirstPartyPushDeliveryContext = {
+        outboxId: row.outbox_id,
+        orderId: row.order_id,
+        tenantId: row.tenant_id,
+        targetDevices: row.target_devices,
+        wireMessage: row.wire_message,
+        wireMessageHash: row.wire_message_hash,
+        eventSequence: parseInt(row.event_sequence, 10),
+        expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : row.expires_at,
+        deliveryTarget: row.delivery_target,
+        deliveryStage: row.delivery_stage,
+        retryDisposition: row.retry_disposition,
+        failureReason: row.failure_reason,
+        receiptId: row.receipt_id,
+        createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+        deliveredAt: row.delivered_at ? (row.delivered_at instanceof Date ? row.delivered_at.toISOString() : row.delivered_at) : null,
+      };
+
+      const tokensByDeviceId = new Map<string, string>();
+      const deviceIds = context.targetDevices.map((d: any) => d.deviceId);
+      if (deviceIds.length > 0) {
+        const tokenResult = await client.query<any>(
+          `SELECT device_id, token FROM iam.phase1_passenger_push_devices WHERE device_id = ANY($1::uuid[])`,
+          [deviceIds]
+        );
+        for (const tRow of tokenResult.rows) {
+          tokensByDeviceId.set(tRow.device_id, tRow.token);
+        }
+      }
+      return { context, tokensByDeviceId };
+    } finally {
+      client.release();
+    }
+  }
+
+  async prepareFirstPartyNotificationContext(
+    context: Omit<FirstPartyPushDeliveryContext, "createdAt" | "deliveredAt">,
+    fenceToken: string,
+  ): Promise<FirstPartyPushDeliveryContext> {
+    if (!this.isEnabled()) {
+      throw new Error("DATABASE_URL is not configured");
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      
+      const outbox = await client.query(
+        "SELECT status FROM ops.consumer_notification_outbox WHERE outbox_id = $1 AND claim_token = $2 FOR UPDATE",
+        [context.outboxId, fenceToken]
+      );
+      if (outbox.rows.length === 0) {
+        throw new Error("Outbox row not found or claim token mismatch");
+      }
+
+      const inserted = await client.query<any>(
+        `
+        INSERT INTO mobility.phase1_first_party_notification_delivery_contexts (
+          outbox_id, order_id, tenant_id, target_devices, wire_message, wire_message_hash,
+          event_sequence, expires_at, delivery_target, delivery_stage, retry_disposition,
+          failure_reason, receipt_id, created_at, delivered_at
+        ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NULL)
+        RETURNING created_at
+        `,
+        [
+          context.outboxId, context.orderId, context.tenantId, JSON.stringify(context.targetDevices),
+          JSON.stringify(context.wireMessage), context.wireMessageHash, context.eventSequence,
+          context.expiresAt, context.deliveryTarget, context.deliveryStage, context.retryDisposition,
+          context.failureReason, context.receiptId
+        ]
+      );
+      
+      await client.query("COMMIT");
+      return {
+        ...context,
+        createdAt: inserted.rows[0].created_at instanceof Date ? inserted.rows[0].created_at.toISOString() : inserted.rows[0].created_at,
+        deliveredAt: null,
+      };
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
     } finally {
       client.release();
     }
