@@ -151,3 +151,72 @@ Node v22.23.2, exit 1); this is a tooling limitation, not a formatting pass.
 The final trailer check and exact local/remote/PR SHA comparison are recorded
 in the candidate handoff. No product unit tests are needed for this report-only
 change; historical runner results above retain their original candidate SHA.
+
+## Codex2 reopen and owner recheck: UNBLOCK-PARENT-METADATA
+
+Review source: Codex2 independent review recorded at `2026-10-07T02:41:15Z`,
+candidate `2f9ca85e0cdfa63c30ce7b247acf494bc96b1f5d`, generation
+`dd72b7bf63ba45608264c1d8d4df2b75`, PR #2386. The reviewer accepted the
+report scope and diagnosis but reopened the missing parent update and unsafe
+merge disposition. This section retains that finding in the original artifact;
+it does not claim an operator repair. No second adjacent helper candidate has
+been independently reviewed, so a second consecutive reopen is not asserted.
+
+Owner recheck on 2026-10-07 after the `02:41:40Z` progress receipt:
+
+- Helper is `in_progress`, owner Codex, reviewer Codex2; `candidate_sha` is
+  cleared following reopen. Generation remains the value above.
+- `required_acceptance`, `resolved_parent_status`,
+  `resolved_parent_waiting_for` and `resolved_parent_next` are all absent
+  (`null` in the selected JSON). The human acceptance array is not a machine gate.
+- Parent remains `blocked`, `external_gate=false`, `waiting_for=Codex`.
+  Its `next` is still the generic provisioning message, last updated
+  `2026-10-07T02:18:18Z`; the concrete sessions/fixtures/IAP note is absent.
+- Parent candidate, reviewed SHA and CI SHA all remain
+  `992975969b8e32c402d9a776ee7b090c20724a82`, CI status `success`, and merge SHA
+  `8c93658f4b38d1754c3f04b0872728a153f13f3d` is preserved.
+- Before this documentation checkpoint, local HEAD, remote branch and open
+  PR #2386 head all equaled the reopened candidate. Its hosted CI still had
+  queued/running jobs; no final helper CI success is claimed.
+
+### Minimal reproduction, actual path and repair boundary
+
+Use the dispatched active release (not the worktree CLI):
+
+```bash
+STATUS_CLI=/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-d4cb3eb62a8d/tools/development-orchestrator/bin/ai-status.sh
+"$STATUS_CLI" show DOC-LIVE-RUNNER-UPGRADE-20261005-UNBLOCK-MANUAL-UNBLOCK | jq '{status,candidate_sha,candidate_generation,required_acceptance,resolved_parent_status,resolved_parent_waiting_for,resolved_parent_next}'
+"$STATUS_CLI" show DOC-LIVE-RUNNER-UPGRADE-20261005 | jq '{status,external_gate,waiting_for,next,last_update,candidate_sha,reviewed_sha,ci_sha,ci_status,merge_sha}'
+```
+
+Both reads completed with exit 0. Active release `bin/ai_status.py:592-600`
+reads only `required_acceptance`; `transition_after_merge:663-684` completes
+a helper without those gates and invokes `apply_unblock_parent_resolution`.
+At `1097-1165`, that function accepts this blocked, non-external parent,
+defaults the missing disposition to `todo` at line 1116, changes parent status,
+clears `waiting_for` and resolves its blockers. Expected: parent stays blocked
+with the exact external acceptance next step. Actual predicted merge behavior:
+parent resumes despite missing live acceptance. This is deterministic static
+evidence; no merge or state-mutating reproduction was performed.
+
+The owner also reread `control_plane/usecases/task_board_commands.py:81-97`:
+the dispatch guard excludes `assign` and cross-task mutation.
+`command_assign` at `bin/ai_status.py:1752-1808` persists `TASK_METADATA_JSON`.
+Therefore the next repair unit is Supervisor coordination through the existing
+CLI, not runner or control-plane implementation. No guard bypass was attempted.
+
+Supervisor must persist the exact JSON in **Parent update and merge safety**
+above using `assign` with owner Codex/reviewer Codex2, then use parent `note`
+with that exact `resolved_parent_next`. Preserve blocked status, waiting lane
+and the parent evidence listed above. Leave `resolved_parent_at` to merge.
+The operator receipt is **still missing**; no successful reconciliation is
+recorded. Owner must reread both task slices, verify all three helper fields
+and exact parent note/evidence, then publish and hand off the final report SHA
+for independent Codex2 review. This checkpoint is not a new handoff.
+
+| Finding / acceptance | Owner result | Verification and remaining limit |
+| --- | --- | --- |
+| `UNBLOCK-PARENT-METADATA` | Still open; merge default and dispatch boundary reconfirmed | Completed CLI reads and active release source inspection; no operator receipt |
+| Update parent with concrete next step | Not met | Exact prepared JSON retained; Supervisor assign and parent note still required |
+| Preserve parent evidence | Pass for this read-only recheck | Candidate/review/CI SHA and merge SHA match the values above |
+| Scoped report / publish | Original artifact extended only | Checkpoint must be committed and normally pushed; no approval or live acceptance claimed |
