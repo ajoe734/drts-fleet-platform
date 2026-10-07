@@ -23,6 +23,7 @@ class HostedGateTest(unittest.TestCase):
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [], 
                          'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'identityEmail': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                         'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': 'valid@message.id', 'body_sha256': 'a' * 64},
                          'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': 'valid@message.id', 'body_sha256': 'a' * 64},
                          'downloadProof': True,
                          'durableHistoryCount': 1,

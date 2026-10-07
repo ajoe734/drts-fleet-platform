@@ -1,7 +1,10 @@
 """Missing, partial, stale or unsuccessful evidence never yields a green run."""
 import json
 import os
+import re
 from pathlib import Path
+
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 def evaluate(env, evidence, provider):
     steps = {key: env.get(key, "missing") for key in (
@@ -13,7 +16,7 @@ def evaluate(env, evidence, provider):
     http_calls = evidence.get("httpCalls", [])
     resources = evidence.get("trackedResources", [])
     mb = evidence.get("mailboxEvidence", {})
-    unimplemented = evidence.get("unimplementedLiveSurfaces", [])
+    mb2 = evidence.get("resendMailboxEvidence", {})
     
     def get_call(method, path=None, scenario=None):
         for c in http_calls:
@@ -25,7 +28,7 @@ def evaluate(env, evidence, provider):
     tenant = evidence.get("tenantId")
     invoice = evidence.get("invoiceId")
     identity = evidence.get("identityEmail")
-    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and len(identity) == 64 and "-" in tenant and len(tenant) == 36 and "-" in invoice and len(invoice) == 36)
+    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and UUID_RE.match(invoice) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
 
     # Check statuses strictly: no generic checks, validate the exact expected scenarios
     first_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="normal_send")
@@ -43,7 +46,14 @@ def evaluate(env, evidence, provider):
     has_inbox_proof = (mb.get("matched_content") is True and mb.get("candidate_sha") == sha and
                        mb.get("delivery_id") == dl_id and dl_id is not None and 
                        isinstance(rfc, str) and len(rfc) > 5 and "@" in rfc and
-                       isinstance(sha256, str) and len(sha256) == 64)
+                       isinstance(sha256, str) and len(sha256) == 64 and all(c in "0123456789abcdef" for c in sha256))
+                       
+    rfc2 = mb2.get("rfc_message_id")
+    sha256_2 = mb2.get("body_sha256")
+    has_resend_inbox_proof = (mb2.get("matched_content") is True and mb2.get("candidate_sha") == sha and
+                       resend and mb2.get("delivery_id") == resend.get("delivery_id") and resend.get("delivery_id") is not None and 
+                       isinstance(rfc2, str) and len(rfc2) > 5 and "@" in rfc2 and
+                       isinstance(sha256_2, str) and len(sha256_2) == 64 and all(c in "0123456789abcdef" for c in sha256_2))
     
     # F4: downloadProof must be strict True
     has_download = bool(get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200 and evidence.get("downloadProof") is True)
@@ -67,7 +77,7 @@ def evaluate(env, evidence, provider):
                   and evidence.get("status") == "passed" and evidence.get("exitCode") == 0
                   and is_fully_implemented and evidence.get("errors") == []
                   and has_authority
-                  and has_identity and has_invoice and has_inbox_proof and has_download 
+                  and has_identity and has_invoice and has_inbox_proof and has_resend_inbox_proof and has_download 
                   and has_idempotency and has_durable_get
                   and has_wrong_tenant and has_intentional_resend and has_normal_send
                   and resources
