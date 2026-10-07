@@ -29,7 +29,8 @@ class HostedGateTest(unittest.TestCase):
             DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID='10000000-0000-0000-0000-000000000abc',
             DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID='a1',
             DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID='a2',
-            DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID='a3'
+            DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID='a3',
+            DRTS_LIVE_INVOICE_MAIL_PORTAL_ORIGIN='http://portal.invalid'
         )
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [],
@@ -37,7 +38,7 @@ class HostedGateTest(unittest.TestCase):
                          'nonAllowlistInvoiceId': '20000000-0000-0000-0000-000000000789', 'readOnlyInvoiceId': '20000000-0000-0000-0000-000000000abc',
                          'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': '<d2@notification.drts.invalid>', 'body_sha256': 'a' * 64},
                          'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': '<d1@notification.drts.invalid>', 'body_sha256': 'a' * 64},
-                         'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf'},
+                         'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf', 'origin': 'http://portal.invalid', 'path': '/api/downloads/tenant-invoice/20000000-0000-0000-0000-000000000456', 'query': '?sig=valid', 'status': 200, 'candidateSha': SHA, 'invoiceId': '20000000-0000-0000-0000-000000000456', 'tenantId': '10000000-0000-0000-0000-000000000123', 'browserObserved': True},
                          'durableDeliveries': [
                              {'scenario': 'first_send', 'deliveryId': 'd1', 'idempotencyKey': 'key1', 'acceptedAt': '2026-10-07T00:00:00Z', 'attemptsCount': 1, 'status': 'sent', 'attemptOutcome': 'sent'},
                              {'scenario': 'intentional_resend', 'deliveryId': 'd2', 'idempotencyKey': 'key2', 'acceptedAt': '2026-10-07T00:01:00Z', 'attemptsCount': 1, 'status': 'sent', 'attemptOutcome': 'sent'},
@@ -50,7 +51,7 @@ class HostedGateTest(unittest.TestCase):
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
                              {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_resource': '20000000-0000-0000-0000-000000000456', 'mutation_count': 0, 'forbidden_download_observed': False},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True, 'forbidden_download_observed': False, 'download_proof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf'}},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True, 'forbidden_download_observed': False, 'download_proof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf', 'origin': 'http://portal.invalid', 'path': '/api/downloads/tenant-invoice/20000000-0000-0000-0000-000000000abc', 'query': '?sig=valid', 'status': 200, 'candidateSha': SHA, 'invoiceId': '20000000-0000-0000-0000-000000000abc', 'tenantId': '10000000-0000-0000-0000-000000000abc', 'browserObserved': True}},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -92,6 +93,23 @@ class HostedGateTest(unittest.TestCase):
         ev4 = copy.deepcopy(self.evidence)
         del ev4['tenantId']
         self.assertEqual(gate.evaluate(self.env, ev4, self.provider)['status'], 'failed')
+
+        # missing or incorrect new download proof properties
+        ev5 = copy.deepcopy(self.evidence)
+        ev5['downloadProof']['origin'] = 'wrong'
+        self.assertEqual(gate.evaluate(self.env, ev5, self.provider)['status'], 'failed')
+
+        ev6 = copy.deepcopy(self.evidence)
+        ev6['downloadProof']['path'] = '/wrong'
+        self.assertEqual(gate.evaluate(self.env, ev6, self.provider)['status'], 'failed')
+
+        ev7 = copy.deepcopy(self.evidence)
+        ev7['downloadProof']['status'] = 404
+        self.assertEqual(gate.evaluate(self.env, ev7, self.provider)['status'], 'failed')
+
+        ev8 = copy.deepcopy(self.evidence)
+        ev8['downloadProof']['candidateSha'] = 'wrong'
+        self.assertEqual(gate.evaluate(self.env, ev8, self.provider)['status'], 'failed')
 
 
     def test_f5_durable_binding_regressions(self):
