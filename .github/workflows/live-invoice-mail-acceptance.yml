@@ -22,6 +22,9 @@ on:
         description: "Optional actual queued retryable invitation delivery; observer never induces provider failure"
         required: false
         default: ""
+  push:
+    branches:
+      - "gemini2/sr-live-invoice-mail-20261007"
 
 permissions:
   contents: read
@@ -41,8 +44,8 @@ jobs:
       id-token: write
     env:
       CI: true
-      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-      DRTS_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+      DRTS_CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
       DISPATCH_WORKFLOW_SHA: ${{ github.workflow_sha }}
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: ${{ vars.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED }}
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: ${{ vars.DRTS_LIVE_INVOICE_MAIL_API_ORIGIN }}
@@ -75,7 +78,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ inputs.candidate_sha || github.sha }}
           fetch-depth: 0
 
       - name: Bind checkout and base SHAs
@@ -171,7 +174,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: live-invoice-mail-acceptance-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: live-invoice-mail-acceptance-${{ inputs.candidate_sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .artifacts/live-invoice-mail-acceptance/evidence-mail.json
             .artifacts/live-invoice-mail-acceptance/evidence-provider.json
