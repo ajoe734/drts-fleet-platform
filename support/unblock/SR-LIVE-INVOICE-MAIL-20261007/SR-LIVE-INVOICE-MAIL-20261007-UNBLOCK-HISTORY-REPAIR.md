@@ -24,3 +24,9 @@ This approach preserves the entire unpushed diff in a new commit object, side-st
 
 ## Next Step for Parent Task
 The owner (`Gemini2`) should resume work on `SR-LIVE-INVOICE-MAIL-20261007` by adopting the new branch `gemini2/sr-live-invoice-mail-20261007-clean` as the canonical continuation of the task, verify the state, and handoff the candidate from this new branch. The original local branch `gemini2/sr-live-invoice-mail-20261007` can be abandoned, keeping both histories intact.
+
+## Helper Candidate Evidence
+- **Helper Branch:** `gemini2/sr-live-invoice-mail-20261007-unblock-history-repair`
+- **Helper Candidate SHA:** `db4ab6d1b6597fd2198275984e09fee92ff55484`
+- **Helper PR:** [PR #2411](https://github.com/ajoe734/drts-fleet-platform/pull/2411)
+- **PR Head Verification:** `gh pr view 2411 --json headRefOid` confirms head is `db4ab6d1b6597fd2198275984e09fee92ff55484`.
