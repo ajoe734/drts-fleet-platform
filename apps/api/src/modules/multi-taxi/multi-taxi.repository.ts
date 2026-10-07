@@ -733,7 +733,13 @@ export class MultiTaxiRepository {
       assignment_version: number;
     }>(
       `
-      SELECT o.status, COALESCE((SELECT MAX(assignment_version) FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id=o.order_id), 0) AS assignment_version
+      SELECT o.status, COALESCE(
+        (SELECT MAX(assignment_version)
+         FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id = o.order_id),
+        CASE WHEN o.runtime_profile_code = 'business_dispatch' THEN
+          (SELECT count(*) FROM ops.phase1_dispatch_assignments a WHERE a.order_id = o.order_id)
+        ELSE 0 END
+      ) AS assignment_version
       FROM ops.phase1_owned_orders o WHERE o.order_id=$1
     `,
       [orderId],

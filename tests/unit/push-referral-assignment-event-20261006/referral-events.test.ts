@@ -44,6 +44,17 @@ function harness(routed = true) {
   const statements: string[] = [];
   const query = vi.fn(async (sql: string, v: readonly unknown[] = []) => {
     statements.push(sql.trim());
+    if (sql.includes("SELECT n.assignment_version")) {
+      const task = tasks.get(String(v[0]));
+      const assignmentEvent = task
+        ? outboxes.get(`referral-assignment:${task.assignmentId}`)
+        : undefined;
+      return {
+        rows: assignmentEvent
+          ? [{ assignment_version: assignmentEvent.assignmentVersion }]
+          : [],
+      };
+    }
     if (sql.includes("FROM ops.phase1_dispatch_assignments")) {
       if (sql.includes("count(*)"))
         return { rows: [{ count: String(assignments.size) }] };
@@ -153,7 +164,11 @@ function harness(routed = true) {
     } as never,
     new AuditNotificationService(),
     {} as never,
-    { publishTaskAssigned, publishTaskCancelled: vi.fn() } as never,
+    {
+      publishTaskAssigned,
+      publishTaskCancelled: vi.fn(),
+      publishTaskUpdated: vi.fn(),
+    } as never,
     undefined,
     repository,
   );
@@ -293,9 +308,125 @@ describe("routed referral assignment and cancellation", () => {
     expect(h.statements).not.toContain("COMMIT");
     expect(h.publishTaskAssigned).not.toHaveBeenCalled();
   });
+
+  it("versions the production ETA from its own assignment and suppresses it after replacement", async () => {
+    const h = harness();
+    const first = await h.assign();
+    await h.service.updateDriverTaskEta(first.taskId, 7);
+    const eta = [...h.outboxes.values()].find(
+      (o) => o.eventType === "eta_changed",
+    )!;
+    expect(eta).toMatchObject({
+      assignmentVersion: 1,
+      payload: { eventSequence: 2 },
+    });
+    await h.assign(first.assignmentId);
+    // A delayed write must still use the task's original generation.
+    await h.repository.withTransaction((tx) =>
+      h.repository.persistOrderWorkflow(tx, {
+        consumerNotificationOutbox: [
+          { ...eta, outboxId: "delayed-eta", assignmentVersion: null },
+        ],
+      }),
+    );
+    expect(h.outboxes.get("delayed-eta")?.assignmentVersion).toBe(1);
+    const delivery = transportHarness();
+    Object.assign(delivery.row, structuredClone(eta));
+    delivery.route.orderId = eta.orderId;
+    delivery.route.passengerSubjectRef = eta.passengerSubjectRef;
+    delivery.relevance.assignmentVersion = h.assignments.size;
+    await delivery.service.deliverPassengerNotification(delivery.row);
+    expect(delivery.row.payload.partnerNotification).toMatchObject({
+      failureReason: "notification_superseded",
+    });
+    expect(delivery.fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the transaction and route lookup tied to durable order ownership", async () => {
+    const h = harness();
+    await h.assign();
+    const routeRead = h.query.mock.calls.find(([sql]) =>
+      sql.includes("SELECT passenger_subject_ref"),
+    );
+    expect(routeRead?.[1]).toEqual([
+      "referral-order",
+      "tenant-1",
+      "partner-1",
+      "entry-1",
+      "passenger-1",
+    ]);
+    expect(routeRead?.[0]).toContain("drts_passenger_id = $5");
+    expect(h.statements.indexOf(routeRead![0].trim())).toBeGreaterThan(
+      h.statements.findIndex((s) =>
+        s.includes("SELECT record, aggregate_version"),
+      ),
+    );
+  });
+
+  it("rolls back cancellation when its outbox write fails", async () => {
+    const h = harness();
+    const query = h.query.getMockImplementation()!;
+    h.query.mockImplementation(async (sql, values) => {
+      if (sql.includes("INSERT INTO ops.consumer_notification_outbox"))
+        throw new Error("cancel outbox unavailable");
+      return query(sql, values);
+    });
+    await expect(
+      h.service.cancelOwnedOrder(h.getOrder().orderId, {}),
+    ).rejects.toThrow("cancel outbox unavailable");
+    expect(h.statements).toContain("ROLLBACK");
+    expect(h.statements).not.toContain("COMMIT");
+  });
 });
 
 describe("referral transport relevance", () => {
+  it.each([
+    "assignment_disclosure_ready",
+    "eta_changed",
+    "driver_arrived",
+    "trip_cancelled",
+  ] as const)(
+    "after cancellation, %s uses the existing obsolete exception",
+    async (eventType) => {
+      const h = transportHarness();
+      h.row.eventType = eventType;
+      h.row.payload = { eventSequence: 1 };
+      h.relevance.status = "cancelled";
+      h.relevance.assignmentVersion = 2;
+      const result = await h.service.deliverPassengerNotification(h.row);
+      if (eventType === "trip_cancelled") {
+        expect(result.result).toBe("delivered");
+        expect(h.fetch).toHaveBeenCalledOnce();
+      } else {
+        expect(h.row.payload.partnerNotification).toMatchObject({
+          failureReason: "notification_obsolete",
+          retryDisposition: "terminal",
+        });
+        expect(h.fetch).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("maps the durable relevance value and limits the SQL count fallback to business dispatch", async () => {
+    const query = vi.fn(async () => ({
+      rows: [{ status: "assigned", assignment_version: "2" }],
+    }));
+    const repository = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+    expect(
+      await repository.findPartnerNotificationRelevance("referral-order"),
+    ).toEqual({ status: "assigned", assignmentVersion: 2 });
+    // SQL contract review only; PostgreSQL execution belongs to hosted PG-QA.
+    const sql = (query.mock.calls as unknown as [string, unknown[]][])[0]![0];
+    expect(sql).toContain("MAX(assignment_version)");
+    expect(sql).toContain(
+      "CASE WHEN o.runtime_profile_code = 'business_dispatch'",
+    );
+    expect(sql).toContain("count(*) FROM ops.phase1_dispatch_assignments");
+    expect(sql).toContain("ELSE 0 END");
+  });
   it.each([
     "assignment_disclosure_ready",
     "assignment_replaced",
