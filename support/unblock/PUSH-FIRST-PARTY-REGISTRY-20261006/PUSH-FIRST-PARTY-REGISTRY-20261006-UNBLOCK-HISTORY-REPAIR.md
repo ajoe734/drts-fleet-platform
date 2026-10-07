@@ -184,3 +184,87 @@ the exact same candidate SHA is fully green on a clean rerun. No further
 code change is needed on this branch; the candidate is ready for reviewer
 Pi, and once PR #2363 merges, §4 above is the concrete unblock step for the
 parent.
+
+## 6. Resolution (2026-10-07T07:23Z): Supervisor recorded the parent note directly; §4's dispatch-guard gap is now closed
+
+Reviewer Claude's F1 finding (§4) correctly identified that no dispatched
+worker for this helper task could write to the parent task
+(`PUSH-FIRST-PARTY-REGISTRY-20261006`) — confirmed by this task's own failed
+attempt and by `TaskBoardCommandExecutor._guard_worker_command`. That gap is
+now closed, but **not** by this helper task shipping PR #2363 as originally
+planned in §4. Instead, a genuine `AI_NAME=Supervisor` session (no
+`ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID`) ran the canonical CLI directly, with
+receipts recorded at
+`.local/full-system-completion-20261007/command-receipts.jsonl`:
+
+- `07:23:11.779Z` — `assign PUSH-FIRST-PARTY-REGISTRY-20261006 Claude2 Codex`
+  (reassigns parent reviewer to Codex, widens `write_scopes` to explicitly
+  include `tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts`
+  — the exact guard file diagnosed in §2).
+- `07:23:12.524Z` — `note PUSH-FIRST-PARTY-REGISTRY-20261006 "..."` — records
+  a concrete next step directly on the parent: merge `origin/dev` into the
+  parent's own branch `claude2/push-first-party-registry-20261006` (PR
+  #2358), apply the same one-line `passenger_push_channel_allocations`
+  guard correction there (now in-scope), run scoped regressions plus
+  same-SHA full CI, and hand off normally (no force-push).
+- `07:23:13.251Z` — `resume-blocked PUSH-FIRST-PARTY-REGISTRY-20261006
+  in_progress "..."` — clears the parent's own blocked status.
+- `07:23:14.010Z` / `07:23:14.757Z` / `07:23:15.497Z` — `assign` / `note` /
+  `resume-blocked` on this helper task itself, instructing: update this
+  artifact truthfully, sync `origin/dev` into this helper branch if needed,
+  hand off to reviewer Claude, make no further registry/migration code
+  changes, and do not call `done` directly (independent reviewer verifies).
+
+This is a materially **different** repair path than §4 proposed. §4 assumed
+the parent would wait for this helper's PR #2363 to merge to `dev` and then
+pull it in. The actual path the Supervisor authorized is faster and
+independent of PR #2363: the parent's `write_scopes` were widened so its own
+owner (Claude2, a separate dispatched session already running as of
+`07:23:29Z`, `worker_run_id claude2-20261007T072329Z-a865ace9`) can apply the
+identical one-line fix directly on the parent's own branch, without waiting
+on this helper's PR at all. The Supervisor's note is explicit that **"PR2363
+is a historical helper, its old red dependency CI is not permission to
+exempt gates; it need not merge before the authorized parent guard
+correction."**
+
+**This helper task's own PR #2363 status as of this writing** (re-checked,
+not assumed from §5's earlier green rerun): `gh pr view 2363` shows
+`state=OPEN`, `mergeable=MERGEABLE`, but `statusCheckRollup` now shows 3
+`FAILURE` entries — `Dependency security` (CI workflow), `dependency-security`
+and `ci-integ` (CI integration-trunk workflow) — alongside 25 `SUCCESS` and 1
+`SKIPPED`. These are dependency/advisory-driven checks unrelated to this
+branch's 2-file diff (one test-aggregation line, one doc); §5's "fully green"
+claim describes an earlier rerun (`37493446474`) and is no longer current.
+Per the Supervisor's explicit instruction, this is **not** being claimed as
+green now, and PR #2363 merging is **not** a precondition for the parent's
+unblock (see above) — it remains optional, independent cleanup for the
+shared guard test.
+
+**`origin/dev` sync attempted and blocked.** This branch is 3 commits ahead
+of / 12 commits behind `origin/dev` (not yet merged in). Both
+`git merge origin/dev` and the non-destructive, read-only `git merge-tree
+--write-tree HEAD origin/dev` were attempted from this worker session and
+both were rejected by this sandbox's git-safety guard (`Bash command
+classified as defer`), consistent with this environment's established
+policy of deferring any `git merge`-family command from a dispatched worker
+session. No rebase/reset/force-push was attempted as a workaround. As
+objective evidence that a sync is not blocking correctness: `gh pr view 2363
+--json mergeable` independently reports `MERGEABLE` against the current
+`origin/dev` tip, i.e. GitHub's own three-way check confirms no conflict
+between this branch and the 12 commits it is behind. A literal local sync
+merge therefore remains a non-blocking housekeeping step that a session
+without this sandbox's merge restriction (e.g. the Supervisor, or a plain
+non-dispatched `git` session) can perform if still desired; this helper task
+does not need it to satisfy its own acceptance criteria.
+
+**Net effect on this helper task's acceptance criteria:**
+1. Contamination identified — none found (§1), unchanged.
+2. Non-destructive repair path — documented and shipped (§2/§3), unchanged.
+3. Task-scoped commit/push/PR evidence — PR #2363, unchanged; CI status
+   updated above to be current and truthful.
+4. Parent updated with concrete unblocked next step — **now genuinely
+   satisfied**, directly by an authorized Supervisor session (not by this
+   helper), as the dispatch-guard architecture requires. The parent's
+   actual next step supersedes this artifact's §4 proposal: parent owner
+   Claude2 applies the guard fix directly on the parent's own
+   now-in-scope branch, independent of PR #2363.
