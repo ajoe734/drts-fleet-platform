@@ -7,7 +7,7 @@ import signal
 import subprocess
 import tempfile
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import unittest
 import os
 from pathlib import Path
@@ -2955,6 +2955,150 @@ class WorkerAttemptCooldownTests(unittest.TestCase):
         self.assertFalse(supervisor.redispatch_is_deferred(workers, "YIELD-002", "Codex"))
 
 
+class ProgressRedispatchBackoffTests(unittest.TestCase):
+    """An owner that can only report "still waiting" must not be woken every
+    progress_retry_seconds forever: each unchanged attempt doubles the wait."""
+
+    START = datetime(2026, 10, 7, 4, 0, 0, tzinfo=timezone.utc)
+
+    @staticmethod
+    def _task(**overrides: Any) -> dict[str, Any]:
+        task = {
+            "id": "WAIT-001",
+            "status": "acceptance",
+            "owner": "Codex",
+            "reviewer": "Claude2",
+            "depends_on": [],
+            "candidate_sha": "a" * 40,
+            "last_update": "2026-10-07T04:00:00Z",
+            "next": "still waiting",
+            "worker_outcomes": {},
+        }
+        task.update(overrides)
+        return task
+
+    def _attempt(
+        self,
+        state: dict[str, Any],
+        index: int,
+        task: dict[str, Any],
+        now: datetime,
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        worker = {"run_id": f"codex-wait-{index:03d}", "task_id": "WAIT-001", "agent_id": "codex"}
+        consumed = supervisor.consume_progress_outcome(
+            config or {},
+            worker,
+            {"outcome": "progress", "summary": f"still waiting #{index}"},
+            now=now,
+            state=state,
+            task=task,
+            task_map={task["id"]: task},
+        )
+        self.assertTrue(consumed)
+        return worker
+
+    def _wait_seconds(self, worker: dict[str, Any], now: datetime) -> int:
+        resume_at = supervisor.parse_runtime_timestamp(worker["redispatch_after"])
+        return int((resume_at - now).total_seconds())
+
+    def test_unchanged_progress_doubles_the_wait(self) -> None:
+        state: dict[str, Any] = {}
+        now = self.START
+        waits = []
+        for index in range(4):
+            # Each report rewrites only the bookkeeping fields.
+            task = self._task(
+                last_update=now.isoformat(),
+                next=f"still waiting #{index}",
+                worker_outcomes={f"codex-wait-{index:03d}": {"outcome": "progress"}},
+            )
+            worker = self._attempt(state, index, task, now)
+            waits.append(self._wait_seconds(worker, now))
+            self.assertEqual(worker["progress_streak"], index + 1)
+            now += timedelta(seconds=waits[-1])
+        self.assertEqual(waits, [120, 240, 480, 960])
+
+    def test_material_change_starts_over(self) -> None:
+        state: dict[str, Any] = {}
+        self._attempt(state, 0, self._task(), self.START)
+        self._attempt(state, 1, self._task(), self.START)
+        for index, change in enumerate(
+            (
+                {"candidate_sha": "b" * 40},
+                {"status": "in_progress"},
+                {"resolved_parent_status": "blocked"},
+                {"ci_status": "success"},
+                {"acceptance_evidence": {"browser_map_render_live": "run 1"}},
+            ),
+            start=2,
+        ):
+            with self.subTest(change=change):
+                worker = self._attempt(state, index, self._task(**change), self.START)
+                self.assertEqual(worker["progress_streak"], 1)
+                self.assertEqual(self._wait_seconds(worker, self.START), 120)
+
+    def test_wait_is_capped(self) -> None:
+        state: dict[str, Any] = {}
+        config = {"supervisor": {"progress_retry_seconds": 120, "progress_retry_max_seconds": 600}}
+        waits = [
+            self._wait_seconds(self._attempt(state, index, self._task(), self.START, config), self.START)
+            for index in range(5)
+        ]
+        self.assertEqual(waits, [120, 240, 480, 600, 600])
+
+    def test_replayed_result_does_not_extend_the_streak(self) -> None:
+        state: dict[str, Any] = {}
+        task = self._task()
+        worker = self._attempt(state, 0, task, self.START)
+        replay = supervisor.consume_progress_outcome(
+            {},
+            worker,
+            {"outcome": "progress", "summary": "still waiting #0"},
+            now=self.START,
+            state=state,
+            task=task,
+            task_map={task["id"]: task},
+        )
+        self.assertFalse(replay)
+        self.assertEqual(state["progress_streaks"]["WAIT-001:codex"]["count"], 1)
+
+    def test_without_task_context_the_flat_retry_applies(self) -> None:
+        worker = {"run_id": "codex-wait-flat", "task_id": "WAIT-001", "agent_id": "codex"}
+        self.assertTrue(
+            supervisor.consume_progress_outcome({}, worker, {"outcome": "progress"}, now=self.START)
+        )
+        self.assertEqual(self._wait_seconds(worker, self.START), 120)
+        self.assertNotIn("progress_streak", worker)
+
+    def test_stale_streaks_are_dropped(self) -> None:
+        state: dict[str, Any] = {
+            "progress_streaks": {
+                "OLD-001:codex": {"count": 9, "fingerprint": "x", "updated_at": "2026-10-01T00:00:00Z"},
+                "BAD-001:codex": "not a record",
+            }
+        }
+        self._attempt(state, 0, self._task(), self.START)
+        self.assertEqual(sorted(state["progress_streaks"]), ["WAIT-001:codex"])
+
+    def test_fingerprint_ignores_progress_bookkeeping(self) -> None:
+        base = self._task()
+        reported = self._task(
+            last_update="2026-10-07T05:00:00Z",
+            next="checked again, nothing changed",
+            worker_outcomes={"codex-wait-009": {"outcome": "progress"}},
+        )
+        task_map = {base["id"]: base}
+        self.assertEqual(
+            supervisor.material_task_fingerprint(base, task_map),
+            supervisor.material_task_fingerprint(reported, task_map),
+        )
+        self.assertNotEqual(
+            supervisor.material_task_fingerprint(base, task_map),
+            supervisor.material_task_fingerprint(self._task(external_gate=True), task_map),
+        )
+
+
 class DispatchCooldownTests(unittest.TestCase):
     """Cooldown protects freshly-dispatched workers from voluntary supersede.
 
@@ -3376,6 +3520,20 @@ class LaneFailureAutoPauseTests(unittest.TestCase):
         for t in ("T1", "T2", "T3", "T4"):
             supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), "status: 429 rate limited")
         self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+
+    def test_repeated_failures_on_two_tasks_pause_lane(self) -> None:
+        # 2026-10-06: a rejected model failed the lane every few seconds, but
+        # only ever on two tasks, so the distinct-task threshold never tripped.
+        state: dict[str, Any] = {}
+        reason = "status 400: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
+        for t in ("T1", "T2", "T1", "T2", "T1"):
+            supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), reason)
+        self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+        supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker("T2"), reason)
+        pause = supervisor.provider_pause_registry(state)["codex2"]
+        self.assertEqual(pause["kind"], "capacity")
+        self.assertIn("6 terminal worker failures across 2 distinct tasks", pause["reason"])
+        self.assertNotIn("codex2", state.get("lane_failure_streaks", {}))
 
 
 class GovernanceRecursionGuardTests(unittest.TestCase):
