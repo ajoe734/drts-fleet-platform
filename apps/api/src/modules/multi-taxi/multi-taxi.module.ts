@@ -5,7 +5,6 @@ import { Module, OnModuleInit } from "@nestjs/common";
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
-import { PassengerPushDevicesModule } from "../passenger-push-devices/passenger-push-devices.module";
 import { ReportingFilingModule } from "../reporting-filing/reporting-filing.module";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
 import { ServiceProductModule } from "../service-product/service-product.module";
@@ -42,7 +41,6 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
     ReportingFilingModule,
     ServiceProductModule,
     TenantPartnerModule,
-    PassengerPushDevicesModule,
   ],
   controllers: [MultiTaxiController],
   providers: [
