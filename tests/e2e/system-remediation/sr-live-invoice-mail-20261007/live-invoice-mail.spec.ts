@@ -139,6 +139,16 @@ test.describe("Live Invoice Mail Acceptance", () => {
     });
     expect(wrongInvoiceResponse.status()).toBe(404);
 
+    // Enforce dedicated single-invoice fixture before any sends
+    const primaryInvoiceListCheck = await request.get(`${apiOrigin}/api/tenant/invoices`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    expect(primaryInvoiceListCheck.status()).toBe(200);
+    const primaryInvoiceListData = await primaryInvoiceListCheck.json();
+    if (primaryInvoiceListData.data?.items?.length !== 1 || primaryInvoiceListData.data?.items[0].invoiceId !== invoiceId) {
+       throw new Error("Primary test tenant must have exactly ONE invoice for dedicated fixture verification.");
+    }
+
     // 2. Wrong Tenant
 
     const wrongTenantResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${invoiceId}/mail`, {
@@ -211,6 +221,16 @@ test.describe("Live Invoice Mail Acceptance", () => {
       if (naInvoiceData.data?.tenantId !== nonAllowlistTenantId || naInvoiceData.data?.invoiceId !== nonAllowlistInvoiceId) {
         throw new Error("Non-allowlist invoice fixture mismatch");
       }
+      
+      const naInvoiceListCheck = await request.get(`${apiOrigin}/api/tenant/invoices`, {
+        headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
+      });
+      expect(naInvoiceListCheck.status()).toBe(200);
+      const naInvoiceListData = await naInvoiceListCheck.json();
+      if (naInvoiceListData.data?.items?.length !== 1 || naInvoiceListData.data?.items[0].invoiceId !== nonAllowlistInvoiceId) {
+        throw new Error("Non-allowlist test tenant must have exactly ONE invoice for dedicated fixture verification.");
+      }
+
       const naProfileCheck = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
         headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
       });
@@ -518,10 +538,9 @@ test.describe("Live Invoice Mail Acceptance", () => {
         // Assert it's the ONLY invoice in the list
         const invoiceLinks = page.locator('a[href*="/invoices?invoiceId="]');
         const count = await invoiceLinks.count();
-        if (count > 0) {
-            const firstHref = await invoiceLinks.first().getAttribute('href');
-            expect(firstHref).toContain(nonAllowlistInvoiceId);
-        }
+        expect(count).toBe(1);
+        const firstHref = await invoiceLinks.first().getAttribute('href');
+        expect(firstHref).toContain(nonAllowlistInvoiceId);
 
         const wtOwnResource = new URL(`/control-plane-proxy/tenant/invoices/${nonAllowlistInvoiceId}`, portalOrigin).href;
         const wtOwnResponse = await page.request.get(wtOwnResource);
@@ -540,15 +559,22 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const wrongTenantUiUrl = new URL(`/invoices?invoiceId=${invoiceId}`, portalOrigin).href;
         await page.goto(wrongTenantUiUrl, { waitUntil: "networkidle" });
         await expect(getDetailTitle(invoiceId)).not.toBeVisible();
-        const anyDownloadLink = page.locator('a[href*="/downloads/"]');
-        if (await anyDownloadLink.count() > 0) {
-            const href = await anyDownloadLink.first().getAttribute('href');
+        await expect(getDetailTitle(nonAllowlistInvoiceId)).toBeVisible();
+
+        const detailArtifactUrlLink = page.locator('dt').filter({ hasText: /Artifact URL|產出檔案/ }).locator('xpath=following-sibling::dd[1]//a');
+        if (await detailArtifactUrlLink.count() > 0) {
+            const href = await detailArtifactUrlLink.first().getAttribute('href');
             if (href) {
-                const parts = href.split('/');
-                fallbackSelectedId = parts[parts.length - 1] ?? "";
+                const parsedUrl = new URL(href, portalOrigin);
+                const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+                if (pathParts.length >= 2) {
+                    fallbackSelectedId = pathParts[pathParts.length - 1];
+                }
             }
         }
-        await expect(page.locator(`a[href*="${invoiceId}"]`)).not.toBeVisible();
+        const wrongDownloadLinkCount = await page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`).count();
+        const forbidden_download_absent = (wrongDownloadLinkCount === 0);
+        await expect(page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`)).not.toBeVisible();
 
         // The selected fallback MUST be the own invoice
         expect(fallbackSelectedId).toBe(nonAllowlistInvoiceId);
@@ -560,7 +586,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
         expect(wtResponse.status()).toBe(404);
         const errBody = await wtResponse.json().catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
-        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: false });
+        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: forbidden_download_absent });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
             evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
@@ -605,6 +631,14 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const roResponse = await page.request.get(roApiUrl);
         expect(roResponse.status()).toBe(200);
 
+        // Verify the legitimate download link exists
+        const roOwnDownloadCount = await page.locator(`a[href*="/downloads/tenant-invoice/${readOnlyInvoiceId}"]`).count();
+        expect(roOwnDownloadCount).toBeGreaterThan(0);
+        
+        // Verify no foreign download links are present
+        const roForeignDownloadCount = await page.locator(`a[href*="/downloads/tenant-invoice/"]`).count();
+        const roForbidden_download_observed = (roForeignDownloadCount > roOwnDownloadCount);
+
         evidenceData.httpCalls.push({
             method: "GET",
             path: "read_only_portal",
@@ -613,7 +647,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
             selected_identity: readOnlyInvoiceId,
             mutation_count: mutationCount,
             send_disabled: true,
-            forbidden_download_observed: false
+            forbidden_download_observed: roForbidden_download_observed
         });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {

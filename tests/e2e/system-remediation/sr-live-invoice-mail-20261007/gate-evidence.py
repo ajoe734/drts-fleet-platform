@@ -177,9 +177,24 @@ def main():
         }
 
         issued_keys = []
-        for k in issued_sessions_raw:
+        for entry in issued_sessions_raw:
+            if not isinstance(entry, dict):
+                raise ValueError("issued_sessions entry must be a dictionary with observed attributes")
+            k = entry.get("exportKey")
             if not isinstance(k, str) or k not in expected_keys:
                 raise ValueError("malformed or unknown issued key")
+                
+            role = entry.get("observed_role")
+            scopes = entry.get("observed_scopes", [])
+            actor_id = entry.get("observed_actor_id")
+            tenant_id = entry.get("observed_tenant_id")
+            if not role or not isinstance(scopes, list) or not actor_id or not tenant_id:
+                raise ValueError("missing observed token payload details")
+            if k == "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN" and (role != "tenant_admin" or "billing.write" not in scopes):
+                raise ValueError("primary token role/scopes mismatch")
+            if k == "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN" and (role != "tenant_viewer" or "billing.write" in scopes):
+                raise ValueError("read_only token role/scopes mismatch")
+                
             issued_keys.append(k)
 
         if len(set(issued_keys)) != len(issued_keys):

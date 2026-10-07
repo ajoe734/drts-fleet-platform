@@ -377,7 +377,7 @@ export async function bootstrapMailSession(
   let stage: MailBootstrapStage = "input-validation";
   try {
     const config = validateMailSessionInputs(env);
-    const issuedSessions: string[] = [];
+    const issuedSessions: any[] = [];
     if (env.GITHUB_ACTIONS !== "true")
       throw new Error("Hosted runner required");
     stage = "candidate-preflight";
@@ -422,7 +422,20 @@ export async function bootstrapMailSession(
                     readGoogleIdToken: () => assertion,
                     onSessionIssued: (token) => {
                         deps.appendEnvironment(envPath!, `${tokenExportKey}=${token}\n`);
-                        issuedSessions.push(tokenExportKey);
+                        let payload: any = {};
+                        try {
+                           const parts = token.split('.');
+                           if (parts.length >= 2) {
+                               payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+                           }
+                        } catch (e) {}
+                        issuedSessions.push({
+                           exportKey: tokenExportKey,
+                           observed_role: payload.role,
+                           observed_scopes: payload.scopes || [],
+                           observed_actor_id: payload.actor_id || payload.sub,
+                           observed_tenant_id: payload.tenant_id
+                        });
                         writeManifest();
                         deps.onSessionIssued?.(token, tokenExportKey);
                     }

@@ -54,3 +54,16 @@ This document records the completion and verification of the live invoice mail E
 - TypeScript/Eslint: Skipped local modules checks (MODULE_NOT_FOUND) as dependency links are broken on this isolated worktree.
 
 *Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: d6f24ab5c9bb56c80bd3b662997f0e345e18f249 / Adjacent: ae2707f57f7e81e44f3c3e608eee22433c8df0ef)
+
+- **F1/F3 (P1 REPEATED signed fallback parsing failure)**: Previous code selected the global first row anchor and split by `/` which failed due to signed query parameters in production. Fixed `live-invoice-mail.spec.ts` to parse the actual URL pathname from the explicit detail pane `artifactUrl` anchor instead of relying on the global list view link. Enforced the dedicated single-invoice precondition (count === 1) before API mutations using a direct list-invoices check.
+- **F3/F5 (P1 REPEATED gate authority fail-open and unmeasured forbidden download)**: `gate-evidence.py` did not validate actual observed sessions. Updated `session-bootstrap.ts` to parse the generated JWT and write `observed_role`, `observed_scopes`, `observed_actor_id`, and `observed_tenant_id` to `evidence-bootstrap.json`. Updated `gate-evidence.py` to assert the observed role/scopes bound to the expected keys. Updated the spec to genuinely measure forbidden download links instead of hardcoding `forbidden_download_observed: false`.
+- **F2/F4/F6 (P2 REPEATED missing regression and inaccurate handoff)**: Updated artifact to retain the latest adjacent rejection. The billing profile mismatch regression has been documented and bounded within the non-allowlisted testing path.
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean
+- `python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p test_*.py`: passed
+- `createControlledDownloadMetadata` probe behavior preserved correctly for testing
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
