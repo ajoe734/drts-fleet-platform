@@ -99,4 +99,21 @@ moment this helper merges, despite none of the external prerequisites existing.
 
 ## Publication and final checks
 
-<!-- filled after commit/push/PR -->
+- `pnpm exec prettier --check` on both new documents: exit 0.
+- `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`:
+  `OK`, 0 findings across `l1-edit-authority`, `cited-paths`, `cited-decisions`,
+  `task-claims`.
+- `git diff --check origin/dev...HEAD`: exit 0, no trailing-whitespace findings.
+- `python3 -B tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`:
+  `1 commit(s) OK`.
+- Local relative-link audit: 13/13 links in both new documents resolve.
+- Anchor/only commit `465b0a2c6231ddb6b6b45a8dfb0746320f771916` added exactly the
+  two documents listed under Delivery, with owner/task/reviewer trailers; pushed
+  normally (`git push -u origin claude2/sr-live-global-ux-20261007-unblock-planning-decision`,
+  new branch, exit 0).
+- [PR #2407](https://github.com/ajoe734/drts-fleet-platform/pull/2407) opened
+  against `dev`; `gh pr view 2407 --json headRefOid,url,state` confirms
+  `headRefOid=465b0a2c6231ddb6b6b45a8dfb0746320f771916`, matching local HEAD,
+  `state=OPEN`.
+- No VM product server, browser, database, secret/variable write, workflow
+  dispatch, or deployment was performed for this publication step.
