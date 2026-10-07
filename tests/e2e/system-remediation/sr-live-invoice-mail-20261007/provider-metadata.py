@@ -58,6 +58,14 @@ def main():
                 "observed_at": datetime.now(timezone.utc).isoformat()}
     path = Path(".artifacts/live-invoice-mail-acceptance/evidence-provider.json")
     path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Fetch effective allowlist
+    allowlist_version = allowlist["resolved_version"].rsplit("/", 1)[1]
+    payload = subprocess.run(["gcloud", "secrets", "versions", "access", allowlist_version, "--secret=drts-dev-smtp-recipient-allowlist", "--project=" + PROJECT], capture_output=True, text=True, check=True).stdout
+    if env_path := os.environ.get("GITHUB_ENV"):
+        delimiter = "EOF"
+        with open(env_path, "a") as f:
+            f.write(f"DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST<<{delimiter}\n{payload}\n{delimiter}\n")
     path.write_text(json.dumps(evidence, indent=2) + "\n")
 
 

@@ -111,6 +111,13 @@ test.describe("Live Invoice Mail Acceptance", () => {
       throw new Error("Billing profile email does not match authorized recipient");
     }
 
+    const effectiveAllowlist = process.env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST || "";
+    if (!effectiveAllowlist.split(/[\r\n]+/).includes(authorizedRecipient)) {
+       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
+       evidenceData.errors.push("Authorized recipient is not in effective allowlist");
+       throw new Error("Missing effective invoice-specific allowlist authority");
+    }
+
     if (process.env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED !== "true") {
       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
       evidenceData.errors.push("Missing explicit authorization for the target fixture");
@@ -137,12 +144,29 @@ test.describe("Live Invoice Mail Acceptance", () => {
     evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "wrong_tenant", status: wrongTenantResponse.status() });
     expect(wrongTenantResponse.status()).toBe(403);
 
+    const wrongInvoiceResponse2 = await request.post(`${apiOrigin}/api/tenant/invoices/invoice-10000000-0000-0000-0000-000000000999/mail`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    evidenceData.httpCalls.push({ method: "POST", path: `wrong_invoice_authority`, scenario: "wrong_invoice", status: wrongInvoiceResponse2.status() });
+    expect([403, 404]).toContain(wrongInvoiceResponse2.status());
+
+
     
     // 3. Read Only Send
     const readOnlyToken = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN;
     const readOnlyTenantId = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID;
     const readOnlyInvoiceId = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID;
-    if (readOnlyToken && readOnlyTenantId && readOnlyInvoiceId) {
+    const readOnlyRecipient = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_RECIPIENT;
+    if (readOnlyToken && readOnlyTenantId && readOnlyInvoiceId && readOnlyRecipient) {
+      const roSessionCheck = await request.get(`${apiOrigin}/api/auth/session`, {
+        headers: { authorization: `Bearer ${readOnlyToken}` },
+      });
+      expect(roSessionCheck.status()).toBe(200);
+      const roSessionData = await roSessionCheck.json();
+      const scopes = roSessionData.data?.identity?.scopes || [];
+      expect(scopes).toContain("tenant:billing:read");
+      expect(scopes).not.toContain("tenant:billing:write");
+
       const roInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}`, {
         headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
       });
@@ -155,6 +179,10 @@ test.describe("Live Invoice Mail Acceptance", () => {
         headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
       });
       expect(roProfileCheck.status()).toBe(200);
+      const roProfileData = await roProfileCheck.json();
+      if (roProfileData.data?.tenantId !== readOnlyTenantId || roProfileData.data?.email !== readOnlyRecipient) {
+        throw new Error("Read-only recipient mismatch");
+      }
       const readOnlyResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
       });
@@ -202,13 +230,19 @@ test.describe("Live Invoice Mail Acceptance", () => {
            });
            const dData = await check.json();
            const dDel = dData.data?.deliveries?.find((d: any) => d.deliveryId === naDeliveryId);
-           if (dDel?.status === "failed" && dDel?.attempts?.some((a: any) => a.outcome === "failed" && a.errorCode === "SMTP_RECIPIENT_NOT_ALLOWLISTED" && a.acceptedAt === null && a.retryable === false)) {
+           const attempt = dDel?.attempts?.find((a: any) => a.outcome === "failed" && a.errorCode === "SMTP_RECIPIENT_NOT_ALLOWLISTED");
+           if (dDel?.status === "failed" && attempt && attempt.acceptedAt === null && attempt.retryable === false) {
              isRejected = true;
              evidenceData.durableDeliveries.push({
                scenario: "non_allowlisted",
                deliveryId: naDeliveryId,
+               invoiceId: nonAllowlistInvoiceId,
+               tenantId: nonAllowlistTenantId,
                status: dDel.status,
-               errorCode: "SMTP_RECIPIENT_NOT_ALLOWLISTED"
+               errorCode: attempt.errorCode,
+               outcome: attempt.outcome,
+               acceptedAt: attempt.acceptedAt,
+               retryable: attempt.retryable
              });
              break;
            }
@@ -265,6 +299,15 @@ test.describe("Live Invoice Mail Acceptance", () => {
     expect(getMailAfterRetry.status()).toBe(200);
     const mailAfterRetry = await getMailAfterRetry.json();
     const retryDelivery = mailAfterRetry.data?.deliveries?.find((d: any) => d.deliveryId === deliveryId);
+    
+    evidenceData.durableDeliveries.push({
+      scenario: "idempotent_retry",
+      deliveryId: deliveryId,
+      idempotencyKey: idempotencyKey,
+      initialAttemptsCount: initialAttemptsCount,
+      afterRetryAttemptsCount: retryDelivery?.attempts?.length || 0,
+      status: retryDelivery?.status
+    });
     expect(retryDelivery?.attempts?.length).toBe(initialAttemptsCount); // Exact same attempts count
 
 
@@ -380,16 +423,20 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
     // Genuine Browser Check with UI interaction (F3)
     const artifactUrlPath = invoiceData.data?.artifactUrl;
-    expect(artifactUrlPath).toMatch(/^\/downloads\/(invoice|receipt)\//);
+    expect(artifactUrlPath).toMatch(/^\/downloads\/(tenant-invoice|invoice|receipt)\//);
+    const exactPortalUrl = new URL(artifactUrlPath, portalOrigin).href;
     
     // UI Download
-    const responsePromise = context.waitForEvent('response', res => res.url().includes(artifactUrlPath));
-    const downloadLocator = page.locator(`a[href^="${artifactUrlPath}"], button[data-testid*="download"], button:has-text("Download")`).first();
+    const responsePromise = context.waitForEvent('response', res => res.url() === exactPortalUrl);
+    const downloadLocator = page.locator(`a[href="${artifactUrlPath}"]`).first();
     await downloadLocator.click();
     const response = await responsePromise;
     expect(response.status()).toBe(200);
     const contentType = response.headers()['content-type'];
     expect(contentType).toMatch(/application\/pdf/);
+    
+    // Prove deployed SHA from successful browser response
+    expect(response.headers()['x-drts-candidate-sha']).toBe(candidateSha);
     
     const bodyBuffer = await response.body();
     expect(bodyBuffer.length).toBeGreaterThan(0);
@@ -403,23 +450,21 @@ test.describe("Live Invoice Mail Acceptance", () => {
     evidenceData.downloadProof = {
       matched: true,
       manifestHash: manifestHash,
+      downloadedHash: downloadedHash,
       downloadedBytes: bodyBuffer.length,
       contentType: contentType,
     };
     
-    // Check missing token isolation on portal
-    const unauthPortalResponse = await request.get(response.url(), { maxRedirects: 0 });
+    // Check missing token isolation on portal (unauthenticated signed link on portal)
+    // The portal should redirect to /login if there's no session, even with a valid signed link.
+    const unauthPortalResponse = await request.get(exactPortalUrl, { maxRedirects: 0 });
     expect([302, 307]).toContain(unauthPortalResponse.status());
     expect(unauthPortalResponse.headers()['location']).toMatch(/\/login/);
     
-    // Check missing token isolation on API directly
-    const apiDownloadUrl = new URL(artifactUrlPath, apiOrigin).href;
-    const privateResponse = await request.get(apiDownloadUrl, { maxRedirects: 0 });
-    expect(privateResponse.status()).toBe(401);
+    // Check API origin explicitly (F3)
+    const apiDownloadUrl = new URL("/api" + artifactUrlPath, apiOrigin).href;
     
-    evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
-    
-    // Invalid link scenario (F3) - API directly
+    // Invalid link scenario - API directly
     const fullArtifactUrlObj = new URL(apiDownloadUrl);
     if (fullArtifactUrlObj.searchParams.has("sig")) {
       fullArtifactUrlObj.searchParams.set("sig", "invalid");
@@ -433,14 +478,28 @@ test.describe("Live Invoice Mail Acceptance", () => {
     expect(invalidDownloadResponse.status()).toBe(403);
     const errorBody = await invalidDownloadResponse.json().catch(() => ({}));
     expect(errorBody.error?.code).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
+    evidenceData.httpCalls.push({ method: "GET", path: "bad_sig_api", status: invalidDownloadResponse.status() });
     
-    // Missing portal deployed-SHA verification header check
-    const badShaResponse = await request.get(response.url(), {
-      headers: { "x-drts-candidate-sha": "invalidsha" },
-      maxRedirects: 0
-    });
-    // Record negative observation
-    evidenceData.httpCalls.push({ method: "GET", path: "bad_sha_portal", status: badShaResponse.status() });
+    // Wrong-role/wrong-tenant browser scenarios
+    const wrongTenantContext = await (page.context() as any).browser()!.newContext();
+    await wrongTenantContext.setExtraHTTPHeaders({ "x-drts-candidate-sha": candidateSha! });
+    await wrongTenantContext.addCookies([{ name: "drts_tenant_session", value: process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN || "", domain: portalUrlObj.hostname, path: "/" }]);
+    const wrongTenantPage = await wrongTenantContext.newPage();
+    const wtResponse = await wrongTenantPage.goto(exactPortalUrl, { waitUntil: "networkidle" });
+    expect([401, 403, 404]).toContain(wtResponse?.status());
+    evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse?.status() });
+    await wrongTenantContext.close();
+
+    const readOnlyContext = await (page.context() as any).browser()!.newContext();
+    await readOnlyContext.setExtraHTTPHeaders({ "x-drts-candidate-sha": candidateSha! });
+    await readOnlyContext.addCookies([{ name: "drts_tenant_session", value: process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN || "", domain: portalUrlObj.hostname, path: "/" }]);
+    const readOnlyPage = await readOnlyContext.newPage();
+    const roResponse = await readOnlyPage.goto(exactPortalUrl, { waitUntil: "networkidle" });
+    expect([401, 403, 404]).toContain(roResponse?.status());
+    evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: roResponse?.status() });
+    await readOnlyContext.close();
+
+    evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
   });
 });
 

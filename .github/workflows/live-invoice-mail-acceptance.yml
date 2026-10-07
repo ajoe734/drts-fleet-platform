@@ -170,6 +170,9 @@ jobs:
           path: |
             .artifacts/live-invoice-mail-acceptance/evidence-mail.json
             .artifacts/live-invoice-mail-acceptance/evidence-provider.json
+            .artifacts/live-invoice-mail-acceptance/evidence-bootstrap.json
+            .artifacts/live-invoice-mail-acceptance/evidence-teardown.json
+            .artifacts/live-invoice-mail-acceptance/evidence-teardown.json
             .artifacts/live-invoice-mail-acceptance/run-status.json
           if-no-files-found: error
           retention-days: 30

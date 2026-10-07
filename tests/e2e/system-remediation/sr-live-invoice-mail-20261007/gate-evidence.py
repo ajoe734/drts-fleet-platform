@@ -28,7 +28,7 @@ def evaluate(env, evidence, provider):
     tenant = evidence.get("tenantId")
     invoice = evidence.get("invoiceId")
     identity = evidence.get("identityEmail")
-    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and UUID_RE.match(invoice) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
+    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and UUID_RE.match(tenant) and (UUID_RE.match(invoice) or (invoice.startswith("invoice-") and UUID_RE.match(invoice[8:]))) and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity))
 
     # Check statuses strictly: no generic checks, validate the exact expected scenarios
     first_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="normal_send")
@@ -61,8 +61,13 @@ def evaluate(env, evidence, provider):
         dl_proof = {}
     has_download = bool(
         get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
+        and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") in (401, 403, 404)
+        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") in (401, 403, 404)
+        and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
+        and get_call("GET", path="bad_sha_portal") and get_call("GET", path="bad_sha_portal").get("status") in (400, 401, 403, 404)
         and dl_proof.get("matched") is True
         and isinstance(dl_proof.get("manifestHash"), str) and len(dl_proof.get("manifestHash")) == 64
+        and dl_proof.get("manifestHash") == dl_proof.get("downloadedHash")
         and isinstance(dl_proof.get("downloadedBytes"), int) and dl_proof.get("downloadedBytes") > 0
         and isinstance(dl_proof.get("contentType"), str) and "pdf" in dl_proof.get("contentType")
     )
@@ -75,22 +80,27 @@ def evaluate(env, evidence, provider):
     first_send_del = get_delivery("first_send")
     resend_del = get_delivery("intentional_resend")
     na_del = get_delivery("non_allowlisted")
+    retry_del = get_delivery("idempotent_retry")
     
     # Check normal send and retry correlation
     has_normal_send = bool(first_send and first_send.get("status") == 201)
-    has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and dl_id is not None)
     
     # Check intentional resend
     has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
     
-    # Check durable delivery correlations
+    # Check durable delivery correlations and idempotency snapshot
+    has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and dl_id is not None and
+                           retry_del and retry_del.get("initialAttemptsCount") == retry_del.get("afterRetryAttemptsCount") and retry_del.get("initialAttemptsCount", 0) > 0 and
+                           retry_del.get("idempotencyKey") == first_send_del.get("idempotencyKey"))
+
     has_durable_get = bool(
-        first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") is not None and first_send_del.get("attemptsCount", 0) > 0 and
-        resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") is not None and
-        na_del and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED"
+        first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") is not None and first_send_del.get("attemptsCount", 0) > 0 and first_send_del.get("status") == "sent" and
+        resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") is not None and resend_del.get("attemptsCount", 0) > 0 and resend_del.get("idempotencyKey") != first_send_del.get("idempotencyKey") and resend_del.get("status") == "sent" and
+        na_del and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED" and na_del.get("outcome") == "failed" and na_del.get("acceptedAt") is None and na_del.get("retryable") is False
     )
     
     has_wrong_tenant = bool(get_call("POST", scenario="wrong_tenant") and get_call("POST", scenario="wrong_tenant").get("status") == 403)
+    has_wrong_invoice = bool(get_call("POST", scenario="wrong_invoice") and get_call("POST", scenario="wrong_invoice").get("status") in (403, 404))
 
 
     # Missing fixture/role authority remains pending rather than fabricated pass.
@@ -104,7 +114,7 @@ def evaluate(env, evidence, provider):
                   and has_authority
                   and has_identity and has_invoice and has_inbox_proof and has_resend_inbox_proof and has_download 
                   and has_idempotency and has_durable_get
-                  and has_wrong_tenant and has_intentional_resend and has_normal_send
+                  and has_wrong_tenant and has_wrong_invoice and has_intentional_resend and has_normal_send
                   and resources
                   and provider.get("candidate_sha") == sha and provider.get("alias_revision_fresh") is True)
                   
@@ -124,11 +134,16 @@ def main():
             return {}
             
     teardown_ev = read("evidence-teardown.json")
-    if not (teardown_ev.get("success") is True and teardown_ev.get("attempted", 0) > 0 and teardown_ev.get("failures", -1) == 0):
-        print("Mail acceptance: failed - missing or failed cleanup evidence")
-        raise SystemExit(1)
+    bootstrap_ev = read("evidence-bootstrap.json")
+    issued = bootstrap_ev.get("issued_sessions_count", 0)
+    teardown_passed = teardown_ev.get("success") is True and teardown_ev.get("attempted", 0) > 0 and teardown_ev.get("attempted") == issued and teardown_ev.get("failures", -1) == 0
         
     result = evaluate(os.environ, read("evidence-mail.json"), read("evidence-provider.json"))
+    if not teardown_passed:
+        result["status"] = "failed"
+        result["steps"]["teardown"] = False
+        print("Mail acceptance: failed - missing or failed cleanup evidence")
+        
     (directory / "run-status.json").write_text(json.dumps(result, indent=2) + "\n")
     print("Mail acceptance: " + result["status"])
     raise SystemExit(0 if result["status"] == "passed" else 1)

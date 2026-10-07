@@ -26,6 +26,8 @@ import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
 import {
   validateTarget,
   verifyDeployedCandidate,
@@ -202,6 +204,8 @@ export async function mintTenantSession(
   deps: MailSessionFetchDeps,
   actorType: string = "tenant_admin",
   expectedRole: string = "tenant_admin",
+  expectedScopes: string[] = [],
+  forbiddenScopes: string[] = [],
 ): Promise<MintedMailSession> {
   deps.onStage?.("assertion-validation");
   const idToken = deps.readGoogleIdToken().trim();
@@ -261,6 +265,7 @@ export async function mintTenantSession(
         actor_id?: string;
         tenant_id?: string;
         roles?: string[];
+        scopes?: string[];
       }
     | undefined;
   if (
@@ -270,7 +275,9 @@ export async function mintTenantSession(
     identity?.actor_id !== config.actorId ||
     identity?.tenant_id !== config.tenantId ||
     !Array.isArray(identity.roles) ||
-    !identity.roles?.includes(expectedRole)
+    !identity.roles?.includes(expectedRole) ||
+    (expectedScopes.length > 0 && (!Array.isArray(identity.scopes) || !expectedScopes.every(s => identity.scopes!.includes(s)))) ||
+    (forbiddenScopes.length > 0 && Array.isArray(identity.scopes) && forbiddenScopes.some(s => identity.scopes!.includes(s)))
   ) {
     throw new Error(
       "Minted session failed live verification via auth/session.",
@@ -371,6 +378,7 @@ export async function bootstrapMailSession(
   let stage: MailBootstrapStage = "input-validation";
   try {
     const config = validateMailSessionInputs(env);
+    const issuedSessions: string[] = [];
     if (env.GITHUB_ACTIONS !== "true")
       throw new Error("Hosted runner required");
     stage = "candidate-preflight";
@@ -390,7 +398,7 @@ export async function bootstrapMailSession(
     stage = "assertion-configuration";
     const assertions = deps.assertions(config);
 
-    async function tryMint(cfg: MailSessionConfig, actType: string, tokenExportKey: string, expRole: string = "tenant_admin") {
+    async function tryMint(cfg: MailSessionConfig, actType: string, tokenExportKey: string, expRole: string = "tenant_admin", expectedScopes: string[] = [], forbiddenScopes: string[] = []) {
         for (let attempt = 0; attempt < 3; attempt++) {
             stage = "assertion-mint";
             const assertion = await assertions.next();
@@ -402,9 +410,10 @@ export async function bootstrapMailSession(
                     readGoogleIdToken: () => assertion,
                     onSessionIssued: (token) => {
                         deps.appendEnvironment(envPath!, `${tokenExportKey}=${token}\n`);
+                        issuedSessions.push(tokenExportKey);
                         deps.onSessionIssued?.(token, tokenExportKey);
                     }
-                }, actType, expRole);
+                }, actType, expRole, expectedScopes, forbiddenScopes);
                 return res;
             } catch (error) {
                 if (!(error instanceof AssertionReplayError)) throw error;
@@ -413,18 +422,18 @@ export async function bootstrapMailSession(
         throw new Error("Assertion collisions exhausted bounded retries for " + actType);
     }
 
-    const mintedSession = await tryMint(config, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN", "tenant_admin");
+    const mintedSession = await tryMint(config, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN", "tenant_admin", ["tenant:billing:read", "tenant:billing:write"], []);
     stage = "step-up-export";
     deps.appendEnvironment(envPath!, `DRTS_LIVE_INVOICE_MAIL_STEP_UP_REFERENCE=${mintedSession.stepUpReference}\n`);
 
     if (env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID && env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID) {
       const roConfig = { ...config, tenantId: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID, actorId: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID };
-      await tryMint(roConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN", "tenant_viewer");
+      await tryMint(roConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN", "tenant_viewer", ["tenant:billing:read"], ["tenant:billing:write"]);
     }
 
     if (env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID && env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID) {
       const naConfig = { ...config, tenantId: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID, actorId: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID };
-      await tryMint(naConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN", "tenant_admin");
+      await tryMint(naConfig, "tenant_admin", "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN", "tenant_admin", ["tenant:billing:read", "tenant:billing:write"], []);
     }
 
     stage = "mailbox-read";
@@ -434,6 +443,10 @@ export async function bootstrapMailSession(
     const authorizedRecipient = deriveAliasRecipient(baseMailbox, "invoice");
     deps.mask(authorizedRecipient);
     stage = "recipient-export";
+    const effectiveAllowlist = env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST || "";
+    if (!effectiveAllowlist.split(/[\r\n]+/).includes(authorizedRecipient)) {
+      throw new Error("Derived recipient is not present in the observed effective allowlist.");
+    }
     deps.appendEnvironment(
       envPath,
       `DRTS_LIVE_INVOICE_MAIL_AUTHORIZED_RECIPIENT=${authorizedRecipient}\n`,
@@ -443,6 +456,16 @@ export async function bootstrapMailSession(
       envPath,
       "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-invoice-mail-negative@reserved.invalid\n",
     );
+    
+    const artifactsDir = resolve(".artifacts", "live-invoice-mail-acceptance");
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(resolve(artifactsDir, "evidence-bootstrap.json"), JSON.stringify({
+      runId: env.GITHUB_RUN_ID,
+      candidateSha: env.DRTS_CANDIDATE_SHA,
+      issued_sessions_count: issuedSessions.length,
+      issued_sessions: issuedSessions
+    }, null, 2));
+
   } catch (error) {
     throw new MailBootstrapError(stage, error);
   }

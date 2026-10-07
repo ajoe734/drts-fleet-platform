@@ -9,13 +9,17 @@ export async function teardown(
   fetcher = fetch,
 ) {
   const tokens = [
-    env.DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN,
-    env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN,
-    env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN
+    { key: "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN", val: env.DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN },
+    { key: "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN", val: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN },
+    { key: "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN", val: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN }
   ];
   const errors: Error[] = [];
+  const sessionResults: Array<{ key: string, status: "success" | "failed", error?: string }> = [];
   for (const token of tokens) {
-    if (!token) continue;
+    if (!token.val) {
+       sessionResults.push({ key: token.key, status: "failed", error: "not_issued" });
+       continue;
+    }
     try {
       const { origin } = validateTarget(createInvoiceMailEnvAdapter(env));
       const response = await fetcher(`${origin}/api/auth/logout`, {
@@ -23,7 +27,7 @@ export async function teardown(
         redirect: "error",
         signal: AbortSignal.timeout(15_000),
         headers: {
-          authorization: `Bearer ${token}`,
+          authorization: `Bearer ${token.val}`,
           "content-type": "application/json",
         },
         body: "{}",
@@ -35,16 +39,22 @@ export async function teardown(
       };
       if (body.data?.revoked !== true || body.data.logged_out !== true)
           throw new Error("Session cleanup did not confirm revocation");
+      sessionResults.push({ key: token.key, status: "success" });
     } catch (e) {
-      errors.push(e instanceof Error ? e : new Error(String(e)));
+      const err = e instanceof Error ? e : new Error(String(e));
+      errors.push(err);
+      sessionResults.push({ key: token.key, status: "failed", error: err.message });
     }
   }
   const artifactsDir = resolve(".artifacts", "live-invoice-mail-acceptance");
   mkdirSync(artifactsDir, { recursive: true });
   writeFileSync(resolve(artifactsDir, "evidence-teardown.json"), JSON.stringify({
-    attempted: tokens.filter(t => !!t).length,
+    runId: env.GITHUB_RUN_ID,
+    candidateSha: env.DRTS_CANDIDATE_SHA,
+    attempted: tokens.filter(t => !!t.val).length,
     failures: errors.length,
-    success: errors.length === 0
+    success: errors.length === 0,
+    sessions: sessionResults
   }, null, 2));
 
   if (errors.length > 0) {
