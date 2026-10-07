@@ -4,6 +4,28 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-GCP-ARTIFACT-ACTIVATION-20261004 — repair scope and hosted acceptance routing
+
+No new product choice or acceptance scope cut is needed. PRD §9.8.3 and service
+contracts §3.11 retain immutable fee-plan publication; the existing artifact
+provider contracts and all four parent acceptance keys remain binding.
+Supervisor must coordinate the billing controller/service and regression-test
+write scopes, then return the repeated publish-error/cache-durability repair to
+parent owner Claude (reviewer Claude2), continuing PR #2384's published history.
+Source review/CI and live acceptance are separate lifecycle stages: route the
+registered immutable WIF provisioning workflow and subsequent shared Cloud Run
+activation/readback to the authorized operator. The VM hosting restriction does
+not itself prohibit an authorized hosted workflow; this helper performs no cloud
+mutation.
+
+Keep the parent blocked until scope and execution routing are recorded. The
+dispatched helper cannot update another task or its own disposition metadata:
+Supervisor must write the parent next step and helper
+`resolved_parent_status: blocked`, `resolved_parent_waiting_for: Claude`, and
+`resolved_parent_next` before helper handoff/merge. This is follow-up on the
+existing parent, not new unregistered backlog. See the
+[decision, repeated-finding boundary, gate mapping and state-write evidence](support/unblock/SR-GCP-ARTIFACT-ACTIVATION-20261004/SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-SR-PARTNER-NOTIFY-UI-20260917 — approved notification canvas handoff
 
 Supervisor/Claude must identify the design owner and reviewer, authorize the
