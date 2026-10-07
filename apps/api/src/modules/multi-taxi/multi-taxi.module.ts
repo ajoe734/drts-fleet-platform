@@ -1,4 +1,7 @@
-import { FIRST_PARTY_PUSH_PROVIDER, FirstPartyNotificationTransport } from "./first-party-notification.transport";
+import {
+  FIRST_PARTY_PUSH_PROVIDER,
+  FirstPartyNotificationTransport,
+} from "./first-party-notification.transport";
 import { FcmFirstPartyPushProvider } from "./fcm-push.provider";
 import { Module, OnModuleInit } from "@nestjs/common";
 
@@ -64,7 +67,12 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
       provide: PASSENGER_PUSH_TRANSPORT,
       useExisting: PartnerNotificationTransport,
     },
-    FcmFirstPartyPushProvider,
+    // Factory avoids reflecting interface/default arguments as Object tokens.
+    // Construction is lazy with respect to credentials and external I/O.
+    {
+      provide: FcmFirstPartyPushProvider,
+      useFactory: () => new FcmFirstPartyPushProvider(),
+    },
     {
       provide: FIRST_PARTY_PUSH_PROVIDER,
       useExisting: FcmFirstPartyPushProvider,
