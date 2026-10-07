@@ -154,8 +154,13 @@ class HostedGateTest(unittest.TestCase):
                 if self.name == "evidence-teardown.json": return json.dumps(DummyPath.teardown_ev)
                 return "{}"
 
-        base_bootstrap = {"runId": "run1", "candidateSha": SHA, "issued_sessions_count": 2, "issued_sessions": ["k1", "k2"]}
-        base_teardown = {"runId": "run1", "candidateSha": SHA, "success": True, "attempted": 2, "failures": 0, "sessions": [{"key": "k1", "status": "success"}, {"key": "k2", "status": "success"}]}
+        valid_keys = [
+            "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN",
+            "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN",
+            "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN"
+        ]
+        base_bootstrap = {"runId": "run1", "candidateSha": SHA, "issued_sessions_count": 3, "issued_sessions": valid_keys.copy()}
+        base_teardown = {"runId": "run1", "candidateSha": SHA, "success": True, "attempted": 3, "failures": 0, "sessions": [{"key": k, "status": "success"} for k in valid_keys]}
 
         def run_main(b_ev, t_ev):
             DummyPath._files.clear()
@@ -182,18 +187,18 @@ class HostedGateTest(unittest.TestCase):
         self.assertEqual(data["status"], "failed")
 
         # 3. Mismatched identity but equal count
-        b3 = {**base_bootstrap, "issued_sessions": ["k3", "k4"]}
+        b3 = {**base_bootstrap, "issued_sessions": ["DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN", "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN", "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN"]}
         code, data = run_main(b3, base_teardown)
         self.assertEqual(code, 1)
         self.assertEqual(data["status"], "failed")
 
         # 4. Partial issuance
-        b4 = {**base_bootstrap, "issued_sessions_count": 3, "issued_sessions": ["k1", "k2"]}
+        b4 = {**base_bootstrap, "issued_sessions_count": 4, "issued_sessions": valid_keys.copy()}
         code, data = run_main(b4, base_teardown)
         self.assertEqual(code, 1)
 
         # 5. Malformed teardown sessions (AttributeError before)
-        t5 = {**base_teardown, "sessions": [None, {"key": "k2", "status": "success"}]}
+        t5 = {**base_teardown, "sessions": [None, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "success"}]}
         code, data = run_main(base_bootstrap, t5)
         self.assertEqual(code, 1)
         self.assertEqual(data["status"], "failed")

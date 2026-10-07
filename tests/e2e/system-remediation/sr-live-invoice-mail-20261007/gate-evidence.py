@@ -86,10 +86,10 @@ def evaluate(env, evidence, provider):
     has_normal_send = bool(first_send and first_send.get("status") == 201)
 
     # Check intentional resend
-    has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
+    has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and isinstance(resend.get("delivery_id"), str) and bool(resend.get("delivery_id")))
 
     # Check durable delivery correlations and idempotency snapshot
-    has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and dl_id is not None and
+    has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and isinstance(dl_id, str) and bool(dl_id) and
                            retry_del and retry_del.get("deliveryId") == dl_id and
                            retry_del and retry_del.get("initialAttemptsCount") == retry_del.get("afterRetryAttemptsCount") and retry_del.get("initialAttemptsCount", 0) > 0 and
                            first_send_del.get("idempotencyKey") and retry_del.get("idempotencyKey") == first_send_del.get("idempotencyKey"))
@@ -100,7 +100,7 @@ def evaluate(env, evidence, provider):
         has_durable_get_call and
         first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") and first_send_del.get("attemptsCount", 0) > 0 and first_send_del.get("status") == "sent" and first_send_del.get("attemptOutcome") == "sent" and first_send_del.get("errorCode") is None and
         resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") and resend_del.get("attemptsCount", 0) > 0 and first_send_del.get("idempotencyKey") and resend_del.get("idempotencyKey") and resend_del.get("idempotencyKey") != first_send_del.get("idempotencyKey") and resend_del.get("status") == "sent" and resend_del.get("attemptOutcome") == "sent" and resend_del.get("errorCode") is None and
-        na_del and na_send and na_send.get("status") == 201 and na_send.get("delivery_id") is not None and na_del.get("deliveryId") == na_send.get("delivery_id") and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED" and na_del.get("outcome") == "failed" and not na_del.get("acceptedAt") and na_del.get("retryable") is False
+        na_del and na_send and na_send.get("status") == 201 and isinstance(na_send.get("delivery_id"), str) and bool(na_send.get("delivery_id")) and na_del.get("deliveryId") == na_send.get("delivery_id") and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED" and na_del.get("outcome") == "failed" and not na_del.get("acceptedAt") and na_del.get("retryable") is False
     )
 
     has_wrong_tenant = bool(get_call("POST", scenario="wrong_tenant") and get_call("POST", scenario="wrong_tenant").get("status") == 403)
@@ -152,10 +152,16 @@ def main():
         if not isinstance(issued_sessions_raw, list):
             raise ValueError("issued_sessions must be a list")
 
+        expected_keys = {
+            "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN",
+            "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN",
+            "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN"
+        }
+
         issued_keys = []
         for k in issued_sessions_raw:
-            if not isinstance(k, str) or not k:
-                raise ValueError("malformed issued key")
+            if not isinstance(k, str) or k not in expected_keys:
+                raise ValueError("malformed or unknown issued key")
             issued_keys.append(k)
 
         if len(set(issued_keys)) != len(issued_keys):
@@ -168,27 +174,35 @@ def main():
             raise ValueError("sessions must be a list")
 
         teardown_keys = []
+        teardown_success_keys = []
         for s in sessions_raw:
             if not isinstance(s, dict):
                 raise ValueError("malformed session entry")
             k = s.get("key")
             st = s.get("status")
-            if not isinstance(k, str) or not k:
-                raise ValueError("malformed session key")
+            if not isinstance(k, str) or k not in expected_keys:
+                raise ValueError("malformed or unknown session key")
             if st not in ("success", "not_issued"):
                 raise ValueError("session status must be success or not_issued")
-            # Only count success ones as matching the issued keys
+
+            teardown_keys.append(k)
             if st == "success":
-                teardown_keys.append(k)
+                teardown_success_keys.append(k)
 
         if len(set(teardown_keys)) != len(teardown_keys):
-            raise ValueError("duplicate teardown keys")
+            raise ValueError("duplicate teardown keys across ALL entries")
 
-        teardown_keys.sort()
+        for k in teardown_keys:
+            st = next(s.get("status") for s in sessions_raw if s.get("key") == k)
+            if k in issued_keys and st == "not_issued":
+                raise ValueError("contradiction: key was issued but status is not_issued")
+
+        teardown_success_keys.sort()
 
         teardown_passed = bool(
             teardown_ev.get("success") is True and
-            teardown_ev.get("attempted", 0) > 0 and
+            teardown_ev.get("attempted") == issued and
+            teardown_ev.get("attempted") == len(teardown_success_keys) and
             teardown_ev.get("failures", -1) == 0 and
             teardown_ev.get("runId") == run_id and
             bootstrap_ev.get("runId") == run_id and
@@ -196,7 +210,7 @@ def main():
             bootstrap_ev.get("candidateSha") == sha and
             issued == len(issued_keys) and
             issued > 0 and
-            teardown_keys == issued_keys
+            teardown_success_keys == issued_keys
         )
     except Exception as e:
         teardown_passed = False

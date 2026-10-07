@@ -494,40 +494,53 @@ test.describe("Live Invoice Mail Acceptance", () => {
     evidenceData.httpCalls.push({ method: "GET", path: "bad_sig_api", status: invalidDownloadResponse.status() });
 
     // Wrong-role/wrong-tenant browser scenarios on protected portal route
-    // APIRequestContext GET calls alone do not establish required browser role interaction; keep hosted browser/role acceptance pending
-    evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
 
     if (nonAllowlistedToken && nonAllowlistInvoiceId) {
+        await context.clearCookies();
+        await context.addCookies([{ name: "drts_tenant_session", value: nonAllowlistedToken, domain: portalUrlObj.hostname, path: "/" }]);
+
         // Establish authorized same-resource 200
+        const ownInvoiceUiUrl = new URL(`/invoices?invoiceId=${nonAllowlistInvoiceId}`, portalOrigin).href;
+        const ownUiResp = await page.goto(ownInvoiceUiUrl, { waitUntil: "networkidle" });
+        expect(ownUiResp?.status()).toBe(200);
+
         const wtOwnResource = new URL(`/control-plane-proxy/tenant/invoices/${nonAllowlistInvoiceId}`, portalOrigin).href;
-        const wtOwnResponse = await request.get(wtOwnResource, {
-            headers: { cookie: `drts_tenant_session=${nonAllowlistedToken}` }
-        });
+        const wtOwnResponse = await page.request.get(wtOwnResource);
         expect(wtOwnResponse.status()).toBe(200);
 
         // Verify authenticated cross-tenant 404
+        const wrongTenantUiUrl = new URL(`/invoices?invoiceId=${invoiceId}`, portalOrigin).href;
+        await page.goto(wrongTenantUiUrl, { waitUntil: "networkidle" });
+
         const protectedPortalApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${invoiceId}`, portalOrigin).href;
-        const wtResponse = await request.get(protectedPortalApiUrl, {
-            headers: { cookie: `drts_tenant_session=${nonAllowlistedToken}` }
-        });
+        const wtResponse = await page.request.get(protectedPortalApiUrl);
         expect(wtResponse.status()).toBe(404);
         const errBody = await wtResponse.json().catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
         evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status() });
     } else {
-        evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: 404 });
+        if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
+            evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
+        }
     }
 
     if (readOnlyToken && readOnlyInvoiceId) {
-        const roApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${readOnlyInvoiceId}`, portalOrigin).href;
-        const roResponse = await request.get(roApiUrl, {
-            headers: { cookie: `drts_tenant_session=${readOnlyToken}` }
-        });
+        await context.clearCookies();
+        await context.addCookies([{ name: "drts_tenant_session", value: readOnlyToken, domain: portalUrlObj.hostname, path: "/" }]);
+
         // Read-only role CAN view the invoice
+        const roInvoiceUiUrl = new URL(`/invoices?invoiceId=${readOnlyInvoiceId}`, portalOrigin).href;
+        const roUiResp = await page.goto(roInvoiceUiUrl, { waitUntil: "networkidle" });
+        expect(roUiResp?.status()).toBe(200);
+
+        const roApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${readOnlyInvoiceId}`, portalOrigin).href;
+        const roResponse = await page.request.get(roApiUrl);
         expect(roResponse.status()).toBe(200);
         evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: roResponse.status() });
     } else {
-        evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: 200 });
+        if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {
+            evidenceData.unimplementedLiveSurfaces.push("browser_role_interaction");
+        }
     }
 
     evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
