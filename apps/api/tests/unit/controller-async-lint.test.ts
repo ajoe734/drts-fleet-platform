@@ -10,6 +10,14 @@ describe.each([apiRoot, root])("controller async lint from %s", (cwd) => {
   const eslint = new ESLint({
     cwd,
     overrideConfigFile: `${cwd}/eslint.config.mjs`,
+    // lintText replaces the same file repeatedly. The parser's CI single-run
+    // optimization uses the on-disk program, then an isolated fix-pass program
+    // without imported types. Use its watch program for these in-memory edits.
+    overrideConfig: {
+      languageOptions: {
+        parserOptions: { disallowAutomaticSingleRunInference: true },
+      },
+    },
   });
 
   async function lint(body: string) {
