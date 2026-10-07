@@ -669,9 +669,11 @@ describe("F1 bootstrap and teardown adapter", () => {
       unimplementedLiveSurfaces: [], errors: [],
       tenantId: "10000000-0000-0000-0000-000000000201", invoiceId: "20000000-0000-0000-0000-000000000456", identityEmail: "a".repeat(64),
       nonAllowlistInvoiceId: "20000000-0000-0000-0000-000000000789", readOnlyInvoiceId: "20000000-0000-0000-0000-000000000abc",
+      invoiceData: { data: { artifactDownloadMetadata: { manifestHash: "a".repeat(64) } } },
+      roInvoiceData: { data: { artifactDownloadMetadata: { manifestHash: "a".repeat(64) } } },
       resendMailboxEvidence: { matched_content: true, candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", delivery_id: "d2", rfc_message_id: "<d2@notification.drts.invalid>", body_sha256: "a".repeat(64) },
       mailboxEvidence: { matched_content: true, candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", delivery_id: "d1", rfc_message_id: "<d1@notification.drts.invalid>", body_sha256: "a".repeat(64) },
-      downloadProof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 123, contentType: "application/pdf" },
+      downloadProof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 123, contentType: "application/pdf", path: "/downloads/tenant-invoice/20000000-0000-0000-0000-000000000456", query: "?sig=REDACTED", status: 200, candidateSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", invoiceId: "20000000-0000-0000-0000-000000000456", tenantId: "10000000-0000-0000-0000-000000000201", browserObserved: true, origin: "http://portal.invalid" },
       durableDeliveries: [
         { scenario: "first_send", deliveryId: "d1", idempotencyKey: "k1", acceptedAt: "2026-10-07T00:00:00Z", attemptsCount: 1, status: "sent", attemptOutcome: "sent" },
         { scenario: "intentional_resend", deliveryId: "d2", idempotencyKey: "k2", acceptedAt: "2026-10-07T00:01:00Z", attemptsCount: 1, status: "sent", attemptOutcome: "sent" },
@@ -684,7 +686,7 @@ describe("F1 bootstrap and teardown adapter", () => {
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456", method: "GET", status: 200 },
         { path: "artifactUrl", method: "GET", status: 200 },
         { path: "wrong_tenant_portal", method: "GET", status: 404, ui_isolated: true, selected_identity: "20000000-0000-0000-0000-000000000789", forbidden_resource: "20000000-0000-0000-0000-000000000456", mutation_count: 0, forbidden_download_observed: false },
-        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false, download_proof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 12345, contentType: "application/pdf" } },
+        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false, download_proof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 12345, contentType: "application/pdf", path: "/downloads/tenant-invoice/20000000-0000-0000-0000-000000000abc", query: "?sig=REDACTED", status: 200, candidateSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", invoiceId: "20000000-0000-0000-0000-000000000abc", tenantId: "10000000-0000-0000-0000-000000000202", browserObserved: true, origin: "http://portal.invalid" } },
         { path: "bad_sig_api", method: "GET", status: 403 },
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "normal_send", status: 201, delivery_id: "d1" },
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "idempotent_retry", status: 201, delivery_id: "d1" },
@@ -718,7 +720,8 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID: "10000000-0000-0000-0000-000000000202",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID: "10000000-0000-0000-0000-000000000902",
-      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID: "10000000-0000-0000-0000-000000000903"
+      DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID: "10000000-0000-0000-0000-000000000903",
+      DRTS_LIVE_INVOICE_MAIL_PORTAL_ORIGIN: "http://portal.invalid"
     };
 
     try {

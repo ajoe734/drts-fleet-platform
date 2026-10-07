@@ -713,14 +713,17 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
 export async function observeAndEvaluateDownload(context: any, locator: any, expectedHref: string, portalOrigin: string, candidateSha: string, manifestHash: string, invoiceId: string, tenantId: string) {
     const expectedUrlObj = new URL(expectedHref, portalOrigin);
-    const popupResponsePromise = context.waitForEvent('response', (response: any) => {
-        try {
-            const actualUrlObj = new URL(response.url());
-            return actualUrlObj.origin === expectedUrlObj.origin &&
-                   actualUrlObj.pathname === expectedUrlObj.pathname &&
-                   actualUrlObj.search === expectedUrlObj.search;
-        } catch { return false; }
-    }, { timeout: 5000 });
+    const popupResponsePromise = context.waitForEvent('response', {
+        predicate: (response: any) => {
+            try {
+                const actualUrlObj = new URL(response.url());
+                return actualUrlObj.origin === expectedUrlObj.origin &&
+                       actualUrlObj.pathname === expectedUrlObj.pathname &&
+                       actualUrlObj.search === expectedUrlObj.search;
+            } catch { return false; }
+        },
+        timeout: 5000
+    });
 
     await locator.click();
     const popupResponse = await popupResponsePromise;

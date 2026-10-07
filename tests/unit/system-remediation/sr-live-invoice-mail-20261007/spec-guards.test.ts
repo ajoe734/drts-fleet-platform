@@ -120,7 +120,7 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
       }),
       post: vi.fn()
     };
-    await expect(runReadOnlyPreflight(request, { apiOrigin: "http://test", readOnlyToken: "token", readOnlyTenantId: "tenant-ro", readOnlyInvoiceId: "invoice-ro", readOnlyRecipient: "ro@test.com" })).resolves.toBeUndefined();
+    await expect(runReadOnlyPreflight(request, { apiOrigin: "http://test", readOnlyToken: "token", readOnlyTenantId: "tenant-ro", readOnlyInvoiceId: "invoice-ro", readOnlyRecipient: "ro@test.com" })).resolves.toEqual(expect.objectContaining({ roInvoiceData: expect.any(Object) }));
   });
 
   it("throws on non-allowlisted mismatch and performs zero sends", async () => {
@@ -192,21 +192,24 @@ describe("F4/F6 verifyInvoiceLinks regressions", () => {
   });
 });
 
-import { evaluateDownloadResponse } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+import { evaluateDownloadResponse, observeAndEvaluateDownload } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
 
 describe("F4/F6 evaluateDownloadResponse", () => {
-  const validManifestHash = "2d3e9114777d1ff04b2a65825df3890f55cf5eb393430531bdc8636e0d37e4fb"; // echo -n '%PDF-test' | sha256sum
-  const createMockResponse = (overrides = {}) => ({
-    headers: () => ({
-      'content-type': 'application/pdf',
-      'x-drts-candidate-sha': 'a'.repeat(40),
-      ...overrides.headers
-    }),
-    body: async () => Buffer.from('%PDF-test'),
-    url: () => 'http://portal.invalid/api/downloads/tenant-invoice/inv1?sig=1',
-    status: () => 200,
-    ...overrides
-  });
+  const validManifestHash = "3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63"; // echo -n '%PDF-test' | sha256sum
+  const createMockResponse = (overrides: any = {}) => {
+    const { headers: headersOverride, ...otherOverrides } = overrides;
+    return {
+      headers: () => ({
+        'content-type': 'application/pdf',
+        'x-drts-candidate-sha': 'a'.repeat(40),
+        ...headersOverride
+      }),
+      body: async () => Buffer.from('%PDF-test'),
+      url: () => 'http://portal.invalid/api/downloads/tenant-invoice/inv1?sig=1',
+      status: () => 200,
+      ...otherOverrides
+    };
+  };
 
   it("passes for valid download", async () => {
     const res = createMockResponse();
@@ -233,5 +236,88 @@ describe("F4/F6 evaluateDownloadResponse", () => {
   it("throws on hash mismatch", async () => {
     const res = createMockResponse();
     await expect(evaluateDownloadResponse(res, 'a'.repeat(40), "wronghash", "inv1", "tenant1")).rejects.toThrow("Hash mismatch");
+  });
+});
+
+describe("F4/F6 observeAndEvaluateDownload regressions", () => {
+  const validManifestHash = "3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63";
+  const createMockResponse = (overrides: any = {}) => {
+    const { headers: headersOverride, ...otherOverrides } = overrides;
+    return {
+      headers: () => ({
+        'content-type': 'application/pdf',
+        'x-drts-candidate-sha': 'a'.repeat(40),
+        ...headersOverride
+      }),
+      body: async () => Buffer.from('%PDF-test'),
+      url: () => 'http://portal.invalid/api/downloads/tenant-invoice/inv1?sig=1',
+      status: () => 200,
+      ...otherOverrides
+    };
+  };
+
+  it("passes valid observation and redacts query", async () => {
+    const mockResponse = createMockResponse();
+    const context = {
+      waitForEvent: vi.fn().mockImplementation(async (event, options) => {
+        // Evaluate predicate synchronously
+        const isMatch = options.predicate(mockResponse);
+        if (isMatch) return mockResponse;
+        throw new Error("Timeout");
+      })
+    };
+    const locator = { click: vi.fn().mockResolvedValue(undefined) };
+
+    const proof = await observeAndEvaluateDownload(
+      context,
+      locator,
+      "/api/downloads/tenant-invoice/inv1?sig=1",
+      "http://portal.invalid",
+      "a".repeat(40),
+      validManifestHash,
+      "inv1",
+      "tenant1"
+    );
+
+    expect(proof.matched).toBe(true);
+    expect(proof.query).toBe("sig=REDACTED");
+    expect(locator.click).toHaveBeenCalled();
+  });
+
+  it("throws when response event does not match predicate (timeout)", async () => {
+    const context = {
+      waitForEvent: vi.fn().mockRejectedValue(new Error("Timeout"))
+    };
+    const locator = { click: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(observeAndEvaluateDownload(
+      context,
+      locator,
+      "/api/downloads/tenant-invoice/inv1?sig=1",
+      "http://portal.invalid",
+      "a".repeat(40),
+      validManifestHash,
+      "inv1",
+      "tenant1"
+    )).rejects.toThrow("Timeout");
+  });
+
+  it("throws on evaluateDownloadResponse failure (MIME)", async () => {
+    const mockResponse = createMockResponse({ headers: { 'content-type': 'text/plain' } });
+    const context = {
+      waitForEvent: vi.fn().mockResolvedValue(mockResponse)
+    };
+    const locator = { click: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(observeAndEvaluateDownload(
+      context,
+      locator,
+      "/api/downloads/tenant-invoice/inv1?sig=1",
+      "http://portal.invalid",
+      "a".repeat(40),
+      validManifestHash,
+      "inv1",
+      "tenant1"
+    )).rejects.toThrow("Invalid mime");
   });
 });

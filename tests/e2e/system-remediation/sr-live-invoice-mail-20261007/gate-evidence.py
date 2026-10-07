@@ -99,13 +99,14 @@ def evaluate(env, evidence, provider):
         and get_call("GET", path="read_only_portal").get("download_proof").get("matched") is True
         and isinstance(get_call("GET", path="read_only_portal").get("download_proof").get("manifestHash"), str)
         and bool(re.match(r"^[0-9a-f]{64}$", get_call("GET", path="read_only_portal").get("download_proof").get("manifestHash")))
+        and get_call("GET", path="read_only_portal").get("download_proof").get("manifestHash") == evidence.get("roInvoiceData", {}).get("data", {}).get("artifactDownloadMetadata", {}).get("manifestHash")
         and get_call("GET", path="read_only_portal").get("download_proof").get("manifestHash") == get_call("GET", path="read_only_portal").get("download_proof").get("downloadedHash")
         and isinstance(get_call("GET", path="read_only_portal").get("download_proof").get("downloadedBytes"), int)
         and get_call("GET", path="read_only_portal").get("download_proof").get("downloadedBytes") > 0
         and get_call("GET", path="read_only_portal").get("download_proof").get("contentType") == "application/pdf"
         and get_call("GET", path="read_only_portal").get("download_proof").get("origin") == env.get("DRTS_LIVE_INVOICE_MAIL_PORTAL_ORIGIN")
-        and get_call("GET", path="read_only_portal").get("download_proof").get("path") == f"/api/downloads/tenant-invoice/{env.get('DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID')}"
-        and isinstance(get_call("GET", path="read_only_portal").get("download_proof").get("query"), str) and "sig=" in get_call("GET", path="read_only_portal").get("download_proof").get("query")
+        and get_call("GET", path="read_only_portal").get("download_proof").get("path") == f"/downloads/tenant-invoice/{env.get('DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID')}"
+        and isinstance(get_call("GET", path="read_only_portal").get("download_proof").get("query"), str) and "sig=REDACTED" in get_call("GET", path="read_only_portal").get("download_proof").get("query")
         and get_call("GET", path="read_only_portal").get("download_proof").get("status") == 200
         and get_call("GET", path="read_only_portal").get("download_proof").get("candidateSha") == env.get("CANDIDATE_SHA")
         and get_call("GET", path="read_only_portal").get("download_proof").get("invoiceId") == env.get("DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID")
@@ -114,12 +115,13 @@ def evaluate(env, evidence, provider):
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
         and dl_proof.get("matched") is True
         and isinstance(dl_proof.get("manifestHash"), str) and bool(re.match(r"^[0-9a-f]{64}$", dl_proof.get("manifestHash")))
+        and dl_proof.get("manifestHash") == evidence.get("invoiceData", {}).get("data", {}).get("artifactDownloadMetadata", {}).get("manifestHash")
         and dl_proof.get("manifestHash") == dl_proof.get("downloadedHash")
         and isinstance(dl_proof.get("downloadedBytes"), int) and dl_proof.get("downloadedBytes") > 0
         and dl_proof.get("contentType") == "application/pdf"
         and dl_proof.get("origin") == env.get("DRTS_LIVE_INVOICE_MAIL_PORTAL_ORIGIN")
-        and dl_proof.get("path") == f"/api/downloads/tenant-invoice/{env.get('DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID')}"
-        and isinstance(dl_proof.get("query"), str) and "sig=" in dl_proof.get("query")
+        and dl_proof.get("path") == f"/downloads/tenant-invoice/{env.get('DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID')}"
+        and isinstance(dl_proof.get("query"), str) and "sig=REDACTED" in dl_proof.get("query")
         and dl_proof.get("status") == 200
         and dl_proof.get("candidateSha") == env.get("CANDIDATE_SHA")
         and dl_proof.get("invoiceId") == env.get("DRTS_LIVE_INVOICE_MAIL_TEST_INVOICE_ID")
