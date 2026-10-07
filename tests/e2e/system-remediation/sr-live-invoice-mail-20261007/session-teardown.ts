@@ -14,7 +14,7 @@ export async function teardown(
     { key: "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN", val: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN }
   ];
   const errors: Error[] = [];
-  const sessionResults: Array<{ key: string, status: "success" | "failed", error?: string }> = [];
+  const sessionResults: Array<{ key: string, status: "success" | "failed" | "not_issued", error?: string }> = [];
   for (const token of tokens) {
     if (!token.val) {
        sessionResults.push({ key: token.key, status: "not_issued" });
