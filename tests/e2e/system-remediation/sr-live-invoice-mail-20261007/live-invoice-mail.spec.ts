@@ -763,13 +763,16 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
     const expiresAt = searchParams.get('expires_at') as string;
     const keyId = searchParams.get('key_id') as string;
     const sigV = searchParams.get('sig_v') as string;
+    const sig = searchParams.get('sig') as string;
 
     if (manifestHashParam !== manifestHash) {
         throw new Error("Contradictory manifest hash in download link");
     }
 
-    if (Number.isNaN(Date.parse(signedAt))) throw new Error("Invalid signed_at");
-    if (Number.isNaN(Date.parse(expiresAt))) throw new Error("Invalid expires_at");
+    if (sig.trim() === '') throw new Error("Invalid sig");
+
+    if (Number.isNaN(Date.parse(signedAt)) || new Date(signedAt).toISOString() !== signedAt) throw new Error("Invalid signed_at");
+    if (Number.isNaN(Date.parse(expiresAt)) || new Date(expiresAt).toISOString() !== expiresAt) throw new Error("Invalid expires_at");
     if (keyId.trim() === '') throw new Error("Invalid key_id");
     if (!/^\d+$/.test(sigV)) throw new Error("Invalid sig_v");
 

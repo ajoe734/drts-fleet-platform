@@ -279,6 +279,122 @@ class HostedGateTest(unittest.TestCase):
         ro_proof9["query"] = f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&notsig=REDACTED&sig_v=1"
         self.assertEqual(gate.evaluate(self.env, ev9, self.provider)["status"], "failed")
 
+    def test_f4_f6_actual_helper_output(self):
+        import subprocess
+        import json
+        import copy
+        
+        node_script = r'''
+        const { stripTypeScriptTypes } = require('module');
+        const fs = require('fs');
+        const crypto = require('crypto');
+        
+        const spec = fs.readFileSync('tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec.ts', 'utf8');
+        const funcStr = spec.substring(spec.indexOf('export async function observeAndEvaluateDownload'));
+        const jsCode = stripTypeScriptTypes(funcStr.replace(/export async function/g, 'async function').replace(/export function/g, 'function'));
+        
+        eval(jsCode);
+        
+        async function run() {
+            const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+            const searchParams = new URLSearchParams();
+            searchParams.append('manifest_hash', input.manifest_hash);
+            searchParams.append('signed_at', input.signed_at);
+            searchParams.append('expires_at', input.expires_at);
+            searchParams.append('key_id', input.key_id);
+            searchParams.append('sig_v', input.sig_v);
+            searchParams.append('sig', input.sig);
+            
+            if (input.duplicate_sig) {
+                searchParams.append('sig', input.sig);
+            }
+            if (input.duplicate_hash) {
+                searchParams.append('manifest_hash', input.manifest_hash);
+            }
+            
+            const url = `http://portal.invalid/downloads/tenant-invoice/${input.invoiceId}?${searchParams.toString()}`;
+            
+            const popupResponse = {
+                headers: () => ({'content-type': 'application/pdf', 'x-drts-candidate-sha': input.candidateSha}),
+                body: async () => Buffer.from('%PDF-test'),
+                url: () => url,
+                status: () => 200
+            };
+            
+            try {
+                const proof = await evaluateDownloadResponse(popupResponse, input.candidateSha, input.manifest_hash, input.invoiceId, input.tenantId);
+                console.log(JSON.stringify({ success: true, proof }));
+            } catch (e) {
+                console.log(JSON.stringify({ success: false, error: e.message }));
+            }
+        }
+        
+        run();
+        '''
+        
+        def get_proof(manifest_hash, signed_at, expires_at, key_id, sig_v, sig, candidate_sha, invoice_id, tenant_id, duplicate_sig=False, duplicate_hash=False):
+            input_data = json.dumps({
+                'manifest_hash': manifest_hash,
+                'signed_at': signed_at,
+                'expires_at': expires_at,
+                'key_id': key_id,
+                'sig_v': sig_v,
+                'sig': sig,
+                'candidateSha': candidate_sha,
+                'invoiceId': invoice_id,
+                'tenantId': tenant_id,
+                'duplicate_sig': duplicate_sig,
+                'duplicate_hash': duplicate_hash
+            })
+            res = subprocess.run(['node', '-e', node_script], input=input_data, text=True, capture_output=True, check=True)
+            return json.loads(res.stdout.splitlines()[-1])
+
+        # Base inputs
+        manifest_hash = '3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63'
+        candidate_sha = SHA
+        
+        # Positive case (Primary and Read-Only)
+        res_primary = get_proof(manifest_hash, '2026-10-07T19:00:00.000Z', '2026-10-07T19:15:00.000Z', 'k1', '1', 'valid', candidate_sha, '20000000-0000-0000-0000-000000000456', '10000000-0000-0000-0000-000000000123')
+        self.assertTrue(res_primary['success'])
+        
+        res_ro = get_proof(manifest_hash, '2026-10-07T19:00:00.000Z', '2026-10-07T19:15:00.000Z', 'k1', '1', 'valid', candidate_sha, '20000000-0000-0000-0000-000000000abc', '10000000-0000-0000-0000-000000000abc')
+        self.assertTrue(res_ro['success'])
+        
+        ev = copy.deepcopy(self.evidence)
+        ev['invoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
+        ev['roInvoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
+        ev['downloadProof'] = res_primary['proof']
+        for c in ev['httpCalls']:
+            if c.get('path') == 'read_only_portal':
+                c['download_proof'] = res_ro['proof']
+                
+        self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'passed')
+        
+        # Negative cases
+        negatives = [
+            # whitespace sig
+            {'sig': '   '},
+            {'sig': ''},
+            {'duplicate_sig': True},
+            {'duplicate_hash': True},
+            {'signed_at': '2026-02-30T19:00:00.000Z'},
+            {'expires_at': 'invalid'},
+            {'key_id': '   '},
+            {'sig_v': 'not_int'}
+        ]
+        
+        for neg in negatives:
+            with self.subTest(neg=neg):
+                kwargs = {
+                    'manifest_hash': manifest_hash, 'signed_at': '2026-10-07T19:00:00.000Z',
+                    'expires_at': '2026-10-07T19:15:00.000Z', 'key_id': 'k1', 'sig_v': '1',
+                    'sig': 'valid', 'candidate_sha': candidate_sha,
+                    'invoice_id': '20000000-0000-0000-0000-000000000456', 'tenant_id': '10000000-0000-0000-0000-000000000123'
+                }
+                kwargs.update(neg)
+                res = get_proof(**kwargs)
+                self.assertFalse(res['success'], f"Expected failure for {neg}")
+
     def test_green_runner_cannot_hide_missing_stale_or_partial_artifacts(self):
         for override in ({'status': 'failed'}, {'candidateSha': 'b' * 40}, {'headSha': 'b' * 40},
                          {'unimplementedLiveSurfaces': [{'surface': 'expiry'}]}, {'errors': ['failed']},

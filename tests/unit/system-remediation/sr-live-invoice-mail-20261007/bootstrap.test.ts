@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { evaluateDownloadResponse } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+import * as crypto from "crypto";
 import { bootstrapMailSession } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-bootstrap";
 import { teardown } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-teardown";
 
@@ -664,16 +666,35 @@ describe("F1 bootstrap and teardown adapter", () => {
     }, tdFetchMock as any);
 
     // Provide the rest of the valid gate files
+    const mockPrimaryBody = Buffer.from('%PDF-test');
+    const primaryManifestHash = crypto.createHash("sha256").update(mockPrimaryBody).digest("hex");
+    const primaryPopupResponse = {
+        headers: () => ({ 'content-type': 'application/pdf', 'x-drts-candidate-sha': "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }),
+        body: async () => mockPrimaryBody,
+        url: () => `http://portal.invalid/downloads/tenant-invoice/20000000-0000-0000-0000-000000000456?manifest_hash=${primaryManifestHash}&signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=k1&sig_v=1&sig=valid`,
+        status: () => 200
+    };
+    const mockReadOnlyBody = Buffer.from('%PDF-ro');
+    const readOnlyManifestHash = crypto.createHash("sha256").update(mockReadOnlyBody).digest("hex");
+    const readOnlyPopupResponse = {
+        headers: () => ({ 'content-type': 'application/pdf', 'x-drts-candidate-sha': "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }),
+        body: async () => mockReadOnlyBody,
+        url: () => `http://portal.invalid/downloads/tenant-invoice/20000000-0000-0000-0000-000000000abc?manifest_hash=${readOnlyManifestHash}&signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=k1&sig_v=1&sig=valid`,
+        status: () => 200
+    };
+    const actualPrimaryProof = await evaluateDownloadResponse(primaryPopupResponse, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", primaryManifestHash, "20000000-0000-0000-0000-000000000456", "10000000-0000-0000-0000-000000000201");
+    const actualReadOnlyProof = await evaluateDownloadResponse(readOnlyPopupResponse, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", readOnlyManifestHash, "20000000-0000-0000-0000-000000000abc", "10000000-0000-0000-0000-000000000202");
+
     const validEvidence = {
       candidateSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", status: "passed", exitCode: 0,
       unimplementedLiveSurfaces: [], errors: [],
       tenantId: "10000000-0000-0000-0000-000000000201", invoiceId: "20000000-0000-0000-0000-000000000456", identityEmail: "a".repeat(64),
       nonAllowlistInvoiceId: "20000000-0000-0000-0000-000000000789", readOnlyInvoiceId: "20000000-0000-0000-0000-000000000abc",
-      invoiceData: { data: { tenantId: "10000000-0000-0000-0000-000000000201", invoiceId: "20000000-0000-0000-0000-000000000456", artifactDownloadMetadata: { manifestHash: "a".repeat(64) } } },
-      roInvoiceData: { data: { tenantId: "10000000-0000-0000-0000-000000000202", invoiceId: "20000000-0000-0000-0000-000000000abc", artifactDownloadMetadata: { manifestHash: "a".repeat(64) } } },
+      invoiceData: { data: { tenantId: "10000000-0000-0000-0000-000000000201", invoiceId: "20000000-0000-0000-0000-000000000456", artifactDownloadMetadata: { manifestHash: primaryManifestHash } } },
+      roInvoiceData: { data: { tenantId: "10000000-0000-0000-0000-000000000202", invoiceId: "20000000-0000-0000-0000-000000000abc", artifactDownloadMetadata: { manifestHash: readOnlyManifestHash } } },
       resendMailboxEvidence: { matched_content: true, candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", delivery_id: "d2", rfc_message_id: "<d2@notification.drts.invalid>", body_sha256: "a".repeat(64) },
       mailboxEvidence: { matched_content: true, candidate_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", delivery_id: "d1", rfc_message_id: "<d1@notification.drts.invalid>", body_sha256: "a".repeat(64) },
-      downloadProof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 123, contentType: "application/pdf", path: "/downloads/tenant-invoice/20000000-0000-0000-0000-000000000456", query: "?manifest_hash=" + "a".repeat(64) + "&signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=k1&sig_v=1&sig=REDACTED", status: 200, candidateSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", invoiceId: "20000000-0000-0000-0000-000000000456", tenantId: "10000000-0000-0000-0000-000000000201", browserObserved: true, origin: "http://portal.invalid" },
+      downloadProof: actualPrimaryProof,
       durableDeliveries: [
         { scenario: "first_send", deliveryId: "d1", idempotencyKey: "k1", acceptedAt: "2026-10-07T00:00:00Z", attemptsCount: 1, status: "sent", attemptOutcome: "sent" },
         { scenario: "intentional_resend", deliveryId: "d2", idempotencyKey: "k2", acceptedAt: "2026-10-07T00:01:00Z", attemptsCount: 1, status: "sent", attemptOutcome: "sent" },
@@ -686,7 +707,7 @@ describe("F1 bootstrap and teardown adapter", () => {
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456", method: "GET", status: 200 },
         { path: "artifactUrl", method: "GET", status: 200 },
         { path: "wrong_tenant_portal", method: "GET", status: 404, ui_isolated: true, selected_identity: "20000000-0000-0000-0000-000000000789", forbidden_resource: "20000000-0000-0000-0000-000000000456", mutation_count: 0, forbidden_download_observed: false },
-        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false, download_proof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 12345, contentType: "application/pdf", path: "/downloads/tenant-invoice/20000000-0000-0000-0000-000000000abc", query: "?manifest_hash=" + "a".repeat(64) + "&signed_at=2026-10-07T19:00:00.000Z&expires_at=2026-10-07T19:15:00.000Z&key_id=k1&sig_v=1&sig=REDACTED", status: 200, candidateSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", invoiceId: "20000000-0000-0000-0000-000000000abc", tenantId: "10000000-0000-0000-0000-000000000202", browserObserved: true, origin: "http://portal.invalid" } },
+        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false, download_proof: actualReadOnlyProof },
         { path: "bad_sig_api", method: "GET", status: 403 },
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "normal_send", status: 201, delivery_id: "d1" },
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "idempotent_retry", status: 201, delivery_id: "d1" },

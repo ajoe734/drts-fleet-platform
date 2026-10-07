@@ -247,3 +247,18 @@ This document records the completion and verification of the live invoice mail E
 - `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit 0.
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: 0df15913159d275b098afe75213f5a97b1a3f0f0 / Generation: 33c2a41a75b44196b38539b62e2bef6a)
+
+- **F8 (P1 new candidate CI regression)**: Removed the unused `sig` variable assignment in `live-invoice-mail.spec.ts` that caused the exact-SHA lint failure.
+- **F3/F5 (P1 partial repair: remaining invalid signature normalization; newly isolated whitespace subcase)**: 
+  - Repaired `evaluateDownloadResponse` in `live-invoice-mail.spec.ts` to explicitly reject whitespace-only `sig` values prior to redaction.
+  - Hardened timestamp parsing in `evaluateDownloadResponse` and `gate-evidence.py` to use strict date parsing that rejects impossible calendar dates (like February 30) instead of relying on `Date.parse()` or regular expressions alone. 
+- **F4/F6 (P2 REPEATED same missing regression on adjacent candidates)**: 
+  - Connected the producer and consumer integration by dynamically invoking `evaluateDownloadResponse` within `bootstrap.test.ts` to generate the exact literal objects expected by the Python gate.
+  - Wrote a new integration regression `test_f4_f6_actual_helper_output` in `test_hosted_gate.py` that utilizes a spawned `node` execution of the TypeScript evaluation function to feed the actual JS-generated proof objects directly to the gate, verifying both positive configurations and the newly implemented negative validations (e.g. invalid dates, whitespace signature).
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task: PASS 13/13 exit 0 (includes the new Node-based helper-to-gate integration test).
+- `git diff --check HEAD^ HEAD`: clean (exit 0).
+- Local lint checks (`npx eslint ...` on modified files): clean (exit 0).
