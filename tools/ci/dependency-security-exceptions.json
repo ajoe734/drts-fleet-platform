@@ -182,6 +182,18 @@
     ]
   },
   {
+    "advisory_id": "1241339",
+    "module_name": "@modelcontextprotocol/sdk",
+    "reason": "Development tooling/SDK used in internal tools only, not exposed to untrusted external authorization servers.",
+    "expires_at": "2027-01-01T00:00:00Z",
+    "versions": [
+      "1.30.0"
+    ],
+    "paths": [
+      "apps__api>openclaw>@modelcontextprotocol/sdk"
+    ]
+  },
+  {
     "advisory_id": "1239765",
     "module_name": "image-size",
     "reason": "Build-time tooling vulnerability in mobile driver app (not exploitable in production bundle)",

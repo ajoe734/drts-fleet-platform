@@ -21,7 +21,7 @@ Repository：ajoe734/drts-fleet-platform
 | packages/contracts/src/referral-channel.ts: 1–180 | 既有 PartnerUserIdentityLinkRecord 保存 entrySlug、partnerUserRef、drtsPassengerId、active/revoked；既有簽章 handoff 與同意資料可沿用。 |
 | apps/api/src/modules/tenant-partner/webhook-dispatch.service.ts | HMAC-SHA256、snake_case 序列化、HTTP timeout、shouldRetry/backoff 已存在；WebhookFetch 只回 ok/status，沒有讀取接收回執 body。 |
 | apps/api/src/modules/multi-taxi/passenger-push.adapter.ts | 可注入 PassengerPushTransport；存在可選 device resolver；generic HTTP 分支會以 receipt-${outboxId} 作缺回執時的 fallback。 |
-| apps/api/src/modules/multi-taxi/multi-taxi.module.ts | PASSENGER_PUSH_TRANSPORT 目前仍綁 WebPushTransport，並注入 PassengerPushDeviceResolver。只新增一個 class 不會切換現行行為。 |
+| apps/api/src/modules/multi-taxi/multi-taxi.module.ts | PASSENGER_PUSH_TRANSPORT 目前仍綁 WebPushTransport，並注入 PassengerPushDeviceResolver。只新增一個 class 不會切換現行行為。 **[2026-10-06 附註，不改本行原文]** 此行所述現況已過時：目前 PASSENGER_PUSH_TRANSPORT 綁的是 PartnerNotificationTransport（transportMode: "partner_webhook"），WebPushTransport／PassengerPushDeviceResolver 已不是現行注入對象。本表其餘各行與下文六項決議不受影響。每張單依來源分流到哪個管道、沒有 App 來源明確標無管道，以及預備第一方 App 接收端的補篇設計，見 `docs/02-architecture/passenger-notification-channel-routing-20261006.md` 與 `docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md`。 |
 | apps/api/src/modules/multi-taxi/multi-taxi.service.ts: 950–1100 | 已有 outbox claim、fence 與 receipt/outcome 同交易寫入；通用錯誤目前會摺疊成 provider_error。 |
 | packages/contracts/src/phase1-p5-s3-multi-taxi.ts: 620–665 | outbox 四狀態 pending/sending/delivered/failed；五種事件；result 為 delivered/provider_not_configured/provider_error。 |
 | docs/03-runbooks/tenant-api-webhook-governance-runbook.md | 記載 tenant webhook 自動重試、重啟恢復、停用、測試及輪替機制。 |
