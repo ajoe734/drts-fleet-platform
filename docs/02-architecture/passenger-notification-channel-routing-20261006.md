@@ -196,6 +196,8 @@ DELETE /api/passenger-app/push-devices/{deviceId}
 - 兩個管道共用同一個 outbox 的 claim/fence/receipt 交易（既有 `ops.consumer_notification_outbox`）。worker 只要有**任一**管道啟用就要啟動；取件條件（`WHERE` 子句）要同時涵蓋兩種管道各自的 `retryDisposition` 語意,不能只認識夥伴管道的失敗原因集合。
 - 事件清單一律從 contract 的 `eventType` union（`ConsumerNotificationOutboxRecord["eventType"]`）推導，不在分流邏輯裡寫死五種事件名——`PUSH-TRIP-CANCELLED-NOTIFICATION-20261005` 會替這個 union 加入取消事件，分流邏輯不應因此需要同步修改列舉。
 
+**實作對應（PUSH-CHANNEL-ROUTER-20261006）**：`MultiTaxiRepository.resolvePassengerNotificationChannel` 是本節「每筆 outbox 先依 D2 判定管道」的唯一實作——一次查詢兩張路由快照表。新檔 `passenger-notification-channel-router.ts` 的 `resolveNonPartnerChannelOutcome` 是 D3/D6 對 `ambiguous`/`none`/`first_party_app`（骨架）三種非夥伴結果的決策表，純函式無 I/O。`MultiTaxiService.deliverPassengerNotification` 在判定為 `partner_webhook` 時原樣轉給既有 `deliverPartnerNotification`（逐位元不變）；其餘三種結果轉給新的 `deliverNonPartnerChannelOutcome`，與夥伴路徑共用同一個 `claimPartnerNotification`／`recordPushDeliveryOutcome` 交易（新增可選的 `channelMetadata` 欄位，寫入獨立的 `payload.channelRouting`，不動既有 `payload.partnerNotification`）。`listDuePartnerNotifications` 的取件 `WHERE` 子句新增一個 COALESCE 分支讀 `payload.channelRouting.retryDisposition`，涵蓋這三種非夥伴結果；沒有新增 timer，worker 本身（`partner-notification.worker.ts`）未修改。`multi-taxi.module.ts` 的 `transportMode: "partner_webhook"` 字面值維持不動——判定完全在 service/repository 層完成，不需要新的 transportMode 值或 DI token。詳見 `docs/04-uat/passenger-push-channel-20261006/PUSH-CHANNEL-ROUTER-20261006.md`。
+
 ## D8 本波不做（後續任務的範圍）
 
 - 第一方乘客身分與登入、第一方叫車路徑（D5 路由表的呼叫端）、D4 的 HTTP 登錄 API。
