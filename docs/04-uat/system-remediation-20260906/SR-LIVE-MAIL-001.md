@@ -37,7 +37,21 @@
 
 ### 本輪檢查與狀態
 
-- TypeScript 本輪 suite、Python suite、scoped typecheck/lint、格式／diff／trailers 的最終結果在本節 closeout 更新；所有已啟動檢查都等結束後再報告。
+以下檢查均已結束並讀取結果；程式 checkpoint `5091aae258ffc2098038cebd117ad7785b00a923`，後續此 closeout 僅更新文件。
+
+| 指令                                                                                                                                                     | Exit／結果                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-live-mail-001/`                                                                                   | **0**，9 files／184 tests passed；含 option-A 正反案例、正式 approval authority 定位、既有 F13–F17 pipeline |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v`                             | **0**，41 tests passed                                                                                      |
+| `pnpm exec tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json`                                                             | **0**                                                                                                       |
+| `pnpm exec eslint --max-warnings=0 tests/e2e/system-remediation/sr-live-mail-001/ tests/unit/system-remediation/sr-live-mail-001/`                       | **0**；初跑 no-control-regex 已修，再跑成功                                                                 |
+| `pnpm exec prettier --check`（本輪 7 個 changed files）                                                                                                  | **0**                                                                                                       |
+| `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/check_test_coverage.py`                                                                                      | **0**，83 Python files 可由 CI 收集                                                                         |
+| `git diff --check`；`python3 tools/ci/git/check_commit_trailers.py --base 2467f88a2e64ccc2204bb99f1356fdeb997bda13 --head HEAD`                          | **0**，checkpoint 28 commits trailers 合格                                                                  |
+| `./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json .local/sr-live-mail-001/test-log-probe.ts` | **0**；直接呼叫正式 `verifiedTestLog` 解析兩份已下載 GitHub logs，數量如上                                  |
+
+初次 prettier 因現有 node_modules 連結缺套件失敗；`CI=true pnpm install --frozen-lockfile` 完成後再驗，未改 lockfile。第一次新 collector 也有 template literal parse error，修正後才得到上表測試結果；setup/parse error 不是產品缺陷重現。
+
 - 機器證據置 `.local/sr-live-mail-001/`，不作唯一 durable acceptance；可重跑程式與上述 GitHub job/artifact 為審查依據。
 - 未啟 VM product/browser/preview/Docker/PG server，未跑 Playwright，未部署、讀 SMTP secrets、送信或注入故障。C079 仍非本 task 本輪驗收範圍。
 
