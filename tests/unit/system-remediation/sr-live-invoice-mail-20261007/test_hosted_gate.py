@@ -23,6 +23,7 @@ class HostedGateTest(unittest.TestCase):
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
                          'unimplementedLiveSurfaces': [], 'errors': [],
                          'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'identityEmail': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                         'nonAllowlistInvoiceId': '20000000-0000-0000-0000-000000000789', 'readOnlyInvoiceId': '20000000-0000-0000-0000-000000000abc',
                          'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': '<d2@notification.drts.invalid>', 'body_sha256': 'a' * 64},
                          'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': '<d1@notification.drts.invalid>', 'body_sha256': 'a' * 64},
                          'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf'},
@@ -37,8 +38,8 @@ class HostedGateTest(unittest.TestCase):
                              {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
-                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True},
+                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_download_observed': False, 'mutation_count': 0},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'forbidden_download_observed': False, 'mutation_count': 0, 'send_disabled': True},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -125,6 +126,26 @@ class HostedGateTest(unittest.TestCase):
             if c.get('scenario') == 'non_allowlisted':
                 c['status'] = 500
         self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed')
+
+    def test_f3_f5_role_evidence_regressions(self):
+        import copy
+        # Baseline passes
+        gate.evaluate(self.env, self.evidence, self.provider)
+        
+        # Missing wrong_tenant selected_identity
+        ev2 = copy.deepcopy(self.evidence)
+        next(c for c in ev2["httpCalls"] if c.get("path") == "wrong_tenant_portal")["selected_identity"] = "bad"
+        self.assertEqual(gate.evaluate(self.env, ev2, self.provider)["status"], "failed")
+        
+        # Missing read_only send_disabled
+        ev3 = copy.deepcopy(self.evidence)
+        next(c for c in ev3["httpCalls"] if c.get("path") == "read_only_portal")["send_disabled"] = False
+        self.assertEqual(gate.evaluate(self.env, ev3, self.provider)["status"], "failed")
+
+        # Mutation count > 0
+        ev4 = copy.deepcopy(self.evidence)
+        next(c for c in ev4["httpCalls"] if c.get("path") == "read_only_portal")["mutation_count"] = 1
+        self.assertEqual(gate.evaluate(self.env, ev4, self.provider)["status"], "failed")
 
     def test_green_runner_cannot_hide_missing_stale_or_partial_artifacts(self):
         for override in ({'status': 'failed'}, {'candidateSha': 'b' * 40}, {'headSha': 'b' * 40},

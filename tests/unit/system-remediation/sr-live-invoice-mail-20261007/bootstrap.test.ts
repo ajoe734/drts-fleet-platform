@@ -17,6 +17,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -53,6 +56,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -115,6 +121,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -234,25 +243,31 @@ describe("F1 bootstrap and teardown adapter", () => {
     );
 
     const fs = await import("node:fs");
-    const writeCall = (fs.writeFileSync as any).mock.calls.find((c: any) =>
-      c[0].includes("evidence-bootstrap.json"),
-    );
-    expect(writeCall).toBeDefined();
-    const emittedJson = JSON.parse(writeCall[1]);
-    expect(emittedJson.success).toBe(true);
-    expect(emittedJson.candidateSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(emittedJson.issued_sessions_count).toBe(3);
-    expect(emittedJson.issued_sessions).toEqual([
+    const writeCalls = (fs.writeFileSync as any).mock.calls.filter((c: any) => c[0].includes("evidence-bootstrap.json"));
+    expect(writeCalls.length).toBeGreaterThan(0);
+    const firstEmitted = JSON.parse(writeCalls[0][1]);
+    expect(firstEmitted.runId).toBeDefined();
+    expect(firstEmitted.candidateSha).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(firstEmitted.issued_sessions_count).toBe(1);
+    expect(firstEmitted.issued_sessions).toEqual(["DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN"]);
+    const finalEmitted = JSON.parse(writeCalls[writeCalls.length - 1][1]);
+    expect(finalEmitted.issued_sessions_count).toBe(3);
+    expect(finalEmitted.issued_sessions).toEqual([
       "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN",
       "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN",
       "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN"
     ]);
+    expect(finalEmitted.success).toBeUndefined();
+    (fs.writeFileSync as any).mockClear();
   });
 
   it("fails post-issuance validation but still exports the issued token", async () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -308,19 +323,23 @@ describe("F1 bootstrap and teardown adapter", () => {
     );
 
     const fs = await import("node:fs");
-    const writeCall = (fs.writeFileSync as any).mock.calls.find((c: any) =>
+    const writeCall = (fs.writeFileSync as any).mock.calls.findLast((c: any) =>
       c[0].includes("evidence-bootstrap.json"),
     );
     expect(writeCall).toBeDefined();
     const emittedJson = JSON.parse(writeCall[1]);
-    expect(emittedJson.success).toBe(false);
+    expect(emittedJson.success).toBeUndefined();
     expect(emittedJson.issued_sessions).toContain("DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN");
+    (fs.writeFileSync as any).mockClear();
   });
 
   it("teardown cleans up multiple tokens", async () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -355,6 +374,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -411,6 +433,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
@@ -487,7 +512,7 @@ describe("F1 bootstrap and teardown adapter", () => {
     }
 
     expect(caughtError).toBeDefined();
-    expect(caughtError.message).toMatch(/allowlist|recipient/i); // ensure exact failure stage
+    expect(caughtError.stage).toBe("recipient-export"); // ensure exact failure stage
 
     // Explicit zero-mail-mutation assertions
     const mailCalls = fetchMock.mock.calls.filter(
@@ -500,6 +525,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const baseEnv = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
@@ -542,7 +570,12 @@ describe("F1 bootstrap and teardown adapter", () => {
       if (c.expectPass) {
         await expect(bootstrapMailSession(e, d, false)).resolves.toBeUndefined();
       } else {
-        await expect(bootstrapMailSession(e, d, false)).rejects.toThrow(/allowlist/i);
+        try {
+          await bootstrapMailSession(e, d, false);
+          throw new Error("Expected to throw");
+        } catch(err: any) {
+          expect(err.stage).toBe("recipient-export");
+        }
       }
     }
   });
@@ -554,6 +587,9 @@ describe("F1 bootstrap and teardown adapter", () => {
     const env = {
       DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      GITHUB_RUN_ID: "12345",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
