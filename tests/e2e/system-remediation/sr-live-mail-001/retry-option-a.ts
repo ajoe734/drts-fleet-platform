@@ -25,6 +25,7 @@ export const retryTestSources = [
     merge: "52aab7a14d4ff1d4801fe7890b257d589aceab9b",
     run: 36877528664,
     job: 110420985211,
+    pr: 2261,
     suites: [
       retrySuite,
       postgresSuite,
@@ -36,6 +37,7 @@ export const retryTestSources = [
     merge: "a5bc50654e43e7e4d9fcbf75b8a4f93ad5521760",
     run: 36952519280,
     job: 110668455916,
+    pr: 2266,
     suites: [
       retrySuite,
       postgresSuite,
@@ -142,12 +144,18 @@ export async function observeDisclosedRetry(
 
   const tests = [];
   for (const source of retryTestSources) {
-    await run("git", [
-      "merge-base",
-      "--is-ancestor",
-      source.sha,
-      config.candidateSha,
-    ]);
+    // GitHub squash merges do not retain the reviewed head as an ancestor.
+    // Verify the immutable PR mapping, then the actual merge ancestry.
+    const pull = JSON.parse(
+      await run("gh", ["api", `repos/${repository}/pulls/${source.pr}`]),
+    );
+    assert(
+      pull.merged === true &&
+        pull.head?.sha === source.sha &&
+        pull.merge_commit_sha === source.merge &&
+        pull.base?.ref === "dev",
+      "Dependency reviewed head does not match its merged PR",
+    );
     await run("git", [
       "merge-base",
       "--is-ancestor",
@@ -187,6 +195,7 @@ export async function observeDisclosedRetry(
       candidate_sha: source.sha,
       merge_sha: source.merge,
       job_url: `https://github.com/${repository}/actions/runs/${source.run}/job/${source.job}`,
+      pr_url: `https://github.com/${repository}/pull/${source.pr}`,
       suites: verifiedTestLog(log, source.suites),
     });
   }

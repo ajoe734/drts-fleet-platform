@@ -72,8 +72,17 @@ function fixture() {
       const path = args[1]!;
       const source = retryTestSources.find(
         (row) =>
-          path.includes(String(row.run)) || path.includes(String(row.job)),
+          path.includes(String(row.run)) ||
+          path.includes(String(row.job)) ||
+          path.endsWith(`/pulls/${row.pr}`),
       )!;
+      if (path.includes("/pulls/"))
+        return JSON.stringify({
+          merged: true,
+          head: { sha: source.sha },
+          merge_commit_sha: source.merge,
+          base: { ref: "dev" },
+        });
       if (path.endsWith("/logs"))
         return source.suites
           .map((suite) => `✓ ${suite} (2 tests) 10ms`)
@@ -166,6 +175,7 @@ describe("user-authorized retry option A", () => {
   );
   it.each([
     "ancestry",
+    "pr-mapping",
     "ci-sha",
     "ci-failed",
     "test-skipped",
@@ -180,6 +190,8 @@ describe("user-authorized retry option A", () => {
         if (kind === "ancestry" && file === "git")
           throw new Error("not ancestor");
         const value = await good(file, args);
+        if (kind === "pr-mapping" && args[1]?.includes("/pulls/"))
+          return value.replace('"merged":true', '"merged":false');
         if (kind === "ci-sha" && file === "gh" && !args[1]!.endsWith("/logs"))
           return value.replace(/"head_sha":"[a-f0-9]+"/, '"head_sha":"wrong"');
         if (kind === "ci-failed" && file === "gh")
