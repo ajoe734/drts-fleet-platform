@@ -1,0 +1,5 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "include": ["../../../../tests/e2e/system-remediation/sr-live-global-ux-20261007/**/*.ts", "./*.test.ts", "../../../../playwright.live-global-ux.config.ts"],
+  "exclude": []
+}
