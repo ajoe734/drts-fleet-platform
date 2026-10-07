@@ -46,6 +46,8 @@ class HostedGateTest(unittest.TestCase):
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'scenario': 'durable_get', 'method': 'GET', 'status': 200},
                              {'scenario': 'wrong_tenant', 'method': 'POST', 'status': 403},
                              {'scenario': 'wrong_invoice', 'method': 'POST', 'status': 403},
+                             {'scenario': 'read_only', 'method': 'POST', 'status': 403},
+                             {'scenario': 'non_allowlisted', 'method': 'POST', 'status': 201, 'delivery_id': 'd3'},
                          ],
                          'trackedResources': [{'type': 'provider_receipt', 'id': 'test'}]}
         self.provider = {'candidate_sha': SHA, 'alias_revision_fresh': True}
@@ -96,6 +98,70 @@ class HostedGateTest(unittest.TestCase):
 
     def test_revocation_gate_requires_live_provider_freshness(self):
         self.assertEqual(gate.evaluate(self.env, self.evidence, {'candidate_sha': SHA, 'alias_revision_fresh': False})['status'], 'failed')
+
+    @patch.object(gate, 'Path')
+    def test_f1_cleanup_validation(self, mock_path):
+        import json
+        import os
+        
+        class DummyPath:
+            _files = {}
+            def __init__(self, name=""): self.name = name
+            def mkdir(self, **kwargs): pass
+            def __truediv__(self, other): return DummyPath(other)
+            def write_text(self, data):
+                if self.name == "run-status.json":
+                    DummyPath._files["run-status.json"] = json.loads(data)
+            def read_text(self):
+                if self.name == "evidence-mail.json": return json.dumps(DummyPath.evidence)
+                if self.name == "evidence-provider.json": return json.dumps({'candidate_sha': SHA, 'alias_revision_fresh': True})
+                if self.name == "evidence-bootstrap.json": return json.dumps(DummyPath.bootstrap_ev)
+                if self.name == "evidence-teardown.json": return json.dumps(DummyPath.teardown_ev)
+                return "{}"
+
+        base_bootstrap = {"runId": "run1", "candidateSha": SHA, "issued_sessions_count": 2, "issued_sessions": ["k1", "k2"]}
+        base_teardown = {"runId": "run1", "candidateSha": SHA, "success": True, "attempted": 2, "failures": 0, "sessions": [{"key": "k1", "status": "success"}, {"key": "k2", "status": "success"}]}
+
+        def run_main(b_ev, t_ev):
+            DummyPath._files.clear()
+            DummyPath.evidence = self.evidence
+            DummyPath.bootstrap_ev = b_ev
+            DummyPath.teardown_ev = t_ev
+            mock_path.return_value = DummyPath()
+            with patch.dict(os.environ, {**self.env, "GITHUB_RUN_ID": "run1", "CANDIDATE_SHA": SHA}, clear=True):
+                try:
+                    gate.main()
+                except SystemExit as e:
+                    return e.code, DummyPath._files.get("run-status.json", {})
+            return -1, {}
+
+        # 1. Valid
+        code, data = run_main(base_bootstrap, base_teardown)
+        self.assertEqual(code, 0)
+        self.assertEqual(data["status"], "passed")
+
+        # 2. Null issued lists (TypeError before)
+        b2 = {**base_bootstrap, "issued_sessions": None}
+        code, data = run_main(b2, base_teardown)
+        self.assertEqual(code, 1)
+        self.assertEqual(data["status"], "failed")
+
+        # 3. Mismatched identity but equal count
+        b3 = {**base_bootstrap, "issued_sessions": ["k3", "k4"]}
+        code, data = run_main(b3, base_teardown)
+        self.assertEqual(code, 1)
+        self.assertEqual(data["status"], "failed")
+
+        # 4. Partial issuance
+        b4 = {**base_bootstrap, "issued_sessions_count": 3, "issued_sessions": ["k1", "k2"]}
+        code, data = run_main(b4, base_teardown)
+        self.assertEqual(code, 1)
+
+        # 5. Malformed teardown sessions (AttributeError before)
+        t5 = {**base_teardown, "sessions": [None, {"key": "k2", "status": "success"}]}
+        code, data = run_main(base_bootstrap, t5)
+        self.assertEqual(code, 1)
+        self.assertEqual(data["status"], "failed")
 
 class ProviderMetadataTest(unittest.TestCase):
     def test_old_revision_and_split_traffic_fail_before_secret_payload_access(self):

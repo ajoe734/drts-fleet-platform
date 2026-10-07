@@ -225,11 +225,12 @@ test.describe("Live Invoice Mail Acceptance", () => {
       const nonAllowlistResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId, "idempotency-key": "na-" + Date.now() },
       });
-      evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, scenario: "non_allowlisted", status: nonAllowlistResponse.status() });
+      const naData = nonAllowlistResponse.ok() ? await nonAllowlistResponse.json() : null;
+      evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, scenario: "non_allowlisted", status: nonAllowlistResponse.status(), delivery_id: naData?.data?.deliveryId });
       
       // Check durable failure if accepted, or immediate rejection
       if (nonAllowlistResponse.status() === 201) {
-         const naDeliveryId = (await nonAllowlistResponse.json()).data?.deliveryId;
+         const naDeliveryId = naData?.data?.deliveryId;
          let isRejected = false;
          for (let i = 0; i < 8; i++) {
            await new Promise(r => setTimeout(r, 1500));
@@ -432,26 +433,25 @@ test.describe("Live Invoice Mail Acceptance", () => {
     await context.addCookies([{ name: "drts_tenant_session", value: sessionToken, domain: portalUrlObj.hostname, path: "/" }]);
     const pageResponse = await page.goto(invoiceLink, { waitUntil: "networkidle" });
     expect(pageResponse?.status()).toBe(200);
+    expect(pageResponse?.headers()['x-drts-candidate-sha']).toBe(candidateSha);
 
     // Genuine Browser Check with UI interaction (F3)
     const artifactUrlPath = invoiceData.data?.artifactUrl;
     expect(artifactUrlPath).toMatch(/^\/downloads\/(tenant-invoice|invoice|receipt)\//);
     const exactPortalUrl = new URL(artifactUrlPath, portalOrigin).href;
     
-    // UI Download
-    const downloadPromise = page.waitForEvent('download');
+    // UI Download (inline popup since no attachment disposition + target=_blank)
+    const popupPromise = page.waitForEvent('popup');
     const downloadLocator = page.locator(`a[href="${artifactUrlPath}"]`).first();
     await downloadLocator.click();
-    const download = await downloadPromise;
+    const popup = await popupPromise;
+    const popupResponse = await popup.waitForResponse(response => response.url().includes(artifactUrlPath) && response.status() === 200);
     
-    // Prove deployed SHA from successful browser response (we can't easily get headers from download object in playwright, but we can verify the stream)
-    const downloadStream = await download.createReadStream();
-    const bodyChunks = [];
-    for await (const chunk of downloadStream) {
-      bodyChunks.push(chunk);
-    }
-    const bodyBuffer = Buffer.concat(bodyChunks);
-    
+    expect(popupResponse.headers()['content-type']).toBe('application/pdf');
+    expect(popupResponse.headers()['x-drts-candidate-sha']).toBe(candidateSha);
+
+    const bodyBuffer = await popupResponse.body();
+
     expect(bodyBuffer.length).toBeGreaterThan(0);
     expect(bodyBuffer.subarray(0, 5).toString('latin1')).toBe('%PDF-');
 
@@ -465,7 +465,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
       manifestHash: manifestHash,
       downloadedHash: downloadedHash,
       downloadedBytes: bodyBuffer.length,
-      contentType: "application/pdf",
+      contentType: popupResponse.headers()['content-type'],
     };
     
     // Check missing token isolation on portal (unauthenticated signed link on portal)
@@ -494,28 +494,19 @@ test.describe("Live Invoice Mail Acceptance", () => {
     evidenceData.httpCalls.push({ method: "GET", path: "bad_sig_api", status: invalidDownloadResponse.status() });
     
     // Wrong-role/wrong-tenant browser scenarios on protected portal route
-    const protectedPortalUrl = new URL(`/tenant/invoices/${invoiceId}`, portalOrigin).href;
-    const wrongTenantContext = await (page.context() as any).browser()!.newContext();
-    await wrongTenantContext.setExtraHTTPHeaders({ "x-drts-candidate-sha": candidateSha! });
-    await wrongTenantContext.addCookies([{ name: "drts_tenant_session", value: process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN || "", domain: portalUrlObj.hostname, path: "/" }]);
-    const wrongTenantPage = await wrongTenantContext.newPage();
-    const wtResponse = await wrongTenantPage.goto(protectedPortalUrl, { waitUntil: "networkidle" });
-    expect([401, 403, 404]).toContain(wtResponse?.status());
-    evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse?.status() });
-    await wrongTenantContext.close();
+    const protectedPortalApiUrl = new URL(`/control-plane-proxy/tenant/invoices/${invoiceId}`, portalOrigin).href;
+    const wtResponse = await request.get(protectedPortalApiUrl, {
+      headers: { cookie: `drts_tenant_session=${process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN || ""}` }
+    });
+    expect([401, 403]).toContain(wtResponse.status());
+    evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status() });
 
-    const readOnlyContext = await (page.context() as any).browser()!.newContext();
-    await readOnlyContext.setExtraHTTPHeaders({ "x-drts-candidate-sha": candidateSha! });
-    await readOnlyContext.addCookies([{ name: "drts_tenant_session", value: process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN || "", domain: portalUrlObj.hostname, path: "/" }]);
-    const readOnlyPage = await readOnlyContext.newPage();
-    const roResponse = await readOnlyPage.goto(protectedPortalUrl, { waitUntil: "networkidle" });
-    // Note: Read-only CAN view the invoice page, but cannot click the "Send Email" button.
-    // The previous test expected 401/403/404 because it was confused about what URL to hit.
-    // Actually, for read-only, we should check if they can POST to the API (already done)
-    // and maybe expect 200 on the portal, but let's just make sure it doesn't fail.
-    // The issue says: "Use protected invoice/API/browser actions for tenant/role negatives".
-    evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: roResponse?.status() });
-    await readOnlyContext.close();
+    const roResponse = await request.get(protectedPortalApiUrl, {
+      headers: { cookie: `drts_tenant_session=${process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN || ""}` }
+    });
+    // Read-only role CAN view the invoice
+    expect(roResponse.status()).toBe(200);
+    evidenceData.httpCalls.push({ method: "GET", path: "read_only_portal", status: roResponse.status() });
 
     evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
   });
