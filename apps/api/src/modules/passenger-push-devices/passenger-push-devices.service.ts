@@ -45,8 +45,9 @@ export class PassengerPushDevicesService
   invalidateDevice(
     deviceId: string,
     reason: string,
+    expectedTokenSha256?: string,
   ): Promise<PassengerPushDeviceRecord | null> {
-    return this.repository.invalidateDevice(deviceId, reason);
+    return this.repository.invalidateDevice(deviceId, reason, expectedTokenSha256);
   }
 
   resolveActiveDevices(

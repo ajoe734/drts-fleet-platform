@@ -1,4 +1,4 @@
-import { FirstPartyNotificationTransport } from "./first-party-notification.transport";
+import { FirstPartyNotificationTransport, FirstPartyPushFailure, type FirstPartyDeliveryMetadata } from "./first-party-notification.transport";
 import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import {
   PartnerNotificationFailure,
@@ -1295,12 +1295,12 @@ export class MultiTaxiService implements OnModuleInit {
       attemptCount: record.attemptCount,
     };
 
-    let metadata: any;
-    let outcome: any;
+    let metadata: FirstPartyDeliveryMetadata;
+    let outcome: PassengerPushDeliveryOutcome;
     try {
       const receipt = await this.firstPartyTransport.send({
         providerName: "first_party_app",
-        message: message as any,
+        message,
         context: { requestId, fenceToken },
       });
 
@@ -1316,7 +1316,7 @@ export class MultiTaxiService implements OnModuleInit {
         failureReason: c.failureReason,
         expiresAt: c.expiresAt,
         receiptId: c.receiptId,
-        downstreamStatus: "unknown",
+        deviceOutcomes: c.deviceOutcomes,
       };
 
       outcome = {
@@ -1329,8 +1329,8 @@ export class MultiTaxiService implements OnModuleInit {
         deliveredAt: receipt.deliveredAt,
         providerName: receipt.providerName,
       };
-    } catch (error: any) {
-      if (error.name !== "FirstPartyPushFailure") {
+    } catch (error) {
+      if (!(error instanceof FirstPartyPushFailure)) {
         throw new PassengerPushPersistenceUnknownError(outboxId, error);
       }
       
@@ -1353,14 +1353,14 @@ export class MultiTaxiService implements OnModuleInit {
         retryDisposition,
         expiresAt,
         receiptId: null,
-        downstreamStatus: "unknown",
+        deviceOutcomes: context?.deviceOutcomes ?? [],
       };
 
       outcome = {
         ...metadata,
         outboxId,
         status: "failed",
-        result: retryDisposition === "automatic" ? "provider_error" : "provider_not_configured",
+        result: retryDisposition === "configuration_blocked" ? "provider_not_configured" : "provider_error",
         attemptCount: record.attemptCount,
         nextAttemptAt: nextAttemptAt ?? new Date().toISOString(),
         deliveredAt: null,
@@ -1382,7 +1382,7 @@ export class MultiTaxiService implements OnModuleInit {
               ? "provider_not_configured"
               : "provider_rejected",
         deliveryOutcome: outcome,
-        partnerMetadata: metadata,
+        firstPartyMetadata: metadata,
       });
       if (!persisted.recorded) {
         throw new Error("First party notification fence lost");

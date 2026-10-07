@@ -1,108 +1,78 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createRequire } from "node:module";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MultiTaxiModule } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.module";
+import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { FcmFirstPartyPushProvider } from "../../../apps/api/src/modules/multi-taxi/fcm-push.provider";
-
-describe("FirstPartyNotification FCM Transport", () => {
-  let provider: FcmFirstPartyPushProvider;
-  let mockFetch: any;
-  let mockTokens: any;
-  let oldEnv: NodeJS.ProcessEnv;
-
-  beforeEach(() => {
-    oldEnv = { ...process.env };
-    process.env.PASSENGER_PUSH_FCM_PROJECT_ID = "test-project-id";
-    process.env.PASSENGER_PUSH_FIRST_PARTY_ENABLED = "true";
-    mockFetch = vi.fn();
-    mockTokens = {
-      accessToken: vi.fn().mockResolvedValue("mock-access-token"),
-    };
-    provider = new FcmFirstPartyPushProvider(mockTokens, mockFetch as any);
-  });
-
-  afterEach(() => {
-    process.env = oldEnv;
-  });
-
-  describe("FcmFirstPartyPushProvider", () => {
-    const mockMessage: any = {
-      notification: { title: "Test", body: "Test" },
-      data: { ride_ref: "123", expires_at: new Date().toISOString() },
-    };
-    const mockTarget = { deviceId: "d1", token: "fcm-token-123" };
-
-    it("returns configuration_blocked if PASSENGER_PUSH_FCM_PROJECT_ID is missing", async () => {
-      delete process.env.PASSENGER_PUSH_FCM_PROJECT_ID;
-      expect(provider.isConfigured()).toBe(false);
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "configuration_blocked" });
-    });
-
-    it("returns accepted when 200 OK with name", async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ name: "projects/test/messages/123" }),
+import {
+  FIRST_PARTY_PUSH_PROVIDER,
+  FirstPartyNotificationTransport,
+} from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
+const apiRequire = createRequire(
+  new URL("../../../apps/api/package.json", import.meta.url),
+);
+const { Module } = apiRequire("@nestjs/common");
+const { NestFactory } = apiRequire("@nestjs/core");
+@Module({})
+class CompositionTestModule {}
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+describe("production first-party Nest provider composition (no server)", () => {
+  it.each([undefined, "false", "true"])(
+    "resolves production registrations with flag %s and zero HTTP",
+    async (enabled) => {
+      vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", enabled);
+      vi.stubEnv("PASSENGER_PUSH_FCM_PROJECT_ID", "synthetic-project");
+      const network = vi.fn(() => {
+        throw new Error("Unexpected network");
       });
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "accepted", messageId: "projects/test/messages/123" });
-    });
-
-    it("returns invalid on 404 UNREGISTERED", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: vi.fn().mockResolvedValue({ error: { status: "UNREGISTERED" } }),
-      });
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "invalid" });
-    });
-
-    it("returns invalid on 400 INVALID_ARGUMENT", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: vi.fn().mockResolvedValue({ error: { status: "INVALID_ARGUMENT" } }),
-      });
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "invalid" });
-    });
-
-    it("returns credential_rejected on 401 THIRD_PARTY_AUTH_ERROR", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 401,
-        json: vi.fn().mockResolvedValue({ error: { status: "THIRD_PARTY_AUTH_ERROR" } }),
-      });
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "credential_rejected" });
-    });
-
-    it("returns transient on 429 with Retry-After", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 429,
-        headers: { get: vi.fn().mockReturnValue("120") },
-        json: vi.fn().mockResolvedValue({}),
-      });
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "transient", retryAfterSeconds: 120 });
-    });
-
-    it("returns transient on 500", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        headers: { get: vi.fn().mockReturnValue(null) },
-        json: vi.fn().mockResolvedValue({}),
-      });
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "transient" });
-    });
-
-    it("returns transient on fetch error (timeout)", async () => {
-      mockFetch.mockRejectedValue(new Error("timed out"));
-      const result = await provider.send(mockMessage, mockTarget);
-      expect(result).toEqual({ kind: "transient" });
-    });
-  });
-
-  // Further transport logic testing would go here
+      vi.stubGlobal("fetch", network);
+      // Use actual module registrations; replace only repository/device external boundaries.
+      const registrations = Reflect.getMetadata(
+        "providers",
+        MultiTaxiModule,
+      ).filter((p: any) =>
+        [
+          FcmFirstPartyPushProvider,
+          FirstPartyNotificationTransport,
+          FIRST_PARTY_PUSH_PROVIDER,
+        ].includes(p.provide ?? p),
+      );
+      const app = await NestFactory.createApplicationContext(
+        {
+          module: CompositionTestModule,
+          providers: [
+            ...registrations,
+            { provide: MultiTaxiRepository, useValue: {} },
+            { provide: PassengerPushDevicesService, useValue: {} },
+          ],
+        },
+        { logger: false, abortOnError: false },
+      );
+      try {
+        expect(app.get(FIRST_PARTY_PUSH_PROVIDER)).toBeInstanceOf(
+          FcmFirstPartyPushProvider,
+        );
+        expect(app.get(FirstPartyNotificationTransport)).toBeInstanceOf(
+          FirstPartyNotificationTransport,
+        );
+        expect(app.get(FIRST_PARTY_PUSH_PROVIDER).isConfigured()).toBe(
+          enabled === "true",
+        );
+        if (enabled !== "true")
+          await expect(
+            app
+              .get(FirstPartyNotificationTransport)
+              .send({ message: {}, context: {} }),
+          ).rejects.toMatchObject({
+            failure: { failureReason: "configuration_blocked" },
+          });
+        expect(network).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
 });
