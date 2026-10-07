@@ -1,4 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
+
+vi.mock("@playwright/test", () => ({
+  test: Object.assign(vi.fn(), { describe: vi.fn(), afterEach: vi.fn(), afterAll: vi.fn(), fn: vi.fn(), step: vi.fn(), use: vi.fn() }),
+  expect: expect,
+}));
+
 import { evaluateDownloadResponse } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
 import * as crypto from "crypto";
 import { bootstrapMailSession } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-bootstrap";

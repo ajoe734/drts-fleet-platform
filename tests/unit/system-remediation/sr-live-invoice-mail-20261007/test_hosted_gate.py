@@ -283,18 +283,18 @@ class HostedGateTest(unittest.TestCase):
         import subprocess
         import json
         import copy
-        
+
         node_script = r'''
         const { stripTypeScriptTypes } = require('module');
         const fs = require('fs');
         const crypto = require('crypto');
-        
+
         const spec = fs.readFileSync('tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec.ts', 'utf8');
         const funcStr = spec.substring(spec.indexOf('export async function observeAndEvaluateDownload'));
         const jsCode = stripTypeScriptTypes(funcStr.replace(/export async function/g, 'async function').replace(/export function/g, 'function'));
-        
+
         eval(jsCode);
-        
+
         async function run() {
             const input = JSON.parse(fs.readFileSync(0, 'utf8'));
             const searchParams = new URLSearchParams();
@@ -304,23 +304,23 @@ class HostedGateTest(unittest.TestCase):
             searchParams.append('key_id', input.key_id);
             searchParams.append('sig_v', input.sig_v);
             searchParams.append('sig', input.sig);
-            
+
             if (input.duplicate_sig) {
                 searchParams.append('sig', input.sig);
             }
             if (input.duplicate_hash) {
                 searchParams.append('manifest_hash', input.manifest_hash);
             }
-            
+
             const url = `http://portal.invalid/downloads/tenant-invoice/${input.invoiceId}?${searchParams.toString()}`;
-            
+
             const popupResponse = {
                 headers: () => ({'content-type': 'application/pdf', 'x-drts-candidate-sha': input.candidateSha}),
                 body: async () => Buffer.from('%PDF-test'),
                 url: () => url,
                 status: () => 200
             };
-            
+
             try {
                 const proof = await evaluateDownloadResponse(popupResponse, input.candidateSha, input.manifest_hash, input.invoiceId, input.tenantId);
                 console.log(JSON.stringify({ success: true, proof }));
@@ -328,10 +328,10 @@ class HostedGateTest(unittest.TestCase):
                 console.log(JSON.stringify({ success: false, error: e.message }));
             }
         }
-        
+
         run();
         '''
-        
+
         def get_proof(manifest_hash, signed_at, expires_at, key_id, sig_v, sig, candidate_sha, invoice_id, tenant_id, duplicate_sig=False, duplicate_hash=False):
             input_data = json.dumps({
                 'manifest_hash': manifest_hash,
@@ -352,14 +352,14 @@ class HostedGateTest(unittest.TestCase):
         # Base inputs
         manifest_hash = '3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63'
         candidate_sha = SHA
-        
+
         # Positive case (Primary and Read-Only)
         res_primary = get_proof(manifest_hash, '2026-10-07T19:00:00.000Z', '2026-10-07T19:15:00.000Z', 'k1', '1', 'valid', candidate_sha, '20000000-0000-0000-0000-000000000456', '10000000-0000-0000-0000-000000000123')
         self.assertTrue(res_primary['success'])
-        
+
         res_ro = get_proof(manifest_hash, '2026-10-07T19:00:00.000Z', '2026-10-07T19:15:00.000Z', 'k1', '1', 'valid', candidate_sha, '20000000-0000-0000-0000-000000000abc', '10000000-0000-0000-0000-000000000abc')
         self.assertTrue(res_ro['success'])
-        
+
         ev = copy.deepcopy(self.evidence)
         ev['invoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
         ev['roInvoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
@@ -367,33 +367,77 @@ class HostedGateTest(unittest.TestCase):
         for c in ev['httpCalls']:
             if c.get('path') == 'read_only_portal':
                 c['download_proof'] = res_ro['proof']
-                
+
         self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'passed')
-        
+
         # Negative cases
         negatives = [
-            # whitespace sig
             {'sig': '   '},
             {'sig': ''},
             {'duplicate_sig': True},
             {'duplicate_hash': True},
             {'signed_at': '2026-02-30T19:00:00.000Z'},
+            {'signed_at': '2026-10-07'},
+            {'signed_at': '2026-W41-3'},
+            {'signed_at': '2026-10-07T19:00:00'},
             {'expires_at': 'invalid'},
             {'key_id': '   '},
             {'sig_v': 'not_int'}
         ]
-        
-        for neg in negatives:
-            with self.subTest(neg=neg):
-                kwargs = {
-                    'manifest_hash': manifest_hash, 'signed_at': '2026-10-07T19:00:00.000Z',
-                    'expires_at': '2026-10-07T19:15:00.000Z', 'key_id': 'k1', 'sig_v': '1',
-                    'sig': 'valid', 'candidate_sha': candidate_sha,
-                    'invoice_id': '20000000-0000-0000-0000-000000000456', 'tenant_id': '10000000-0000-0000-0000-000000000123'
-                }
-                kwargs.update(neg)
-                res = get_proof(**kwargs)
-                self.assertFalse(res['success'], f"Expected failure for {neg}")
+
+        roles = [
+            ('primary', '20000000-0000-0000-0000-000000000456', '10000000-0000-0000-0000-000000000123'),
+            ('read_only', '20000000-0000-0000-0000-000000000abc', '10000000-0000-0000-0000-000000000abc')
+        ]
+
+        for role, inv_id, ten_id in roles:
+            for neg in negatives:
+                with self.subTest(role=role, neg=neg):
+                    kwargs = {
+                        'manifest_hash': manifest_hash, 'signed_at': '2026-10-07T19:00:00.000Z',
+                        'expires_at': '2026-10-07T19:15:00.000Z', 'key_id': 'k1', 'sig_v': '1',
+                        'sig': 'valid', 'candidate_sha': candidate_sha,
+                        'invoice_id': inv_id, 'tenant_id': ten_id,
+                        'duplicate_sig': False, 'duplicate_hash': False
+                    }
+                    kwargs.update(neg)
+
+                    # 1. Test helper rejection
+                    res = get_proof(**kwargs)
+                    self.assertFalse(res['success'], f"Helper should reject {neg} for {role}")
+
+                    # 2. Test independent gate rejection with persisted malformed proof
+                    query_params = []
+                    for k in ['manifest_hash', 'signed_at', 'expires_at', 'key_id', 'sig_v', 'sig']:
+                        query_params.append(f"{k}={kwargs[k]}")
+                    if kwargs.get('duplicate_sig'): query_params.append(f"sig={kwargs['sig']}")
+                    if kwargs.get('duplicate_hash'): query_params.append(f"manifest_hash={kwargs['manifest_hash']}")
+
+                    malformed_url = f"http://portal.invalid/downloads/tenant-invoice/{inv_id}?{'&'.join(query_params)}"
+
+                    malformed_proof = {
+                        'url': malformed_url,
+                        'status': 200,
+                        'headers': {'content-type': 'application/pdf', 'x-drts-candidate-sha': candidate_sha},
+                        'manifestHash': kwargs['manifest_hash']
+                    }
+
+                    ev = copy.deepcopy(self.evidence)
+                    ev['invoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
+                    ev['roInvoiceData']['data']['artifactDownloadMetadata']['manifestHash'] = manifest_hash
+
+                    if role == 'primary':
+                        ev['downloadProof'] = malformed_proof
+                        for c in ev['httpCalls']:
+                            if c.get('path') == 'read_only_portal':
+                                c['download_proof'] = res_ro['proof'] # valid ro proof
+                    else:
+                        ev['downloadProof'] = res_primary['proof'] # valid primary proof
+                        for c in ev['httpCalls']:
+                            if c.get('path') == 'read_only_portal':
+                                c['download_proof'] = malformed_proof
+
+                    self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed', f"Gate should reject {neg} for {role}")
 
     def test_green_runner_cannot_hide_missing_stale_or_partial_artifacts(self):
         for override in ({'status': 'failed'}, {'candidateSha': 'b' * 40}, {'headSha': 'b' * 40},

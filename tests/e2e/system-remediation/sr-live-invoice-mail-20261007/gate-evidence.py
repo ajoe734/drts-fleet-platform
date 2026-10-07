@@ -96,8 +96,13 @@ def evaluate(env, evidence, provider):
                 return False
         try:
             from datetime import datetime
-            datetime.fromisoformat(param_dict["signed_at"].replace("Z", "+00:00"))
-            datetime.fromisoformat(param_dict["expires_at"].replace("Z", "+00:00"))
+            import re
+            for k in ["signed_at", "expires_at"]:
+                val = param_dict[k]
+                if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$", val):
+                    return False
+                # Calendar validation (throws ValueError if impossible date like Feb 30)
+                datetime.fromisoformat(val.replace("Z", "+00:00"))
         except ValueError:
             return False
         if not param_dict["key_id"].strip():

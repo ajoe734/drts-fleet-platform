@@ -251,10 +251,10 @@ This document records the completion and verification of the live invoice mail E
 ## Codex Review Rejection (Candidate: 0df15913159d275b098afe75213f5a97b1a3f0f0 / Generation: 33c2a41a75b44196b38539b62e2bef6a)
 
 - **F8 (P1 new candidate CI regression)**: Removed the unused `sig` variable assignment in `live-invoice-mail.spec.ts` that caused the exact-SHA lint failure.
-- **F3/F5 (P1 partial repair: remaining invalid signature normalization; newly isolated whitespace subcase)**: 
+- **F3/F5 (P1 partial repair: remaining invalid signature normalization; newly isolated whitespace subcase)**:
   - Repaired `evaluateDownloadResponse` in `live-invoice-mail.spec.ts` to explicitly reject whitespace-only `sig` values prior to redaction.
-  - Hardened timestamp parsing in `evaluateDownloadResponse` and `gate-evidence.py` to use strict date parsing that rejects impossible calendar dates (like February 30) instead of relying on `Date.parse()` or regular expressions alone. 
-- **F4/F6 (P2 REPEATED same missing regression on adjacent candidates)**: 
+  - Hardened timestamp parsing in `evaluateDownloadResponse` and `gate-evidence.py` to use strict date parsing that rejects impossible calendar dates (like February 30) instead of relying on `Date.parse()` or regular expressions alone.
+- **F4/F6 (P2 REPEATED same missing regression on adjacent candidates)**:
   - Connected the producer and consumer integration by dynamically invoking `evaluateDownloadResponse` within `bootstrap.test.ts` to generate the exact literal objects expected by the Python gate.
   - Wrote a new integration regression `test_f4_f6_actual_helper_output` in `test_hosted_gate.py` that utilizes a spawned `node` execution of the TypeScript evaluation function to feed the actual JS-generated proof objects directly to the gate, verifying both positive configurations and the newly implemented negative validations (e.g. invalid dates, whitespace signature).
 
@@ -262,3 +262,17 @@ This document records the completion and verification of the live invoice mail E
 - Python unittest discovery scoped to task: PASS 13/13 exit 0 (includes the new Node-based helper-to-gate integration test).
 - `git diff --check HEAD^ HEAD`: clean (exit 0).
 - Local lint checks (`npx eslint ...` on modified files): clean (exit 0).
+
+## Codex Review Rejection (Candidate: f3d53f22f2e78dcf0612f53d0574261573dcd641 / Generation: 758c0dad85214236b2b4861382b842f1)
+
+- **F9 (P1 NEW executable regression: bootstrap suite cannot load under Vitest)**:
+  - Repaired by adding a `@playwright/test` mock to `bootstrap.test.ts` to isolate Playwright test runner registration logic, similarly to `spec-guards.test.ts`. This permits standard Vitest collection and execution of unit boundaries referencing the Playwright spec without triggering registration errors.
+- **F10 (P2 NEW gate fail-open regression while fixing timestamps)**:
+  - Repaired `gate-evidence.py` to strictly enforce the serialized UTC timestamp format regex (`YYYY-MM-DDTHH:MM:SS.mmmZ`) while additionally applying calendar validation (via `datetime.fromisoformat` catching `ValueError`), instead of loosely replacing one check with the other. This prevents date-only, ISO week-date, or timezone-free formats from being inappropriately accepted as download evidence.
+- **F4/F6 (Remaining integration matrix coverage)**:
+  - Repaired `test_hosted_gate.py` to complete the actual negative coverage loop. The test now loops over both primary and read-only roles with expected IDs. For each role and each invalid condition (including the new date-only, week-date, and no-zone formats), it strictly tests both that the helper rejects it, AND independently constructs a malformed valid-structure proof payload asserting that the persisted Python gate correctly fails it.
+
+**Completed Local Verification**:
+1. `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v`: PASS 13/13.
+2. `git diff --check HEAD^ HEAD`: PASS (resolved previous trailing whitespace).
+- **Documentation Hygiene**: Clarified that while the actual signature is redacted from persisted proofs, the helper correctly requires and validates its presence and non-whitespace shape beforehand.
