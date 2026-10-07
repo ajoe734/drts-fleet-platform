@@ -202,6 +202,43 @@ describe("validateMailRunnerInputs", () => {
 });
 
 describe("runMailAcceptance", () => {
+  it("option-A evidence removes only the retry gate, preserving approval and real expiry gates", async () => {
+    const config = validateMailRunnerInputs(baseEnv());
+    const recorder = new UatEvidenceRecorder({
+      taskId: "sr-live-mail-001",
+      candidateSha: config.candidateSha,
+    });
+    const retryEvidence = vi.fn(async () => true);
+    const result = await runMailAcceptance(config, {
+      ...happyPathDeps(VALID_SHA),
+      recorder,
+      retryEvidence,
+    });
+    expect(retryEvidence).toHaveBeenCalledWith(
+      NEGATIVE_DELIVERY_ID,
+      failedAllowlistReceipt(),
+    );
+    expect(result.status).toBe("failed");
+    expect(result.reasons.join(" ")).toContain("approval");
+    expect(result.reasons.join(" ")).toContain(
+      "real 24-hour invitation expiry",
+    );
+    expect(result.reasons.join(" ")).not.toContain("retry");
+  });
+  it("missing option-A evidence keeps the retry gate closed", async () => {
+    const config = validateMailRunnerInputs(baseEnv());
+    const recorder = new UatEvidenceRecorder({
+      taskId: "sr-live-mail-001",
+      candidateSha: config.candidateSha,
+    });
+    const result = await runMailAcceptance(config, {
+      ...happyPathDeps(VALID_SHA),
+      recorder,
+      retryEvidence: async () => false,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.reasons.join(" ")).toContain("retry option A");
+  });
   let recorder: UatEvidenceRecorder;
   let config: MailRunnerConfig;
   let fetchSpy: ReturnType<typeof vi.spyOn>;
