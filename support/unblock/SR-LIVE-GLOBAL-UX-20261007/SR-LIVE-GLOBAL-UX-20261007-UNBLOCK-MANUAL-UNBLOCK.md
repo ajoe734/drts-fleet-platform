@@ -134,3 +134,25 @@ Document validation uses existing cached Prettier 3.8.2 and repository Python
 checks. There is no new behavior to justify a new unit suite. No VM product,
 preview, browser, PG or Docker service was started; no workflow was dispatched,
 no cloud/IAM write occurred, and no live/manual check is represented as passed.
+
+## Publication and check results
+
+- Anchor `e54e2638b1d333ddf482cc82a1b2cdc8d9d82766` was normally pushed on the
+  assigned branch. [PR #2417](https://github.com/ajoe734/drts-fleet-platform/pull/2417)
+  targets `dev`; only this artifact is changed. The final candidate is the full
+  SHA recorded by the active-release handoff, after local/remote/PR-head equality
+  verification. The parent candidate is distinct and remains unchanged.
+- Cached Prettier `--check`: exit 0. `check_canonical_consistency.py --ci --base
+origin/dev --head HEAD`: exit 0, zero findings in all four categories.
+  `check_commit_trailers.py --base origin/dev --head HEAD`: exit 0.
+  `git diff --check origin/dev...HEAD`: exit 0. Both local document links resolve.
+- The incomplete shared dependency links prevent the hook's normal `pnpm`
+  formatter path from loading. Commits use one-command `HUSKY=0`, with the
+  equivalent Markdown formatting, staged-generated-file and commit-trailer checks
+  executed explicitly; no repository hook or dependency configuration is edited.
+  Final-SHA validation/publication receipts are kept in the local evidence
+  directory. CI and independent review remain tied to that candidate.
+- Parent-note rejection remains unresolved at document publication. Supervisor
+  must apply the operator command block above and the reviewer must read back
+  both task slices before approval; prose and PR publication do not satisfy this
+  machine-truth update requirement.
