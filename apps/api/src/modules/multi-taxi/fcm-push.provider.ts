@@ -1,7 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { FirstPartyPushProvider, FirstPartyPushDeviceTarget, FirstPartyPushProviderResult } from "./first-party-notification.transport";
 import { FirstPartyPushMessage } from "@drts/contracts";
-import { GoogleCloudTokens, GoogleMetadataTokens, withCloudDeadline } from "../../common/google-cloud/google-cloud-object-client";
+import type { GoogleCloudTokens } from "../../common/google-cloud/google-cloud-object-client";
+import { GoogleMetadataTokens, withCloudDeadline } from "../../common/google-cloud/google-cloud-object-client";
 
 @Injectable()
 export class FcmFirstPartyPushProvider implements FirstPartyPushProvider {

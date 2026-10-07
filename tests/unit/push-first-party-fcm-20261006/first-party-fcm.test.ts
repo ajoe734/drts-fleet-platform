@@ -1,9 +1,10 @@
-import { FcmFirstPartyPushProvider } from "../../../src/modules/multi-taxi/fcm-push.provider";
-import { FirstPartyNotificationTransport } from "../../../src/modules/multi-taxi/first-party-notification.transport";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { FcmFirstPartyPushProvider } from "../../../apps/api/src/modules/multi-taxi/fcm-push.provider";
+import { FirstPartyNotificationTransport } from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
 
 describe("FirstPartyNotification FCM Transport", () => {
   let provider: FcmFirstPartyPushProvider;
-  let mockFetch: jest.Mock;
+  let mockFetch: any;
   let mockTokens: any;
   let oldEnv: NodeJS.ProcessEnv;
 
@@ -11,9 +12,9 @@ describe("FirstPartyNotification FCM Transport", () => {
     oldEnv = { ...process.env };
     process.env.PASSENGER_PUSH_FCM_PROJECT_ID = "test-project-id";
     process.env.PASSENGER_PUSH_FIRST_PARTY_ENABLED = "true";
-    mockFetch = jest.fn();
+    mockFetch = vi.fn();
     mockTokens = {
-      accessToken: jest.fn().mockResolvedValue("mock-access-token"),
+      accessToken: vi.fn().mockResolvedValue("mock-access-token"),
     };
     provider = new FcmFirstPartyPushProvider(mockTokens, mockFetch as any);
   });
@@ -39,7 +40,7 @@ describe("FirstPartyNotification FCM Transport", () => {
     it("returns accepted when 200 OK with name", async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: jest.fn().mockResolvedValue({ name: "projects/test/messages/123" }),
+        json: vi.fn().mockResolvedValue({ name: "projects/test/messages/123" }),
       });
       const result = await provider.send(mockMessage, mockTarget);
       expect(result).toEqual({ kind: "accepted", messageId: "projects/test/messages/123" });
@@ -49,7 +50,7 @@ describe("FirstPartyNotification FCM Transport", () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 404,
-        json: jest.fn().mockResolvedValue({ error: { status: "UNREGISTERED" } }),
+        json: vi.fn().mockResolvedValue({ error: { status: "UNREGISTERED" } }),
       });
       const result = await provider.send(mockMessage, mockTarget);
       expect(result).toEqual({ kind: "invalid" });
@@ -59,7 +60,7 @@ describe("FirstPartyNotification FCM Transport", () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 400,
-        json: jest.fn().mockResolvedValue({ error: { status: "INVALID_ARGUMENT" } }),
+        json: vi.fn().mockResolvedValue({ error: { status: "INVALID_ARGUMENT" } }),
       });
       const result = await provider.send(mockMessage, mockTarget);
       expect(result).toEqual({ kind: "invalid" });
@@ -69,7 +70,7 @@ describe("FirstPartyNotification FCM Transport", () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 401,
-        json: jest.fn().mockResolvedValue({ error: { status: "THIRD_PARTY_AUTH_ERROR" } }),
+        json: vi.fn().mockResolvedValue({ error: { status: "THIRD_PARTY_AUTH_ERROR" } }),
       });
       const result = await provider.send(mockMessage, mockTarget);
       expect(result).toEqual({ kind: "credential_rejected" });
@@ -79,8 +80,8 @@ describe("FirstPartyNotification FCM Transport", () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 429,
-        headers: { get: jest.fn().mockReturnValue("120") },
-        json: jest.fn().mockResolvedValue({}),
+        headers: { get: vi.fn().mockReturnValue("120") },
+        json: vi.fn().mockResolvedValue({}),
       });
       const result = await provider.send(mockMessage, mockTarget);
       expect(result).toEqual({ kind: "transient", retryAfterSeconds: 120 });
@@ -90,8 +91,8 @@ describe("FirstPartyNotification FCM Transport", () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 500,
-        headers: { get: jest.fn().mockReturnValue(null) },
-        json: jest.fn().mockResolvedValue({}),
+        headers: { get: vi.fn().mockReturnValue(null) },
+        json: vi.fn().mockResolvedValue({}),
       });
       const result = await provider.send(mockMessage, mockTarget);
       expect(result).toEqual({ kind: "transient" });

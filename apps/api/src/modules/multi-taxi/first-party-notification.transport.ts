@@ -33,7 +33,7 @@ export function firstPartyFailure(
   return new FirstPartyPushFailure(
     {
       failureReason,
-      retryDisposition: "terminal",
+      retryDisposition: failureReason === "configuration_blocked" ? "configuration_blocked" : "terminal",
       suggestedNextAttemptAt: null,
     },
     deliveryContext || null,
@@ -183,7 +183,7 @@ export class FirstPartyNotificationTransport implements PassengerPushTransport {
       throw new FirstPartyPushFailure(
         {
           failureReason: "no_active_device",
-          retryDisposition: "terminal",
+          retryDisposition: failureReason === "configuration_blocked" ? "configuration_blocked" : "terminal",
           suggestedNextAttemptAt: null,
         },
         context,
@@ -205,7 +205,7 @@ export class FirstPartyNotificationTransport implements PassengerPushTransport {
       throw new FirstPartyPushFailure(
         {
           failureReason: "provider_transient_error",
-          retryDisposition: "terminal",
+          retryDisposition: failureReason === "configuration_blocked" ? "configuration_blocked" : "terminal",
           suggestedNextAttemptAt: null,
         },
         context,
@@ -278,7 +278,7 @@ export class FirstPartyNotificationTransport implements PassengerPushTransport {
       throw new FirstPartyPushFailure(
         {
           failureReason: "no_active_device",
-          retryDisposition: "terminal",
+          retryDisposition: failureReason === "configuration_blocked" ? "configuration_blocked" : "terminal",
           suggestedNextAttemptAt: null,
         },
         context,
