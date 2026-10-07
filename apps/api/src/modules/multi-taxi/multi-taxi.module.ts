@@ -64,7 +64,7 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
       provide: PASSENGER_PUSH_TRANSPORT,
       useExisting: PartnerNotificationTransport,
     },
-    FcmFirstPartyPushProvider,
+    { provide: FcmFirstPartyPushProvider, useFactory: () => new FcmFirstPartyPushProvider() },
     {
       provide: FIRST_PARTY_PUSH_PROVIDER,
       useExisting: FcmFirstPartyPushProvider,

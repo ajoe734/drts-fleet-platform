@@ -1,302 +1,163 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import {
   FIRST_PARTY_PUSH_RETRY_POLICY,
-  FirstPartyPushDeliveryContext,
-  FirstPartyPushMessage,
   PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
+  type FirstPartyPushDeliveryContext,
+  type FirstPartyPushMessage,
+  type OrderFirstPartyNotificationRoute,
+  type PassengerNotificationFailureReason,
+  type PartnerNotificationRetryDisposition,
 } from "@drts/contracts";
 import { MultiTaxiRepository } from "./multi-taxi.repository";
 import { PassengerPushDevicesService } from "../passenger-push-devices/passenger-push-devices.service";
-import type { PassengerPushTransport, PassengerPushTransportRequest } from "./passenger-push.adapter";
-import type { PassengerPushReceipt } from "./passenger-push.port";
-import { PartnerNotificationFailure, partnerFailure } from "./partner-notification.types";
+import type { PassengerPushTransportRequest } from "./passenger-push.adapter";
 import { notificationExpiresAt } from "./partner-notification.transport";
+
+export type FirstPartyDeviceOutcome = {
+  deviceId: string;
+  kind: FirstPartyPushProviderResult["kind"];
+  messageId: string | null;
+  errorCode: string | null;
+};
+/** Storage extension stays private to this transport; partner/public contracts stay intact. */
+export interface StoredFirstPartyContext extends Omit<FirstPartyPushDeliveryContext, "failureReason"> {
+  routeSnapshot: OrderFirstPartyNotificationRoute;
+  retryPolicySnapshot: { maxAttempts: number; initialDelaySeconds: number; backoffMultiplier: number; maxDelaySeconds: number };
+  deviceOutcomes: FirstPartyDeviceOutcome[];
+  failureReason: PassengerNotificationFailureReason | null;
+}
+export type FirstPartyDeliveryMetadata = Pick<StoredFirstPartyContext,
+  "deliveryTarget" | "deliveryStage" | "retryDisposition" | "failureReason" | "expiresAt" | "receiptId" | "deviceOutcomes">;
+export type FirstPartyReceipt = { providerName: string; providerMessageRef: string; deliveredAt: string; deliveryContext: StoredFirstPartyContext };
 
 export class FirstPartyPushFailure extends Error {
   constructor(
     readonly failure: {
-      failureReason: any;
-      retryDisposition: "automatic" | "terminal" | "configuration_blocked" | "none";
+      failureReason: PassengerNotificationFailureReason;
+      retryDisposition: PartnerNotificationRetryDisposition;
       suggestedNextAttemptAt: string | null;
     },
-    readonly deliveryContext: FirstPartyPushDeliveryContext | null = null,
+    readonly deliveryContext: StoredFirstPartyContext | null = null,
   ) {
     super(failure.failureReason);
     this.name = "FirstPartyPushFailure";
   }
 }
-export function firstPartyFailure(
-  failureReason: any,
-  deliveryContext?: FirstPartyPushDeliveryContext | null,
-) {
-  return new FirstPartyPushFailure(
-    {
-      failureReason,
-      retryDisposition: failureReason === "configuration_blocked" ? "configuration_blocked" : "terminal",
-      suggestedNextAttemptAt: null,
-    },
-    deliveryContext || null,
-  );
+export function firstPartyFailure(failureReason: PassengerNotificationFailureReason, context: StoredFirstPartyContext | null = null) {
+  return new FirstPartyPushFailure({ failureReason,
+    retryDisposition: ["configuration_blocked", "credential_rejected"].includes(failureReason) ? "configuration_blocked" : "terminal",
+    suggestedNextAttemptAt: null,
+  }, context);
 }
-
-export interface FirstPartyPushDeviceTarget {
-  deviceId: string;
-  token: string;
-}
-
+export interface FirstPartyPushDeviceTarget { deviceId: string; token: string }
 export type FirstPartyPushProviderResult =
   | { kind: "accepted"; messageId: string }
-  | { kind: "invalid" }
-  | { kind: "transient"; retryAfterSeconds?: number }
-  | { kind: "credential_rejected" }
-  | { kind: "configuration_blocked" }
-  | { kind: "internal_error" };
-
+  | { kind: "invalid"; errorCode?: string }
+  | { kind: "transient"; retryAfterSeconds?: number; errorCode?: string }
+  | { kind: "credential_rejected"; errorCode?: string }
+  | { kind: "configuration_blocked"; errorCode?: string }
+  | { kind: "internal_error" }
+  | { kind: "expired" };
 export const FIRST_PARTY_PUSH_PROVIDER = Symbol("FIRST_PARTY_PUSH_PROVIDER");
-
 export interface FirstPartyPushProvider {
   isConfigured(): boolean;
   send(message: FirstPartyPushMessage, target: FirstPartyPushDeviceTarget): Promise<FirstPartyPushProviderResult>;
 }
 
 @Injectable()
-export class FirstPartyNotificationTransport implements PassengerPushTransport {
-  private readonly logger = new Logger(FirstPartyNotificationTransport.name);
-
+export class FirstPartyNotificationTransport {
   constructor(
-    private readonly repository: MultiTaxiRepository,
-    private readonly deviceResolver: PassengerPushDevicesService,
-    private readonly provider: FirstPartyPushProvider,
+    @Inject(MultiTaxiRepository) private readonly repository: MultiTaxiRepository,
+    @Inject(PassengerPushDevicesService) private readonly deviceResolver: PassengerPushDevicesService,
+    @Inject(FIRST_PARTY_PUSH_PROVIDER) private readonly provider: FirstPartyPushProvider,
   ) {}
 
-  isAvailable(): boolean {
-    return false;
-  }
-
-  async isAvailableFor(message: any): Promise<boolean> {
-    return false; // Handled by router
-  }
-
-  async send(request: PassengerPushTransportRequest): Promise<PassengerPushReceipt> {
-    const { message, context: fenceContext } = request;
-    const attemptCount = message.attemptCount;
-    if (!attemptCount || !fenceContext.fenceToken) {
-      throw new Error("First-party dispatch requires a durable consumer claim");
-    }
-
-    if (process.env.PASSENGER_PUSH_FIRST_PARTY_ENABLED !== "true") {
-      throw firstPartyFailure("configuration_blocked");
-    }
-    
-    if (!this.provider.isConfigured()) {
-      throw firstPartyFailure("configuration_blocked");
-    }
-
-    let loaded = await this.repository.findFirstPartyNotificationContextAndTokens(message.outboxId);
-    let context: FirstPartyPushDeliveryContext;
-    let tokensByDeviceId = new Map<string, string>();
-
+  private async checkRelevance(request: PassengerPushTransportRequest, context: StoredFirstPartyContext | null) {
+    const { message } = request;
     const route = await this.repository.findOrderFirstPartyNotificationRoute(message.orderId);
-    if (!route) {
-      throw firstPartyFailure("route_missing", loaded?.context);
+    if (!route) throw firstPartyFailure("route_missing", context);
+    if (route.orderId !== message.orderId || route.passengerSubjectRef !== message.passengerSubjectRef ||
+      (context && (context.orderId !== route.orderId || context.tenantId !== route.tenantId ||
+        context.routeSnapshot.drtsPassengerId !== route.drtsPassengerId || context.routeSnapshot.appId !== route.appId ||
+        context.routeSnapshot.passengerSubjectRef !== route.passengerSubjectRef || context.routeSnapshot.rideRef !== route.rideRef))) {
+      throw firstPartyFailure("owner_changed", context);
     }
-
     const relevance = await this.repository.findPartnerNotificationRelevance(message.orderId);
-    if (!relevance) {
-      throw firstPartyFailure("route_missing", loaded?.context);
+    if (!relevance) throw firstPartyFailure("route_missing", context);
+    if (message.eventType !== "receipt_ready" && message.eventType !== "trip_cancelled") {
+      if (["cancelled", "completed", "closed", "rejected"].includes(relevance.status)) throw firstPartyFailure("notification_obsolete", context);
+      if (message.assignmentVersion !== null && message.assignmentVersion < relevance.assignmentVersion) throw firstPartyFailure("notification_superseded", context);
     }
+    if (Date.parse(context?.expiresAt ?? notificationExpiresAt(message)) <= Date.now()) throw firstPartyFailure("notification_expired", context);
+    return route;
+  }
 
-    // Check relevance status
-    if (message.eventType !== "receipt_ready") {
-      if (["cancelled", "completed", "closed", "rejected"].includes(relevance.status)) {
-        throw firstPartyFailure("notification_obsolete", loaded?.context);
-      }
-      if (message.assignmentVersion !== null && message.assignmentVersion < relevance.assignmentVersion) {
-        throw firstPartyFailure("notification_superseded", loaded?.context);
-      }
-    }
-
-    const eventSequence = message.payload.eventSequence;
-    if (typeof eventSequence !== "number" || !Number.isSafeInteger(eventSequence) || eventSequence < 1) {
-      throw firstPartyFailure("route_missing", loaded?.context);
-    }
-
-    if (!loaded) {
-      // First attempt: resolve active devices
-      const activeDevices = await this.deviceResolver.resolveActiveDevices(route.drtsPassengerId);
-      const targetDevices = activeDevices.map(d => ({
-        deviceId: d.deviceId,
-        tokenSha256: d.tokenSha256
-      }));
-      
+  async send(request: PassengerPushTransportRequest): Promise<FirstPartyReceipt> {
+    const { message, context: fenceContext } = request;
+    // Even a direct provider/transport call must stay dormant without configuration.
+    if (process.env.PASSENGER_PUSH_FIRST_PARTY_ENABLED !== "true" || !this.provider.isConfigured()) throw firstPartyFailure("configuration_blocked");
+    const attemptCount = message.attemptCount;
+    if (!attemptCount || !fenceContext.fenceToken) throw new Error("First-party dispatch requires a durable consumer claim");
+    const loaded = await this.repository.findFirstPartyNotificationContextAndTokens(message.outboxId);
+    let context = loaded?.context ?? null;
+    const route = await this.checkRelevance(request, context);
+    if (!context) {
+      const eventSequence = message.payload.eventSequence;
+      const event = PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[message.eventType];
+      if (typeof eventSequence !== "number" || !Number.isSafeInteger(eventSequence) || eventSequence < 1 || !event) throw firstPartyFailure("route_missing");
+      const devices = await this.deviceResolver.resolveActiveDevices(route.drtsPassengerId);
+      const expiresAt = notificationExpiresAt(message);
       const wireMessage: FirstPartyPushMessage = {
-        notification: {
-          title: "乘車通知", // Default generic title
-          body: "請查看最新乘車資訊" // Default generic body
-        },
-        data: {
-          notification_id: message.outboxId,
-          event: (PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME as any)[message.eventType] || message.eventType,
-          ride_ref: route.rideRef,
-          event_sequence: String(eventSequence),
-          expires_at: notificationExpiresAt(message) as any,
-        } as any
+        notification: { title: "乘車通知", body: "請查看最新乘車資訊" },
+        data: { notification_id: message.outboxId, event, ride_ref: route.rideRef, event_sequence: String(eventSequence), expires_at: expiresAt },
       };
-
-      const wireMessageBytes = Buffer.from(JSON.stringify(wireMessage));
-      const wireMessageHash = createHash("sha256").update(wireMessageBytes).digest("hex");
-
-      context = await this.repository.prepareFirstPartyNotificationContext(
-        {
-          outboxId: message.outboxId,
-          orderId: message.orderId,
-          tenantId: route.tenantId,
-          targetDevices,
-          wireMessage,
-          wireMessageHash,
-          eventSequence,
-          expiresAt: notificationExpiresAt(message) as any,
-          deliveryTarget: "first_party_device",
-          deliveryStage: null,
-          retryDisposition: null,
-          failureReason: null,
-          receiptId: null,
-        },
-        String(fenceContext.fenceToken) as any,
-      );
-
-      // We don't have tokens yet, but the actual fetch from DB during send loop will need them.
-      // We will reload to get tokens.
-      loaded = await this.repository.findFirstPartyNotificationContextAndTokens(message.outboxId);
-      if (!loaded) throw new Error("Context failed to load after preparation");
+      context = await this.repository.prepareFirstPartyNotificationContext({
+        outboxId: message.outboxId, orderId: message.orderId, tenantId: route.tenantId,
+        routeSnapshot: route, retryPolicySnapshot: { ...FIRST_PARTY_PUSH_RETRY_POLICY }, deviceOutcomes: [],
+        targetDevices: devices.filter(d => d.appId === route.appId).map(d => ({ deviceId: d.deviceId, tokenSha256: d.tokenSha256 })),
+        wireMessage, wireMessageHash: createHash("sha256").update(JSON.stringify(wireMessage)).digest("hex"),
+        eventSequence, expiresAt, deliveryTarget: "first_party_device", deliveryStage: null,
+        retryDisposition: null, failureReason: null, receiptId: null,
+      }, fenceContext.fenceToken);
     }
-
-    context = loaded.context;
-    tokensByDeviceId = loaded.tokensByDeviceId;
-
-    if (Date.parse(context.expiresAt) <= Date.now()) {
-      throw firstPartyFailure("notification_expired", context);
-    }
-
-    if (context.targetDevices.length === 0) {
-      throw new FirstPartyPushFailure(
-        {
-          failureReason: "no_active_device",
-          retryDisposition: "terminal",
-          suggestedNextAttemptAt: null,
-        },
-        context,
-      );
-    }
-
-    // Now re-check devices status to see if they are still active? No, "重試只送 context 裡的裝置"
-    // Wait, SD says "重試只送 context 裡仍為 active 的裝置". 
-    // BUT the context in `FirstPartyPushDeliveryContext` stores `targetDevices`.
-    // And `findFirstPartyNotificationContextAndTokens` reads tokens from `iam.phase1_passenger_push_devices`.
-    // It only returns tokens if the device exists. But if the device was revoked, does it still return the token? Yes, if it's not deleted.
-    // However, I need to check if it's still 'active'.
-    // Let's rely on the token check. Or maybe the token fetch should only fetch 'active' status?
-    // Actually, `resolveActiveDevices` filters `status = 'active'`. So the initial context has active devices.
-    // If a device becomes revoked later, we can still send to it, or FCM will reject it. Let's just use what's in tokensByDeviceId.
-    
-    // Check if attempt count exceeded maxAttempts from FIRST_PARTY_PUSH_RETRY_POLICY
-    if (attemptCount > FIRST_PARTY_PUSH_RETRY_POLICY.maxAttempts) {
-      throw new FirstPartyPushFailure(
-        {
-          failureReason: "provider_transient_error",
-          retryDisposition: "terminal",
-          suggestedNextAttemptAt: null,
-        },
-        context,
-      );
-    }
-
-    let acceptedCount = 0;
-    let allInvalid = true;
-    let transientCount = 0;
-    let credentialRejected = false;
-    let firstReceiptId: string | null = null;
+    const policy = context.retryPolicySnapshot;
+    if (attemptCount > policy.maxAttempts) throw firstPartyFailure("provider_transient_error", context);
+    const outcomes = new Map(context.deviceOutcomes.map(o => [o.deviceId, o]));
+    let firstReceiptId = context.deviceOutcomes.find(o => o.kind === "accepted")?.messageId ?? null;
+    let blocked: "credential_rejected" | "configuration_blocked" | null = null;
+    let transient = false;
     let maxRetryAfter = 0;
-
     for (const target of context.targetDevices) {
-      const token = tokensByDeviceId.get(target.deviceId);
-      if (!token) continue; // Device missing or token missing
-
-      const result = await this.provider.send(context.wireMessage, {
-        deviceId: target.deviceId,
-        token: token,
-      });
-
-      if (result.kind === "accepted") {
-        acceptedCount++;
-        allInvalid = false;
-        if (!firstReceiptId) firstReceiptId = result.messageId;
-      } else if (result.kind === "invalid") {
-        await this.deviceResolver.invalidateDevice(target.deviceId, "provider_invalid");
-      } else if (result.kind === "credential_rejected") {
-        credentialRejected = true;
-        allInvalid = false;
-      } else {
-        transientCount++;
-        allInvalid = false;
-        if (result.kind === "transient" && result.retryAfterSeconds) {
-          maxRetryAfter = Math.max(maxRetryAfter, result.retryAfterSeconds);
-        }
-      }
+      if (["accepted", "invalid"].includes(outcomes.get(target.deviceId)?.kind ?? "")) continue;
+      // Relevance and active captured identity are checked just before each IO,
+      // including retries and later devices in a slow multi-device attempt.
+      try { await this.checkRelevance(request, context); }
+      catch (error) { if (firstReceiptId) break; throw error; }
+      const token = await this.repository.findFirstPartyNotificationDeviceToken(context, target, fenceContext.fenceToken);
+      if (!token) continue;
+      const result = await this.provider.send(context.wireMessage, { deviceId: target.deviceId, token });
+      outcomes.set(target.deviceId, { deviceId: target.deviceId, kind: result.kind,
+        messageId: result.kind === "accepted" ? result.messageId : null,
+        errorCode: "errorCode" in result ? result.errorCode ?? null : null });
+      context = { ...context, deviceOutcomes: [...outcomes.values()] };
+      if (result.kind === "accepted") firstReceiptId ??= result.messageId;
+      else if (result.kind === "invalid") await this.deviceResolver.invalidateDevice(target.deviceId, "provider_invalid", target.tokenSha256);
+      else if (result.kind === "credential_rejected" || result.kind === "configuration_blocked") blocked = result.kind;
+      else if (result.kind === "expired") { if (firstReceiptId) break; throw firstPartyFailure("notification_expired", context); }
+      else { transient = true; if (result.kind === "transient") maxRetryAfter = Math.max(maxRetryAfter, result.retryAfterSeconds ?? 0); }
     }
-
-    if (acceptedCount > 0) {
+    if (firstReceiptId) {
       const deliveredAt = new Date().toISOString();
-      return {
-        providerName: "first_party_app",
-        providerMessageRef: firstReceiptId || "unknown",
-        deliveredAt,
-        deliveryContext: {
-          ...context,
-          deliveryStage: "provider_accepted",
-          retryDisposition: "none",
-          failureReason: null,
-          receiptId: firstReceiptId,
-          deliveredAt,
-        } as any,
-      };
+      return { providerName: "first_party_app", providerMessageRef: firstReceiptId, deliveredAt,
+        deliveryContext: { ...context, deliveryStage: "provider_accepted", retryDisposition: "none", failureReason: null, receiptId: firstReceiptId, deliveredAt } };
     }
-
-    if (credentialRejected) {
-      throw new FirstPartyPushFailure(
-        {
-          failureReason: "credential_rejected",
-          retryDisposition: "configuration_blocked",
-          suggestedNextAttemptAt: null,
-        },
-        context,
-      );
-    }
-
-    if (allInvalid) {
-      throw new FirstPartyPushFailure(
-        {
-          failureReason: "no_active_device",
-          retryDisposition: "terminal",
-          suggestedNextAttemptAt: null,
-        },
-        context,
-      );
-    }
-
-    // Transient failure
-    const delayMs = maxRetryAfter > 0 ? maxRetryAfter * 1000 : 
-      FIRST_PARTY_PUSH_RETRY_POLICY.initialDelaySeconds * 1000 * Math.pow(FIRST_PARTY_PUSH_RETRY_POLICY.backoffMultiplier, attemptCount - 1);
-    
-    throw new FirstPartyPushFailure(
-      {
-        failureReason: "provider_transient_error",
-        retryDisposition: "automatic",
-        suggestedNextAttemptAt: new Date(Date.now() + Math.min(delayMs, FIRST_PARTY_PUSH_RETRY_POLICY.maxDelaySeconds * 1000)).toISOString(),
-      },
-      context,
-    );
+    if (blocked) throw firstPartyFailure(blocked, context);
+    if (!transient) throw firstPartyFailure("no_active_device", context);
+    const ownDelay = Math.min(policy.maxDelaySeconds, policy.initialDelaySeconds * policy.backoffMultiplier ** (attemptCount - 1));
+    const next = Date.now() + Math.max(ownDelay, maxRetryAfter) * 1000;
+    if (attemptCount >= policy.maxAttempts) throw firstPartyFailure("provider_transient_error", context);
+    if (next >= Date.parse(context.expiresAt)) throw firstPartyFailure("notification_expired", context);
+    throw new FirstPartyPushFailure({ failureReason: "provider_transient_error", retryDisposition: "automatic", suggestedNextAttemptAt: new Date(next).toISOString() }, context);
   }
 }
-
