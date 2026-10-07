@@ -27,8 +27,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID:
         "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
     };
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -66,8 +64,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID:
         "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
     };
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -140,8 +136,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID:
         "10000000-0000-0000-0000-000000000903",
       DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST: "billing+invoice@company.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
     };
 
     let tokenIndex = 0;
@@ -275,8 +269,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID:
         "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
     };
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -384,8 +376,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID:
         "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
     };
 
     const fetchMock = vi
@@ -443,8 +433,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID:
         "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
       DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST: "billing+invoice@company.com",
     };
 
@@ -533,8 +521,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
     };
 
     const fetchMock = vi.fn().mockImplementation(async (url) => {
@@ -599,7 +585,6 @@ describe("F1 bootstrap and teardown adapter", () => {
       DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN: "token1",
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN: "token_fail",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      GITHUB_RUN_ID: "12345",
     };
     const tdFetchMock = vi.fn().mockImplementation(async (url, opts) => {
       if (opts.headers?.authorization === "Bearer token1") {
