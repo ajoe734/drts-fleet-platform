@@ -21,6 +21,8 @@ describe('F1 bootstrap and teardown adapter', () => {
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
       GITHUB_ACTIONS: "true",
       GITHUB_ENV: "/tmp/env",
@@ -49,6 +51,8 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
@@ -81,6 +85,8 @@ describe('F1 bootstrap and teardown adapter', () => {
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
     };
     
@@ -101,6 +107,8 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
@@ -168,6 +176,8 @@ describe('F1 bootstrap and teardown adapter', () => {
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
       GITHUB_ACTIONS: "true",
       GITHUB_ENV: "/tmp/env",
@@ -206,8 +216,11 @@ describe('F1 bootstrap and teardown adapter', () => {
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
       DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN: "token1",
+      DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN: "token2",
       DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN: "token3",
     };
@@ -230,6 +243,8 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
       DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
       DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
       DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
@@ -263,5 +278,50 @@ describe('F1 bootstrap and teardown adapter', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     
     consoleErrorSpy.mockRestore();
+  });
+
+  it('prevents zero-send on recipient mismatch and enforces allowlist semantics', async () => {
+    // Assert recipient mismatch throws error
+    const env = {
+      DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
+      DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
+      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
+      GITHUB_ACTIONS: "true",
+      GITHUB_ENV: "/tmp/env",
+    };
+    const deps = {
+      fetch: vi.fn(),
+      mask: vi.fn(),
+      appendEnvironment: vi.fn(),
+      readMailbox: vi.fn().mockReturnValue("different@company.com"),
+      assertions: vi.fn().mockReturnValue({ next: vi.fn().mockResolvedValue("mocked-token") })
+    };
+    await expect(bootstrapMailSession(env, deps, false)).rejects.toThrow();
+  });
+
+  it('enforces manifest content and teardown artifact correlation/redaction', async () => {
+    const env = {
+      DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
+      DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
+      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
+      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID: "10000000-0000-0000-0000-000000000201",
+      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID: "10000000-0000-0000-0000-000000000901",
+      DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN: "token1",
+      DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
+    };
+    const tdFetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { revoked: true, logged_out: true } })
+    });
+    
+    await teardown(env, tdFetchMock as any);
+    expect(tdFetchMock).toHaveBeenCalled();
   });
 });

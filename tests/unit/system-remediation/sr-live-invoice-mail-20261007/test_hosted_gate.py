@@ -21,7 +21,7 @@ class HostedGateTest(unittest.TestCase):
         self.env = {key: 'success' for key in ('DEPLOYMENT_GUARD_OUTCOME', 'SESSION_GUARD_OUTCOME', 'INSTALL_OUTCOME', 'PREFLIGHT_OUTCOME', 'RESOURCES_OUTCOME', 'SESSIONS_OUTCOME', 'RUNNER_OUTCOME', 'TEARDOWN_OUTCOME')}
         self.env.update(CANDIDATE_SHA=SHA, WORKFLOW_SHA=SHA, BASE_SHA='b' * 40)
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
-                         'unimplementedLiveSurfaces': [], 'errors': [], 
+                         'unimplementedLiveSurfaces': [], 'errors': [],
                          'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'identityEmail': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                          'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': '<d2@notification.drts.invalid>', 'body_sha256': 'a' * 64},
                          'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': '<d1@notification.drts.invalid>', 'body_sha256': 'a' * 64},
@@ -37,8 +37,8 @@ class HostedGateTest(unittest.TestCase):
                              {'path': 'tenant/billing/profile', 'method': 'GET', 'status': 200},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
-                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 403},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 403},
+                             {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -81,6 +81,41 @@ class HostedGateTest(unittest.TestCase):
         del ev4['tenantId']
         self.assertEqual(gate.evaluate(self.env, ev4, self.provider)['status'], 'failed')
 
+
+    def test_f5_durable_binding_regressions(self):
+        import copy
+
+        # change ONLY durable_get path
+        ev = copy.deepcopy(self.evidence)
+        for c in ev['httpCalls']:
+            if c.get('scenario') == 'durable_get':
+                c['path'] = '/api/tenant/invoices/unrelated/mail'
+        self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed')
+
+        # change ONLY idempotent_retry durable deliveryId
+        ev = copy.deepcopy(self.evidence)
+        for d in ev['durableDeliveries']:
+            if d.get('scenario') == 'idempotent_retry':
+                d['deliveryId'] = 'unrelated'
+        self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed')
+
+        # remove negative durable deliveryId and HTTP delivery_id
+        ev = copy.deepcopy(self.evidence)
+        for d in ev['durableDeliveries']:
+            if d.get('scenario') == 'non_allowlisted':
+                del d['deliveryId']
+        for c in ev['httpCalls']:
+            if c.get('scenario') == 'non_allowlisted':
+                del c['delivery_id']
+        self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed')
+
+        # change negative POST status to 500
+        ev = copy.deepcopy(self.evidence)
+        for c in ev['httpCalls']:
+            if c.get('scenario') == 'non_allowlisted':
+                c['status'] = 500
+        self.assertEqual(gate.evaluate(self.env, ev, self.provider)['status'], 'failed')
+
     def test_green_runner_cannot_hide_missing_stale_or_partial_artifacts(self):
         for override in ({'status': 'failed'}, {'candidateSha': 'b' * 40}, {'headSha': 'b' * 40},
                          {'unimplementedLiveSurfaces': [{'surface': 'expiry'}]}, {'errors': ['failed']},
@@ -103,7 +138,7 @@ class HostedGateTest(unittest.TestCase):
     def test_f1_cleanup_validation(self, mock_path):
         import json
         import os
-        
+
         class DummyPath:
             _files = {}
             def __init__(self, name=""): self.name = name

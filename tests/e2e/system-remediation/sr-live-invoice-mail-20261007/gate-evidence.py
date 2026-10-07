@@ -17,7 +17,7 @@ def evaluate(env, evidence, provider):
     resources = evidence.get("trackedResources", [])
     mb = evidence.get("mailboxEvidence", {})
     mb2 = evidence.get("resendMailboxEvidence", {})
-    
+
     def get_call(method, path=None, scenario=None):
         for c in http_calls:
             if c.get("method") == method and (path is None or c.get("path") == path) and (scenario is None or c.get("scenario") == scenario):
@@ -35,35 +35,35 @@ def evaluate(env, evidence, provider):
     retry_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="idempotent_retry")
     resend = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="intentional_resend")
     na_send = get_call("POST", scenario="non_allowlisted")
-    
+
     dl_id = first_send.get("delivery_id") if first_send else None
-    
+
     has_identity = bool(get_call("GET", path="tenant/billing/profile") and get_call("GET", path="tenant/billing/profile").get("status") == 200)
     has_invoice = bool(get_call("GET", path=f"/api/tenant/invoices/{invoice}" if invoice else None) and get_call("GET", path=f"/api/tenant/invoices/{invoice}" if invoice else None).get("status") == 200)
-    
+
     # F4: Check exact hash and ID shapes
     rfc = mb.get("rfc_message_id")
     sha256 = mb.get("body_sha256")
     has_inbox_proof = (mb.get("matched_content") is True and mb.get("candidate_sha") == sha and
-                       mb.get("delivery_id") == dl_id and dl_id is not None and 
+                       mb.get("delivery_id") == dl_id and dl_id is not None and
                        isinstance(rfc, str) and rfc == f"<{dl_id}@notification.drts.invalid>" and
                        isinstance(sha256, str) and len(sha256) == 64 and all(c in "0123456789abcdef" for c in sha256))
-                       
+
     rfc2 = mb2.get("rfc_message_id")
     sha256_2 = mb2.get("body_sha256")
     has_resend_inbox_proof = (mb2.get("matched_content") is True and mb2.get("candidate_sha") == sha and
-                       resend and mb2.get("delivery_id") == resend.get("delivery_id") and resend.get("delivery_id") is not None and 
+                       resend and mb2.get("delivery_id") == resend.get("delivery_id") and resend.get("delivery_id") is not None and
                        isinstance(rfc2, str) and rfc2 == f"<{resend.get('delivery_id')}@notification.drts.invalid>" and
                        isinstance(sha256_2, str) and len(sha256_2) == 64 and all(c in "0123456789abcdef" for c in sha256_2))
-    
+
     # F4: enforce download proof is valid object
     dl_proof = evidence.get("downloadProof")
     if not isinstance(dl_proof, dict):
         dl_proof = {}
     has_download = bool(
         get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
-        and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") in (401, 403, 404)
-        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") in (200, 401, 403, 404)
+        and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") == 404
+        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") == 200
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
         and dl_proof.get("matched") is True
         and isinstance(dl_proof.get("manifestHash"), str) and bool(re.match(r"^[0-9a-f]{64}$", dl_proof.get("manifestHash")))
@@ -71,37 +71,38 @@ def evaluate(env, evidence, provider):
         and isinstance(dl_proof.get("downloadedBytes"), int) and dl_proof.get("downloadedBytes") > 0
         and dl_proof.get("contentType") == "application/pdf"
     )
-    
+
     # F5: Bind durable deliveries
     durable_deliveries = evidence.get("durableDeliveries") or []
     def get_delivery(scenario):
         return next((d for d in durable_deliveries if d.get("scenario") == scenario), None)
-        
+
     first_send_del = get_delivery("first_send")
     resend_del = get_delivery("intentional_resend")
     na_del = get_delivery("non_allowlisted")
     retry_del = get_delivery("idempotent_retry")
-    
+
     # Check normal send and retry correlation
     has_normal_send = bool(first_send and first_send.get("status") == 201)
-    
+
     # Check intentional resend
     has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
-    
+
     # Check durable delivery correlations and idempotency snapshot
     has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and dl_id is not None and
+                           retry_del and retry_del.get("deliveryId") == dl_id and
                            retry_del and retry_del.get("initialAttemptsCount") == retry_del.get("afterRetryAttemptsCount") and retry_del.get("initialAttemptsCount", 0) > 0 and
                            first_send_del.get("idempotencyKey") and retry_del.get("idempotencyKey") == first_send_del.get("idempotencyKey"))
 
-    has_durable_get_call = bool(get_call("GET", scenario="durable_get") and get_call("GET", scenario="durable_get").get("status") == 200)
+    has_durable_get_call = bool(get_call("GET", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="durable_get") and get_call("GET", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="durable_get").get("status") == 200)
 
     has_durable_get = bool(
         has_durable_get_call and
         first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") and first_send_del.get("attemptsCount", 0) > 0 and first_send_del.get("status") == "sent" and first_send_del.get("attemptOutcome") == "sent" and first_send_del.get("errorCode") is None and
         resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") and resend_del.get("attemptsCount", 0) > 0 and first_send_del.get("idempotencyKey") and resend_del.get("idempotencyKey") and resend_del.get("idempotencyKey") != first_send_del.get("idempotencyKey") and resend_del.get("status") == "sent" and resend_del.get("attemptOutcome") == "sent" and resend_del.get("errorCode") is None and
-        na_del and na_send and na_del.get("deliveryId") == na_send.get("delivery_id") and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED" and na_del.get("outcome") == "failed" and not na_del.get("acceptedAt") and na_del.get("retryable") is False
+        na_del and na_send and na_send.get("status") == 201 and na_send.get("delivery_id") is not None and na_del.get("deliveryId") == na_send.get("delivery_id") and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED" and na_del.get("outcome") == "failed" and not na_del.get("acceptedAt") and na_del.get("retryable") is False
     )
-    
+
     has_wrong_tenant = bool(get_call("POST", scenario="wrong_tenant") and get_call("POST", scenario="wrong_tenant").get("status") == 403)
     has_wrong_invoice = bool(get_call("POST", scenario="wrong_invoice") and get_call("POST", scenario="wrong_invoice").get("status") in (403, 404))
     has_read_only = bool(get_call("POST", scenario="read_only") and get_call("POST", scenario="read_only").get("status") == 403)
@@ -110,18 +111,18 @@ def evaluate(env, evidence, provider):
     # Missing fixture/role authority remains pending rather than fabricated pass.
     # F4: strictly require the key to be present and empty
     is_fully_implemented = "unimplementedLiveSurfaces" in evidence and evidence["unimplementedLiveSurfaces"] == []
-    
+
     passed = bool(sha and len(sha) == 40 and all(value == "success" for value in steps.values())
                   and evidence.get("candidateSha") == sha and evidence.get("headSha") == sha
                   and evidence.get("status") == "passed" and evidence.get("exitCode") == 0
                   and is_fully_implemented and evidence.get("errors") == []
                   and has_authority
-                  and has_identity and has_invoice and has_inbox_proof and has_resend_inbox_proof and has_download 
+                  and has_identity and has_invoice and has_inbox_proof and has_resend_inbox_proof and has_download
                   and has_idempotency and has_durable_get
                   and has_wrong_tenant and has_wrong_invoice and has_intentional_resend and has_normal_send and has_read_only
                   and resources
                   and provider.get("candidate_sha") == sha and provider.get("alias_revision_fresh") is True)
-                  
+
     return {"candidate_sha": sha, "workflow_sha": env.get("DISPATCH_WORKFLOW_SHA"),
             "checkout_sha": env.get("WORKFLOW_SHA"), "base_sha": env.get("BASE_SHA"),
             "run_id": env.get("GITHUB_RUN_ID"), "run_attempt": env.get("GITHUB_RUN_ATTEMPT"),
@@ -141,33 +142,60 @@ def main():
     sha = os.environ.get("CANDIDATE_SHA")
     result = {"status": "failed", "steps": {}}
     teardown_passed = False
-    
+
     try:
         teardown_ev = read("evidence-teardown.json")
         bootstrap_ev = read("evidence-bootstrap.json")
-        
-        issued = bootstrap_ev.get("issued_sessions_count", 0)
-        issued_sessions_raw = bootstrap_ev.get("issued_sessions", [])
-        if not isinstance(issued_sessions_raw, list):
-            issued_sessions_raw = []
-        issued_keys = sorted([k for k in issued_sessions_raw if isinstance(k, str)])
 
-        sessions_raw = teardown_ev.get("sessions", [])
+        issued = bootstrap_ev.get("issued_sessions_count", 0)
+        issued_sessions_raw = bootstrap_ev.get("issued_sessions")
+        if not isinstance(issued_sessions_raw, list):
+            raise ValueError("issued_sessions must be a list")
+
+        issued_keys = []
+        for k in issued_sessions_raw:
+            if not isinstance(k, str) or not k:
+                raise ValueError("malformed issued key")
+            issued_keys.append(k)
+
+        if len(set(issued_keys)) != len(issued_keys):
+            raise ValueError("duplicate issued keys")
+
+        issued_keys.sort()
+
+        sessions_raw = teardown_ev.get("sessions")
         if not isinstance(sessions_raw, list):
-            sessions_raw = []
-        teardown_keys = sorted([s.get("key") for s in sessions_raw if isinstance(s, dict) and s.get("status") == "success" and isinstance(s.get("key"), str)])
+            raise ValueError("sessions must be a list")
+
+        teardown_keys = []
+        for s in sessions_raw:
+            if not isinstance(s, dict):
+                raise ValueError("malformed session entry")
+            k = s.get("key")
+            st = s.get("status")
+            if not isinstance(k, str) or not k:
+                raise ValueError("malformed session key")
+            if st not in ("success", "not_issued"):
+                raise ValueError("session status must be success or not_issued")
+            # Only count success ones as matching the issued keys
+            if st == "success":
+                teardown_keys.append(k)
+
+        if len(set(teardown_keys)) != len(teardown_keys):
+            raise ValueError("duplicate teardown keys")
+
+        teardown_keys.sort()
 
         teardown_passed = bool(
             teardown_ev.get("success") is True and
             teardown_ev.get("attempted", 0) > 0 and
-            teardown_ev.get("attempted") == issued and
             teardown_ev.get("failures", -1) == 0 and
             teardown_ev.get("runId") == run_id and
             bootstrap_ev.get("runId") == run_id and
             teardown_ev.get("candidateSha") == sha and
             bootstrap_ev.get("candidateSha") == sha and
-            len(issued_keys) > 0 and
-            len(issued_keys) == issued and
+            issued == len(issued_keys) and
+            issued > 0 and
             teardown_keys == issued_keys
         )
     except Exception as e:
@@ -187,7 +215,7 @@ def main():
             result["steps"] = {}
         result["steps"]["teardown"] = False
         print("Mail acceptance: failed - missing or failed cleanup evidence")
-        
+
     (directory / "run-status.json").write_text(json.dumps(result, indent=2) + "\n")
     print("Mail acceptance: " + result["status"])
     raise SystemExit(0 if result["status"] == "passed" else 1)
