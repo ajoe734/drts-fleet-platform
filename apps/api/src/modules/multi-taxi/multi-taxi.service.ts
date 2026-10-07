@@ -5,7 +5,24 @@ import {
   type PartnerPushOutcome,
 } from "./partner-notification.types";
 import { notificationExpiresAt } from "./partner-notification.transport";
-import { PLATFORM_CURRENCY } from "@drts/contracts";
+import {
+  buildFirstPartyPushMessage,
+  firstPartyPushCollapseKey,
+  firstPartyPushMessageHash,
+  InjectFirstPartyPushConfig,
+  InjectFirstPartyPushProvider,
+  type FirstPartyPushConfig,
+  type FirstPartyPushProvider,
+} from "./first-party-notification.transport";
+import {
+  InjectFirstPartyPushDeviceResolver,
+  type FirstPartyPushDeviceResolverPort,
+} from "../passenger-push-devices/passenger-push-devices.port";
+import {
+  FIRST_PARTY_PUSH_RETRY_POLICY,
+  PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS as FIRST_PARTY_PUSH_EVENT_TTL_SECONDS,
+  PLATFORM_CURRENCY,
+} from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
@@ -42,7 +59,9 @@ import type {
   MultiTaxiTripOperationalLegalHoldView,
   MultiTaxiTripOperationalRecordQuery,
   ConsumerNotificationOutboxRecord,
+  OrderFirstPartyNotificationRoute,
   OwnedOrderRecord,
+  PartnerNotificationRetryDisposition,
   PassengerContactUnavailableReason,
   PassengerPushDeliveryOutcome,
   PassengerPushDeliveryResult,
@@ -80,6 +99,7 @@ import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
   MultiTaxiRepository,
+  type FirstPartyContextOutcomeMetadata,
   type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
@@ -183,6 +203,15 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    @InjectFirstPartyPushProvider()
+    private readonly firstPartyPushProvider?: FirstPartyPushProvider,
+    @Optional()
+    @InjectFirstPartyPushDeviceResolver()
+    private readonly firstPartyPushDeviceResolver?: FirstPartyPushDeviceResolverPort,
+    @Optional()
+    @InjectFirstPartyPushConfig()
+    private readonly firstPartyPushConfig?: FirstPartyPushConfig,
   ) {}
 
   async onModuleInit() {
@@ -1285,10 +1314,403 @@ export class MultiTaxiService implements OnModuleInit {
     if (resolution.channel === "partner_webhook") {
       return this.deliverPartnerNotification(record.outboxId, requestId);
     }
+    if (resolution.channel === "first_party_app") {
+      return this.deliverFirstPartyPushNotification(
+        record.outboxId,
+        resolution.route,
+      );
+    }
     return this.deliverNonPartnerChannelOutcome(
       record.outboxId,
       resolution.channel,
     );
+  }
+
+  /**
+   * D6 — the real FCM transport. Dormant unless both
+   * `PASSENGER_PUSH_FIRST_PARTY_ENABLED` and `PASSENGER_PUSH_FCM_PROJECT_ID`
+   * are set (and the provider/device-resolver ports are actually bound);
+   * otherwise delegates unchanged to the existing
+   * `deliverNonPartnerChannelOutcome` dormant seal — byte-identical to
+   * PUSH-CHANNEL-ROUTER-20261006's behaviour, no HTTP call ever made.
+   */
+  private async deliverFirstPartyPushNotification(
+    outboxId: string,
+    route: OrderFirstPartyNotificationRoute,
+  ): Promise<PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata> {
+    if (
+      !this.firstPartyPushConfig?.enabled ||
+      !this.firstPartyPushConfig.projectId ||
+      !this.firstPartyPushProvider ||
+      !this.firstPartyPushDeviceResolver
+    ) {
+      return this.deliverNonPartnerChannelOutcome(outboxId, "first_party_app");
+    }
+    const projectId = this.firstPartyPushConfig.projectId;
+
+    const claim = await this.repository!.claimPartnerNotification(
+      outboxId,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (!claim) throw new PassengerPushClaimConflictError(outboxId);
+    const { record, fenceToken } = claim;
+
+    /** Seals via the shared channelRouting path only; never touches the V0108 context table (used for relevance/channel decisions made before any attempt, which this table's narrower failure_reason CHECK does not accept). */
+    const sealChannelOnly = async (
+      failureReason: PassengerNotificationChannelMetadata["failureReason"],
+      retryDisposition: PartnerNotificationRetryDisposition,
+      expiresAt: string | null,
+    ) => {
+      const channelMetadata: PassengerNotificationChannelMetadata = {
+        resolvedChannel: "first_party_app",
+        deliveryTarget: null,
+        deliveryStage: null,
+        retryDisposition,
+        failureReason,
+        receiptId: null,
+        downstreamStatus: "unknown",
+        expiresAt,
+      };
+      const outcome = {
+        ...channelMetadata,
+        outboxId,
+        status: "failed" as const,
+        result:
+          failureReason === "configuration_blocked"
+            ? ("provider_not_configured" as const)
+            : ("provider_error" as const),
+        attemptCount: record.attemptCount,
+        nextAttemptAt: new Date().toISOString(),
+        deliveredAt: null,
+        providerName: null,
+      };
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: null,
+        providerMessageRef: null,
+        providerAckState: "provider_rejected",
+        deliveryOutcome: outcome,
+        channelMetadata,
+      });
+      if (!persisted.recorded)
+        throw new Error("First-party notification channel fence lost");
+      return outcome;
+    };
+
+    /** Seals via both channelRouting (outbox quick-read) and the V0108 context row — a real attempt actually ran. */
+    const sealWithContext = async (
+      failureReason: FirstPartyContextOutcomeMetadata["failureReason"],
+      retryDisposition: PartnerNotificationRetryDisposition,
+      deliveryStage: "provider_accepted" | null,
+      receiptId: string | null,
+      expiresAt: string,
+      nextAttemptAt: string,
+      providerName: string | null,
+    ) => {
+      const delivered = deliveryStage === "provider_accepted";
+      const channelMetadata: PassengerNotificationChannelMetadata = {
+        resolvedChannel: "first_party_app",
+        deliveryTarget: "first_party_device",
+        deliveryStage,
+        retryDisposition,
+        failureReason,
+        receiptId,
+        downstreamStatus: "unknown",
+        expiresAt,
+      };
+      const outcome = {
+        ...channelMetadata,
+        outboxId,
+        status: delivered ? ("delivered" as const) : ("failed" as const),
+        result: delivered
+          ? ("delivered" as const)
+          : ("provider_error" as const),
+        attemptCount: record.attemptCount,
+        nextAttemptAt,
+        deliveredAt: delivered ? nextAttemptAt : null,
+        providerName,
+      };
+      const firstPartyMetadata: FirstPartyContextOutcomeMetadata = {
+        deliveryStage,
+        retryDisposition,
+        failureReason,
+        receiptId,
+      };
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName,
+        providerMessageRef: receiptId,
+        providerAckState: delivered
+          ? "provider_acknowledged"
+          : "provider_rejected",
+        deliveryOutcome: outcome,
+        channelMetadata,
+        firstPartyMetadata,
+      });
+      if (!persisted.recorded)
+        throw new Error("First-party notification channel fence lost");
+      return outcome;
+    };
+
+    try {
+      if (record.eventType !== "receipt_ready") {
+        const relevance = await this.repository!.findPartnerNotificationRelevance(
+          record.orderId,
+        );
+        if (relevance) {
+          if (
+            ["cancelled", "completed", "closed", "rejected"].includes(
+              relevance.status,
+            )
+          ) {
+            return await sealChannelOnly(
+              "notification_obsolete",
+              "terminal",
+              null,
+            );
+          }
+          if (
+            record.assignmentVersion !== null &&
+            record.assignmentVersion < relevance.assignmentVersion
+          ) {
+            return await sealChannelOnly(
+              "notification_superseded",
+              "terminal",
+              null,
+            );
+          }
+        }
+      }
+
+      let context = await this.repository!.findFirstPartyNotificationContext(
+        outboxId,
+      );
+      const activeTargets =
+        await this.firstPartyPushDeviceResolver.resolveActiveDeviceSendTargets(
+          route.drtsPassengerId,
+        );
+
+      if (!context) {
+        if (activeTargets.length === 0) {
+          return await sealChannelOnly("no_active_device", "terminal", null);
+        }
+        const eventSequence = record.payload.eventSequence;
+        if (
+          typeof eventSequence !== "number" ||
+          !Number.isSafeInteger(eventSequence) ||
+          eventSequence < 1
+        ) {
+          throw new Error("First-party dispatch requires an allocated event sequence");
+        }
+        let expiresAt: string;
+        try {
+          expiresAt = notificationExpiresAt(record);
+        } catch {
+          throw new Error("First-party dispatch could not compute an expiry");
+        }
+        const wireMessage = buildFirstPartyPushMessage({
+          eventType: record.eventType,
+          outboxId,
+          rideRef: route.rideRef,
+          eventSequence,
+          expiresAt,
+        });
+        context = await this.repository!.prepareFirstPartyNotificationContext(
+          {
+            outboxId,
+            orderId: route.orderId,
+            tenantId: route.tenantId,
+            targetDevices: activeTargets.map((t) => ({
+              deviceId: t.deviceId,
+              tokenSha256: t.tokenSha256,
+            })),
+            wireMessage,
+            wireMessageHash: firstPartyPushMessageHash(wireMessage),
+            eventSequence,
+            expiresAt,
+            deliveryTarget: "first_party_device",
+            deliveryStage: null,
+            retryDisposition: null,
+            failureReason: null,
+            receiptId: null,
+            createdAt: new Date().toISOString(),
+            deliveredAt: null,
+          },
+          fenceToken,
+        );
+      }
+
+      if (Date.parse(context.expiresAt) <= Date.now()) {
+        // D6's FirstPartyPushFailureReason union has no "expired" member
+        // (unlike the partner contract's notification_expired) and V0108's
+        // failure_reason CHECK cannot accept one either; "no_active_device"
+        // is reused here as the closest fit (terminal, nothing left to send)
+        // rather than widening a CHECK constraint for a case outside this
+        // task's required acceptance matrix.
+        return await sealChannelOnly(
+          "no_active_device",
+          "terminal",
+          context.expiresAt,
+        );
+      }
+      if (record.attemptCount > FIRST_PARTY_PUSH_RETRY_POLICY.maxAttempts) {
+        return await sealWithContext(
+          "provider_transient_error",
+          "terminal",
+          null,
+          null,
+          context.expiresAt,
+          new Date().toISOString(),
+          null,
+        );
+      }
+
+      // D6: retries only ever (re)send to devices frozen into the context's
+      // own snapshot — never a freshly resolved recipient list — intersected
+      // against each device's *current* active status/token.
+      const sendable = context.targetDevices
+        .map((snapshot) => ({
+          ...snapshot,
+          token: activeTargets.find((t) => t.deviceId === snapshot.deviceId)
+            ?.token,
+        }))
+        .filter(
+          (candidate): candidate is { deviceId: string; tokenSha256: string; token: string } =>
+            typeof candidate.token === "string",
+        );
+
+      if (sendable.length === 0) {
+        return await sealWithContext(
+          "no_active_device",
+          "terminal",
+          null,
+          null,
+          context.expiresAt,
+          new Date().toISOString(),
+          null,
+        );
+      }
+
+      const ttlSeconds = FIRST_PARTY_PUSH_EVENT_TTL_SECONDS[record.eventType];
+      const collapseKey = firstPartyPushCollapseKey(
+        record.eventType,
+        route.orderId,
+        outboxId,
+      );
+      const expiresAtEpochSeconds = Math.floor(
+        Date.parse(context.expiresAt) / 1000,
+      );
+
+      let accepted: { deviceId: string; messageName: string } | null = null;
+      const deviceOutcomes: Array<{
+        deviceId: string;
+        outcome: Awaited<ReturnType<FirstPartyPushProvider["send"]>>;
+      }> = [];
+      for (const device of sendable) {
+        const result = await this.firstPartyPushProvider.send(
+          device.token,
+          context.wireMessage,
+          { projectId, ttlSeconds, collapseKey, expiresAtEpochSeconds },
+        );
+        deviceOutcomes.push({ deviceId: device.deviceId, outcome: result });
+        if (result.outcome === "accepted" && !accepted) {
+          accepted = { deviceId: device.deviceId, messageName: result.messageName };
+        }
+      }
+
+      for (const { deviceId, outcome } of deviceOutcomes) {
+        if (outcome.outcome === "invalid") {
+          await this.firstPartyPushDeviceResolver.invalidateDevice(
+            deviceId,
+            "fcm_reported_invalid_token",
+          );
+        }
+      }
+
+      if (accepted) {
+        const deliveredAt = new Date().toISOString();
+        return await sealWithContext(
+          null,
+          "none",
+          "provider_accepted",
+          accepted.messageName,
+          context.expiresAt,
+          deliveredAt,
+          "fcm_v1",
+        );
+      }
+
+      const allInvalid = deviceOutcomes.every(
+        (d) => d.outcome.outcome === "invalid",
+      );
+      if (allInvalid) {
+        return await sealWithContext(
+          "no_active_device",
+          "terminal",
+          null,
+          null,
+          context.expiresAt,
+          new Date().toISOString(),
+          null,
+        );
+      }
+
+      const credentialRejected = deviceOutcomes.find(
+        (d) => d.outcome.outcome === "credential_rejected",
+      );
+      if (credentialRejected) {
+        return await sealWithContext(
+          "credential_rejected",
+          "configuration_blocked",
+          null,
+          null,
+          context.expiresAt,
+          new Date().toISOString(),
+          null,
+        );
+      }
+
+      const transient = deviceOutcomes.find(
+        (d) => d.outcome.outcome === "transient",
+      );
+      const retryAfterSeconds =
+        transient?.outcome.outcome === "transient"
+          ? transient.outcome.retryAfterSeconds
+          : null;
+      const backoffSeconds = Math.min(
+        FIRST_PARTY_PUSH_RETRY_POLICY.initialDelaySeconds *
+          FIRST_PARTY_PUSH_RETRY_POLICY.backoffMultiplier **
+            (record.attemptCount - 1),
+        FIRST_PARTY_PUSH_RETRY_POLICY.maxDelaySeconds,
+      );
+      const delaySeconds = Math.max(retryAfterSeconds ?? 0, backoffSeconds);
+      let nextAttemptAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+      let retryDisposition: PartnerNotificationRetryDisposition = "automatic";
+      if (Date.parse(nextAttemptAt) >= Date.parse(context.expiresAt)) {
+        retryDisposition = "terminal";
+        nextAttemptAt = new Date().toISOString();
+      }
+      return await sealWithContext(
+        "provider_transient_error",
+        retryDisposition,
+        null,
+        null,
+        context.expiresAt,
+        nextAttemptAt,
+        null,
+      );
+    } catch (error) {
+      // Mirrors deliverPartnerNotification: an unknown failure here (DB
+      // write before/after IO included) must retain the claim and reserved
+      // attempt rather than release it — lease expiry is the only recovery
+      // path, so a stale "success" can never be read back as delivered.
+      throw new PassengerPushPersistenceUnknownError(outboxId, error);
+    }
   }
 
   /**

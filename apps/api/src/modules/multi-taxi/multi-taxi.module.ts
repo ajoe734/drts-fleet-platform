@@ -14,6 +14,12 @@ import { ServiceProductModule } from "../service-product/service-product.module"
 // one-way edge (TenantPartnerModule does not import MultiTaxiModule), so
 // this does not introduce a module cycle.
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
+// PUSH-FIRST-PARTY-FCM-20261006: only the first-party transport's own
+// bindings below are new. `PASSENGER_PUSH_TRANSPORT`/`PASSENGER_PUSH_PORT`
+// stay exclusively bound to the partner path (unchanged), per D7 — the
+// first-party channel is selected in MultiTaxiService/MultiTaxiRepository,
+// never through that generic single-transport abstraction.
+import { PassengerPushDevicesModule } from "../passenger-push-devices/passenger-push-devices.module";
 import {
   MASKED_CALL_PORT,
   UnavailableMaskedCallPort,
@@ -30,6 +36,12 @@ import {
 import { PassengerPushRepository } from "./passenger-push.repository";
 import { PartnerNotificationTransport } from "./partner-notification.transport";
 import { PartnerNotificationWorker } from "./partner-notification.worker";
+import {
+  FcmHttpV1PushProvider,
+  FIRST_PARTY_PUSH_CONFIG,
+  FIRST_PARTY_PUSH_PROVIDER,
+  firstPartyPushConfigFromEnv,
+} from "./first-party-notification.transport";
 
 @Module({
   imports: [
@@ -39,6 +51,7 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
     ReportingFilingModule,
     ServiceProductModule,
     TenantPartnerModule,
+    PassengerPushDevicesModule,
   ],
   controllers: [MultiTaxiController],
   providers: [
@@ -64,6 +77,15 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
     },
     // Retained for subscription API compatibility, not injected as a receiver.
     PassengerPushRepository,
+    // PUSH-FIRST-PARTY-FCM-20261006: additive, dormant-by-default bindings.
+    // `useValue` reads the flag/project id once at bootstrap, same pattern
+    // as PASSENGER_PUSH_ADAPTER_CONFIG above — this is a static deploy-time
+    // setting, not something expected to change mid-process.
+    { provide: FIRST_PARTY_PUSH_CONFIG, useValue: firstPartyPushConfigFromEnv() },
+    {
+      provide: FIRST_PARTY_PUSH_PROVIDER,
+      useFactory: () => new FcmHttpV1PushProvider(),
+    },
   ],
   exports: [MultiTaxiService],
 })
