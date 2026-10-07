@@ -39,6 +39,38 @@ with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("large.txt", b"0" * (11 * 1024 * 1024))
 ENGINE_LIMIT_PAYLOAD = out.getvalue()
 
+SCANNER_INITIAL_READINESS_MAX_ATTEMPTS = int(os.environ.get("SCANNER_INITIAL_READINESS_MAX_ATTEMPTS", "30"))
+SCANNER_INITIAL_READINESS_DEADLINE_SECONDS = float(os.environ.get("SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", "120"))
+SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS = float(os.environ.get("SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS", "2"))
+
+
+def wait_for_initial_clean_scan(scan_fn, content):
+    """Bounded retry around the very first clean-file scan.
+
+    A cold scanner revision can legitimately answer 503
+    scan_engine_not_ready while freshclam/clamd is still loading its
+    engine before this helper's first request ever lands -- retry THAT
+    exact condition only, up to a finite attempt count and total
+    deadline. Any other status/error (auth403, a non-readiness 503, a
+    malformed body) returns immediately for the caller to assert on; a
+    503 is never treated as success and no negative case is weakened.
+    """
+    deadline = time.monotonic() + SCANNER_INITIAL_READINESS_DEADLINE_SECONDS
+    attempt = 0
+    while True:
+        attempt += 1
+        status, body = scan_fn(content)
+        if status != 503 or not isinstance(body, dict) or body.get("error") != "scan_engine_not_ready":
+            return status, body
+        if attempt >= SCANNER_INITIAL_READINESS_MAX_ATTEMPTS or time.monotonic() >= deadline:
+            raise AssertionError(
+                "Scanner did not become ready for the initial clean scan within "
+                f"{attempt} attempt(s) / {SCANNER_INITIAL_READINESS_DEADLINE_SECONDS}s deadline: "
+                f"last status={status}, body={body}"
+            )
+        time.sleep(SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS)
+
+
 def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
     print(f"Testing scanner at {scanner_url}")
     token = get_identity_token(scanner_url)
@@ -72,7 +104,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert body.get("error") == expected_error, f"Expected error {expected_error}, got {body.get('error')}"
 
     print("Test 1: Clean file")
-    status, body = scan(CLEAN)
+    status, body = wait_for_initial_clean_scan(scan, CLEAN)
     assert status == 200, f"Expected 200, got {status}: {body}"
     assert_receipt(body, CLEAN, expected_verdict="clean")
 

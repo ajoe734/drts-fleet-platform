@@ -226,6 +226,16 @@ def deploy_scanner_service(
             "--concurrency", "1",
             "--min-instances", "0",
             "--max-instances", "1",
+            # Cloud Run throttles CPU to near-zero outside of request
+            # processing by default. freshclam/clamd run as a long-lived
+            # background daemon that must load/refresh its signature
+            # engine (and the gateway's readiness marker) before the
+            # revision is genuinely ready to scan, independent of request
+            # traffic -- without this, that background work can stall
+            # arbitrarily long after the TCP probe already marked the
+            # revision Ready, which is exactly what produced the observed
+            # first-request 503 scan_engine_not_ready.
+            "--no-cpu-throttling",
             # An in-memory volume shared by both containers in this same
             # instance -- the readiness marker clamd writes must actually
             # be visible to the gateway's filesystem checks (R4).
