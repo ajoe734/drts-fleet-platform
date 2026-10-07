@@ -111,6 +111,66 @@ write at or before this candidate's merge reconciliation, because
 `todo`) would otherwise wrongly resume the parent for fresh owner dispatch the
 moment this helper merges, despite none of the chain's prerequisites existing.
 
+## Round 2 — reviewer findings and repair (2026-10-07)
+
+Codex reopened generation `9578b50ccf654edf919877e1e0da9e6e` (candidate
+`a9a765986d94c657fb451c39952a450b9d0f07e7`) with two findings. Both repaired
+in this candidate; no code, workflow, or test file touched — planning
+documents only, per this task's own scope.
+
+**F1 [P1] — deploy-dev dispatch-target loophole (fixed).**
+[SD-DP-20261007-002 §4](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md)
+previously said "against this parent's merged SHA (or a later `origin/dev`
+commit)", which reads as permitting the bare parent merge SHA
+(`f8725220d0ee67e90b185cf0dd339b250bcb3d2b`) alone. Re-verified that SHA
+predates real upload storage entirely:
+
+- `git ls-tree -r f8725220d0ee67e90b185cf0dd339b250bcb3d2b -- apps/api/src/modules/fleet-partner/`
+  lists no `fleet-document-storage.service.ts` (empty output).
+- `git ls-tree -r origin/dev -- apps/api/src/modules/fleet-partner/` lists it;
+  `git log --oneline f8725220d0ee67e90b185cf0dd339b250bcb3d2b..origin/dev --
+  apps/api/src/modules/fleet-partner/fleet-document-storage.service.ts` shows
+  it is introduced by `446228cbc` (`C125-REAL-UPLOAD-STORAGE-20261005`).
+- `git log --oneline origin/dev | grep f8725220d` confirms the parent merge is
+  itself an ancestor of current `origin/dev`; `SR-GCP-ARTIFACT-ACTIVATION-20261004`'s
+  code (`0be15c0ad`) is also already on `origin/dev`, but
+  `SR-GCP-SCANNER-COLD-READINESS-20261007` has no merge on `origin/dev` yet
+  (its own status is still `todo`) — so even `origin/dev` HEAD today does not
+  yet contain the full required chain, which is exactly why dispatch timing
+  and target selection both matter and can't be left to "or later".
+
+Fix applied: §4, the embedded `resolved_parent_next` JSON block, and the
+`PARENT_NEXT` bash variable in SD-DP-20261007-002 now require an **immutable
+full commit SHA or a pinned publish/release ref**, verified by ancestry (log
+reachability of each chain commit) and source check (real, non-stub
+implementation file present) to contain the parent merge **and** all three
+chain fixes, before Supervisor dispatches `deploy-dev.yml`. The bare parent
+merge SHA alone is now explicitly excluded as a valid dispatch target in all
+three places. The parent-table row (§"Source diagnosis and required chain")
+was also updated to cross-reference this, so no copy of the guidance still
+carries the old ambiguous phrasing.
+
+**F2 [P2] — stale `resolved_parent_next` / unfilled publication section (addressed, not owner-writable).**
+Re-ran the exact guard probe this round:
+`AI_NAME=Claude2 bash <active-release>/ai-status.sh note
+CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 "repair-round test write attempt..."`
+→ exit 1, `Dispatched worker cannot mutate a different task` (unchanged from
+round 1; guard still correctly blocks this dispatched owner from writing
+parent/helper canonical metadata directly). Codex is correct that both this
+helper's and the parent's `ai-status.sh show` currently still carry an older,
+unrelated message (from a prior bootstrap/IAM/scanner-login round, not this
+decision) in their `resolved_parent_next` / `next` fields — that is stale
+content to be overwritten, not a missing field (`resolved_parent_status` is
+already correctly `blocked` and is not being claimed absent). This is exactly
+the gap the "Canonical routing write limitation and operator action" section
+above already scopes to Supervisor: Supervisor must run the command block in
+SD-DP-20261007-002 §"Parent disposition and acceptance" (now carrying the F1
+fix's tightened dispatch-target wording) to overwrite both fields with the
+current itemized chain text, before or at this candidate's merge
+reconciliation. Owner readback evidence will be appended here once that write
+lands and is visible via `ai-status.sh show` on both tasks; it cannot be
+captured earlier because the write has not happened yet as of this handoff.
+
 ## Publication and final checks
 
 (to be completed after commit/push, below)

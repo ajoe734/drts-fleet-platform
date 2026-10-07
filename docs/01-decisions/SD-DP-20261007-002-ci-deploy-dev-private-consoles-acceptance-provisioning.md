@@ -55,7 +55,7 @@ is not yet backed by a provisioned GCS bucket and ClamAV scanner.
 | `SR-GCP-SCANNER-COLD-READINESS-20261007`                | `todo`                                                   | Must land a cold-start/bounded-readiness fix for the private ClamAV scanner's CPU/startup contract in `operations/deployment/provision-dev-artifact-backends.py` / `operations/verification/verify-dev-artifact-backends.py`, with its own exact-SHA review, CI and merge, before any hosted retest. Latest `next`: an independent counterexample found the current draft's deadline/sleep-budget check lets a late scan finish after its declared deadline; needs a tightened pre-attempt/post-response deadline check before fresh handoff. | Claude / Claude2  |
 | `SR-GCP-ARTIFACT-ACTIVATION-20261004`                   | `blocked` (`depends_on` includes the scanner task above) | Code candidate `0be15c0ad` (PR #2384) already merged and CI-green; remaining `required_acceptance` keys (`private_resources_iam_and_image_provenance`, `genuine_scan_storage_positive_negative`, `shared_dev_provider_activation_readback`) need the scanner fix above, then a real hosted provisioning run whose first clean attempt already returned `503 scan_engine_not_ready` (Cloud Run "ready" ≠ engine ready) — exactly what the scanner task is scoped to repair.                                                                    | Claude / Claude2  |
 | `C125-REAL-UPLOAD-STORAGE-20261005`                     | `blocked`                                                | Needs the real GCS/ClamAV activation above, then its own positive/negative scan, role-ownership and readback verification against the live store, per its own acceptance text. Must not weaken the fail-closed 503 or return fake upload URLs to pass.                                                                                                                                                                                                                                                                                        | Gemini2 / Claude2 |
-| `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005` (this parent) | `blocked`                                                | Items 1 and 3 complete; item 2 (`真實deploy-dev綠燈`) needs a fresh Supervisor-dispatched `deploy-dev.yml` run against the current merged SHA (or later) with the full 16/16 operational-acceptance suite green, once the chain above is live. No defect exists in this parent's own diff.                                                                                                                                                                                                                                                    | Claude2 / Codex   |
+| `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005` (this parent) | `blocked`                                                | Items 1 and 3 complete; item 2 (`真實deploy-dev綠燈`) needs a fresh Supervisor-dispatched `deploy-dev.yml` run against an immutable full SHA/pinned ref verified to contain the parent merge plus the scanner, artifact-activation, and upload-storage chain fixes (not the bare parent merge SHA alone — see §4 below), with the full 16/16 operational-acceptance suite green, once the chain above is live. No defect exists in this parent's own diff.                                                                                                                                                                                                                                                    | Claude2 / Codex   |
 
 Production/contract sources read for this table: `ai-status.sh show` on all
 four tasks above (fresh, 2026-10-07); `.github/workflows/deploy-dev.yml`
@@ -86,9 +86,28 @@ unprovisioned `DOCUMENT_ARTIFACT_STORE` fail-closed default.
    (reviewer Claude2) verifies real upload/scan/readback on
    `C125-REAL-UPLOAD-STORAGE-20261005` once (b) is live.
 4. **After (a)–(c) above land:** Supervisor dispatches `deploy-dev.yml`
-   against this parent's merged SHA (or a later `origin/dev` commit) and
-   records the full 16/16 operational-acceptance result as `真實deploy-dev綠燈`
-   evidence. No new code is implied by this decision on the parent itself.
+   against an **immutable full commit SHA (or a publish/release ref pinned to
+   one)** that is verified, at dispatch time, to contain all of: this
+   parent's merged fix (`f8725220d0ee67e90b185cf0dd339b250bcb3d2b`), the
+   scanner cold-readiness fix from (a), the artifact-activation code from (b),
+   and the real-upload-storage code from (c) — with ancestry evidence (e.g.
+   `git log --oneline <parent_merge>..<selected_sha>` showing each chain
+   commit, or `git merge-base --is-ancestor <each_chain_sha> <selected_sha>`)
+   and source evidence (confirming the real, non-stub implementation file for
+   each, e.g. `apps/api/src/modules/fleet-partner/fleet-document-storage.service.ts`,
+   exists at that SHA via `git ls-tree`) recorded before the run. The bare
+   parent merge SHA alone is **not** a valid dispatch target: it predates the
+   real upload-storage implementation entirely (re-verified 2026-10-07 —
+   `git ls-tree -r f8725220d0ee67e90b185cf0dd339b250bcb3d2b -- apps/api/src/modules/fleet-partner/`
+   has no `fleet-document-storage.service.ts`; that file only lands via
+   `446228cbc` on `origin/dev`), so dispatching against it cannot validate the
+   delivered chain and must not be offered as an alternative. `deploy-dev.yml`
+   checks out the selected `source_ref` verbatim for build/deploy/acceptance
+   (see `.github/workflows/deploy-dev.yml:383-385,632-634,1788-1790`), so an
+   under-scoped ref silently rolls back the required implementation instead of
+   testing it. Records the full 16/16 operational-acceptance result as
+   `真實deploy-dev綠燈` evidence. No new code is implied by this decision on
+   the parent itself.
 
 ## Parent disposition and acceptance
 
@@ -104,7 +123,7 @@ Before this helper merges, canonical helper metadata must contain:
 {
   "resolved_parent_status": "blocked",
   "resolved_parent_waiting_for": "Claude2",
-  "resolved_parent_next": "SD-DP-20261007-002 confirms no product/contract ambiguity. required_acceptance items 1 and 3 (identity-token wiring; same-SHA CI green + independent Codex review) remain fully evidenced on candidate 13656eb14818edc0c9ed85358d360e2fa588c764 / merge f8725220d0ee67e90b185cf0dd339b250bcb3d2b. The sole open item, 真實deploy-dev綠燈, waits on: SR-GCP-SCANNER-COLD-READINESS-20261007 (todo, Claude/Claude2) lands its cold-start/bounded-readiness fix -> unblocks SR-GCP-ARTIFACT-ACTIVATION-20261004 (blocked, Claude/Claude2) to complete real GCS/IAM/ClamAV-scanner activation (private_resources_iam_and_image_provenance, genuine_scan_storage_positive_negative, shared_dev_provider_activation_readback) -> unblocks C125-REAL-UPLOAD-STORAGE-20261005 (blocked, Gemini2/Claude2) to verify real upload/scan/readback -> only then should Supervisor dispatch a fresh deploy-dev.yml run and confirm the full 16/16 operational-acceptance suite (not health-only) before recording 真實deploy-dev綠燈. Do not reopen this parent's own candidate; its diff is not the cause of the upload-url/scanner gap."
+  "resolved_parent_next": "SD-DP-20261007-002 confirms no product/contract ambiguity. required_acceptance items 1 and 3 (identity-token wiring; same-SHA CI green + independent Codex review) remain fully evidenced on candidate 13656eb14818edc0c9ed85358d360e2fa588c764 / merge f8725220d0ee67e90b185cf0dd339b250bcb3d2b. The sole open item, 真實deploy-dev綠燈, waits on: SR-GCP-SCANNER-COLD-READINESS-20261007 (todo, Claude/Claude2) lands its cold-start/bounded-readiness fix -> unblocks SR-GCP-ARTIFACT-ACTIVATION-20261004 (blocked, Claude/Claude2) to complete real GCS/IAM/ClamAV-scanner activation (private_resources_iam_and_image_provenance, genuine_scan_storage_positive_negative, shared_dev_provider_activation_readback) -> unblocks C125-REAL-UPLOAD-STORAGE-20261005 (blocked, Gemini2/Claude2) to verify real upload/scan/readback -> only then should Supervisor dispatch a fresh deploy-dev.yml run and confirm the full 16/16 operational-acceptance suite (not health-only) before recording 真實deploy-dev綠燈. Dispatch target must be an immutable full commit SHA (or a publish/release ref pinned to one) verified by ancestry (git log/merge-base showing each chain commit reachable) and source check (real non-stub fleet-document-storage.service.ts present) to contain the parent merge plus all three chain fixes; the bare parent merge SHA f8725220d0ee67e90b185cf0dd339b250bcb3d2b alone is not a valid dispatch target because it predates real upload storage (no fleet-document-storage.service.ts until 446228cbc on origin/dev). Do not reopen this parent's own candidate; its diff is not the cause of the upload-url/scanner gap."
 }
 ```
 
@@ -121,7 +140,7 @@ existing yet.
 STATUS_CLI=/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-d4cb3eb62a8d/tools/development-orchestrator/bin/ai-status.sh
 HELPER_ID=CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION
 PARENT_ID=CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005
-PARENT_NEXT='SD-DP-20261007-002 confirms no product/contract ambiguity. required_acceptance items 1 and 3 remain fully evidenced on candidate 13656eb14818edc0c9ed85358d360e2fa588c764 / merge f8725220d0ee67e90b185cf0dd339b250bcb3d2b. The sole open item, 真實deploy-dev綠燈, waits on: SR-GCP-SCANNER-COLD-READINESS-20261007 lands its cold-start/bounded-readiness fix -> unblocks SR-GCP-ARTIFACT-ACTIVATION-20261004 real GCS/IAM/ClamAV-scanner activation -> unblocks C125-REAL-UPLOAD-STORAGE-20261005 real upload/scan/readback verification -> then Supervisor dispatches a fresh deploy-dev.yml run and confirms the full 16/16 operational-acceptance suite before recording 真實deploy-dev綠燈. Do not reopen this parent'\''s own candidate.'
+PARENT_NEXT='SD-DP-20261007-002 confirms no product/contract ambiguity. required_acceptance items 1 and 3 remain fully evidenced on candidate 13656eb14818edc0c9ed85358d360e2fa588c764 / merge f8725220d0ee67e90b185cf0dd339b250bcb3d2b. The sole open item, 真實deploy-dev綠燈, waits on: SR-GCP-SCANNER-COLD-READINESS-20261007 lands its cold-start/bounded-readiness fix -> unblocks SR-GCP-ARTIFACT-ACTIVATION-20261004 real GCS/IAM/ClamAV-scanner activation -> unblocks C125-REAL-UPLOAD-STORAGE-20261005 real upload/scan/readback verification -> then Supervisor dispatches a fresh deploy-dev.yml run against an immutable full SHA (or pinned publish/release ref) verified by ancestry+source check to contain the parent merge plus all three chain fixes, and confirms the full 16/16 operational-acceptance suite before recording 真實deploy-dev綠燈. The bare parent merge SHA f8725220d0ee67e90b185cf0dd339b250bcb3d2b alone is not a valid dispatch target (predates real upload storage; no fleet-document-storage.service.ts until 446228cbc on origin/dev). Do not reopen this parent'\''s own candidate.'
 AI_NAME=Supervisor TASK_METADATA_JSON="$(jq -cn --arg next "$PARENT_NEXT" '{resolved_parent_status:"blocked",resolved_parent_waiting_for:"Claude2",resolved_parent_next:$next}')" \
   bash "$STATUS_CLI" assign "$HELPER_ID" Claude2 Codex
 AI_NAME=Supervisor bash "$STATUS_CLI" note "$PARENT_ID" "$PARENT_NEXT"
