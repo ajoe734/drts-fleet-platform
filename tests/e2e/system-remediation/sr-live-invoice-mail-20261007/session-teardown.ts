@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateTarget } from "./preflight";
+import { validateTarget } from "../sr-live-mail-001/preflight";
 
 export async function teardown(
   env: Record<string, string | undefined>,

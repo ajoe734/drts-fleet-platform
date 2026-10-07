@@ -26,8 +26,11 @@ import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { validateTarget, verifyDeployedCandidate } from "./preflight";
-import { googleAssertionSource } from "./fresh-assertion";
+import {
+  validateTarget,
+  verifyDeployedCandidate,
+} from "../sr-live-mail-001/preflight";
+import { googleAssertionSource } from "../sr-live-mail-001/fresh-assertion";
 
 export class MailSessionInputError extends Error {}
 export class AssertionReplayError extends Error {}
@@ -121,7 +124,8 @@ export function validateMailSessionInputs(
       "DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID",
     ),
     stepUpActionId:
-      env.DRTS_LIVE_INVOICE_MAIL_STEP_UP_ACTION_ID?.trim() || "tenant:users:create",
+      env.DRTS_LIVE_INVOICE_MAIL_STEP_UP_ACTION_ID?.trim() ||
+      "tenant:users:create",
     gcpProjectId: requireString(env.DEV_GCP_PROJECT_ID, "DEV_GCP_PROJECT_ID"),
   };
 }

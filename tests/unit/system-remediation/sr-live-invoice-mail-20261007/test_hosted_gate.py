@@ -23,7 +23,19 @@ class HostedGateTest(unittest.TestCase):
         self.env = {key: 'success' for key in ('DEPLOYMENT_GUARD_OUTCOME', 'SESSION_GUARD_OUTCOME', 'INSTALL_OUTCOME', 'PREFLIGHT_OUTCOME', 'RESOURCES_OUTCOME', 'SESSIONS_OUTCOME', 'RUNNER_OUTCOME', 'TEARDOWN_OUTCOME')}
         self.env.update(CANDIDATE_SHA=SHA, WORKFLOW_SHA=SHA, BASE_SHA='b' * 40)
         self.evidence = {'candidateSha': SHA, 'headSha': SHA, 'status': 'passed', 'exitCode': 0,
-                         'unimplementedLiveSurfaces': [], 'errors': [], 'httpCalls': [{'statusCode': 201}],
+                         'unimplementedLiveSurfaces': [], 'errors': [], 
+                         'mailboxEvidence': {'matched_content': True},
+                         'httpCalls': [
+                             {'path': 'tenant/billing/profile'},
+                             {'path': '/api/tenant/invoices/1', 'method': 'GET'},
+                             {'path': 'artifactUrl'},
+                             {'idempotency': True},
+                             {'path': '/api/tenant/invoices/1/mail', 'method': 'GET'},
+                             {'scenario': 'read_only'},
+                             {'scenario': 'wrong_tenant'},
+                             {'scenario': 'non_allowlisted'},
+                             {'scenario': 'intentional_resend'}
+                         ],
                          'trackedResources': [{'type': 'provider_receipt', 'id': 'test'}]}
         self.provider = {'candidate_sha': SHA, 'alias_revision_fresh': True}
 

@@ -96,7 +96,9 @@ jobs:
           python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py
           python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
       - name: Verify live mail Python unit tests
-        run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
+        run: |
+          python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
+          python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: filter

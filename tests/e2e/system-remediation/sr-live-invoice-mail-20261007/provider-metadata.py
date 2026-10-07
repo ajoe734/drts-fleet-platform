@@ -56,7 +56,7 @@ def main():
                 "revision": revision["metadata"]["name"], "revision_created_at": created,
                 "alias_revision_fresh": True, "secret_references": refs,
                 "observed_at": datetime.now(timezone.utc).isoformat()}
-    path = Path(".artifacts/live-mail-acceptance/evidence-provider.json")
+    path = Path(".artifacts/live-invoice-mail-acceptance/evidence-provider.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(evidence, indent=2) + "\n")
 
