@@ -80,9 +80,11 @@ import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
   MultiTaxiRepository,
+  type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
 } from "./multi-taxi.repository";
+import { resolveNonPartnerChannelOutcome } from "./passenger-notification-channel-router";
 import {
   InjectPassengerPushPort,
   type PassengerPushPort,
@@ -1006,7 +1008,7 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ): Promise<PassengerPushDeliveryOutcome> {
     if (this.passengerPushPort?.transportMode === "partner_webhook") {
-      return this.deliverPartnerNotification(record.outboxId, requestId);
+      return this.deliverRoutedPassengerNotification(record, requestId);
     }
     const attemptCount = record.attemptCount + 1;
     const attemptedAt = new Date();
@@ -1257,6 +1259,95 @@ export class MultiTaxiService implements OnModuleInit {
       });
       if (!persisted.recorded)
         throw new Error("Partner notification fence lost");
+    } catch (error) {
+      throw new PassengerPushPersistenceUnknownError(outboxId, error);
+    }
+    return outcome;
+  }
+
+  /**
+   * PUSH-CHANNEL-ROUTER-20261006 D2/D7 — the per-order channel decision
+   * point. A partner route resolves exactly as before (unchanged
+   * `deliverPartnerNotification`); every other resolution (ambiguous, no
+   * channel at all, or the dormant first-party skeleton) gets a terminal
+   * typed outcome here instead of falling into the generic `route_missing`
+   * that `PartnerNotificationTransport` would otherwise report for an order
+   * with no partner route.
+   */
+  private async deliverRoutedPassengerNotification(
+    record: ConsumerNotificationOutboxRecord,
+    requestId?: string,
+  ): Promise<PassengerPushDeliveryOutcome> {
+    const resolution =
+      await this.repository!.resolvePassengerNotificationChannel(
+        record.orderId,
+      );
+    if (resolution.channel === "partner_webhook") {
+      return this.deliverPartnerNotification(record.outboxId, requestId);
+    }
+    return this.deliverNonPartnerChannelOutcome(
+      record.outboxId,
+      resolution.channel,
+    );
+  }
+
+  /**
+   * D3/D6 — seals a row that resolved to `ambiguous`, `none`, or the dormant
+   * `first_party_app` skeleton. Shares the exact same claim/fence/receipt
+   * transaction as the partner path (D7: one retry owner for every
+   * channel) so a concurrent or restarted caller cannot double-seal the
+   * same row, and so a row already sealed here is never reclaimed by
+   * `listDuePartnerNotifications` again (its `channelRouting.retryDisposition`
+   * is never `automatic`).
+   */
+  private async deliverNonPartnerChannelOutcome(
+    outboxId: string,
+    channel: "first_party_app" | "ambiguous" | "none",
+  ): Promise<PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata> {
+    const claim = await this.repository!.claimPartnerNotification(
+      outboxId,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (!claim) throw new PassengerPushClaimConflictError(outboxId);
+    const { record, fenceToken } = claim;
+    const decision = resolveNonPartnerChannelOutcome(channel);
+    const channelMetadata: PassengerNotificationChannelMetadata = {
+      resolvedChannel: channel,
+      deliveryTarget: null,
+      deliveryStage: null,
+      retryDisposition: decision.retryDisposition,
+      failureReason: decision.failureReason,
+      receiptId: null,
+      downstreamStatus: "unknown",
+      expiresAt: null,
+    };
+    const outcome = {
+      ...channelMetadata,
+      outboxId,
+      status: "failed" as const,
+      result: decision.result,
+      attemptCount: record.attemptCount,
+      nextAttemptAt: new Date().toISOString(),
+      deliveredAt: null,
+      providerName: null,
+    };
+    try {
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: null,
+        providerMessageRef: null,
+        providerAckState:
+          outcome.result === "provider_not_configured"
+            ? "provider_not_configured"
+            : "provider_rejected",
+        deliveryOutcome: outcome,
+        channelMetadata,
+      });
+      if (!persisted.recorded)
+        throw new Error("Passenger notification channel fence lost");
     } catch (error) {
       throw new PassengerPushPersistenceUnknownError(outboxId, error);
     }
