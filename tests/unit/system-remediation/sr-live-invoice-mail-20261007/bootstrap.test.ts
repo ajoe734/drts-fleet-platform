@@ -108,6 +108,7 @@ describe('F1 bootstrap and teardown adapter', () => {
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID: "10000000-0000-0000-0000-000000000902",
       DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID: "10000000-0000-0000-0000-000000000203",
       DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID: "10000000-0000-0000-0000-000000000903",
+      DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST: "billing+invoice@company.com",
       GITHUB_ACTIONS: "true",
       GITHUB_ENV: "/tmp/env",
     };
@@ -134,7 +135,8 @@ describe('F1 bootstrap and teardown adapter', () => {
         const token = authHeader ? authHeader.split(' ')[1] : '';
         const ctx = tokensMap[token] || { tenant_id: '', actor_id: '' };
         const role = ctx.actor_id === '10000000-0000-0000-0000-000000000902' ? 'tenant_viewer' : 'tenant_admin';
-        return { ok: true, headers: defaultHeaders, json: async () => ({ data: { active: true, identity: { realm: 'tenant', actor_type: 'tenant_admin', actor_id: ctx.actor_id, tenant_id: ctx.tenant_id, roles: [role] } } }) };
+        const scopes = ctx.actor_id === '10000000-0000-0000-0000-000000000902' ? ['tenant:billing:read'] : ['tenant:billing:read', 'tenant:billing:write'];
+        return { ok: true, headers: defaultHeaders, json: async () => ({ data: { active: true, identity: { realm: 'tenant', actor_type: 'tenant_admin', actor_id: ctx.actor_id, tenant_id: ctx.tenant_id, roles: [role], scopes } } }) };
       }
       if (url.includes('identity/step-up-proofs')) {
         return { ok: true, headers: defaultHeaders, json: async () => ({ data: { required: true, step_up_reference: "mock-step-up-ref", action_id: "tenant:users:create" } }) };

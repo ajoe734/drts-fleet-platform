@@ -26,7 +26,6 @@ import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
 import { writeFileSync, mkdirSync } from "node:fs";
 import {
   validateTarget,
