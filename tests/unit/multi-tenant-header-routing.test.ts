@@ -5,6 +5,7 @@ import type { UpdateTenantNotificationsCommand } from "@drts/contracts";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { BillingSettlementController } from "../../apps/api/src/modules/billing-settlement/billing-settlement.controller";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
+import { financeIdentity } from "./invoice-mail-20261004/fixtures";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
@@ -27,7 +28,7 @@ function getErrorCode(error: unknown) {
 }
 
 describe("multi-tenant header controller routing", () => {
-  it("requires x-tenant-id for tenant billing endpoints", () => {
+  it("rejects tenant billing selectors without authenticated identity", () => {
     const billingSettlementService = {
       getTenantBillingProfile: vi.fn(),
     } as unknown as BillingSettlementService;
@@ -42,13 +43,13 @@ describe("multi-tenant header controller routing", () => {
       thrown = error;
     }
 
-    expect(getErrorCode(thrown)).toBe("TENANT_ID_REQUIRED");
+    expect(getErrorCode(thrown)).toBe("INVOICE_ACCESS_DENIED");
     expect(
       billingSettlementService.getTenantBillingProfile,
     ).not.toHaveBeenCalled();
   });
 
-  it("forwards a trimmed x-tenant-id through tenant billing endpoints", async () => {
+  it("forwards a matching trimmed selector with a legitimate tenant finance identity", async () => {
     const billingSettlementService = {
       getTenantBillingProfile: vi.fn(() => ({
         tenantId: "tenant-alpha",
@@ -63,7 +64,7 @@ describe("multi-tenant header controller routing", () => {
         tenantId: "tenant-alpha",
         status: "issued",
       })),
-      listTenantInvoicesRuntime: vi.fn(() => ({
+      listTenantInvoicesFresh: vi.fn(() => ({
         items: [
           {
             invoiceId: "inv-tenant-alpha-001",
@@ -83,7 +84,7 @@ describe("multi-tenant header controller routing", () => {
           source: "live",
         },
       })),
-      getTenantInvoice: vi.fn(() => ({
+      getTenantInvoiceFresh: vi.fn(() => ({
         invoiceId: "inv-tenant-alpha-001",
         tenantId: "tenant-alpha",
       })),
@@ -106,28 +107,34 @@ describe("multi-tenant header controller routing", () => {
       periodEnd: "2026-04-30T23:59:59Z",
     };
 
+    const identity = { ...financeIdentity, tenantId: "tenant-alpha" };
     const profileEnvelope = controller.getTenantBillingProfile(
       headerTenantId,
       requestId,
+      identity,
     );
-    const updateEnvelope = controller.updateTenantBillingProfile(
+    const updateEnvelope = await controller.updateTenantBillingProfile(
       profileCommand,
       headerTenantId,
       requestId,
+      identity,
     );
     const generateEnvelope = await controller.generateTenantInvoice(
       invoiceCommand,
       headerTenantId,
       requestId,
+      identity,
     );
-    const listEnvelope = controller.listTenantInvoices(
+    const listEnvelope = await controller.listTenantInvoices(
       headerTenantId,
       requestId,
+      identity,
     );
-    const invoiceEnvelope = controller.getTenantInvoice(
+    const invoiceEnvelope = await controller.getTenantInvoice(
       "inv-tenant-alpha-001",
       headerTenantId,
       requestId,
+      identity,
     );
 
     expect(
@@ -142,9 +149,9 @@ describe("multi-tenant header controller routing", () => {
       requestId,
     );
     expect(
-      billingSettlementService.listTenantInvoicesRuntime,
+      billingSettlementService.listTenantInvoicesFresh,
     ).toHaveBeenCalledWith("tenant-alpha");
-    expect(billingSettlementService.getTenantInvoice).toHaveBeenCalledWith(
+    expect(billingSettlementService.getTenantInvoiceFresh).toHaveBeenCalledWith(
       "tenant-alpha",
       "inv-tenant-alpha-001",
     );

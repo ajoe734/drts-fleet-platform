@@ -1,9 +1,14 @@
 import { Module } from "@nestjs/common";
 
-import { DatabaseModule } from "../../common/db";
+import { DatabaseModule, DatabaseService } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { ControlledDownloadModule } from "../controlled-download/controlled-download.module";
+import { InvoiceMailController } from "./invoice-mail.controller";
+import { InvoiceMailService } from "./invoice-mail.service";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
+import { PostgresMailOutbox } from "../notification-delivery/postgres-mail-outbox";
+import { createMailTransportFromEnv } from "../notification-delivery/smtp-mail.transport";
 import { BillingSettlementRepository } from "./billing-settlement.repository";
 import { BillingSettlementController } from "./billing-settlement.controller";
 import { BillingSettlementService } from "./billing-settlement.service";
@@ -38,10 +43,43 @@ import {
     // by the controller that answers the signed link pointing at it.
     ControlledDownloadModule,
   ],
-  controllers: [BillingSettlementController, RemittanceProofDownloadController],
+  controllers: [
+    BillingSettlementController,
+    RemittanceProofDownloadController,
+    InvoiceMailController,
+  ],
   providers: [
     BillingSettlementService,
     BillingSettlementRepository,
+    {
+      provide: InvoiceMailService,
+      inject: [BillingSettlementRepository, DatabaseService],
+      useFactory: (
+        repository: BillingSettlementRepository,
+        database: DatabaseService,
+      ) => {
+        // Same PostgreSQL outbox and lock as the existing hosted mail drain.
+        const outbox =
+          database.isEnabled() &&
+          process.env.NOTIFICATION_OUTBOX_TYPE?.trim() === "postgres"
+            ? new PostgresMailOutbox(database)
+            : null;
+        return new InvoiceMailService(
+          repository,
+          outbox,
+          outbox
+            ? new NotificationDeliveryService(
+                outbox,
+                createMailTransportFromEnv(process.env),
+              )
+            : null,
+          {
+            fromEmail: process.env.NOTIFICATION_FROM_EMAIL,
+            portalOrigin: process.env.INVOICE_MAIL_PORTAL_ORIGIN,
+          },
+        );
+      },
+    },
     PlatformManualPaymentRecoveryPort,
     // retry_capture remains unavailable (no PSP/issuer is integrated); see
     // PlatformManualPaymentRecoveryPort for the exact confirmed boundary.

@@ -59,6 +59,126 @@ function buildValidProductionEnv(): Record<string, string> {
   };
 }
 
+function buildGoogleOidcEnv(environment: string): Record<string, string> {
+  const env: Record<string, string> = {
+    ...buildValidProductionEnv(),
+    APP_ENV: environment,
+    OIDC_ISSUER: "https://accounts.google.com",
+    OIDC_CLIENT_ID: "drts-startup-test.apps.googleusercontent.com",
+    OIDC_AUTHORIZATION_ENDPOINT: "https://accounts.google.com/o/oauth2/v2/auth",
+    OIDC_TOKEN_ENDPOINT: "https://oauth2.googleapis.com/token",
+    OIDC_JWKS_URI: "https://www.googleapis.com/oauth2/v3/certs",
+  };
+  delete env.TENANT_OIDC_ISSUER;
+  delete env.TENANT_OIDC_AUDIENCE;
+  delete env.TENANT_OIDC_JWT_SECRET;
+  return env;
+}
+
+// ENTRY-TENANT-GOOGLE-OIDC-20261005: exercise the real startup validator;
+// no server, provider HTTP request, or authentication-policy mock is needed.
+describe.each(["staging", "production"])(
+  "Google OIDC startup in %s",
+  (environment) => {
+    it("accepts the rotating Google JWKS provider without legacy tenant static credentials", () => {
+      const report = buildAuthStartupConfigReport(
+        buildGoogleOidcEnv(environment),
+      );
+
+      expect(report.environment).toBe(environment);
+      expect(report.isStrictEnvironment).toBe(true);
+      expect(report.issues).toEqual([]);
+      expect(report.valid).toBe(true);
+    });
+
+    it("still rejects a missing Google client ID", () => {
+      const env = buildGoogleOidcEnv(environment);
+      delete env.OIDC_CLIENT_ID;
+      const report = buildAuthStartupConfigReport(env);
+
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({
+          control: "OIDC_CLIENT_ID",
+          code: "MISSING_CONTROL",
+        }),
+      );
+    });
+
+    it("accepts the verifier's default Google JWKS endpoint", () => {
+      const env = buildGoogleOidcEnv(environment);
+      delete env.OIDC_JWKS_URI;
+      expect(buildAuthStartupConfigReport(env).issues).toEqual([]);
+    });
+
+    it("rejects an insecure Google JWKS override even with a legacy static key", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.OIDC_JWKS_URI = "http://www.googleapis.com/oauth2/v3/certs";
+      env.TENANT_OIDC_JWT_SECRET = VALID_STRONG_SECRET;
+      const report = buildAuthStartupConfigReport(env);
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({
+          control: "OIDC_JWKS_URI",
+          code: "UNSAFE_VALUE",
+        }),
+      );
+    });
+
+    it("does not bypass a non-Google tenant override's verification requirements", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.TENANT_OIDC_ISSUER = "https://tenant-idp.drts.internal";
+      const report = buildAuthStartupConfigReport(env);
+      expect(report.valid).toBe(false);
+      expect(report.issues.map((issue) => issue.control)).toEqual([
+        "TENANT_OIDC_AUDIENCE",
+        "TENANT_OIDC_JWT_PUBLIC_KEY / TENANT_OIDC_JWT_SECRET",
+      ]);
+    });
+
+    it("rejects a wildcard tenant audience instead of falling back to the Google client", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.TENANT_OIDC_AUDIENCE = "*";
+      const report = buildAuthStartupConfigReport(env);
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({
+          control: "TENANT_OIDC_AUDIENCE",
+          code: "UNSAFE_VALUE",
+        }),
+      );
+    });
+
+    it("still rejects mock authentication with the Google provider configured", () => {
+      const env = buildGoogleOidcEnv(environment);
+      env.OIDC_MOCK_MODE = "true";
+      const report = buildAuthStartupConfigReport(env);
+
+      expect(report.valid).toBe(false);
+      expect(report.issues).toContainEqual(
+        expect.objectContaining({
+          control: "OIDC_MOCK_MODE",
+          code: "FORBIDDEN_MODE",
+        }),
+      );
+    });
+  },
+);
+
+it("classifies shared dev Google OIDC by DRTS_ENV despite NODE_ENV=production", () => {
+  const report = buildAuthStartupConfigReport({
+    ...buildGoogleOidcEnv("production"),
+    NODE_ENV: "production",
+    DRTS_ENV: "development",
+    AUTH_MODE: "explicit",
+  });
+
+  expect(report.environment).toBe("local");
+  expect(report.isStrictEnvironment).toBe(false);
+  expect(report.issues).toEqual([]);
+  expect(report.valid).toBe(true);
+});
+
 describe("detectAuthEnvironment", () => {
   it("prefers DRTS_ENV over NODE_ENV for runtime classification", () => {
     expect(
@@ -343,6 +463,49 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
 
     const report = buildAuthStartupConfigReport(env);
     expect(report.issues.some((i) => i.code === "FORBIDDEN_MODE")).toBe(true);
+  });
+
+  it("fails when DRTS_DEV_MFA_WAIVED=true is supplied in production (ENTRY-IAP-WORKFORCE-AUTH-20261005)", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      DRTS_DEV_MFA_WAIVED: "true",
+    };
+
+    expect(() => validateAuthStartupConfig(env)).toThrowError(
+      AuthConfigurationError,
+    );
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(
+      report.issues.some(
+        (i) => i.control === "DRTS_DEV_MFA_WAIVED" && i.code === "FORBIDDEN_MODE",
+      ),
+    ).toBe(true);
+  });
+
+  it("fails when DRTS_DEV_MFA_WAIVED=true is supplied in staging", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      DRTS_ENV: "staging",
+      DRTS_DEV_MFA_WAIVED: "true",
+    };
+
+    const report = buildAuthStartupConfigReport(env);
+    expect(
+      report.issues.some(
+        (i) => i.control === "DRTS_DEV_MFA_WAIVED" && i.code === "FORBIDDEN_MODE",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag DRTS_DEV_MFA_WAIVED outside staging/production", () => {
+    const report = buildAuthStartupConfigReport({
+      DRTS_ENV: "local",
+      DRTS_DEV_MFA_WAIVED: "true",
+    });
+    expect(
+      report.issues.some((i) => i.control === "DRTS_DEV_MFA_WAIVED"),
+    ).toBe(false);
   });
 
   it("fails when mandatory control JWT_ISSUER is missing", () => {

@@ -35,6 +35,9 @@ intended_services=(
   "drts-dev-enterprise-dispatch-web"
   "drts-channel-partner-portal-web"
 )
+optional_services=(
+  "drts-dev-scanner"
+)
 
 inventory_output="$(
   gcloud run services list \
@@ -44,8 +47,14 @@ inventory_output="$(
     --format='value(metadata.name)'
 )"
 
+# Filter out optional services from actual for strict comparison
+actual_filtered="$inventory_output"
+for opt in "${optional_services[@]}"; do
+  actual_filtered=$(printf '%s\n' "$actual_filtered" | grep -v "^${opt}$" || true)
+done
+
 actual_sorted="$(
-  printf '%s\n' "$inventory_output" |
+  printf '%s\n' "$actual_filtered" |
     sed '/^[[:space:]]*$/d' |
     LC_ALL=C sort
 )"
@@ -66,7 +75,7 @@ if [[ "$actual_sorted" != "$expected_sorted" ]]; then
       <(printf '%s\n' "$actual_sorted")
   )"
 
-  echo "Cloud Run inventory does not exactly match the 9 active services plus ${retired_service}; refusing deletion." >&2
+  echo "Cloud Run inventory does not exactly match the intended active services plus ${retired_service}; refusing deletion." >&2
   if [[ -n "$missing" ]]; then
     echo "Missing services:" >&2
     printf '%s\n' "$missing" >&2

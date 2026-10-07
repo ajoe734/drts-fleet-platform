@@ -1109,6 +1109,50 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(chosen, ("codex", "Codex"))
 
+    def test_chair_reviewer_skips_lane_banned_by_zero_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "ai-status.json").write_text('{"agents": [{"name": "Pi"}, {"name": "Codex"}], "tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "pi": {"id": "pi", "display_name": "Pi", "provider": "pi"},
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "paths": {
+                    "event_queue": str(root / "event-queue.jsonl"),
+                    "status_file": str(root / "ai-status.json"),
+                },
+                "ready_dispatcher": {
+                    "active_worker_statuses": [],
+                    "max_tasks_per_agent_by_lane": {"pi": 0, "codex": 2},
+                },
+            }
+            status = {"agents": [{"name": "Pi"}, {"name": "Codex"}], "tasks": []}
+            provider_report = {
+                "agent_adapters": {
+                    "pi": {"supported": True, "can_auto_deliver": True},
+                    "codex": {"supported": True, "can_auto_deliver": True},
+                }
+            }
+
+            # Every rotation position must skip the banned lane, not just the first.
+            chosen = []
+            for rotation_index in range(2):
+                state = {
+                    "workers": {},
+                    "queue": {"events": {}},
+                    "provider_pauses": {},
+                    "chair_review": {"rotation_index": rotation_index},
+                }
+                chosen.append(supervisor.choose_chair_reviewer(config, state, status, provider_report))
+                chosen.append(
+                    supervisor.choose_chair_reviewer(
+                        config, state, status, provider_report, allow_primary_work_fallback=True
+                    )
+                )
+
+        self.assertEqual(chosen, [("codex", "Codex")] * 4)
 
     def test_urgent_chair_review_can_recover_busy_lane_when_capacity_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

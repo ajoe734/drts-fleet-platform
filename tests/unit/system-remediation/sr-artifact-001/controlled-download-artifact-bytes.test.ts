@@ -74,18 +74,18 @@ async function drain(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-function codeOf(call: () => unknown): string {
+async function codeOf(call: () => unknown): Promise<string> {
   try {
-    call();
+    await call();
   } catch (error) {
     return (error as ApiRequestError).code;
   }
   throw new Error("expected the call to throw");
 }
 
-function statusOf(call: () => unknown): number {
+async function statusOf(call: () => unknown): Promise<number> {
   try {
-    call();
+    await call();
   } catch (error) {
     return (error as ApiRequestError).getStatus();
   }
@@ -96,7 +96,7 @@ describe("controlled download serves real bytes for materialised artifacts", () 
   it("returns the exact bytes and correct MIME type for an existing tenant invoice, with a computable sha256", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const bytes = Buffer.from("%PDF-1.4 tenant invoice bytes", "utf8");
-    const record = store.put({
+    const record = await store.put({
       kind: "tenant-invoice",
       subjectId: "invoice-42",
       mimeType: "application/pdf",
@@ -108,10 +108,15 @@ describe("controlled download serves real bytes for materialised artifacts", () 
       issue("tenant-invoice", "invoice-42", record.sha256).downloadUrl,
     );
 
-    const file = resolve(controller, "tenant-invoice", "invoice-42", params);
+    const file = await resolve(
+      controller,
+      "tenant-invoice",
+      "invoice-42",
+      params,
+    );
     expect(file).toHaveProperty("getStream");
 
-    const streamable = file as StreamableFileLike;
+    const streamable = file as unknown as StreamableFileLike;
     const returnedBytes = await drain(streamable.getStream());
 
     expect(returnedBytes.equals(bytes)).toBe(true);
@@ -122,7 +127,7 @@ describe("controlled download serves real bytes for materialised artifacts", () 
   it("returns the exact bytes for an existing placard", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const bytes = Buffer.from("placard render bytes");
-    const record = store.put({
+    const record = await store.put({
       kind: "placard",
       subjectId: "placard-7",
       mimeType: "application/pdf",
@@ -134,16 +139,16 @@ describe("controlled download serves real bytes for materialised artifacts", () 
       issue("placard", "placard-7", record.sha256).downloadUrl,
     );
 
-    const streamable = resolve(
+    const streamable = (await resolve(
       controller,
       "placard",
       "placard-7",
       params,
-    ) as StreamableFileLike;
+    )) as unknown as StreamableFileLike;
     expect((await drain(streamable.getStream())).equals(bytes)).toBe(true);
   });
 
-  it("still fails explicitly for a kind/subjectId that was never materialised", () => {
+  it("still fails explicitly for a kind/subjectId that was never materialised", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const controller = new ControlledDownloadController(store);
     const params = paramsOf(
@@ -152,16 +157,16 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     );
 
     expect(
-      codeOf(() =>
+      await codeOf(() =>
         resolve(controller, "tenant-invoice", "invoice-does-not-exist", params),
       ),
     ).toBe("ARTIFACT_NOT_MATERIALISED");
   });
 
-  it("rejects an expired link even though the artifact exists", () => {
+  it("rejects an expired link even though the artifact exists", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const bytes = Buffer.from("report bytes");
-    const record = store.put({
+    const record = await store.put({
       kind: "report",
       subjectId: "report-1",
       mimeType: "application/pdf",
@@ -176,19 +181,19 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     );
 
     expect(
-      codeOf(() => resolve(controller, "report", "report-1", params)),
+      await codeOf(() => resolve(controller, "report", "report-1", params)),
     ).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
   });
 
-  it("rejects a tampered link (subject swapped after signing) even though both subjects exist", () => {
+  it("rejects a tampered link (subject swapped after signing) even though both subjects exist", async () => {
     const store = new InMemoryDocumentArtifactStore();
-    const recordA = store.put({
+    const recordA = await store.put({
       kind: "tenant-invoice",
       subjectId: "invoice-A",
       mimeType: "application/pdf",
       bytes: Buffer.from("invoice A"),
     });
-    store.put({
+    await store.put({
       kind: "tenant-invoice",
       subjectId: "invoice-B",
       mimeType: "application/pdf",
@@ -200,13 +205,15 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     );
 
     expect(
-      codeOf(() => resolve(controller, "tenant-invoice", "invoice-B", params)),
+      await codeOf(() =>
+        resolve(controller, "tenant-invoice", "invoice-B", params),
+      ),
     ).toBe("CONTROLLED_DOWNLOAD_SIGNATURE_INVALID");
   });
 
-  it("rejects cross-kind (cross-scope) access: a valid link for one kind cannot read another kind's artifact at the same subjectId", () => {
+  it("rejects cross-kind (cross-scope) access: a valid link for one kind cannot read another kind's artifact at the same subjectId", async () => {
     const store = new InMemoryDocumentArtifactStore();
-    store.put({
+    await store.put({
       kind: "placard",
       subjectId: "shared-id",
       mimeType: "application/pdf",
@@ -221,13 +228,15 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     );
 
     expect(
-      codeOf(() => resolve(controller, "tenant-invoice", "shared-id", params)),
+      await codeOf(() =>
+        resolve(controller, "tenant-invoice", "shared-id", params),
+      ),
     ).toBe("ARTIFACT_NOT_MATERIALISED");
   });
 
-  it("rejects a verified, unexpired link whose manifest hash no longer matches the stored artifact", () => {
+  it("rejects a verified, unexpired link whose manifest hash no longer matches the stored artifact", async () => {
     const store = new InMemoryDocumentArtifactStore();
-    store.put({
+    await store.put({
       kind: "placard",
       subjectId: "placard-9",
       mimeType: "application/pdf",
@@ -243,17 +252,17 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     );
 
     expect(
-      codeOf(() => resolve(controller, "placard", "placard-9", params)),
+      await codeOf(() => resolve(controller, "placard", "placard-9", params)),
     ).toBe("CONTROLLED_DOWNLOAD_CONTENT_MISMATCH");
     expect(
-      statusOf(() => resolve(controller, "placard", "placard-9", params)),
+      await statusOf(() => resolve(controller, "placard", "placard-9", params)),
     ).toBe(409);
   });
 
   it("reissuing a URL for the same artifact does not change the bytes served", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const bytes = Buffer.from("stable invoice bytes across reissue");
-    const record = store.put({
+    const record = await store.put({
       kind: "tenant-invoice",
       subjectId: "invoice-stable",
       mimeType: "application/pdf",
@@ -274,18 +283,18 @@ describe("controlled download serves real bytes for materialised artifacts", () 
       { createdAt: new Date(Date.now() + 1_000).toISOString() },
     ).downloadUrl;
 
-    const first = resolve(
+    const first = (await resolve(
       controller,
       "tenant-invoice",
       "invoice-stable",
       paramsOf(firstLink),
-    ) as StreamableFileLike;
-    const second = resolve(
+    )) as unknown as StreamableFileLike;
+    const second = (await resolve(
       controller,
       "tenant-invoice",
       "invoice-stable",
       paramsOf(secondLink),
-    ) as StreamableFileLike;
+    )) as unknown as StreamableFileLike;
 
     const firstBytes = await drain(first.getStream());
     const secondBytes = await drain(second.getStream());
@@ -293,14 +302,16 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     expect(secondBytes.equals(bytes)).toBe(true);
   });
 
-  it("falls back to its own local store when constructed with no arguments, preserving prior behaviour", () => {
+  it("falls back to its own local store when constructed with no arguments, preserving prior behaviour", async () => {
     const controller = new ControlledDownloadController();
     const params = paramsOf(
       issue("tenant-invoice", "invoice-1", "e3b0c44298fc1c14").downloadUrl,
     );
 
     expect(
-      codeOf(() => resolve(controller, "tenant-invoice", "invoice-1", params)),
+      await codeOf(() =>
+        resolve(controller, "tenant-invoice", "invoice-1", params),
+      ),
     ).toBe("ARTIFACT_NOT_MATERIALISED");
   });
 });

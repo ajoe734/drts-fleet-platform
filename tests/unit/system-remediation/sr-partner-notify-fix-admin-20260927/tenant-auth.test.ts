@@ -3,8 +3,8 @@ import { issueControlPlaneRequestAuth } from "../../../../packages/control-plane
 import jwt from "jsonwebtoken";
 
 describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () => {
-  it("injects assumeTenantId as x-tenant-id in bootstrap mode", () => {
-    const auth = issueControlPlaneRequestAuth({
+  it("injects assumeTenantId as x-tenant-id in bootstrap mode", async () => {
+    const auth = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       headers: {
         "x-goog-authenticated-user-email":
@@ -17,8 +17,8 @@ describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () 
     expect(auth.identity.tenantId).toBe("t-test-tenant-id");
   });
 
-  it("injects assumeTenantId as x-tenant-id in JWT mode", () => {
-    const auth = issueControlPlaneRequestAuth({
+  it("injects assumeTenantId as x-tenant-id in JWT mode", async () => {
+    const auth = await issueControlPlaneRequestAuth({
       actorType: "platform_admin",
       headers: {
         "x-goog-authenticated-user-email":
@@ -36,8 +36,8 @@ describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () 
     expect(decoded.tenantId).toBe("t-test-tenant-id");
   });
 
-  it("fails when IAP assertion is forged or unverified in strict mode", () => {
-    expect(() => {
+  it("fails when IAP assertion is forged or unverified in strict mode", async () => {
+    await expect(
       issueControlPlaneRequestAuth({
         actorType: "platform_admin",
         headers: {
@@ -46,19 +46,19 @@ describe("SR-PARTNER-NOTIFY-FIX-ADMIN-20260927 tenant auth proxy authority", () 
         strictIapMode: true,
         jwtSecret: "test-secret-123",
         assumeTenantId: "t-test-tenant-id",
-      });
-    }).toThrow(/verification failed/);
+      }),
+    ).rejects.toThrow(/verification failed/);
   });
 
-  it("fails when no verified user email is available in strict mode", () => {
-    expect(() => {
+  it("fails when no verified user email is available in strict mode", async () => {
+    await expect(
       issueControlPlaneRequestAuth({
         actorType: "platform_admin",
         headers: {},
         strictIapMode: true,
         jwtSecret: "test-secret-123",
         assumeTenantId: "t-test-tenant-id",
-      });
-    }).toThrow(/requires a valid x-goog-iap-jwt-assertion header/);
+      }),
+    ).rejects.toThrow(/requires a valid x-goog-iap-jwt-assertion header/);
   });
 });

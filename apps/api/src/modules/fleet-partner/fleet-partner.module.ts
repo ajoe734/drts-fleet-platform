@@ -1,3 +1,5 @@
+import { FleetDocumentStorageService } from "./fleet-document-storage.service";
+import { ControlledDownloadModule } from "../controlled-download/controlled-download.module";
 import { Module } from "@nestjs/common";
 
 import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
@@ -20,6 +22,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
 
 @Module({
   imports: [
+    ControlledDownloadModule,
     DatabaseModule,
     DriverAcademyModule,
     BillingSettlementModule,
@@ -31,6 +34,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
   ],
   controllers: [FleetPartnerController],
   providers: [
+    FleetDocumentStorageService,
     FleetPartnerService,
     FleetPartnerCaseService,
     FleetPartnerRepository,

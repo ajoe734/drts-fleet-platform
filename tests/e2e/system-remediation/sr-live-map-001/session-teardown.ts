@@ -16,6 +16,7 @@ import {
 } from "./session-bootstrap";
 
 import { revokeMapInvitation } from "./session-cleanup";
+import assert from "node:assert/strict";
 
 type TeardownDeps = Pick<
   BootstrapDeps,
@@ -35,6 +36,17 @@ export async function teardownMapSessions(env: LiveEnv, deps: TeardownDeps) {
     revoked: false,
   };
   try {
+    if (!env.DRTS_LIVE_MAP_INVITE_CODE) {
+      // An earlier gate/observer/isolation failure cannot have created a
+      // driver invitation. Do not mint credentials or call the API to clean
+      // up nothing. An attempted mutation with lost recovery data still fails.
+      assert(!env.DRTS_LIVE_MAP_INVITATION_ATTEMPTED);
+      assert(!env.DRTS_LIVE_MAP_DRIVER_SESSION_TOKEN);
+      assert(!env.DRTS_LIVE_MAP_DRIVER_DEVICE_ID);
+      evidence.recovery = "not-required";
+      evidence.status = "passed";
+      return;
+    }
     const registrationCode = required(env, "DRTS_LIVE_MAP_INVITE_CODE");
     await verifyLiveDeployment(env, deps.fetch, () => {});
     const request = createMapSessionRequest(config, deps.fetch);

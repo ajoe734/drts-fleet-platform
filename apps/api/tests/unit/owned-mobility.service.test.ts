@@ -39,7 +39,6 @@ function defaultReservationWindowEnd(offsetHours = 3): string {
   return new Date(Date.now() + offsetHours * 3600_000).toISOString();
 }
 
-
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 const DEFAULT_VEHICLE_LICENSE_TYPES: Record<string, string> = {
   "veh-demo-001": "multi_purpose_taxi",
@@ -3936,6 +3935,126 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it.each([false, true])(
+    "generates one trip_cancelled outbox only for multi_taxi_direct (persistence=%s)",
+    async (persisted) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+      const tx = {};
+      const repository = {
+        isEnabled: () => true,
+        persistChanges: vi.fn(async () => undefined),
+        persistOrderWorkflow: vi.fn(async () => undefined),
+        withTransaction: vi.fn(
+          async (work: (tx: unknown) => Promise<unknown>) => work(tx),
+        ),
+        reportPersistenceFailure: vi.fn(),
+      };
+      const { service } = createOwnedMobilityService({
+        repository: persisted ? repository : undefined,
+        candidates: [],
+        serviceProductOverrides: {
+          serviceProductType: "taxi_reservation",
+          displayName: "Multi-taxi reservation",
+          timing: "reservation",
+          active: true,
+          defaultBillingMode: "meter",
+          defaultProofRequirements: [],
+        },
+      });
+
+      const tenantBooking = service.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
+          pickup: { address: "Pickup" },
+          dropoff: { address: "Dropoff" },
+          passenger: { name: "Rider Tenant", phone: "0912000000" },
+        },
+        "tenant-demo-001",
+      );
+      await service.cancelOwnedOrder(tenantBooking.orderId, {
+        reason: "Cancel tenant",
+      });
+
+      // Ensure no outbox was created for tenant booking cancellation
+      const outboxAfterTenant = (service as any).consumerNotificationOutbox;
+      expect(outboxAfterTenant).toHaveLength(0);
+
+      const authorization = {
+        authorizationId: "auth-mtx-001",
+        operatorId: "operator-001",
+        authorityCode: "TPE-MTX-001",
+        businessPlanVersion: "2026.1",
+        status: "approved" as const,
+        serviceAreaCodes: ["TPE"],
+        activeFareVersionId: "fare-001",
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+        effectiveUntil: "2027-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const partnerBooking = service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: "pm-token-001",
+        },
+        authorization,
+      );
+      await service.cancelOwnedOrder(partnerBooking.orderId, {
+        reason: "Cancel partner",
+      });
+      const outboxAfterPartner = (service as any).consumerNotificationOutbox;
+      expect(outboxAfterPartner).toHaveLength(1);
+      expect(outboxAfterPartner[0].eventType).toBe("trip_cancelled");
+      expect(outboxAfterPartner[0].payload).toEqual({
+        cancelReason: "passenger_cancelled",
+      });
+      expect(service.getOrder(partnerBooking.orderId).cancelReason).toBe(
+        "Cancel partner",
+      );
+      if (persisted) {
+        expect(repository.persistOrderWorkflow).toHaveBeenLastCalledWith(
+          tx,
+          expect.objectContaining({
+            orders: [
+              expect.objectContaining({
+                orderId: partnerBooking.orderId,
+                status: "cancelled",
+              }),
+            ],
+            consumerNotificationOutbox: [outboxAfterPartner[0]],
+          }),
+        );
+        expect(repository.persistOrderWorkflow).toHaveBeenCalledWith(
+          tx,
+          expect.objectContaining({
+            orders: [
+              expect.objectContaining({
+                orderId: tenantBooking.orderId,
+                status: "cancelled",
+              }),
+            ],
+            consumerNotificationOutbox: [],
+          }),
+        );
+      }
+      await expect(
+        service.cancelOwnedOrder(partnerBooking.orderId, {
+          reason: "Retry cancellation",
+        }),
+      ).rejects.toMatchObject({ code: "ORDER_NOT_CANCELABLE" });
+      expect((service as any).consumerNotificationOutbox).toEqual(
+        outboxAfterPartner,
+      );
+    },
+  );
+
   it("moves trips into proof_pending when signoff is missing", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -7343,5 +7462,238 @@ describe("UV-EXEC-004: owned-order UoW / CAS transaction primitives", () => {
     ).rejects.toThrow("connection reset");
 
     expect(service.getOrder(seededOrder.orderId).status).toBe(beforeStatus);
+  });
+});
+
+describe("OwnedMobilityService arrival and ETA producers", () => {
+  it("duplicate arrivedPickup call produces only one driver_arrived outbox row", async () => {
+    const persistedChanges: any[] = [];
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async (changes) => {
+        persistedChanges.push(changes);
+      }),
+      withTransaction: vi.fn(async (work) => work({})),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new OwnedMobilityService(
+      {} as any, // regulatoryRegistryService
+      { recordAuditLog: vi.fn() } as any, // auditNotificationService
+      {} as any, // callcenterService
+      {
+        appendDispatchTraceLog: vi.fn(),
+        emitOpsEvent: vi.fn(),
+        notifyPartnerOfSystemEvent: vi.fn(),
+        publishTaskUpdated: vi.fn(),
+      } as any, // taskEventsService
+      {} as any, // opsDispatchEventsService
+      repository, // ownedMobilityRepository
+      { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
+    );
+
+    // inject state directly
+    const orderId = "order-arv-1";
+    const taskId = "task-arv-1";
+    service["orders"] = [
+      buildOrderFixture({
+        orderId,
+        status: "enroute_pickup",
+      }),
+    ] as any;
+    service["driverTasks"] = [
+      {
+        taskId,
+        orderId,
+        status: "enroute_pickup",
+      },
+    ] as any;
+
+    // Call first time
+    try {
+      await service.arrivedPickup(taskId, {
+        arrivedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+    expect(persistedChanges).toHaveLength(1);
+    expect(persistedChanges[0].consumerNotificationOutbox).toHaveLength(1);
+    expect(persistedChanges[0].consumerNotificationOutbox[0].eventType).toBe(
+      "driver_arrived",
+    );
+
+    // Call second time
+    await service.arrivedPickup(taskId, {
+      arrivedAt: new Date().toISOString(),
+    });
+
+    // The second call shouldn't trigger another persistChanges with outbox
+    expect(persistedChanges).toHaveLength(1);
+    expect(service["driverTasks"][0].status).toBe("arrived_pickup");
+  });
+
+  it("updateDriverTaskEta respects the debounce threshold (>=3min)", async () => {
+    const persistedChanges: any[] = [];
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async (changes) => {
+        persistedChanges.push(changes);
+      }),
+      withTransaction: vi.fn(async (work) => work({})),
+      reportPersistenceFailure: vi.fn(),
+    } as any;
+
+    const service = new OwnedMobilityService(
+      {} as any, // regulatoryRegistryService
+      { recordAuditLog: vi.fn() } as any, // auditNotificationService
+      {} as any, // callcenterService
+      {
+        appendDispatchTraceLog: vi.fn(),
+        emitOpsEvent: vi.fn(),
+        notifyPartnerOfSystemEvent: vi.fn(),
+        publishTaskUpdated: vi.fn(),
+      } as any, // taskEventsService
+      {} as any, // opsDispatchEventsService
+      repository, // ownedMobilityRepository
+      { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
+    );
+
+    const orderId = "order-eta-1";
+    const taskId = "task-eta-1";
+    service["orders"] = [
+      buildOrderFixture({
+        orderId,
+        status: "enroute_pickup",
+        etaSnapshot: { etaMinutes: 10, calculatedAt: new Date().toISOString() },
+      }),
+    ] as any;
+    service["driverTasks"] = [
+      {
+        taskId,
+        orderId,
+        status: "enroute_pickup",
+      },
+    ] as any;
+
+    // Small change < 3 minutes
+    await service.updateDriverTaskEta(taskId, 12);
+    expect(persistedChanges).toHaveLength(1);
+    expect(persistedChanges[0].consumerNotificationOutbox).toBeUndefined(); // no outbox for 2 min change
+
+    // Another small change, cumulative diff from 10 is 4 >= 3
+    await service.updateDriverTaskEta(taskId, 14);
+    expect(persistedChanges).toHaveLength(2);
+    expect(persistedChanges[1].consumerNotificationOutbox).toHaveLength(1); // outbox generated
+    expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe(
+      "eta_changed",
+    );
+    expect(
+      persistedChanges[1].consumerNotificationOutbox[0].payload.oldEtaMinutes,
+    ).toBe(10);
+  });
+
+  it("completeTask produces receipt_ready outbox", async () => {
+    let persistedWorkflow: any = null;
+    const repository = {
+      isEnabled: () => true,
+      persistOrderWorkflow: vi.fn(async (tx, changes) => {
+        persistedWorkflow = changes;
+      }),
+      withTransaction: vi.fn(async (work) => work({})),
+      reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(),
+      loadDriverTaskCompletionBundleForUpdate: vi.fn().mockResolvedValue({
+        order: buildOrderFixture({
+          orderId: "order-cmp-1",
+          status: "enroute_dropoff",
+        }),
+        task: {
+          taskId: "task-cmp-1",
+          orderId: "order-cmp-1",
+          assignmentId: "assign-cmp-1",
+          dispatchJobId: "job-1",
+          driverId: "dr-1",
+          vehicleId: "veh-1",
+          status: "on_trip",
+          fare: { amountMinor: 1500, currency: "TWD" },
+        },
+        assignment: {
+          assignmentId: "assign-cmp-1",
+          orderId: "order-cmp-1",
+          driverId: "dr-1",
+          vehicleId: "veh-1",
+          taskId: "task-cmp-1",
+          dispatchJobId: "job-1",
+          status: "accepted",
+        },
+        dispatchJob: {
+          jobId: "job-1",
+          orderId: "order-cmp-1",
+          status: "active",
+        },
+        consumerNotificationOutbox: null,
+      }),
+    } as any;
+
+    const service = new OwnedMobilityService(
+      {} as any, // regulatoryRegistryService
+      { recordAuditLog: vi.fn() } as any, // auditNotificationService
+      { completeCallcenterOrder: vi.fn() } as any, // callcenterService
+      {
+        appendDispatchTraceLog: vi.fn(),
+        emitOpsEvent: vi.fn(),
+        notifyPartnerOfSystemEvent: vi.fn(),
+        publishTaskUpdated: vi.fn(),
+      } as any, // taskEventsService
+      { emitCompletionFailed: vi.fn() } as any, // opsDispatchEventsService
+      repository, // ownedMobilityRepository
+      { publishWebhookEvent: vi.fn() } as any, // tenantPartnerService
+    );
+
+    const orderId = "order-cmp-1";
+    const taskId = "task-cmp-1";
+    const assignmentId = "assign-cmp-1";
+    service["orders"] = [
+      buildOrderFixture({
+        orderId,
+        status: "enroute_dropoff",
+      }),
+    ] as any;
+    service["driverTasks"] = [
+      {
+        taskId,
+        orderId,
+        status: "enroute_dropoff",
+        fare: { amountMinor: 1500, currency: "TWD" },
+      },
+    ] as any;
+    service["dispatchAssignments"] = [
+      {
+        assignmentId,
+        orderId,
+        driverId: "dr-1",
+        taskId,
+        status: "active",
+      },
+    ] as any;
+
+    await service.completeDriverTask(taskId, {
+      completedAt: new Date().toISOString(),
+      fare: { amountMinor: 1500, currency: "TWD" },
+    } as any);
+
+    expect(persistedWorkflow).not.toBeNull();
+    expect(persistedWorkflow.consumerNotificationOutbox).toHaveLength(1);
+    expect(persistedWorkflow.consumerNotificationOutbox[0].eventType).toBe(
+      "receipt_ready",
+    );
+    expect(
+      persistedWorkflow.consumerNotificationOutbox[0].payload,
+    ).toMatchObject({
+      taskId,
+      fareTotal: 1500,
+    });
   });
 });

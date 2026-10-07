@@ -2,6 +2,38 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { MailRunnerConfig } from "./mail-acceptance-runner";
 
+// Python emits only these fixed stages. Do not forward arbitrary subprocess
+// strings, even when they happen to be valid JSON.
+const mailboxFailureStages = new Set([
+  "mailbox_preflight_failed",
+  "mailbox_credentials_failed",
+  "imap_connection_failed",
+  "imap_login_failed",
+  "imap_list_failed",
+  "imap_all_folder_not_found",
+  "imap_all_folder_ambiguous",
+  "imap_select_failed",
+  "imap_search_failed",
+  "imap_fetch_failed",
+  "message_not_found_before_deadline",
+  "content_mismatch",
+  "invitation_acceptance_failed",
+  "mailbox_observation_failed",
+]);
+
+export class MailboxObservationError extends Error {
+  readonly stage: string;
+
+  constructor(stage: unknown) {
+    const safeStage =
+      typeof stage === "string" && mailboxFailureStages.has(stage)
+        ? stage
+        : "mailbox_observation_failed";
+    super(`Authorized mailbox observation failed; stage=${safeStage}.`);
+    this.stage = safeStage;
+  }
+}
+
 /** Credentials and MIME bodies stay inside the stdlib IMAP subprocess. */
 export function observeInvitationMailbox(
   config: MailRunnerConfig,
@@ -40,10 +72,16 @@ export function observeMailbox(
       },
     );
     let output = "";
+    let outputTooLarge = false;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
+      if (outputTooLarge) return;
       output += chunk;
-      if (output.length > 16_384) child.kill();
+      if (output.length > 16_384) {
+        outputTooLarge = true;
+        output = "";
+        child.kill();
+      }
     });
     child.stdin.on("error", () =>
       reject(new Error("Mailbox subprocess input failed")),
@@ -52,8 +90,18 @@ export function observeMailbox(
       reject(new Error("Mailbox subprocess unavailable")),
     );
     child.on("close", (code) => {
-      if (code !== 0)
-        return reject(new Error("Authorized mailbox observation failed"));
+      if (code !== 0 || outputTooLarge) {
+        let stage: unknown;
+        try {
+          const failure = JSON.parse(output) as {
+            error?: { stage?: unknown };
+          };
+          stage = failure?.error?.stage;
+        } catch {
+          // Crashes, signals and malformed output retain the fixed fallback.
+        }
+        return reject(new MailboxObservationError(stage));
+      }
       try {
         const result = JSON.parse(output) as Record<string, unknown>;
         if (

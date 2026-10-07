@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useTranslation } from "../../../lib/i18n";
 import {
   CanvasBanner,
   CanvasCard,
@@ -8,8 +9,14 @@ import {
   CanvasBtn,
   CanvasIcon,
 } from "@drts/ui-web";
-import { FleetActionButton } from "@/components/fleet-action-button";
-import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+import {
+  fleetDocumentRequest,
+  fleetDocumentProxyPath,
+  putFleetDocument,
+  type FleetDocumentUploadIntent,
+} from "../../../lib/fleet-document-upload";
+import { FleetActionButton } from "../../../components/fleet-action-button";
+import { buildFleetTheme } from "../../../lib/fleet-portal-theme";
 import type {
   FleetCaseItem,
   FleetCaseAttachmentRecord,
@@ -25,6 +32,7 @@ export function CaseReplyComposer({
   initialAttachments,
 }: CaseReplyComposerProps) {
   const theme = buildFleetTheme();
+  const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [replyState, setReplyState] = useState<
     "idle" | "submitting" | "sent" | "failed"
@@ -35,65 +43,107 @@ export function CaseReplyComposer({
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const fileInput = useRef<HTMLInputElement>(null);
+  const uploadFiles = useRef(new Map<string, File>());
+  const retryTarget = useRef<string | null>(null);
+
   const isClosed = caseDetail.status === "closed";
   const isPlatform = caseDetail.responsibility === "platform";
 
   const handleDownload = async (attachment: FleetCaseAttachmentRecord) => {
     try {
       setDownloadNotice(`正在獲取「${attachment.name}」的授權下載連結…`);
-      const res = await fetch(
+      const data = await fleetDocumentRequest<{
+        downloadUrl: string;
+        expiresAt: string;
+      }>(
         `/api/fleet-partner/cases/${caseDetail.id}/attachments/${attachment.attachmentId}/read-url`,
       );
-      if (!res.ok) {
-        setDownloadNotice("授權讀取失敗：查無檔案或權限不足");
-        return;
-      }
-      const data = await res.json();
-      if (data?.data?.downloadUrl) {
-        setDownloadNotice(
-          `已核發授權下載連結（有效期至 ${new Date(data.data.expiresAt).toLocaleTimeString()}）`,
-        );
-        window.open(data.data.downloadUrl, "_blank");
-      }
+      setDownloadNotice(
+        `已核發授權下載連結（有效期至 ${new Date(data.expiresAt).toLocaleTimeString()}）`,
+      );
+      window.location.assign(fleetDocumentProxyPath(data.downloadUrl));
     } catch {
       setDownloadNotice("授權回讀失敗：網路錯誤");
     }
   };
 
-  const handleRetryUpload = (attachmentId: string) => {
-    setAttachments((prev) =>
-      prev.map((att) =>
-        att.attachmentId === attachmentId
-          ? { ...att, state: "uploading", pct: 50 }
-          : att,
-      ),
-    );
-    setTimeout(() => {
-      setAttachments((prev) =>
-        prev.map((att) =>
-          att.attachmentId === attachmentId
-            ? { ...att, state: "done", pct: 100 }
-            : att,
+  const uploadAttachment = async (
+    file: File,
+    temporaryId = `upload-${crypto.randomUUID()}`,
+  ) => {
+    uploadFiles.current.set(temporaryId, file);
+    const pending: FleetCaseAttachmentRecord = {
+      attachmentId: temporaryId,
+      caseId: caseDetail.id,
+      fleetPartnerId: caseDetail.fleetPartnerId,
+      name: file.name,
+      size: `${file.size} B`,
+      fileSize: file.size,
+      contentType: file.type || "application/octet-stream",
+      state: "uploading",
+      pct: 0,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: "",
+      objectKey: "",
+    };
+    setAttachments((previous) => [
+      ...previous.filter((item) => item.attachmentId !== temporaryId),
+      pending,
+    ]);
+    setErrorMessage(null);
+    try {
+      const metadata = {
+        fileName: file.name,
+        fileSize: file.size,
+        contentType: pending.contentType,
+      };
+      const intent = await fleetDocumentRequest<
+        FleetDocumentUploadIntent & { attachmentId: string; objectKey: string }
+      >(`/api/fleet-partner/cases/${caseDetail.id}/attachments/upload-url`, {
+        method: "POST",
+        body: JSON.stringify(metadata),
+      });
+      await putFleetDocument(intent, file);
+      const confirmed = await fleetDocumentRequest<FleetCaseAttachmentRecord>(
+        `/api/fleet-partner/cases/${caseDetail.id}/attachments/confirm`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...metadata,
+            attachmentId: intent.attachmentId,
+            objectKey: intent.objectKey,
+          }),
+        },
+      );
+      setAttachments((previous) =>
+        previous.map((item) =>
+          item.attachmentId === temporaryId ? confirmed : item,
         ),
       );
-    }, 800);
+      uploadFiles.current.delete(temporaryId);
+    } catch (error) {
+      setAttachments((previous) =>
+        previous.map((item) =>
+          item.attachmentId === temporaryId ? { ...item, state: "fail" } : item,
+        ),
+      );
+      setErrorMessage(error instanceof Error ? error.message : "附件上傳失敗");
+    }
+  };
+
+  const handleRetryUpload = (attachmentId: string) => {
+    const file = uploadFiles.current.get(attachmentId);
+    if (file) void uploadAttachment(file, attachmentId);
+    else {
+      retryTarget.current = attachmentId;
+      fileInput.current?.click();
+    }
   };
 
   const handleAddAttachment = () => {
-    const newAtt: FleetCaseAttachmentRecord = {
-      attachmentId: `att-new-${Date.now()}`,
-      caseId: caseDetail.id,
-      fleetPartnerId: caseDetail.fleetPartnerId,
-      name: `supplementary_evidence_${Date.now().toString().slice(-4)}.pdf`,
-      size: "350 KB",
-      fileSize: 358400,
-      contentType: "application/pdf",
-      state: "done",
-      uploadedAt: new Date().toISOString(),
-      uploadedBy: "車行負責人",
-      objectKey: `fleet-cases/${caseDetail.id}/supplement.pdf`,
-    };
-    setAttachments((prev) => [...prev, newAtt]);
+    retryTarget.current = null;
+    fileInput.current?.click();
   };
 
   const handleSubmit = async () => {
@@ -105,7 +155,7 @@ export function CaseReplyComposer({
       try {
         const idempotencyKey = `idem-${caseDetail.id}-${Date.now()}`;
         const res = await fetch(
-          `/api/fleet-partner/cases/${caseDetail.id}/reply`,
+          `/control-plane-proxy/fleet-partner/cases/${caseDetail.id}/reply`,
           {
             method: "POST",
             headers: {
@@ -348,20 +398,20 @@ export function CaseReplyComposer({
             file.state === "done"
               ? "success"
               : file.state === "uploading"
-              ? "info"
-              : "danger";
+                ? "info"
+                : "danger";
           const icon =
             file.state === "done"
               ? "check"
               : file.state === "uploading"
-              ? "clock"
-              : "warn";
+                ? "clock"
+                : "warn";
           const label =
             file.state === "done"
               ? "已上傳"
               : file.state === "uploading"
-              ? "上傳中"
-              : "上傳失敗";
+                ? "上傳中"
+                : "上傳失敗";
 
           return (
             <div
@@ -482,6 +532,18 @@ export function CaseReplyComposer({
 
       {!isClosed && !isPlatform && replyState !== "submitting" && (
         <div style={{ marginTop: 10 }}>
+          <input
+            ref={fileInput}
+            type="file"
+            aria-label={t("supply.table.fileName")}
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file)
+                void uploadAttachment(file, retryTarget.current ?? undefined);
+              event.target.value = "";
+            }}
+          />
           <FleetActionButton
             size="xs"
             descriptor={{

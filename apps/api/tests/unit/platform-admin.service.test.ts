@@ -10,6 +10,12 @@ function createService() {
   const platformAdminRepository = {
     persistChanges: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
+    claimPlacardPublish: vi
+      .fn()
+      .mockResolvedValue({ claimed: true, currentRecord: null }),
+    finalizePlacardPublish: vi.fn().mockResolvedValue(true),
+    releasePlacardPublishClaim: vi.fn().mockResolvedValue(true),
+    getPlacardVersionRecord: vi.fn().mockResolvedValue(null),
   };
 
   const service = new PlatformAdminService(
@@ -83,7 +89,7 @@ describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
 });
 
 describe("PlatformAdminService.publishPlacardVersion", () => {
-  it("records the verified publisher actorId in placard publish audit logs", () => {
+  it("records the verified publisher actorId in placard publish audit logs", async () => {
     const { service, auditNotificationService, platformAdminRepository } =
       createService();
     const draftPublicInfo = service.createPublicInfoVersion({
@@ -96,7 +102,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
       effectiveFrom: null,
       effectiveTo: null,
     });
-    const placard = service.generatePlacardVersion(
+    const placard = await service.generatePlacardVersion(
       {
         versionCode: "placard-2026-q4",
         publicInfoVersionId: draftPublicInfo.versionId,
@@ -106,7 +112,7 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
       "req-generate-placard",
     );
 
-    const published = service.publishPlacardVersion(
+    const published = await service.publishPlacardVersion(
       placard.placardVersionId,
       {},
       "req-publish-placard",
@@ -114,11 +120,15 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
     );
 
     expect(published.publishedAt).toEqual(expect.any(String));
-    expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith({
-      placardVersions: [
-        expect.objectContaining({ placardVersionId: placard.placardVersionId }),
-      ],
-    });
+    // Publish commits through the fenced, awaited
+    // `finalizePlacardPublish` path, not the fire-and-forget
+    // `persistChanges` used by other mutations (see R7-followthrough).
+    expect(
+      platformAdminRepository.finalizePlacardPublish,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ placardVersionId: placard.placardVersionId }),
+      expect.any(String),
+    );
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: "req-publish-placard",

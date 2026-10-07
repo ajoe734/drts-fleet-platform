@@ -99,15 +99,16 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
       expect(PARTNER_NOTIFICATION_SCHEMA_VERSION).toBe("1.0");
     });
 
-    it("maps each of the five internal event types to passenger.<name>.v1, unchanged internal names", () => {
+    it("maps each of the six internal event types to passenger.<name>.v1, unchanged internal names", () => {
       expect(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME).toEqual({
         assignment_disclosure_ready: "passenger.assignment_disclosure_ready.v1",
         assignment_replaced: "passenger.assignment_replaced.v1",
         eta_changed: "passenger.eta_changed.v1",
         driver_arrived: "passenger.driver_arrived.v1",
         receipt_ready: "passenger.receipt_ready.v1",
+        trip_cancelled: "passenger.trip_cancelled.v1",
       });
-      expect(PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS).toHaveLength(5);
+      expect(PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS).toHaveLength(6);
       for (const name of Object.values(
         PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME,
       )) {
@@ -115,7 +116,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
       }
     });
 
-    it("keeps the binding-test event distinct and not part of the five real events", () => {
+    it("keeps the binding-test event distinct and not part of the six real events", () => {
       expect(PARTNER_NOTIFICATION_TEST_EXTERNAL_EVENT).toBe(
         "passenger.notification.test.v1",
       );
@@ -468,6 +469,9 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...content.additional_allocations.map((a: any) => a.version),
         ...content.launch_allocations.map((a: any) => a.version),
         ...content.partner_notification_allocations.map((a: any) => a.version),
+        ...(content.voice_application_allocations || []).map(
+          (a: any) => a.version,
+        ),
       ];
       expect(new Set(allVersions).size).toBe(allVersions.length);
     });
@@ -484,7 +488,11 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
       // ROUTE owns V0104; TRANSPORT now owns V0105. The CON task remains
       // allocation-only, while downstream DDL must match its allocation.
       const diskFiles = fs.readdirSync(path.join(repoRoot, "infra/migrations"));
-      for (const alloc of readAllocation().partner_notification_allocations) {
+      const allocation = readAllocation();
+      for (const alloc of [
+        ...allocation.partner_notification_allocations,
+        ...(allocation.voice_application_allocations || []),
+      ]) {
         expect(
           diskFiles.filter((file) => file.startsWith(`${alloc.version}_`)),
         ).toEqual([alloc.migration_filename]);
@@ -499,6 +507,8 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...(content.additional_allocations || []),
         ...(content.launch_allocations || []),
         ...(content.partner_notification_allocations || []),
+        ...(content.voice_application_allocations || []),
+        ...(content.passenger_push_channel_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
