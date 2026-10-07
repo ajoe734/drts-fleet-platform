@@ -684,7 +684,7 @@ describe("F1 bootstrap and teardown adapter", () => {
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456", method: "GET", status: 200 },
         { path: "artifactUrl", method: "GET", status: 200 },
         { path: "wrong_tenant_portal", method: "GET", status: 404, ui_isolated: true, selected_identity: "20000000-0000-0000-0000-000000000789", forbidden_resource: "20000000-0000-0000-0000-000000000456", mutation_count: 0, forbidden_download_observed: false },
-        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false, download_proof: { bytes: 1234, mime: "application/pdf" } },
+        { path: "read_only_portal", method: "GET", status: 200, ui_readonly: true, selected_identity: "20000000-0000-0000-0000-000000000abc", mutation_count: 0, send_disabled: true, forbidden_download_observed: false, download_proof: { matched: true, manifestHash: "a".repeat(64), downloadedHash: "a".repeat(64), downloadedBytes: 12345, contentType: "application/pdf" } },
         { path: "bad_sig_api", method: "GET", status: 403 },
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "normal_send", status: 201, delivery_id: "d1" },
         { path: "/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail", method: "POST", scenario: "idempotent_retry", status: 201, delivery_id: "d1" },

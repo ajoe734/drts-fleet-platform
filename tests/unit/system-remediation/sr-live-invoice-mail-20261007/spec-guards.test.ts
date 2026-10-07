@@ -8,11 +8,22 @@ vi.mock("@playwright/test", () => ({
 import { runInvoiceMailPreflight } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
 
 describe("F2/F4/F6 spec guards", () => {
-  it("throws on invoice fixture mismatch", async () => {
+  it("throws on invoice fixture mismatch (wrong tenant)", async () => {
     const request = {
       get: vi.fn().mockResolvedValue({
         status: () => 200,
-        json: async () => ({ data: { tenantId: "wrong", invoiceId: "wrong" } })
+        json: async () => ({ data: { tenantId: "wrong", invoiceId: "invoice" } })
+      })
+    };
+    const evidenceData = { httpCalls: [], unimplementedLiveSurfaces: [] };
+    await expect(runInvoiceMailPreflight(request, { apiOrigin: "http://test", sessionToken: "token", tenantId: "tenant", authorizedRecipient: "test@test.com", invoiceId: "invoice" }, evidenceData)).rejects.toThrow("Invoice fixture does not belong");
+  });
+
+  it("throws on invoice fixture mismatch (wrong invoice)", async () => {
+    const request = {
+      get: vi.fn().mockResolvedValue({
+        status: () => 200,
+        json: async () => ({ data: { tenantId: "tenant", invoiceId: "wrong" } })
       })
     };
     const evidenceData = { httpCalls: [], unimplementedLiveSurfaces: [] };
@@ -74,12 +85,25 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
     expect(request.post).not.toHaveBeenCalled();
   });
 
-  it("throws on read-only invoice fixture mismatch", async () => {
+  it("throws on read-only invoice fixture mismatch (wrong tenant)", async () => {
     const request = {
       get: vi.fn().mockImplementation(async (url) => {
         if (url.includes("auth/session")) return { status: () => 200, json: async () => ({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
         if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", email: "ro@test.com" } }) };
-        return { status: () => 200, json: async () => ({ data: { tenantId: "wrong", invoiceId: "wrong" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "wrong", invoiceId: "invoice-ro" } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runReadOnlyPreflight(request, { apiOrigin: "http://test", readOnlyToken: "token", readOnlyTenantId: "tenant-ro", readOnlyInvoiceId: "invoice-ro", readOnlyRecipient: "ro@test.com" })).rejects.toThrow("Read-only invoice fixture mismatch");
+    expect(request.post).not.toHaveBeenCalled();
+  });
+
+  it("throws on read-only invoice fixture mismatch (wrong invoice)", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("auth/session")) return { status: () => 200, json: async () => ({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", email: "ro@test.com" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", invoiceId: "wrong" } }) };
       }),
       post: vi.fn()
     };
@@ -111,11 +135,23 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
     expect(request.post).not.toHaveBeenCalled();
   });
 
-  it("throws on non-allowlist invoice fixture mismatch", async () => {
+  it("throws on non-allowlist invoice fixture mismatch (wrong tenant)", async () => {
     const request = {
       get: vi.fn().mockImplementation(async (url) => {
         if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { email: "na@test.com" } }) };
-        return { status: () => 200, json: async () => ({ data: { tenantId: "wrong", invoiceId: "wrong", items: [{invoiceId: "wrong"}] } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "wrong", invoiceId: "invoice-na", items: [{invoiceId: "invoice-na"}] } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runNonAllowlistPreflight(request, { apiOrigin: "http://test", nonAllowlistedToken: "token", nonAllowlistTenantId: "tenant-na", nonAllowlistInvoiceId: "invoice-na", nonAllowlistedRecipient: "na@test.com" }, ["allow.com"])).rejects.toThrow("Non-allowlist invoice fixture mismatch");
+    expect(request.post).not.toHaveBeenCalled();
+  });
+
+  it("throws on non-allowlist invoice fixture mismatch (wrong invoice)", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { email: "na@test.com" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-na", invoiceId: "wrong", items: [{invoiceId: "wrong"}] } }) };
       }),
       post: vi.fn()
     };
@@ -132,5 +168,26 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
       post: vi.fn()
     };
     await expect(runNonAllowlistPreflight(request, { apiOrigin: "http://test", nonAllowlistedToken: "token", nonAllowlistTenantId: "tenant-na", nonAllowlistInvoiceId: "invoice-na", nonAllowlistedRecipient: "na@test.com" }, ["allow.com"])).resolves.toBeUndefined();
+  });
+});
+
+import { verifyInvoiceLinks } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+
+describe("F4/F6 verifyInvoiceLinks regressions", () => {
+  it("passes for repeated same-invoice anchor", () => {
+    const hrefs = [
+      "/invoices?invoiceId=20000000-0000-0000-0000-000000000456",
+      "/invoices?invoiceId=20000000-0000-0000-0000-000000000456",
+      null
+    ];
+    expect(() => verifyInvoiceLinks(hrefs, "20000000-0000-0000-0000-000000000456")).not.toThrow();
+  });
+
+  it("throws when multiple distinct invoice IDs exist", () => {
+    const hrefs = [
+      "/invoices?invoiceId=20000000-0000-0000-0000-000000000456",
+      "/invoices?invoiceId=20000000-0000-0000-0000-000000000789"
+    ];
+    expect(() => verifyInvoiceLinks(hrefs, "20000000-0000-0000-0000-000000000456")).toThrow();
   });
 });

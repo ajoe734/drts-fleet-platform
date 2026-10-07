@@ -130,6 +130,7 @@ export async function runReadOnlyPreflight(request: any, config: any) {
     if (roProfileData.data?.tenantId !== readOnlyTenantId || roProfileData.data?.email !== readOnlyRecipient) {
       throw new Error("Read-only recipient mismatch");
     }
+    return { roInvoiceData };
 }
 
 export async function runNonAllowlistPreflight(request: any, config: any, allowedEntries: string[]) {
@@ -165,6 +166,19 @@ export async function runNonAllowlistPreflight(request: any, config: any, allowe
     if (allowedEntries.includes(negLower) || allowedEntries.includes(negDomain)) {
        throw new Error("Non-allowlist negative fixture mistakenly overlaps with positive allowlist domain/address");
     }
+}
+
+export function verifyInvoiceLinks(hrefs: (string | null)[], expectedId: string) {
+    const seenIds = new Set<string>();
+    for (const href of hrefs) {
+        if (href) {
+            const url = new URL(href, 'http://localhost');
+            const id = url.searchParams.get('invoiceId');
+            if (id) seenIds.add(id);
+        }
+    }
+    expect(seenIds.size).toBe(1);
+    expect(Array.from(seenIds)[0]).toBe(expectedId);
 }
 
 test.describe("Live Invoice Mail Acceptance", () => {
@@ -242,7 +256,8 @@ test.describe("Live Invoice Mail Acceptance", () => {
     (evidenceData as any).readOnlyInvoiceId = readOnlyInvoiceId;
     const readOnlyRecipient = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_RECIPIENT;
     if (readOnlyToken && readOnlyTenantId && readOnlyInvoiceId && readOnlyRecipient) {
-      await runReadOnlyPreflight(request, { apiOrigin, readOnlyToken, readOnlyTenantId, readOnlyInvoiceId, readOnlyRecipient });
+      const { roInvoiceData } = await runReadOnlyPreflight(request, { apiOrigin, readOnlyToken, readOnlyTenantId, readOnlyInvoiceId, readOnlyRecipient });
+      (evidenceData as any).roInvoiceData = roInvoiceData;
 
       const readOnlyResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}/mail`, {
         headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
@@ -557,17 +572,11 @@ test.describe("Live Invoice Mail Acceptance", () => {
         // Assert it's the ONLY invoice in the list
         const invoiceLinks = page.locator('a[href*="/invoices?invoiceId="]');
         const count = await invoiceLinks.count();
-        const seenIds = new Set<string>();
+        const hrefs: (string | null)[] = [];
         for (let i = 0; i < count; i++) {
-            const href = await invoiceLinks.nth(i).getAttribute('href');
-            if (href) {
-                const url = new URL(href, 'http://localhost');
-                const id = url.searchParams.get('invoiceId');
-                if (id) seenIds.add(id);
-            }
+            hrefs.push(await invoiceLinks.nth(i).getAttribute('href'));
         }
-        expect(seenIds.size).toBe(1);
-        expect(Array.from(seenIds)[0]).toBe(nonAllowlistInvoiceId);
+        verifyInvoiceLinks(hrefs, nonAllowlistInvoiceId);
 
         const wtOwnResource = new URL(`/control-plane-proxy/tenant/invoices/${nonAllowlistInvoiceId}`, portalOrigin).href;
         const wtOwnResponse = await page.request.get(wtOwnResource);
@@ -671,19 +680,37 @@ test.describe("Live Invoice Mail Acceptance", () => {
         // Click the actual signed link in the UI and wait for the download
         let roOwnDownloadObservedBytes = 0;
         let roOwnDownloadObservedMime = "";
+        let roDownloadProof: any = null;
         const ownDownloadLink = page.locator(`a[href*="/downloads/tenant-invoice/${readOnlyInvoiceId}"]`).first();
         if (await ownDownloadLink.count() > 0) {
             const ownHref = await ownDownloadLink.getAttribute('href');
             if (ownHref) {
-                const downloadRes = await page.request.get(new URL(ownHref, portalOrigin).href);
-                if (downloadRes.status() === 200) {
-                    const bytes = await downloadRes.body();
-                    roOwnDownloadObservedBytes = bytes.byteLength;
-                    roOwnDownloadObservedMime = downloadRes.headers()['content-type'] || "";
-                    if (bytes.byteLength > 0 && roOwnDownloadObservedMime === 'application/pdf') {
-                        roOwnDownloadObserved = true;
-                    }
-                }
+                const popupResponsePromise = context.waitForEvent('response', (response: any) => response.url().includes(ownHref) && response.status() === 200);
+                await ownDownloadLink.click();
+                const popupResponse = await popupResponsePromise;
+
+                roOwnDownloadObservedMime = popupResponse.headers()['content-type'] || "";
+                expect(roOwnDownloadObservedMime).toBe('application/pdf');
+                expect(popupResponse.headers()['x-drts-candidate-sha']).toBe(candidateSha);
+
+                const bodyBuffer = await popupResponse.body();
+                roOwnDownloadObservedBytes = bodyBuffer.length;
+                expect(roOwnDownloadObservedBytes).toBeGreaterThan(0);
+                expect(bodyBuffer.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+
+                const manifestHash = (evidenceData as any).roInvoiceData?.data?.artifactDownloadMetadata?.manifestHash;
+                expect(manifestHash).toBeTruthy();
+                const downloadedHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
+                expect(downloadedHash).toBe(manifestHash);
+
+                roOwnDownloadObserved = true;
+                roDownloadProof = {
+                  matched: true,
+                  manifestHash: manifestHash,
+                  downloadedHash: downloadedHash,
+                  downloadedBytes: bodyBuffer.length,
+                  contentType: roOwnDownloadObservedMime,
+                };
             }
         }
 
@@ -711,7 +738,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
             mutation_count: mutationCount,
             send_disabled: true,
             forbidden_download_observed: roForbidden_download_observed,
-            download_proof: {
+            download_proof: roDownloadProof || {
                 bytes: roOwnDownloadObservedBytes,
                 mime: roOwnDownloadObservedMime
             }

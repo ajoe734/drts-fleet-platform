@@ -129,3 +129,18 @@ This document records the completion and verification of the live invoice mail E
 - `pnpm exec eslint tests/e2e/system-remediation/sr-live-invoice-mail-20261007 tests/unit/system-remediation/sr-live-invoice-mail-20261007 playwright.live-invoice-mail.config.ts`: exit 0
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: 216fdd13bd856fb09a10df32040b2cb77ef3b82f / Generation: 23716ab874684f4ba4eebd1f558ca79d. Adjacent: 334bf6b32dada090ce72c297b057d96d740b988a)
+
+- **Confirmed source repairs**: Removed nonexistent unsigned wrong-tenant download request; read-only now resolves actual signed portal href, preserving signed query. Reads response bytes/MIME; gate now rejects absent read-only download_proof. Added legal-positive preflight and fixture mismatch zero-send cases for both read-only and non-allowlisted roles.
+- **F3/F5 (P1 REPEATED: required browser download and content/authority verification still bypassed)**: Trigger: legitimate read-only UI renders own signed download link. `live-invoice-mail.spec.ts` says click/wait but never calls click or installs response/download observer. Uses `page.request.get` which is APIRequestContext, not browser interaction. Accepts any nonempty bytes with application/pdf without PDF magic, authoritative hash equality, exact response identity, or candidate runtime header. Gate validates only bytes/mime, so incomplete/contradictory role download proof yields passed. Primary-role checks do not prove separate read-only role boundary. `browser_download_observation` is absent from unresolved surfaces. Expected: read-only browser actually activates authorized UI link, captures completed response/download from correct origin/path, verifies PDF bytes/hash against invoice's metadata and runtime SHA, and binds observed fields to evidence/gate.
+- **F4/F6 (P2 REPEATED: event-boundary regressions and precise handoff evidence incomplete)**: No repeated-same-invoice-anchor vs distinct-invoice-ID regression. No actual role-download success/failure/missing/hash/runtime event regressions. `test_hosted_gate.py` and `bootstrap.test.ts` merely add two-field download_proof to positive fixtures; no new negative proof regressions. New guard fixture-mismatch cases set BOTH tenant and invoice wrong, failing to independently protect each check. Original UAT artifact named an older candidate and didn't accurately identify adjacent review candidate or record this candidate's field-level repair.
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task: PASS 11/11 exit0
+- Node dependency tools (vitest, tsc, eslint) could not execute their suites (MODULE_NOT_FOUND) - local verification limitation, not source failure.
+- `git diff --check HEAD^ HEAD`: clean
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit0
+- Differential source and actual-gate probes: exit0, defects reproduced.
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
