@@ -197,9 +197,10 @@ async function request(
   };
 }
 
-export async function mintTenantAdminSession(
+export async function mintTenantSession(
   config: MailSessionConfig,
   deps: MailSessionFetchDeps,
+  actorType: string = "tenant_admin",
 ): Promise<MintedMailSession> {
   deps.onStage?.("assertion-validation");
   const idToken = deps.readGoogleIdToken().trim();
@@ -220,7 +221,7 @@ export async function mintTenantAdminSession(
       headers: {
         "content-type": "application/json",
         "x-drts-google-id-token": idToken,
-        "x-actor-type": "tenant_admin",
+        "x-actor-type": actorType,
         "x-actor-id": config.actorId,
         "x-realm": "tenant",
         "x-tenant-id": config.tenantId,
@@ -264,14 +265,14 @@ export async function mintTenantAdminSession(
   if (
     session.data?.active !== true ||
     identity?.realm !== "tenant" ||
-    identity?.actor_type !== "tenant_admin" ||
+    identity?.actor_type !== actorType ||
     identity?.actor_id !== config.actorId ||
     identity?.tenant_id !== config.tenantId ||
     !Array.isArray(identity.roles) ||
-    !identity.roles?.includes("tenant_admin")
+    !identity.roles?.includes(actorType)
   ) {
     throw new Error(
-      "Minted tenant_admin session failed live verification via auth/session.",
+      "Minted session failed live verification via auth/session.",
     );
   }
 
@@ -387,37 +388,43 @@ export async function bootstrapMailSession(
     stage = "assertion-configuration";
     const assertions = deps.assertions(config);
     let minted: MintedMailSession | undefined;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      stage = "assertion-mint";
-      const assertion = await assertions.next();
-      try {
-        minted = await mintTenantAdminSession(config, {
-          fetch: deps.fetch,
-          mask: deps.mask,
-          onStage: (value) => {
-            stage = value;
-          },
-          readGoogleIdToken: () => assertion,
-          onSessionIssued: (token) =>
-            deps.appendEnvironment(
-              envPath,
-              `DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN=${token}\n`,
-            ),
-        });
-        break;
-      } catch (error) {
-        // A concurrent dev workflow can consume the first same-second token.
-        // Only this explicit replay rejection permits minting a new assertion.
-        if (!(error instanceof AssertionReplayError)) throw error;
-      }
+
+    async function tryMint(cfg: MailSessionConfig, actType: string) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+            stage = "assertion-mint";
+            const assertion = await assertions.next();
+            try {
+                const res = await mintTenantSession(cfg, {
+                    fetch: deps.fetch,
+                    mask: deps.mask,
+                    onStage: (value) => { stage = value; },
+                    readGoogleIdToken: () => assertion.value || (assertion as any),
+                }, actType);
+                return res;
+            } catch (error) {
+                if (!(error instanceof AssertionReplayError)) throw error;
+            }
+        }
+        throw new Error("Assertion collisions exhausted bounded retries for " + actType);
     }
-    if (!minted)
-      throw new Error("Assertion collisions exhausted bounded retries");
+
+    minted = await tryMint(config, "tenant_admin");
+    deps.onSessionIssued?.(minted.sessionToken);
+    deps.appendEnvironment(envPath, `DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN=${minted.sessionToken}\n`);
     stage = "step-up-export";
-    deps.appendEnvironment(
-      envPath,
-      `DRTS_LIVE_INVOICE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`,
-    );
+    deps.appendEnvironment(envPath, `DRTS_LIVE_INVOICE_MAIL_STEP_UP_REFERENCE=${minted.stepUpReference}\n`);
+
+    if (env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID && env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID) {
+      const roConfig = { ...config, tenantId: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID, actorId: env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID };
+      const roMinted = await tryMint(roConfig, "tenant_viewer");
+      deps.appendEnvironment(envPath, `DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN=${roMinted.sessionToken}\n`);
+    }
+
+    if (env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID && env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID) {
+      const naConfig = { ...config, tenantId: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID, actorId: env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID };
+      const naMinted = await tryMint(naConfig, "tenant_admin");
+      deps.appendEnvironment(envPath, `DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN=${naMinted.sessionToken}\n`);
+    }
 
     stage = "mailbox-read";
     const baseMailbox = deps.readMailbox(config).trim();

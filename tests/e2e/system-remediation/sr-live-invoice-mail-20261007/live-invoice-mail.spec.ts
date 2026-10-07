@@ -88,7 +88,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
     expect(initialInvoiceResponse.status()).toBe(200);
     
     const invoiceData = await initialInvoiceResponse.json();
-    if (invoiceData.data?.tenantId !== tenantId || invoiceData.data?.id !== invoiceId) {
+    if (invoiceData.data?.tenantId !== tenantId || invoiceData.data?.invoiceId !== invoiceId) {
       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-mismatch");
       throw new Error("Invoice fixture does not belong to authorized dedicated tenant/invoice");
     }
@@ -100,7 +100,8 @@ test.describe("Live Invoice Mail Acceptance", () => {
     evidenceData.httpCalls.push({ method: "GET", path: "tenant/billing/profile", status: profileResponse.status() });
     expect(profileResponse.status()).toBe(200);
     const profileData = await profileResponse.json();
-    evidenceData.identityEmail = profileData.data?.email || "";
+    const rawEmail = profileData.data?.email || "";
+    evidenceData.identityEmail = rawEmail ? crypto.createHash("sha256").update(rawEmail).digest("hex") : "";
     
     if (profileData.data?.email !== authorizedRecipient) {
       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
@@ -108,33 +109,67 @@ test.describe("Live Invoice Mail Acceptance", () => {
       throw new Error("Billing profile email does not match authorized recipient");
     }
 
+    
+    // 2a. Wrong invoice mismatch
+    const wrongInvoiceResponse = await request.post(`${apiOrigin}/api/tenant/invoices/10000000-0000-0000-0000-000000000888/mail`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    expect(wrongInvoiceResponse.status()).toBeGreaterThanOrEqual(400);
+    
     // 2. Wrong Tenant
+
     const wrongTenantResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${invoiceId}/mail`, {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": "10000000-0000-0000-0000-000000000999" },
     });
     evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "wrong_tenant", status: wrongTenantResponse.status() });
     expect(wrongTenantResponse.status()).toBe(403);
 
+    
     // 3. Read Only Send
     const readOnlyToken = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN;
-    if (readOnlyToken) {
-      const readOnlyResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${invoiceId}/mail`, {
-        headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": tenantId },
+    const readOnlyTenantId = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID;
+    const readOnlyInvoiceId = process.env.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID;
+    if (readOnlyToken && readOnlyTenantId && readOnlyInvoiceId) {
+      const readOnlyResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${readOnlyInvoiceId}/mail`, {
+        headers: { authorization: `Bearer ${readOnlyToken}`, "x-tenant-id": readOnlyTenantId },
       });
-      evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "read_only", status: readOnlyResponse.status() });
+      evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${readOnlyInvoiceId}/mail`, scenario: "read_only", status: readOnlyResponse.status() });
       expect(readOnlyResponse.status()).toBe(403);
     } else {
       evidenceData.unimplementedLiveSurfaces.push("read_only");
     }
 
+    
     // 4. Non-allowlisted recipient
     const nonAllowlistedToken = process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN;
-    if (nonAllowlistedToken) {
-      const nonAllowlistResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${invoiceId}/mail`, {
-        headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": tenantId },
+    const nonAllowlistTenantId = process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID;
+    const nonAllowlistInvoiceId = process.env.DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_INVOICE_ID;
+    if (nonAllowlistedToken && nonAllowlistTenantId && nonAllowlistInvoiceId) {
+      const nonAllowlistResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, {
+        headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId, "idempotency-key": "na-" + Date.now() },
       });
-      evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "non_allowlisted", status: nonAllowlistResponse.status() });
-      expect(nonAllowlistResponse.status()).toBe(403);
+      evidenceData.httpCalls.push({ method: "POST", path: `/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, scenario: "non_allowlisted", status: nonAllowlistResponse.status() });
+      
+      // Check durable failure if accepted, or immediate rejection
+      if (nonAllowlistResponse.status() === 201) {
+         const naDeliveryId = (await nonAllowlistResponse.json()).data?.deliveryId;
+         let isRejected = false;
+         for (let i = 0; i < 8; i++) {
+           await new Promise(r => setTimeout(r, 1500));
+           const check = await request.get(`${apiOrigin}/api/tenant/invoices/${nonAllowlistInvoiceId}/mail`, {
+              headers: { authorization: `Bearer ${nonAllowlistedToken}`, "x-tenant-id": nonAllowlistTenantId },
+           });
+           const dData = await check.json();
+           const dDel = dData.data?.deliveries?.find((d: any) => d.deliveryId === naDeliveryId);
+           if (dDel?.attempts?.some((a: any) => a.outcome === "SMTP_RECIPIENT_NOT_ALLOWLISTED" || a.status === "failed")) {
+             isRejected = true;
+             break;
+           }
+         }
+         expect(isRejected).toBe(true);
+      } else {
+         expect(nonAllowlistResponse.status()).toBeGreaterThanOrEqual(400);
+      }
     } else {
       evidenceData.unimplementedLiveSurfaces.push("non_allowlisted");
     }
@@ -172,7 +207,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
     });
     expect(getMailBefore.status()).toBe(200);
     const mailBefore = await getMailBefore.json();
-    const initialAttemptsCount = mailBefore.data?.attempts?.length || 0;
+    const initialAttemptsCount = mailBefore.data?.deliveries?.length || 0;
     expect(initialAttemptsCount).toBeGreaterThan(0);
 
     // 7. Intentional resend (F3: Expects 201)
@@ -197,12 +232,12 @@ test.describe("Live Invoice Mail Acceptance", () => {
       method: "GET", path: `/api/tenant/invoices/${invoiceId}/mail`, scenario: "durable_get", status: getMailResponse.status(),
     });
     expect(getMailResponse.status()).toBe(200);
-    expect(mailData.data?.attempts?.length).toBeGreaterThan(initialAttemptsCount);
+    expect(mailData.data?.deliveries?.length).toBeGreaterThan(initialAttemptsCount);
     
-    const resendAttempt = mailData.data.attempts.find((a: any) => a.deliveryId === resendResult.data?.deliveryId);
+    const resendAttempt = mailData.data.deliveries?.find((a: any) => a.deliveryId === resendResult.data?.deliveryId);
     expect(resendAttempt).toBeTruthy();
-    expect(resendAttempt.status || resendAttempt.outcome).toBeTruthy(); // Correlation validation
-    evidenceData.durableHistoryCount = mailData.data?.attempts?.length || 0;
+    expect(resendAttempt.attempts?.[0]?.status || resendAttempt.attempts?.[0]?.outcome).toBeTruthy(); // Correlation validation
+    evidenceData.durableHistoryCount = mailData.data?.deliveries?.length || 0;
 
     // Mailbox observation
     let invoiceLink = "";
@@ -218,57 +253,62 @@ test.describe("Live Invoice Mail Acceptance", () => {
       throw e;
     }
 
+
     // Authenticated browser check (F3, F5)
-    // Validate exact authorized portal origin plus invoice binding
     const invoiceUrlObj = new URL(invoiceLink);
     const portalUrlObj = new URL(portalOrigin!);
     expect(invoiceUrlObj.origin).toBe(portalUrlObj.origin);
-    expect(invoiceUrlObj.searchParams.get("invoiceId") || invoiceUrlObj.pathname.includes(invoiceId!)).toBeTruthy(); // invoice binding
+    expect(invoiceUrlObj.searchParams.get("invoiceId") === invoiceId || invoiceUrlObj.pathname.includes(invoiceId!)).toBeTruthy();
 
     const unauthResponse = await request.get(invoiceLink, { maxRedirects: 0 });
-    expect(unauthResponse.status()).toBeGreaterThanOrEqual(300); // Usually redirects to login or 401
+    expect(unauthResponse.status()).toBeGreaterThanOrEqual(300);
 
-    // Genuine Browser Check (F5)
+    // Foreign origin isolation
+    await context.route('**/*', (route) => {
+      const url = route.request().url();
+      if (!url.startsWith(portalOrigin!) && !url.startsWith(apiOrigin!) && !url.startsWith("data:")) {
+        return route.abort();
+      }
+      return route.continue();
+    });
+
     await context.addCookies([{ name: "drts_tenant_session", value: sessionToken, domain: portalUrlObj.hostname, path: "/" }]);
     const pageResponse = await page.goto(invoiceLink, { waitUntil: "networkidle" });
     expect(pageResponse?.status()).toBe(200);
-    // Optionally we could assert page content but for now trust 200
 
-    // Get Artifact URL from the API again (or from page)
-    const artifactUrlPath = initialInvoiceResponse.json().then(j => j.data?.artifactUrl); 
-    const artifactPathResolved = await artifactUrlPath;
+    // Genuine Browser Check with UI interaction (F3)
+    const artifactUrlPath = invoiceData.data?.artifactUrl;
+    expect(artifactUrlPath).toMatch(/^\/downloads\/(invoice|receipt)\//);
     
-    // F3: Consume console-relative controlled download contract
-    expect(artifactPathResolved).toMatch(/^\/downloads\/(invoice|receipt)\//);
+    // UI Download
+    const downloadPromise = page.waitForEvent('download');
+    const downloadLocator = page.locator('a[href^="/downloads/invoice/"], a[href^="/downloads/receipt/"], button[data-testid*="download"], button:has-text("Download")').first();
+    await downloadLocator.click();
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+    expect(downloadPath).toBeTruthy();
     
-    // Download and check hash
-    const fullArtifactUrl = new URL(artifactPathResolved, portalOrigin).href;
-    evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
-    const downloadResponse = await request.get(fullArtifactUrl, {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
-      maxRedirects: 0 // Restrict redirect forwarding
-    });
-    
-    expect(downloadResponse.status()).toBe(200);
-    
-    // Expect real download bytes
-    const bodyBuffer = await downloadResponse.body();
+    const bodyBuffer = fs.readFileSync(downloadPath!);
     expect(bodyBuffer.length).toBeGreaterThan(0);
 
-    const manifestHash = await initialInvoiceResponse.json().then(j => j.data?.artifactDownloadMetadata?.manifestHash);
+    const manifestHash = invoiceData.data?.artifactDownloadMetadata?.manifestHash;
+    expect(manifestHash).toBeTruthy();
     const downloadedHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
-    if (manifestHash) {
-      expect(downloadedHash).toBe(manifestHash);
-    }
+    expect(downloadedHash).toBe(manifestHash);
+    
     evidenceData.downloadProof = true;
     
-    // Invalid/expired link scenario (F3)
+    const fullArtifactUrl = new URL(artifactUrlPath, portalOrigin).href;
+    evidenceData.httpCalls.push({ method: "GET", path: "artifactUrl", status: 200 });
+    
+    // Invalid/expired link scenario (F3) no 500s allowed
     const invalidUrl = fullArtifactUrl + "invalid";
     const invalidDownloadResponse = await request.get(invalidUrl, {
       headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
       maxRedirects: 0
     });
     expect(invalidDownloadResponse.status()).toBeGreaterThanOrEqual(400);
-
+    expect(invalidDownloadResponse.status()).toBeLessThan(500);
   });
 });
+

@@ -17,7 +17,7 @@ def evaluate(env, evidence, provider):
     
     def get_call(method, path=None, scenario=None):
         for c in http_calls:
-            if c.get("method") == method and (path is None or c.get("path", "").startswith(path)) and (scenario is None or c.get("scenario") == scenario):
+            if c.get("method") == method and (path is None or c.get("path") == path) and (scenario is None or c.get("scenario") == scenario):
                 return c
         return None
 
@@ -25,7 +25,7 @@ def evaluate(env, evidence, provider):
     tenant = evidence.get("tenantId")
     invoice = evidence.get("invoiceId")
     identity = evidence.get("identityEmail")
-    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str))
+    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str) and len(identity) == 64 and "-" in tenant and len(tenant) == 36 and "-" in invoice and len(invoice) == 36)
 
     # Check statuses strictly: no generic checks, validate the exact expected scenarios
     first_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="normal_send")
