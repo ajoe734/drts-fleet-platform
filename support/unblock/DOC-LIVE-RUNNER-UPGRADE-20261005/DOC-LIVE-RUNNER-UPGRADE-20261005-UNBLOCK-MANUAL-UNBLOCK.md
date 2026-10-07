@@ -1,6 +1,7 @@
 # DOC-LIVE-RUNNER-UPGRADE-20261005: remaining acceptance blocker
 
-Task: `DOC-LIVE-RUNNER-UPGRADE-20261005-UNBLOCK-MANUAL-UNBLOCK`  
+Task: `DOC-LIVE-RUNNER-UPGRADE-20261005-UNBLOCK-MANUAL-UNBLOCK`
+
 Owner: Codex; reviewer: Codex2; diagnosis: 2026-10-07 UTC.
 
 ## Disposition
