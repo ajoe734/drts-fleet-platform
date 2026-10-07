@@ -230,6 +230,38 @@ describe("referral embed notification route", () => {
 });
 
 describe("referral route negative cases and replay", () => {
+  it("writes the route for scheduled referral bookings too", async () => {
+    const h = harness();
+    const booking = await h.service.createReferralPassengerBooking(
+      { ...command, scheduledAt: new Date(Date.now() + 7200000).toISOString() },
+      identity,
+    );
+    expect(h.routes.get(booking.orderId)?.partner_user_ref).toBe(
+      h.link.partnerUserRef,
+    );
+    expect(h.sequences.get(booking.orderId)).toBe(1);
+  });
+
+  it("keeps booking successful when the entry disappears at route resolution", async () => {
+    const h = harness();
+    h.links.findByDrtsPassengerId.mockImplementation(async () => {
+      // Booking authorization has already checked the entry; only the later
+      // notification registry lookup fails. Intake authorization stays intact.
+      vi.spyOn(h.tenant, "getPartnerEntry").mockImplementation(() => {
+        throw new Error("entry no longer available");
+      });
+      return h.link;
+    });
+    const booking = await h.service.createReferralPassengerBooking(
+      command,
+      identity,
+    );
+    expect(booking.orderId).toBeTruthy();
+    expect(h.routes.size).toBe(0);
+    expect(h.sequences.size).toBe(0);
+    expect(h.publish).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["missing", "revoked", "lookup-error", "missing-subject"])(
     "%s skips routing without blocking the booking",
     async (mode) => {
