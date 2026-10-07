@@ -64,6 +64,10 @@ def main():
     payload = subprocess.run(["gcloud", "secrets", "versions", "access", allowlist_version, "--secret=drts-dev-smtp-recipient-allowlist", "--project=" + PROJECT], capture_output=True, text=True, check=True).stdout
     if env_path := os.environ.get("GITHUB_ENV"):
         delimiter = "EOF"
+        for entry in payload.split(","):
+            entry_trimmed = entry.strip()
+            if entry_trimmed:
+                print(f"::add-mask::{entry_trimmed}")
         with open(env_path, "a") as f:
             f.write(f"DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST<<{delimiter}\n{payload}\n{delimiter}\n")
     path.write_text(json.dumps(evidence, indent=2) + "\n")

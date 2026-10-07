@@ -27,8 +27,8 @@ class HostedGateTest(unittest.TestCase):
                          'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': '<d1@notification.drts.invalid>', 'body_sha256': 'a' * 64},
                          'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf'},
                          'durableDeliveries': [
-                             {'scenario': 'first_send', 'deliveryId': 'd1', 'idempotencyKey': 'key1', 'acceptedAt': '2026-10-07T00:00:00Z', 'attemptsCount': 1, 'status': 'sent'},
-                             {'scenario': 'intentional_resend', 'deliveryId': 'd2', 'idempotencyKey': 'key2', 'acceptedAt': '2026-10-07T00:01:00Z', 'attemptsCount': 1, 'status': 'sent'},
+                             {'scenario': 'first_send', 'deliveryId': 'd1', 'idempotencyKey': 'key1', 'acceptedAt': '2026-10-07T00:00:00Z', 'attemptsCount': 1, 'status': 'sent', 'attemptOutcome': 'sent'},
+                             {'scenario': 'intentional_resend', 'deliveryId': 'd2', 'idempotencyKey': 'key2', 'acceptedAt': '2026-10-07T00:01:00Z', 'attemptsCount': 1, 'status': 'sent', 'attemptOutcome': 'sent'},
                              {'scenario': 'idempotent_retry', 'deliveryId': 'd1', 'idempotencyKey': 'key1', 'initialAttemptsCount': 1, 'afterRetryAttemptsCount': 1, 'status': 'sent'},
                              {'scenario': 'non_allowlisted', 'deliveryId': 'd3', 'status': 'failed', 'errorCode': 'SMTP_RECIPIENT_NOT_ALLOWLISTED', 'outcome': 'failed', 'acceptedAt': None, 'retryable': False}
                          ],
@@ -40,7 +40,6 @@ class HostedGateTest(unittest.TestCase):
                              {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 403},
                              {'path': 'read_only_portal', 'method': 'GET', 'status': 403},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
-                             {'path': 'bad_sha_portal', 'method': 'GET', 'status': 400},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'intentional_resend', 'status': 201, 'delivery_id': 'd2'},

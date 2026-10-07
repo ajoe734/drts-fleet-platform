@@ -43,7 +43,7 @@ export async function teardown(
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       errors.push(err);
-      sessionResults.push({ key: token.key, status: "failed", error: err.message });
+      sessionResults.push({ key: token.key, status: "failed", error: "cleanup_failed" });
     }
   }
   const artifactsDir = resolve(".artifacts", "live-invoice-mail-acceptance");

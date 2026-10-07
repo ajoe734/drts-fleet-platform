@@ -57,6 +57,7 @@ jobs:
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID: ${{ vars.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID }}
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID: ${{ vars.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_INVOICE_ID }}
       DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID: ${{ vars.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID }}
+      DRTS_LIVE_INVOICE_MAIL_READ_ONLY_RECIPIENT: ${{ vars.DRTS_LIVE_INVOICE_MAIL_READ_ONLY_RECIPIENT }}
       DRTS_LIVE_INVOICE_MAIL_INVITATION_ROLE_CODE: ${{ vars.DRTS_LIVE_INVOICE_MAIL_INVITATION_ROLE_CODE }}
       DRTS_LIVE_INVOICE_MAIL_APPROVAL_REQUEST_ID: ${{ inputs.approval_request_id }}
       DRTS_LIVE_INVOICE_MAIL_EXPIRY_USER_ID: ${{ inputs.expiry_user_id }}
@@ -103,6 +104,7 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v
           pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007
+          pnpm exec tsc -p tests/e2e/system-remediation/sr-live-invoice-mail-20261007/tsconfig.live.json
 
       - name: Verify authorization and deployed SHA before cloud authentication
         id: preflight
@@ -139,6 +141,9 @@ jobs:
           # not an impersonated SA access token requiring a new self-grant.
           DRTS_LIVE_INVOICE_MAIL_WIF_FEDERATED_TOKEN: ${{ steps.auth.outputs.auth_token }}
         run: ./apps/api/node_modules/.bin/tsx --tsconfig tests/e2e/system-remediation/sr-live-invoice-mail-20261007/tsconfig.live.json tests/e2e/system-remediation/sr-live-invoice-mail-20261007/session-bootstrap.ts
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run invitation and optional approval observations
         id: runner

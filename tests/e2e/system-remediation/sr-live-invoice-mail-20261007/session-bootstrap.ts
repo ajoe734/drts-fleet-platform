@@ -397,6 +397,19 @@ export async function bootstrapMailSession(
     stage = "assertion-configuration";
     const assertions = deps.assertions(config);
 
+    const artifactsDir = resolve(".artifacts", "live-invoice-mail-acceptance");
+    mkdirSync(artifactsDir, { recursive: true });
+    const bootstrapEvPath = resolve(artifactsDir, "evidence-bootstrap.json");
+
+    function writeManifest() {
+       writeFileSync(bootstrapEvPath, JSON.stringify({
+          runId: env.GITHUB_RUN_ID,
+          candidateSha: env.DRTS_CANDIDATE_SHA,
+          issued_sessions_count: issuedSessions.length,
+          issued_sessions: issuedSessions
+       }, null, 2));
+    }
+
     async function tryMint(cfg: MailSessionConfig, actType: string, tokenExportKey: string, expRole: string = "tenant_admin", expectedScopes: string[] = [], forbiddenScopes: string[] = []) {
         for (let attempt = 0; attempt < 3; attempt++) {
             stage = "assertion-mint";
@@ -410,6 +423,7 @@ export async function bootstrapMailSession(
                     onSessionIssued: (token) => {
                         deps.appendEnvironment(envPath!, `${tokenExportKey}=${token}\n`);
                         issuedSessions.push(tokenExportKey);
+                        writeManifest();
                         deps.onSessionIssued?.(token, tokenExportKey);
                     }
                 }, actType, expRole, expectedScopes, forbiddenScopes);
@@ -443,27 +457,25 @@ export async function bootstrapMailSession(
     deps.mask(authorizedRecipient);
     stage = "recipient-export";
     const effectiveAllowlist = env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST || "";
-    if (!effectiveAllowlist.split(/[\r\n]+/).includes(authorizedRecipient)) {
+    const allowedEntries = effectiveAllowlist.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const authLower = authorizedRecipient.toLowerCase();
+    const domain = authLower.split("@")[1] || "";
+    if (!allowedEntries.includes(authLower) && !allowedEntries.includes(domain)) {
       throw new Error("Derived recipient is not present in the observed effective allowlist.");
     }
     deps.appendEnvironment(
       envPath,
       `DRTS_LIVE_INVOICE_MAIL_AUTHORIZED_RECIPIENT=${authorizedRecipient}\n`,
     );
+    deps.appendEnvironment(
+      envPath,
+      `DRTS_LIVE_INVOICE_MAIL_READ_ONLY_RECIPIENT=${authorizedRecipient}\n`,
+    );
     // Reserved TLD; production transport must record an allowlist rejection.
     deps.appendEnvironment(
       envPath,
       "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_RECIPIENT=sr-live-invoice-mail-negative@reserved.invalid\n",
     );
-    
-    const artifactsDir = resolve(".artifacts", "live-invoice-mail-acceptance");
-    mkdirSync(artifactsDir, { recursive: true });
-    writeFileSync(resolve(artifactsDir, "evidence-bootstrap.json"), JSON.stringify({
-      runId: env.GITHUB_RUN_ID,
-      candidateSha: env.DRTS_CANDIDATE_SHA,
-      issued_sessions_count: issuedSessions.length,
-      issued_sessions: issuedSessions
-    }, null, 2));
 
   } catch (error) {
     throw new MailBootstrapError(stage, error);

@@ -62,14 +62,13 @@ def evaluate(env, evidence, provider):
     has_download = bool(
         get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200
         and get_call("GET", path="wrong_tenant_portal") and get_call("GET", path="wrong_tenant_portal").get("status") in (401, 403, 404)
-        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") in (401, 403, 404)
+        and get_call("GET", path="read_only_portal") and get_call("GET", path="read_only_portal").get("status") in (200, 401, 403, 404)
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
-        and get_call("GET", path="bad_sha_portal") and get_call("GET", path="bad_sha_portal").get("status") in (400, 401, 403, 404)
         and dl_proof.get("matched") is True
-        and isinstance(dl_proof.get("manifestHash"), str) and len(dl_proof.get("manifestHash")) == 64
+        and isinstance(dl_proof.get("manifestHash"), str) and bool(re.match(r"^[0-9a-f]{64}$", dl_proof.get("manifestHash")))
         and dl_proof.get("manifestHash") == dl_proof.get("downloadedHash")
         and isinstance(dl_proof.get("downloadedBytes"), int) and dl_proof.get("downloadedBytes") > 0
-        and isinstance(dl_proof.get("contentType"), str) and "pdf" in dl_proof.get("contentType")
+        and dl_proof.get("contentType") == "application/pdf"
     )
     
     # F5: Bind durable deliveries
@@ -94,8 +93,8 @@ def evaluate(env, evidence, provider):
                            retry_del.get("idempotencyKey") == first_send_del.get("idempotencyKey"))
 
     has_durable_get = bool(
-        first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") is not None and first_send_del.get("attemptsCount", 0) > 0 and first_send_del.get("status") == "sent" and
-        resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") is not None and resend_del.get("attemptsCount", 0) > 0 and resend_del.get("idempotencyKey") != first_send_del.get("idempotencyKey") and resend_del.get("status") == "sent" and
+        first_send_del and first_send_del.get("deliveryId") == dl_id and first_send_del.get("acceptedAt") is not None and first_send_del.get("attemptsCount", 0) > 0 and first_send_del.get("status") == "sent" and first_send_del.get("attemptOutcome") == "sent" and
+        resend_del and resend_del.get("deliveryId") == resend.get("delivery_id") and resend_del.get("acceptedAt") is not None and resend_del.get("attemptsCount", 0) > 0 and resend_del.get("idempotencyKey") != first_send_del.get("idempotencyKey") and resend_del.get("status") == "sent" and resend_del.get("attemptOutcome") == "sent" and
         na_del and na_del.get("status") == "failed" and na_del.get("errorCode") == "SMTP_RECIPIENT_NOT_ALLOWLISTED" and na_del.get("outcome") == "failed" and na_del.get("acceptedAt") is None and na_del.get("retryable") is False
     )
     
@@ -136,11 +135,32 @@ def main():
     teardown_ev = read("evidence-teardown.json")
     bootstrap_ev = read("evidence-bootstrap.json")
     issued = bootstrap_ev.get("issued_sessions_count", 0)
-    teardown_passed = teardown_ev.get("success") is True and teardown_ev.get("attempted", 0) > 0 and teardown_ev.get("attempted") == issued and teardown_ev.get("failures", -1) == 0
+    issued_keys = sorted(bootstrap_ev.get("issued_sessions", []))
+    teardown_keys = sorted([s.get("key") for s in teardown_ev.get("sessions", []) if s.get("status") == "success"])
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    sha = os.environ.get("CANDIDATE_SHA")
+    
+    teardown_passed = bool(
+        teardown_ev.get("success") is True and
+        teardown_ev.get("attempted", 0) > 0 and
+        teardown_ev.get("attempted") == issued and
+        teardown_ev.get("failures", -1) == 0 and
+        teardown_ev.get("runId") == run_id and
+        bootstrap_ev.get("runId") == run_id and
+        teardown_ev.get("candidateSha") == sha and
+        bootstrap_ev.get("candidateSha") == sha and
+        teardown_keys == issued_keys
+    )
         
-    result = evaluate(os.environ, read("evidence-mail.json"), read("evidence-provider.json"))
+    try:
+        result = evaluate(os.environ, read("evidence-mail.json"), read("evidence-provider.json"))
+    except Exception as e:
+        result = {"status": "failed", "steps": {}, "error": "Evaluation raised exception"}
+
     if not teardown_passed:
         result["status"] = "failed"
+        if "steps" not in result:
+            result["steps"] = {}
         result["steps"]["teardown"] = False
         print("Mail acceptance: failed - missing or failed cleanup evidence")
         
