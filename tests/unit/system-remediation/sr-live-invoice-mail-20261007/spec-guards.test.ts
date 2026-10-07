@@ -74,6 +74,31 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
     expect(request.post).not.toHaveBeenCalled();
   });
 
+  it("throws on read-only invoice fixture mismatch", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("auth/session")) return { status: () => 200, json: async () => ({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", email: "ro@test.com" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "wrong", invoiceId: "wrong" } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runReadOnlyPreflight(request, { apiOrigin: "http://test", readOnlyToken: "token", readOnlyTenantId: "tenant-ro", readOnlyInvoiceId: "invoice-ro", readOnlyRecipient: "ro@test.com" })).rejects.toThrow("Read-only invoice fixture mismatch");
+    expect(request.post).not.toHaveBeenCalled();
+  });
+
+  it("passes legally positive runReadOnlyPreflight case", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("auth/session")) return { status: () => 200, json: async () => ({ data: { identity: { scopes: ["tenant:billing:read"] } } }) };
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", email: "ro@test.com" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-ro", invoiceId: "invoice-ro" } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runReadOnlyPreflight(request, { apiOrigin: "http://test", readOnlyToken: "token", readOnlyTenantId: "tenant-ro", readOnlyInvoiceId: "invoice-ro", readOnlyRecipient: "ro@test.com" })).resolves.toBeUndefined();
+  });
+
   it("throws on non-allowlisted mismatch and performs zero sends", async () => {
     const request = {
       get: vi.fn().mockImplementation(async (url) => {
@@ -84,5 +109,28 @@ describe("F2/F4/F6 Read-only and non-allowlist guards", () => {
     };
     await expect(runNonAllowlistPreflight(request, { apiOrigin: "http://test", nonAllowlistedToken: "token", nonAllowlistTenantId: "tenant-na", nonAllowlistInvoiceId: "invoice-na", nonAllowlistedRecipient: "na@test.com" }, ["allow.com"])).rejects.toThrow("Non-allowlist fixture email does not match reserved negative recipient");
     expect(request.post).not.toHaveBeenCalled();
+  });
+
+  it("throws on non-allowlist invoice fixture mismatch", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { email: "na@test.com" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "wrong", invoiceId: "wrong", items: [{invoiceId: "wrong"}] } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runNonAllowlistPreflight(request, { apiOrigin: "http://test", nonAllowlistedToken: "token", nonAllowlistTenantId: "tenant-na", nonAllowlistInvoiceId: "invoice-na", nonAllowlistedRecipient: "na@test.com" }, ["allow.com"])).rejects.toThrow("Non-allowlist invoice fixture mismatch");
+    expect(request.post).not.toHaveBeenCalled();
+  });
+
+  it("passes legally positive runNonAllowlistPreflight case", async () => {
+    const request = {
+      get: vi.fn().mockImplementation(async (url) => {
+        if (url.includes("billing/profile")) return { status: () => 200, json: async () => ({ data: { email: "na@test.com" } }) };
+        return { status: () => 200, json: async () => ({ data: { tenantId: "tenant-na", invoiceId: "invoice-na", items: [{invoiceId: "invoice-na"}] } }) };
+      }),
+      post: vi.fn()
+    };
+    await expect(runNonAllowlistPreflight(request, { apiOrigin: "http://test", nonAllowlistedToken: "token", nonAllowlistTenantId: "tenant-na", nonAllowlistInvoiceId: "invoice-na", nonAllowlistedRecipient: "na@test.com" }, ["allow.com"])).resolves.toBeUndefined();
   });
 });

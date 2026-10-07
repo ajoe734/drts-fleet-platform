@@ -95,6 +95,9 @@ def evaluate(env, evidence, provider):
         and get_call("GET", path="read_only_portal").get("mutation_count") == 0
         and get_call("GET", path="read_only_portal").get("forbidden_download_observed") is False
         and get_call("GET", path="read_only_portal").get("send_disabled") is True
+        and isinstance(get_call("GET", path="read_only_portal").get("download_proof"), dict)
+        and get_call("GET", path="read_only_portal").get("download_proof").get("bytes", 0) > 0
+        and get_call("GET", path="read_only_portal").get("download_proof").get("mime") == "application/pdf"
         and get_call("GET", path="bad_sig_api") and get_call("GET", path="bad_sig_api").get("status") == 403
         and dl_proof.get("matched") is True
         and isinstance(dl_proof.get("manifestHash"), str) and bool(re.match(r"^[0-9a-f]{64}$", dl_proof.get("manifestHash")))

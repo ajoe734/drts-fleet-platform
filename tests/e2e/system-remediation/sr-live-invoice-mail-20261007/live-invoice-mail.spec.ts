@@ -606,13 +606,6 @@ test.describe("Live Invoice Mail Acceptance", () => {
         const wrongDownloadLinkCount = await page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`).count();
         await expect(page.locator(`a[href*="/downloads/tenant-invoice/${invoiceId}"]`)).not.toBeVisible();
 
-        // Explicitly attempt to fetch the forbidden download to ensure backend protection works even if URL is guessed
-        const forbiddenDownloadResponse = await page.request.get(new URL(`/api/tenant/downloads/tenant-invoice/${invoiceId}`, apiOrigin).href);
-        if (forbiddenDownloadResponse.status() === 200 || forbiddenDownloadResponse.status() === 302) {
-             wrongDownloadObserved = true; // should be 403 or 404
-        }
-        expect([403, 404]).toContain(forbiddenDownloadResponse.status());
-
         // The selected fallback MUST be the own invoice
         expect(fallbackSelectedId).toBe(nonAllowlistInvoiceId);
 
@@ -675,8 +668,24 @@ test.describe("Live Invoice Mail Acceptance", () => {
         expect(mutationCount).toBe(0); // no Next.js server action POST should be emitted
 
         // attempt own legitimate download network call to prove path works
-        const ownDownloadCheck = await page.request.get(new URL(`/api/tenant/downloads/tenant-invoice/${readOnlyInvoiceId}`, apiOrigin).href);
-        if (ownDownloadCheck.status() === 200 || ownDownloadCheck.status() === 302) roOwnDownloadObserved = true;
+        // Click the actual signed link in the UI and wait for the download
+        let roOwnDownloadObservedBytes = 0;
+        let roOwnDownloadObservedMime = "";
+        const ownDownloadLink = page.locator(`a[href*="/downloads/tenant-invoice/${readOnlyInvoiceId}"]`).first();
+        if (await ownDownloadLink.count() > 0) {
+            const ownHref = await ownDownloadLink.getAttribute('href');
+            if (ownHref) {
+                const downloadRes = await page.request.get(new URL(ownHref, portalOrigin).href);
+                if (downloadRes.status() === 200) {
+                    const bytes = await downloadRes.body();
+                    roOwnDownloadObservedBytes = bytes.byteLength;
+                    roOwnDownloadObservedMime = downloadRes.headers()['content-type'] || "";
+                    if (bytes.byteLength > 0 && roOwnDownloadObservedMime === 'application/pdf') {
+                        roOwnDownloadObserved = true;
+                    }
+                }
+            }
+        }
 
         page.off('request', requestListener);
 
@@ -701,7 +710,11 @@ test.describe("Live Invoice Mail Acceptance", () => {
             selected_identity: readOnlyInvoiceId,
             mutation_count: mutationCount,
             send_disabled: true,
-            forbidden_download_observed: roForbidden_download_observed
+            forbidden_download_observed: roForbidden_download_observed,
+            download_proof: {
+                bytes: roOwnDownloadObservedBytes,
+                mime: roOwnDownloadObservedMime
+            }
         });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {

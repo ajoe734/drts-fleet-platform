@@ -113,3 +113,19 @@ This document records the completion and verification of the live invoice mail E
 - `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: exit 0
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: b18d27e586d72be685b2f80db97d60b99cbaf66a / Generation: cb5a1e8822c94e7ba8eb57e86ec1c980)
+
+- **Confirmed repairs**: Removed three unused test bindings and consumed `roOwnDownloadObserved` in an assertion. Scoped ESLint now passes. Added assertion rejects 404/500 own-download results that preceding candidate silently ignored. Existing source regressions all pass locally: Vitest 15/15; Python 11/11; tsc passes.
+- **F3/F5 (P1 REPEATED role-download path/evidence invalid; legal positive now fails)**: Trigger: authorized read-only session with valid invoice requests `/api/tenant/downloads/tenant-invoice/<id>` with no signed query. Actual controller and main expose `/api/downloads/:kind/:subjectId` and require signature fields. Thus the current request cannot exercise the controlled-download handler. Merely removing `/tenant` is insufficient. The identical nonexistent path treats 404 as proof of wrong-tenant rejection, proving routing failure, not resource authorization. Expected portal route is `/downloads/:kind/:subjectId` -> `/control-plane-proxy/downloads/:kind/:subjectId` which forwards to `/api/downloads` preserving signed query.
+- **F3/F5 (P1 REPEATED role download observation and fail-closed gate still incomplete)**: Listeners observed attempted page requests after navigation, not response/download completion. `roOwnDownloadObserved`=true even if it fails. Evidence emitted contains no own download result at all. `gate-evidence.py` checks only primary downloadProof; it still accepts absence of read-only download response/bytes. The `browser_download_observation` unresolved marker remains removed.
+- **F2/F4/F6 (P2 REPEATED missing behavioral regressions and inaccurate handoff)**: `spec-guards.test.ts` still tests recipient mismatches only for read-only/non-allowlisted roles: invoice and tenant identities are correct in both fixtures. Neither role has an independent invoice/tenant mismatch zero-send regression or legal-positive case. No repeated-same-invoice-anchor versus distinct-invoice-ID regression and no role-download event-boundary regressions. Required next unit: preserve existing primary positive/cases, add missing independent guard positives and mismatches plus actual role download regressions.
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v`: exit 0
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007`: exit 0
+- `pnpm exec tsc -p tests/e2e/system-remediation/sr-live-invoice-mail-20261007/tsconfig.live.json --noEmit`: exit 0
+- `pnpm exec eslint tests/e2e/system-remediation/sr-live-invoice-mail-20261007 tests/unit/system-remediation/sr-live-invoice-mail-20261007 playwright.live-invoice-mail.config.ts`: exit 0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
