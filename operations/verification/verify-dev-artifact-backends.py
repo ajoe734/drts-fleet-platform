@@ -54,28 +54,47 @@ def wait_for_initial_clean_scan(scan_fn, content):
     deadline. Any other status/error (auth403, a non-readiness 503, a
     malformed body) returns immediately for the caller to assert on; a
     503 is never treated as success and no negative case is weakened.
+
+    The deadline is checked BEFORE every attempt, not only after a 503
+    comes back: checking it only on the trailing edge let an attempt that
+    started right at the deadline (its own 503 having landed just inside
+    it) still run and return a late, post-deadline clean receipt as a
+    pass. The remaining budget is also threaded into `scan_fn` as
+    `timeout=`, so a single slow request cannot itself run past the
+    deadline, and the poll sleep is capped to whatever budget is left.
     """
     deadline = time.monotonic() + SCANNER_INITIAL_READINESS_DEADLINE_SECONDS
     attempt = 0
+    last_status, last_body = None, None
+
+    def fail(reason):
+        raise AssertionError(
+            "Scanner did not become ready for the initial clean scan within "
+            f"{attempt} attempt(s) / {SCANNER_INITIAL_READINESS_DEADLINE_SECONDS}s deadline: {reason}"
+        )
+
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(f"deadline expired before another attempt could start (last status={last_status}, body={last_body})")
         attempt += 1
-        status, body = scan_fn(content)
+        status, body = scan_fn(content, timeout=min(remaining, 30))
+        last_status, last_body = status, body
         if status != 503 or not isinstance(body, dict) or body.get("error") != "scan_engine_not_ready":
             return status, body
-        if attempt >= SCANNER_INITIAL_READINESS_MAX_ATTEMPTS or time.monotonic() >= deadline:
-            raise AssertionError(
-                "Scanner did not become ready for the initial clean scan within "
-                f"{attempt} attempt(s) / {SCANNER_INITIAL_READINESS_DEADLINE_SECONDS}s deadline: "
-                f"last status={status}, body={body}"
-            )
-        time.sleep(SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS)
+        if attempt >= SCANNER_INITIAL_READINESS_MAX_ATTEMPTS:
+            fail(f"last status={status}, body={body}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(f"last status={status}, body={body}")
+        time.sleep(min(SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS, remaining))
 
 
 def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
     print(f"Testing scanner at {scanner_url}")
     token = get_identity_token(scanner_url)
 
-    def scan(content, sha256_header=None):
+    def scan(content, sha256_header=None, timeout=30):
         req = urllib.request.Request(f"{scanner_url}/scan", data=content, method="POST")
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/pdf")
@@ -85,7 +104,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             req.add_header("X-Content-SHA256", hashlib.sha256(content).hexdigest())
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status, json.loads(response.read().decode())
         except urllib.error.HTTPError as e:
             try:

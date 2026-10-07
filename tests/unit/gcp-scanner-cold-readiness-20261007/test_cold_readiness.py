@@ -50,7 +50,7 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         ]
         calls = []
 
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             calls.append(content)
             return responses.pop(0)
 
@@ -64,7 +64,7 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         self.assertEqual(sleep.call_count, 2)
 
     def test_permanently_pending_fails_closed_after_bounded_attempts(self):
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             return 503, {"error": "scan_engine_not_ready"}
 
         with patch.object(verify.time, "sleep") as sleep, \
@@ -89,7 +89,7 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         def fake_sleep(seconds):
             clock["now"] += seconds
 
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             calls.append(content)
             return 503, {"error": "scan_engine_not_ready"}
 
@@ -106,10 +106,106 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         # merely the attempt ceiling with a coincidentally similar effect.
         self.assertLess(len(calls), verify.SCANNER_INITIAL_READINESS_MAX_ATTEMPTS)
 
+    def test_scan_at_or_after_deadline_never_starts_and_late_clean_cannot_pass(self):
+        """Regression for the captured counterexample against the prior
+        cut (.local/full-system-completion-20261007/round3/
+        cold-deadline-counterexample.json): deadline=3s, a 503 that
+        itself takes 1s lands inside the deadline, the 2s poll sleep
+        lands exactly on the deadline, and a second attempt that would
+        only return a genuine-shaped 200 at t=4s must never be allowed to
+        start -- checking the deadline only after a 503 comes back let
+        that late clean receipt slip through as a pass."""
+        clock = {"now": 1000.0}
+        calls = []
+
+        def fake_monotonic():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += seconds
+
+        def scan_fn(content, timeout=None):
+            calls.append(timeout)
+            if len(calls) == 1:
+                clock["now"] += 1  # first 503 lands at t=1s, inside the 3s deadline
+                return 503, {"error": "scan_engine_not_ready"}
+            clock["now"] += 1  # would-be clean response only resolves at t=4s
+            return 200, {"sha256": "abc", "sizeBytes": 3, "verdict": "clean"}
+
+        with patch.object(verify, "SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", 3.0), \
+             patch.object(verify.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(verify.time, "sleep", side_effect=fake_sleep), \
+             self.assertRaises(AssertionError) as error:
+            verify.wait_for_initial_clean_scan(scan_fn, b"clean-bytes")
+
+        self.assertIn("deadline expired before another attempt could start", str(error.exception))
+        # The second attempt -- the one that would have returned the late
+        # clean receipt -- never started.
+        self.assertEqual(len(calls), 1)
+        # The first (only) attempt was threaded the remaining budget, not
+        # some fixed/unbounded timeout.
+        self.assertEqual(calls[0], 3)
+
+    def test_single_clock_retry_still_passes_comfortably_inside_the_deadline(self):
+        """Same single-clock shape as the counterexample regression, but
+        with slack to spare, so the stricter pre-attempt deadline check
+        does not also rot a legitimate, on-time retry."""
+        clock = {"now": 1000.0}
+        responses = [
+            (503, {"error": "scan_engine_not_ready"}),
+            (200, {"sha256": "abc", "sizeBytes": 3, "verdict": "clean"}),
+        ]
+        calls = []
+
+        def fake_monotonic():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += seconds
+
+        def scan_fn(content, timeout=None):
+            calls.append(timeout)
+            return responses.pop(0)
+
+        with patch.object(verify, "SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", 10.0), \
+             patch.object(verify.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(verify.time, "sleep", side_effect=fake_sleep):
+            status, body = verify.wait_for_initial_clean_scan(scan_fn, b"clean-bytes")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["verdict"], "clean")
+        self.assertEqual(len(calls), 2)
+
+    def test_poll_sleep_is_capped_to_remaining_budget_not_the_full_interval(self):
+        """Less time remains than the configured poll interval: the sleep
+        must be capped to what's actually left, or it would itself
+        overshoot the deadline before the next check ever runs."""
+        clock = {"now": 1000.0}
+        sleeps = []
+
+        def fake_monotonic():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            clock["now"] += seconds
+
+        def scan_fn(content, timeout=None):
+            return 503, {"error": "scan_engine_not_ready"}
+
+        with patch.object(verify, "SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", 1.5), \
+             patch.object(verify.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(verify.time, "sleep", side_effect=fake_sleep), \
+             self.assertRaises(AssertionError):
+            verify.wait_for_initial_clean_scan(scan_fn, b"clean-bytes")
+
+        self.assertEqual(sleeps, [1.5])
+        self.assertLess(sleeps[0], verify.SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS)
+
     def test_auth403_is_not_retried(self):
         calls = []
 
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             calls.append(content)
             return 403, {"error": "forbidden"}
 
@@ -126,7 +222,7 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         silently retried or coerced into a pass."""
         calls = []
 
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             calls.append(content)
             return 503, {"error": "scan_engine_unavailable"}
 
@@ -144,7 +240,7 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         receipt -- it is returned immediately for the caller to fail on,
         exactly like today's non-JSON-body handling elsewhere in this
         script."""
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             return 503, "upstream gateway error"
 
         with patch.object(verify.time, "sleep") as sleep:
@@ -161,7 +257,7 @@ class WaitForInitialCleanScanTest(unittest.TestCase):
         away."""
         calls = []
 
-        def scan_fn(content):
+        def scan_fn(content, timeout=None):
             calls.append(content)
             return 200, {"sha256": "deadbeef", "sizeBytes": 3, "verdict": "infected"}
 
@@ -233,6 +329,55 @@ class TestScannerInitialReadinessIntegrationTest(unittest.TestCase):
             verify.test_scanner("http://fake")
 
         self.assertIn("did not become ready", str(error.exception))
+
+    @patch("urllib.request.urlopen")
+    @patch("os.environ.get")
+    def test_single_clock_counterexample_never_issues_a_late_request(self, mock_env, mock_urlopen):
+        """Same counterexample clock shape as
+        WaitForInitialCleanScanTest.test_scan_at_or_after_deadline_never_starts_and_late_clean_cannot_pass,
+        driven through the real `test_scanner()` entrypoint (urlopen
+        mocked) -- proves the fix holds in the actual call path Test 1
+        uses, not only when `wait_for_initial_clean_scan` is driven
+        directly."""
+        mock_env.return_value = "fake-token"
+        clock = {"now": 1000.0}
+        calls = []
+
+        def fake_monotonic():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += seconds
+
+        def urlopen_side_effect(req, timeout=30):
+            calls.append(timeout)
+            if len(calls) == 1:
+                clock["now"] += 1
+                err = urllib.error.HTTPError(req.full_url, 503, "Error", hdrs={}, fp=None)
+                err.read = MagicMock(return_value=json.dumps({"error": "scan_engine_not_ready"}).encode())
+                raise err
+            clock["now"] += 1
+            resp = MagicMock()
+            resp.status = 200
+            resp.read = MagicMock(return_value=json.dumps({
+                "sha256": verify.hashlib.sha256(verify.CLEAN).hexdigest(),
+                "sizeBytes": len(verify.CLEAN), "verdict": "clean",
+            }).encode())
+            cm = MagicMock()
+            cm.__enter__.return_value = resp
+            return cm
+
+        mock_urlopen.side_effect = urlopen_side_effect
+
+        with patch.object(verify, "SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", 3.0), \
+             patch.object(verify.time, "monotonic", side_effect=fake_monotonic), \
+             patch.object(verify.time, "sleep", side_effect=fake_sleep), \
+             self.assertRaises(AssertionError) as error:
+            verify.test_scanner("http://fake")
+
+        self.assertIn("deadline expired before another attempt could start", str(error.exception))
+        # The would-be-clean second request must never have been issued.
+        self.assertEqual(len(calls), 1)
 
 
 GOOD_ARGS = [

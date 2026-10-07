@@ -66,6 +66,18 @@ after (not an auth regression).
   `assert status == 200` / `assert_receipt(...)` calls. A `503` is never
   treated as a pass, and no existing negative case (hash mismatch,
   oversized, engine-limit, Tests 5-9) was touched.
+  - **Round-3 fix to the first cut**: an independent counterexample
+    (`.local/full-system-completion-20261007/round3/cold-deadline-counterexample.json`)
+    showed the first cut checked the deadline only *after* a 503 came
+    back, so an attempt that happened to start right at the deadline
+    (its own prior 503 having landed just inside it) could still run and
+    return a late, post-deadline clean receipt as a pass. The deadline is
+    now checked before every attempt starts, not only on the trailing
+    edge; no attempt is ever issued at or after the deadline. The
+    remaining budget is also threaded into `scan_fn` as `timeout=`
+    (`scan()`'s own `urllib.request.urlopen` timeout, capped at the
+    pre-existing 30s), and the poll sleep is capped to whatever budget is
+    actually left instead of always sleeping the full poll interval.
 
 ## Regression coverage
 
@@ -76,12 +88,19 @@ after (not an auth regression).
   pending (fails closed at the attempt ceiling), permanently pending (fails
   closed at the deadline, independently of the attempt ceiling, proven with
   a fake clock), non-retryable `403`, non-retryable non-readiness `503`,
-  non-retryable malformed/non-dict body, and a wrong-verdict `200` returned
-  immediately instead of retried away.
+  non-retryable malformed/non-dict body, a wrong-verdict `200` returned
+  immediately instead of retried away, the round-3 single-clock
+  counterexample itself (a would-be-late clean receipt is never issued and
+  the attempt is given the remaining budget as its `timeout`), the same
+  clock shape passing cleanly with slack to spare, and the poll sleep
+  capped below the configured interval when less time remains than that.
 - `TestScannerInitialReadinessIntegrationTest`: drives the real
   `test_scanner()` entrypoint end-to-end with a cold-start
-  pending-to-healthy sequence followed by the existing Tests 2-4b, and a
-  permanently-pending sequence that fails the whole run.
+  pending-to-healthy sequence followed by the existing Tests 2-4b, a
+  permanently-pending sequence that fails the whole run, and the round-3
+  single-clock counterexample (proving the fix holds through the actual
+  `scan()`/`urlopen` call path, not only when the helper is driven
+  directly).
 - `ProvisionScannerCpuAndProbePolicyTest`: the scanner deploy call carries
   `--no-cpu-throttling` (including when reusing already-existing
   resources), while private IAM, exact-digest images, per-container memory,
@@ -92,6 +111,17 @@ These are additive to, and verified not to break,
 `tools/ci/test_dev_artifact_providers.py` and
 `tools/ci/test_verify_dev_artifact_backends.py` (51 tests, run unmodified
 and still green against both edited files).
+
+`.github/workflows/ci.yml`'s `scope` job gained one dedicated discovery
+line, `python3 -m unittest discover -s
+tests/unit/gcp-scanner-cold-readiness-20261007 -p 'test_*.py'`, immediately
+after the existing `gcp-artifact-activation-20261004` line. Nothing else in
+that job, the invoice task's separate discovery step, or any other
+workflow/gate changed. Without this line the new test file sat on no path
+CI runs and `tools/ci/check_test_coverage.py` would fail the PR; with it,
+`check_test_coverage.py` reports all 87 tracked test files yield tests CI
+runs, and the three local runs above (new 15, activation 7, and the 156
+`tools/ci/test_*` cases) are all green.
 
 ## What this does not fix (preserved limitations, unchanged from the parent)
 
