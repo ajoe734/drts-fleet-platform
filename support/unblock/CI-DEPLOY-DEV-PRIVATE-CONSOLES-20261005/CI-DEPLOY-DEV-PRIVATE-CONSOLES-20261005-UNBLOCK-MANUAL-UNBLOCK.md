@@ -395,3 +395,49 @@ round contradicts or needs correcting.
   branch) and this round's own `CANDIDATE_SHA`/`CANDIDATE_BRANCH`, so Codex can review the
   now-fully-delivered artifact (R1/R2 delivery gaps closed by Supervisor's own metadata
   write; R3 adds only independent verification) to merge.
+
+## Round 4 (2026-10-07, resumed dispatch; attempted the Round 3 re-handoff)
+
+This dispatch picked up the task exactly where Round 3 left off: canonical state (`show
+CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK`) still showed
+`status=in_progress`, `resolved_parent_status/waiting_for/next` already recorded by
+Supervisor as Round 3 found, and only 3 `worker_outcomes` entries (ending at the Round 2
+`blocker`) — i.e. Round 3's own closing `handoff` call was written into this artifact and
+committed (`4d2fe8b02`, pushed, matches open PR #2398's `headRefOid`) but never actually
+reached the task board as a `worker_outcomes` entry. This round re-attempted that exact
+`handoff` call and found why:
+
+- Every mutating `ai-status.sh` invocation this round attempted —
+  `handoff CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK Codex "..."`, then
+  a minimal `progress ... "test"` to isolate the cause, then a second `progress` retry a
+  short time later — was rejected before execution with `Bash command classified as defer`,
+  i.e. the command never ran at all (no `ai_status.py` traceback, no task-board write,
+  nothing for `show` to reflect). Read-only operations in the same session (`show`, `git
+  fetch`/`log`, `gh pr list`) all succeeded normally throughout; only mutating orchestrator
+  CLI calls are affected.
+- This matches a known, already-diagnosed condition, not a new bug introduced by this
+  helper: the `orchestrator_approval_broker` MCP server failed to connect at the start of
+  this session (`CONNECT_TIMEOUT` after 30000ms), and mutating `ai-status.sh`/`ai_status.py`
+  calls in this environment are routed through a permission-broker hook that defers while
+  that broker is unreachable — session-wide, not specific to this task. No workaround exists
+  from inside a dispatched worker: per standing guardrails, this helper does not bypass the
+  guard, edit `ai-status.json`/`current-work.md`/the activity log directly, or retry in a
+  sleep loop. Two attempts roughly a minute apart both deferred identically, so this is not a
+  one-off transient blip within this session's lifetime.
+
+### What this round did and did not do
+
+- No product code, workflow file, GitHub variable, IAM binding, or GCP resource was
+  touched. No local service, Docker, or Playwright/browser run was started.
+- Only this file changed; committed and pushed normally (plain `git`, unaffected by the
+  broker outage) to keep the candidate and PR #2398 current and let the next session (or a
+  session where the broker has recovered) resume straight into the `handoff` call without
+  redoing this diagnosis.
+- No `ai-status.sh` mutation (`handoff`/`progress`/`blocker`) could be landed this round. The
+  task's machine-truth state is therefore **unchanged from Round 3's**: `status=in_progress`,
+  owner `Claude2`, `resolved_parent_*` already correctly recorded. This round does not and
+  cannot claim a handoff occurred — the concrete next action for the next session (this
+  agent or Supervisor) is simply: once `orchestrator_approval_broker` is reachable again, run
+  `handoff CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-MANUAL-UNBLOCK Codex "..."` with
+  `CANDIDATE_SHA`/`CANDIDATE_BRANCH` set to this branch's current HEAD and
+  `PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2398`.
