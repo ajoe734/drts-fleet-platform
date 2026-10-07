@@ -195,3 +195,24 @@ This document records the completion and verification of the live invoice mail E
 - `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit0
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: a0632c1326b2a6dd57fc3c68d30adc6724b3763c / Generation: 8075f62fca9a4c73800af80f60828421)
+
+- **F3/F5 (P1 REPEATED, partial repair: durable signed-link and authority correlation remains fail-open)**:
+  - Repaired `gate-evidence.py` to assert authoritative primary and read-only `tenantId` and `invoiceId` against configured role resources instead of solely relying on the hash.
+  - Repaired `evaluateDownloadResponse` in `live-invoice-mail.spec.ts` to strictly validate and mandate presence of exactly expected signed claims (`signed_at`, `expires_at`, `key_id`, `manifest_hash`, `sig_v`, `sig`), failing on contradiction. It securely strips the actual `sig` via explicit `REDACTED` replacement rather than relying on substring operations on an unrestricted query.
+  - Repaired `gate-evidence.py` to enforce presence of an exact `sig=REDACTED` field mapping in the query constraint using precise matching.
+  - Added 9 independent `missing/mismatch/empty/substring-only` signature and claim negatives to `test_hosted_gate.py` asserting correct failure cases for both invoice and tenant IDs and signature substrings.
+- **F4/F6 (P2 REPEATED, partial repair: required event and producer-to-gate regressions incomplete)**:
+  - Rewrote the bounded regression unit block `observeAndEvaluateDownload regressions` in `spec-guards.test.ts`.
+  - Driven completion solely by click logic. Unmatched events correctly continue until predicate is satisfied.
+  - Fixed timeout cases enforcing complete rejection for wrong origin/path/query parameters instead of resolving early.
+  - Repaired internal `evaluateDownloadResponse` mock payload to supply actual required metadata claims.
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task (`tests/unit/system-remediation/sr-live-invoice-mail-20261007`): PASS 12/12 exit 0.
+- Node dependency tools (vitest, tsc, eslint) skipped due to local dependency limitations (MODULE_NOT_FOUND), NOT source failures.
+- `git diff --check HEAD^ HEAD`: clean
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*

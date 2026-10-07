@@ -36,11 +36,11 @@ class HostedGateTest(unittest.TestCase):
                          'unimplementedLiveSurfaces': [], 'errors': [],
                          'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'identityEmail': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                          'nonAllowlistInvoiceId': '20000000-0000-0000-0000-000000000789', 'readOnlyInvoiceId': '20000000-0000-0000-0000-000000000abc',
-                         'invoiceData': {'data': {'artifactDownloadMetadata': {'manifestHash': 'a' * 64}}},
-                         'roInvoiceData': {'data': {'artifactDownloadMetadata': {'manifestHash': 'a' * 64}}},
+                         'invoiceData': {'data': {'tenantId': '10000000-0000-0000-0000-000000000123', 'invoiceId': '20000000-0000-0000-0000-000000000456', 'artifactDownloadMetadata': {'manifestHash': 'a' * 64}}},
+                         'roInvoiceData': {'data': {'tenantId': '10000000-0000-0000-0000-000000000abc', 'invoiceId': '20000000-0000-0000-0000-000000000abc', 'artifactDownloadMetadata': {'manifestHash': 'a' * 64}}},
                          'resendMailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd2', 'rfc_message_id': '<d2@notification.drts.invalid>', 'body_sha256': 'a' * 64},
                          'mailboxEvidence': {'matched_content': True, 'candidate_sha': SHA, 'delivery_id': 'd1', 'rfc_message_id': '<d1@notification.drts.invalid>', 'body_sha256': 'a' * 64},
-                         'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf', 'origin': 'http://portal.invalid', 'path': '/downloads/tenant-invoice/20000000-0000-0000-0000-000000000456', 'query': '?sig=REDACTED', 'status': 200, 'candidateSha': SHA, 'invoiceId': '20000000-0000-0000-0000-000000000456', 'tenantId': '10000000-0000-0000-0000-000000000123', 'browserObserved': True},
+                         'downloadProof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf', 'origin': 'http://portal.invalid', 'path': '/downloads/tenant-invoice/20000000-0000-0000-0000-000000000456', 'query': f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&sig=REDACTED&sig_v=1", 'status': 200, 'candidateSha': SHA, 'invoiceId': '20000000-0000-0000-0000-000000000456', 'tenantId': '10000000-0000-0000-0000-000000000123', 'browserObserved': True},
                          'durableDeliveries': [
                              {'scenario': 'first_send', 'deliveryId': 'd1', 'idempotencyKey': 'key1', 'acceptedAt': '2026-10-07T00:00:00Z', 'attemptsCount': 1, 'status': 'sent', 'attemptOutcome': 'sent'},
                              {'scenario': 'intentional_resend', 'deliveryId': 'd2', 'idempotencyKey': 'key2', 'acceptedAt': '2026-10-07T00:01:00Z', 'attemptsCount': 1, 'status': 'sent', 'attemptOutcome': 'sent'},
@@ -53,7 +53,7 @@ class HostedGateTest(unittest.TestCase):
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456', 'method': 'GET', 'status': 200},
                              {'path': 'artifactUrl', 'method': 'GET', 'status': 200},
                              {'path': 'wrong_tenant_portal', 'method': 'GET', 'status': 404, 'ui_isolated': True, 'selected_identity': '20000000-0000-0000-0000-000000000789', 'forbidden_resource': '20000000-0000-0000-0000-000000000456', 'mutation_count': 0, 'forbidden_download_observed': False},
-                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True, 'forbidden_download_observed': False, 'download_proof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf', 'origin': 'http://portal.invalid', 'path': '/downloads/tenant-invoice/20000000-0000-0000-0000-000000000abc', 'query': '?sig=REDACTED', 'status': 200, 'candidateSha': SHA, 'invoiceId': '20000000-0000-0000-0000-000000000abc', 'tenantId': '10000000-0000-0000-0000-000000000abc', 'browserObserved': True}},
+                             {'path': 'read_only_portal', 'method': 'GET', 'status': 200, 'ui_readonly': True, 'selected_identity': '20000000-0000-0000-0000-000000000abc', 'mutation_count': 0, 'send_disabled': True, 'forbidden_download_observed': False, 'download_proof': {'matched': True, 'manifestHash': 'a' * 64, 'downloadedHash': 'a' * 64, 'downloadedBytes': 12345, 'contentType': 'application/pdf', 'origin': 'http://portal.invalid', 'path': '/downloads/tenant-invoice/20000000-0000-0000-0000-000000000abc', 'query': f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&sig=REDACTED&sig_v=1", 'status': 200, 'candidateSha': SHA, 'invoiceId': '20000000-0000-0000-0000-000000000abc', 'tenantId': '10000000-0000-0000-0000-000000000abc', 'browserObserved': True}},
                              {'path': 'bad_sig_api', 'method': 'GET', 'status': 403},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'normal_send', 'status': 201, 'delivery_id': 'd1'},
                              {'path': '/api/tenant/invoices/20000000-0000-0000-0000-000000000456/mail', 'method': 'POST', 'scenario': 'idempotent_retry', 'status': 201, 'delivery_id': 'd1'},
@@ -226,6 +226,58 @@ class HostedGateTest(unittest.TestCase):
         ro_proof_un = next(c for c in ev_ro_proof_unmatched["httpCalls"] if c.get("path") == "read_only_portal")["download_proof"]
         ro_proof_un["matched"] = False
         self.assertEqual(gate.evaluate(self.env, ev_ro_proof_unmatched, self.provider)["status"], "failed")
+
+    def test_f3_f5_claim_and_signature_regressions(self):
+        import copy
+        # Baseline passes
+        self.assertEqual(gate.evaluate(self.env, self.evidence, self.provider)["status"], "passed")
+
+        # 1. invoiceData tenantId mismatch
+        ev1 = copy.deepcopy(self.evidence)
+        ev1["invoiceData"]["data"]["tenantId"] = "wrong"
+        self.assertEqual(gate.evaluate(self.env, ev1, self.provider)["status"], "failed")
+
+        # 2. invoiceData invoiceId mismatch
+        ev2 = copy.deepcopy(self.evidence)
+        ev2["invoiceData"]["data"]["invoiceId"] = "wrong"
+        self.assertEqual(gate.evaluate(self.env, ev2, self.provider)["status"], "failed")
+
+        # 3. roInvoiceData tenantId missing
+        ev3 = copy.deepcopy(self.evidence)
+        del ev3["roInvoiceData"]["data"]["tenantId"]
+        self.assertEqual(gate.evaluate(self.env, ev3, self.provider)["status"], "failed")
+
+        # 4. roInvoiceData invoiceId mismatch
+        ev4 = copy.deepcopy(self.evidence)
+        ev4["roInvoiceData"]["data"]["invoiceId"] = "wrong"
+        self.assertEqual(gate.evaluate(self.env, ev4, self.provider)["status"], "failed")
+
+        # 5. Primary query missing sig=REDACTED entirely
+        ev5 = copy.deepcopy(self.evidence)
+        ev5["downloadProof"]["query"] = f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&sig_v=1"
+        self.assertEqual(gate.evaluate(self.env, ev5, self.provider)["status"], "failed")
+
+        # 6. Primary query substring only (notsig)
+        ev6 = copy.deepcopy(self.evidence)
+        ev6["downloadProof"]["query"] = f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&notsig=REDACTED&sig_v=1"
+        self.assertEqual(gate.evaluate(self.env, ev6, self.provider)["status"], "failed")
+
+        # 7. Primary query empty sig parameter
+        ev7 = copy.deepcopy(self.evidence)
+        ev7["downloadProof"]["query"] = f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&sig=&sig_v=1"
+        self.assertEqual(gate.evaluate(self.env, ev7, self.provider)["status"], "failed")
+
+        # 8. Read-only query missing sig=REDACTED entirely
+        ev8 = copy.deepcopy(self.evidence)
+        ro_proof = next(c for c in ev8["httpCalls"] if c.get("path") == "read_only_portal")["download_proof"]
+        ro_proof["query"] = f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&sig_v=1"
+        self.assertEqual(gate.evaluate(self.env, ev8, self.provider)["status"], "failed")
+
+        # 9. Read-only query substring only
+        ev9 = copy.deepcopy(self.evidence)
+        ro_proof9 = next(c for c in ev9["httpCalls"] if c.get("path") == "read_only_portal")["download_proof"]
+        ro_proof9["query"] = f"?signed_at=1&expires_at=2&key_id=3&manifest_hash={'a'*64}&notsig=REDACTED&sig_v=1"
+        self.assertEqual(gate.evaluate(self.env, ev9, self.provider)["status"], "failed")
 
     def test_green_runner_cannot_hide_missing_stale_or_partial_artifacts(self):
         for override in ({'status': 'failed'}, {'candidateSha': 'b' * 40}, {'headSha': 'b' * 40},

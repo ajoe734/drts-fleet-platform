@@ -744,7 +744,27 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
     if (downloadedHash !== manifestHash) throw new Error("Hash mismatch");
 
     const actualUrlObj = new URL(popupResponse.url());
-    const hasSig = actualUrlObj.searchParams.has('sig');
+    const searchParams = actualUrlObj.searchParams;
+    
+    // Validate required claims
+    const sig = searchParams.get('sig');
+    const manifestHashParam = searchParams.get('manifest_hash');
+    const signedAt = searchParams.get('signed_at');
+    const expiresAt = searchParams.get('expires_at');
+    const keyId = searchParams.get('key_id');
+    const sigV = searchParams.get('sig_v');
+
+    if (!sig || !manifestHashParam || !signedAt || !expiresAt || !keyId || !sigV) {
+        throw new Error("Missing signed claims in download link");
+    }
+    if (manifestHashParam !== manifestHash) {
+        throw new Error("Contradictory manifest hash in download link");
+    }
+
+    // Produce redacted safe query
+    const safeParams = new URLSearchParams(searchParams);
+    safeParams.set('sig', 'REDACTED');
+
     return {
         matched: true,
         manifestHash: manifestHash,
@@ -753,7 +773,7 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
         contentType: mime,
         origin: actualUrlObj.origin,
         path: actualUrlObj.pathname,
-        query: hasSig ? 'sig=REDACTED' : actualUrlObj.search,
+        query: '?' + safeParams.toString(),
         status: popupResponse.status(),
         candidateSha: popupResponse.headers()['x-drts-candidate-sha'] || "",
         invoiceId: readOnlyInvoiceId,

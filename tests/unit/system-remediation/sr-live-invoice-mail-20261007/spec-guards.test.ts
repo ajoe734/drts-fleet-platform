@@ -196,6 +196,7 @@ import { evaluateDownloadResponse, observeAndEvaluateDownload } from "../../../.
 
 describe("F4/F6 evaluateDownloadResponse", () => {
   const validManifestHash = "3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63"; // echo -n '%PDF-test' | sha256sum
+  const validQuery = `?signed_at=1&expires_at=2&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1`;
   const createMockResponse = (overrides: any = {}) => {
     const { headers: headersOverride, ...otherOverrides } = overrides;
     return {
@@ -205,7 +206,7 @@ describe("F4/F6 evaluateDownloadResponse", () => {
         ...headersOverride
       }),
       body: async () => Buffer.from('%PDF-test'),
-      url: () => 'http://portal.invalid/api/downloads/tenant-invoice/inv1?sig=1',
+      url: () => 'http://portal.invalid/downloads/tenant-invoice/inv1' + validQuery,
       status: () => 200,
       ...otherOverrides
     };
@@ -237,10 +238,16 @@ describe("F4/F6 evaluateDownloadResponse", () => {
     const res = createMockResponse();
     await expect(evaluateDownloadResponse(res, 'a'.repeat(40), "wronghash", "inv1", "tenant1")).rejects.toThrow("Hash mismatch");
   });
+
+  it("throws on contradictory hash claim", async () => {
+    const res = createMockResponse({ url: () => `http://portal.invalid/downloads/tenant-invoice/inv1?signed_at=1&expires_at=2&key_id=3&manifest_hash=wrong&sig=valid&sig_v=1` });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Contradictory manifest hash in download link");
+  });
 });
 
 describe("F4/F6 observeAndEvaluateDownload regressions", () => {
   const validManifestHash = "3c87d37f1dbea6909f917ce437c390fb8e655a774387d9e69301c0b2283d5b63";
+  const validQuery = `?signed_at=1&expires_at=2&key_id=3&manifest_hash=${validManifestHash}&sig=valid&sig_v=1`;
   const createMockResponse = (overrides: any = {}) => {
     const { headers: headersOverride, ...otherOverrides } = overrides;
     return {
@@ -250,28 +257,43 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
         ...headersOverride
       }),
       body: async () => Buffer.from('%PDF-test'),
-      url: () => 'http://portal.invalid/api/downloads/tenant-invoice/inv1?sig=1',
+      url: () => 'http://portal.invalid/downloads/tenant-invoice/inv1' + validQuery,
       status: () => 200,
       ...otherOverrides
     };
   };
 
-  it("passes valid observation and redacts query", async () => {
-    const mockResponse = createMockResponse();
+  it("passes valid observation and redacts query driven by click", async () => {
+    let predicateFn: any;
+    let eventResolve: any;
+    let registered = false;
+    
     const context = {
-      waitForEvent: vi.fn().mockImplementation(async (event, options) => {
-        // Evaluate predicate synchronously
-        const isMatch = options.predicate(mockResponse);
-        if (isMatch) return mockResponse;
-        throw new Error("Timeout");
+      waitForEvent: vi.fn().mockImplementation((event, options) => {
+        registered = true;
+        predicateFn = options.predicate;
+        return new Promise((resolve) => {
+          eventResolve = resolve;
+        });
       })
     };
-    const locator = { click: vi.fn().mockResolvedValue(undefined) };
+
+    const mockResponse = createMockResponse();
+    const locator = {
+      click: vi.fn().mockImplementation(async () => {
+        if (!registered) throw new Error("Clicked before registered");
+        if (predicateFn(mockResponse)) {
+          eventResolve(mockResponse);
+        } else {
+          throw new Error("Predicate rejected in mock click");
+        }
+      })
+    };
 
     const proof = await observeAndEvaluateDownload(
       context,
       locator,
-      "/api/downloads/tenant-invoice/inv1?sig=1",
+      "/downloads/tenant-invoice/inv1" + validQuery,
       "http://portal.invalid",
       "a".repeat(40),
       validManifestHash,
@@ -280,20 +302,37 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
     );
 
     expect(proof.matched).toBe(true);
-    expect(proof.query).toBe("sig=REDACTED");
+    expect(proof.query).toContain("sig=REDACTED");
     expect(locator.click).toHaveBeenCalled();
   });
 
-  it("throws when response event does not match predicate (timeout)", async () => {
+  it("rejects unmatched events and times out", async () => {
+    let predicateFn: any;
+    let registered = false;
+
     const context = {
-      waitForEvent: vi.fn().mockRejectedValue(new Error("Timeout"))
+      waitForEvent: vi.fn().mockImplementation((event, options) => {
+        registered = true;
+        predicateFn = options.predicate;
+        return Promise.reject(new Error("Timeout"));
+      })
     };
-    const locator = { click: vi.fn().mockResolvedValue(undefined) };
+
+    const wrongOriginResponse = createMockResponse({ url: () => 'http://wrong.invalid/downloads/tenant-invoice/inv1' + validQuery });
+    
+    const locator = {
+      click: vi.fn().mockImplementation(async () => {
+        if (!registered) throw new Error("Clicked before registered");
+        // Emulate an unmatched event that doesn't trigger the resolver
+        const match = predicateFn(wrongOriginResponse);
+        expect(match).toBe(false);
+      })
+    };
 
     await expect(observeAndEvaluateDownload(
       context,
       locator,
-      "/api/downloads/tenant-invoice/inv1?sig=1",
+      "/downloads/tenant-invoice/inv1" + validQuery,
       "http://portal.invalid",
       "a".repeat(40),
       validManifestHash,
@@ -302,17 +341,35 @@ describe("F4/F6 observeAndEvaluateDownload regressions", () => {
     )).rejects.toThrow("Timeout");
   });
 
-  it("throws on evaluateDownloadResponse failure (MIME)", async () => {
-    const mockResponse = createMockResponse({ headers: { 'content-type': 'text/plain' } });
+  it("throws on evaluateDownloadResponse failure without failing the event observer", async () => {
+    let predicateFn: any;
+    let eventResolve: any;
+    let registered = false;
+    
     const context = {
-      waitForEvent: vi.fn().mockResolvedValue(mockResponse)
+      waitForEvent: vi.fn().mockImplementation((event, options) => {
+        registered = true;
+        predicateFn = options.predicate;
+        return new Promise((resolve) => {
+          eventResolve = resolve;
+        });
+      })
     };
-    const locator = { click: vi.fn().mockResolvedValue(undefined) };
+
+    const badMimeResponse = createMockResponse({ headers: { 'content-type': 'text/plain' } });
+    const locator = {
+      click: vi.fn().mockImplementation(async () => {
+        if (!registered) throw new Error("Clicked before registered");
+        if (predicateFn(badMimeResponse)) {
+          eventResolve(badMimeResponse);
+        }
+      })
+    };
 
     await expect(observeAndEvaluateDownload(
       context,
       locator,
-      "/api/downloads/tenant-invoice/inv1?sig=1",
+      "/downloads/tenant-invoice/inv1" + validQuery,
       "http://portal.invalid",
       "a".repeat(40),
       validManifestHash,
