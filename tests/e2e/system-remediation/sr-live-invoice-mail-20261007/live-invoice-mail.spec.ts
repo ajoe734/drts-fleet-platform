@@ -758,7 +758,6 @@ export async function evaluateDownloadResponse(popupResponse: any, candidateSha:
         }
     }
 
-    const sig = searchParams.get('sig') as string;
     const manifestHashParam = searchParams.get('manifest_hash') as string;
     const signedAt = searchParams.get('signed_at') as string;
     const expiresAt = searchParams.get('expires_at') as string;
