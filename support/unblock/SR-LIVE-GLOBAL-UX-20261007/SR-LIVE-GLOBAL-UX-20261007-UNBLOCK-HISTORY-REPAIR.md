@@ -185,6 +185,28 @@ The essential observations and minimal probe are preserved in this artifact.
 
 ## Publication and checks
 
-Task-scoped anchor and final publication evidence will be appended here after
-the document checks and normal push. Required routing writes remain pending;
-do not infer task completion or parent resumability from this report.
+- Anchor `82dfbfeec` adds only this artifact, with the task/owner/reviewer
+  trailers; normal push created the helper branch. Draft
+  [PR #2412](https://github.com/ajoe734/drts-fleet-platform/pull/2412) targets
+  `dev`; the anchor local/PR head matched before this evidence update.
+- `check_canonical_consistency.py --ci --base b81c9f096da71330db9714a5c6c2691d85fb680d --head HEAD`:
+  exit 0, zero findings. `check_commit_trailers.py` on the same range: exit 0.
+  `check_staged_generated_files.py --staged` and `git diff --check`: exit 0.
+  All four local relative links resolve; Prettier check exits 0.
+- Initial `pnpm exec prettier --write` failed with `MODULE_NOT_FOUND`: the
+  inherited shared `node_modules/prettier` symlink targets a removed worker.
+  The intact pinned Prettier 3.8.2 package at
+  `/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/prettier@3.8.2/node_modules/prettier/bin/prettier.cjs`
+  ran successfully via `node`. Shared dependencies/config were not modified.
+  This worktree has no generated `.husky/_` hooks; the applicable staged,
+  formatting and commit-trailer checks were run explicitly.
+- The follow-up evidence commit is append-only. Its full SHA, normal-push
+  result and local/live-remote/PR equality are recorded in the task's machine
+  blocker and local `delivery-verification.json` / `publication.json`, avoiding
+  a self-referential commit hash in this file. Hosted CI is separate from local
+  documentation checks and must match the final head before approval.
+- Parent-note and metadata writes remain pending Supervisor. No candidate
+  handoff, approval, merge, deployment or live/manual pass is claimed. After
+  the routing readback, use the then-verified `CANDIDATE_SHA=$(git rev-parse HEAD)`
+  and `CANDIDATE_BRANCH=$(git branch --show-current)` with PR #2412 to hand off
+  to Claude2; do not call `done`.
