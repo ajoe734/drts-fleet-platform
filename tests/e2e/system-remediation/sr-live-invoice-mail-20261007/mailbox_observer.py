@@ -162,6 +162,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def invoice_link_from_body(body):
+    body = body.replace("\r\n", "\n")
+    links = re.findall(r"(https?://\S+/invoices\?invoiceId=\S+)", body)
+    require(len(links) == 1, "Missing unique invoice link")
+    return {"invoice_link": links[0]}
+
+
 def invitation_from_body(body):
     # SMTP MIME preserves RFC 5322 CRLF after transfer decoding. Normalize only
     # this parsing copy: anchored lines otherwise reject the trailing CR. Keep
@@ -270,7 +277,12 @@ def main():
         with observation_stage("imap_login_failed"):
             status, _ = client.login(username, password)
             require(status == "OK", "IMAP login rejected")
-        consume = (lambda body: accept_invitation(body, request)) if request.get("acceptance") else None
+        if request.get("acceptance"):
+            consume = lambda body: accept_invitation(body, request)
+        elif request.get("flow") == "invoice":
+            consume = lambda body: invoice_link_from_body(body)
+        else:
+            consume = None
         evidence = observe(client, expected_id, recipient, sender, request["subject"], request["required_text"], consume=consume)
     finally:
         failed = sys.exc_info()[0] is not None

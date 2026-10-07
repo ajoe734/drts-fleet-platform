@@ -68,13 +68,15 @@ function safeErrorClass(error: unknown): string {
 }
 
 export class MailBootstrapError extends Error {
+  readonly stage: MailBootstrapStage;
   constructor(
-    readonly stage: MailBootstrapStage,
+    stage: MailBootstrapStage,
     error: unknown,
   ) {
     super(
       `Mail session bootstrap failed; stage=${stage}; error_class=${safeErrorClass(error)}; credential details omitted.`,
     );
+    this.stage = stage;
   }
 }
 
@@ -99,11 +101,22 @@ function requireString(value: string | undefined, name: string): string {
   return trimmed;
 }
 
+export function createInvoiceMailEnvAdapter(env: MailSessionEnv): MailSessionEnv {
+  return {
+    ...env,
+    DRTS_LIVE_MAIL_TEST_AUTHORIZED: env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED,
+    DRTS_LIVE_MAIL_API_ORIGIN: env.DRTS_LIVE_INVOICE_MAIL_API_ORIGIN,
+    DRTS_LIVE_MAIL_ALLOWED_TARGETS: env.DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS,
+    DRTS_LIVE_MAIL_TEST_TENANT_ID: env.DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID,
+    DRTS_LIVE_MAIL_TENANT_ACTOR_ID: env.DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID,
+  };
+}
+
 export function validateMailSessionInputs(
   env: MailSessionEnv,
 ): MailSessionConfig {
   try {
-    validateTarget(env);
+    validateTarget(createInvoiceMailEnvAdapter(env));
   } catch (error) {
     throw new MailSessionInputError(
       error instanceof Error ? error.message : "Invalid mail target",

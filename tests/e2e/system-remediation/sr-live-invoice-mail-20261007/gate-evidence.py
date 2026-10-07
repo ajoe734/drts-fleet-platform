@@ -13,22 +13,46 @@ def evaluate(env, evidence, provider):
     sha = env.get("CANDIDATE_SHA", "")
     http_calls = evidence.get("httpCalls", [])
     resources = evidence.get("trackedResources", [])
+    mb = evidence.get("mailboxEvidence", {})
     
-    has_identity = any(call.get("path") == "tenant/billing/profile" for call in http_calls)
-    has_invoice = any(call.get("path", "").startswith("/api/tenant/invoices/") and call.get("method") == "GET" for call in http_calls)
-    has_inbox_proof = evidence.get("mailboxEvidence") and evidence.get("mailboxEvidence").get("matched_content") is True
-    has_download = any(call.get("path") == "artifactUrl" for call in http_calls)
-    has_idempotency = any(call.get("idempotency") is True for call in http_calls)
-    has_durable_get = any(call.get("path", "").endswith("/mail") and call.get("method") == "GET" for call in http_calls)
-    has_read_only = any(call.get("scenario") == "read_only" for call in http_calls)
-    has_wrong_tenant = any(call.get("scenario") == "wrong_tenant" for call in http_calls)
-    has_non_allowlisted = any(call.get("scenario") == "non_allowlisted" for call in http_calls)
-    has_intentional_resend = any(call.get("scenario") == "intentional_resend" for call in http_calls)
+    def get_call(method, path=None, scenario=None):
+        for c in http_calls:
+            if c.get("method") == method and (path is None or c.get("path", "").startswith(path)) and (scenario is None or c.get("scenario") == scenario):
+                return c
+        return None
 
+    # Check statuses
+    valid_statuses = all(c.get("status") in (200, 201, 401, 403, 404, 400) for c in http_calls if "status" in c)
+    
+    first_send = get_call("POST", path="/api/tenant/invoices/", scenario="normal_send")
+    retry_send = get_call("POST", path="/api/tenant/invoices/", scenario="idempotent_retry")
+    resend = get_call("POST", path="/api/tenant/invoices/", scenario="intentional_resend")
+    
+    dl_id = first_send.get("delivery_id") if first_send else None
+    
+    has_identity = bool(get_call("GET", path="tenant/billing/profile") and get_call("GET", path="tenant/billing/profile").get("status") == 200)
+    has_invoice = bool(get_call("GET", path="/api/tenant/invoices/") and get_call("GET", path="/api/tenant/invoices/").get("status") == 200)
+    
+    has_inbox_proof = (mb.get("matched_content") is True and mb.get("candidate_sha") == sha and
+                       mb.get("delivery_id") == dl_id and dl_id is not None and 
+                       mb.get("rfc_message_id") and mb.get("body_sha256"))
+    
+    has_download = bool(get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200 and evidence.get("downloadProof"))
+    
+    has_idempotency = bool(retry_send and retry_send.get("status") == 200 and retry_send.get("delivery_id") == dl_id and dl_id is not None)
+    
+    has_durable_get = bool(get_call("GET", scenario="durable_get") and get_call("GET", scenario="durable_get").get("status") == 200 and evidence.get("durableHistoryCount", 0) > 0)
+    
+    has_read_only = bool(get_call("POST", scenario="read_only") and get_call("POST", scenario="read_only").get("status") == 403)
+    has_wrong_tenant = bool(get_call("POST", scenario="wrong_tenant") and get_call("POST", scenario="wrong_tenant").get("status") == 403)
+    has_non_allowlisted = bool(get_call("POST", scenario="non_allowlisted") and get_call("POST", scenario="non_allowlisted").get("status") == 400)
+    has_intentional_resend = bool(resend and resend.get("status") == 200 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
+    
     passed = bool(sha and len(sha) == 40 and all(value == "success" for value in steps.values())
                   and evidence.get("candidateSha") == sha and evidence.get("headSha") == sha
                   and evidence.get("status") == "passed" and evidence.get("exitCode") == 0
                   and evidence.get("unimplementedLiveSurfaces") == [] and evidence.get("errors") == []
+                  and valid_statuses
                   and has_identity and has_invoice and has_inbox_proof and has_download 
                   and has_idempotency and has_durable_get and has_read_only 
                   and has_wrong_tenant and has_non_allowlisted and has_intentional_resend

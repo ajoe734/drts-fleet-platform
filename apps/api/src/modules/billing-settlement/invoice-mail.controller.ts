@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  HttpCode,
-  Param,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 import {
   CurrentIdentity,
   RequireRealms,
@@ -50,7 +42,6 @@ export class InvoiceMailController {
   }
 
   @Post()
-  @HttpCode(200)
   @RequireScopes("tenant:billing:write")
   async send(
     @Param("invoiceId") invoiceId: string,

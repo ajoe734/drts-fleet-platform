@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateTarget } from "../sr-live-mail-001/preflight";
+import { createInvoiceMailEnvAdapter } from "./session-bootstrap";
 
 export async function teardown(
   env: Record<string, string | undefined>,
@@ -8,7 +9,7 @@ export async function teardown(
 ) {
   const token = env.DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN;
   if (!token) return;
-  const { origin } = validateTarget(env);
+  const { origin } = validateTarget(createInvoiceMailEnvAdapter(env));
   const response = await fetcher(`${origin}/api/auth/logout`, {
     method: "POST",
     redirect: "error",
