@@ -4,27 +4,29 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-### Q-SR-GCP-ARTIFACT-ACTIVATION-20261004 — repair scope and hosted acceptance routing
+### Q-SR-GCP-ARTIFACT-ACTIVATION-20261004 — planning resolved; hosted activation pending
 
 No new product choice or acceptance scope cut is needed. PRD §9.8.3 and service
 contracts §3.11 retain immutable fee-plan publication; the existing artifact
 provider contracts and all four parent acceptance keys remain binding.
-Supervisor must coordinate the billing controller/service and regression-test
-write scopes, then return the repeated publish-error/cache-durability repair to
-parent owner Claude (reviewer Claude2), continuing PR #2384's published history.
-Source review/CI and live acceptance are separate lifecycle stages: route the
-registered immutable WIF provisioning workflow and subsequent shared Cloud Run
-activation/readback to the authorized operator. The VM hosting restriction does
-not itself prohibit an authorized hosted workflow; this helper performs no cloud
-mutation.
+Supervisor's 2026-10-07 10:31 UTC decision resolves the old scope/permission
+routing: activation PR #2384 is independently reviewed and merged as `0be15c0a`;
+the controller await fix is separately merged as `2467f88a`. Do not request
+another controller repair or blanket resource permission. Source review/CI/merge
+does not close live acceptance. Parent owner/reviewer remain Claude/Claude2.
 
-Keep the parent blocked until scope and execution routing are recorded. The
-dispatched helper cannot update another task or its own disposition metadata:
-Supervisor must write the parent next step and helper
-`resolved_parent_status: blocked`, `resolved_parent_waiting_for: Claude`, and
-`resolved_parent_next` before helper handoff/merge. This is follow-up on the
-existing parent, not new unregistered backlog. See the
-[decision, repeated-finding boundary, gate mapping and state-write evidence](support/unblock/SR-GCP-ARTIFACT-ACTIVATION-20261004/SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-PLANNING-DECISION.md).
+The parent next step and helper blocked disposition are now recorded in machine
+truth. Supervisor/operator must resolve provisioning workflow registration or a
+controlled hosted bootstrap, then collect private GCS/real ClamAV/readback,
+C125 real-upload acceptance, and full deploy candidate/browser evidence in that
+order. Keep the parent blocked until actual hosted evidence changes. The workflow
+is absent from the observed Actions registry; do not promote the entire failed
+snapshot to bypass the full-deploy gate. Latest observed deploy `37602185882`,
+publish `v2026.10.07.0` / source `3ecd55d6`, failed operational acceptance after
+successful deployment and health; neither the historical startup timeout nor
+full-release success describes that run. The VM hosting restriction remains.
+This helper performs no cloud mutation and may proceed to scoped review. See the
+[current decision, preserved history, gate mapping and verified state writes](support/unblock/SR-GCP-ARTIFACT-ACTIVATION-20261004/SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-PLANNING-DECISION.md).
 
 ### Q-SR-PARTNER-NOTIFY-UI-20260917 — approved notification canvas handoff
 

@@ -1,5 +1,107 @@
 # GCP artifact activation — planning disposition, 2026-10-07
 
+## Current disposition — Supervisor decision at 10:31 UTC
+
+**Planning routing is resolved; the parent remains blocked on actual hosted
+activation.** No new product decision, controller scope request or blanket
+first-resource permission loop is needed. This section supersedes the historical
+instructions below, including the draft-only hold. It changes only this artifact
+and `PHASE1_OPEN_QUESTIONS.md`; implementation and all four acceptance gates
+remain intact. Owner Codex hands this helper to reviewer Claude2.
+
+Authority: the dispatch and fresh release-CLI task slices read at
+2026-10-07T10:32Z record the Supervisor's parent update at `10:31:00Z` and helper
+disposition at `10:31:04Z`. Parent `next` explicitly routes authorized shared GCP
+activation to Supervisor and says no controller/scope re-fix or blanket new
+permission is needed. The helper already records `resolved_parent_status:
+blocked`, `resolved_parent_waiting_for: Claude`, and the ordered cloud chain in
+`resolved_parent_next`. Parent owner/reviewer remain Claude/Claude2. These are
+verified machine writes, not proposed metadata. No cross-task mutation or guard
+bypass is necessary from this worker; lifecycle owns `resolved_parent_at`.
+
+### Source, deployment and historical finding reconciliation
+
+| Item | Verified evidence | Disposition |
+| --- | --- | --- |
+| Parent source | [PR #2384](https://github.com/ajoe734/drts-fleet-platform/pull/2384) is MERGED at 07:44:14Z; reviewed candidate `60376bf155eb60c8e60d3bfa318629356d1d5533`, merge `0be15c0adfb6b228d92c18a3263b45b8086dcbb6` | Preserve independent source approval and matching CI; no new parent implementation. |
+| R8-doc unawaited controller | `API-UNAWAITED-ASYNC-CONTROLLERS-20261007` is `done`, [PR #2392](https://github.com/ajoe734/drts-fleet-platform/pull/2392), merge `2467f88a2e64ccc2204bb99f1356fdeb997bda13`. `git show` confirms `billing-settlement.controller.ts#publishDriverFeePlan` is async and awaits the service before its envelope. | Fixed by the separately owned task; do not repeat the old scope request. Its unit/CI evidence is not a new live HTTP/PG claim. |
+| Historical cache-before-persistence concern | Earlier helper statically localized the service/cache order, but supplied no dynamic reproduction. The API fix's changed-file list does not include the service. | Retain the historical finding below; do not claim that await changed cache ordering or dynamically disproved the concern. Supervisor's current disposition does not require another repair here. This helper neither closes a new product defect nor creates unregistered implementation work. |
+| Latest observed full deployment | [Run 37602185882](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37602185882), `publish/v2026.10.07.0`, source `3ecd55d6cf18ec4bdc2d3c28c527d2b3d7555f1f`: completed **failure**. Build, migration, deploy and health jobs succeeded; `Candidate SHA operational acceptance` failed at `Execute candidate-bound operational journeys`. | Do not report a current API startup timeout or full-release success. This readback identifies the failed job/step, not an independently diagnosed HTTP cause for every journey. |
+| Provisioning registration | Fresh Actions workflow inventory contains no `.github/workflows/provision-dev-artifact-backends.yml` entry; parent records it absent on default main. | Registration/bootstrap is the first concrete operator step. Source merge does not establish dispatchability or live resources. |
+
+The dependency audits are `done` (provider merge `c0f5d66c6b90d8c2e9bf2107e73fef999fc2d5ac`,
+infra merge `0e4b93191e039acabf71549495bd07c0cfa618ee`). Their offline/source
+evidence still does not prove live GCS or genuine ClamAV acceptance. Product
+authority remains PRD §9.8.3 and service contracts §§3.11–3.12, cited below.
+
+### Concrete parent next step and execution order
+
+1. **Supervisor/operator resolves the specific workflow registration/bootstrap
+   route.** Use the reviewed provisioning workflow through the protected review
+   and integration process, or an explicitly coordinated hosted bootstrap route
+   preserving its WIF, immutable-source and evidence controls. Record the exact
+   workflow revision and full source SHA. Do not promote the entire failed
+   `publish/v2026.10.07.0` snapshot to bypass the full-dev-deploy gate, push to a
+   protected branch directly, or substitute local gcloud credentials. This helper
+   routes that bounded operator follow-up; it does not assert it has executed or
+   introduce a bootstrap implementation.
+2. **Run private GCS/real ClamAV provisioning and readback on hosted runners.**
+   Recheck live `DEV_GCP_*`, WIF and billing, capture gateway/clamd digests,
+   bucket ownership/versioning/private IAM, scanner IAM/anonymous denial and
+   genuine positive/negative scan/storage results. Missing privileges or a
+   failed run must be recorded as the exact operator blocker. Keep resources
+   private, preserve data and retain fail-closed behavior.
+3. **Configure the six provider variables only from verified backend outputs**
+   (names preserved in the historical sequence below), then deploy the immutable
+   runtime source on shared Cloud Run as needed to exercise
+   `C125-REAL-UPLOAD-STORAGE-20261005`. Collect real upload bytes/hash, scan,
+   readback and role/ownership rejection evidence. C125's existing implementation
+   remains; do not return fake URLs or weaken unprovisioned `503` behavior.
+4. **Complete the full deploy candidate/operational/browser acceptance** on the
+   authorized hosted environment. Bind each result to its source/run/revision;
+   distinguish backend success, C125 success and full-release success. Record
+   actual evidence for each existing acceptance key through the normal lifecycle.
+
+Read-only variable lookup at 10:32Z confirms `DEV_GCP_PROJECT_ID` is
+`drts-dev-devcc-20260825` and `DEV_GCP_REGION` is `us-central1`. Recheck before
+execution. The suspended historical target is not an alternative. This VM may
+run repository checks only; no product server, browser runner or Docker was run.
+
+| Parent required acceptance | Current evidence / outstanding work |
+| --- | --- |
+| `immutable_hosted_workflow_review_ci` | Reviewed candidate/CI/merge identity exists as above. Parent `acceptance_evidence` is currently null; helper does not manufacture a receipt or call `done`. Authorized lifecycle recording remains required. |
+| `private_resources_iam_and_image_provenance` | Actual private resource/IAM and deployed image-digest readback remains outstanding; operator step 2. |
+| `genuine_scan_storage_positive_negative` | Actual clean/EICAR, engine limits/freshness/fault recovery and GCS generation/CAS evidence remains outstanding; operator step 2. Offline/mocked pass is insufficient. |
+| `shared_dev_provider_activation_readback` | Real runtime configuration/source and application producer/scan/download evidence remains outstanding; steps 3–4. The observed full deploy failed. |
+
+### Helper acceptance and verification for this revision
+
+| Finding / acceptance | Source and change | Before → after | Verification / limitation |
+| --- | --- | --- | --- |
+| Resolve or route the missing product/contract decision | Supervisor 10:31 task slices; current section and canonical Q entry | Old controller/scope permission loop → existing operator's bounded registration/bootstrap and live cloud chain | `ai-status.sh show` for helper/parent, exit 0. No new product choice or scope cut. |
+| Record decision, scope cut or explicit parent follow-up | PRD/contracts; four preserved acceptance keys; ordered steps above | Stale unmerged-parent narrative → merged source and remaining cloud evidence explicitly separated | `gh pr view 2384`, `git show 2467f88a2`, `gh run view 37602185882`, workflow inventory and variable lookup, exit 0. No live test claim. |
+| Update parent with concrete next step | Parent `next` at 10:31:00Z; helper disposition at 10:31:04Z | Prior worker guard rejection → Supervisor has performed both canonical writes | Fresh release-CLI readback confirms the first step and retained blocked disposition. Cross-task write not retried. |
+| Task-scoped commit/push/PR | Existing [PR #2387](https://github.com/ajoe734/drts-fleet-platform/pull/2387) and this published branch | Prior draft `02b6fe275aa1ff997c6723ac5e074cb79dd61927` → revised scoped delivery | Final full SHA, local/remote/PR equality and check results are recorded in helper lifecycle at handoff. Prior-SHA CI cannot cover this revision. |
+
+Machine-specific JSON readbacks are retained under
+`.local/SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-PLANNING-DECISION/`
+(`parent.json`, `helper.json`, `parent-pr.json`, `deploy.json`, `workflows.json`).
+Documentation checks are whitespace, local references, commit trailers and
+canonical consistency; their completed results accompany the handoff. Product,
+PG, genuine engine and browser execution is not applicable to this documentation
+helper and is not claimed. New hosted CI/review/merge remain separate lifecycle
+gates. This helper may hand off without claiming live activation or resuming the
+blocked parent.
+
+## Historical 02:42 UTC artifact — superseded execution instructions
+
+The original artifact follows unchanged to preserve the adjacent candidate,
+finding localization and rejected state-write evidence required by Guide §0.7.
+Its present-tense scope requests, OPEN/reopen status, draft-only hold and
+permission prerequisites are historical, superseded by the current disposition
+above. The cache concern is retained as a static observation, not relabeled as a
+verified fix. Do not execute this archived routing instead of the current chain.
+
 Task: `SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-PLANNING-DECISION`.
 Owner Codex; reviewer Claude2. Parent owner Claude; reviewer Claude2.
 This helper records a bounded repair and operator route. It neither grants
