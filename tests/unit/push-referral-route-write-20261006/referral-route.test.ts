@@ -34,21 +34,46 @@ function harness() {
   const routes = new Map<string, Record<string, unknown>>();
   const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
     statements.push(sql.trim());
-    if (sql.includes("INSERT INTO mobility.phase1_order_partner_notification_routes")) {
-      const columns = ["order_id", "tenant_id", "partner_id", "entry_slug", "partner_user_ref", "drts_passenger_id", "passenger_subject_ref", "identity_linked_at", "consent_bundle_version", "notification_policy_version", "ride_ref", "created_at"];
-      const row = Object.fromEntries(columns.map((key, i) => [key, values?.[i]]));
+    if (
+      sql.includes(
+        "INSERT INTO mobility.phase1_order_partner_notification_routes",
+      )
+    ) {
+      const columns = [
+        "order_id",
+        "tenant_id",
+        "partner_id",
+        "entry_slug",
+        "partner_user_ref",
+        "drts_passenger_id",
+        "passenger_subject_ref",
+        "identity_linked_at",
+        "consent_bundle_version",
+        "notification_policy_version",
+        "ride_ref",
+        "created_at",
+      ];
+      const row = Object.fromEntries(
+        columns.map((key, i) => [key, values?.[i]]),
+      );
       if (routes.has(String(row.order_id))) return { rows: [] };
       routes.set(String(row.order_id), row);
       return { rows: [row] };
     }
-    if (sql.includes("FROM mobility.phase1_order_partner_notification_routes")) {
+    if (
+      sql.includes("FROM mobility.phase1_order_partner_notification_routes")
+    ) {
       const row = routes.get(String(values?.[0]));
       return { rows: row ? [row] : [] };
     }
     return { rows: [] };
   });
   const client = { query, release: vi.fn() };
-  const database = { isEnabled: () => true, query, connect: vi.fn(async () => client) };
+  const database = {
+    isEnabled: () => true,
+    query,
+    connect: vi.fn(async () => client),
+  };
   const allocator = new MultiTaxiRepository(database as never);
   const repository = new OwnedMobilityRepository(database as never, allocator);
   const audit = new AuditNotificationService();
@@ -61,23 +86,56 @@ function harness() {
     consentScope: "passenger_identity_link",
     linkedAt: "2026-10-01T00:00:00.000Z",
   };
-  const links = { findByDrtsPassengerId: vi.fn(async () => link as typeof link | null) };
-  const publish = vi.fn(() => { statements.push("PUBLISH"); });
+  const links = {
+    findByDrtsPassengerId: vi.fn(async () => link as typeof link | null),
+  };
+  const publish = vi.fn(() => {
+    statements.push("PUBLISH");
+  });
   const service = new OwnedMobilityService(
-    {} as never, audit, {} as never, {} as never,
+    {} as never,
+    audit,
+    {} as never,
+    {} as never,
     { publishOrderCreated: publish } as never,
-    repository, tenant,
-    undefined, undefined, undefined, undefined, undefined, undefined,
-    undefined, undefined, undefined, undefined, undefined, undefined,
+    repository,
+    tenant,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
     links as never,
   );
-  return { service, repository, allocator, tenant, links, link, routes, query, statements, publish, database };
+  return {
+    service,
+    repository,
+    allocator,
+    tenant,
+    links,
+    link,
+    routes,
+    query,
+    statements,
+    publish,
+    database,
+  };
 }
 
 describe("referral embed notification route", () => {
   it("persists the trusted route and sequence before publishing the committed booking", async () => {
     const h = harness();
-    const result = await h.service.createReferralPassengerBooking(command, identity);
+    const result = await h.service.createReferralPassengerBooking(
+      command,
+      identity,
+    );
     expect(h.routes.get(result.orderId)).toMatchObject({
       tenant_id: identity.tenantId,
       partner_id: identity.partnerId,
@@ -87,12 +145,25 @@ describe("referral embed notification route", () => {
       notification_policy_version: "partner_notification_v1",
       ride_ref: result.orderId,
     });
-    expect(h.links.findByDrtsPassengerId).toHaveBeenCalledExactlyOnceWith(identity.partnerEntrySlug, identity.drtsPassengerId);
-    const routeIndex = h.statements.findIndex((sql) => sql.includes("INSERT INTO mobility.phase1_order_partner_notification_routes"));
-    const sequenceIndex = h.statements.findIndex((sql) => sql.includes("INSERT INTO mobility.phase1_partner_notification_sequences"));
+    expect(h.links.findByDrtsPassengerId).toHaveBeenCalledExactlyOnceWith(
+      identity.partnerEntrySlug,
+      identity.drtsPassengerId,
+    );
+    const routeIndex = h.statements.findIndex((sql) =>
+      sql.includes(
+        "INSERT INTO mobility.phase1_order_partner_notification_routes",
+      ),
+    );
+    const sequenceIndex = h.statements.findIndex((sql) =>
+      sql.includes(
+        "INSERT INTO mobility.phase1_partner_notification_sequences",
+      ),
+    );
     expect(routeIndex).toBeGreaterThan(h.statements.indexOf("BEGIN"));
     expect(sequenceIndex).toBeGreaterThan(routeIndex);
     expect(h.statements.indexOf("COMMIT")).toBeGreaterThan(sequenceIndex);
-    expect(h.statements.indexOf("PUBLISH")).toBeGreaterThan(h.statements.indexOf("COMMIT"));
+    expect(h.statements.indexOf("PUBLISH")).toBeGreaterThan(
+      h.statements.indexOf("COMMIT"),
+    );
   });
 });

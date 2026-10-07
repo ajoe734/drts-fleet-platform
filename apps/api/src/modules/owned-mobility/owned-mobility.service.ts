@@ -1,3 +1,5 @@
+import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
+import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { PartnerNotificationNavigationRepository } from "../tenant-partner/partner-notification-navigation.repository";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 import {
@@ -577,6 +579,8 @@ export class OwnedMobilityService
     // harness that constructs this service directly.
     @Optional()
     private readonly platformPresenceService?: PlatformPresenceService,
+    @Optional()
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -1550,6 +1554,7 @@ export class OwnedMobilityService
     options?: {
       required?: boolean;
       isImmediateReferral?: boolean;
+      writeReferralNotificationRoute?: boolean;
     },
   ): MaybePromise<TenantBookingResult> {
     const resolvedKey =
@@ -1589,6 +1594,7 @@ export class OwnedMobilityService
     options?: {
       required?: boolean;
       isImmediateReferral?: boolean;
+      writeReferralNotificationRoute?: boolean;
     },
   ): Promise<TenantBookingResult> {
     const scope = `tenant:${tenantId}:booking_create`;
@@ -1643,6 +1649,7 @@ export class OwnedMobilityService
     options?: {
       required?: boolean;
       isImmediateReferral?: boolean;
+      writeReferralNotificationRoute?: boolean;
     },
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
@@ -1863,6 +1870,22 @@ export class OwnedMobilityService
       };
     };
 
+    const writeReferralRoute = async (tx?: OwnedMobilityQueryExecutor) => {
+      if (!options?.writeReferralNotificationRoute) return;
+      const route = await resolveOrderPartnerNotificationRoute(
+        order, identity, this.partnerUserIdentityLinkRepository, this.tenantPartnerService,
+      );
+      if (route) {
+        await this.ownedMobilityRepository?.writeOrderPartnerNotificationRoute(route, tx);
+      }
+    };
+    const finalizeWithRoute = (
+      previous: TenantBookingApprovalState,
+      approval: TenantBookingApprovalRequestRecord | null,
+    ) => options?.writeReferralNotificationRoute
+      ? writeReferralRoute().then(() => finalizeCreation(previous, approval))
+      : finalizeCreation(previous, approval);
+
     const previousApprovalState = order.approvalState;
     const governanceSnapshot = this.captureTenantGovernanceSnapshot();
     const applyPassengerDisclosure = () =>
@@ -1891,16 +1914,19 @@ export class OwnedMobilityService
 
     if (
       this.ownedMobilityRepository?.isEnabled() &&
-      this.tenantPartnerService?.isPersistenceEnabled()
+      (this.tenantPartnerService?.isPersistenceEnabled() || options?.writeReferralNotificationRoute)
     ) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
           await applyPassengerDisclosure();
-          const approvalRequest = await applyGovernance(tx);
+          const approvalRequest = await applyGovernance(
+            this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
+          );
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(order)],
             dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
           });
+          await writeReferralRoute(tx);
           if (command.passengerDisclosureAcknowledgement) {
             await this.acknowledgePassengerDisclosure(
               tenantId,
@@ -1915,12 +1941,15 @@ export class OwnedMobilityService
               },
             );
           }
-          return finalizeCreation(
-            previousApprovalState,
-            approvalRequest,
-            false,
-          );
+          return approvalRequest;
         })
+        // Publish into the in-memory order feed and dispatch events only after
+        // commit: readers must not race the frozen route/sequence setup.
+        .then((approvalRequest) => finalizeCreation(
+          previousApprovalState,
+          approvalRequest,
+          false,
+        ))
         .catch((error) => {
           // The DB transaction rolls back persisted rows, but the in-memory
           // governance state (quota ledger / approval requests) is mutated
@@ -1950,9 +1979,9 @@ export class OwnedMobilityService
                     },
                   ),
                   () =>
-                    finalizeCreation(previousApprovalState, approvalRequest),
+                    finalizeWithRoute(previousApprovalState, approvalRequest),
                 )
-              : finalizeCreation(previousApprovalState, approvalRequest);
+              : finalizeWithRoute(previousApprovalState, approvalRequest);
           }),
         ),
       () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
@@ -13686,7 +13715,7 @@ export class OwnedMobilityService
             requestId,
             runtimeProfileCodeHeader,
             undefined,
-            { isImmediateReferral },
+            { isImmediateReferral, writeReferralNotificationRoute: true },
           );
 
           if (
@@ -13767,7 +13796,7 @@ export class OwnedMobilityService
       requestId,
       runtimeProfileCodeHeader,
       undefined,
-      { isImmediateReferral },
+      { isImmediateReferral, writeReferralNotificationRoute: true },
     );
 
     return result;

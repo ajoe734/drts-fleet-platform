@@ -1,3 +1,4 @@
+import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import {
   PartnerNotificationFailure,
   type PartnerDeliveryMetadata,
@@ -467,81 +468,19 @@ export class MultiTaxiService implements OnModuleInit {
     return this.createRideAccessResult(order, requestId);
   }
 
-  /**
-   * SR-PARTNER-NOTIFY-ROUTE-20260917 design §4: freezes "which partner app /
-   * which resident" for this order from the authenticated session and the
-   * existing identity link only — never from `command` (a caller could put
-   * anything in the request body). A call-center ride's `identity` is always
-   * `null` (see `createCallCenterRide` above), so it never reaches here.
-   *
-   * This is not literally inside the same DB transaction as the
-   * `phase1_owned_orders` INSERT (that transaction lives in
-   * `OwnedMobilityRepository`, outside this task's write scope) — it runs
-   * synchronously immediately after order creation returns, before any
-   * caller observes the order and before any assignment/outbox cycle can
-   * run, so "a route exists before the first outbox row" (design §4) still
-   * holds. A resolvable route write failure never fails ride creation
-   * (`writeOrderPartnerNotificationRoute` swallows and logs) — design §9:
-   * notification setup gaps must not become a ride-creation gate.
-   */
+  /** Preserve the multi-taxi entry point, sharing trusted resolution and SQL
+   * with referral embed bookings without adding a module dependency cycle. */
   private async writeOrderPartnerNotificationRouteIfApplicable(
     order: OwnedOrderRecord,
     identity: BootstrapRequestIdentity | null,
   ) {
-    const entrySlug = identity?.partnerEntrySlug?.trim();
-    const drtsPassengerId = identity?.drtsPassengerId?.trim();
-    if (
-      !entrySlug ||
-      !drtsPassengerId ||
-      !this.partnerUserIdentityLinkRepository
-    ) {
-      return;
-    }
-    const link = await this.partnerUserIdentityLinkRepository
-      .findByDrtsPassengerId(entrySlug, drtsPassengerId)
-      .catch(() => null);
-    if (!link || link.status !== "active") {
-      return;
-    }
-    // tenantId/partnerId come from the platform partner-entry registry (the
-    // canonical source per design §3.1), not from the order record (multi-
-    // taxi standard-taxi orders are tenant-less by design) or from any
-    // caller-suppliable field.
-    let entry: { tenantId: string; partnerId: string } | null = null;
-    try {
-      entry = this.tenantPartnerService?.getPartnerEntry(entrySlug) ?? null;
-    } catch {
-      entry = null;
-    }
-    if (!entry) {
-      return;
-    }
-    const now = new Date().toISOString();
-    await this.repository
-      ?.writeOrderPartnerNotificationRoute({
-        orderId: order.orderId,
-        tenantId: entry.tenantId,
-        partnerId: entry.partnerId,
-        entrySlug,
-        partnerUserRef: link.partnerUserRef,
-        drtsPassengerId: link.drtsPassengerId,
-        passengerSubjectRef: this.resolvePassengerSubjectRef(order),
-        identityLinkedAt: link.linkedAt,
-        // No dedicated versioned consent-bundle store exists yet (design §6
-        // asks for one for the notification-consent notice, future work);
-        // the identity link's own consentScope is the closest existing
-        // record of what was granted and is reused here pending that.
-        consentBundleVersion: link.consentScope,
-        notificationPolicyVersion: "partner_notification_v1",
-        rideRef: order.orderId,
-        createdAt: now,
-      })
-      .catch((error) =>
-        this.repository?.reportPersistenceFailure(
-          error,
-          "write order partner notification route",
-        ),
-      );
+    const route = await resolveOrderPartnerNotificationRoute(
+      order, identity, this.partnerUserIdentityLinkRepository, this.tenantPartnerService,
+    );
+    if (!route) return;
+    await this.repository?.writeOrderPartnerNotificationRoute(route).catch((error) =>
+      this.repository?.reportPersistenceFailure(error, "write order partner notification route"),
+    );
   }
 
   async getPassengerRide(
