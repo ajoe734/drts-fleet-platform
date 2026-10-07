@@ -135,7 +135,7 @@ Docker or a `done` command as a substitute.
 | Diagnose dependency-ready blocker | Merged implementation; missing external live evidence identified above | Release CLI `show` filtered to parent fields; `gh pr view 2382` and `gh run view 37558966738 --log`, exit 0 | No live environment probe |
 | Task-scoped resolution or remaining-blocker report | This artifact only; original UAT/history retained | Content/reference review; no behavior changed, so old/new runtime reproduction is not applicable | Parent remains blocked |
 | Commit/push/PR evidence | Task branch and exact report candidate supplied in handoff | Local/remote/PR head must match before handoff | Review/CI/merge belong to candidate lifecycle |
-| Update parent next step | Exact next step and blocked disposition prepared above | Parent `note` denied, exit 1, by dispatch guard | Supervisor must persist parent note and helper metadata before approval/merge |
+| Update parent next step | Supervisor persisted the prepared next step and blocked disposition; owner verified both task slices | Operator receipts and exact field comparison below, exit 0 | Reviewer must reconfirm metadata before approval/merge; parent live acceptance remains blocked |
 | WIF token and deployed SHA | Workflow token minting and response SHA guards present | Source inspection; same-candidate hosted runner result read | Real WIF admission/deployment match unverified |
 | Invoice, placard, report, bank signature and role negatives | Live callbacks exist; five live tests skipped | Hosted 52 pass / 5 skip result, exit 0 | Genuine sessions, fixtures, IAP ingress and signed artifact still needed |
 | Missing evidence fails closed | Live preflight and public-key check inspected | Static source review; previous hosted unit evidence retained | No new live missing-input execution claimed |
@@ -209,8 +209,8 @@ Supervisor must persist the exact JSON in **Parent update and merge safety**
 above using `assign` with owner Codex/reviewer Codex2, then use parent `note`
 with that exact `resolved_parent_next`. Preserve blocked status, waiting lane
 and the parent evidence listed above. Leave `resolved_parent_at` to merge.
-The operator receipt is **still missing**; no successful reconciliation is
-recorded. Owner must reread both task slices, verify all three helper fields
+At that checkpoint the operator receipt was **still missing**; no successful
+reconciliation had been recorded. Owner must reread both task slices, verify all three helper fields
 and exact parent note/evidence, then publish and hand off the final report SHA
 for independent Codex2 review. This checkpoint is not a new handoff.
 
@@ -220,3 +220,45 @@ for independent Codex2 review. This checkpoint is not a new handoff.
 | Update parent with concrete next step | Not met | Exact prepared JSON retained; Supervisor assign and parent note still required |
 | Preserve parent evidence | Pass for this read-only recheck | Candidate/review/CI SHA and merge SHA match the values above |
 | Scoped report / publish | Original artifact extended only | Checkpoint must be committed and normally pushed; no approval or live acceptance claimed |
+
+## Operator reconciliation verified: 2026-10-07
+
+This section supersedes the open metadata finding above while retaining its
+reproduction and review history. The prior checkpoint was
+`590de4f58e32c8bf223d8e79f8f000f6c4b0a49f`, published on PR #2386.
+
+Operator activity receipts identify Supervisor `assign` on this helper at
+`2026-10-07T04:11:16Z` and Supervisor `note` on the parent at
+`2026-10-07T04:11:29Z`. These receipts are corroborated by fresh active-release
+CLI `show` reads of both tasks; the activity log alone is not state authority.
+The owner did not perform either cross-task or operator-only mutation.
+
+The owner compared the JSON block in **Parent update and merge safety** to the
+helper slice using Python equality assertions over CLI output. All three fields
+match exactly: `resolved_parent_status=blocked`,
+`resolved_parent_waiting_for=Codex` and the complete `resolved_parent_next`.
+Owner/reviewer remain Codex/Codex2 and `resolved_parent_at` remains unset.
+The parent note adds a Supervisor receipt prefix followed by that exact next
+step, verified with `parent.next.endswith(resolved_parent_next)`.
+
+Parent status remains `blocked`, waiting for Codex. Candidate, reviewed and CI
+SHAs all remain `992975969b8e32c402d9a776ee7b090c20724a82`, CI status remains
+`success`, and merge SHA remains `8c93658f4b38d1754c3f04b0872728a153f13f3d`.
+The active release's `apply_unblock_parent_resolution` now reads the explicit
+blocked disposition instead of the absent-field `todo` default. This is static
+merge-safety verification, not a performed merge or live acceptance run.
+
+| Finding / acceptance | Previous checkpoint → current result | Verification and remaining limit |
+| --- | --- | --- |
+| `UNBLOCK-PARENT-METADATA` | Missing fields → exact prepared JSON persisted | Active-release CLI slices plus Python equality assertions, exit 0; independent Codex2 review pending |
+| Update parent with concrete next step | Generic provisioning message → exact concrete next step after operator prefix | Parent CLI slice and suffix assertion, exit 0; operator note receipt at 04:11:29Z |
+| Preserve parent evidence and routing | Original evidence → unchanged; parent stays blocked | Assertions for status, waiting lane, three SHAs, CI success, merge SHA and unset helper resolution timestamp, exit 0 |
+| Scoped report / publish | Published checkpoint → this receipt supplement in the same artifact | Final candidate identity, artifact hash, diff/trailer checks and normal push are recorded in handoff |
+
+Machine-specific filtered snapshots are stored under
+`.local/doc-live-runner-unblock/20261007-operator-reconciliation/` as
+`helper.json` and `parent.json`; the durable facts are recorded above.
+No product code changed. No workflow dispatch, runtime test, deployment or
+external acceptance was performed. Sessions, fixtures, deployed identity and
+supported IAP ingress remain the parent's external blockers. The earlier
+Prettier tooling limitation remains; it is not a formatting pass.
