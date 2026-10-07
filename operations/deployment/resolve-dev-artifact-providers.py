@@ -21,6 +21,28 @@ class ConfigurationError(ValueError):
     pass
 
 
+def validate_scanner_origin(url: str) -> None:
+    """Exact root origin only: https, no userinfo/query/fragment/path, so the
+    Cloud Run gateway's identity-token audience is unambiguous and nothing
+    can smuggle a redirect target or credentials into the configured URL."""
+    try:
+        parsed = urlsplit(url)
+        _ = parsed.port
+    except ValueError as error:
+        raise ConfigurationError("Invalid REMITTANCE_PROOF_SCANNER_URL") from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/")
+        or any(character.isspace() for character in url)
+    ):
+        raise ConfigurationError("Invalid REMITTANCE_PROOF_SCANNER_URL")
+
+
 def resolve(variables: dict[str, str], secret_prefix: str) -> tuple[dict[str, str], dict[str, str]]:
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", secret_prefix):
         raise ConfigurationError("Invalid Secret Manager prefix")
@@ -62,16 +84,29 @@ def resolve(variables: dict[str, str], secret_prefix: str) -> tuple[dict[str, st
         fields = [prefix + "_S3_" + suffix for suffix in (
             "BUCKET", "REGION", "ENDPOINT", "FORCE_PATH_STYLE", "AUTH_MODE", "SESSION_TOKEN_ENABLED",
         )]
+        gcs_fields = [prefix + "_GCS_BUCKET"]
         # Credentials in ordinary GitHub variables are not an accepted input.
         for suffix in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "SESSION_TOKEN"):
             if value(prefix + "_S3_" + suffix):
                 raise ConfigurationError(f"{prefix} credentials must use managed secret references")
         if provider == "unprovisioned":
             absent(fields)
+            absent(gcs_fields)
             settings[provider_key] = provider
             continue
+        if provider == "gcs":
+            absent(fields)
+            settings[provider_key] = provider
+            bucket = required(prefix + "_GCS_BUCKET")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]", bucket):
+                raise ConfigurationError(f"Invalid {prefix} GCS bucket name")
+            settings[prefix + "_GCS_BUCKET"] = bucket
+            # GCS auth is the ambient Cloud Run metadata identity, never a
+            # secret -- nothing further to mount.
+            continue
         if provider != "s3":
-            raise ConfigurationError(f"DEV_{provider_key} must be s3 or unprovisioned")
+            raise ConfigurationError(f"DEV_{provider_key} must be s3, gcs or unprovisioned")
+        absent(gcs_fields)
         settings[provider_key] = provider
         bucket = required(prefix + "_S3_BUCKET")
         if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
@@ -112,11 +147,15 @@ def resolve(variables: dict[str, str], secret_prefix: str) -> tuple[dict[str, st
     scanner_key = "REMITTANCE_PROOF_SCANNER_PROVIDER"
     scanner = value(scanner_key, "unprovisioned")
     fields = ["REMITTANCE_PROOF_CLAMD_" + suffix for suffix in ("HOST", "PORT", "TLS", "TIMEOUT_MS")]
+    cloud_run_fields = ["REMITTANCE_PROOF_SCANNER_URL", "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS"]
+    proof_storage_configured = settings["REMITTANCE_PROOF_STORAGE_PROVIDER"] != "unprovisioned"
     if scanner == "unprovisioned":
         absent(fields)
+        absent(cloud_run_fields)
     elif scanner == "clamd":
-        if settings["REMITTANCE_PROOF_STORAGE_PROVIDER"] != "s3":
+        if not proof_storage_configured:
             raise ConfigurationError("clamd requires configured proof storage")
+        absent(cloud_run_fields)
         host = required(fields[0])
         if not re.fullmatch(r"[a-zA-Z0-9.:-]+", host):
             raise ConfigurationError("Invalid clamd host")
@@ -127,8 +166,19 @@ def resolve(variables: dict[str, str], secret_prefix: str) -> tuple[dict[str, st
                 raise ConfigurationError(f"Invalid DEV_{name}")
             settings[name] = result
         settings[fields[2]] = boolean(fields[2], "true")
+    elif scanner == "cloud-run-clamd":
+        if not proof_storage_configured:
+            raise ConfigurationError("cloud-run-clamd requires configured proof storage")
+        absent(fields)
+        url = required(cloud_run_fields[0])
+        validate_scanner_origin(url)
+        settings[cloud_run_fields[0]] = url
+        timeout = value(cloud_run_fields[1], "60000")
+        if not timeout.isascii() or not timeout.isdigit() or not 100 <= int(timeout) <= 60000:
+            raise ConfigurationError(f"Invalid DEV_{cloud_run_fields[1]}")
+        settings[cloud_run_fields[1]] = timeout
     else:
-        raise ConfigurationError("Proof scanner must be clamd or unprovisioned")
+        raise ConfigurationError("Proof scanner must be clamd, cloud-run-clamd or unprovisioned")
     settings[scanner_key] = scanner
     if any(key.startswith(("DEV_REMITTANCE_PROOF_", "DEV_DOCUMENT_ARTIFACT_")) and key not in recognized for key in variables):
         raise ConfigurationError("Unknown dev artifact provider variable; check configuration spelling")

@@ -21,7 +21,7 @@ Repository：ajoe734/drts-fleet-platform
 | packages/contracts/src/referral-channel.ts: 1–180 | 既有 PartnerUserIdentityLinkRecord 保存 entrySlug、partnerUserRef、drtsPassengerId、active/revoked；既有簽章 handoff 與同意資料可沿用。 |
 | apps/api/src/modules/tenant-partner/webhook-dispatch.service.ts | HMAC-SHA256、snake_case 序列化、HTTP timeout、shouldRetry/backoff 已存在；WebhookFetch 只回 ok/status，沒有讀取接收回執 body。 |
 | apps/api/src/modules/multi-taxi/passenger-push.adapter.ts | 可注入 PassengerPushTransport；存在可選 device resolver；generic HTTP 分支會以 receipt-${outboxId} 作缺回執時的 fallback。 |
-| apps/api/src/modules/multi-taxi/multi-taxi.module.ts | PASSENGER_PUSH_TRANSPORT 目前仍綁 WebPushTransport，並注入 PassengerPushDeviceResolver。只新增一個 class 不會切換現行行為。 |
+| apps/api/src/modules/multi-taxi/multi-taxi.module.ts | PASSENGER_PUSH_TRANSPORT 目前仍綁 WebPushTransport，並注入 PassengerPushDeviceResolver。只新增一個 class 不會切換現行行為。 **[2026-10-06 附註，不改本行原文]** 此行所述現況已過時：目前 PASSENGER_PUSH_TRANSPORT 綁的是 PartnerNotificationTransport（transportMode: "partner_webhook"），WebPushTransport／PassengerPushDeviceResolver 已不是現行注入對象。本表其餘各行與下文六項決議不受影響。每張單依來源分流到哪個管道、沒有 App 來源明確標無管道，以及預備第一方 App 接收端的補篇設計，見 `docs/02-architecture/passenger-notification-channel-routing-20261006.md` 與 `docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md`。 |
 | apps/api/src/modules/multi-taxi/multi-taxi.service.ts: 950–1100 | 已有 outbox claim、fence 與 receipt/outcome 同交易寫入；通用錯誤目前會摺疊成 provider_error。 |
 | packages/contracts/src/phase1-p5-s3-multi-taxi.ts: 620–665 | outbox 四狀態 pending/sending/delivered/failed；五種事件；result 為 delivered/provider_not_configured/provider_error。 |
 | docs/03-runbooks/tenant-api-webhook-governance-runbook.md | 記載 tenant webhook 自動重試、重啟恢復、停用、測試及輪替機制。 |
@@ -165,6 +165,14 @@ interface OrderPartnerNotificationRoute {
 ETA：同 order + assignmentVersion 至多每 60 秒一筆，變動至少 2 分鐘才生成；未送出的舊 ETA 可標記 superseded，不顯示 delivered。已送出未知結果仍沿原 ID／payload 重試或依效期結束，不能換內容冒稱同一事件。
 
 送出前重查事件是否仍有通知意義：已取消／已結束的「司機已抵達」、已被新指派取代的舊指派／ETA 停送。receipt_ready 可在完成後送。夥伴收到亂序事件，要去重、依序更新；點擊時一律讀最新正式行程，而非呈現通知內的舊狀態。
+
+### 2026-10-05 使用者決定 A：取消通知（夥伴契約變更）
+
+`multi_taxi_direct` 訂單經正式取消入口 `cancelOwnedOrder` 成功取消時，在相同交易寫入 `trip_cancelled` outbox，沿用持久化 eventSequence、不可變 delivery context、重試去重與 accepted/duplicate ack 契約。重複取消受訂單狀態防護，不新增第二筆取消通知；其它 runtime profile 不新增此事件。
+
+外部事件為 `passenger.trip_cancelled.v1`，`schema_version=1.0`，TTL 為 7 日，仍受 endpoint maxAttempts 限制。夥伴必須明確訂閱並支援本事件；既有 binding 與 endpoint 不會自動加訂。固定文案為「行程已取消，請回行程查看。」。內部原因僅保存分類碼 `passenger_cancelled`；外送 payload 沿用原有 allowlist，不新增原因欄位或個資，不含乘客提供的自由文字取消原因。
+
+取消仍令先前待送的派車／改派／ETA／到場通知成為 `notification_obsolete`；取消通知本身不因行程取消或舊 assignmentVersion 停送，自動派送及受控重送都適用。`navigation.type=ride` 且帶原 `ride_ref`；夥伴需以原 entry 與目前已核身住戶取得 fresh handoff，正式 resolver 讀取最新 cancelled 狀態，導向已取消頁。通知識別與 ride_ref 均不構成授權。
 
 ## 6. 酬載與隱私
 

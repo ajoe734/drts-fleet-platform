@@ -235,6 +235,14 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      # This job runs as a non-strict (CI/"test") auth environment. The
+      # platform/ops workforce step-up MFA gate denies by default
+      # (ENTRY-IAP-WORKFORCE-AUTH-20261005); the bootstrap dev fixture no
+      # longer fabricates verified_iap_workforce/aal2, so integration tests
+      # exercising platform_admin/ops_user privileged actions need this
+      # explicit, audited dev waiver. isDevWorkforceMfaWaiverEnabled rejects
+      # it outright in staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -343,6 +351,17 @@ jobs:
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
       PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
       PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+      # This job's hermetic E2E sub-run (tests/e2e/E2E-004/018 via
+      # run-iam-negative-matrix.sh) drives real platform_admin/ops_user
+      # bootstrap identities through privileged platform-admin routes. Since
+      # ENTRY-IAP-WORKFORCE-AUTH-20261005 removed the fabricated
+      # verified_iap_workforce/aal2 stamping on those bootstrap identities,
+      # the step-up gate needs the explicit, audited dev waiver to clear
+      # (mirrors the "API unit tests" step in ci.yml). The tests/security/*
+      # cases in this same step do not reference MFA/step-up state, so this
+      # is safe at job level. isDevWorkforceMfaWaiverEnabled rejects the flag
+      # outright in staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -487,8 +506,18 @@ jobs:
       JWT_ISSUER: drts-local
       JWT_AUDIENCE: drts-api
       CONTROLLED_DOWNLOAD_SIGNING_SECRET: ci-e2e-controlled-download-secret
+      DOCUMENT_ARTIFACT_STORAGE_PROVIDER: memory
       PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT: ci-e2e-alpha-ingress-key
       PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT: ci-e2e-beta-ingress-key
+      # Several scenarios here (E2E-004/008/011/015/016) drive real
+      # platform_admin/ops_user bootstrap identities through privileged
+      # platform-admin routes. ENTRY-IAP-WORKFORCE-AUTH-20261005 removed the
+      # fabricated verified_iap_workforce/aal2 stamping on those bootstrap
+      # identities, so the step-up gate needs the explicit, audited dev
+      # waiver to clear (mirrors the "API unit tests" step in ci.yml).
+      # isDevWorkforceMfaWaiverEnabled rejects the flag outright in
+      # staging/production regardless of this value.
+      DRTS_DEV_MFA_WAIVED: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

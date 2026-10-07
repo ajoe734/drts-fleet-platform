@@ -1,8 +1,11 @@
 import React from "react";
 import { act, create } from "react-test-renderer";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const screenRegistrations: Array<{ name: string; options: Record<string, unknown> }> = [];
+const screenRegistrations: Array<{
+  name: string;
+  options: Record<string, unknown>;
+}> = [];
 let passedTabBar: any = null;
 
 vi.mock("react-native", () => ({
@@ -39,8 +42,14 @@ vi.mock("expo-status-bar", () => ({
 }));
 
 vi.mock("expo-router", () => {
-  const MockScreen = (props: { name: string; options?: Record<string, unknown> }) => {
-    screenRegistrations.push({ name: props.name, options: props.options ?? {} });
+  const MockScreen = (props: {
+    name: string;
+    options?: Record<string, unknown>;
+  }) => {
+    screenRegistrations.push({
+      name: props.name,
+      options: props.options ?? {},
+    });
     return React.createElement("Tabs.Screen", props);
   };
 
@@ -91,14 +100,16 @@ vi.mock("@/lib/api-client", () => ({
 import RootLayout from "../../app/_layout";
 
 describe("RootLayout navigator structure", () => {
-  it("declares the five main tabs and all existing sub-screens once in the root navigator", () => {
+  beforeEach(() => {
     screenRegistrations.length = 0;
     passedTabBar = null;
 
     act(() => {
       create(React.createElement(RootLayout));
     });
+  });
 
+  it("declares the five main tabs and all existing sub-screens once in the root navigator", () => {
     expect(passedTabBar).toBeDefined();
 
     const registeredNames = screenRegistrations.map((s) => s.name);
@@ -111,13 +122,21 @@ describe("RootLayout navigator structure", () => {
       "onboarding",
       "earnings",
       "shift",
+      "leave",
+      "academy",
       "sos",
       "incident",
       "safety-operator",
     ]);
 
     // Check main 5 tabs have valid titles and no href: null
-    const rootTabNames = ["index", "jobs", "trip", "platform-presence", "settings"];
+    const rootTabNames = [
+      "index",
+      "jobs",
+      "trip",
+      "platform-presence",
+      "settings",
+    ];
     for (const name of rootTabNames) {
       const reg = screenRegistrations.find((s) => s.name === name);
       expect(reg).toBeDefined();
@@ -129,6 +148,8 @@ describe("RootLayout navigator structure", () => {
       "onboarding",
       "earnings",
       "shift",
+      "leave",
+      "academy",
       "sos",
       "incident",
       "safety-operator",
@@ -142,13 +163,17 @@ describe("RootLayout navigator structure", () => {
 
   it("renders the bottom tab bar when provided sub-screen navigation state", () => {
     expect(passedTabBar).toBeDefined();
+    const incidentIndex = screenRegistrations.findIndex(
+      (s) => s.name === "incident",
+    );
+    expect(incidentIndex).toBeGreaterThanOrEqual(0);
 
     let tabRenderer: any;
     act(() => {
       tabRenderer = create(
         passedTabBar({
           state: {
-            index: 9,
+            index: incidentIndex,
             routes: screenRegistrations.map((s) => ({
               key: `key-${s.name}`,
               name: s.name,
@@ -161,7 +186,7 @@ describe("RootLayout navigator structure", () => {
     const tabs = tabRenderer.root.findAllByProps({ accessibilityRole: "tab" });
     expect(tabs.length).toBe(5);
 
-    // Route index 9 is "incident", so "行程" tab should be active
+    // The incident sub-screen belongs to the 行程 tab, regardless of route order.
     const activeTab = tabs.find(
       (t: any) => t.props.accessibilityState?.selected === true,
     );

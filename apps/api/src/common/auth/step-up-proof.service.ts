@@ -14,7 +14,11 @@ import {
   resolveRouteStepUpPolicy,
   resolveStepUpActionPolicy,
 } from "./step-up.policy";
-import { hasTrustedMfa } from "./trusted-mfa.policy";
+import {
+  DEV_MFA_WAIVED_AMR,
+  hasTrustedMfa,
+  isDevWorkforceMfaWaiverEnabled,
+} from "./trusted-mfa.policy";
 
 const MAX_STORED_PROOFS = 1000;
 
@@ -115,12 +119,48 @@ export class StepUpProofService {
     }
 
     const authTimeMs = parseTimestamp(identity.authTime);
-    if (authTimeMs === null || !hasTrustedMfa(identity)) {
+    const mfaTrusted = hasTrustedMfa(identity);
+    // Dev-only, explicitly flagged, audited waiver (ENTRY-IAP-WORKFORCE-AUTH-20261005,
+    // product decision 2026-10-05): lets a platform/ops workforce identity clear
+    // this gate in dev without a real MFA signal. Scoped to platform/ops realms
+    // only -- it never applies to tenant/driver/partner step-up -- and
+    // `isDevWorkforceMfaWaiverEnabled` always returns false in staging/production.
+    const devWaiverApplies =
+      !mfaTrusted &&
+      (identity.realm === "platform" || identity.realm === "ops") &&
+      isDevWorkforceMfaWaiverEnabled();
+    if (!mfaTrusted && !devWaiverApplies) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
         reasonCode:
           authTimeMs === null ? "missing_trusted_auth_time" : "mfa_not_trusted",
+        requestId,
+      });
+      throw new ApiRequestError(
+        403,
+        "MFA_REQUIRED",
+        "Trusted multi-factor authentication is required before step-up proof can be issued.",
+        {
+          actionId: policy.actionId,
+          freshnessSeconds: Math.floor(policy.freshnessWindowMs / 1000),
+        },
+      );
+    }
+
+    // Real MFA evidence must still carry its own auth_time so the freshness
+    // window below is meaningful. The dev waiver's "no second factor" grant
+    // is instead anchored to this request's own clock -- it's an explicit,
+    // audited bypass (not fabricated upstream evidence), and it has to be
+    // able to clear a real IAP assertion that carries no auth_time claim at
+    // all, or the waiver would be unusable on the real IAP path it exists
+    // for (ENTRY-IAP-WORKFORCE-AUTH-20261005).
+    const effectiveAuthTimeMs = devWaiverApplies ? Date.now() : authTimeMs;
+    if (effectiveAuthTimeMs === null) {
+      this.recordEvent("step_up.denied", identity, {
+        actionId: policy.actionId,
+        outcome: "denied",
+        reasonCode: "missing_trusted_auth_time",
         requestId,
       });
       throw new ApiRequestError(
@@ -153,7 +193,7 @@ export class StepUpProofService {
       );
     }
 
-    const expiresAtMs = authTimeMs + policy.freshnessWindowMs;
+    const expiresAtMs = effectiveAuthTimeMs + policy.freshnessWindowMs;
     if (Date.now() > expiresAtMs) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
@@ -183,8 +223,14 @@ export class StepUpProofService {
       tenantId: identity.tenantId ?? null,
       issuedAt,
       expiresAt: new Date(expiresAtMs).toISOString(),
-      authTime: identity.authTime!,
-      amr: [...(identity.amr ?? [])],
+      authTime: identity.authTime ?? new Date(effectiveAuthTimeMs).toISOString(),
+      // Truthfully reflect a dev waiver in the proof's own evidence instead
+      // of inheriting whatever (possibly empty) amr the identity carried --
+      // a proof minted under the waiver must never look like it came from a
+      // real MFA signal.
+      amr: devWaiverApplies
+        ? [...(identity.amr ?? []), DEV_MFA_WAIVED_AMR]
+        : [...(identity.amr ?? [])],
       acr: identity.acr ?? null,
     };
 
@@ -195,6 +241,7 @@ export class StepUpProofService {
       outcome: "success",
       requestId,
       tokenId: proof.stepUpReference,
+      ...(devWaiverApplies ? { reasonCode: "dev_mfa_waived" } : {}),
       afterSummary: {
         expiresAt: proof.expiresAt,
         issuedAt: proof.issuedAt,

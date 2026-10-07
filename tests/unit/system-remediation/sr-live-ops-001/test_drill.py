@@ -128,6 +128,34 @@ class RestoreDrillTest(unittest.TestCase):
         self.assertEqual(result["failure_code"], "child_command_failed")
         self.assertFalse(self.deleted())
 
+    def test_readback_uses_raw_secret_and_pg_credentials_for_socket_and_tcp_urls(self):
+        cases = [
+            ("postgresql://drill-user:TOP-SECRET-PASSWORD@/drts?host=/cloudsql/private-db", "drill-user", "TOP-SECRET-PASSWORD", "drts"),
+            ("postgres://drill-user:TOP-SECRET:p@ss+[]@/drts?host=/cloudsql/private-db", "drill-user", "TOP-SECRET:p@ss+[]", "drts"),
+            ("postgresql://drill%40user:TOP-SECRET%40%3A%2F%3F%23%25%5B%5D%5C@/drts?host=/cloudsql/private-db", "drill@user", "TOP-SECRET@:/?#%[]\\", "drts"),
+            ("postgresql://drill-user:TOP-SECRET-PASSWORD@private-db/drts%20db", "drill-user", "TOP-SECRET-PASSWORD", "drts db"),
+            ("postgresql://ignored:ignored@/drts?host=/cloudsql/private-db&user=drill-user&password=TOP-SECRET%2Bpass", "drill-user", "TOP-SECRET+pass", "drts"),
+        ]
+        for index, (url, user, password, database) in enumerate(cases):
+            with self.subTest(case=index), patch.dict(os.environ, {"DRILL_FAKE_DB_URL": url, "PGPASSWORD": "must-not-inherit"}):
+                reader = drill.Readback(self.root)
+                self.assertEqual(reader.env["PGUSER"], user)
+                self.assertEqual(reader.env["PGDATABASE"], database)
+                self.assertEqual(reader.env["PGHOST"], "127.0.0.1")
+                self.assertNotIn("PGPASSWORD", reader.env)
+                escape = lambda value: value.replace("\\", "\\\\").replace(":", "\\:")
+                self.assertEqual((self.root / "pgpass").read_text(), f"127.0.0.1:*:{escape(database)}:{escape(user)}:{escape(password)}\n")
+                self.assertEqual((self.root / "pgpass").stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("TOP-SECRET", json.dumps(self.calls()))
+
+    def test_invalid_db_secret_is_sanitized_before_clone(self):
+        for secret in ("not-a-url-TOP-SECRET", "postgresql://user@/drts", "postgresql://user:TOP-SECRET@/", "postgresql://user:TOP-SECRET%0A@/drts"):
+            with self.subTest(kind=secret.split(":", 1)[0]), patch.dict(os.environ, {"DRILL_FAKE_DB_URL": secret}):
+                result = self.execute()
+                self.assertEqual(result["failure_code"], "invalid_db_secret")
+                self.assertFalse(self.deleted())
+        self.assertFalse(any(call[1:4] == ["sql", "instances", "clone"] for call in self.calls()))
+
     def test_clone_api_failure_still_deletes_possible_resource(self):
         result = self.execute("clone_failure")
         self.assertTrue(self.deleted())
@@ -316,6 +344,72 @@ class RestoreDrillTest(unittest.TestCase):
             sweep.sweep(self.target, self.output, output)
         self.assertEqual(json.loads(output.read_text())["status"], "sweep_passed")
         self.assertFalse(self.deleted())
+
+    def test_sweep_window_covers_restore_run_with_fifteen_minute_margin(self):
+        prior = drill.context(self.target)
+        prior["started_at"] = drill.iso(drill.utcnow() - sweep.dt.timedelta(minutes=50))
+        drill.write(self.output, prior)
+        output = self.root / "sweep.json"
+        sweep.sweep(self.target, self.output, output)
+        result = json.loads(output.read_text())
+        expected = drill.timestamp(prior["started_at"]) - sweep.dt.timedelta(minutes=15)
+        self.assertEqual(drill.timestamp(result["audit_window_start"]), expected)
+        query = next(call[3] for call in self.calls() if call[1:3] == ["logging", "read"])
+        self.assertIn(f'timestamp>="{drill.iso(expected)}"', query)
+        self.assertIn(f'timestamp<="{result["audit_window_end"]}"', query)
+
+    def test_sweep_without_restore_receipt_uses_bounded_preflight_window(self):
+        output = self.root / "sweep.json"
+        sweep.sweep(self.target, self.output, output)
+        result = json.loads(output.read_text())
+        self.assertEqual(drill.timestamp(result["audit_window_start"]), drill.timestamp(result["started_at"]) - sweep.dt.timedelta(minutes=15))
+
+    def test_sweep_rejects_invalid_restore_start_before_query(self):
+        prior = drill.context(self.target)
+        for value in (None, "bad", drill.iso(drill.utcnow() + sweep.dt.timedelta(hours=1))):
+            drill.write(self.output, dict(prior, started_at=value))
+            with self.subTest(value=value), self.assertRaises(drill.DrillError):
+                sweep.sweep(self.target, self.output, self.root / "sweep.json")
+        self.assertFalse(any(call[1:3] == ["logging", "read"] for call in self.calls()))
+
+    def test_sweep_logging_timeout_is_bounded_sanitized_and_fails_closed(self):
+        prior = drill.context(self.target)
+        drill.write(self.output, prior)
+        output = self.root / "sweep.json"
+        original = drill.subprocess.run
+        timeouts = []
+        def boundary(args, **kwargs):
+            if args[:3] == ["gcloud", "logging", "read"]:
+                timeouts.append(kwargs["timeout"])
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"], output="TOP-SECRET", stderr="TOP-SECRET")
+            return original(args, **kwargs)
+        with patch.object(drill.subprocess, "run", boundary), self.assertRaises(drill.DrillError):
+            sweep.sweep(self.target, self.output, output)
+        result = json.loads(output.read_text())
+        self.assertEqual(result["failure_code"], "audit_read_timeout")
+        self.assertEqual(result["status"], "sweep_failed")
+        self.assertEqual(result["remaining_drill_instances"], [])
+        self.assertLessEqual(sum(timeouts) + 3 * 20 + 90, 260)
+        self.assertNotIn("TOP-SECRET", output.read_text())
+        self.assertFalse(self.deleted())
+
+    def test_sweep_retries_transient_logging_timeout(self):
+        prior = drill.context(self.target)
+        prior["clone_operation_id"] = "op1"
+        drill.write(self.output, prior)
+        original = drill.subprocess.run
+        attempts = []
+        def boundary(args, **kwargs):
+            if args[:3] == ["gcloud", "logging", "read"]:
+                attempts.append(1)
+                if len(attempts) == 1:
+                    raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return original(args, **kwargs)
+        output = self.root / "sweep.json"
+        with patch.object(drill.subprocess, "run", boundary):
+            sweep.sweep(self.target, self.output, output)
+        self.assertEqual(json.loads(output.read_text())["status"], "sweep_passed")
+        self.assertEqual(len(attempts), 2)
 
     def test_sweep_rejects_leftovers_foreign_creates_missing_and_truncated_audit(self):
         prior = drill.context(self.target)

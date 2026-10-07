@@ -2349,7 +2349,7 @@ export class TenantPartnerController {
 
   @Post("tenant/webhooks/:webhookId/deliveries/:deliveryId/retry")
   @RequireRealms("tenant", "platform", "ops")
-  retryWebhookDelivery(
+  async retryWebhookDelivery(
     @Param("webhookId") webhookId: string,
     @Param("deliveryId") deliveryId: string,
     @CurrentIdentity() identity: IdentityContext | null,
@@ -2357,7 +2357,7 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.retryWebhookDelivery(
+      await this.tenantPartnerService.retryWebhookDelivery(
         this.requireTenantId(tenantId),
         webhookId,
         deliveryId,

@@ -1,0 +1,663 @@
+import { describe, expect, it, vi } from "vitest";
+import type {
+  VoiceCapabilityTokenClaims,
+  VoiceCapabilityTokenEnvelope,
+} from "@drts/contracts";
+
+import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
+import { VoiceBookingAuthorizationService } from "../../../apps/api/src/modules/voice-booking/voice-booking-authorization.service";
+import type { VoiceCapabilityGuard } from "../../../apps/api/src/common/auth/voice-capability.guard";
+import type { VoiceCapabilityService } from "../../../apps/api/src/common/auth/voice-capability.service";
+import type { VoiceSessionService } from "../../../apps/api/src/modules/voice-booking/voice-session.service";
+import type {
+  VoiceBookingRepository,
+  VoiceSessionRecord,
+} from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
+import type { VoiceHandoffService } from "../../../apps/api/src/modules/voice-booking/voice-handoff.service";
+import { VoiceHandoffOnlyToolPorts } from "../../../apps/api/src/modules/voice-booking/voice-handoff-tool-ports";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
+import { IdempotencyService } from "../../../apps/api/src/common/idempotency";
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4 (Codex reopen round 5/6):
+ * previously `VoiceCapabilityService.issue` had no production call site,
+ * `voice-booking.controller.ts` exposed no route guarded by
+ * `VoiceCapabilityGuard`, and `VoiceToolGatewayService.execute` was an
+ * unconsumed interface. This file exercises the real, newly-wired
+ * composition end to end -- only the DB-backed repository/session/handoff
+ * services (the genuine external boundary this unit test is scoped to) are
+ * doubled; `VoiceBookingController`, `VoiceBookingAuthorizationService`,
+ * `VoiceToolGatewayService`, and `VoiceHandoffOnlyToolPorts` all run for
+ * real.
+ */
+
+function session(overrides: Partial<VoiceSessionRecord> = {}): VoiceSessionRecord {
+  return {
+    voiceSessionId: "22222222-2222-2222-2222-222222222222",
+    callId: "call-1",
+    providerAccountId: "acct-1",
+    providerCallId: "provider-call-1",
+    resourceScopeId: "33333333-3333-3333-3333-333333333333",
+    lineBindingId: "line-1",
+    routeProfileId: "profile-1",
+    routeProfileVersion: 1,
+    dialogState: "collecting",
+    mediaState: "active",
+    controlOwner: "ai",
+    leaseEpoch: 1,
+    sessionVersion: 5,
+    commitStatus: "none",
+    recordingState: "active",
+    confirmationState: "none",
+    outcome: null,
+    inputEpoch: 2,
+    pendingInput: true,
+    lastResolvedInputEpoch: 1,
+    lastAppliedControlSequence: 10,
+    createdAt: "2026-07-24T09:00:00.000Z",
+    updatedAt: "2026-07-24T09:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function claims(
+  overrides: Partial<VoiceCapabilityTokenClaims> = {},
+): VoiceCapabilityTokenClaims {
+  return {
+    iss: "drts_voice_capability_issuer",
+    aud: "voice-tool-gateway",
+    exp: Math.floor(Date.now() / 1000) + 60,
+    servicePrincipalId: "svc-voice-media-worker",
+    voiceSessionId: "22222222-2222-2222-2222-222222222222",
+    resourceScopeId: "33333333-3333-3333-3333-333333333333",
+    routeProfileVersion: 1,
+    leaseEpoch: 1,
+    scopes: ["session_execute", "handoff_request"],
+    ...overrides,
+  };
+}
+
+/** `VoiceToolDomainPorts.execute`'s real context shape -- matches
+ * `session()`'s default `inputEpoch: 2` so a test can pass this through
+ * unmodified unless it is specifically exercising the inputEpoch/signal
+ * fences added for R7. */
+function toolPortContext(overrides: {
+  claimsOverrides?: Partial<VoiceCapabilityTokenClaims>;
+  inputEpoch?: number;
+  boundOrderId?: string | null;
+  signal?: AbortSignal;
+} = {}): {
+  claims: VoiceCapabilityTokenClaims;
+  inputEpoch: number;
+  boundOrderId: string | null;
+  signal: AbortSignal;
+} {
+  return {
+    claims: claims(overrides.claimsOverrides),
+    inputEpoch: overrides.inputEpoch ?? 2,
+    boundOrderId: overrides.boundOrderId ?? null,
+    signal: overrides.signal ?? new AbortController().signal,
+  };
+}
+
+function buildController(opts: {
+  guardAuthenticate: ReturnType<typeof vi.fn>;
+  issue?: ReturnType<typeof vi.fn>;
+  getSession?: ReturnType<typeof vi.fn>;
+  resolveInput?: ReturnType<typeof vi.fn>;
+  recordControlEvent?: ReturnType<typeof vi.fn>;
+  findSessionById?: ReturnType<typeof vi.fn>;
+  initiateHandoff?: ReturnType<typeof vi.fn>;
+}) {
+  const guard = { authenticate: opts.guardAuthenticate } as unknown as VoiceCapabilityGuard;
+  const capabilityService = {
+    issue: opts.issue ?? vi.fn(),
+  } as unknown as VoiceCapabilityService;
+  const sessionService = {
+    getSession: opts.getSession ?? vi.fn(async () => session()),
+    resolveInput: opts.resolveInput ?? vi.fn(),
+    recordControlEvent: opts.recordControlEvent ?? vi.fn(),
+  } as unknown as VoiceSessionService;
+  const repository = {
+    findSessionById: opts.findSessionById ?? vi.fn(async () => session()),
+    findResourceScopeById: vi.fn(async () => ({ status: "active" })),
+  } as unknown as VoiceBookingRepository;
+  const authorization = new VoiceBookingAuthorizationService(repository);
+  const handoffService = {
+    initiateHandoff:
+      opts.initiateHandoff ??
+      vi.fn(async () => ({
+        session: session(),
+        handoffId: "handoff-1",
+        summary: {} as unknown,
+        queueItem: { status: "queued" },
+        coordinatorClaims: {
+          voiceSessionId: session().voiceSessionId,
+          resourceScopeId: session().resourceScopeId,
+          leaseEpoch: 2,
+          scopes: [],
+        },
+      })),
+  } as unknown as VoiceHandoffService;
+
+  // Real `IdempotencyService` (not a mock): none of this file's tests send
+  // an `idempotency-key` header, so `execute()`'s `required: false` path
+  // calls through to `issue()` directly without ever touching the
+  // repository -- see IdempotencyService.execute's own documented
+  // key-omitted/not-required branch.
+  const idempotencyService = new IdempotencyService({} as never);
+
+  const controller = new VoiceBookingController(
+    { deriveCohortFromDurableEvidence: vi.fn() } as never,
+    { listUsageRecords: vi.fn(), listRateCards: vi.fn(), reconcileInvoice: vi.fn() } as never,
+    undefined,
+    capabilityService,
+    guard,
+    sessionService,
+    repository,
+    authorization,
+    handoffService,
+    idempotencyService,
+  );
+  return { controller, repository, guard, capabilityService, sessionService, handoffService };
+}
+
+describe("VoiceBookingController.issueCapability (SD §4.2 stage 2 issuance route)", () => {
+  it("forwards the authenticated identity and body to VoiceCapabilityService.issue", async () => {
+    const envelope = {
+      token: "jwt",
+      tokenType: "Bearer",
+      expiresIn: 120,
+      claims: claims(),
+    } as VoiceCapabilityTokenEnvelope;
+    const issue = vi.fn(() => envelope);
+    const { controller } = buildController({ guardAuthenticate: vi.fn(), issue });
+
+    const identity = {
+      authMode: "jwt_bearer" as const,
+      actorType: "system" as const,
+      actorId: "svc-1",
+      realm: "system" as const,
+      tenantId: null,
+      scopes: ["voice:capability:issue"],
+      roles: [],
+      roleFamilies: [],
+      requestId: null,
+    };
+
+    const result = await controller.issueCapability(identity, {
+      voiceSessionId: session().voiceSessionId,
+      resourceScopeId: session().resourceScopeId,
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      scopes: ["session_execute", "handoff_request"],
+    });
+
+    expect(issue).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({
+        voiceSessionId: session().voiceSessionId,
+        scopes: ["session_execute", "handoff_request"],
+      }),
+    );
+    expect(result.data).toEqual(envelope);
+  });
+
+  it("rejects an unknown scope value before ever reaching VoiceCapabilityService", async () => {
+    const issue = vi.fn();
+    const { controller } = buildController({ guardAuthenticate: vi.fn(), issue });
+
+    await expect(
+      controller.issueCapability(null, {
+        voiceSessionId: session().voiceSessionId,
+        resourceScopeId: session().resourceScopeId,
+        routeProfileVersion: 1,
+        leaseEpoch: 1,
+        scopes: ["not_a_real_scope" as never],
+      }),
+    ).rejects.toThrow();
+    expect(issue).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-entry (Codex reopen round
+ * 15/16): `MediaWorkerServer`'s real admission path needs to resolve this
+ * session's resourceScopeId/routeProfileVersion/leaseEpoch/sessionVersion
+ * BEFORE it holds any `voice:capability:issue`-minted token for it --
+ * `issueCapability` above already requires the caller to supply those
+ * same coordinates, so it cannot be how a worker first discovers them.
+ * This is the real, previously-missing `GET /sessions/{sessionId}` route
+ * (SD §10.1) that breaks that circularity, authenticated the same way as
+ * `issueCapability` -- stage-1 workload identity, never the
+ * `VoiceCapabilityGuard` used by every session-mutating route below.
+ */
+describe("VoiceBookingController.getSession (SD §10.1 GET /sessions/{sessionId}, R4-entry)", () => {
+  it("returns the real VoiceSessionService.getSession record for this exact session id", async () => {
+    const getSession = vi.fn(async (voiceSessionId: string) => {
+      expect(voiceSessionId).toBe(session().voiceSessionId);
+      return session();
+    });
+    const { controller } = buildController({ guardAuthenticate: vi.fn(), getSession });
+
+    const result = await controller.getSession(session().voiceSessionId);
+
+    expect(getSession).toHaveBeenCalledWith(session().voiceSessionId);
+    expect(result.data).toEqual({ session: session() });
+  });
+
+  it("propagates VoiceSessionService's not-found rejection -- never fabricates a session/binding", async () => {
+    const getSession = vi.fn(async () => {
+      throw new ApiRequestError(403, "VOICE_SESSION_NOT_OWNER", "Voice session not found.");
+    });
+    const { controller } = buildController({ guardAuthenticate: vi.fn(), getSession });
+
+    await expect(controller.getSession("unknown-session")).rejects.toMatchObject({
+      code: "VOICE_SESSION_NOT_OWNER",
+    });
+  });
+});
+
+describe("VoiceBookingController.resolveInput (backs VoiceDialoguePersistPort trusted mode)", () => {
+  it("rejects when the capability's bound session does not match the path", async () => {
+    const guardAuthenticate = vi.fn(async () =>
+      claims({ voiceSessionId: "99999999-9999-9999-9999-999999999999" }),
+    );
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.resolveInput(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        { expectedSessionVersion: 5, inputEpoch: 2, resolution: "relevant" },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("rejects when the capability lacks session_execute scope", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ scopes: ["handoff_request"] }));
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.resolveInput(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        { expectedSessionVersion: 5, inputEpoch: 2, resolution: "relevant" },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("calls VoiceSessionService.resolveInput with the capability-bound session id and the caller's CAS fields", async () => {
+    const guardAuthenticate = vi.fn(async () => claims());
+    const resolveInput = vi.fn(async () => session({ inputEpoch: 2, pendingInput: false }));
+    const { controller } = buildController({ guardAuthenticate, resolveInput });
+
+    const result = await controller.resolveInput(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      { expectedSessionVersion: 5, inputEpoch: 2, resolution: "irrelevant" },
+    );
+
+    expect(resolveInput).toHaveBeenCalledWith(
+      session().voiceSessionId,
+      5,
+      2,
+      "irrelevant",
+    );
+    expect((result.data as { session: VoiceSessionRecord }).session.pendingInput).toBe(
+      false,
+    );
+  });
+
+  it("propagates VOICE_DRAFT_STALE when the session service rejects a stale CAS value, never silently succeeding", async () => {
+    const guardAuthenticate = vi.fn(async () => claims());
+    const resolveInput = vi.fn(async () => {
+      throw new ApiRequestError(409, "VOICE_DRAFT_STALE", "stale");
+    });
+    const { controller } = buildController({ guardAuthenticate, resolveInput });
+
+    await expect(
+      controller.resolveInput(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        { expectedSessionVersion: 1, inputEpoch: 2, resolution: "relevant" },
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_DRAFT_STALE" });
+  });
+});
+
+describe("VoiceBookingController.recordControlEvent (backs VoiceSessionService.recordControlEvent, SD §5.4 durable speech-start watermark)", () => {
+  /**
+   * Codex reopen round 5/6, R4: this worker had no route or client to
+   * reach `VoiceSessionService.recordControlEvent` at all, so the durable
+   * speech-start watermark `resolveInput` checks against never advanced
+   * for any real call. This route exposes that already-built/tested
+   * service method.
+   */
+  it("rejects when the capability's bound session does not match the path", async () => {
+    const guardAuthenticate = vi.fn(async () =>
+      claims({ voiceSessionId: "99999999-9999-9999-9999-999999999999" }),
+    );
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        {
+          source: "media_worker",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+          sequence: 1,
+          mediaEpoch: 1,
+          eventType: "speech_start",
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("rejects when the capability lacks session_execute scope", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ scopes: ["handoff_request"] }));
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        {
+          source: "media_worker",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+          sequence: 1,
+          mediaEpoch: 1,
+          eventType: "speech_start",
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("calls VoiceSessionService.recordControlEvent with the capability-bound session id, the capability's own leaseEpoch (never a caller-supplied one), and the body's event fields", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ leaseEpoch: 1 }));
+    const recordControlEvent = vi.fn(async () => ({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: session({ inputEpoch: 1, pendingInput: true }),
+    }));
+    const { controller } = buildController({ guardAuthenticate, recordControlEvent });
+
+    const result = await controller.recordControlEvent(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      {
+        source: "media_worker",
+        providerAccountId: "acct-1",
+        sourceEventId: "evt-1",
+        occurredAt: "2026-07-24T09:00:00.000Z",
+        sequence: 1,
+        mediaEpoch: 1,
+        eventType: "speech_start",
+        payload: { foo: "bar" },
+      },
+    );
+
+    expect(recordControlEvent).toHaveBeenCalledWith({
+      voiceSessionId: session().voiceSessionId,
+      legId: null,
+      source: "media_worker",
+      providerAccountId: "acct-1",
+      sourceEventId: "evt-1",
+      occurredAt: "2026-07-24T09:00:00.000Z",
+      sequence: 1,
+      mediaEpoch: 1,
+      leaseEpoch: 1,
+      eventType: "speech_start",
+      payload: { foo: "bar" },
+      payloadRef: null,
+    });
+    expect(result.data).toEqual({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: session({ inputEpoch: 1, pendingInput: true }),
+    });
+  });
+
+  it("never trusts a caller-supplied leaseEpoch -- only the authenticated capability's own bound value reaches the service", async () => {
+    const guardAuthenticate = vi.fn(async () => claims({ leaseEpoch: 9 }));
+    const recordControlEvent = vi.fn(async () => ({
+      deduped: false,
+      applied: true,
+      gap: false,
+      appliedThroughSequence: 1,
+      session: session(),
+    }));
+    const { controller } = buildController({ guardAuthenticate, recordControlEvent });
+
+    await controller.recordControlEvent(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      {
+        // No `leaseEpoch` field exists on this route's body type at all --
+        // even if a forged client sent one, nothing here reads it.
+        source: "media_worker",
+        occurredAt: "2026-07-24T09:00:00.000Z",
+        sequence: 1,
+        mediaEpoch: 1,
+        eventType: "speech_start",
+      } as never,
+    );
+
+    expect(recordControlEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ leaseEpoch: 9 }),
+    );
+  });
+
+  it("propagates VOICE_SESSION_NOT_OWNER when the lease has been superseded, never silently succeeding", async () => {
+    const guardAuthenticate = vi.fn(async () => claims());
+    const recordControlEvent = vi.fn(async () => {
+      throw new ApiRequestError(409, "VOICE_SESSION_NOT_OWNER", "stale lease");
+    });
+    const { controller } = buildController({ guardAuthenticate, recordControlEvent });
+
+    await expect(
+      controller.recordControlEvent(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        {
+          source: "media_worker",
+          occurredAt: "2026-07-24T09:00:00.000Z",
+          sequence: 1,
+          mediaEpoch: 1,
+          eventType: "speech_start",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+  });
+});
+
+describe("VoiceBookingController.requestHandoff (backs VoiceToolGatewayService.execute)", () => {
+  const output = {
+    intent: "unknown" as const,
+    text: "",
+    terminal: "handoff" as const,
+    slots: [],
+    tools: [{ name: "request_handoff" as const, args: { reason: "customer_requested" as const } }],
+    usage: { inputTokens: null, outputTokens: null },
+  };
+
+  it("routes through the real gateway/port to the handoff service boundary and maps a queued outcome", async () => {
+    const guardAuthenticate = vi.fn(async () => claims());
+    const initiateHandoff = vi.fn(async () => ({
+      session: session(),
+      handoffId: "handoff-1",
+      summary: {} as unknown,
+      queueItem: { status: "queued" },
+      coordinatorClaims: {
+        voiceSessionId: session().voiceSessionId,
+        resourceScopeId: session().resourceScopeId,
+        leaseEpoch: 2,
+        scopes: [],
+      },
+    }));
+    const { controller } = buildController({ guardAuthenticate, initiateHandoff });
+
+    const result = await controller.requestHandoff(
+      session().voiceSessionId,
+      { authorization: "Bearer token" },
+      { inputEpoch: 2, output },
+    );
+
+    expect(initiateHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        voiceSessionId: session().voiceSessionId,
+        expectedSessionVersion: session().sessionVersion,
+        expectedLeaseEpoch: claims().leaseEpoch,
+        reason: "customer_requested",
+      }),
+      {
+        inputEpoch: 2,
+        resourceScopeId: claims().resourceScopeId,
+        routeProfileVersion: claims().routeProfileVersion,
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(result.data).toEqual({
+      results: [{ status: "queued", handoffId: "handoff-1" }],
+    });
+  });
+
+  it("rejects when the capability is bound to a different session than the path", async () => {
+    const guardAuthenticate = vi.fn(async () =>
+      claims({ voiceSessionId: "99999999-9999-9999-9999-999999999999" }),
+    );
+    const { controller } = buildController({ guardAuthenticate });
+
+    await expect(
+      controller.requestHandoff(
+        session().voiceSessionId,
+        { authorization: "Bearer token" },
+        { inputEpoch: 2, output },
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+});
+
+describe("VoiceHandoffOnlyToolPorts", () => {
+  it("fails closed (never fabricates a result) for any tool other than request_handoff", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => session()),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+
+    await expect(
+      ports.execute(
+        { name: "resolve_location", args: { rawText: "x" } } as never,
+        toolPortContext(),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_TOOL_NOT_IMPLEMENTED" });
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("maps every HandoffQueueStatus to the request_handoff result schema's three-value enum", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => session()),
+    } as unknown as VoiceBookingRepository;
+    const cases: Array<[string, "queued" | "connected" | "unavailable"]> = [
+      ["queued", "queued"],
+      ["assigned", "queued"],
+      ["bridging", "queued"],
+      ["connected", "connected"],
+      ["unanswered", "unavailable"],
+      ["caller_dropped", "unavailable"],
+      ["agent_dropped", "unavailable"],
+      ["failed", "unavailable"],
+    ];
+    for (const [status, expected] of cases) {
+      const handoffService = {
+        initiateHandoff: vi.fn(async () => ({
+          handoffId: "h-1",
+          queueItem: { status },
+        })),
+      } as unknown as VoiceHandoffService;
+      const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+      const result = await ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext(),
+      );
+      expect(result).toEqual({ status: expected, handoffId: "h-1" });
+    }
+  });
+
+  it("rejects when the session no longer exists, never calling initiateHandoff with a stale/forged version", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => null),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext(),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_SESSION_NOT_OWNER" });
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the authoritative session's inputEpoch has advanced since this proposal was admitted, never refreshing a stale proposal onto the newer version (Codex reopen round 5/6, R7)", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => session({ inputEpoch: 3, sessionVersion: 9 })),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext({ inputEpoch: 2 }),
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_DRAFT_STALE" });
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects without calling initiateHandoff when context.signal is already aborted before the session read even starts", async () => {
+    const repository = {
+      findSessionById: vi.fn(async () => session()),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext({ signal: controller.signal }),
+      ),
+    ).rejects.toBeDefined();
+    expect(repository.findSessionById).not.toHaveBeenCalled();
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects without calling initiateHandoff when context.signal aborts while the session read is in flight", async () => {
+    const controller = new AbortController();
+    const repository = {
+      findSessionById: vi.fn(async () => {
+        controller.abort();
+        return session();
+      }),
+    } as unknown as VoiceBookingRepository;
+    const handoffService = { initiateHandoff: vi.fn() } as unknown as VoiceHandoffService;
+    const ports = new VoiceHandoffOnlyToolPorts(repository, handoffService);
+
+    await expect(
+      ports.execute(
+        { name: "request_handoff", args: { reason: "customer_requested" } } as never,
+        toolPortContext({ signal: controller.signal }),
+      ),
+    ).rejects.toBeDefined();
+    expect(handoffService.initiateHandoff).not.toHaveBeenCalled();
+  });
+});

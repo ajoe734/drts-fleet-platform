@@ -163,6 +163,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def invitation_from_body(body):
+    # SMTP MIME preserves RFC 5322 CRLF after transfer decoding. Normalize only
+    # this parsing copy: anchored lines otherwise reject the trailing CR. Keep
+    # message_body/inspect_message unchanged so evidence hashes still describe
+    # the actual decoded content, and do not relax token/expiry uniqueness.
+    body = body.replace("\r\n", "\n")
     codes = re.findall(r"^Invitation code: (\S+)$", body, re.MULTILINE)
     links = re.findall(r"^Accept your invitation: (\S+)$", body, re.MULTILINE)
     for link in links:
