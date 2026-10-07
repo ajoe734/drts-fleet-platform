@@ -9,6 +9,9 @@ import type { QueryResultRow } from "pg";
 import type {
   ConsumerNotificationOutboxRecord,
   DriverRatingSummary,
+  FirstPartyPushDeliveryContext,
+  FirstPartyPushDeliveryStage,
+  FirstPartyPushDeliveryTarget,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
@@ -209,14 +212,39 @@ export type PushDeliveryClaimOutcome =
  */
 export interface PassengerNotificationChannelMetadata {
   resolvedChannel: "first_party_app" | "ambiguous" | "none";
-  deliveryTarget: null;
-  deliveryStage: null;
+  /**
+   * PUSH-FIRST-PARTY-FCM-20261006 widens this from a literal `null`: a
+   * sealed ambiguous/none/configuration-blocked row still writes `null`
+   * (unchanged), but a real first-party delivery attempt now also mirrors
+   * its own `deliveryTarget`/`deliveryStage`/`receiptId` here so
+   * `listDuePartnerNotifications`/`claimPartnerNotification`'s existing
+   * `payload.channelRouting` reads keep working unmodified for this channel.
+   */
+  deliveryTarget: FirstPartyPushDeliveryTarget | null;
+  deliveryStage: FirstPartyPushDeliveryStage | null;
   retryDisposition: PartnerNotificationRetryDisposition;
-  failureReason: PassengerNotificationFailureReason;
-  receiptId: null;
+  /** Null only for a delivered first-party outcome (PUSH-FIRST-PARTY-FCM-20261006); every sealed/failed outcome sets a concrete reason. */
+  failureReason: PassengerNotificationFailureReason | null;
+  receiptId: string | null;
   downstreamStatus: "unknown";
   expiresAt: string | null;
 }
+
+/**
+ * PUSH-FIRST-PARTY-FCM-20261006 — the one-completed-attempt result columns
+ * of `mobility.phase1_first_party_notification_delivery_contexts` (V0108).
+ * Kept separate from `PassengerNotificationChannelMetadata` (which mirrors
+ * the same outcome onto the outbox's `payload.channelRouting` for the
+ * shared claim/retry read path) because this table's `failure_reason` CHECK
+ * is deliberately narrower (no `route_ambiguous`/`notification_obsolete`/
+ * `notification_superseded` — those are channel/relevance decisions made
+ * before any context row exists, never an FCM attempt outcome) — a caller
+ * must never pass this field for those reasons.
+ */
+export type FirstPartyContextOutcomeMetadata = Pick<
+  FirstPartyPushDeliveryContext,
+  "deliveryStage" | "retryDisposition" | "failureReason" | "receiptId"
+>;
 
 export interface RecordPushDeliveryOutcomeInput {
   outboxId: string;
@@ -228,6 +256,7 @@ export interface RecordPushDeliveryOutcomeInput {
   deliveryOutcome: PassengerPushDeliveryOutcome;
   partnerMetadata?: PartnerDeliveryMetadata;
   channelMetadata?: PassengerNotificationChannelMetadata;
+  firstPartyMetadata?: FirstPartyContextOutcomeMetadata;
 }
 
 export type RecordPushDeliveryOutcomeResult =
@@ -851,6 +880,106 @@ export class MultiTaxiRepository {
     }
   }
 
+  private mapFirstPartyNotificationContext(
+    row: Record<string, unknown>,
+  ): FirstPartyPushDeliveryContext {
+    return {
+      outboxId: String(row.outbox_id),
+      orderId: String(row.order_id),
+      tenantId: String(row.tenant_id),
+      targetDevices:
+        row.target_devices as FirstPartyPushDeliveryContext["targetDevices"],
+      wireMessage: row.wire_message as FirstPartyPushDeliveryContext["wireMessage"],
+      wireMessageHash: String(row.wire_message_hash),
+      eventSequence: Number(row.event_sequence),
+      expiresAt: new Date(row.expires_at as string).toISOString(),
+      deliveryTarget: "first_party_device",
+      deliveryStage:
+        row.delivery_stage as FirstPartyPushDeliveryContext["deliveryStage"],
+      retryDisposition:
+        row.retry_disposition as FirstPartyPushDeliveryContext["retryDisposition"],
+      failureReason:
+        row.failure_reason as FirstPartyPushDeliveryContext["failureReason"],
+      receiptId: row.receipt_id as string | null,
+      createdAt: new Date(row.created_at as string).toISOString(),
+      deliveredAt: row.delivered_at
+        ? new Date(row.delivered_at as string).toISOString()
+        : null,
+    };
+  }
+
+  /** D6/D8 — immutable first-party delivery context (V0108), one row per outbox row. */
+  async findFirstPartyNotificationContext(
+    outboxId: string,
+  ): Promise<FirstPartyPushDeliveryContext | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query(
+      `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`,
+      [outboxId],
+    );
+    return result.rows[0]
+      ? this.mapFirstPartyNotificationContext(result.rows[0])
+      : null;
+  }
+
+  /**
+   * Same fence-verified insert-once pattern as `preparePartnerNotificationContext`:
+   * re-validates the caller's claim is still live, inserts (no-op on a
+   * concurrent duplicate via `ON CONFLICT DO NOTHING`), then re-reads
+   * whichever row actually landed so a race always returns the one true
+   * first-attempt snapshot rather than the losing caller's own input.
+   */
+  async prepareFirstPartyNotificationContext(
+    context: FirstPartyPushDeliveryContext,
+    fenceToken: number,
+  ): Promise<FirstPartyPushDeliveryContext> {
+    if (!this.isEnabled())
+      throw new Error("First-party notification persistence unavailable");
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const claim = await client.query(
+        `SELECT fence_token FROM ops.phase1_push_delivery_claims WHERE outbox_id=$1 AND fence_token=$2 AND claim_state='claimed' AND lease_expires_at > clock_timestamp() FOR UPDATE`,
+        [context.outboxId, fenceToken],
+      );
+      if (!claim.rows.length)
+        throw new Error(
+          "First-party notification fence lost before preparation",
+        );
+      await client.query(
+        `
+        INSERT INTO mobility.phase1_first_party_notification_delivery_contexts (
+          outbox_id, order_id, tenant_id, target_devices, wire_message, wire_message_hash,
+          event_sequence, expires_at, created_at)
+        VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9)
+        ON CONFLICT (outbox_id) DO NOTHING
+      `,
+        [
+          context.outboxId,
+          context.orderId,
+          context.tenantId,
+          JSON.stringify(context.targetDevices),
+          JSON.stringify(context.wireMessage),
+          context.wireMessageHash,
+          context.eventSequence,
+          context.expiresAt,
+          context.createdAt,
+        ],
+      );
+      const result = await client.query(
+        `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`,
+        [context.outboxId],
+      );
+      await client.query("COMMIT");
+      return this.mapFirstPartyNotificationContext(result.rows[0]!);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async findPartnerNotificationRelevance(
     orderId: string,
   ): Promise<{ status: string; assignmentVersion: number } | null> {
@@ -997,7 +1126,9 @@ export class MultiTaxiRepository {
       // fenced claimPartnerNotification() as the partner path (D7: one
       // shared claim/fence owner for every channel), so they re-validate
       // the lease at write time identically.
-      const fencedClaim = Boolean(input.partnerMetadata || input.channelMetadata);
+      const fencedClaim = Boolean(
+        input.partnerMetadata || input.channelMetadata || input.firstPartyMetadata,
+      );
       if (fencedClaim) {
         // Same lock order as claimPartnerNotification (outbox before claim)
         // for every fenced channel, partner or router-sealed, avoids a
@@ -1067,6 +1198,30 @@ export class MultiTaxiRepository {
         await client.query(
           `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{partnerNotification}', $2::jsonb) WHERE outbox_id=$1`,
           [input.outboxId, JSON.stringify(m)],
+        );
+      }
+
+      if (input.firstPartyMetadata) {
+        // PUSH-FIRST-PARTY-FCM-20261006 — the dedicated V0108 context row
+        // for an actual FCM attempt (never for a channel/relevance decision
+        // made before any such row exists; see FirstPartyContextOutcomeMetadata).
+        // No-op if the row does not exist for this outbox yet, same as the
+        // partner branch above.
+        const f = input.firstPartyMetadata;
+        await client.query(
+          `
+          UPDATE mobility.phase1_first_party_notification_delivery_contexts
+          SET delivery_stage=$2, retry_disposition=$3, failure_reason=$4, receipt_id=$5, delivered_at=$6
+          WHERE outbox_id=$1
+        `,
+          [
+            input.outboxId,
+            f.deliveryStage,
+            f.retryDisposition,
+            f.failureReason,
+            f.receiptId,
+            input.deliveryOutcome.deliveredAt,
+          ],
         );
       }
 

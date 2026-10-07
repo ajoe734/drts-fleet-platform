@@ -501,6 +501,47 @@ export class PassengerPushDevicesRepository {
   }
 
   /**
+   * PUSH-FIRST-PARTY-FCM-20261006 — same selection as `resolveActiveDevices`
+   * (D6: "之後重試只用 context 裡的裝置", so the transport always re-checks
+   * current active/token-sha status here and intersects it against an
+   * already-frozen context's `targetDevices` by `deviceId`; this method
+   * never re-derives the recipient list itself). Returns the raw `token`
+   * only because the FCM transport has no other way to call FCM — this is
+   * an in-process call, never an HTTP response, and the caller must never
+   * log or persist the returned `token` (only `deviceId`/`tokenSha256`).
+   */
+  async resolveActiveDeviceSendTargets(
+    drtsPassengerId: string,
+  ): Promise<Array<{ deviceId: string; token: string; tokenSha256: string }>> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    try {
+      const result = await this.databaseService!.query<
+        QueryResultRow & { device_id: string; token: string; token_sha256: string }
+      >(
+        `
+          SELECT device_id, token, token_sha256
+          FROM iam.phase1_passenger_push_devices
+          WHERE drts_passenger_id = $1
+            AND status = 'active'
+            AND last_seen_at IS NOT NULL
+            AND last_seen_at >= now() - make_interval(days => $2)
+          ORDER BY last_seen_at DESC
+        `,
+        [drtsPassengerId, FIRST_PARTY_PUSH_DEVICE_STALE_AFTER_DAYS],
+      );
+      return result.rows.map((row) => ({
+        deviceId: row.device_id,
+        token: row.token,
+        tokenSha256: row.token_sha256,
+      }));
+    } catch (error) {
+      throw toSafeOperationError(error);
+    }
+  }
+
+  /**
    * D2/D5 — writes the frozen first-party route snapshot, refusing when a
    * partner route already claims the same order (mutual exclusion checked
    * in the same transaction) and treating an identical re-write as an
