@@ -172,7 +172,9 @@ describe("push-first-party-fcm_transport_and_error_mapping — FcmHttpV1PushProv
   it("sends the raw token only inside the FCM request body, with the required envelope fields, and never logs it", async () => {
     const logSpy = vi.spyOn(console, "log");
     const errorSpy = vi.spyOn(console, "error");
-    const fetchImpl = vi.fn(async () => jsonResponse(200, { name: "projects/p/messages/42" }));
+    const fetchImpl = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
+      async () => jsonResponse(200, { name: "projects/p/messages/42" }),
+    );
     const provider = new FcmHttpV1PushProvider(stubTokens("bearer-xyz"), fetchImpl as unknown as typeof fetch);
     await provider.send("super-secret-raw-token", message, options);
 
@@ -182,7 +184,7 @@ describe("push-first-party-fcm_transport_and_error_mapping — FcmHttpV1PushProv
       `https://fcm.googleapis.com/v1/projects/${options.projectId}/messages:send`,
     );
     expect(init.redirect).toBe("error");
-    expect(init.headers.Authorization).toBe("Bearer bearer-xyz");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer bearer-xyz");
     const body = JSON.parse(init.body as string);
     expect(body.message.token).toBe("super-secret-raw-token");
     expect(body.message.notification).toEqual(message.notification);

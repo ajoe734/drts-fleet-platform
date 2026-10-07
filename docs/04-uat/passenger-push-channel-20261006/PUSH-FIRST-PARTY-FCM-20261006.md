@@ -86,6 +86,16 @@ pnpm vitest run tests/unit/system-remediation/sr-partner-notify-transport-202609
 pnpm vitest run tests/unit/mtx-full-suite-contract.test.ts --reporter=dot      # 5 passed
 ```
 
+### 2026-10-07 續驗：PR #2404 CI 的 `typecheck`／`Product smoke acceptance` 兩個 job 皆回報 `tsc -p tsconfig.json`（根 `typecheck:root`，涵蓋 `tests/**/*.ts`，與上面只跑過的 `apps/api` tsconfig 範圍不同）在
+`tests/unit/push-first-party-fcm-20261006/fcm-provider-error-mapping.test.ts` 有 5 個真實型別錯誤（`vi.fn(async () => ...)` 零參數推論出空 tuple，`fetchImpl.mock.calls[0]` 解構出的 `init` 型別落到 `undefined`）。本機之前只驗過 `apps/api` 的 tsconfig，沒覆蓋這個根層 include，漏驗。修正：改用 `vi.fn<(url: string, init: RequestInit) => Promise<Response>>(...)` 顯式型別，`calls[0]!` 恢復非空斷言，`init.headers` 轉型為 `Record<string, string>` 讀 `Authorization`。修正後重跑：
+
+```
+pnpm typecheck:root        # 0 errors（排除本 worktree 既有、與本 task 無關的 packages/api-client 雙路徑 ApiClient.baseUrl 噪音——同樣錯誤不在 CI 的 typecheck log 內，確認是 worktree 環境假訊號，非本 task 新增）
+cd apps/api && pnpm exec tsc --noEmit -p tsconfig.json   # 0 errors（仍通過）
+pnpm eslint tests/unit/push-first-party-fcm-20261006/    # 0 problems
+pnpm vitest run tests/unit/push-first-party-fcm-20261006 --reporter=verbose   # 36 passed（不變）
+```
+
 ## 未驗項目
 
 - Postgres 實測（V0108 migration 實際 apply、trigger 不可變邊界、CHECK 約束、`claimPartnerNotification`/`recordPushDeliveryOutcome` 對 V0108 列的真實交易行為）：本 VM 不允許啟動資料庫/Docker Compose，`tests/unit/db-apply.test.ts` 需要 `localhost:5432` 的 Postgres，無法在此執行；依波次分工交 `PUSH-CHANNEL-PG-QA-20261006` 驗證。
