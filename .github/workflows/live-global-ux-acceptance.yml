@@ -1,0 +1,145 @@
+name: Live global UX acceptance
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - tests/e2e/system-remediation/sr-live-global-ux-20261007/**
+      - tests/unit/system-remediation/sr-live-global-ux-20261007/**
+      - playwright.live-global-ux.config.ts
+      - .github/workflows/live-global-ux-acceptance.yml
+  workflow_dispatch:
+    inputs:
+      harness_sha:
+        description: Reviewed harness full SHA (must equal dispatch ref)
+        required: true
+      runtime_sha:
+        description: Immutable already-deployed product SHA
+        required: true
+      bundle_run_id:
+        description: Operator-provisioned global-ux-input artifact run ID (same repository)
+        required: true
+      plan_sha256:
+        description: Reviewed plan.json SHA256 from input artifact
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-global-ux-${{ github.event.pull_request.number || inputs.runtime_sha }}
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.harness_sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Offline gate regressions
+        run: pnpm exec vitest run tests/unit/system-remediation/sr-live-global-ux-20261007
+      - name: Scoped typecheck
+        run: pnpm exec tsc --noEmit -p tests/unit/system-remediation/sr-live-global-ux-20261007/tsconfig.json
+      - name: Scoped lint
+        run: pnpm exec eslint tests/e2e/system-remediation/sr-live-global-ux-20261007 tests/unit/system-remediation/sr-live-global-ux-20261007 playwright.live-global-ux.config.ts --max-warnings=0
+
+  hosted:
+    if: github.event_name == 'workflow_dispatch'
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: shared-dev-acceptance
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GLOBAL_UX_HOSTED: authorized-shared-dev
+      HARNESS_SHA: ${{ inputs.harness_sha }}
+      RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      PLAN_SHA256: ${{ inputs.plan_sha256 }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+      GLOBAL_UX_INVOKER_SA: ${{ vars.DEV_WIF_SERVICE_ACCOUNT || secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      GLOBAL_UX_PLAN: .local/global-ux-input/plan.json
+      GLOBAL_UX_MANUAL: .local/global-ux-input/manual.json
+      GLOBAL_UX_SESSIONS: .local/global-ux-private/sessions.json
+      GLOBAL_UX_TOKENS: .local/global-ux-private/tokens.json
+      GLOBAL_UX_ARTIFACT_ROOT: .artifacts/live-global-ux/artifacts
+    steps:
+      - name: Require exact workflow and candidate identity
+        env:
+          DISPATCH_SHA: ${{ github.sha }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$HARNESS_SHA" =~ ^[a-f0-9]{40}$ && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ && "$BUNDLE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$HARNESS_SHA" == "$DISPATCH_SHA" ]]
+          test -n "$DEV_GCP_PROJECT_ID"
+          test -n "$DEV_GCP_REGION"
+          test -n "$GLOBAL_UX_INVOKER_SA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.harness_sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.DEV_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ vars.DEV_WIF_SERVICE_ACCOUNT || secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: global-ux-input
+          path: .local/global-ux-input
+          run-id: ${{ inputs.bundle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Materialize authorized role sessions without logging secrets
+        env:
+          SESSIONS: ${{ secrets.GLOBAL_UX_SESSIONS_JSON }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          if (!process.env.SESSIONS) throw new Error('GLOBAL_UX_SESSIONS_JSON required');
+          JSON.parse(process.env.SESSIONS);
+          fs.mkdirSync('.local/global-ux-private', {recursive:true, mode:0o700});
+          fs.writeFileSync(process.env.GLOBAL_UX_SESSIONS, process.env.SESSIONS, {mode:0o600});
+          fs.mkdirSync(process.env.GLOBAL_UX_ARTIFACT_ROOT, {recursive:true});
+          if (fs.existsSync('.local/global-ux-input/artifacts')) fs.cpSync('.local/global-ux-input/artifacts', process.env.GLOBAL_UX_ARTIFACT_ROOT, {recursive:true});
+          NODE
+      - name: Freeze source inventory, live Cloud Run revisions and identity inputs
+        run: ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-global-ux-20261007/runner.ts prepare
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Hosted same-release browser cases
+        run: pnpm exec playwright test -c playwright.live-global-ux.config.ts
+      - name: Strict automated plus manual evidence gate
+        if: ${{ always() && !cancelled() }}
+        run: ./apps/api/node_modules/.bin/tsx tests/e2e/system-remediation/sr-live-global-ux-20261007/runner.ts gate
+      - name: Retain sanitized evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-ux-${{ inputs.harness_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/live-global-ux/*.json
+            .artifacts/live-global-ux/cases/
+            .artifacts/live-global-ux/measurements/
+            .artifacts/live-global-ux/artifacts/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -rf .local/global-ux-private

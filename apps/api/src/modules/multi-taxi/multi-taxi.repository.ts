@@ -12,7 +12,10 @@ import type {
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
+  OrderFirstPartyNotificationRoute,
   OrderPartnerNotificationRoute,
+  PartnerNotificationRetryDisposition,
+  PassengerNotificationFailureReason,
   PassengerPaymentStatus,
   PassengerRatingModerationAuditRecord,
   PassengerRatingReviewListItem,
@@ -27,6 +30,7 @@ import type {
   PartnerDeliveryMetadata,
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
+import type { PassengerNotificationRouteResolution } from "./passenger-notification-channel-router";
 
 import {
   persistOrderPartnerNotificationRoute,
@@ -35,6 +39,42 @@ import {
 } from "../tenant-partner/order-partner-notification-route";
 import { DatabaseService } from "../../common/db/database.service";
 import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
+
+/**
+ * Row shape of `mobility.phase1_order_first_party_notification_routes`
+ * (V0107, D5). Mirrors `OrderPartnerNotificationRouteRow`'s precedent: this
+ * repository owns its own mapper rather than importing one from the
+ * `passenger-push-devices` module, which must stay independent of
+ * multi-taxi (PUSH-FIRST-PARTY-REGISTRY-20261006).
+ */
+type FirstPartyNotificationRouteRow = QueryResultRow & {
+  order_id: string;
+  tenant_id: string;
+  drts_passenger_id: string;
+  passenger_subject_ref: string;
+  app_id: string;
+  notification_policy_version: string;
+  consent_version: string;
+  ride_ref: string;
+  created_at: Date | string;
+};
+
+function mapFirstPartyNotificationRoute(
+  row: FirstPartyNotificationRouteRow,
+): OrderFirstPartyNotificationRoute {
+  return {
+    orderId: row.order_id,
+    tenantId: row.tenant_id,
+    drtsPassengerId: row.drts_passenger_id,
+    passengerSubjectRef: row.passenger_subject_ref,
+    appId: row.app_id,
+    notificationPolicyVersion:
+      row.notification_policy_version as OrderFirstPartyNotificationRoute["notificationPolicyVersion"],
+    consentVersion: row.consent_version,
+    rideRef: row.ride_ref,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
 
 type AuthorizationRow = QueryResultRow & {
   authorization_id: string;
@@ -158,6 +198,26 @@ export type PushDeliveryClaimOutcome =
   | PushDeliveryClaimGranted
   | PushDeliveryClaimDenied;
 
+/**
+ * PUSH-CHANNEL-ROUTER-20261006 D3/D6 — the router-level outcome for a row
+ * that resolved to `ambiguous`, `none`, or the dormant `first_party_app`
+ * skeleton. Kept distinct from `PartnerDeliveryMetadata` (whose
+ * `failureReason` type does not include `no_notification_channel`) rather
+ * than widening that unrelated, already-shipped partner type; stored under
+ * its own `payload.channelRouting` key so it never collides with
+ * `payload.partnerNotification`.
+ */
+export interface PassengerNotificationChannelMetadata {
+  resolvedChannel: "first_party_app" | "ambiguous" | "none";
+  deliveryTarget: null;
+  deliveryStage: null;
+  retryDisposition: PartnerNotificationRetryDisposition;
+  failureReason: PassengerNotificationFailureReason;
+  receiptId: null;
+  downstreamStatus: "unknown";
+  expiresAt: string | null;
+}
+
 export interface RecordPushDeliveryOutcomeInput {
   outboxId: string;
   passengerSubjectRef: string;
@@ -167,6 +227,7 @@ export interface RecordPushDeliveryOutcomeInput {
   providerMessageRef: string | null;
   deliveryOutcome: PassengerPushDeliveryOutcome;
   partnerMetadata?: PartnerDeliveryMetadata;
+  channelMetadata?: PassengerNotificationChannelMetadata;
 }
 
 export type RecordPushDeliveryOutcomeResult =
@@ -458,6 +519,46 @@ export class MultiTaxiRepository {
   }
 
   /**
+   * PUSH-CHANNEL-ROUTER-20261006 D2 — one query against both frozen route
+   * snapshot tables (the existing partner one and the new first-party one,
+   * V0107). Both present at once is `ambiguous` (manual_only, send on
+   * neither per D2); neither present is `none` (D3). This never re-derives
+   * a channel from the passenger's current session/devices — only these
+   * two immutable snapshots decide it.
+   */
+  async resolvePassengerNotificationChannel(
+    orderId: string,
+  ): Promise<PassengerNotificationRouteResolution> {
+    if (!this.isEnabled()) return { channel: "none" };
+    const result = await this.databaseService!.query<{
+      partner_route: OrderPartnerNotificationRouteRow | null;
+      first_party_route: FirstPartyNotificationRouteRow | null;
+    }>(
+      `
+        SELECT
+          (SELECT to_jsonb(p) FROM mobility.phase1_order_partner_notification_routes p WHERE p.order_id = $1) AS partner_route,
+          (SELECT to_jsonb(f) FROM mobility.phase1_order_first_party_notification_routes f WHERE f.order_id = $1) AS first_party_route
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    const partnerRow = row?.partner_route ?? null;
+    const firstPartyRow = row?.first_party_route ?? null;
+    if (partnerRow && firstPartyRow) return { channel: "ambiguous" };
+    if (partnerRow)
+      return {
+        channel: "partner_webhook",
+        route: mapOrderPartnerNotificationRoute(partnerRow),
+      };
+    if (firstPartyRow)
+      return {
+        channel: "first_party_app",
+        route: mapFirstPartyNotificationRoute(firstPartyRow),
+      };
+    return { channel: "none" };
+  }
+
+  /**
    * design §5/§11: the sole durable ordering authority for partner
    * notifications — never the in-memory `passengerEventSequenceByOrder`
    * counter on MultiTaxiService, which resets across process restarts. The
@@ -491,7 +592,18 @@ export class MultiTaxiRepository {
    * for a `delivered` outcome, so a row whose provider was never provisioned
    * stays queryable as undelivered instead of looking like a sent notification.
    */
-  /** Durable selection; blocked/manual/terminal rows never become automatic retries. */
+  /**
+   * Durable selection; blocked/manual/terminal rows never become automatic
+   * retries. PUSH-CHANNEL-ROUTER-20261006 D7: this single due-set covers
+   * every channel a row might still resolve to — a brand new row with no
+   * channel context yet (both COALESCE branches null, defaults to
+   * `automatic`), a partner row whose context/payload disposition is
+   * `automatic`, and a row already sealed `ambiguous`/`none`/
+   * `first_party_app`-skeleton via `payload.channelRouting` (added by
+   * `recordPushDeliveryOutcome`'s `channelMetadata` path) — the last group
+   * is excluded here exactly like a `manual_only` partner row already was,
+   * so it is never rescanned once sealed.
+   */
   async listDuePartnerNotifications(
     limit = 100,
   ): Promise<ConsumerNotificationOutboxRecord[]> {
@@ -503,7 +615,12 @@ export class MultiTaxiRepository {
       SELECT to_jsonb(o) AS record FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts c USING (outbox_id)
       WHERE o.status IN ('pending','sending','failed') AND o.next_attempt_at <= now()
-        AND COALESCE(c.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition', 'automatic') = 'automatic'
+        AND COALESCE(
+          o.payload->'channelRouting'->>'retryDisposition',
+          c.retry_disposition,
+          o.payload->'partnerNotification'->>'retryDisposition',
+          'automatic'
+        ) = 'automatic'
         AND NOT EXISTS (SELECT 1 FROM ops.phase1_push_delivery_claims l
           WHERE l.outbox_id=o.outbox_id AND l.claim_state='claimed' AND l.lease_expires_at > now())
       ORDER BY CASE WHEN c.expires_at <= now() THEN 0 ELSE 1 END, o.next_attempt_at LIMIT $1
@@ -548,8 +665,18 @@ export class MultiTaxiRepository {
       const metadata = record.payload.partnerNotification as
         | PartnerDeliveryMetadata
         | undefined;
+      const channelMetadata = record.payload.channelRouting as
+        | PassengerNotificationChannelMetadata
+        | undefined;
+      // A sealed router stop (channelRouting) is authoritative over any
+      // older/default partner-automatic signal — see
+      // listDuePartnerNotifications' matching COALESCE order. Only an
+      // explicit manual retry (retryPartnerNotificationDelivery), which
+      // clears channelRouting, can reopen a row the router has stopped.
       const disposition =
-        context.rows[0]?.retry_disposition ?? metadata?.retryDisposition;
+        channelMetadata?.retryDisposition ??
+        context.rows[0]?.retry_disposition ??
+        metadata?.retryDisposition;
       if (
         record.status === "delivered" ||
         Date.parse(record.nextAttemptAt) > Date.now() ||
@@ -733,7 +860,13 @@ export class MultiTaxiRepository {
       assignment_version: number;
     }>(
       `
-      SELECT o.status, COALESCE((SELECT MAX(assignment_version) FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id=o.order_id), 0) AS assignment_version
+      SELECT o.status, COALESCE(
+        (SELECT MAX(assignment_version)
+         FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id = o.order_id),
+        CASE WHEN o.runtime_profile_code = 'business_dispatch' THEN
+          (SELECT count(*) FROM ops.phase1_dispatch_assignments a WHERE a.order_id = o.order_id)
+        ELSE 0 END
+      ) AS assignment_version
       FROM ops.phase1_owned_orders o WHERE o.order_id=$1
     `,
       [orderId],
@@ -860,8 +993,16 @@ export class MultiTaxiRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      if (input.partnerMetadata) {
-        // Same lock order as claimPartnerNotification avoids a claim/outbox deadlock.
+      // Router-level outcomes are claimed through the same strict,
+      // fenced claimPartnerNotification() as the partner path (D7: one
+      // shared claim/fence owner for every channel), so they re-validate
+      // the lease at write time identically.
+      const fencedClaim = Boolean(input.partnerMetadata || input.channelMetadata);
+      if (fencedClaim) {
+        // Same lock order as claimPartnerNotification (outbox before claim)
+        // for every fenced channel, partner or router-sealed, avoids a
+        // claim/outbox deadlock between a recovering worker and an
+        // in-flight writer of the other kind.
         await client.query(
           "SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE",
           [input.outboxId],
@@ -875,7 +1016,7 @@ export class MultiTaxiRepository {
             AND ($2::boolean = false OR (claim_state = 'claimed' AND lease_expires_at > clock_timestamp()))
           FOR UPDATE
         `,
-        [input.outboxId, Boolean(input.partnerMetadata)],
+        [input.outboxId, fencedClaim],
       );
       const claimRow = claimResult.rows[0];
       if (!claimRow || claimRow.fence_token !== input.fenceToken) {
@@ -926,6 +1067,17 @@ export class MultiTaxiRepository {
         await client.query(
           `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{partnerNotification}', $2::jsonb) WHERE outbox_id=$1`,
           [input.outboxId, JSON.stringify(m)],
+        );
+      }
+
+      if (input.channelMetadata) {
+        // PUSH-CHANNEL-ROUTER-20261006: router-level outcomes (ambiguous/
+        // none/first_party_app-skeleton) have no partner context row to
+        // update — only the outbox's own payload carries the sealed
+        // disposition `listDuePartnerNotifications` reads back.
+        await client.query(
+          `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{channelRouting}', $2::jsonb) WHERE outbox_id=$1`,
+          [input.outboxId, JSON.stringify(input.channelMetadata)],
         );
       }
 
@@ -1679,13 +1831,34 @@ export class MultiTaxiRepository {
         ctx.wire_payload as "wirePayload",
         ctx.wire_payload_hash as "wirePayloadHash",
         ctx.event_sequence as "eventSequence",
-        COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz) as "expiresAt",
-        COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget') as "deliveryTarget",
-        COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage') as "deliveryStage",
-        COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition') as "retryDisposition",
-        COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') as "failureReason",
-        COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId') as "receiptId",
-        COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus') as "downstreamStatus",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN (o.payload->'channelRouting'->>'expiresAt')::timestamptz
+          ELSE COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz)
+        END as "expiresAt",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'deliveryTarget'
+          ELSE COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget')
+        END as "deliveryTarget",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'deliveryStage'
+          ELSE COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage')
+        END as "deliveryStage",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'retryDisposition'
+          ELSE COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition')
+        END as "retryDisposition",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'failureReason'
+          ELSE COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason')
+        END as "failureReason",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'receiptId'
+          ELSE COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId')
+        END as "receiptId",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'downstreamStatus'
+          ELSE COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus')
+        END as "downstreamStatus",
         o.created_at as "createdAt",
         ctx.delivered_at as "deliveredAt",
         o.status,
@@ -1693,7 +1866,10 @@ export class MultiTaxiRepository {
         o.event_type as "eventType",
         CASE
           WHEN o.status = 'delivered' THEN 'delivered'
-          WHEN COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') IN ('endpoint_disabled', 'configuration_blocked') THEN 'provider_not_configured'
+          WHEN (CASE WHEN o.payload ? 'channelRouting'
+                  THEN o.payload->'channelRouting'->>'failureReason'
+                  ELSE COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason')
+                END) IN ('endpoint_disabled', 'configuration_blocked', 'no_notification_channel') THEN 'provider_not_configured'
           WHEN o.status = 'failed' THEN 'provider_error'
           ELSE NULL
         END as result,
@@ -2108,6 +2284,14 @@ export class MultiTaxiRepository {
       );
 
       const newPayload = outbox.payload || {};
+      // A deliberate manual retry clears a prior router-sealed stop
+      // (ambiguous/none/first_party_app-skeleton) so the next attempt
+      // re-resolves the channel fresh; if it is still ambiguous/none,
+      // deliverNonPartnerChannelOutcome reseals channelRouting and
+      // listDuePartnerNotifications/claimPartnerNotification stop it again
+      // (PUSH-CHANNEL-ROUTER-20261006 R2) instead of leaving the old seal in
+      // place to fight the `retry_disposition = 'automatic'` write below.
+      delete newPayload.channelRouting;
 
       await client.query(
         "UPDATE ops.consumer_notification_outbox SET status = 'pending', next_attempt_at = NOW(), payload = $2::jsonb WHERE outbox_id = $1",
