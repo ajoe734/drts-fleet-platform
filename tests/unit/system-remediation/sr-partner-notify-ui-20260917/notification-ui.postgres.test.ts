@@ -139,7 +139,11 @@ describe.skipIf(!testDbUrl)(
       const endpointRecord: import("../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository").StoredWebhookEndpointRecord =
         {
           url: "https://test.com",
-          events: ["passenger.eta_changed.v1", "passenger.receipt_ready.v1"],
+          events: [
+            "passenger.eta_changed.v1",
+            "passenger.receipt_ready.v1",
+            "passenger.trip_cancelled.v1",
+          ],
           status: "active",
           webhookId: webhookId,
           tenantId: tenantId,
@@ -994,61 +998,65 @@ describe.skipIf(!testDbUrl)(
       expect(prepReady.kind).toBe("requeued");
     });
 
-    it("tests cancellation versus independent receipt_ready", async () => {
-      const { outboxId, orderId } = await createFixture({ status: "failed" });
-      await pool.query(
-        "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
-        [orderId],
-      );
-
-      // First without receipt_ready
-      const resNoReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
-        { entrySlug: entrySlug1, tenantId, partnerId },
-        outboxId,
-      );
-      expect(resNoReceiptReady.kind).toBe("failed");
-
-      // Update binding to have receipt_ready
-      await pool.query(
-        'UPDATE admin.phase1_partner_notification_bindings SET event_types = \'["eta_changed", "receipt_ready"]\' WHERE binding_id = $1',
-        [bindingId1],
-      );
-
-      // Even with receipt_ready in binding, the immutable outbox event is 'eta_changed', which is obsolete
-      const resReceiptReady = await mtRepo.retryPartnerNotificationDelivery(
-        { entrySlug: entrySlug1, tenantId, partnerId },
-        outboxId,
-      );
-      expect(resReceiptReady.kind).toBe("failed");
-      expect((resReceiptReady as any).failure?.failureReason).toBe(
-        "notification_obsolete",
-      );
-
-      // Add an independent valid receipt_ready fixture
-      const { outboxId: outboxIdReceipt, orderId: orderIdReceipt } =
-        await createFixture({
-          status: "failed",
-          entrySlug: entrySlug1,
-          eventType: "receipt_ready",
-        });
-      await pool.query(
-        "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
-        [orderIdReceipt],
-      );
-
-      // This should be allowed to retry because the event itself is receipt_ready
-      const resActualReceiptReady =
-        await mtRepo.retryPartnerNotificationDelivery(
-          { entrySlug: entrySlug1, tenantId, partnerId },
-          outboxIdReceipt,
+    it("tests cancellation versus independent receipt_ready and trip_cancelled", async () => {
+      // Keep both terminal-event regressions within the existing seven-case PG gate.
+      for (const eventType of ["receipt_ready", "trip_cancelled"]) {
+        const { outboxId, orderId } = await createFixture({ status: "failed" });
+        await pool.query(
+          "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
+          [orderId],
         );
-      expect(resActualReceiptReady.kind).toBe("requeued");
 
-      // Revert binding
-      await pool.query(
-        "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\"]' WHERE binding_id = $1",
-        [bindingId1],
-      );
+        // Old ETA is obsolete after cancellation
+        const oldEtaBeforeSubscription =
+          await mtRepo.retryPartnerNotificationDelivery(
+            { entrySlug: entrySlug1, tenantId, partnerId },
+            outboxId,
+          );
+        expect(oldEtaBeforeSubscription.kind).toBe("failed");
+
+        // Subscribe explicitly to the terminal event
+        await pool.query(
+          "UPDATE admin.phase1_partner_notification_bindings SET event_types = $2::jsonb WHERE binding_id = $1",
+          [bindingId1, JSON.stringify(["eta_changed", eventType])],
+        );
+
+        // A new subscription does not change the immutable old ETA event
+        const oldEtaAfterSubscription =
+          await mtRepo.retryPartnerNotificationDelivery(
+            { entrySlug: entrySlug1, tenantId, partnerId },
+            outboxId,
+          );
+        expect(oldEtaAfterSubscription.kind).toBe("failed");
+        expect((oldEtaAfterSubscription as any).failure?.failureReason).toBe(
+          "notification_obsolete",
+        );
+
+        // Create an independent terminal event using the production schema
+        const { outboxId: terminalOutboxId, orderId: terminalOrderId } =
+          await createFixture({
+            status: "failed",
+            entrySlug: entrySlug1,
+            eventType,
+          });
+        await pool.query(
+          "UPDATE ops.phase1_owned_orders SET status = 'cancelled' WHERE order_id = $1",
+          [terminalOrderId],
+        );
+
+        // The independent terminal event must remain eligible for controlled retry
+        const terminalRetry = await mtRepo.retryPartnerNotificationDelivery(
+          { entrySlug: entrySlug1, tenantId, partnerId },
+          terminalOutboxId,
+        );
+        expect(terminalRetry.kind).toBe("requeued");
+
+        // Revert binding
+        await pool.query(
+          "UPDATE admin.phase1_partner_notification_bindings SET event_types = '[\"eta_changed\"]' WHERE binding_id = $1",
+          [bindingId1],
+        );
+      }
     });
 
     it("tests historical context/route ownership changes", async () => {

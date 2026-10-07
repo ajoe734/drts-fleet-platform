@@ -33,15 +33,59 @@ afterEach(() => {
 });
 
 describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
-  it("resolves IAP workforce subject and persists durable identity in repository", async () => {
+  it("resolves IAP workforce subject and persists durable identity in repository, binding the pre-provisioned account to the verified subject", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
 
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_ops_lead_integ_001",
+        sourceRef: "pre_provisioned:ops-lead@platform.drts",
+        issuer: "workforce_directory",
+        subject: "ops-lead@platform.drts",
+        principalType: "human",
+        email: "ops-lead@platform.drts",
+        emailVerified: true,
+        displayName: "Ops Lead",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_ops_lead_integ_001",
+        sourceRef: "pre_provisioned_membership:ops-lead@platform.drts",
+        principalId: "principal_ops_lead_integ_001",
+        realm: "ops",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_ops_lead_integ_001",
+          sourceRef: "rb_ops_lead_integ_001",
+          membershipId: "membership_ops_lead_integ_001",
+          roleCode: "operator",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
     const token = signAssertion({
       sub: "google_subject_integ_001",
       email: "ops-lead@platform.drts",
-      gcp_ia_groups: ["ops-users@platform.drts"],
     });
 
     const resolution = await adapter.resolveSubject(
@@ -49,7 +93,6 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       {
         expectedAudience: INTEGRATION_AUDIENCE,
         jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
-        autoProvision: true,
       },
     );
 
@@ -64,6 +107,36 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     );
     expect(savedPrincipal).not.toBeNull();
     expect(savedPrincipal?.email).toBe("ops-lead@platform.drts");
+  });
+
+  it("denies a verified email with no persisted workforce account (deny-by-default, no auto-provisioning from any claim)", async () => {
+    const identityRepo = new IdentityRepository();
+    const securityEventsService = new SecurityEventsService();
+    const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const token = signAssertion({
+      sub: "google_subject_integ_unprovisioned_001",
+      email: "never-provisioned@platform.drts",
+    });
+
+    let error: ApiRequestError | null = null;
+    try {
+      await adapter.resolveSubject(
+        { "x-goog-iap-jwt-assertion": token },
+        {
+          expectedAudience: INTEGRATION_AUDIENCE,
+          jwtSecretOrPublicKey: INTEGRATION_TEST_SECRET,
+        },
+      );
+    } catch (err: any) {
+      if (err instanceof ApiRequestError) {
+        error = err;
+      }
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.getStatus()).toBe(403);
+    expect(error?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
   });
 
   it("verifies negative matrix: missing assertion with spoofed role headers fails", async () => {
@@ -197,7 +270,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     expect(error?.code).toBe("IAP_WORKFORCE_USER_INACTIVE");
   });
 
-  it("verifies group drift: missing admin group downgrades role and logs security alert", async () => {
+  it("grants the full persisted superadmin role with no claim-driven downgrade, even though the assertion carries no groups claim at all", async () => {
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
@@ -291,10 +364,14 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       ],
     );
 
+    // Real Cloud IAP assertions never carry gcp_ia_groups/groups; this token
+    // deliberately omits it to pin that the persisted platform superadmin
+    // binding is still granted in full (not silently downgraded), and that
+    // the default realm selection (no requestedRealm) still prefers the
+    // platform membership over the ops one.
     const token = signAssertion({
       sub: "group_drift_subject_001",
       email: "demoted-admin@platform.drts",
-      gcp_ia_groups: ["ops-users@platform.drts"],
     });
 
     const resolution = await adapter.resolveSubject(
@@ -305,19 +382,11 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       },
     );
 
-    expect(resolution.driftDetected).toBe(true);
-    expect(resolution.effectiveRoles).not.toContain("superadmin");
-    expect(resolution.effectiveRoles).toEqual(["ops_user"]);
-    expect(resolution.membership.realm).toBe("ops");
+    expect(resolution.effectiveRoles).toEqual(["superadmin"]);
+    expect(resolution.membership.realm).toBe("platform");
     expect(resolution.membership.membershipId).toBe(
-      "membership_group_drift_ops_integ",
+      "membership_group_drift_platform_integ",
     );
-
-    const driftEvents = await securityEventsService.listEvents(null, {
-      eventType: "iap_group_drift.detected",
-    });
-    expect(driftEvents.length).toBeGreaterThan(0);
-    expect(driftEvents[0]?.actorId).toBe("principal_group_drift_integ");
   });
 
   it("verifies AuthController /auth/token uses IAPSubjectAdapter runtime resolution and ignores spoofed headers", async () => {
@@ -349,10 +418,54 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       adapter,
     );
 
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_runtime_admin_001",
+        sourceRef: "pre_provisioned:runtime-admin@platform.drts",
+        issuer: "workforce_directory",
+        subject: "runtime-admin@platform.drts",
+        principalType: "human",
+        email: "runtime-admin@platform.drts",
+        emailVerified: true,
+        displayName: "Runtime Admin",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_runtime_admin_001",
+        sourceRef: "pre_provisioned_membership:runtime-admin@platform.drts",
+        principalId: "principal_runtime_admin_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_runtime_admin_001",
+          sourceRef: "rb_runtime_admin_001",
+          membershipId: "membership_runtime_admin_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
+
     const token = signAssertion({
       sub: "runtime_iap_sub_001",
       email: "runtime-admin@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
     });
 
     const request = {
@@ -484,13 +597,58 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.IAP_JWT_SECRET;
   });
 
-  it("verifies BootstrapAuthGuard enforces durable membership and group drift when receiving x-goog-iap-jwt-assertion", async () => {
+  it("verifies BootstrapAuthGuard enforces durable membership resolved from persisted role bindings when receiving x-goog-iap-jwt-assertion", async () => {
     process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
     process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
 
     const identityRepo = new IdentityRepository();
     const securityEventsService = new SecurityEventsService();
     const adapter = new IAPSubjectAdapter(identityRepo, securityEventsService);
+
+    const now = new Date().toISOString();
+    await identityRepo.upsertWorkforceIdentity(
+      {
+        principalId: "principal_admin_guard_001",
+        sourceRef: "pre_provisioned:admin-guard@platform.drts",
+        issuer: "workforce_directory",
+        subject: "admin-guard@platform.drts",
+        principalType: "human",
+        email: "admin-guard@platform.drts",
+        emailVerified: true,
+        displayName: "Admin Guard",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        membershipId: "membership_admin_guard_001",
+        sourceRef: "pre_provisioned_membership:admin-guard@platform.drts",
+        principalId: "principal_admin_guard_001",
+        realm: "platform",
+        scopeRef: "platform:control_plane",
+        tenantId: null,
+        partnerId: null,
+        status: "active",
+        invitedByPrincipalId: null,
+        invitationId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [
+        {
+          roleBindingId: "rb_admin_guard_001",
+          sourceRef: "rb_admin_guard_001",
+          membershipId: "membership_admin_guard_001",
+          roleCode: "superadmin",
+          grantedByPrincipalId: null,
+          approvalId: null,
+          validFrom: now,
+          validTo: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    );
 
     const reflector = {
       getAllAndOverride: () => undefined,
@@ -506,7 +664,6 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const token = signAssertion({
       sub: "guard_iap_sub_001",
       email: "admin-guard@platform.drts",
-      gcp_ia_groups: ["platform-admins@platform.drts"],
     });
 
     const mockRequest: any = {
@@ -622,7 +779,7 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     delete process.env.STRICT_IAP_MODE;
   });
 
-  it("verifies BootstrapAuthGuard denies platform-only route access when group drift downgrades identity to ops realm", async () => {
+  it("verifies BootstrapAuthGuard denies platform-only route access for a workforce identity whose only durable membership is ops", async () => {
     process.env.IAP_EXPECTED_AUDIENCE = INTEGRATION_AUDIENCE;
     process.env.IAP_JWT_SECRET = INTEGRATION_TEST_SECRET;
 
@@ -633,66 +790,22 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     const now = new Date().toISOString();
     await identityRepo.upsertWorkforceIdentity(
       {
-        principalId: "principal_drift_guard_001",
-        sourceRef: "iap_subject:drift_guard_sub",
+        principalId: "principal_ops_only_guard_001",
+        sourceRef: "iap_subject:ops_only_guard_sub",
         issuer: "google_iap",
-        subject: "drift_guard_sub",
+        subject: "ops_only_guard_sub",
         principalType: "human",
-        email: "drift-guard@platform.drts",
+        email: "ops-only-guard@platform.drts",
         emailVerified: true,
-        displayName: "Drift Guard User",
+        displayName: "Ops Only Guard User",
         status: "active",
         createdAt: now,
         updatedAt: now,
       },
       {
-        membershipId: "membership_drift_guard_001",
-        sourceRef: "iap_membership:drift_guard_sub",
-        principalId: "principal_drift_guard_001",
-        realm: "platform",
-        scopeRef: "platform:control_plane",
-        tenantId: null,
-        partnerId: null,
-        status: "active",
-        invitedByPrincipalId: null,
-        invitationId: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-      [
-        {
-          roleBindingId: "rb_drift_guard_001",
-          sourceRef: "rb_drift_guard_001",
-          membershipId: "membership_drift_guard_001",
-          roleCode: "superadmin",
-          grantedByPrincipalId: null,
-          approvalId: null,
-          validFrom: now,
-          validTo: null,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    );
-
-    await identityRepo.upsertWorkforceIdentity(
-      {
-        principalId: "principal_drift_guard_001",
-        sourceRef: "iap_subject:drift_guard_sub",
-        issuer: "google_iap",
-        subject: "drift_guard_sub",
-        principalType: "human",
-        email: "drift-guard@platform.drts",
-        emailVerified: true,
-        displayName: "Drift Guard User",
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        membershipId: "membership_drift_guard_ops_001",
-        sourceRef: "iap_membership:drift_guard_sub_ops",
-        principalId: "principal_drift_guard_001",
+        membershipId: "membership_ops_only_guard_001",
+        sourceRef: "iap_membership:ops_only_guard_sub",
+        principalId: "principal_ops_only_guard_001",
         realm: "ops",
         scopeRef: "platform:control_plane",
         tenantId: null,
@@ -705,9 +818,9 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
       },
       [
         {
-          roleBindingId: "rb_drift_guard_ops_001",
-          sourceRef: "rb_drift_guard_ops_001",
-          membershipId: "membership_drift_guard_ops_001",
+          roleBindingId: "rb_ops_only_guard_001",
+          sourceRef: "rb_ops_only_guard_001",
+          membershipId: "membership_ops_only_guard_001",
           roleCode: "ops_user",
           grantedByPrincipalId: null,
           approvalId: null,
@@ -736,9 +849,8 @@ describe("IAP Subject Adapter Integration Negative Matrix & Resolution", () => {
     );
 
     const token = signAssertion({
-      sub: "drift_guard_sub",
-      email: "drift-guard@platform.drts",
-      gcp_ia_groups: ["ops-users@platform.drts"],
+      sub: "ops_only_guard_sub",
+      email: "ops-only-guard@platform.drts",
     });
 
     const mockRequest: any = {

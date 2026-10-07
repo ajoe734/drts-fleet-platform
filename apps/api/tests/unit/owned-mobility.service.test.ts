@@ -3935,6 +3935,126 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it.each([false, true])(
+    "generates one trip_cancelled outbox only for multi_taxi_direct (persistence=%s)",
+    async (persisted) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+      const tx = {};
+      const repository = {
+        isEnabled: () => true,
+        persistChanges: vi.fn(async () => undefined),
+        persistOrderWorkflow: vi.fn(async () => undefined),
+        withTransaction: vi.fn(
+          async (work: (tx: unknown) => Promise<unknown>) => work(tx),
+        ),
+        reportPersistenceFailure: vi.fn(),
+      };
+      const { service } = createOwnedMobilityService({
+        repository: persisted ? repository : undefined,
+        candidates: [],
+        serviceProductOverrides: {
+          serviceProductType: "taxi_reservation",
+          displayName: "Multi-taxi reservation",
+          timing: "reservation",
+          active: true,
+          defaultBillingMode: "meter",
+          defaultProofRequirements: [],
+        },
+      });
+
+      const tenantBooking = service.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: defaultReservationWindowStart(),
+          reservationWindowEnd: defaultReservationWindowEnd(),
+          pickup: { address: "Pickup" },
+          dropoff: { address: "Dropoff" },
+          passenger: { name: "Rider Tenant", phone: "0912000000" },
+        },
+        "tenant-demo-001",
+      );
+      await service.cancelOwnedOrder(tenantBooking.orderId, {
+        reason: "Cancel tenant",
+      });
+
+      // Ensure no outbox was created for tenant booking cancellation
+      const outboxAfterTenant = (service as any).consumerNotificationOutbox;
+      expect(outboxAfterTenant).toHaveLength(0);
+
+      const authorization = {
+        authorizationId: "auth-mtx-001",
+        operatorId: "operator-001",
+        authorityCode: "TPE-MTX-001",
+        businessPlanVersion: "2026.1",
+        status: "approved" as const,
+        serviceAreaCodes: ["TPE"],
+        activeFareVersionId: "fare-001",
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+        effectiveUntil: "2027-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const partnerBooking = service.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: new Date().toISOString(),
+          timingMode: "on_demand",
+          paymentMethodTokenRef: "pm-token-001",
+        },
+        authorization,
+      );
+      await service.cancelOwnedOrder(partnerBooking.orderId, {
+        reason: "Cancel partner",
+      });
+      const outboxAfterPartner = (service as any).consumerNotificationOutbox;
+      expect(outboxAfterPartner).toHaveLength(1);
+      expect(outboxAfterPartner[0].eventType).toBe("trip_cancelled");
+      expect(outboxAfterPartner[0].payload).toEqual({
+        cancelReason: "passenger_cancelled",
+      });
+      expect(service.getOrder(partnerBooking.orderId).cancelReason).toBe(
+        "Cancel partner",
+      );
+      if (persisted) {
+        expect(repository.persistOrderWorkflow).toHaveBeenLastCalledWith(
+          tx,
+          expect.objectContaining({
+            orders: [
+              expect.objectContaining({
+                orderId: partnerBooking.orderId,
+                status: "cancelled",
+              }),
+            ],
+            consumerNotificationOutbox: [outboxAfterPartner[0]],
+          }),
+        );
+        expect(repository.persistOrderWorkflow).toHaveBeenCalledWith(
+          tx,
+          expect.objectContaining({
+            orders: [
+              expect.objectContaining({
+                orderId: tenantBooking.orderId,
+                status: "cancelled",
+              }),
+            ],
+            consumerNotificationOutbox: [],
+          }),
+        );
+      }
+      await expect(
+        service.cancelOwnedOrder(partnerBooking.orderId, {
+          reason: "Retry cancellation",
+        }),
+      ).rejects.toMatchObject({ code: "ORDER_NOT_CANCELABLE" });
+      expect((service as any).consumerNotificationOutbox).toEqual(
+        outboxAfterPartner,
+      );
+    },
+  );
+
   it("moves trips into proof_pending when signoff is missing", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -7469,7 +7589,9 @@ describe("OwnedMobilityService arrival and ETA producers", () => {
     expect(persistedChanges[1].consumerNotificationOutbox[0].eventType).toBe(
       "eta_changed",
     );
-    expect(persistedChanges[1].consumerNotificationOutbox[0].payload.oldEtaMinutes).toBe(10);
+    expect(
+      persistedChanges[1].consumerNotificationOutbox[0].payload.oldEtaMinutes,
+    ).toBe(10);
   });
 
   it("completeTask produces receipt_ready outbox", async () => {
