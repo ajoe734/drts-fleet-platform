@@ -21,38 +21,52 @@ def evaluate(env, evidence, provider):
                 return c
         return None
 
+    # F4: Ensure explicit evidence fields exist for authority tracking
+    tenant = evidence.get("tenantId")
+    invoice = evidence.get("invoiceId")
+    identity = evidence.get("identityEmail")
+    has_authority = bool(tenant and invoice and identity and isinstance(tenant, str) and isinstance(invoice, str) and isinstance(identity, str))
+
     # Check statuses strictly: no generic checks, validate the exact expected scenarios
-    first_send = get_call("POST", path="/api/tenant/invoices/", scenario="normal_send")
-    retry_send = get_call("POST", path="/api/tenant/invoices/", scenario="idempotent_retry")
-    resend = get_call("POST", path="/api/tenant/invoices/", scenario="intentional_resend")
+    first_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="normal_send")
+    retry_send = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="idempotent_retry")
+    resend = get_call("POST", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="intentional_resend")
     
     dl_id = first_send.get("delivery_id") if first_send else None
     
     has_identity = bool(get_call("GET", path="tenant/billing/profile") and get_call("GET", path="tenant/billing/profile").get("status") == 200)
-    has_invoice = bool(get_call("GET", path="/api/tenant/invoices/") and get_call("GET", path="/api/tenant/invoices/").get("status") == 200)
+    has_invoice = bool(get_call("GET", path=f"/api/tenant/invoices/{invoice}" if invoice else None) and get_call("GET", path=f"/api/tenant/invoices/{invoice}" if invoice else None).get("status") == 200)
     
+    # F4: Check exact hash and ID shapes
+    rfc = mb.get("rfc_message_id")
+    sha256 = mb.get("body_sha256")
     has_inbox_proof = (mb.get("matched_content") is True and mb.get("candidate_sha") == sha and
                        mb.get("delivery_id") == dl_id and dl_id is not None and 
-                       mb.get("rfc_message_id") and mb.get("body_sha256"))
+                       isinstance(rfc, str) and len(rfc) > 5 and "@" in rfc and
+                       isinstance(sha256, str) and len(sha256) == 64)
     
-    has_download = bool(get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200 and evidence.get("downloadProof"))
+    # F4: downloadProof must be strict True
+    has_download = bool(get_call("GET", path="artifactUrl") and get_call("GET", path="artifactUrl").get("status") == 200 and evidence.get("downloadProof") is True)
     
     has_idempotency = bool(retry_send and retry_send.get("status") == 201 and retry_send.get("delivery_id") == dl_id and dl_id is not None)
     
-    has_durable_get = bool(get_call("GET", scenario="durable_get") and get_call("GET", scenario="durable_get").get("status") == 200 and evidence.get("durableHistoryCount", 0) > 0)
+    # F4: enforce path on durable_get
+    durable_get_call = get_call("GET", path=f"/api/tenant/invoices/{invoice}/mail" if invoice else None, scenario="durable_get")
+    has_durable_get = bool(durable_get_call and durable_get_call.get("status") == 200 and evidence.get("durableHistoryCount", 0) > 0)
     
     has_wrong_tenant = bool(get_call("POST", scenario="wrong_tenant") and get_call("POST", scenario="wrong_tenant").get("status") == 403)
     has_intentional_resend = bool(resend and resend.get("status") == 201 and resend.get("delivery_id") != dl_id and resend.get("delivery_id") is not None)
     has_normal_send = bool(first_send and first_send.get("status") == 201)
 
     # Missing fixture/role authority remains pending rather than fabricated pass.
-    # Therefore, we do NOT strictly require unimplementedLiveSurfaces to be empty.
-    # But if they are NOT empty, we must fail the gate.
+    # F4: strictly require the key to be present and empty
+    is_fully_implemented = "unimplementedLiveSurfaces" in evidence and evidence["unimplementedLiveSurfaces"] == []
     
     passed = bool(sha and len(sha) == 40 and all(value == "success" for value in steps.values())
                   and evidence.get("candidateSha") == sha and evidence.get("headSha") == sha
                   and evidence.get("status") == "passed" and evidence.get("exitCode") == 0
-                  and unimplemented == [] and evidence.get("errors") == []
+                  and is_fully_implemented and evidence.get("errors") == []
+                  and has_authority
                   and has_identity and has_invoice and has_inbox_proof and has_download 
                   and has_idempotency and has_durable_get
                   and has_wrong_tenant and has_intentional_resend and has_normal_send
