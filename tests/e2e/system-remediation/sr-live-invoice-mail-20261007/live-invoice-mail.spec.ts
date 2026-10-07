@@ -32,6 +32,77 @@ const evidenceData = {
   identityEmail: "",
 };
 
+export async function runInvoiceMailPreflight(request: any, config: any, evidenceData: any) {
+    const { apiOrigin, sessionToken, tenantId, authorizedRecipient, invoiceId } = config;
+
+    // 0. Fetch Invoice Before Sends
+    const initialInvoiceResponse = await request.get(`${apiOrigin}/api/tenant/invoices/${invoiceId}`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    evidenceData.httpCalls.push({ method: "GET", path: `/api/tenant/invoices/${invoiceId}`, status: initialInvoiceResponse.status() });
+    expect(initialInvoiceResponse.status()).toBe(200);
+
+    const invoiceData = await initialInvoiceResponse.json();
+    if (invoiceData.data?.tenantId !== tenantId || invoiceData.data?.invoiceId !== invoiceId) {
+      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-mismatch");
+      throw new Error("Invoice fixture does not belong to authorized dedicated tenant/invoice");
+    }
+
+    // 1. Check Identity (Billing Profile)
+    const profileResponse = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    evidenceData.httpCalls.push({ method: "GET", path: "tenant/billing/profile", status: profileResponse.status() });
+    expect(profileResponse.status()).toBe(200);
+    const profileData = await profileResponse.json();
+    const rawEmail = profileData.data?.email || "";
+    evidenceData.identityEmail = rawEmail ? crypto.createHash("sha256").update(rawEmail).digest("hex") : "";
+
+    if (profileData.data?.email !== authorizedRecipient) {
+      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
+      evidenceData.errors.push("Billing profile email does not match actual authorized recipient");
+      throw new Error("Billing profile email does not match authorized recipient");
+    }
+
+    const effectiveAllowlist = process.env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST || "";
+    const allowedEntries = effectiveAllowlist.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const authLower = authorizedRecipient.toLowerCase();
+    const domain = authLower.split("@")[1] || "";
+    if (!allowedEntries.includes(authLower) && !allowedEntries.includes(domain)) {
+       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
+       evidenceData.errors.push("Authorized recipient is not in effective allowlist");
+       throw new Error("Missing effective invoice-specific allowlist authority");
+    }
+
+    if (process.env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED !== "true") {
+      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
+      evidenceData.errors.push("Missing explicit authorization for the target fixture");
+      throw new Error("Missing explicit DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED=true");
+    }
+
+    // 2a. Wrong invoice mismatch
+    const generatedMissingId = crypto.randomUUID();
+    const missingInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${generatedMissingId}`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    expect(missingInvoiceCheck.status()).toBe(404); // Must prove it doesn't exist
+    const wrongInvoiceResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${generatedMissingId}/mail`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    expect(wrongInvoiceResponse.status()).toBe(404);
+
+    // Enforce dedicated single-invoice fixture before any sends
+    const primaryInvoiceListCheck = await request.get(`${apiOrigin}/api/tenant/invoices`, {
+      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
+    });
+    expect(primaryInvoiceListCheck.status()).toBe(200);
+    const primaryInvoiceListData = await primaryInvoiceListCheck.json();
+    if (primaryInvoiceListData.data?.items?.length !== 1 || primaryInvoiceListData.data?.items[0].invoiceId !== invoiceId) {
+       throw new Error("Primary test tenant must have exactly ONE invoice for dedicated fixture verification.");
+    }
+    return { invoiceData, allowedEntries };
+}
+
 test.describe("Live Invoice Mail Acceptance", () => {
   test.afterEach((_, testInfo) => {
     if (testInfo.status !== "passed") {
@@ -82,72 +153,7 @@ test.describe("Live Invoice Mail Acceptance", () => {
     evidenceData.tenantId = tenantId;
     evidenceData.invoiceId = invoiceId;
 
-    // 0. Fetch Invoice Before Sends (F2: Invoice fetch happens only AFTER sends at spec:286)
-    const initialInvoiceResponse = await request.get(`${apiOrigin}/api/tenant/invoices/${invoiceId}`, {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
-    });
-    evidenceData.httpCalls.push({ method: "GET", path: `/api/tenant/invoices/${invoiceId}`, status: initialInvoiceResponse.status() });
-    expect(initialInvoiceResponse.status()).toBe(200);
-
-    const invoiceData = await initialInvoiceResponse.json();
-    if (invoiceData.data?.tenantId !== tenantId || invoiceData.data?.invoiceId !== invoiceId) {
-      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-mismatch");
-      throw new Error("Invoice fixture does not belong to authorized dedicated tenant/invoice");
-    }
-
-    // 1. Check Identity (Billing Profile)
-    const profileResponse = await request.get(`${apiOrigin}/api/tenant/billing/profile`, {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
-    });
-    evidenceData.httpCalls.push({ method: "GET", path: "tenant/billing/profile", status: profileResponse.status() });
-    expect(profileResponse.status()).toBe(200);
-    const profileData = await profileResponse.json();
-    const rawEmail = profileData.data?.email || "";
-    evidenceData.identityEmail = rawEmail ? crypto.createHash("sha256").update(rawEmail).digest("hex") : "";
-
-    if (profileData.data?.email !== authorizedRecipient) {
-      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
-      evidenceData.errors.push("Billing profile email does not match actual authorized recipient");
-      throw new Error("Billing profile email does not match authorized recipient");
-    }
-
-    const effectiveAllowlist = process.env.DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST || "";
-    const allowedEntries = effectiveAllowlist.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-    const authLower = authorizedRecipient.toLowerCase();
-    const domain = authLower.split("@")[1] || "";
-    if (!allowedEntries.includes(authLower) && !allowedEntries.includes(domain)) {
-       evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
-       evidenceData.errors.push("Authorized recipient is not in effective allowlist");
-       throw new Error("Missing effective invoice-specific allowlist authority");
-    }
-
-    if (process.env.DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED !== "true") {
-      evidenceData.unimplementedLiveSurfaces.push("invoice-fixture-missing");
-      evidenceData.errors.push("Missing explicit authorization for the target fixture");
-      throw new Error("Missing explicit DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED=true");
-    }
-
-
-    // 2a. Wrong invoice mismatch
-    const generatedMissingId = crypto.randomUUID();
-    const missingInvoiceCheck = await request.get(`${apiOrigin}/api/tenant/invoices/${generatedMissingId}`, {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
-    });
-    expect(missingInvoiceCheck.status()).toBe(404); // Must prove it doesn't exist
-    const wrongInvoiceResponse = await request.post(`${apiOrigin}/api/tenant/invoices/${generatedMissingId}/mail`, {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
-    });
-    expect(wrongInvoiceResponse.status()).toBe(404);
-
-    // Enforce dedicated single-invoice fixture before any sends
-    const primaryInvoiceListCheck = await request.get(`${apiOrigin}/api/tenant/invoices`, {
-      headers: { authorization: `Bearer ${sessionToken}`, "x-tenant-id": tenantId },
-    });
-    expect(primaryInvoiceListCheck.status()).toBe(200);
-    const primaryInvoiceListData = await primaryInvoiceListCheck.json();
-    if (primaryInvoiceListData.data?.items?.length !== 1 || primaryInvoiceListData.data?.items[0].invoiceId !== invoiceId) {
-       throw new Error("Primary test tenant must have exactly ONE invoice for dedicated fixture verification.");
-    }
+    const { invoiceData, allowedEntries } = await runInvoiceMailPreflight(request, { apiOrigin, sessionToken, tenantId, authorizedRecipient, invoiceId }, evidenceData);
 
     // 2. Wrong Tenant
 
@@ -586,6 +592,10 @@ test.describe("Live Invoice Mail Acceptance", () => {
         expect(wtResponse.status()).toBe(404);
         const errBody = await wtResponse.json().catch(() => ({}));
         expect(errBody?.error?.code).toBe('NOT_FOUND');
+        
+        if (!evidenceData.unimplementedLiveSurfaces.includes("browser_download_observation")) {
+            evidenceData.unimplementedLiveSurfaces.push("browser_download_observation");
+        }
         evidenceData.httpCalls.push({ method: "GET", path: "wrong_tenant_portal", status: wtResponse.status(), ui_isolated: true, selected_identity: nonAllowlistInvoiceId, forbidden_resource: invoiceId, send_disabled: false, mutation_count: wtMutationCount, forbidden_download_observed: wrongDownloadLinkCount > 0 });
     } else {
         if (!evidenceData.unimplementedLiveSurfaces.includes("browser_role_interaction")) {

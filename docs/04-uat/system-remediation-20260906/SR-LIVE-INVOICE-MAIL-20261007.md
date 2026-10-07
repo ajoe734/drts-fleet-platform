@@ -83,3 +83,18 @@ This document records the completion and verification of the live invoice mail E
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v`: exit 0
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: 2d94339df02f44e8b35a42b11d12ccdf71e69901 / Generation: f57b5b202880450a88ad797af0e27bdd)
+
+- **F1/F3 (New executable workflow-to-gate contract mismatch)**: `gate-evidence.py` incorrectly expected `DRTS_LIVE_INVOICE_MAIL_TEST_ACTOR_ID` while the workflow and producers correctly exported `DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID`. Fixed `gate-evidence.py` and `test_hosted_gate.py` to correctly bind against the unified primary actor variable.
+- **F3/F5 (Required role authority still missing from accepted evidence)**: `gate-evidence.py` accepted incomplete partial issuance evidence as long as `teardown_success_keys` equaled `issued_keys`. Fixed by introducing an explicit `all_roles_issued` requirement evaluating exact mandatory keys during acceptance, completely isolating cleanup validity from role-evidence acceptance. Tested each missing role path directly in `test_hosted_gate.py`'s `main()` runner.
+- **F2/F4/F6 (Repeated missing behavioral regressions; precise static localization)**: The bogus zero-send recipient mismatch test calling `bootstrapMailSession` was removed. The actual preflight guard logic was correctly localized, extracted, and placed under isolated offline regression coverage in `spec-guards.test.ts` to genuinely invoke assertions against mismatch errors and zero-sends, respecting production JWT schema rules with correct `sub` mapping and observed bounds checks inside `bootstrap.test.ts`.
+- **F3/F5 (Remaining browser boundary)**: Properly tracked the lack of actual resource download execution as unresolved required browser proof by registering `browser_download_observation` into `unimplementedLiveSurfaces` where Playwright environment network limits prevented true response evaluation of forbidden link execution, satisfying the strict real-execution requirements or accurate unresolved declaration.
+
+**Completed Local Verification**:
+- `git diff --check HEAD^ HEAD`: clean (exit 0)
+- `pnpm exec vitest run tests/unit/system-remediation/sr-live-invoice-mail-20261007/`: exit 0 (11/11 tests pass)
+- `pnpm exec tsc -p tests/e2e/system-remediation/sr-live-invoice-mail-20261007/tsconfig.live.json --noEmit`: exit 0
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p test_*.py -v`: exit 0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*

@@ -206,7 +206,7 @@ def main():
             if k == "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN":
                 if role != "tenant_admin" or "tenant:billing:write" not in scopes or "tenant:billing:read" not in scopes:
                     raise ValueError("primary token role/scopes mismatch")
-                if tenant_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID") or actor_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_TEST_ACTOR_ID"):
+                if tenant_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID") or actor_id != os.environ.get("DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID"):
                     raise ValueError("primary token identity mismatch")
             elif k == "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN":
                 if role != "tenant_viewer" or "tenant:billing:write" in scopes or "tenant:billing:read" not in scopes:
@@ -255,8 +255,9 @@ def main():
                 raise ValueError("contradiction: key was issued but status is not_issued")
 
         teardown_success_keys.sort()
+        all_roles_issued = set(issued_keys) == set(expected_keys)
 
-        teardown_passed = bool(
+        cleanup_valid = bool(
             teardown_ev.get("success") is True and
             teardown_ev.get("attempted") == issued and
             teardown_ev.get("attempted") == len(teardown_success_keys) and
@@ -266,26 +267,31 @@ def main():
             teardown_ev.get("candidateSha") == sha and
             bootstrap_ev.get("candidateSha") == sha and
             issued == len(issued_keys) and
-            issued > 0 and
             teardown_success_keys == issued_keys
         )
     except Exception as e:
-        teardown_passed = False
+        cleanup_valid = False
+        all_roles_issued = False
 
     try:
-        if teardown_passed:
+        if cleanup_valid and all_roles_issued:
             result = evaluate(os.environ, read("evidence-mail.json"), read("evidence-provider.json"))
+        elif cleanup_valid:
+            result = {"status": "failed", "steps": {}, "error": "Missing mandatory role evidence"}
         else:
             result = {"status": "failed", "steps": {}, "error": "Missing or failed cleanup evidence"}
     except Exception as e:
         result = {"status": "failed", "steps": {}, "error": "Evaluation raised exception"}
 
-    if not teardown_passed:
+    if not (cleanup_valid and all_roles_issued):
         result["status"] = "failed"
         if "steps" not in result:
             result["steps"] = {}
         result["steps"]["teardown"] = False
-        print("Mail acceptance: failed - missing or failed cleanup evidence")
+        if not cleanup_valid:
+            print("Mail acceptance: failed - missing or failed cleanup evidence")
+        else:
+            print("Mail acceptance: failed - missing mandatory role evidence")
 
     (directory / "run-status.json").write_text(json.dumps(result, indent=2) + "\n")
     print("Mail acceptance: " + result["status"])

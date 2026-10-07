@@ -27,7 +27,7 @@ class HostedGateTest(unittest.TestCase):
             DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID='10000000-0000-0000-0000-000000000123',
             DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TENANT_ID='10000000-0000-0000-0000-000000000789',
             DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TENANT_ID='10000000-0000-0000-0000-000000000abc',
-            DRTS_LIVE_INVOICE_MAIL_TEST_ACTOR_ID='a1',
+            DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID='a1',
             DRTS_LIVE_INVOICE_MAIL_READ_ONLY_ACTOR_ID='a2',
             DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_ACTOR_ID='a3'
         )
@@ -292,12 +292,12 @@ class HostedGateTest(unittest.TestCase):
         code, data = run_main(base_bootstrap, t7)
         self.assertEqual(code, 1)
 
-        # 8. Valid partial cleanup
+        # 8. Valid partial cleanup, but missing mandatory role evidence means it fails
         b8 = {**base_bootstrap, "issued_sessions_count": 2, "issued_sessions": [valid_objects[0], valid_objects[1]]}
         t8 = {**base_teardown, "attempted": 2, "sessions": [{"key": valid_keys[0], "status": "success"}, {"key": valid_keys[1], "status": "success"}, {"key": valid_keys[2], "status": "not_issued"}]}
         code, data = run_main(b8, t8)
-        self.assertEqual(code, 0)
-        self.assertEqual(data["status"], "passed")
+        self.assertEqual(code, 1)
+        self.assertEqual(data["status"], "failed")
 
         # 9. Attempted count mismatch
         t9 = {**base_teardown, "attempted": 2} # issued is 3

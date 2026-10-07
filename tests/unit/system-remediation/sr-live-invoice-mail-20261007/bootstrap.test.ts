@@ -156,13 +156,14 @@ describe("F1 bootstrap and teardown adapter", () => {
       if (url.includes("auth/token")) {
         const tenantId = opts.headers["x-tenant-id"] || parsedBody.tenant_id;
         const actorId = opts.headers["x-actor-id"] || parsedBody.actor_id;
-        const expectedRole = parsedBody.expected_role || "tenant_admin";
-        const scopes = expectedRole === "tenant_viewer" ? ["tenant:billing:read"] : ["tenant:billing:read", "tenant:billing:write"];
+        const isReadOnly = actorId === "10000000-0000-0000-0000-000000000902";
+        const expectedRole = isReadOnly ? "tenant_viewer" : "tenant_admin";
+        const scopes = isReadOnly ? ["tenant:billing:read"] : ["tenant:billing:read", "tenant:billing:write"];
         const payloadObj = {
           roles: [expectedRole],
           scopes,
           tenantId,
-          actorId
+          sub: actorId
         };
         const token = "dummy." + Buffer.from(JSON.stringify(payloadObj)).toString("base64") + ".dummy";
         tokensMap[token] = { tenant_id: tenantId, actor_id: actorId };
@@ -257,9 +258,27 @@ describe("F1 bootstrap and teardown adapter", () => {
     const finalEmitted = JSON.parse(writeCalls[writeCalls.length - 1][1]);
     expect(finalEmitted.issued_sessions_count).toBe(3);
     expect(finalEmitted.issued_sessions).toEqual([
-      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN" }),
-      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN" }),
-      expect.objectContaining({ exportKey: "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN" })
+      expect.objectContaining({
+        exportKey: "DRTS_LIVE_INVOICE_MAIL_ROLE_SESSION_TOKEN",
+        observed_role: "tenant_admin",
+        observed_scopes: expect.arrayContaining(["tenant:billing:write", "tenant:billing:read"]),
+        observed_tenant_id: "10000000-0000-0000-0000-000000000201",
+        observed_actor_id: "10000000-0000-0000-0000-000000000901"
+      }),
+      expect.objectContaining({
+        exportKey: "DRTS_LIVE_INVOICE_MAIL_READ_ONLY_TOKEN",
+        observed_role: "tenant_viewer",
+        observed_scopes: ["tenant:billing:read"],
+        observed_tenant_id: "10000000-0000-0000-0000-000000000202",
+        observed_actor_id: "10000000-0000-0000-0000-000000000902"
+      }),
+      expect.objectContaining({
+        exportKey: "DRTS_LIVE_INVOICE_MAIL_NON_ALLOWLISTED_TOKEN",
+        observed_role: "tenant_admin",
+        observed_scopes: expect.arrayContaining(["tenant:billing:write", "tenant:billing:read"]),
+        observed_tenant_id: "10000000-0000-0000-0000-000000000203",
+        observed_actor_id: "10000000-0000-0000-0000-000000000903"
+      })
     ]);
     expect(finalEmitted.success).toBeUndefined();
     (fs.writeFileSync as any).mockClear();
@@ -428,97 +447,6 @@ describe("F1 bootstrap and teardown adapter", () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
-  });
-
-  it("prevents zero-send on recipient mismatch and enforces allowlist semantics", async () => {
-    // Assert recipient mismatch throws error
-    const env = {
-      DRTS_LIVE_INVOICE_MAIL_TEST_AUTHORIZED: "true",
-      DRTS_CANDIDATE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      GITHUB_RUN_ID: "12345",
-      GITHUB_ACTIONS: "true",
-      GITHUB_ENV: "/tmp/env",
-      DRTS_LIVE_INVOICE_MAIL_API_ORIGIN: "https://allowed.example.com",
-      DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825",
-      DRTS_LIVE_INVOICE_MAIL_TEST_TENANT_ID:
-        "10000000-0000-0000-0000-000000000201",
-      DRTS_LIVE_INVOICE_MAIL_TENANT_ACTOR_ID:
-        "10000000-0000-0000-0000-000000000901",
-      DRTS_LIVE_INVOICE_MAIL_ALLOWED_TARGETS: "https://allowed.example.com",
-      DRTS_LIVE_INVOICE_MAIL_EFFECTIVE_ALLOWLIST: "billing+invoice@company.com",
-    };
-
-    const fetchMock = vi.fn().mockImplementation(async (url) => {
-      const defaultHeaders = new Headers({
-        "x-drts-candidate-sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      });
-      if (url.includes("auth/token")) {
-        return {
-          ok: true,
-          headers: defaultHeaders,
-          json: async () => ({ token: "mock-token" }),
-        };
-      }
-      if (url.includes("auth/session")) {
-        return {
-          ok: true,
-          headers: defaultHeaders,
-          json: async () => ({
-            data: {
-              active: true,
-              identity: {
-                realm: "tenant",
-                actor_type: "tenant_admin",
-                roles: ["tenant_admin"],
-                actor_id: "10000000-0000-0000-0000-000000000901",
-                tenant_id: "10000000-0000-0000-0000-000000000201",
-                scopes: ["tenant:billing:read", "tenant:billing:write"],
-              },
-            },
-          }),
-        };
-      }
-      if (url.includes("identity/step-up-proofs")) {
-        return {
-          ok: true,
-          headers: defaultHeaders,
-          json: async () => ({
-            data: {
-              required: true,
-              step_up_reference: "mock-step-up-ref",
-              action_id: "tenant:users:create",
-            },
-          }),
-        };
-      }
-      return { ok: true, headers: defaultHeaders, json: async () => ({}) };
-    });
-
-    const deps = {
-      fetch: fetchMock as any,
-      mask: vi.fn(),
-      appendEnvironment: vi.fn(),
-      readMailbox: vi.fn().mockReturnValue("different@company.com"), // This triggers the failure
-      assertions: vi
-        .fn()
-        .mockReturnValue({ next: vi.fn().mockResolvedValue("mocked-token") }),
-    };
-
-    let caughtError: any;
-    try {
-      await bootstrapMailSession(env, deps, false);
-    } catch (e) {
-      caughtError = e;
-    }
-
-    expect(caughtError).toBeDefined();
-    expect(caughtError.stage).toBe("recipient-export"); // ensure exact failure stage
-
-    // Explicit zero-mail-mutation assertions
-    const mailCalls = fetchMock.mock.calls.filter(
-      (call) => call[0].includes("mail") && call[1]?.method === "POST",
-    );
-    expect(mailCalls.length).toBe(0);
   });
 
   it("independently validates comma/case/domain allowlist matrix", async () => {

@@ -17,7 +17,7 @@ export async function teardown(
   const sessionResults: Array<{ key: string, status: "success" | "failed" | "not_issued", error?: string }> = [];
   for (const token of tokens) {
     if (!token.val) {
-       sessionResults.push({ key: token.key, status: "not_issued" });
+       sessionResults.push({ key: token.key, status: "not_issued" as const });
        continue;
     }
     try {
