@@ -198,33 +198,35 @@ export class PassengerPushDevicesRepository {
     try {
       await client.query("BEGIN");
 
-      // F2 rework: serialize every registerDevice call for this passenger
-      // behind one transaction-scoped advisory lock, acquired before any
-      // row lock, so concurrent registrations for the same passenger can
-      // never both observe the pre-cap active-device count and together
-      // push it past FIRST_PARTY_PUSH_MAX_ACTIVE_DEVICES_PER_PASSENGER.
+      // F5 rework (Codex reopen 2026-10-07): per-passenger and per-token
+      // advisory locks (the earlier F2 fix) only serialize calls that share
+      // a passenger or a token. `enforceActiveDeviceCap` below reads and can
+      // revoke *any* currently-active row for `command.drtsPassengerId` —
+      // including a row that a concurrent registerDevice call for a
+      // *different* passenger is in the middle of rebinding away (that row
+      // still carries the old passenger_id until the other transaction
+      // commits). Two such calls — each rebinding the other's oldest device
+      // — each lock their own rebind row first and then block on the cap
+      // UPDATE trying to touch the row the other transaction is rebinding,
+      // forming a wait cycle `FOR UPDATE`/`UPDATE` locks alone can't avoid:
+      // the set of rows a call might need to touch for its cap check is only
+      // known once that call is already running, so no fixed set of
+      // per-passenger/per-token locks taken up front can cover it.
+      //
+      // The only way to rule the cycle out structurally, without weakening
+      // the cap policy, deleting history, or retrying a half-applied
+      // mutation, is to forbid any two registerDevice transactions from
+      // being in flight at the same time. One fixed-key advisory lock,
+      // acquired before any row read or write and held for the whole
+      // transaction, does that: it fully serializes registerDevice across
+      // every passenger and token, so the cap SELECT inside it only ever
+      // observes fully-committed state from prior calls and never a row a
+      // sibling transaction is still holding. This also subsumes the F2 fix
+      // (same-token races across passengers), so the two narrower locks are
+      // gone.
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        [`passenger-push-device-register:${command.drtsPassengerId}`],
-      );
-
-      // F2 reopen rework (Codex 2026-10-07): the passenger lock above only
-      // serializes calls for the *same* passenger. Two different passengers
-      // registering the same (provider, token_sha256) concurrently each
-      // take their own passenger lock, both see no active row under the
-      // `FOR UPDATE` below, and race a plain INSERT into the
-      // `active_token_uq` partial unique index instead of one of them
-      // observing the other's committed row and taking the rebind branch.
-      // A second advisory lock keyed by the token hash closes that: every
-      // caller acquires it in the same fixed order (passenger lock, then
-      // token lock), so no two locks can ever form a wait cycle, and the
-      // second caller for a given token blocks here until the first
-      // commits — at which point its `FOR UPDATE` select actually sees the
-      // just-inserted row and takes the rebind branch instead of racing
-      // the unique index.
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-        [`passenger-push-device-token:${command.provider}:${tokenSha256}`],
+        ["passenger-push-device-register"],
       );
 
       if (command.previousDeviceId) {

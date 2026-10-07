@@ -355,7 +355,7 @@ describe("PassengerPushDevicesRepository.registerDevice", () => {
     expect((caught as Error).message).not.toContain(rawToken);
   });
 
-  it("F2: serializes registerDevice for a passenger behind a transaction-scoped advisory lock before any row lock", async () => {
+  it("F5: serializes every registerDevice call behind one fixed-key transaction-scoped advisory lock before any row lock", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
         return { rows: [] };
@@ -403,20 +403,14 @@ describe("PassengerPushDevicesRepository.registerDevice", () => {
     }, []);
     const forUpdateIndex = calls.findIndex((sql) => sql.includes("FOR UPDATE"));
     expect(beginIndex).toBe(0);
-    expect(lockIndexes).toHaveLength(2);
-    const [passengerLockIndex, tokenLockIndex] = lockIndexes;
-    expect(passengerLockIndex).toBeGreaterThan(beginIndex);
-    expect(passengerLockIndex).toBeLessThan(tokenLockIndex);
-    expect(tokenLockIndex).toBeLessThan(forUpdateIndex);
-    expect(query.mock.calls[passengerLockIndex][1]).toEqual([
-      "passenger-push-device-register:passenger-001",
-    ]);
-    expect(query.mock.calls[tokenLockIndex][1]).toEqual([
-      `passenger-push-device-token:fcm_v1:${sha256("raw-fcm-token-must-never-be-logged")}`,
-    ]);
+    expect(lockIndexes).toHaveLength(1);
+    const [lockIndex] = lockIndexes;
+    expect(lockIndex).toBeGreaterThan(beginIndex);
+    expect(lockIndex).toBeLessThan(forUpdateIndex);
+    expect(query.mock.calls[lockIndex][1]).toEqual(["passenger-push-device-register"]);
   });
 
-  it("F2 reopen: serializes registerDevice for the same (provider, token hash) across different passengers behind a second advisory lock, acquired after the passenger lock in a fixed order", async () => {
+  it("F5: the single advisory lock key does not vary by passenger or token, so two different passengers registering two different (and even each other's) tokens are still fully serialized", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
         return { rows: [] };
@@ -462,11 +456,191 @@ describe("PassengerPushDevicesRepository.registerDevice", () => {
     const lockCalls = query.mock.calls.filter(([sql]) =>
       (sql as string).includes("pg_advisory_xact_lock"),
     );
-    expect(lockCalls).toHaveLength(2);
-    expect(lockCalls[0][1]).toEqual(["passenger-push-device-register:passenger-002"]);
-    expect(lockCalls[1][1]).toEqual([
-      `passenger-push-device-token:fcm_v1:${sha256("raw-fcm-token-shared-across-passengers")}`,
+    expect(lockCalls).toHaveLength(1);
+    expect(lockCalls[0][1]).toEqual(["passenger-push-device-register"]);
+  });
+
+  it("F5: two passengers simultaneously rebinding each other's oldest active token cannot interleave their row locks, because the shared advisory lock blocks the second transaction's entire body until the first commits", async () => {
+    // Reproduces the exact deadlock the F2-only fix left open: passenger-001
+    // registers with passenger-002's token (rebind steals device B), while
+    // passenger-002 concurrently registers with passenger-001's token
+    // (rebind steals device A) — each call's FOR-UPDATE/cap work touches a
+    // row the *other* call is simultaneously mutating. Unlike the other F2
+    // tests above, this one actually runs two pending transactions at once
+    // (via two independent mock connections driven through Promise.all)
+    // instead of only asserting one call's lock-call ordering, so it can't
+    // be satisfied by a mock that never truly overlaps. The mock faithfully
+    // reproduces Postgres's real pg_advisory_xact_lock blocking semantics
+    // for the single shared key: a second acquire attempt genuinely stalls
+    // until the first transaction's COMMIT/ROLLBACK releases it. Given that
+    // real guarantee, the assertion below is on *this* repository's query
+    // ordering — that no row-touching query for one passenger is ever
+    // issued while the other passenger's transaction holds the lock — which
+    // is exactly the property that rules the F5 wait-cycle out structurally.
+    const timeline: string[] = [];
+    let locked = false;
+    let wake: (() => void) | null = null;
+
+    async function acquireGlobalLock(tag: string) {
+      while (locked) {
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+      locked = true;
+      timeline.push(`${tag}:lock-acquired`);
+    }
+
+    function releaseGlobalLock(tag: string) {
+      timeline.push(`${tag}:lock-released`);
+      locked = false;
+      const resume = wake;
+      wake = null;
+      resume?.();
+    }
+
+    const tokenOwnedByPassenger001 = "raw-token-owned-by-passenger-001";
+    const tokenOwnedByPassenger002 = "raw-token-owned-by-passenger-002";
+    const deviceOwnedByPassenger001 = {
+      device_id: "device-a",
+      drts_passenger_id: "passenger-001",
+      platform: "ios" as const,
+      provider: "fcm_v1" as const,
+      app_id: "app-first-party-001",
+      app_version: "1.0.0",
+      token_sha256: sha256(tokenOwnedByPassenger001),
+      status: "active" as const,
+      status_reason: null,
+      notification_consent_version: "v1",
+      registered_at: "2026-10-01T00:00:00.000Z",
+      last_seen_at: null,
+      invalidated_at: null,
+      created_at: "2026-10-01T00:00:00.000Z",
+      updated_at: "2026-10-01T00:00:00.000Z",
+    };
+    const deviceOwnedByPassenger002 = {
+      ...deviceOwnedByPassenger001,
+      device_id: "device-b",
+      drts_passenger_id: "passenger-002",
+      token_sha256: sha256(tokenOwnedByPassenger002),
+    };
+
+    function makeClient(
+      tag: string,
+      rebindTargetRow: typeof deviceOwnedByPassenger001,
+      newDeviceId: string,
+      newPassengerId: string,
+    ) {
+      const query = vi.fn(async (sql: string) => {
+        if (sql === "BEGIN") {
+          return { rows: [] };
+        }
+        if (sql.includes("pg_advisory_xact_lock")) {
+          await acquireGlobalLock(tag);
+          return { rows: [] };
+        }
+        if (sql === "COMMIT" || sql === "ROLLBACK") {
+          releaseGlobalLock(tag);
+          return { rows: [] };
+        }
+        if (sql.includes("FOR UPDATE") && sql.includes("token_sha256 = $2")) {
+          timeline.push(`${tag}:select-for-update`);
+          return { rows: [rebindTargetRow] };
+        }
+        if (sql.includes("rebound_to_new_passenger")) {
+          timeline.push(`${tag}:revoke-rebind-target`);
+          return { rows: [] };
+        }
+        if (sql.includes("INSERT INTO iam.phase1_passenger_push_devices")) {
+          timeline.push(`${tag}:insert-new-device`);
+          return {
+            rows: [
+              {
+                ...rebindTargetRow,
+                device_id: newDeviceId,
+                drts_passenger_id: newPassengerId,
+                last_seen_at: null,
+              },
+            ],
+          };
+        }
+        if (sql.includes("OFFSET")) {
+          timeline.push(`${tag}:cap-select`);
+          return { rows: [] };
+        }
+        if (sql.includes("WHERE device_id = $1")) {
+          timeline.push(`${tag}:final-select`);
+          return {
+            rows: [
+              {
+                ...rebindTargetRow,
+                device_id: newDeviceId,
+                drts_passenger_id: newPassengerId,
+                last_seen_at: null,
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      });
+      return { query, release: vi.fn() };
+    }
+
+    const clientForPassenger001 = makeClient(
+      "P1",
+      deviceOwnedByPassenger002,
+      "device-b1",
+      "passenger-001",
+    );
+    const clientForPassenger002 = makeClient(
+      "P2",
+      deviceOwnedByPassenger001,
+      "device-a2",
+      "passenger-002",
+    );
+
+    const repositoryForPassenger001 = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue(clientForPassenger001),
+    } as never);
+    const repositoryForPassenger002 = new PassengerPushDevicesRepository({
+      isEnabled: () => true,
+      connect: vi.fn().mockResolvedValue(clientForPassenger002),
+    } as never);
+
+    const [resultForPassenger001, resultForPassenger002] = await Promise.all([
+      repositoryForPassenger001.registerDevice(
+        baseCommand({
+          drtsPassengerId: "passenger-001",
+          token: tokenOwnedByPassenger002,
+        }),
+      ),
+      repositoryForPassenger002.registerDevice(
+        baseCommand({
+          drtsPassengerId: "passenger-002",
+          token: tokenOwnedByPassenger001,
+        }),
+      ),
     ]);
+
+    expect(resultForPassenger001.deviceId).toBe("device-b1");
+    expect(resultForPassenger002.deviceId).toBe("device-a2");
+
+    let holder: string | null = null;
+    for (const entry of timeline) {
+      const [tag] = entry.split(":");
+      if (entry.endsWith(":lock-acquired")) {
+        expect(holder).toBeNull();
+        holder = tag;
+      } else if (entry.endsWith(":lock-released")) {
+        expect(holder).toBe(tag);
+        holder = null;
+      } else {
+        expect(holder).toBe(tag);
+      }
+    }
+    expect(holder).toBeNull();
+    expect(timeline.filter((entry) => entry.endsWith(":lock-acquired"))).toHaveLength(2);
   });
 
   it("F2 reopen: a concurrent second passenger registering the same token sees the first passenger's committed active row and rebinds, instead of racing a unique-violation INSERT", async () => {

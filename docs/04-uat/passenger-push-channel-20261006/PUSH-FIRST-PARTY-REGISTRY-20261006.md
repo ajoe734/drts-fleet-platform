@@ -201,7 +201,43 @@ NODE_PATH=<.pnpm>/typescript@5.9.3/node_modules node <同一路徑>/typescript/b
 
 CI：待本輪 commit push 後的新 candidate SHA 觸發，尚未讀取結果。
 
+## 第 5 輪退修（reviewer Codex reopen #3，REVIEWED_SHA=ba03e24f9，generation=e8d2d747d93949b1bf5acf04f364064a，PR #2358）
+
+Codex 核對候選 `ba03e24f9a368570f7a42caffd564c1e820945ae`（第 4 輪：無新程式碼變更，僅補跑第 3 輪缺的真實 vitest/eslint/tsc）後第三次 reopen，F1–F4 全部確認修復，抓出 F5：`registerDevice` 的轉綁（rebind）與 cap 執行仍可在**兩個不同乘客互相搶對方裝置**時形成列鎖等待環，第 1/3 輪加的 passenger-lock、token-lock 都無法防止，因為 cap 檢查會碰到的列（「這個乘客目前的 active 列」）在執行前無法預先知道——它可能正是另一個交易正在轉綁走的那一列。
+
+| # | Finding 摘要 | 修正位置 | 修正內容 | 回歸測試 |
+|---|---|---|---|---|
+| F5 [P2] | 乘客 P1 用 P2 的 token 登錄（轉綁偷走 P2 的裝置 B）同時乘客 P2 用 P1 的 token 登錄（轉綁偷走 P1 的裝置 A）：兩交易的 passenger lock（P1 vs P2）與 token lock（token b vs token a）互不衝突，都能往下跑。T1 鎖住並 revoke B、insert 新列；T2 鎖住並 revoke A、insert 新列。兩者 commit 前都執行 `enforceActiveDeviceCap`：T1 對 P1 的 cap 檢查在 T2 的 revoke A 尚未 commit 前，仍把 A 算進 P1 的 active 列，可能選中 A 做 cap overflow 並對它發 UPDATE——但 A 這列的寫鎖已被 T2 持有；對稱地 T2 的 cap 檢查可能需要 UPDATE 被 T1 鎖住的 B。兩個 `UPDATE` 互相等待對方持有的列鎖，形成等待環，只能靠 Postgres 死鎖偵測中止其中一筆，而目前的 `catch` 只把 `40P01` 轉成 `operation_failed` 直接拋出，沒有重試整筆交易，兩個合法的轉綁無法保證都能完成 | `passenger-push-devices.repository.ts` `registerDevice`，原本兩個各自鎖 passenger/token 的 `pg_advisory_xact_lock` 呼叫 | 影響集合（cap 檢查可能碰到的列）要等交易真正執行才知道，無法事先用一組固定的 per-passenger/per-token 鎖涵蓋；在不弱化 cap 政策、不刪歷史列、不把失敗的單句 SQL 原地重試的前提下，唯一能結構性排除這個等待環的方法是禁止任何兩個 `registerDevice` 交易同時在途。因此把原本兩個鎖鍵（`passenger-push-device-register:<passengerId>`、`passenger-push-device-token:<provider>:<hash>`）合併成**一個不隨乘客或 token 變化的固定鎖鍵** `"passenger-push-device-register"`，在 `BEGIN` 後、任何列讀寫前取得並持有整個交易：等同把所有 `registerDevice` 呼叫全域序列化，第二個呼叫的鎖取得會卡住直到第一個 `COMMIT`/`ROLLBACK` 真正釋放鎖，此時它看到的一律是已完全提交的狀態，不會再有未提交列被另一交易同時持鎖的情況，F2 的跨乘客同 token 競態也被這個更強的鎖一併涵蓋 | 既有「F2/F2 reopen」兩則改寫為「F5: serializes every registerDevice call behind one fixed-key transaction-scoped advisory lock before any row lock」與「F5: the single advisory lock key does not vary by passenger or token...」，斷言恰好一次 `pg_advisory_xact_lock` 呼叫、鎖鍵固定為 `"passenger-push-device-register"`、且在 `FOR UPDATE` 之前。另外新增「F5: two passengers simultaneously rebinding each other's oldest active token cannot interleave their row locks...」：用兩個獨立的 mock connection（各自的 `query`/`connect`）搭配一個會真實模擬 Postgres `pg_advisory_xact_lock` 阻塞語意的共享鎖（第二個 `acquire` 會卡在一個真正的 `await Promise`，直到第一個 `release` 才被喚醒），透過 `Promise.all` 真正同時啟動兩個 `registerDevice()`（P1 用 P2 的 token、P2 用 P1 的 token），斷言時間軸上任一方「取得鎖」到「釋放鎖」之間，另一方的任何列讀寫查詢都不會出現——這是 reviewer 指出「既有測試只斷言單次呼叫的鎖呼叫順序，沒有真正執行兩個等待中的交易」要補的那一類回歸 |
+
+### 本輪本機驗證指令與結果
+
+```
+NODE_PATH=<.pnpm>/vitest@4.1.4.../node_modules node <同一路徑>/vitest/vitest.mjs run \
+  tests/unit/push-first-party-registry-20261006/push-first-party-registry-20261006.test.ts \
+  tests/unit/push-channel-sd-20261006/push-channel-sd-20261006.test.ts \
+  tests/unit/system-remediation/sr-partner-notify-con-20260917/sr-partner-notify-con-20260917.test.ts \
+  --maxWorkers=1
+# Test Files  3 passed (3)
+#      Tests  59 passed (59)
+
+# 同法改用 vitest/node 的 startVitest({ config: "vitest.config.ts", include: ["apps/api/tests/unit/*.test.ts"] })
+# 執行 apps/api/tests/unit/passenger-push-devices.repository.test.ts（含本輪新增/改寫的 F5 測試）+ multi-taxi.repository.test.ts
+# Test Files  2 passed (2)
+#      Tests  35 passed (35)   # passenger-push-devices 28 則（原 27 則 F2/F2-reopen 兩則改寫為 F5 同名兩則 + 新增 1 則雙交易時間軸回歸，淨增 1 則）+ multi-taxi 7 則
+
+pnpm exec eslint apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository.ts apps/api/tests/unit/passenger-push-devices.repository.test.ts
+# exit 0，無輸出（乾淨）
+```
+
+`tsc -p apps/api/tsconfig.json --noEmit` 本輪執行時回報 4 個 `Cannot find module '@drts/control-plane-auth'` 錯誤（`bootstrap-auth.guard.ts`/`jwt-auth.service.ts`/`auth.controller.ts`/`iap-subject.adapter.ts`），與本 task 改動的 `passenger-push-devices.repository.ts`/其測試無關；核對為 `packages/control-plane-auth` 缺 `dist/` build artifact（`ls packages/control-plane-auth/dist` 不存在），嘗試直接 `pnpm --filter @drts/control-plane-auth build` 另外報 `crypto`/`jsonwebtoken`/`@drts/contracts`/`process` 型別找不到（該子套件的本地依賴 symlink 在本 worktree 同樣缺失，與第 1/3 輪記錄的 symlink 問題同一根因），不是本輪新增的程式碼缺陷——本輪未改動 `apps/api/src/common/auth/`、`apps/api/src/modules/auth/` 任一檔案。`git diff --check` 與 `git status --porcelain` 均已核對：本輪只改動 `apps/api/src/modules/passenger-push-devices/passenger-push-devices.repository.ts`、`apps/api/tests/unit/passenger-push-devices.repository.test.ts` 與本文件。
+
+### 本輪未變更/未新驗項目
+
+- Migration 本身、schema 欄位/CHECK/索引、F1/F3/F4：本輪未改動，reviewer 前三輪已核對相符，沿用前述驗收結果。
+- 真實 Postgres 下單一固定鎖鍵的 `pg_advisory_xact_lock` 實際序列化效果（吞吐量下降為完全序列、真實死鎖偵測是否還有其他觸發路徑）：仍是靜態程式碼修正 + mock-DB 單元測試（含本輪新增的真實雙交易時間軸回歸），按 common.md 分工留給 `PUSH-CHANNEL-PG-QA-20261006` 的 hosted 環境驗證，不冒稱 PG 實測。
+- CI：待本輪 commit push 後的新 candidate SHA 觸發，尚未讀取結果。
+
 ## candidate
 
-- `CANDIDATE_SHA`：待本次（第 4 輪）commit 後由 `git rev-parse HEAD` 取得（取代 `6cc3fdbbf`）。
+- `CANDIDATE_SHA`：待本次（第 5 輪）commit 後由 `git rev-parse HEAD` 取得（取代 `ba03e24f9`）。
 - `CANDIDATE_BRANCH`：`claude2/push-first-party-registry-20261006`
