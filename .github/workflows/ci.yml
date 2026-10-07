@@ -64,6 +64,7 @@ jobs:
           python3 -m unittest tools/ci/test_enterprise_search_acceptance_workflow.py
           python3 -m unittest tools/ci/test_enterprise_data_acceptance_workflow.py
           python3 -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
+          python3 -m unittest discover -s tests/unit/gcp-scanner-cold-readiness-20261007 -p 'test_*.py'
       - name: Verify live mail Python unit tests
         run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
       - name: Verify live invoice mail Python unit tests
