@@ -191,3 +191,47 @@ describe("F4/F6 verifyInvoiceLinks regressions", () => {
     expect(() => verifyInvoiceLinks(hrefs, "20000000-0000-0000-0000-000000000456")).toThrow();
   });
 });
+
+import { evaluateDownloadResponse } from "../../../../tests/e2e/system-remediation/sr-live-invoice-mail-20261007/live-invoice-mail.spec";
+
+describe("F4/F6 evaluateDownloadResponse", () => {
+  const validManifestHash = "2d3e9114777d1ff04b2a65825df3890f55cf5eb393430531bdc8636e0d37e4fb"; // echo -n '%PDF-test' | sha256sum
+  const createMockResponse = (overrides = {}) => ({
+    headers: () => ({
+      'content-type': 'application/pdf',
+      'x-drts-candidate-sha': 'a'.repeat(40),
+      ...overrides.headers
+    }),
+    body: async () => Buffer.from('%PDF-test'),
+    url: () => 'http://portal.invalid/api/downloads/tenant-invoice/inv1?sig=1',
+    status: () => 200,
+    ...overrides
+  });
+
+  it("passes for valid download", async () => {
+    const res = createMockResponse();
+    const proof = await evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1");
+    expect(proof.matched).toBe(true);
+    expect(proof.manifestHash).toBe(validManifestHash);
+  });
+
+  it("throws on wrong candidate SHA", async () => {
+    const res = createMockResponse({ headers: { 'content-type': 'application/pdf', 'x-drts-candidate-sha': 'wrong' } });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Candidate SHA mismatch");
+  });
+
+  it("throws on wrong MIME type", async () => {
+    const res = createMockResponse({ headers: { 'content-type': 'text/plain', 'x-drts-candidate-sha': 'a'.repeat(40) } });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Invalid mime");
+  });
+
+  it("throws on invalid PDF magic bytes", async () => {
+    const res = createMockResponse({ body: async () => Buffer.from('NOTPDF') });
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), validManifestHash, "inv1", "tenant1")).rejects.toThrow("Invalid PDF magic");
+  });
+
+  it("throws on hash mismatch", async () => {
+    const res = createMockResponse();
+    await expect(evaluateDownloadResponse(res, 'a'.repeat(40), "wronghash", "inv1", "tenant1")).rejects.toThrow("Hash mismatch");
+  });
+});

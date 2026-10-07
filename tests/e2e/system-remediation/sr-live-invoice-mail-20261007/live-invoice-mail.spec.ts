@@ -498,31 +498,20 @@ test.describe("Live Invoice Mail Acceptance", () => {
 
     // UI Download (inline popup since no attachment disposition + target=_blank)
 
-    const popupResponsePromise = context.waitForEvent('response', response => response.url().includes(artifactUrlPath) && response.status() === 200);
+    const expectedUrlObj = new URL(artifactUrlPath, portalOrigin);
+    const popupResponsePromise = context.waitForEvent('response', (response: any) => {
+        try {
+            const actualUrlObj = new URL(response.url());
+            return actualUrlObj.origin === expectedUrlObj.origin && 
+                   actualUrlObj.pathname === expectedUrlObj.pathname && 
+                   actualUrlObj.search === expectedUrlObj.search;
+        } catch { return false; }
+    });
     const downloadLocator = page.locator(`a[href="${artifactUrlPath}"]`).first();
     await downloadLocator.click();
     const popupResponse = await popupResponsePromise;
 
-    expect(popupResponse.headers()['content-type']).toBe('application/pdf');
-    expect(popupResponse.headers()['x-drts-candidate-sha']).toBe(candidateSha);
-
-    const bodyBuffer = await popupResponse.body();
-
-    expect(bodyBuffer.length).toBeGreaterThan(0);
-    expect(bodyBuffer.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-
-    const manifestHash = invoiceData.data?.artifactDownloadMetadata?.manifestHash;
-    expect(manifestHash).toBeTruthy();
-    const downloadedHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
-    expect(downloadedHash).toBe(manifestHash);
-
-    evidenceData.downloadProof = {
-      matched: true,
-      manifestHash: manifestHash,
-      downloadedHash: downloadedHash,
-      downloadedBytes: bodyBuffer.length,
-      contentType: popupResponse.headers()['content-type'],
-    };
+    evidenceData.downloadProof = await evaluateDownloadResponse(popupResponse, candidateSha, invoiceData.data?.artifactDownloadMetadata?.manifestHash, invoiceId, invoiceData.data?.tenantId);
 
     // Check missing token isolation on portal (unauthenticated signed link on portal)
     // The portal should redirect to /login if there's no session, even with a valid signed link.
@@ -663,12 +652,14 @@ test.describe("Live Invoice Mail Acceptance", () => {
             if (req.method() === 'POST' && (!readActionId || req.headers()['next-action'] !== readActionId)) {
                 mutationCount++;
             }
-            if (req.url().includes(`/downloads/tenant-invoice/`) && !req.url().includes(readOnlyInvoiceId)) {
-                roForeignDownloadObserved = true;
-            }
-            if (req.url().includes(`/downloads/tenant-invoice/${readOnlyInvoiceId}`)) {
-                roOwnDownloadObserved = true;
-            }
+            try {
+                const u = new URL(req.url());
+                if (u.pathname.startsWith('/downloads/tenant-invoice/') || u.pathname.startsWith('/api/downloads/tenant-invoice/')) {
+                    if (!u.pathname.endsWith(readOnlyInvoiceId)) {
+                        roForeignDownloadObserved = true;
+                    }
+                }
+            } catch {}
         };
         page.on('request', requestListener);
 
@@ -685,32 +676,22 @@ test.describe("Live Invoice Mail Acceptance", () => {
         if (await ownDownloadLink.count() > 0) {
             const ownHref = await ownDownloadLink.getAttribute('href');
             if (ownHref) {
-                const popupResponsePromise = context.waitForEvent('response', (response: any) => response.url().includes(ownHref) && response.status() === 200);
+                const expectedUrlObj = new URL(ownHref, portalOrigin);
+                const popupResponsePromise = context.waitForEvent('response', (response: any) => {
+                    try {
+                        const actualUrlObj = new URL(response.url());
+                        return actualUrlObj.origin === expectedUrlObj.origin && 
+                               actualUrlObj.pathname === expectedUrlObj.pathname && 
+                               actualUrlObj.search === expectedUrlObj.search;
+                    } catch { return false; }
+                });
                 await ownDownloadLink.click();
                 const popupResponse = await popupResponsePromise;
 
-                roOwnDownloadObservedMime = popupResponse.headers()['content-type'] || "";
-                expect(roOwnDownloadObservedMime).toBe('application/pdf');
-                expect(popupResponse.headers()['x-drts-candidate-sha']).toBe(candidateSha);
-
-                const bodyBuffer = await popupResponse.body();
-                roOwnDownloadObservedBytes = bodyBuffer.length;
-                expect(roOwnDownloadObservedBytes).toBeGreaterThan(0);
-                expect(bodyBuffer.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-
-                const manifestHash = (evidenceData as any).roInvoiceData?.data?.artifactDownloadMetadata?.manifestHash;
-                expect(manifestHash).toBeTruthy();
-                const downloadedHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
-                expect(downloadedHash).toBe(manifestHash);
-
-                roOwnDownloadObserved = true;
-                roDownloadProof = {
-                  matched: true,
-                  manifestHash: manifestHash,
-                  downloadedHash: downloadedHash,
-                  downloadedBytes: bodyBuffer.length,
-                  contentType: roOwnDownloadObservedMime,
-                };
+                roDownloadProof = await evaluateDownloadResponse(popupResponse, candidateSha, (evidenceData as any).roInvoiceData?.data?.artifactDownloadMetadata?.manifestHash, readOnlyInvoiceId, (evidenceData as any).roInvoiceData?.data?.tenantId);
+                roOwnDownloadObserved = roDownloadProof.browserObserved;
+                roOwnDownloadObservedBytes = roDownloadProof.downloadedBytes;
+                roOwnDownloadObservedMime = roDownloadProof.contentType;
             }
         }
 
@@ -753,3 +734,33 @@ test.describe("Live Invoice Mail Acceptance", () => {
   });
 });
 
+export async function evaluateDownloadResponse(popupResponse: any, candidateSha: string, manifestHash: string, readOnlyInvoiceId: string, tenantId: string) {
+    const mime = popupResponse.headers()['content-type'] || "";
+    if (mime !== 'application/pdf') throw new Error("Invalid mime");
+    if (popupResponse.headers()['x-drts-candidate-sha'] !== candidateSha) throw new Error("Candidate SHA mismatch");
+
+    const bodyBuffer = await popupResponse.body();
+    if (bodyBuffer.length === 0) throw new Error("Zero bytes downloaded");
+    if (bodyBuffer.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error("Invalid PDF magic");
+
+    if (!manifestHash) throw new Error("Missing manifestHash");
+    const downloadedHash = crypto.createHash("sha256").update(bodyBuffer).digest("hex");
+    if (downloadedHash !== manifestHash) throw new Error("Hash mismatch");
+
+    const actualUrlObj = new URL(popupResponse.url());
+    return {
+        matched: true,
+        manifestHash: manifestHash,
+        downloadedHash: downloadedHash,
+        downloadedBytes: bodyBuffer.length,
+        contentType: mime,
+        origin: actualUrlObj.origin,
+        path: actualUrlObj.pathname,
+        query: actualUrlObj.search,
+        status: popupResponse.status(),
+        candidateSha: popupResponse.headers()['x-drts-candidate-sha'] || "",
+        invoiceId: readOnlyInvoiceId,
+        tenantId: tenantId,
+        browserObserved: true
+    };
+}

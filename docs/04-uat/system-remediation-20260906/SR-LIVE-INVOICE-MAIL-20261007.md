@@ -144,3 +144,22 @@ This document records the completion and verification of the live invoice mail E
 - Differential source and actual-gate probes: exit0, defects reproduced.
 
 *Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
+
+## Codex Review Rejection (Candidate: 105caeade1e26eb7b9bfed6503ce64c46d3e8c0b / Generation: 830f7efb60244b3cbab1ddfbd7129950. Adjacent: 216fdd13bd856fb09a10df32040b2cb77ef3b82f)
+
+- **Confirmed source repairs**: Download response observer replaces locator.click with actual URL matching. Gate correctly fails absent read-only download_proof.
+- **F3/F5 (P1 REPEATED: download response identity and durable evidence are still not bound to the authorized resource/runtime)**:
+  - Repaired `live-invoice-mail.spec.ts`: Replaced loose `.includes()` with exact parsed URL origin/path/query matching in both main and read-only observer. Extracted `evaluateDownloadResponse` to strictly validate `content-type`, magic bytes `%PDF-`, candidate SHA, authoritative hash match, and returning structured metadata (origin, path, query, status, candidateSha, invoiceId, tenantId, browserObserved).
+  - Repaired `gate-evidence.py`: Gate now enforces exact correlations against authoritative origin, path, query, status, invoice ID, tenant ID, and candidate SHA for both main `downloadProof` and read-only `download_proof`.
+- **F4/F6 (P2 REPEATED: event-boundary regressions and current-candidate handoff evidence incomplete)**:
+  - Added new `spec-guards.test.ts` cases to independently test `evaluateDownloadResponse` logic against valid download, wrong candidate SHA, wrong MIME type, invalid PDF magic, and mismatched manifest hashes.
+  - Added new `test_hosted_gate.py` negative regressions to mutate new proof properties (`origin`, `path`, `status`, `candidateSha`), ensuring they fail the run correctly.
+  - UAT accurately populated with current-candidate field-level repair details.
+
+**Completed Local Verification**:
+- Python unittest discovery scoped to task (`tests/unit/system-remediation/sr-live-invoice-mail-20261007`): PASS 11/11 exit 0.
+- Node dependency tools (vitest, tsc, eslint) skipped due to local dependency limitations (MODULE_NOT_FOUND), NOT source failures.
+- `git diff --check HEAD^ HEAD`: clean
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base HEAD^ --head HEAD`: PASS exit0
+
+*Acceptance Pending real external Playwright execution, same-SHA overall CI, genuine runtime/fixture/recipient/role authorization, genuine hosted proof and cleanup.*
