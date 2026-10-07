@@ -1,4 +1,4 @@
-# SR-GCP-ARTIFACT-ACTIVATION-20261004 unblock audit (2026-10-07)
+# SR-GCP-ARTIFACT-ACTIVATION-20261004 unblock audit (2026-10-07, update 2)
 
 Task: `SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-MANUAL-UNBLOCK`; owner:
 Claude; reviewer: Claude2. Scope: diagnose why the parent remains `blocked`
@@ -6,179 +6,144 @@ even though both declared dependencies are `done`, and either make the
 task-scoped fix or document the exact remaining blocker. No parent source
 file is touched by this helper; no parent candidate handoff is performed.
 
-## Dependencies are not the blocker
+This is an update to this helper's own prior round (committed `65d31f333`,
+2026-10-07T03:42Z). Both decisions that round left pending for Supervisor
+have since been resolved and are independently re-verified below against
+current `origin/dev`. The remaining blocker is now a different, later-stage
+one, stated explicitly in the parent's own Supervisor-authored `next` field
+(`last_update: 2026-10-07T10:31:00Z`), not by this helper.
 
-- `AUDIT-GCP-ARTIFACT-PROVIDERS-20261004`: `status: done`, merged
-  (`merge_sha c0f5d66c6b90d8c2e9bf2107e73fef999fc2d5ac`), reviewed by Codex.
+## Dependencies are not the blocker (unchanged)
+
+- `AUDIT-GCP-ARTIFACT-PROVIDERS-20261004`: `status: done`, merged.
 - `AUDIT-GCP-ARTIFACT-INFRA-20261004`: `status: done`, reviewed by Codex.
 
-Both are fully satisfied. The parent's `status: blocked` is unrelated to
-`depends_on` and is instead a live review REOPEN waiting on two Supervisor
-(or user) policy decisions, as the parent's own `next` field already states.
+Both are fully satisfied; this was never the real blocker.
 
-## The blocker is unchanged in substance from the 2026-10-06 history-repair
-## audit, now independently reconfirmed on a new candidate, plus one new
-## structural finding
+## Both 2026-10-07T03:xx decisions are now resolved on `origin/dev`
 
-The prior helper, `SR-GCP-ARTIFACT-ACTIVATION-20261004-UNBLOCK-HISTORY-REPAIR`
-(commit `64ae06317`, 2026-10-06), already found that the parent was waiting on
-a **write-scope decision**, not a git/history defect, for the same
-`publishDriverFeePlan` fire-and-forget defect. The candidate has since been
-rebuilt twice (commit-tree rebuilds per two separate Supervisor authorizations
-dated 2026-10-05T23:40Z and 2026-10-07T00:30Z, both preserved in the parent's
-`integration_notes`). This audit re-verifies the current state on the
-*current* candidate rather than trusting the prior finding by name.
+### Decision 1 (write-scope grant): resolved by spin-off task, merged
 
-### Point 1 (confirmed unchanged): `billing-settlement.controller.ts` /
-### `.service.ts` are outside `write_scopes`, and the defect is real
+The prior round found `billing-settlement.controller.ts`'s
+`publishDriverFeePlan` passed an un-awaited `Promise` into
+`toApiSuccessEnvelope`, outside this task's `write_scopes`, and asked
+Supervisor to either grant scope or re-scope to a dedicated task. Supervisor
+chose the latter: `API-UNAWAITED-ASYNC-CONTROLLERS-20261007` (owner Codex2),
+merged to `origin/dev` as `2467f88a2` ("await async controller responses",
+PR #2392). Independently re-read directly from `origin/dev` in this round:
 
-Current candidate: `60376bf155eb60c8e60d3bfa318629356d1d5533`, branch
-`claude/sr-gcp-artifact-activation-20261004`, PR
-[#2384](https://github.com/ajoe734/drts-fleet-platform/pull/2384).
+```
+git show origin/dev:apps/api/src/modules/billing-settlement/billing-settlement.controller.ts
+```
 
-Read directly from that exact candidate tree:
+`publishDriverFeePlan` is now `async` and does
+`await this.billingSettlementService.publishDriverFeePlan(...)` before
+wrapping the result in `toApiSuccessEnvelope`. The defect is fixed. Do not
+reopen this finding.
 
-- `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts:314-326`
-  — `publishDriverFeePlan` is a plain (non-`async`) method that does
-  `return toApiSuccessEnvelope(this.billingSettlementService.publishDriverFeePlan(command, requestId), requestId)`,
-  passing the service call's `Promise` straight into the envelope helper
-  without `await`.
-- `apps/api/src/common/api-envelope.ts` `toApiSuccessEnvelope` stores whatever
-  it is given verbatim; it does not detect or await a `Promise`.
-- Net effect: the HTTP response is built and returned before the service's
-  `await this.persistChanges(...)` (service.ts:2029) resolves. Any
-  persistence failure becomes a detached, unobserved promise rejection; the
-  client never sees it, and this task's own in-`write_scopes`
-  `tests/support/signed-session-fixture.ts` fixture helper — which calls this
-  exact endpoint to prepare fixtures — cannot distinguish a failed publish
-  from a successful one.
-- Confirmed via `ai-status.sh show SR-GCP-ARTIFACT-ACTIVATION-20261004`:
-  `write_scopes` lists 14 paths; neither `billing-settlement.controller.ts`
-  nor `billing-settlement.service.ts` is one of them.
-- Confirmed no other open task (`blocked`/`in_progress`/`review`/`todo`/
-  `backlog`) currently holds either file in its own `write_scopes` — the
-  grant would not collide with any parallel task.
+### Decision 2 (hosted-dispatch structural ordering): resolved by merge
 
-This matches Claude2's 2026-10-07T01:44:21Z REOPEN of this exact candidate
-almost verbatim ("P1 REPEATED-DEFECT carried forward unchanged... Supervisor
-must either grant write_scopes... or formally re-scope this requirement to a
-task that already owns those files").
+The prior round found `.github/workflows/provision-dev-artifact-backends.yml`
+did not exist on `origin/dev`, so it could not be `workflow_dispatch`-ed by
+anyone — a precondition problem independent of authorization. This task's own
+candidate `60376bf155eb60c8e60d3bfa318629356d1d5533` (PR #2384), which
+reviewer Claude2 approved on code merits 2026-10-07T07:43:14Z, merged to
+`origin/dev` as `0be15c0ad` ("rebuild activation candidate as one clean commit
+off dev", #2384). Independently re-verified this round:
 
-### Point 2 (confirmed unchanged): hosted GCS/ClamAV live evidence has never
-### been executed for this task, ever
+```
+git log --oneline origin/dev   # 0be15c0ad present
+git show origin/dev:.github/workflows/provision-dev-artifact-backends.yml   # exists
+```
 
-`required_acceptance` is `['immutable_hosted_workflow_review_ci',
-'private_resources_iam_and_image_provenance',
-'genuine_scan_storage_positive_negative',
-'shared_dev_provider_activation_readback']`. Across this task's entire
-history (32 recorded `worker_outcomes`, multiple candidate rebuilds since
-2026-10-02), no reviewer has ever observed a real run of
-`.github/workflows/provision-dev-artifact-backends.yml` against live GCP
-resources. VM-restricted owner/reviewer sessions cannot dispatch it
-themselves.
+The workflow is now registered on the default branch and is dispatchable by
+anyone with real GCP/WIF credentials. This structural precondition is
+resolved; `immutable_hosted_workflow_review_ci` is satisfied by this merge.
 
-### New finding this round: the hosted-workflow requirement has a structural
-### ordering problem, independent of authorization
+## Current actual blocker (per parent's own Supervisor-authored `next`, not
+## this helper's invention)
 
-`.github/workflows/provision-dev-artifact-backends.yml` is itself one of this
-candidate's 14 `write_scopes` files — it does not yet exist on `origin/dev`
-(`git show origin/dev:.github/workflows/provision-dev-artifact-backends.yml`
-fails). GitHub only allows `workflow_dispatch` runs for workflow files that
-already exist on the repository's default branch; a `workflow_dispatch`
-workflow that only exists on a feature branch cannot be dispatched via the
-Actions UI or API at all. This is the same constraint already recorded for
-this repo under the publish→main promotion gate (new `workflow_dispatch`
-workflows wait for the next green deploy-dev + soak before they are usable).
+The parent's `next` field, updated directly by Supervisor at
+`2026-10-07T10:31:00Z` (7 seconds before this helper task's own redispatch),
+states the live chain is still incomplete:
 
-So items 2–4 of `required_acceptance` cannot be produced *before* this exact
-candidate merges to `dev` — the workflow they depend on does not exist yet
-anywhere dispatchable. This is a separate question from "who is allowed to
-press the button": even a fully authorized human cannot press it yet.
+> Remaining order is hosted provisioning workflow registration/bootstrap →
+> true private GCS/ClamAV/readback → C125 real upload → full deploy
+> candidate/browser. Latest source `3ecd55d6`/publish `v2026.10.07.0`
+> deploy `37602185882` failed downstream operational acceptance.
 
-The candidate lifecycle documented in `AI_COLLABORATION_GUIDE.md` §5 is
-`review -> integrating -> acceptance -> done`, i.e. acceptance evidence is
-normally collected *after* merge, not as a precondition for reviewer
-approval. Reviewer's REOPEN is treating hosted-dispatch evidence as a
-pre-merge gate for this activation task specifically (plausible, since
-merging an unexercised provisioning workflow has its own risk), but that is a
-policy choice, not something this helper can decide. Supervisor/user needs to
-settle which model applies here:
+I.e.: the three remaining `required_acceptance` keys
+(`private_resources_iam_and_image_provenance`,
+`genuine_scan_storage_positive_negative`,
+`shared_dev_provider_activation_readback`) need a real GCP bucket, IAM
+bindings, scanner service and GitHub repo variables created, the workflow
+dispatched against them, and the result read back — then a subsequent full
+`deploy-dev` acceptance pass on a release that includes this merge, which has
+not yet gone green (latest attempt, deploy run `37602185882`, failed). This
+is live-cloud and deploy-pipeline work that:
 
-- (a) keep hosted-dispatch evidence as a pre-merge gate, in which case someone
-  with real GCP credentials must push this exact reviewed tree (or an
-  equivalent) to `dev` far enough to register the workflow, dispatch it, and
-  feed the result back into review before merge proper — a two-step/soft
-  landing most other gated workflows in this repo do not need; or
-- (b) treat `private_resources_iam_and_image_provenance`,
-  `genuine_scan_storage_positive_negative`, and
-  `shared_dev_provider_activation_readback` as **post-merge acceptance**
-  items per the normal lifecycle: merge once same-SHA CI is green and the
-  only remaining code defect (Point 1) is fixed, then dispatch and record the
-  live GCP evidence against `dev` via `record-acceptance` before `done`.
+- requires explicit user authorization to create/mutate real GCP resources
+  (billing/IAM impact outside this repo), which Supervisor has already
+  requested per the parent's `integration_notes`; and
+- requires a human/Supervisor session with real GCP credentials to execute,
+  which this VM-restricted owner/reviewer session must not and cannot do
+  (no `gcloud`/workflow-dispatch/cloud-mutation from this worktree).
+
+This helper found no evidence that the current blocker is anything other
+than that explicit, already-identified cloud chain. There is no further
+scope, git-history, or candidate-identity defect left to diagnose in this
+round.
 
 ## No other git/worktree/branch contamination found
 
 `git worktree list --porcelain` shows only this helper's own assigned
-worktree; no collision with the parent's candidate branch
-`claude/sr-gcp-artifact-activation-20261004`. `gh pr view 2384` confirms
-`headRefOid` matches `60376bf15` exactly and `state: OPEN`. `gh pr checks
-2384` shows all 29 checks `pass` (one `orchestrator-tests` job skipping, not
-failing).
+worktree. `origin/dev` fetched clean this round; no divergence or force-push
+signs on the parent's merged candidate.
 
-## Concrete unblocked next step for the parent
+## Concrete next step for the parent (restated, not newly invented)
 
-Two decisions, both outside this helper's authority to make unilaterally
-(one edits a different task's production billing code path; the other
-authorizes real GCP cloud-resource provisioning):
+Both prior pending decisions are closed. The only remaining step is the
+cloud chain already stated in the parent's own `next` field: hosted
+provisioning workflow registration/bootstrap (done — workflow now on `dev`)
+→ real private GCS/ClamAV creation and readback → re-run/complete the C125
+real-upload acceptance → get a full `deploy-dev` candidate green (the
+`37602185882` attempt failed and must not be treated as current or passing)
+→ browser/live acceptance. Executing that chain needs explicit user
+authorization for real GCP resource creation and a session with real GCP
+credentials to run it — not another owner/reviewer code round on this task.
+This helper does not change the parent's `status`/`waiting_for`; Supervisor
+already holds and is acting on that authority (the parent's `next`/
+`last_update` reflect Supervisor's own direct update, not a worker
+`worker_outcome`).
 
-1. **Scope**: grant `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts`
-   and `billing-settlement.service.ts` to this task's `write_scopes` so the
-   current owner can make `publishDriverFeePlan` `async`/`await` the service
-   call and propagate failures — recommended, since no parallel task holds
-   these files and the fix is a small, well-understood correctness change; or
-   redirect it to a new dedicated task.
-2. **Hosted-dispatch ordering + authorization**: decide between pre-merge
-   gating (option a above, needs a human with real GCP credentials to
-   register and dispatch the workflow before merge) or post-merge acceptance
-   (option b, resolves the chicken-and-egg problem cleanly and matches the
-   documented candidate lifecycle). Either way, actually running
-   `provision-dev-artifact-backends.yml` against live GCP resources requires
-   a human with real credentials; this VM-restricted session must not and
-   does not attempt it.
+## Checks performed in this helper (this round)
 
-`resume-blocked` and any `write_scopes`/acceptance-model change is
-Supervisor's/the user's call once these two decisions are made; this helper
-does not make them or touch the parent's `status`/`waiting_for`.
-
-## Checks performed in this helper
-
-- `ai-status.sh show` on the unblock task, the parent, and both `depends_on`
-  tasks.
-- Read the parent's full `worker_outcomes` history (32 entries) and
-  `integration_notes` to confirm the current candidate identity and every
-  prior Supervisor decision still in force.
-- `git show 60376bf15:apps/api/src/modules/billing-settlement/billing-settlement.service.ts`
-  and `...controller.ts` — read the actual `publishDriverFeePlan` code at the
-  exact candidate SHA (not the predecessor commit that claimed to fix it) to
-  independently confirm the defect is real and still present.
-- `ai-status.sh list --status {blocked,in_progress,review,todo,backlog}` for
-  `billing-settlement` — confirmed no collision for a scope grant.
-- `gh pr view 2384 --json state,mergeable,mergeStateStatus,headRefOid,headRefName`
-  and `gh pr checks 2384` — confirmed candidate identity and all-green CI.
+- `ai-status.sh show` on this unblock task and on the parent (full
+  `worker_outcomes` history and `integration_notes`, not just the `next`
+  summary) to confirm current candidate identity and every decision still in
+  force.
+- `git fetch origin dev` + `git log --oneline origin/dev` — confirmed both
+  `0be15c0ad` (this task's merged candidate) and `2467f88a2`
+  (`API-UNAWAITED-ASYNC-CONTROLLERS-20261007`, the spun-off fix) are present
+  on `origin/dev`.
+- `git show origin/dev:apps/api/src/modules/billing-settlement/billing-settlement.controller.ts`
+  — independently re-read the live `origin/dev` code, not just trusted the
+  merge commit message, to confirm `publishDriverFeePlan` is now `async`/
+  `await`s the service call.
 - `git show origin/dev:.github/workflows/provision-dev-artifact-backends.yml`
-  — confirmed the workflow is not yet registered on the default branch,
-  the basis for the new structural-ordering finding above.
+  — confirmed the workflow file now exists on the default branch.
 - `git worktree list --porcelain` — confirmed no worktree collision.
 - No product source file was touched; no test suite was run (nothing in this
-  task's own scope changed product behavior).
+  task's own scope changed product behavior this round either).
 
 ## Delivery
 
-This file is the only change in this helper task. Its task-scoped commit and
-normal push are on
+This file is the only change in this helper task, on top of this helper's
+own prior commit. Its task-scoped commit and normal push are on
 `claude/sr-gcp-artifact-activation-20261004-unblock-manual-unblock`; the
 final SHA and PR URL are recorded by this helper's own `handoff` in machine
-truth. The parent task receives a `note` via the status CLI summarizing this
-finding and the two concrete pending decisions; the parent's
-`status`/`waiting_for` are left untouched since those decisions, not this
-helper, resolve the block.
+truth. The parent's `status`/`waiting_for`/`next` are left untouched by this
+helper: Supervisor has already updated the parent directly with the current,
+accurate next step, and this helper's role per its dispatch brief is to
+finish a truthful scoped artifact and hand off, not to attempt another
+parent-state mutation.
