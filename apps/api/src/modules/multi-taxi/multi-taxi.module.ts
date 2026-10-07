@@ -1,3 +1,5 @@
+import { FIRST_PARTY_PUSH_PROVIDER, FirstPartyNotificationTransport } from "./first-party-notification.transport";
+import { FcmFirstPartyPushProvider } from "./fcm-push.provider";
 import { Module, OnModuleInit } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
@@ -62,6 +64,12 @@ import { PartnerNotificationWorker } from "./partner-notification.worker";
       provide: PASSENGER_PUSH_TRANSPORT,
       useExisting: PartnerNotificationTransport,
     },
+    FcmFirstPartyPushProvider,
+    {
+      provide: FIRST_PARTY_PUSH_PROVIDER,
+      useExisting: FcmFirstPartyPushProvider,
+    },
+    FirstPartyNotificationTransport,
     // Retained for subscription API compatibility, not injected as a receiver.
     PassengerPushRepository,
   ],

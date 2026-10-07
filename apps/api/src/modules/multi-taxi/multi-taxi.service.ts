@@ -1,3 +1,4 @@
+import { FirstPartyNotificationTransport } from "./first-party-notification.transport";
 import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import {
   PartnerNotificationFailure,
@@ -183,6 +184,8 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    private readonly firstPartyTransport?: FirstPartyNotificationTransport,
   ) {}
 
   async onModuleInit() {
@@ -1265,6 +1268,131 @@ export class MultiTaxiService implements OnModuleInit {
     return outcome;
   }
 
+  private async deliverFirstPartyNotification(
+    outboxId: string,
+    requestId?: string,
+  ): Promise<PassengerPushDeliveryOutcome> {
+    if (!this.firstPartyTransport) {
+      return this.deliverNonPartnerChannelOutcome(outboxId, "first_party_app");
+    }
+
+    const claim = await this.repository!.claimPartnerNotification(
+      outboxId,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (!claim) throw new PassengerPushClaimConflictError(outboxId);
+    const { record, fenceToken } = claim;
+
+    const message = {
+      outboxId: record.outboxId,
+      orderId: record.orderId,
+      passengerSubjectRef: record.passengerSubjectRef,
+      eventType: record.eventType,
+      assignmentVersion: record.assignmentVersion,
+      payload: record.payload,
+      createdAt: record.createdAt,
+      attemptCount: record.attemptCount,
+    };
+
+    let metadata: any;
+    let outcome: any;
+    try {
+      const receipt = await this.firstPartyTransport.send({
+        providerName: "first_party_app",
+        message: message as any,
+        context: { requestId, fenceToken },
+      });
+
+      if (!receipt.deliveryContext || !receipt.deliveredAt) {
+        throw new Error("First party receipt context missing");
+      }
+
+      const c = receipt.deliveryContext;
+      metadata = {
+        deliveryTarget: c.deliveryTarget,
+        deliveryStage: c.deliveryStage,
+        retryDisposition: c.retryDisposition,
+        failureReason: c.failureReason,
+        expiresAt: c.expiresAt,
+        receiptId: c.receiptId,
+        downstreamStatus: "unknown",
+      };
+
+      outcome = {
+        ...metadata,
+        outboxId,
+        status: "delivered",
+        result: "delivered",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: receipt.deliveredAt,
+        deliveredAt: receipt.deliveredAt,
+        providerName: receipt.providerName,
+      };
+    } catch (error: any) {
+      if (error.name !== "FirstPartyPushFailure") {
+        throw new PassengerPushPersistenceUnknownError(outboxId, error);
+      }
+      
+      const failure = error.failure;
+      const context = error.deliveryContext;
+      let expiresAt: string;
+      try {
+        expiresAt = context?.expiresAt ?? record.createdAt;
+      } catch {
+        expiresAt = record.createdAt;
+      }
+
+      const retryDisposition = failure.retryDisposition;
+      const nextAttemptAt = failure.suggestedNextAttemptAt;
+
+      metadata = {
+        deliveryTarget: "first_party_device",
+        deliveryStage: context?.deliveryStage || null,
+        failureReason: failure.failureReason,
+        retryDisposition,
+        expiresAt,
+        receiptId: null,
+        downstreamStatus: "unknown",
+      };
+
+      outcome = {
+        ...metadata,
+        outboxId,
+        status: "failed",
+        result: retryDisposition === "automatic" ? "provider_error" : "provider_not_configured",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: nextAttemptAt ?? new Date().toISOString(),
+        deliveredAt: null,
+        providerName: "first_party_app",
+      };
+    }
+
+    try {
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: outcome.providerName,
+        providerMessageRef: metadata.receiptId,
+        providerAckState:
+          outcome.result === "delivered"
+            ? "provider_acknowledged"
+            : outcome.result === "provider_not_configured"
+              ? "provider_not_configured"
+              : "provider_rejected",
+        deliveryOutcome: outcome,
+        partnerMetadata: metadata,
+      });
+      if (!persisted.recorded) {
+        throw new Error("First party notification fence lost");
+      }
+    } catch (error) {
+      throw new PassengerPushPersistenceUnknownError(outboxId, error);
+    }
+    return outcome;
+  }
+
   /**
    * PUSH-CHANNEL-ROUTER-20261006 D2/D7 — the per-order channel decision
    * point. A partner route resolves exactly as before (unchanged
@@ -1284,6 +1412,9 @@ export class MultiTaxiService implements OnModuleInit {
       );
     if (resolution.channel === "partner_webhook") {
       return this.deliverPartnerNotification(record.outboxId, requestId);
+    }
+    if (resolution.channel === "first_party_app") {
+      return this.deliverFirstPartyNotification(record.outboxId, requestId);
     }
     return this.deliverNonPartnerChannelOutcome(
       record.outboxId,
