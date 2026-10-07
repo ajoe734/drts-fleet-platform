@@ -1,8 +1,29 @@
 # SR-LIVE-MAIL-001 — 邀請與簽核真郵件驗收
 
 - 現任 Owner / Reviewer：**Codex / Claude2**（2026-10-02T02:08:52Z reassignment）。
-- 現況：第三次 hosted run 已取得一封邀請的真 Gmail SMTP 回執，但 IMAP 觀測失敗。F16 改用 LIST 的 `\All` 屬性探索本地化資料夾；F17 將安全失敗階段保留至 CLI／Node／evidence。**160 TS＋37 Python tests 通過**；真 IMAP 內容、完整邀請／簽核／expiry／retry 仍待 Supervisor 合併部署後 hosted 重跑。
-- **§0.6 是最新修正與檢查結果**；§0–§0.5 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪只取回既有 hosted artifact，沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+- 現況：F18 retry option A 原始碼已可獨立交 Claude2 審查；F19 合法 approver session 與完整 live acceptance 仍未完成。邀請流程及真 24h expiry 的歷史證據見 §0.7，不冒充本輪候選的 live 通過。
+- **§0.8 是最新交接邊界與檢查結果**；§0–§0.7 保留先前全部 finding、候選與限制，§1–§6 保留前任歷史觀察。本輪沒有寄真郵件、讀 secret payload、部署、呼叫 `done` 或 `record-acceptance`。
+
+## 0.8 F18 原始碼交審；F19 與 live gates 保留（2026-10-07）
+
+依 Supervisor 2026-10-07T10:30:58Z continue-complete dispatch，F18 不再等待 F19 Google identity 才交審。本節取代 §0.7 當時「不能以局部實作鎖整體交審」的排程限制；沒有豁免 approval gate。交接範圍為 PR #2394 的 retry option A 原始碼及 F19 正式授權定位證據。
+
+- 本次 `git fetch origin` 後的 `origin/dev` 為 `f270fdbafd82ecdc12598fa86739ee5845345966`；原始實作 base 仍為 §0.7 的 `2467f88a2e64ccc2204bb99f1356fdeb997bda13`。PR 可合併，未因 dev 前進而 merge/rebase 或改寫已發布歷史。
+- 本機、遠端與 PR #2394 head 均核對為 `4716f23be80f4f7d47f0e6bb597385cdffdb733c`。本輪後續 commit **只更新本文件**；workflow、runner、collector 與所有 tests bytes 均沿用該 checkpoint。最終完整 candidate SHA 由普通 push 後的 PR head 與 canonical handoff 記錄，不把原 checkpoint CI 當作新 SHA 的 CI。
+- checkpoint 的 [CI integration run 37588314304](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37588314304) 與 [CI run 37588314353](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37588314353) 均 completed/success、headSha 同 `4716f23`；29 checks 中 18 success、11 scope skipped。integration workflow 的 lint/typecheck/unit/integration/build 等 skipped 不是完整回歸通過。新文件 candidate 的 CI 交 GitHub bus 依同 SHA 收錄。
+
+本次在 unchanged source 重新執行 §0.7 的完整 scoped Vitest、Python unittest、`tsc --noEmit -p tests/e2e/system-remediation/sr-live-mail-001/tsconfig.live.json` 與 scoped ESLint，均 **exit 0**：**9 files／184 TS tests、41 Python tests**。所有命令已結束並讀取結果；Vitest machine log 在 `.local/sr-live-mail-001/dispatch-20261007/vitest.log`。未再次覆寫模組重現舊版；F18 舊版失敗／修正版通過的最小案例沿用 §0.7。文件另以 Prettier、`git diff --check` 與 commit trailers 核對。
+
+| Finding／驗收項             | 本次交審證據與結果                                                                                                               | 未驗項／責任人                                                                                                                                                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F18 retry option A          | §0.7 的正式 collector、runner gate 與正反回歸；本次 184 TS tests 通過。只替換 retry 證據要求，approval、真 expiry 仍 fail-closed | collector 尚未在 hosted workflow 取得新 candidate 的 Scheduler／Cloud Run 證據；由 Supervisor 於 review/merge 與授權部署後安排                                                                                                                                   |
+| F19 approver identity       | 正式 `recordApprovalDecision` 拒絕非 resolved approver；`resolveCiTenantActorGrant` 拒絕動態 membership，2 定位案例通過          | **blocked prerequisite**：Supervisor／operator 提供合法 +approve session 路徑；self-provision profile 尚未完成。後續若使用 operator session，必須 secret-safe 輸入，經 `/auth/session` 與 `resolvedApproverUserIds` 核對，不擴 WIF grant、不假 JWT、不冒用使用者 |
+| `authorized_test_mailbox`   | 保留僅 +invite／+approve 與唯讀 IMAP 限制；歷史真內容見 §0.7                                                                     | 新 approval profile 尚不可執行；不得擴充收件人                                                                                                                                                                                                                   |
+| `configured_mail_provider`  | 歷史 provider metadata 見 §0.7                                                                                                   | 本輪未部署；Supervisor 需綁新 deployed candidate 的 provider 證據                                                                                                                                                                                                |
+| `provider_message_receipts` | 保留歷史邀請／expiry 回執；未觀察或注入真 retryable SMTP failure 的限制不變                                                      | 尚缺 new_request、approaching_timeout、decision 真內容與回執；option A 的歷史測試不宣稱為 live SMTP                                                                                                                                                              |
+| `live_candidate_sha`        | checkout／API／Cloud Run SHA gates 不變；歷史 expiry SHA 明列 §0.7                                                               | 新 candidate 未部署或執行 live；四個 acceptance keys 均保留，由正式 lifecycle 判定，不以 code review 代替                                                                                                                                                        |
+
+本輪只進行 repository checks 與原始碼交接，未啟動 VM product／preview／browser／Docker／PG server、未執行 Playwright、未寄信或注入 SMTP 故障。owner 普通 commit/push 後 handoff 給 Claude2，獨立 review、同 SHA CI/merge 及全部 required_acceptance 完備才可結案。
 
 ## 0.7 F18／F19：retry option A 與 self-provision 簽核身份前提（2026-10-07）
 
