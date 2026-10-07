@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3] / 'e2e/system-remediation/sr-live-invoice-mail-20261007'
 
-
 def load(name):
     spec = importlib.util.spec_from_file_location(name, ROOT / (name + '.py'))
     module = importlib.util.module_from_spec(spec)
@@ -15,6 +14,7 @@ def load(name):
 
 gate = load('gate-evidence')
 metadata = load('provider-metadata')
+mailbox = load('mailbox_observer')
 SHA = 'a' * 40
 
 
@@ -59,6 +59,23 @@ class ProviderMetadataTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Ambiguous'):
                 metadata.main()
 
+class MailboxObserverTest(unittest.TestCase):
+    def test_derive_alias_recipient_only_allows_invoice(self):
+        # valid invoice alias
+        recipient = mailbox.derive_alias_recipient('test@mycompany.org', 'invoice')
+        self.assertEqual(recipient, 'test+invoice@mycompany.org')
+
+        # reject other flows like invite or approve
+        with self.assertRaisesRegex(ValueError, 'Unauthorized alias'):
+            mailbox.derive_alias_recipient('test@mycompany.org', 'invite')
+        with self.assertRaisesRegex(ValueError, 'Unauthorized alias'):
+            mailbox.derive_alias_recipient('test@mycompany.org', 'approve')
+        
+        # reject invalid base mailboxes
+        with self.assertRaisesRegex(ValueError, 'Invalid dedicated mailbox'):
+            mailbox.derive_alias_recipient('test.mycompany.org', 'invoice')
+        with self.assertRaisesRegex(ValueError, 'Invalid dedicated mailbox'):
+            mailbox.derive_alias_recipient('test@fixture.mycompany.org', 'invoice')
 
 if __name__ == '__main__':
     unittest.main()
