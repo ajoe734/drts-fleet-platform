@@ -119,6 +119,49 @@ R2/R3/R4 在候選 `6c48ea7d5`（第一輪 reopen 2026-10-07T09:19:24Z）與 `bc
 
 驗收對應：`push-channel-router_resolution_and_no_channel`——R2/R3/R4 的程式碼修復與 repository 層回歸均已完成並通過；`push-channel-router_partner_behaviour_unchanged`——以上所有既有夥伴回歸套件（`sr-partner-notify-transport-20260918` 113 tests 等）全過，新增的「無 channelRouting 夥伴 automatic 單仍正常 claim」測試額外鎖住這條不變量。PG 層級的 JSONB 求值與併發語意兩項仍明確留給 PUSH-CHANNEL-PG-QA-20261006，不在此宣告為已驗證。
 
+## R4 第三輪退修（Codex2 2026-10-07T10:03:31Z reopen，候選 `2bd04d18a`）
+
+`2bd04d18a` 修的是「全新 ambiguous 單」子案例（`listPartnerNotificationDeliveries` 的 7 個 COALESCE 把 `channelRouting` 排進第三個 fallback 分支），但遺留了上一輪 review 就點名、這輪 reviewer 再次確認未解的既有狀態優先序 bug：COALESCE 只在前面分支是 SQL NULL 時才會往下找，而 `PassengerNotificationChannelMetadata` 的 `deliveryTarget`/`deliveryStage`/`receiptId` 依型別定義本來就是常值 `null`（見本文件「D3/D6 決策表」一節、`multi-taxi.repository.ts` 的 `PassengerNotificationChannelMetadata` 介面）——`o.payload->'channelRouting'->>'deliveryTarget'` 求值永遠是 NULL，COALESCE 一律跳過它，落到 `ctx`/`payload.partnerNotification` 殘留的舊夥伴值。`retryDisposition`/`failureReason`/`downstreamStatus` 雖然通常非 null，但只要 ctx 或 `payload.partnerNotification` 也非 null（R4 情境：手動重試清封存→真實路由服務再次判定 ambiguous 並重新封存，殘留的舊 `partnerNotification.retryDisposition='automatic'`／ctx 的舊 `failure_reason` 仍在），COALESCE 的「前面非 null 就贏」語意一樣會選到舊值而非新封存值——這正是本輪 reviewer 用可執行 production-function probe（`claimPartnerNotification`／`recordPushDeliveryOutcome` 真實方法，mock DB I/O）重現並記錄在 reopen 訊息裡的具體路徑。
+
+### 根因與修正邊界
+
+把第三個 COALESCE 分支改成條件式互斥：用 `o.payload ? 'channelRouting'`（jsonb 鍵存在性判斷，不是值判斷）測出這一列是否已被路由器封存過；封存了就唯一信任 `payload.channelRouting` 自己的 7 個欄位（含其刻意為 `null` 的欄位），完全不再碰 `ctx`/`payload.partnerNotification`；沒封存才落回原本的 `COALESCE(ctx.x, payload.partnerNotification->>'x')` 兩段式，夥伴既有行為逐位元不變。`result` 的 `CASE` 同步改成讀同一個互斥判斷算出的 `failureReason`，不再用舊的三段 `COALESCE`。
+
+- `apps/api/src/modules/multi-taxi/multi-taxi.repository.ts:1834-1875`（`listPartnerNotificationDeliveries` 的 SELECT 投影）：7 個欄位（`expiresAt`/`deliveryTarget`/`deliveryStage`/`retryDisposition`/`failureReason`/`receiptId`/`downstreamStatus`）与 `result` 的 CASE 全部改成 `CASE WHEN o.payload ? 'channelRouting' THEN <channelRouting 欄位> ELSE COALESCE(ctx.<col>, payload.partnerNotification->>'<field>') END`。`WHERE`／`JOIN`／scoping 一行未動，`none`（真正無管道）單的結構性排除保證不受影響。
+- 没有改 `listDuePartnerNotifications`／`claimPartnerNotification`（R2 已修好且本輪沒退修），也沒有改 `maxAttempts` 投影（`channelRouting` metadata 本來就沒有這個欄位，三段式不適用）。
+
+### 驗證
+
+新增 `tests/unit/push-channel-router-20261006/channel-stop-authority.test.ts` 兩個測試（原有 R4 測試保留，擴充其靜態 SQL 斷言；新增一個場景測試）：
+
+1. 既有 R4 測試：把斷言從「SQL 文字含有 `channelRouting` 第三分支」改成逐欄位 regex 比對完整的 `CASE WHEN o.payload ? 'channelRouting' THEN ... ELSE COALESCE(ctx.x, partnerNotification) END` 結構（含 `expiresAt` 的 timestamptz cast 與 `result` CASE 的巢狀 CASE），確認不是簡單地把 `channelRouting` 接在 COALESCE 尾端。
+2. 新增「`listPartnerNotificationDeliveries` 在既有 stale ctx/partnerNotification 之上信任封存值，包含封存欄位刻意為 null 的情況」：餵入 reviewer reopen 訊息描述的確切殘留狀態（新 `channelRouting` 已封存 `ambiguous`/`manual_only`，舊 `partnerNotification.retryDisposition='automatic'`／`ctx.failure_reason='endpoint_disabled'` 仍在），斷言回傳值 `retryDisposition:'manual_only'`、`failureReason:'route_ambiguous'`、`deliveryTarget/deliveryStage/receiptId: null`，並斷言產生的 SQL 不再含舊的三段式 `COALESCE(ctx.x, partnerNotification, channelRouting)` 模式。
+
+```bash
+pnpm exec vitest run tests/unit/push-channel-router-20261006 --maxWorkers=2
+# exit 0: Test Files 5 passed (5); Tests 21 passed (21)（原 19 + 本輪新增 2）
+
+pnpm exec vitest run tests/unit/push-channel-router-20261006 \
+  tests/unit/system-remediation/sr-partner-notify-transport-20260918 \
+  tests/unit/system-remediation/sr-partner-notify-route-20260917 --maxWorkers=2
+# exit 0: Test Files 15 passed | 1 skipped (16); Tests 165 passed | 7 skipped (172)
+# （上一輪 reviewer 記錄為 164 passed；+1 淨增，因本輪只新增測試、未刪除任何既有測試）
+
+pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build
+# 兩者 exit 0（重建 reviewer 與前兩輪 owner 都記錄過的 stale dist，否則 apps/api typecheck 會出現與本改動無關的假錯誤）
+
+cd apps/api && pnpm exec tsc -p tsconfig.json --noEmit
+# exit 0，apps/api 零錯誤
+
+pnpm exec eslint apps/api/src/modules/multi-taxi/multi-taxi.repository.ts \
+  tests/unit/push-channel-router-20261006/channel-stop-authority.test.ts --max-warnings=0
+# exit 0
+```
+
+未驗項與限制（與前三輪一致，本輪沒有新增未驗項）：這仍是對 `query()` 送出的 SQL 文字 + mock 回應的 JS 映射驗證，不是 PG 對 `o.payload ? 'channelRouting'`／巢狀 `CASE`/JSONB path 的真實求值證明；真正跑一筆帶殘留夥伴狀態的 ambiguous 單進這支 SQL、核對 PG 實際回傳欄位，留給 `PUSH-CHANNEL-PG-QA-20261006`。本輪沒有啟動 API、DB、browser 或任何伺服器，沒有對外部端點送出推播。
+
+驗收對應：`push-channel-router_resolution_and_no_channel`——R4 的既有狀態優先序 bug（本輪 reviewer reopen 的唯一 remaining finding）已修正並通過上述回歸；R1-R3 維持上一輪已解決的狀態，未退修。`push-channel-router_partner_behaviour_unchanged`——`sr-partner-notify-transport-20260918` 全套（113 tests）與既有夥伴回歸一併重跑，全過，確認沒有夥伴行為被本輪改動影響。完整生命週期 acceptance／approval 仍待新 candidate 的 CI 與 reviewer 核實，本地檢查不取代它們。
+
 ## 候選與交接
 
 分支 `claude/push-channel-router-20261006`，base `dev`（已含 SD/ASSIGNMENT-EVENT/FIRST-PARTY-REGISTRY）。owner 完成實作與上述檢查後以 `CANDIDATE_SHA=$(git rev-parse HEAD)` / `CANDIDATE_BRANCH=$(git branch --show-current)` 交給 reviewer Codex2；不自行宣告 `done`。此文件提交時，同 SHA 的 hosted CI／review／merge／acceptance 證據尚待 candidate lifecycle 記錄，本地檢查不取代它們。

@@ -1831,13 +1831,34 @@ export class MultiTaxiRepository {
         ctx.wire_payload as "wirePayload",
         ctx.wire_payload_hash as "wirePayloadHash",
         ctx.event_sequence as "eventSequence",
-        COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz, (o.payload->'channelRouting'->>'expiresAt')::timestamptz) as "expiresAt",
-        COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget', o.payload->'channelRouting'->>'deliveryTarget') as "deliveryTarget",
-        COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage', o.payload->'channelRouting'->>'deliveryStage') as "deliveryStage",
-        COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition', o.payload->'channelRouting'->>'retryDisposition') as "retryDisposition",
-        COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason', o.payload->'channelRouting'->>'failureReason') as "failureReason",
-        COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId', o.payload->'channelRouting'->>'receiptId') as "receiptId",
-        COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus', o.payload->'channelRouting'->>'downstreamStatus') as "downstreamStatus",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN (o.payload->'channelRouting'->>'expiresAt')::timestamptz
+          ELSE COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz)
+        END as "expiresAt",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'deliveryTarget'
+          ELSE COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget')
+        END as "deliveryTarget",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'deliveryStage'
+          ELSE COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage')
+        END as "deliveryStage",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'retryDisposition'
+          ELSE COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition')
+        END as "retryDisposition",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'failureReason'
+          ELSE COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason')
+        END as "failureReason",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'receiptId'
+          ELSE COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId')
+        END as "receiptId",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'downstreamStatus'
+          ELSE COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus')
+        END as "downstreamStatus",
         o.created_at as "createdAt",
         ctx.delivered_at as "deliveredAt",
         o.status,
@@ -1845,7 +1866,10 @@ export class MultiTaxiRepository {
         o.event_type as "eventType",
         CASE
           WHEN o.status = 'delivered' THEN 'delivered'
-          WHEN COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason', o.payload->'channelRouting'->>'failureReason') IN ('endpoint_disabled', 'configuration_blocked', 'no_notification_channel') THEN 'provider_not_configured'
+          WHEN (CASE WHEN o.payload ? 'channelRouting'
+                  THEN o.payload->'channelRouting'->>'failureReason'
+                  ELSE COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason')
+                END) IN ('endpoint_disabled', 'configuration_blocked', 'no_notification_channel') THEN 'provider_not_configured'
           WHEN o.status = 'failed' THEN 'provider_error'
           ELSE NULL
         END as result,

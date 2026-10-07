@@ -13,6 +13,15 @@
 //     (not just `payload.partnerNotification`) so an ambiguous row — which
 //     has a partner route by D2 and therefore appears in this partner-scoped
 //     list — shows its real failureReason/retryDisposition instead of NULL.
+//     A simple third COALESCE argument is not enough: `channelRouting`'s own
+//     fields (deliveryTarget/deliveryStage/receiptId, …) are legitimately
+//     `null` by design (see `PassengerNotificationChannelMetadata`), so
+//     `COALESCE(ctx.x, payload.partnerNotification->>'x', payload.channelRouting->>'x')`
+//     would skip the authoritative-but-null channel value and fall through
+//     to a stale non-null partner value. The fix must instead branch on
+//     whether `payload` has a `channelRouting` key at all (`payload ?
+//     'channelRouting'`) and, if so, use that sealed object's fields
+//     exclusively — never blending it with ctx/partnerNotification.
 //
 // These exercise the real `MultiTaxiRepository` methods (not a re-implemented
 // service-level mock) against a stubbed `pg`-shaped client/pool, the same
@@ -364,23 +373,127 @@ describe("push-channel-router_resolution_and_no_channel: Ops visibility for ambi
       result: "provider_error",
     });
     // Static SQL-text assertion (the stub above does not execute JSONB path
-    // expressions): the fix must add channelRouting as a COALESCE fallback
-    // for every projected partner-context-shaped column, and must not widen
-    // the entry/tenant/partner scoping used to exclude genuinely
-    // channel-less (phone/voice/corporate-dispatch) rows.
-    for (const column of [
-      "retryDisposition",
-      "failureReason",
-      "deliveryTarget",
-      "deliveryStage",
-      "receiptId",
-      "downstreamStatus",
-    ]) {
-      expect(selectSql).toMatch(
-        new RegExp(`o\\.payload->'channelRouting'->>'${column}'[\\s\\S]*as "${column}"`),
+    // expressions): the fix must make a sealed channelRouting authoritative
+    // — not merely appended as a third COALESCE argument, which would still
+    // fall through to a stale non-null ctx/partnerNotification value
+    // whenever the sealed field is (by design) null. Each column must be
+    // guarded by `payload ? 'channelRouting'` with the channel's own value
+    // used exclusively in the THEN branch, and the ctx/partnerNotification
+    // COALESCE only reachable in the ELSE branch. Real JSONB-path/precedence
+    // execution against actual Postgres belongs to PUSH-CHANNEL-PG-QA-20261006.
+    const ctxColumn: Record<string, string> = {
+      deliveryTarget: "delivery_target",
+      deliveryStage: "delivery_stage",
+      retryDisposition: "retry_disposition",
+      failureReason: "failure_reason",
+      receiptId: "receipt_id",
+      downstreamStatus: "downstream_status",
+    };
+    for (const column of Object.keys(ctxColumn)) {
+      const guarded = new RegExp(
+        `CASE WHEN o\\.payload \\? 'channelRouting'\\s+THEN o\\.payload->'channelRouting'->>'${column}'\\s+ELSE COALESCE\\(ctx\\.${ctxColumn[column]}, o\\.payload->'partnerNotification'->>'${column}'\\)\\s+END as "${column}"`,
       );
+      expect(selectSql).toMatch(guarded);
     }
-    expect(selectSql).toContain("'no_notification_channel'");
+    // expiresAt has the same seal-exclusive shape plus a timestamptz cast.
+    expect(selectSql).toMatch(
+      /CASE WHEN o\.payload \? 'channelRouting'\s+THEN \(o\.payload->'channelRouting'->>'expiresAt'\)::timestamptz\s+ELSE COALESCE\(ctx\.expires_at, \(o\.payload->'partnerNotification'->>'expiresAt'\)::timestamptz\)\s+END as "expiresAt"/,
+    );
+    // The `result` classification must read the same seal-exclusive
+    // failureReason, not the old ctx/partnerNotification/channelRouting
+    // COALESCE chain, so an ambiguous-sealed row is never reclassified using
+    // a stale partner failureReason.
+    expect(selectSql).toMatch(
+      /WHEN \(CASE WHEN o\.payload \? 'channelRouting'\s+THEN o\.payload->'channelRouting'->>'failureReason'\s+ELSE COALESCE\(ctx\.failure_reason, o\.payload->'partnerNotification'->>'failureReason'\)\s+END\) IN \('endpoint_disabled', 'configuration_blocked', 'no_notification_channel'\)/,
+    );
     expect(selectSql).toContain("COALESCE(ctx.entry_slug, r.entry_slug) = $1");
+  });
+
+  it("listPartnerNotificationDeliveries prefers a sealed channelRouting over existing stale ctx/partnerNotification values, including when the sealed field is intentionally null", async () => {
+    // Reproduces the exact R4 production path: a fresh ambiguous row that
+    // still carries an older partner-automatic ctx/payload signal from a
+    // manual retry (retryPartnerNotificationDelivery clears channelRouting
+    // on requeue; the subsequent actual routed attempt re-resolves ambiguous
+    // and reseals channelRouting while the old partnerNotification.
+    // retryDisposition="automatic" and ctx.failure_reason="endpoint_disabled"
+    // remain). A COALESCE that merely appends channelRouting last would keep
+    // returning the stale non-null ctx/partnerNotification values here
+    // because the sealed deliveryTarget/deliveryStage/receiptId are null by
+    // design (PassengerNotificationChannelMetadata) and COALESCE skips nulls.
+    const countQuery = vi.fn(async () => ({ rows: [{ cnt: "1" }] }));
+    let selectSql = "";
+    const selectQuery = vi.fn(async (sql: string) => {
+      selectSql = sql;
+      // What a real Postgres run of the corrected (seal-exclusive) SQL
+      // produces for this row: every channel-shaped column reads the sealed
+      // channelRouting value — including its intentional nulls — never the
+      // leftover ctx/partnerNotification non-null values.
+      return {
+        rows: [
+          {
+            outboxId: "outbox-6",
+            orderId: "order-6",
+            entrySlug: "entry-1",
+            tenantId: "tenant-1",
+            partnerId: "partner-1",
+            bindingId: "binding-1",
+            bindingVersion: 1,
+            webhookId: "webhook-1",
+            endpointFingerprint: "fp-1",
+            wirePayload: null,
+            wirePayloadHash: null,
+            eventSequence: 1,
+            expiresAt: null,
+            deliveryTarget: null,
+            deliveryStage: null,
+            retryDisposition: "manual_only",
+            failureReason: "route_ambiguous",
+            receiptId: null,
+            downstreamStatus: "unknown",
+            createdAt: new Date().toISOString(),
+            deliveredAt: null,
+            status: "failed",
+            deliveryId: null,
+            eventType: "assignment_disclosure_ready",
+            result: "provider_error",
+            attempts: 2,
+            maxAttempts: null,
+            nextAttemptAt: new Date().toISOString(),
+            leaseExpiresAt: null,
+          },
+        ],
+      };
+    });
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("SELECT COUNT(*)")) return countQuery();
+      return selectQuery(sql);
+    });
+    const repository = new MultiTaxiRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const { rows } = await repository.listPartnerNotificationDeliveries(
+      { entrySlug: "entry-1", tenantId: "tenant-1", partnerId: "partner-1" },
+      { pageSize: 50, page: 1 },
+    );
+
+    // The authoritative sealed outcome wins even though an older automatic
+    // partner signal still exists underneath it.
+    expect(rows[0]).toMatchObject({
+      retryDisposition: "manual_only",
+      failureReason: "route_ambiguous",
+      deliveryTarget: null,
+      deliveryStage: null,
+      receiptId: null,
+      result: "provider_error",
+    });
+    // The generated SQL must never let a stale ctx/partnerNotification value
+    // leak through as a COALESCE fallback while `channelRouting` is sealed;
+    // every projected channel-shaped column is guarded exclusively.
+    expect(selectSql).toContain("o.payload ? 'channelRouting'");
+    expect(selectSql).not.toMatch(
+      /COALESCE\(ctx\.\w+, o\.payload->'partnerNotification'->>'\w+', o\.payload->'channelRouting'->>'\w+'\)/,
+    );
   });
 });
