@@ -20,7 +20,7 @@ function harness(routed = true) {
     orderId: "referral-order",
     runtimeProfileCode: "business_dispatch",
     serviceBucket: "business_dispatch",
-    orderSource: "tenant_booking",
+    orderSource: "portal",
     tenantId: "tenant-1",
     partnerId: "partner-1",
     partnerEntrySlug: "entry-1",
@@ -30,13 +30,15 @@ function harness(routed = true) {
       phone: "0911000222",
     },
   });
-  let job = {
+  let job: DispatchJobRecord = {
     dispatchJobId: "job-1",
     orderId: order.orderId,
-    status: "pending",
+    status: "matching",
+    mode: "auto",
+    latestEtaMinutes: null,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
-  } as DispatchJobRecord;
+  };
   const assignments = new Map<string, DispatchAssignmentRecord>();
   const tasks = new Map<string, DriverTaskRecord>();
   const outboxes = new Map<string, ConsumerNotificationOutboxRecord>();
