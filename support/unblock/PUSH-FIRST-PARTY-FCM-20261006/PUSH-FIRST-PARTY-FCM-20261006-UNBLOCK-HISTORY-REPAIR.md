@@ -9,11 +9,12 @@ eligibility/relevance race during metadata-token acquisition. This helper
 documents a non-destructive continuation; it does not repair product code or
 grant privacy acceptance.
 
-**Delivery hold:** the parent update required by this helper's fourth acceptance
-item is not written. The release CLI rejected the cross-task `note` with exit 1,
-`Dispatched worker cannot mutate a different task`. Supervisor must record the
-parent note and the helper's blocked-parent resolution metadata before this
-helper is handed off or merged. A draft PR preserves the report meanwhile.
+**Delivery hold resolved (2026-10-07):** Supervisor recorded the parent note and
+this helper's blocked-parent resolution metadata; owner readback confirms both
+in section 4. The earlier cross-task rejection remains part of the audit trail.
+This report can proceed through independent review in [PR #2410](https://github.com/ajoe734/drts-fleet-platform/pull/2410).
+The parent remains `blocked`, waiting for Codex2; this helper does not discharge
+the reproduced product defect or either parent acceptance key.
 
 ## 1. Exact history inventory
 
@@ -141,11 +142,11 @@ reproduction and cannot discharge it.
    #2408 is already merged. Preserve the old SHA/generation/merge as history;
    do not relabel old CI or merge evidence as applying to the repair.
 
-## 4. Supervisor action required before helper handoff/merge
+## 4. Supervisor coordination and verified resolution
 
 The dispatched helper owner tried the canonical release CLI's `note` on the
-parent. The command failed before mutation. The parent's `next` has therefore
-**not** been updated by this helper. The release implementation
+parent. The command failed before mutation. The helper did not update the
+parent directly; Supervisor subsequently recorded it as verified below. The release implementation
 `control_plane/usecases/task_board_commands.py`,
 `TaskBoardCommandExecutor._guard_worker_command`, rejects mutations whose task
 ID differs from `ORCH_DISPATCH_TASK_ID`. Do not remove dispatch environment
@@ -157,7 +158,8 @@ There is an additional concrete lifecycle hazard: release `ai_status.py`
 remaining defect in this Markdown or a handoff message is insufficient.
 `command_handoff` does not ingest `TASK_METADATA_JSON`; `command_assign` does.
 
-An actual Supervisor session must use the dispatch-specified release CLI to:
+The original coordination request required an actual Supervisor session to use
+the dispatch-specified release CLI to:
 
 1. Write a parent `note`: history audit found no local/origin divergence;
    candidate `a10e0b230...` merged via #2408 / `5c09db37...`; preserve
@@ -182,10 +184,44 @@ An actual Supervisor session must use the dispatch-specified release CLI to:
    make the draft PR ready, and hand off the verified local/origin/PR head to
    Codex2. The parent itself remains blocked pending its own adjudication.
 
-These are Supervisor instructions, not commands executed by this worker. Until
-their machine-truth receipts exist, this helper stays blocked and its draft PR
-must not merge. This avoids claiming acceptance item 4 passed or accidentally
-resuming a parent with a demonstrated privacy defect.
+These were Supervisor instructions, not commands executed by this worker. The
+previous report candidate `0cf7eaf07318d46ee251e283dbfa6368fbedeb4a` correctly
+held delivery pending coordination. The following successful operator receipts
+now satisfy that hold without bypassing the worker dispatch guard:
+
+| UTC receipt time | Command / target | Verified result |
+| --- | --- | --- |
+| 2026-10-07T15:49:59.799650+00:00 | `assign` this helper, Codex / Codex2 | Exit 0; `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Codex2` and concrete `resolved_parent_next` recorded. |
+| 2026-10-07T15:50:02.803695+00:00 | `note` parent | Exit 0; preserve a10 candidate / #2408 / merge, request independent exact-source adjudication and bounded original-owner repair with fresh candidate/review/CI. |
+| 2026-10-07T15:50:04.863514+00:00 | `resume-blocked` this helper to `todo` | Exit 0; resume helper verification/handoff only; parent stays blocked. |
+
+Receipt source (canonical repository):
+`.local/full-system-completion-20261007/command-receipts.jsonl`.
+This dispatch saved the three selected receipts and release CLI `show` readbacks
+under this worktree's `.local/push-fcm-history-repair/resume-20261007/`
+(`supervisor-receipts.json`, `parent.json`, `helper.json`). Owner assertions
+completed with exit 0: all three receipts succeed; parent `next` exactly equals
+helper `resolved_parent_next`; parent remains blocked for Codex2; the selected
+candidate/review SHA and merge are unchanged. No `resolved_parent_at` was
+invented and no acceptance was recorded.
+
+Fresh `git fetch origin` completed with exit 0. All four section 1 branch pairs
+still return `0 0`; the parent merge remains an ancestor of current dev
+`7a0d2cd6d4f809f4d857243acdd4622f8b7fb558`. PR #2408 still reports merged head
+`a10e0b23032a2ae1176f59f02660dedd25dd7fdf` and merge
+`5c09db37f1824b6565a7546280c8b6fadabd6450`. The provider and transport files
+have no diff between that candidate and fresh dev; their section 2 call path
+was reread. The worktree inventory is unchanged. No new runtime probe was
+needed for this receipt/documentation change; the earlier reproduction remains
+evidence of an unresolved defect, not a passing regression.
+
+Before this update, helper local/origin/PR #2410 all selected
+`0cf7eaf07318d46ee251e283dbfa6368fbedeb4a`. This update appends a normal commit
+on the existing branch. Final local/origin/PR identity, push and check results
+are recorded in the release CLI handoff for the exact new candidate; review,
+CI and merge must use that identity. Old helper CI results do not qualify the
+new candidate. The report's delivery can proceed while the parent product
+repair remains blocked for its independent adjudication.
 
 ## 5. Acceptance and verification ledger
 
@@ -193,8 +229,8 @@ resuming a parent with a demonstrated privacy defect.
 | --- | --- | --- | --- |
 | Identify exact contamination | Section 1; git refs, worktree inventory, parent task and PR #2408 | All four local/origin pairs `0 0`; rejected head preserved; merge ancestor of dev; no contamination found | Read-only git/gh checks exit 0. Open stale PRs distinguished from selected candidate. |
 | Non-destructive repair path | Sections 2–3; production `send` methods | Both single-mutation races reproduced; product fix remains outstanding | `cmp` and node exit 0; synthetic IO only, no live or PG acceptance. No history mutation. |
-| Canonical commit/push/PR evidence | This helper artifact only | Task-scoped commit and normal push; draft PR while containment coordination is pending | Exact delivery SHA and PR recorded in helper machine-truth progress/blocker; no candidate handoff yet. |
-| Parent concrete next step | Section 4; release dispatch guard and resolution handler | Parent `note` attempt exit 1; NOT SATISFIED | Supervisor parent note and metadata receipts required before handoff/merge. |
+| Canonical commit/push/PR evidence | This helper artifact only; PR #2410 | Preserve old report 0cf7eaf07318d46ee251e283dbfa6368fbedeb4a; append task-scoped commit and normal push | Final exact local/origin/PR SHA is bound by helper machine-truth handoff. Independent review/CI/merge remain separate gates. |
+| Parent concrete next step | Section 4; release dispatch guard and resolution handler | Earlier worker `note` exit 1; subsequent Supervisor note/metadata/resume receipts exit 0; owner readback assertions exit 0; SATISFIED | Parent remains blocked for Codex2, with identical parent next / helper resolution next. Product defect and acceptance remain outstanding. |
 | Content/format verification | This artifact; existing source references | `git diff --check` and repository commit-trailer check required before publication | Documentation-only change; product regression rerun not applicable. The diagnostic probe confirms the existing defect, not a fix. |
 
 No deployment, secrets, real FCM messages, local development servers, browser
