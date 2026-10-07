@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from enum import Enum
@@ -164,6 +165,45 @@ def ready_dispatch_signature(
         "task_id": record.id,
     }
     return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def material_task_fingerprint(
+    task: TaskRecord | Mapping[str, Any],
+    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
+) -> str:
+    """Digest of what a dispatch is about, minus progress bookkeeping.
+
+    ready_dispatch_signature includes last_update, so every write re-arms a
+    dispatch. This leaves out last_update, next and worker_outcomes, the
+    fields an owner rewrites on every status report, so two progress attempts
+    that end with the same fingerprint changed nothing a later attempt could
+    act on: same status, candidate, ownership, gates, dependency states,
+    CI/merge/acceptance evidence and parent resolution.
+    """
+    record = _task(task)
+    raw = record.raw
+    evidence = raw.get("acceptance_evidence")
+    payload = {
+        "acceptance_evidence": sorted(evidence) if isinstance(evidence, Mapping) else None,
+        "candidate_generation": raw.get("candidate_generation"),
+        "candidate_sha": raw.get("candidate_sha"),
+        "ci_sha": raw.get("ci_sha"),
+        "ci_status": raw.get("ci_status"),
+        "dependency_signature": dependency_signature(record, tasks_by_id),
+        "external_gate": bool(raw.get("external_gate")),
+        "merge_sha": raw.get("merge_sha"),
+        "owner": record.owner or None,
+        "resolved_parent_next": raw.get("resolved_parent_next"),
+        "resolved_parent_status": raw.get("resolved_parent_status"),
+        "resolved_parent_waiting_for": raw.get("resolved_parent_waiting_for"),
+        "reviewed_sha": raw.get("reviewed_sha"),
+        "reviewer": record.reviewer or None,
+        "status": record.status,
+        "task_id": record.id,
+        "waiting_for": raw.get("waiting_for"),
+    }
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
 def build_dispatch_event(

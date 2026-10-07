@@ -36,6 +36,7 @@ from control_plane.domain.dispatch_policy import (
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
+    material_task_fingerprint,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -3331,6 +3332,10 @@ def lane_failure_autopause_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict((config.get("ready_dispatcher", {}) or {}).get("lane_failure_autopause", {}) or {})
     settings.setdefault("enabled", True)
     settings.setdefault("threshold", 3)          # distinct-task terminal failures
+    # Total terminal failures, repeats included. Distinct tasks alone never
+    # tripped on 2026-10-06: a model the ChatGPT account rejects failed the
+    # Codex lane every ~3 s for 10 hours, but only ever on two tasks.
+    settings.setdefault("failure_threshold", 6)
     settings.setdefault("window_seconds", 900)   # rolling window
     settings.setdefault("reset_seconds", 1800)   # capacity pause auto-expiry (self-correcting)
     return settings
@@ -3346,8 +3351,8 @@ def record_lane_terminal_failure(
     agent_id: str,
     task_id: str | None,
 ) -> bool:
-    """Track per-lane distinct-task terminal failures in a rolling window.
-    Returns True when the lane crosses the auto-pause threshold."""
+    """Track per-lane terminal failures in a rolling window, both distinct
+    tasks and total attempts. Returns True when either crosses its threshold."""
     settings = lane_failure_autopause_settings(config)
     if not settings.get("enabled", True):
         return False
@@ -3368,9 +3373,12 @@ def record_lane_terminal_failure(
         # no task id — count as an anonymous distinct failure slot
         tasks.append(f"__anon_{len(tasks)}")
     entry["count"] = len(tasks)
+    entry["failures"] = int(entry.get("failures") or 0) + 1
     entry["last_failure_at"] = utc_now()
     registry[normalized] = entry
-    return entry["count"] >= int(settings.get("threshold", 3))
+    return entry["count"] >= int(settings.get("threshold", 3)) or entry["failures"] >= int(
+        settings.get("failure_threshold", 6)
+    )
 
 
 def clear_lane_failure(state: dict[str, Any], agent_id: str) -> None:
@@ -3386,9 +3394,9 @@ def maybe_autopause_unhealthy_lane(
     reason: str,
 ) -> None:
     """Lane-level safety net, independent of allow_provider_pause: if a lane racks
-    up enough distinct-task terminal (non-transient) failures, pause it so the
-    scheduler stops routing to a dead/broken lane (e.g. revoked auth token that
-    only 401s at worker runtime)."""
+    up enough terminal (non-transient) failures, across distinct tasks or in
+    total, pause it so the scheduler stops routing to a dead/broken lane (e.g.
+    revoked auth token that only 401s at worker runtime)."""
     settings = lane_failure_autopause_settings(config)
     if not settings.get("enabled", True):
         return
@@ -3404,15 +3412,16 @@ def maybe_autopause_unhealthy_lane(
     if failure.get("transient"):
         return  # transient (retryable) failures don't count toward lane health
     if record_lane_terminal_failure(config, state, normalized, worker.get("task_id")):
-        threshold = int(settings.get("threshold", 3))
+        entry = lane_failure_registry(state).get(normalized) or {}
         window = int(settings.get("window_seconds", 900))
         pause_provider(
             state,
             normalized,
             (
-                f"Auto-paused (lane health): {threshold}+ terminal worker failures across "
-                f"distinct tasks within {window}s — lane appears unhealthy (e.g. revoked auth "
-                f"that only 401s at runtime). Latest: {reason}"
+                f"Auto-paused (lane health): {entry.get('failures')} terminal worker failures "
+                f"across {entry.get('count')} distinct tasks within {window}s — lane appears "
+                f"unhealthy (e.g. revoked auth that only 401s at runtime, or a model the "
+                f"account rejects). Latest: {reason}"
             ),
             kind="capacity",
             reset_seconds=int(settings.get("reset_seconds", 1800)),
@@ -4711,24 +4720,89 @@ def worker_progress_retry_seconds(config: dict[str, Any]) -> int:
     return max(0, int(settings.get("progress_retry_seconds", 120)))
 
 
+def worker_progress_retry_max_seconds(config: dict[str, Any]) -> int:
+    settings = config.get("supervisor") or {}
+    return max(worker_progress_retry_seconds(config), int(settings.get("progress_retry_max_seconds", 3600)))
+
+
+# A streak nobody has extended for this long belongs to a task that is no
+# longer being dispatched; dropping it keeps state.json from growing one entry
+# for every task that ever reported progress.
+PROGRESS_STREAK_RETENTION_SECONDS = 48 * 3600
+
+
+def record_progress_streak(
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    fingerprint: str,
+    now: datetime,
+) -> int:
+    """Count consecutive progress attempts that left the task materially unchanged.
+
+    An owner waiting on something outside its control can only report "still
+    waiting", and that report rewrites last_update, which makes the task look
+    dispatchable again. With a flat progress_retry_seconds every such attempt
+    came back two minutes later, indefinitely: on 2026-10-03..07 three waiting
+    tasks took more than half of the Codex lane's tokens that way.
+    """
+    registry = state.setdefault("progress_streaks", {})
+    cutoff = now - timedelta(seconds=PROGRESS_STREAK_RETENTION_SECONDS)
+    for key in [
+        key
+        for key, entry in registry.items()
+        if not isinstance(entry, dict) or (parse_runtime_timestamp(entry.get("updated_at")) or cutoff) <= cutoff
+    ]:
+        registry.pop(key, None)
+    task_id = str(worker.get("task_id") or "").strip()
+    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
+    key = f"{task_id}:{agent_id}"
+    previous = registry.get(key)
+    count = int(previous.get("count") or 0) + 1 if previous and previous.get("fingerprint") == fingerprint else 1
+    registry[key] = {
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "fingerprint": fingerprint,
+        "count": count,
+        "updated_at": now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    return count
+
+
 def consume_progress_outcome(
     config: dict[str, Any],
     worker: dict[str, Any],
     outcome: dict[str, Any],
     *,
     now: datetime | None = None,
+    state: dict[str, Any] | None = None,
+    task: dict[str, Any] | None = None,
+    task_map: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
-    """Persist one completed progress attempt and its immutable redispatch time."""
+    """Persist one completed progress attempt and its immutable redispatch time.
+
+    Given the runtime state and the task as the attempt left it, the wait
+    doubles for each consecutive attempt that changed nothing material, up to
+    progress_retry_max_seconds. Any material change starts over at
+    progress_retry_seconds.
+    """
     current = now or datetime.now(timezone.utc)
     completed_at = current.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    retry_after = current + timedelta(seconds=worker_progress_retry_seconds(config))
-    redispatch_after = retry_after.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    return consume_worker_result(
+    delay = worker_progress_retry_seconds(config)
+    retry_after = current + timedelta(seconds=delay)
+    consumed = consume_worker_result(
         worker,
         outcome,
         completed_at=completed_at,
-        redispatch_after=redispatch_after,
+        redispatch_after=retry_after.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     )
+    # Only a first consumption extends the streak; an exact replay must not.
+    if consumed and state is not None and task:
+        streak = record_progress_streak(state, worker, material_task_fingerprint(task, task_map or {}), current)
+        delay = min(worker_progress_retry_max_seconds(config), delay * 2 ** min(streak - 1, 16))
+        retry_after = current + timedelta(seconds=delay)
+        worker["progress_streak"] = streak
+        worker["redispatch_after"] = retry_after.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return consumed
 
 
 def apply_worker_reported_block(
@@ -5084,19 +5158,24 @@ def finalize_exited_worker(
     if is_terminal_worker(worker) or worker.get("status") == "manual_pending":
         return False
 
-    fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+    fresh_tasks = task_index_from_status(config, load_status(config))
+    fresh_task = fresh_tasks.get(worker.get("task_id")) or {}
     requires_receipt = bool(((worker.get("request_snapshot") or {}).get("metadata") or {}).get("dispatch_role"))
     receipt = (fresh_task.get("worker_outcomes") or {}).get(worker.get("run_id"))
     if receipt and receipt.get("outcome") in {"advanced", "blocked", "progress"}:
         if receipt["outcome"] == "progress":
-            consume_progress_outcome(config, worker, receipt, now=now)
+            consume_progress_outcome(
+                config, worker, receipt, now=now, state=state, task=fresh_task, task_map=fresh_tasks
+            )
         else:
             consume_worker_result(worker, receipt, completed_at=utc_now())
         finalize_queue_event_record(config, state, worker, "completed")
         clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
         write_activity_log(config, {"type": "worker_completed", "task_id": worker.get("task_id"),
                                    "worker_run_id": worker["run_id"],
-                                   "message": "Consumed committed attempt outcome: " + receipt["command"]})
+                                   "message": "Consumed committed attempt outcome: " + receipt["command"],
+                                   "redispatch_after": worker.get("redispatch_after"),
+                                   "progress_streak": worker.get("progress_streak")})
         return True
 
     if current_mode in {"planning", "coordination"}:
@@ -5159,7 +5238,9 @@ def finalize_exited_worker(
             return True
         if (outcome and outcome.get("outcome") in {"advanced", "progress"}
                 and not (worker.get("request_snapshot", {}).get("metadata") or {}).get("dispatch_role")):
-            if not consume_progress_outcome(config, worker, outcome, now=now):
+            if not consume_progress_outcome(
+                config, worker, outcome, now=now, state=state, task=fresh_task, task_map=fresh_tasks
+            ):
                 return False
             finalize_queue_event_record(config, state, worker, "completed")
             write_activity_log(
@@ -5171,6 +5252,8 @@ def finalize_exited_worker(
                     "message": "Worker reported progress; its completed attempt owns the redispatch cooldown.",
                     "worker_run_id": worker["run_id"],
                     "result_id": worker.get("consumed_result_id"),
+                    "redispatch_after": worker.get("redispatch_after"),
+                    "progress_streak": worker.get("progress_streak"),
                 },
             )
             return True
