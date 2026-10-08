@@ -744,24 +744,21 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # forged header would not be real engine behavior); the only legitimate
 # source of a genuinely-signed OLDER daily database is a real file that
 # Cisco Talos actually published and that still exists somewhere on disk.
-# `clamav/clamav:1.4` (via immutable digest) is exactly that: this project's own
-# Dockerfile.clamd already documents it as EOL ("database-download support
-# ended 2026-02-07") and explicitly rejected for THIS task's own runtime
-# image -- which also means that tag's own image layers are frozen and no
-# longer rebuilt with a fresh database, so whatever daily.cvd/.cld it
-# baked at its own last build is a real, authentically-signed snapshot
-# that must be older than whatever today's live mirror serves. This never
-# starts or runs freshclam inside that EOL image (whose client-side
-# database-download protocol is itself the rejected/unsupported part) --
-# only `docker cp`s the static file off its layers, matching this
+# `clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23`
+# is exactly that: a factual immutable-index provenance of historical seed content.
+# By pinning the immutable digest, its OCI index is frozen and no longer changes
+# with fresh databases, so whatever daily.cvd/.cld it baked at its own last build
+# is a real, authentically-signed historical seed that must be older than whatever
+# today's live mirror serves. This never starts or runs freshclam inside that
+# historical image -- only `docker cp`s the static file off its layers, matching
 # harness's own write-scope boundary (gateway/runtime sources, including
 # clamd-entrypoint.sh and clamd.conf, stay untouched; every write below is
 # runtime `docker create`/`docker cp`/`docker exec` orchestration, like
 # the rest of this file).
 #
 # Known precondition this Docker-less VM cannot verify locally (documented
-# per Guide 0.7 rather than assumed silently): that `clamav/clamav:1.4`
-# actually ships a readable daily.cvd/.cld in its image layers, and that
+# per Guide 0.7 rather than assumed silently): that the historical image
+# actually ships a readable daily.cvd/.cld in its content, and that
 # the copied file's ownership/permissions remain usable by the target
 # container's freshclam/clamd processes. If either does not hold, the
 # assertions below fail with a specific, attributable message identifying
@@ -777,7 +774,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # write_scopes and stays untouched). Instead, this test runs its own local
 # HTTP static-file server (`_start_local_mirror`, this test process only --
 # no gateway/runtime source touched) that serves the EXACT same
-# main/daily/bytecode CVD bytes just extracted from `clamav/clamav:1.4` (via immutable digest),
+# main/daily/bytecode CVD bytes just extracted from the historical image,
 # and points the seeded container's `freshclam.conf` at it via
 # `PrivateMirror` (a real, documented freshclam directive that skips the
 # DNS TXT version check and fetches directly from the given URL). Because
@@ -796,8 +793,8 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # fail with a specific, attributable message (e.g. the initial-load
 # precondition assertion), not a false pass.
 # Use a verified immutable digest for the seed image to ensure predictable extraction
-# of historical vendor-signed database bytes, since mutable tags like 1.4 might become unavailable.
-# This digest corresponds to a clamav:1.4 image layer snapshot.
+# of historical vendor-signed database bytes. This digest corresponds to a factual
+# immutable-index provenance, with pending content validation.
 SEED_IMAGE = "clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23"
 SEED_DB_FILES = (
     "main.cvd", "main.cld", "daily.cvd", "daily.cld", "bytecode.cvd", "bytecode.cld",
@@ -1629,26 +1626,26 @@ class TestGatewayScanBoundary(unittest.TestCase):
     @patch("urllib.request.urlopen")
     def test_gateway_scan_503_body_read_timeout(self, mock_urlopen):
         import urllib.error
-        
+
         # Mock HTTPError response whose read() raises TimeoutError
         exc_response = urllib.error.HTTPError("url", 503, "Service Unavailable", {}, None)
         exc_response.read = MagicMock(side_effect=TimeoutError("timeout during body read"))
-        
+
         mock_urlopen.side_effect = exc_response
-        
+
         # It should catch TimeoutError and return (None, error_str)
         status, body = gateway_scan(8080, b"dummy", timeout=1)
         self.assertIsNone(status)
         self.assertIn("timeout during body read", body)
-        
+
     @patch("urllib.request.urlopen")
     def test_gateway_scan_503_body_read_connection_reset(self, mock_urlopen):
         import urllib.error
-        
+
         # Mock HTTPError response whose read() raises ConnectionResetError
         exc_response = urllib.error.HTTPError("url", 503, "Service Unavailable", {}, None)
         exc_response.read = MagicMock(side_effect=ConnectionResetError("connection reset during body read"))
-        
+
         mock_urlopen.side_effect = exc_response
         
         # ConnectionResetError is a subclass of ConnectionError

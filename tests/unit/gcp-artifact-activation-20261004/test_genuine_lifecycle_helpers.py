@@ -393,12 +393,13 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         self.current_time = 0.0
 
         def run_cmd_side_effect(cmd, **kwargs):
-            self.current_time += 1.0
+            self.current_time += 0.5
             return self._make_res(returncode=1) # Missing file implies removed
 
         self.mock_run_cmd.side_effect = run_cmd_side_effect
         with self.assertRaisesRegex(TimeoutError, "Removal loop incomplete"):
             harness.poll_genuine_marker_removal("container", timeout_s=1)
+        self.assertEqual(self.mock_run_cmd.call_count, 2)
 
     def test_activation_late_success_rejected(self):
         import subprocess
