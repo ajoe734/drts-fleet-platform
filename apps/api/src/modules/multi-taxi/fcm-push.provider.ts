@@ -3,6 +3,7 @@ import type {
   FirstPartyPushProvider,
   FirstPartyPushDeviceTarget,
   FirstPartyPushProviderResult,
+  FirstPartyPushLateValidation,
 } from "./first-party-notification.transport";
 import type { FirstPartyPushMessage } from "@drts/contracts";
 import type { GoogleCloudTokens } from "../../common/google-cloud/google-cloud-object-client";
@@ -15,6 +16,13 @@ import {
 const MAX_RESPONSE_BYTES = 16 * 1024;
 const FCM_ERROR_TYPE = "type.googleapis.com/google.firebase.fcm.v1.FcmError";
 const BAD_REQUEST_TYPE = "type.googleapis.com/google.rpc.BadRequest";
+// Only errors from the trusted application validator cross the provider's
+// network-error boundary unchanged (including domain context and fence loss).
+class LateValidationFailure extends Error {
+  constructor(readonly failure: unknown) {
+    super("First-party late validation failed");
+  }
+}
 const SAFE_CODES = new Set([
   "UNREGISTERED",
   "INVALID_ARGUMENT",
@@ -47,8 +55,11 @@ export class FcmFirstPartyPushProvider implements FirstPartyPushProvider {
   async send(
     message: FirstPartyPushMessage,
     target: FirstPartyPushDeviceTarget,
+    validateBeforeSend: FirstPartyPushLateValidation,
   ): Promise<FirstPartyPushProviderResult> {
     if (!this.isConfigured()) return { kind: "configuration_blocked" };
+    if (typeof validateBeforeSend !== "function")
+      return { kind: "configuration_blocked" };
     const projectId = process.env.PASSENGER_PUSH_FCM_PROJECT_ID!;
     try {
       return await withCloudDeadline(10000, async (signal) => {
@@ -56,7 +67,18 @@ export class FcmFirstPartyPushProvider implements FirstPartyPushProvider {
         if (!Number.isFinite(expiresAt) || expiresAt <= Date.now())
           return { kind: "expired" };
         const token = await this.tokens.accessToken(signal);
-        // Metadata lookup consumes the same deadline and TTL budget as FCM IO.
+        signal.throwIfAborted();
+        let eligible: boolean;
+        try {
+          eligible = await validateBeforeSend(signal);
+        } catch (error) {
+          throw new LateValidationFailure(error);
+        }
+        // A deadline can expire while DB validation is outstanding. Its eventual
+        // completion must not resume a timed-out send, even with a mock fetch.
+        signal.throwIfAborted();
+        if (!eligible) return { kind: "ineligible" };
+        // Metadata and validation consume the same deadline and TTL budget.
         const ttl = Math.floor((expiresAt - Date.now()) / 1000);
         if (ttl <= 0) return { kind: "expired" };
         const data = message.data;
@@ -159,7 +181,8 @@ export class FcmFirstPartyPushProvider implements FirstPartyPushProvider {
           ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
         };
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof LateValidationFailure) throw error.failure;
       return { kind: "transient", errorCode: "TRANSPORT_ERROR" };
     }
   }

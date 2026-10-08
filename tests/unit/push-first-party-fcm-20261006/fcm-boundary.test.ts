@@ -45,7 +45,9 @@ describe("FCM production provider boundary", () => {
     "flag %s blocks metadata and HTTP",
     async (flag) => {
       vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", flag);
-      expect(await provider.send(message(), target)).toMatchObject({
+      expect(
+        await provider.send(message(), target, async () => true),
+      ).toMatchObject({
         kind: "configuration_blocked",
       });
       expect(accessToken).not.toHaveBeenCalled();
@@ -56,7 +58,9 @@ describe("FCM production provider boundary", () => {
     "missing project %s blocks all IO",
     async (project) => {
       vi.stubEnv("PASSENGER_PUSH_FCM_PROJECT_ID", project);
-      expect(await provider.send(message(), target)).toMatchObject({
+      expect(
+        await provider.send(message(), target, async () => true),
+      ).toMatchObject({
         kind: "configuration_blocked",
       });
       expect(accessToken).not.toHaveBeenCalled();
@@ -68,7 +72,7 @@ describe("FCM production provider boundary", () => {
     vi.setSystemTime(new Date("2026-10-07T00:00:00Z"));
     const input = message();
     input.data.phone = "forbidden";
-    expect(await provider.send(input, target)).toMatchObject({
+    expect(await provider.send(input, target, async () => true)).toMatchObject({
       kind: "accepted",
       messageId: name,
     });
@@ -95,7 +99,80 @@ describe("FCM production provider boundary", () => {
   it("never sends expired messages", async () => {
     const input = message();
     input.data.expires_at = new Date(Date.now() - 1000).toISOString();
-    expect((await provider.send(input, target)).kind).not.toBe("accepted");
+    expect(
+      (await provider.send(input, target, async () => true)).kind,
+    ).not.toBe("accepted");
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("fails closed without a trusted server validator", async () => {
+    expect(await provider.send(message(), target, undefined as any)).toEqual({
+      kind: "configuration_blocked",
+    });
+    expect(accessToken).not.toHaveBeenCalled();
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("deducts validation time from the outgoing TTL", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const input = message();
+    await provider.send(input, target, async () => {
+      vi.setSystemTime(now + 5000);
+      return true;
+    });
+    expect(
+      JSON.parse(fetchStub.mock.calls[0]![1].body).message.android.ttl,
+    ).toBe("55s");
+  });
+  it("does not POST after expiry during validation", async () => {
+    vi.useFakeTimers();
+    const input = message();
+    expect(
+      await provider.send(input, target, async () => {
+        vi.setSystemTime(Date.parse(input.data.expires_at));
+        return true;
+      }),
+    ).toEqual({ kind: "expired" });
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("cannot resume POST after a timed-out validator eventually resolves", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: boolean) => void;
+    const validate = vi.fn(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = provider.send(message(), target, validate);
+    await vi.advanceTimersByTimeAsync(10001);
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(await pending).toEqual({
+      kind: "transient",
+      errorCode: "TRANSPORT_ERROR",
+    });
+    resolve(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("cannot resume validation or POST after timed-out metadata resolves", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: string) => void;
+    accessToken.mockImplementation(
+      () =>
+        new Promise<string>((done) => {
+          resolve = done;
+        }),
+    );
+    const validate = vi.fn(async () => true);
+    const pending = provider.send(message(), target, validate);
+    await vi.advanceTimersByTimeAsync(10001);
+    expect(await pending).toEqual({
+      kind: "transient",
+      errorCode: "TRANSPORT_ERROR",
+    });
+    resolve("synthetic-late-access-token");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(validate).not.toHaveBeenCalled();
     expect(fetchStub).not.toHaveBeenCalled();
   });
   it.each([
@@ -134,7 +211,7 @@ describe("FCM production provider boundary", () => {
         { status: status as number },
       ),
     );
-    const result = await provider.send(message(), target);
+    const result = await provider.send(message(), target, async () => true);
     expect(result.kind).toBe(kind);
     expect(JSON.stringify(result)).not.toContain(target.token);
   });
@@ -146,7 +223,9 @@ describe("FCM production provider boundary", () => {
       fetchStub.mockResolvedValue(
         Response.json({}, { status: 503, headers: { "Retry-After": header } }),
       );
-      expect(await provider.send(message(), target)).toMatchObject({
+      expect(
+        await provider.send(message(), target, async () => true),
+      ).toMatchObject({
         kind: "transient",
         retryAfterSeconds: header === "1" ? 1 : 3600,
       });
@@ -160,9 +239,9 @@ describe("FCM production provider boundary", () => {
     { name: "projects/test/messages/" },
   ])("rejects malformed ack %j", async (body) => {
     fetchStub.mockResolvedValue(Response.json(body));
-    expect((await provider.send(message(), target)).kind).toBe(
-      "internal_error",
-    );
+    expect(
+      (await provider.send(message(), target, async () => true)).kind,
+    ).toBe("internal_error");
   });
   it("cancels oversized response body", async () => {
     const cancel = vi.fn();
@@ -176,9 +255,9 @@ describe("FCM production provider boundary", () => {
         }),
       ),
     );
-    expect((await provider.send(message(), target)).kind).toBe(
-      "internal_error",
-    );
+    expect(
+      (await provider.send(message(), target, async () => true)).kind,
+    ).toBe("internal_error");
     expect(cancel).toHaveBeenCalled();
   });
   it("bounds an actual stalled request at ten seconds without exposing tokens", async () => {
@@ -191,7 +270,7 @@ describe("FCM production provider boundary", () => {
           ),
         ),
     );
-    const pending = provider.send(message(), target);
+    const pending = provider.send(message(), target, async () => true);
     await vi.advanceTimersByTimeAsync(10001);
     const result = await pending;
     expect(result.kind).toBe("transient");

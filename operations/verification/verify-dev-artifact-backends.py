@@ -30,7 +30,10 @@ def get_access_token():
     return result.stdout.strip()
 
 CLEAN = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n200\n%%EOF\n"
-EICAR = CLEAN + b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\n"
+# Canonical 68-byte antivirus transport canary, not a structurally valid PDF.
+# Keep the EICAR string at byte zero, without a PDF prefix or trailing newline.
+# https://www.eicar.org/download-anti-malware-testfile/
+EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 OVERSIZED = CLEAN + b"0" * (11 * 1024 * 1024) # 11 MiB (max is 10 MiB)
 
 import zipfile, io
@@ -39,11 +42,78 @@ with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("large.txt", b"0" * (11 * 1024 * 1024))
 ENGINE_LIMIT_PAYLOAD = out.getvalue()
 
+SCANNER_INITIAL_READINESS_MAX_ATTEMPTS = int(os.environ.get("SCANNER_INITIAL_READINESS_MAX_ATTEMPTS", "30"))
+SCANNER_INITIAL_READINESS_DEADLINE_SECONDS = float(os.environ.get("SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", "120"))
+SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS = float(os.environ.get("SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS", "2"))
+
+
+def wait_for_initial_clean_scan(scan_fn, content):
+    """Bounded retry around the very first clean-file scan.
+
+    A cold scanner revision can legitimately answer 503
+    scan_engine_not_ready while freshclam/clamd is still loading its
+    engine before this helper's first request ever lands -- retry THAT
+    exact condition only, up to a finite attempt count and total
+    deadline. Any other status/error (auth403, a non-readiness 503, a
+    malformed body) returns immediately for the caller to assert on; a
+    503 is never treated as success and no negative case is weakened.
+
+    The deadline is checked BEFORE every attempt, not only after a 503
+    comes back: checking it only on the trailing edge let an attempt that
+    started right at the deadline (its own 503 having landed just inside
+    it) still run and return a late, post-deadline clean receipt as a
+    pass. The remaining budget is also threaded into `scan_fn` as
+    `timeout=`, so a single slow request cannot itself run past the
+    deadline, and the poll sleep is capped to whatever budget is left.
+
+    The deadline is checked AGAIN immediately after `scan_fn` returns, for
+    the exact same reason a single attempt is given `remaining` instead of
+    an unbounded timeout: the `timeout=` passed to `scan_fn` only bounds
+    individual socket operations (connect/read), not the attempt's whole
+    wall-clock duration -- a response whose headers/body arrive just past
+    that per-socket-op budget can still complete and look like a perfectly
+    valid 200 receipt. Without this second check, that stale result would
+    be accepted as success even though it answered after the deadline had
+    already expired.
+    """
+    deadline = time.monotonic() + SCANNER_INITIAL_READINESS_DEADLINE_SECONDS
+    attempt = 0
+    last_status, last_body = None, None
+
+    def fail(reason):
+        raise AssertionError(
+            "Scanner did not become ready for the initial clean scan within "
+            f"{attempt} attempt(s) / {SCANNER_INITIAL_READINESS_DEADLINE_SECONDS}s deadline: {reason}"
+        )
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(f"deadline expired before another attempt could start (last status={last_status}, body={last_body})")
+        attempt += 1
+        status, body = scan_fn(content, timeout=min(remaining, 30))
+        last_status, last_body = status, body
+        if time.monotonic() > deadline:
+            fail(
+                "attempt completed after the total deadline had already expired "
+                f"(status={status}, body={body}); the supplied timeout bounds a "
+                "single socket operation, not the whole call"
+            )
+        if status != 503 or not isinstance(body, dict) or body.get("error") != "scan_engine_not_ready":
+            return status, body
+        if attempt >= SCANNER_INITIAL_READINESS_MAX_ATTEMPTS:
+            fail(f"last status={status}, body={body}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(f"last status={status}, body={body}")
+        time.sleep(min(SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS, remaining))
+
+
 def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
     print(f"Testing scanner at {scanner_url}")
     token = get_identity_token(scanner_url)
 
-    def scan(content, sha256_header=None):
+    def scan(content, sha256_header=None, timeout=30):
         req = urllib.request.Request(f"{scanner_url}/scan", data=content, method="POST")
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/pdf")
@@ -53,7 +123,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             req.add_header("X-Content-SHA256", hashlib.sha256(content).hexdigest())
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status, json.loads(response.read().decode())
         except urllib.error.HTTPError as e:
             try:
@@ -72,7 +142,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert body.get("error") == expected_error, f"Expected error {expected_error}, got {body.get('error')}"
 
     print("Test 1: Clean file")
-    status, body = scan(CLEAN)
+    status, body = wait_for_initial_clean_scan(scan, CLEAN)
     assert status == 200, f"Expected 200, got {status}: {body}"
     assert_receipt(body, CLEAN, expected_verdict="clean")
 
