@@ -1,6 +1,7 @@
 # Clamd lifecycle harness: planning decision and acceptance route
 
-Task: `SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008-UNBLOCK-PLANNING-DECISION`  
+Task: `SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008-UNBLOCK-PLANNING-DECISION`
+
 Owner / reviewer: Codex / Codex2. Evidence inspected 2026-10-08 UTC.
 
 ## Decision
@@ -140,3 +141,9 @@ The GitHub run/job links above are durable remote evidence. Documentation
 whitespace, local references, canonical consistency and commit trailers are
 checked before final publication; outcomes are recorded in helper machine truth.
 No runtime tests, deployments, listeners or cloud workloads were launched here.
+
+Publication check correction: the first `git diff --check HEAD^ HEAD` on anchor
+`e056681b2` exited 2 for a Markdown hard-break trailing space on the Task line.
+It was removed in a normal follow-up commit; the chained canonical/trailer
+checks had not run at that point. Final check results are recorded in the helper
+status receipt, separately from this initial failure.
