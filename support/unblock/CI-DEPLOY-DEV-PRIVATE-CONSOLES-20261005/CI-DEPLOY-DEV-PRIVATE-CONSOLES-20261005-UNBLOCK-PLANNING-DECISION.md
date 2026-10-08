@@ -199,7 +199,7 @@ captured earlier because the write has not happened yet as of this handoff.
 Codex2 reopened candidate `3a00e44c54076f5b3339f3db140b90a89f27dd06` with two findings (F2 repeated, F3 new). This task was reassigned to Gemini due to availability-first reassignment.
 
 **F3 [P2] — missing-path finding (fixed).**
-The original artifact cited a nonexistent literal `docs/01-decisions/SD-DP-20261007-002-...md` which broke the Canonical consistency CI gate. The abbreviation has been replaced with the full real decision path `docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md`.
+The original artifact cited a nonexistent literal shortened path which broke the Canonical consistency CI gate. The abbreviation has been replaced with the full real decision path `docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md`.
 
 **F2 [P2] — stale `resolved_parent_next` (fixed).**
 Codex2 requires: "Repair boundary: Supervisor, in its legitimate operator context through the specified release CLI, updates helper metadata and parent note, preserving blocked disposition... Original owner Claude2 then appends both successful readbacks and this repeated-finding evidence to the SAME artifact... and only then hands off."
@@ -209,20 +209,20 @@ Supervisor has now successfully performed the canonical metadata update in its l
 **Guard Gateway Rejection Receipt:**
 - `command_attempt`: `AI_NAME=Supervisor bash <active-release>/ai-status.sh note CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 "..."`
 - `exit_code`: `1`
-- `stderr`: `Error: Unregistered worker identity 'Supervisor'. Supervisor is an orchestrator runtime context, not a dispatchable worker persona. Allowed agent identities: Gemini, Claude2, Codex, Codex2, registeredPi.`
+- `stderr`: `Unknown agent: Supervisor`
 
 **Metadata Readbacks (from `.local/full-system-completion-20261008/metadata-readbacks.json`):**
 
-- **Parent (`CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`)**:
+- **Parent (`CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`)** (last_update: `2026-10-08T01:13:50Z`):
   - `status`: `blocked`
-  - `waiting_for`: `Gemini`
-  - `notes`: `[Supervisor]: Unblock chain validated. Required fixes: SR-GCP-SCANNER-COLD-READINESS-20261007, SR-GCP-ARTIFACT-ACTIVATION-20261004, C125-REAL-UPLOAD-STORAGE-20261005. Dispatch of deploy-dev.yml blocked until origin/dev includes all fixes plus merge f8725220d0ee67e90b185cf0dd339b250bcb3d2b. Helper CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION handles planning phase completion.`
+  - `waiting_for`: `Pi`
+  - `notes`: `SD-DP-20261007-002 confirms no product/contract ambiguity and no reopen of private-console parent candidate13656eb14818edc0c9ed85358d360e2fa588c764/mergef8725220d0ee67e90b185cf0dd339b250bcb3d2b. Ordered remaining chain: cold9c/eb0 + loggerd5/74d5 + canonicalEICAR593/489 source children DONE -> actual hosted37710967398 clean/hash/size and canonicalinfected PASS, wronghash400PASS, oversized Test4 FAILED expected413 gotempty503 (request destroyed before response; precise gateway repair needed) -> SR-GCP-ARTIFACT-ACTIVATION-20261004 genuine limits/readiness/fault/loaded-version/privateGCS bytes/hash/generation/idempotency/negative/cleanup and provider activation -> C125-REAL-UPLOAD-STORAGE-20261005 true role-bound upload/scan/readback -> only then authorized immutableSDK-patched fullSHA/pinnedrelease containing ALL chain+parent+actual fleet-document-storage implementation, ancestry/source proof, fresh deploy-dev full16/16 operationalacceptance and private IAM readback before 真實deploy-dev綠燈. Bare f872 parentSHA forbidden (file absent before446228cbc), health/build/cloudReady notlivepass. Latest product37683644385 actuallydeployed212 andhealthpassed butoperational12pass/4upload503fail, notpromoted. Parent remainsblocked; Supervisor coordinates cloud/sourcechain while old Claude2 quota paused; owner/reviewer/candidate/review/CI/merge/livekeys unchanged. No readyvars/gatewaiver/VMruntime/newkeys/IAM/publicconsoles. Actual CLI rejects waiting_for=Supervisor (unknownagent; receipt retained); Pi is registeredhealthy currentuser-session operator, so supported operationalwaiting_for/resolved_parent_waiting_for=Pi. This doesnot reassign sourceowner or reviewer or reduce anygate.`
 
-- **Helper (`CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION`)**:
+- **Helper (`CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION`)** (last_update: `2026-10-08T01:13:51Z`):
   - `status`: `in_progress`
   - `resolved_parent_status`: `blocked`
-  - `resolved_parent_waiting_for`: `Gemini`
-  - `resolved_parent_next`: `Waiting for dependency chain to reach canonical trunk and become deploy-ready (SR-GCP-SCANNER-COLD-READINESS-20261007, SR-GCP-ARTIFACT-ACTIVATION-20261004, C125-REAL-UPLOAD-STORAGE-20261005). Dispatch deploy-dev.yml only against an immutable SHA carrying all three fixes plus parent merge.`
+  - `resolved_parent_waiting_for`: `Pi`
+  - `resolved_parent_next`: `SD-DP-20261007-002 confirms no product/contract ambiguity and no reopen of private-console parent candidate13656eb14818edc0c9ed85358d360e2fa588c764/mergef8725220d0ee67e90b185cf0dd339b250bcb3d2b. Ordered remaining chain: cold9c/eb0 + loggerd5/74d5 + canonicalEICAR593/489 source children DONE -> actual hosted37710967398 clean/hash/size and canonicalinfected PASS, wronghash400PASS, oversized Test4 FAILED expected413 gotempty503 (request destroyed before response; precise gateway repair needed) -> SR-GCP-ARTIFACT-ACTIVATION-20261004 genuine limits/readiness/fault/loaded-version/privateGCS bytes/hash/generation/idempotency/negative/cleanup and provider activation -> C125-REAL-UPLOAD-STORAGE-20261005 true role-bound upload/scan/readback -> only then authorized immutableSDK-patched fullSHA/pinnedrelease containing ALL chain+parent+actual fleet-document-storage implementation, ancestry/source proof, fresh deploy-dev full16/16 operationalacceptance and private IAM readback before 真實deploy-dev綠燈. Bare f872 parentSHA forbidden (file absent before446228cbc), health/build/cloudReady notlivepass. Latest product37683644385 actuallydeployed212 andhealthpassed butoperational12pass/4upload503fail, notpromoted. Parent remainsblocked; Supervisor coordinates cloud/sourcechain while old Claude2 quota paused; owner/reviewer/candidate/review/CI/merge/livekeys unchanged. No readyvars/gatewaiver/VMruntime/newkeys/IAM/publicconsoles. Actual CLI rejects waiting_for=Supervisor (unknownagent; receipt retained); Pi is registeredhealthy currentuser-session operator, so supported operationalwaiting_for/resolved_parent_waiting_for=Pi. This doesnot reassign sourceowner or reviewer or reduce anygate.`
 
 All prerequisites are now complete. The parent correctly remains blocked, while the doc helper publication can now resume.
 
