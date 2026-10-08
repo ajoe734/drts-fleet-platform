@@ -59,7 +59,9 @@ or an anchored HTTP412 cause. Never search resource text or details for a class.
 
 ## Implementation and SDK assessment
 
-`is_gcs_precondition_failed` now reads the first nonblank diagnostic line.
+`is_gcs_precondition_failed` skips only blank lines and complete known CLI
+progress lines (the impersonation warning and file-to-GCS Copying line), then
+reads the first remaining line as the authoritative diagnostic.
 It accepts ERROR/EXCEPTION with the supported gcloud-storage wrapper,
 single/double quoted Task resources (including escaped quotes), supported
 typed exception representations, and explicit HTTP/code412 forms.
@@ -111,15 +113,25 @@ SDK source SHA256:
 
 All local checks below use Python 3.12.3. Evidence directory (E):
 `/home/lupin/workspace/drts-fleet-platform/.local/full-system-acceptance-20261008/gcs-contract-codex-repair/`.
-The immutable verifier source is anchor
-`f5c4ad2f6959ecdfa1818c9f4ed0700f254a475a`; final candidate retains that
+The immutable verifier/test source is commit
+`e6fda525cf05221128e77b4bdbdb151d7a9ad3de`; final candidate retains that
 verifier blob. Tested test-file SHA256:
-`143981f9febb81c25ae885915439f41744f6f642f30fa7d3c4b074522df76e82`.
+`c55afc2260390fc7ed1d7a2013f844ecfc748ba80e2fac5fe717e11f1a180f25`.
 The final full candidate SHA/branch/PR are recorded by lifecycle handoff.
+New PR: [2439](https://github.com/ajoe734/drts-fleet-platform/pull/2439).
+
+Pre-handoff inspection caught that the first Codex anchor only handled the
+error-header fixture, while the actual stderr also contains impersonation
+warnings and a Copying progress line. Commit
+`e6fda525cf05221128e77b4bdbdb151d7a9ad3de` adds the bounded progress grammar
+and full-preamble regression. C1 now injects the complete stderr extracted
+from the original failed.log (`E/hosted-stderr.txt`) as well as the header-only
+fixture. Old5f57 rejects both; repaired source accepts both and reaches
+Test12b with exact cleanup. C3–C5 were rerun on these final source/test blobs.
 
 | Finding / acceptance                                          | Source and regression                                                                                                             | Old → repaired result                                                                                                                                                                                                                                                            | Commands / evidence / exit              | Pending or limitation                                                                           |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Confirmed Test11 typed-error rejection                        | `test_gcs`; `test_gcs_success` uses actual hosted error shape                                                                     | 5f57 fails at Test11; both rejected intermediate candidates and repaired source reach Test12b with exact cleanup                                                                                                                                                                 | C1, `E/compare.json`, exit0             | Subprocess and HTTPS transport are synthetic; no hosted rerun                                   |
+| Confirmed Test11 typed-error rejection                        | `test_gcs`; `test_gcs_success` uses full hosted stderr shape                                                                      | 5f57 fails at Test11; both rejected intermediate candidates and repaired source reach Test12b with exact cleanup                                                                                                                                                                 | C1, `E/compare.json`, exit0             | Subprocess and HTTPS transport are synthetic; no hosted rerun                                   |
 | R1 repeated quoted-resource cause defect                      | `is_gcs_precondition_failed`; `test_gcs_precondition_failed_classifier`, `test_gcs_cas_rejection_preserves_exception_and_cleanup` | Both adjacent rejected candidates return true and report production Test11 PASS for actual not-found; repair returns false, re-raises original exception, skips Test12 and cleans exact generations                                                                              | C1/C3, compare and verifier logs, exit0 | Unknown formats deliberately fail closed                                                        |
 | R1 original fixtures and exception contract                   | Tests4/8/11, `run`; class/path/body/warning/status-prefix/secret-shaped negatives and typed/HTTP positives                        | All prior cases retained; new regression covers all three CAS sites, exact exception identity/properties and cleanup; logging diagnostic tests retained                                                                                                                          | C3, 62 PASS, exit0                      | External subprocess responses modeled, no classification/control-flow mock                      |
 | R2 official-endpoint denial boundary                          | `assert_gcs_unauthenticated_denial`, `_RejectGcsRedirects`; HTTP/redirect/transport/recovery tests                                | Both intermediate candidates follow official302→foreign403 and pass; repair rejects before any second request. 401/403 pass; 200/404/500/503, 301/302/303/307/308 and transport/timeout fail with closed responses and exact cleanup. Recovery generation/bytes corruption fails | C1/C3; compare plus verifier log, exit0 | Real urllib opener/redirect/HTTPErrorProcessor; only HTTPS transport fake. No actual GCS denial |
@@ -135,7 +147,7 @@ Verifier source SHA256 comparison:
 | `5f57e39bd2eb00ebdffba0a966ed772629a468d0`          | `e23136e5f3200edbed7224f353bdbf03f7e8265141949d777ee2fd9e63135d48` |
 | `8ddeec4081b7fbaa53a41d03037bc55a5542e030`          | `23bc13ac9fe6bc7b9489508a2d91702d837726e97da7d7d2ddafc61fd575dda6` |
 | `de1da70ff4cd499aad978680d3c7a5eacd58daa2`          | `dbc85782943ee9dd7a2ec1bc21a78253574a5ea4de80a9df2474c8146d066c71` |
-| `f5c4ad2f6959ecdfa1818c9f4ed0700f254a475a` (repair) | `287c7116e22387eaca3aaae4045c312b4040fd0f987fbc71b5b33eec7cb556fd` |
+| `e6fda525cf05221128e77b4bdbdb151d7a9ad3de` (repair) | `376b1d4f4b065f74c778d2885839ae312ef811cf1965b3704f47aa4045137493` |
 
 ## Reproduction commands and limits
 
