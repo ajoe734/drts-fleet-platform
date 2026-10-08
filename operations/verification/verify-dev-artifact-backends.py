@@ -508,6 +508,72 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
         return False
 
     return True
+def is_gcs_precondition_failed(e: subprocess.CalledProcessError) -> bool:
+    """Accept only a complete supported diagnostic cause, never resource text.
+
+    Unknown wrappers/leading payloads fail closed. Quoted Task resources must
+    be consumed in full before inspecting the cause; a word boundary alone
+    would also accept class-looking filenames such as "...Error.txt".
+    """
+    quoted = r"""(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""
+    diagnostic = None
+    for line in (e.stderr or "").splitlines():
+        line = line.strip()
+        # These are the progress lines in the actual hosted stderr. Skip
+        # complete known lines, never search their contents for an error.
+        if not line or re.fullmatch(
+            r"WARNING: This command is using service account impersonation\. "
+            r"All API calls will be executed as \[[^\]\r\n]+\]\.", line,
+        ) or re.fullmatch(r"Copying file://\S+ to gs://\S+", line):
+            continue
+        diagnostic = re.fullmatch(
+            r"(?:ERROR|EXCEPTION):\s*(?:\(gcloud\.storage\.cp\)\s*)?(.*)",
+            line,
+        )
+        # The first non-progress line is authoritative, even when unknown.
+        break
+    if not diagnostic:
+        return False
+    cause = diagnostic.group(1)
+    if cause.startswith("Task"):
+        task = re.fullmatch(r"Task(?:\s+" + quoted + r")?\s+failed:\s*(.*)", cause)
+        if not task:
+            return False
+        cause = task.group(1)
+    if re.fullmatch(r"GcsPreconditionFailedError(?:\(" + quoted + r"?\))?", cause):
+        return True
+    return re.fullmatch(
+        r"(?:HTTP(?:Error)?\s*:?\s*)?412(?:$|:\s*.*|\s+Precondition Failed(?:$|:.*))",
+        cause,
+    ) is not None
+
+
+class _RejectGcsRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Leave the 3xx as an HTTPError; no second endpoint may supply denial.
+        return None
+
+
+def assert_gcs_unauthenticated_denial(bucket_name, test_key):
+    """One credential-free request to the official endpoint, with no redirects."""
+    from urllib.parse import quote
+
+    url = ("https://storage.googleapis.com/storage/v1/b/"
+           + quote(bucket_name, safe="") + "/o/" + quote(test_key, safe=""))
+    req = urllib.request.Request(url)
+    # A fresh opener avoids global auth/cookie handlers and ambient proxy auth.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), _RejectGcsRedirects(),
+    )
+    try:
+        with opener.open(req, timeout=10.0):
+            raise AssertionError("Expected unauthenticated GCS request to fail")
+    except urllib.error.HTTPError as e:
+        with e:
+            assert e.geturl() == url, "Denial did not originate at the requested GCS URL"
+            assert e.code in (401, 403), f"Expected external denial (401/403), got HTTP {e.code}"
+
+
 def test_gcs(bucket_name, runtime_sa):
     print(f"Testing GCS bucket: {bucket_name}")
     import uuid
@@ -546,7 +612,8 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
             assert False, "Expected upload to fail with mismatched generation"
         except subprocess.CalledProcessError as e:
-            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            if not is_gcs_precondition_failed(e):
+                raise
 
         print("Test 5: Update with correct generation match")
         with open(temp_in, "w") as f:
@@ -576,7 +643,8 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to fail with stale generation"
         except subprocess.CalledProcessError as e:
-            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            if not is_gcs_precondition_failed(e):
+                raise
 
         print("Test 9: Verify winning generation remains unchanged")
         res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
@@ -600,14 +668,11 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, absent_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to absent path with generation match to fail"
         except subprocess.CalledProcessError as e:
-            assert "412" in e.stderr or "Precondition Failed" in e.stderr, f"Absent object with CAS should return 412 Precondition Failed, got: {e.stderr}"
+            if not is_gcs_precondition_failed(e):
+                raise
 
-        print("Test 12: Network fault / permission denial regressions")
-        try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0", "--access-token-file=/dev/null"])
-            assert False, "Expected upload to fail with invalid token"
-        except subprocess.CalledProcessError as e:
-            assert "401" in e.stderr or "403" in e.stderr or "Unauthorized" in e.stderr or "Authentication required" in e.stderr, f"Expected external denial (401/403/Unauthorized), got: {e.stderr}"
+        print("Test 12: External unauthenticated GCS denial")
+        assert_gcs_unauthenticated_denial(bucket_name, test_key)
 
         print("Test 12b: Post-fault recovery readback")
         # Prove that we can still read normally and generation is intact
