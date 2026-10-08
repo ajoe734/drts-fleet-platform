@@ -22,30 +22,35 @@ def _sanitize_stderr(text):
 
     # Extract only the explicit error cause from the first error line,
     # ignoring incidental details, resource names, or request payloads.
-    cause = None
     for line in text.splitlines():
-        match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*?)(?::|$)", line, re.IGNORECASE)
+        match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*)", line, re.IGNORECASE)
         if match:
-            cause = match.group(1).strip().upper()
+            cause_line = match.group(1).strip().upper()
+
+            http_match = re.match(r"^(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*(\d{3})\b", cause_line)
+            if http_match:
+                code = http_match.group(1)
+                if code == "401": return "[redacted: UNAUTHENTICATED / 401]"
+                if code == "403": return "[redacted: PERMISSION_DENIED / 403]"
+                if code == "404": return "[redacted: NOT_FOUND / 404]"
+                if code == "504": return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+            if cause_line.startswith("UNAUTHENTICATED") or cause_line.startswith("UNAUTHORIZED"):
+                return "[redacted: UNAUTHENTICATED / 401]"
+            if cause_line.startswith("PERMISSION_DENIED"):
+                return "[redacted: PERMISSION_DENIED / 403]"
+            if cause_line.startswith("NOT_FOUND"):
+                return "[redacted: NOT_FOUND / 404]"
+            if cause_line.startswith("DEADLINE_EXCEEDED") or cause_line.startswith("TIMEOUT"):
+                return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+            if cause_line.startswith("UNRECOGNIZED ARGUMENT") or cause_line.startswith("INVALID ARGUMENT") or cause_line.startswith("USAGE"):
+                return "[redacted: SDK / ARGUMENT_ISSUE]"
+
+            if cause_line.startswith("YOU DO NOT CURRENTLY HAVE AN ACTIVE ACCOUNT SELECTED") or cause_line.startswith("CREDENTIALS") or cause_line.startswith("REAUTH") or cause_line.startswith("ACTIVE ACCOUNT SELECTED"):
+                return "[redacted: AUTH / ACCOUNT_ISSUE]"
+
             break
-
-    if not cause:
-        return "[redacted: UNKNOWN_ERROR_FORMAT]"
-
-    if "UNAUTHENTICATED" in cause or "UNAUTHORIZED" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*401\b", cause):
-        return "[redacted: UNAUTHENTICATED / 401]"
-    if "PERMISSION_DENIED" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*403\b", cause):
-        return "[redacted: PERMISSION_DENIED / 403]"
-    if "NOT_FOUND" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*404\b", cause):
-        return "[redacted: NOT_FOUND / 404]"
-    if "DEADLINE_EXCEEDED" in cause or "TIMEOUT" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*504\b", cause):
-        return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
-
-    if "UNRECOGNIZED ARGUMENT" in cause or "INVALID ARGUMENT" in cause or "USAGE" in cause:
-        return "[redacted: SDK / ARGUMENT_ISSUE]"
-
-    if "ACTIVE ACCOUNT SELECTED" in cause or "CREDENTIALS" in cause or "REAUTH" in cause:
-        return "[redacted: AUTH / ACCOUNT_ISSUE]"
 
     return "[redacted: UNKNOWN_ERROR_FORMAT]"
 
