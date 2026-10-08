@@ -105,7 +105,7 @@ status into `in_progress`.
 > and the itemized `resolved_parent_next` onto this helper, and the same text as
 > a direct `note` on the parent. Do not set `resolved_parent_at` manually; merge
 > lifecycle owns that field.
-> 
+>
 > `tools/development-orchestrator/github_bus.py` makes a draft PR ready once
 > `handoff` locks its candidate. This helper's content does not depend on that
 > metadata write to be correct or reviewable, so the owner hands off normally
@@ -174,15 +174,15 @@ reconciliation. Owner readback evidence will be appended here once that write
 lands and is visible via `ai-status.sh show` on both tasks; it cannot be
 captured earlier because the write has not happened yet as of this handoff.
 
-## Publication and final checks
+## Round 2 — Publication and final checks
 
 - Round 2 repair landed as two commits on
-  `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+  `claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
   off prior reviewed candidate `a9a765986d94c657fb451c39952a450b9d0f07e7`: the
   F1/F2 fix itself, then this publication-evidence note. Each was pushed to
   `origin` with a normal (non-force) push immediately after committing, and
   `git rev-parse HEAD` was confirmed equal to
-  `git rev-parse origin/gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+  `git rev-parse origin/claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
   after each push (local/remote branch heads matched, no divergence). Per the
   prior round's own note on avoiding self-referential SHA edits, the final
   candidate SHA for this handoff is read off `git rev-parse HEAD` /
@@ -193,7 +193,7 @@ captured earlier because the write has not happened yet as of this handoff.
   change exited clean (no whitespace errors).
 - No source, workflow, or test file modified this round; only the two
   planning documents, consistent with this task's scope.
-- Existing open PR #2428 (`head`/`base` = this branch/`dev`) carries these new
+- Existing open PR #2418 (`head`/`base` = this branch/`dev`) carries these new
   commits once GitHub syncs; no new PR opened. Hosted CI for this round has
   not been separately polled as of this writing — treat as pending/unknown,
   not claimed green, until Codex's next review round confirms.
@@ -234,10 +234,22 @@ All prerequisites are now complete. The parent correctly remains blocked, while 
 - Correct producer (`Gemini`) recorded.
 - Task is ready for fresh review, CI, and merge.
 
+Codex2 then reopened candidate `954f401589136830dcc4d1916acfce2079d159c0` (2026-10-08T01:26:57Z) with one finding (missing PR publication evidence). Repaired in candidate `af6ed9bf9b7eb08ccf868659fac5648bcdcdc59e`.
 
-**Round 3 Publication and PR Delivery:**
+## Round 4 — reviewer findings and repair (2026-10-08)
 
-- Repaired candidate has been published through a task-scoped PR to `dev`.
+Codex2 reopened candidate `af6ed9bf9b7eb08ccf868659fac5648bcdcdc59e` (delivered as `487348aa33f72c53f43717a900e113bb900ed533`) with three findings:
+- **F2 [P2] — repeated documentary-history defect**: Round 2 publication history rewrote Claude2 branch as Gemini. Fixed by restoring original branch/PR labels in the historical subsection.
+- **F5 [P2] — inaccurate current-role guidance**: Conflated parent and helper roles. Fixed by distinguishing parent roles (Claude2/Codex) from helper roles (Gemini/Codex2).
+- **F6 [P3] — failed required whitespace regression**: Blockquote blank line had a trailing space. Fixed by removing the trailing space.
+
+**Verification for Round 4:**
+- `git diff origin/dev...HEAD --check` and `git diff --check` on staged changes exited 0 (clean).
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base a9a765986d94c657fb451c39952a450b9d0f07e7^ --head HEAD` ran clean (exit 0). All checks have zero findings.
+
+**Round 4 Publication and PR Delivery:**
+
+- Repaired candidate has been published through the existing task-scoped PR to `dev`.
 - PR URL: https://github.com/ajoe734/drts-fleet-platform/pull/2428
 - Local branch, remote branch, and PR head are fully synchronized on `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`.
 - Prior history is preserved with regular commits (no force-push/rebase).

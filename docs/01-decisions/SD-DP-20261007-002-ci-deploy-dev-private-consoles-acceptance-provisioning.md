@@ -117,7 +117,7 @@ verification, not for a design decision. Do not resume the parent to `todo`
 merely because this helper merges — nothing in the parent's own diff has
 changed, and reopening its candidate would not address the actual gap.
 
-*(The following required metadata rewrite and `assign` command block is now superseded history. The routing has already been correctly established and verified. Expected current guidance: read back and preserve the already-correct routing, with no prerequisite re-write. The parent retains its `blocked` disposition, `waiting_for=Pi`, and current `Gemini`/`Codex2` assignments. Do not overwrite the current state by re-running these historic `assign` or `note` commands.)*
+*(The following required metadata rewrite and `assign` command block is now superseded history. The routing has already been correctly established and verified. Expected current guidance: read back and preserve the already-correct routing, with no prerequisite re-write. The parent retains its `blocked` disposition, `waiting_for=Pi`, and its Claude2/Codex assignments, while this helper retains its Gemini/Codex2 assignments. Do not overwrite the current state by re-running these historic `assign` or `note` commands.)*
 
 Before this helper merges, canonical helper metadata must contain:
 
