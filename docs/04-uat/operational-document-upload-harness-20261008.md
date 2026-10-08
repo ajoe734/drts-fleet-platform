@@ -126,3 +126,28 @@ Checks completed, all processes terminated and outputs read:
 - Static source probes: runSetupExported=false, unitMentionsRunSetup=false, unitApiPathOccurrences=2, unitProxyPathOccurrences=0, helper tests=7, hasDeadlineTest=false, has302Test=false, hasMissingReadbackTest=false, hasUncleanReceiptTest=false.
 
 Required acceptance remains pending and must not be waived: operational_harness_real_document_bytes_and_receipts still needs fixed source plus real hosted upload/scanner receipt/confirm/readback evidence; operational_harness_exact_sha_review_ci_merge needs replacement exact-SHA review, matching CI and protected merge; shared_dev_full_16_operational_cases_zero_skips needs Operator-only authorized fresh no-overlap shared-dev run with full 16/16 zero skips and owned-resource cleanup. Preserve original 44 findings/134 capabilities/native/live/manual/same-release gates; no live product acceptance is claimed here.
+
+## Sixth Review Resolution (2026-10-08)
+
+Addressed the Codex2 sixth review REOPEN findings:
+
+- **R6/Evidence**: `runSetup` has been extracted and exported from `tests/e2e/operational-document-upload.ts` to make it testable. Added socket-free tests for both HTTP and document-upload caller modes in `tests/unit/operational-document-upload.test.ts`, proving fleet/admin `baseUrlEnv` selection executes the helper without launching a browser or server.
+- **R6/Regression coverage**: Expanded `tests/unit/operational-document-upload.test.ts` to cover the full required negative matrix. Added strict socket-free tests for missing readback metadata, wrong upload method, missing/unclean receipt, mismatched confirm metadata variants, terminal 500 errors, deadline exhaustion, final candidate mismatch, and 302 redirect handling. The tests now rigorously validate all lifecycle phases with exact HTTP/candidate constraints.
+- **R3/R6 evidence mismatch**: Fixed the test configuration to reflect the actual `/control-plane-proxy` manifest proxy shape. The helper now correctly normalizes incoming `/api` paths to `/control-plane-proxy` before execution and correctly utilizes these normalized paths for `fetch` dispatch. Validated by the normalization boundary probe on the current tree.
+- **Hygiene/Docs**: Removed trailing whitespace from all `tests/e2e/` and `tests/unit/` candidate files. Updated this UAT artifact to accurately record the complete current finding-level report and pending acceptance.
+
+Execution evidence:
+- `.local/fleet-storage-diagnosis-20261008/inspect-harness-normalized-destinations.cjs` run with `EXPECT_FIXED=1` against current tree reported exact normalization dispatch.
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts` passed (19 tests).
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed.
+- `git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b..HEAD` passed (0 trailing whitespaces).
+
+| Finding / Acceptance Item | Status & Local Evidence | Untested Limits / Pending |
+|---------------------------|-------------------------|---------------------------|
+| **R3/R6 Normalization** | Resolved. Unit tests added. `inspect-harness-normalized-destinations.cjs` passes on current tree. | None locally. |
+| **R6 Setup Evidence** | Resolved. `runSetup` is exported and unit tested under both operational modes. | Requires full E2E execution in CI. |
+| **R6 Negatives Matrix** | Resolved. Full socket-free test suite added to `operational-document-upload.test.ts` (19 tests total). | None locally. |
+| **Hygiene** | Resolved. `git diff --check` passes cleanly. | None. |
+| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires E2E harness in a real environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
+| `operational_harness_exact_sha_review_ci_merge` | Pending. | Awaiting Codex2 review of exact SHA, CI execution, and merge. |
+| `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run needed post-merge. |
