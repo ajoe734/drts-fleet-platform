@@ -29,3 +29,19 @@ The previous test harness setup only performed intent and confirm requests, bypa
 | `operational_harness_exact_sha_review_ci_merge` | N/A | Pending | Pending | 待 CI |
 | `shared_dev_full_16_operational_cases_zero_skips` | N/A | Pending | Pending | 本 VM 限制不可啟動 e2e |
 
+
+## Second Review Resolution (2026-10-08)
+
+Addressed the Codex REOPEN findings:
+- **R3**: Enforced strict route bounds (`/documents/content` for exactly the same `parentPrefix`), enforced single query parameter (`objectKey`), enforced 200/201 exact status codes (blocking 302 redirects), and added unit test regressions for redirects.
+- **R4**: Corrected the lifecycle order. Removed the invalid `GET` before `confirm`. The helper now parses the `confirm` response to extract the `documentId`, validates the returned confirmation metadata, constructs the formal download route (`/control-plane-proxy/fleet-partner/supply-submissions/.../documents/:documentId/download`), and verifies the downloaded bytes against the original. Updated `runSetup` in `operational-browser-acceptance.spec.ts` to capture and record the returned lifecycle evidence.
+- **R5**: Added a finite total lifecycle budget (`totalBudget = 30000ms`), replacing hardcoded timeouts. Re-calculated `timeout` for each request based on `getRemainingTime()`. Added unit tests for time budget exhaustion.
+- **R6**: Added `xref` and `startxref` to the generated PDF to satisfy strict parsers. Expanded `operational-browser-manifest.test.ts` to verify BOTH `document-upload` entries in BOTH journeys, and fleet origin/token selection in both `runSetup` callers. Added strict negative assertions across all operations.
+
+Execution evidence:
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts` passed (7 tests)
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed
+- `git diff --check` passed
+- `pnpm exec tsc --noEmit -p tsconfig.json` passed
+
+*Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI.*

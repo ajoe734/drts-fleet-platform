@@ -406,7 +406,7 @@ async function runSetup(
         variables,
       ) as Record<string, unknown>;
 
-      await uploadOperationalDocument(
+      const evidence = await uploadOperationalDocument(
         page.context().request,
         origin,
         intentPath,
@@ -423,6 +423,16 @@ async function runSetup(
         actorScope: journey.actorScope,
         intentUrl: new URL(intentPath, origin).toString(),
         confirmUrl: new URL(confirmPath, origin).toString(),
+        documentId: evidence.documentId,
+        objectKey: evidence.objectKey,
+        fileSize: evidence.fileSize,
+        sha256: evidence.sha256,
+        attempts: {
+          intent: evidence.intentAttempts,
+          put: evidence.putAttempts,
+          confirm: evidence.confirmAttempts,
+          download: evidence.downloadAttempts
+        }
       });
       continue;
     }
