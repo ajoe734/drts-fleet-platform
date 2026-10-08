@@ -21,6 +21,7 @@ type DocumentUploadSetup = {
   intentBody: Record<string, unknown>;
   confirmPath: string;
   confirmBody: Record<string, unknown>;
+  headers?: Record<string, string>;
 };
 type SetupRequest = HttpRequestSetup | DocumentUploadSetup;
 type JourneyStep =
