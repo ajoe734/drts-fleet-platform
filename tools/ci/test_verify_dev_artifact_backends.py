@@ -536,5 +536,85 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         finally:
             sys.stderr = original_stderr
 
+    @patch("subprocess.run")
+    def test_run_helper_redaction_and_bound(self, mock_run):
+        '''Proves exact-revision log diagnostic surfaces actionable error without leaking tokens, bodies, headers, and enforces a size bound.'''
+        import io
+        import sys
+        
+        # Test 1: Bounded output and secrets redaction
+        fixture = '''ERROR: (gcloud.logging.read) PERMISSION_DENIED: ...
+==== request start ====
+POST / HTTP/1.1
+==== request end ====
+Here is JSON:
+{
+  "refresh_token": "SYNTHETIC_REFRESH",
+  "client_secret": "SYNTHETIC_CLIENT",
+  "private_key": "-----BEGIN PRIVATE KEY-----\\nSYNTHETIC\\n-----END PRIVATE KEY-----",
+  "password": "SYNTHETIC_PASSWORD",
+  "secret": "SYNTHETIC_SECRET"
+}
+{"Authorization": "Basic SYNTHETIC_BASIC"}
+Bearer synthetic/payload+suffix=
+refresh_token=SYNTHETIC_REFRESH
+''' + "X" * 1048576
+        
+        err = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture, output="normal stdout")
+        mock_run.side_effect = err
+        
+        captured_stderr = io.StringIO()
+        original_stderr = sys.stderr
+        sys.stderr = captured_stderr
+        try:
+            with self.assertRaises(subprocess.CalledProcessError) as cm:
+                self.mod.run(["gcloud", "logging", "read"])
+                
+            stderr_output = captured_stderr.getvalue()
+            
+            # Assertions on standard properties preservation
+            self.assertEqual(cm.exception.returncode, 7)
+            self.assertEqual(cm.exception.stdout, "normal stdout")
+            self.assertEqual(cm.exception.stderr, fixture)
+            
+            # Redaction assertions
+            self.assertIn("Diagnostic (gcloud logging read failed):", stderr_output)
+            self.assertIn("ERROR: (gcloud.logging.read) PERMISSION_DENIED: ...", stderr_output)
+            
+            self.assertNotIn("SYNTHETIC_REFRESH", stderr_output)
+            self.assertNotIn("SYNTHETIC_CLIENT", stderr_output)
+            self.assertNotIn("SYNTHETIC_PASSWORD", stderr_output)
+            self.assertNotIn("SYNTHETIC_SECRET", stderr_output)
+            self.assertNotIn("SYNTHETIC_BASIC", stderr_output)
+            self.assertNotIn("synthetic/payload+suffix=", stderr_output)
+            
+            # JSON bodies stripped
+            self.assertIn("{ ***REDACTED BODY*** }", stderr_output)
+            
+            # Bound assertions
+            self.assertIn("... [TRUNCATED]", stderr_output)
+            self.assertLessEqual(len(stderr_output), 1200) # 1024 + prefix + suffix
+            
+        finally:
+            sys.stderr = original_stderr
+            
+        # Test 2: Successful run does not print to stderr or alter stdout
+        mock_run.side_effect = None
+        mock_result = MagicMock()
+        mock_result.stdout = "sensitive_stdout"
+        mock_result.stderr = "silent_stderr"
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        captured_stderr = io.StringIO()
+        sys.stderr = captured_stderr
+        try:
+            result = self.mod.run(["gcloud", "logging", "read"])
+            self.assertEqual(result.stdout, "sensitive_stdout")
+            self.assertNotIn("sensitive_stdout", captured_stderr.getvalue())
+            self.assertNotIn("silent_stderr", captured_stderr.getvalue())
+        finally:
+            sys.stderr = original_stderr
+
 if __name__ == "__main__":
     unittest.main()
