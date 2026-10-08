@@ -292,7 +292,7 @@ export async function uploadOperationalDocument(
   expect(confirmHash, "confirm hash metadata").toBe(sha256);
   expect(confirmSize, "confirm size metadata").toBe(fileSize);
   expect(confirmType, "confirm mime metadata").toBe(contentType);
-  expect(...(confirmSubmissionId ? { confirmSubmissionId } : {}), "confirm submission_id metadata must match URL").toBe(expectedSubmissionId);
+  expect(confirmSubmissionId, "confirm submission_id metadata must match URL").toBe(expectedSubmissionId);
   expect(confirmDocType, "confirm document_type metadata must match intent body").toBe(intentBody.documentType || confirmBody.documentType);
   
   // R4: Bind authoritative fleet
