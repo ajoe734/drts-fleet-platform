@@ -527,9 +527,8 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             
             stderr_output = captured_stderr.getvalue()
             self.assertIn("Diagnostic (gcloud logging read failed):", stderr_output)
-            self.assertIn("PERMISSION_DENIED: caller missing roles/logging.viewer", stderr_output)
+            self.assertIn("[redacted: PERMISSION_DENIED / 403]", stderr_output)
             self.assertNotIn("ya29.aBcDeFgH1234567890", stderr_output)
-            self.assertIn("ya29.***REDACTED***", stderr_output)
             
             # The exception contract should be unmodified.
             self.assertEqual(cm.exception.returncode, 1)
@@ -542,7 +541,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         import io
         import sys
         
-        # Test 1: Bounded output and secrets redaction
+        # Test 1: Bounded output and secrets redaction using fixed categories
         fixture = '''ERROR: (gcloud.logging.read) PERMISSION_DENIED: ...
 ==== request start ====
 POST / HTTP/1.1
@@ -579,7 +578,7 @@ refresh_token=SYNTHETIC_REFRESH
             
             # Redaction assertions
             self.assertIn("Diagnostic (gcloud logging read failed):", stderr_output)
-            self.assertIn("ERROR: (gcloud.logging.read) PERMISSION_DENIED: ...", stderr_output)
+            self.assertIn("[redacted: PERMISSION_DENIED / 403]", stderr_output)
             
             self.assertNotIn("SYNTHETIC_REFRESH", stderr_output)
             self.assertNotIn("SYNTHETIC_CLIENT", stderr_output)
@@ -588,39 +587,24 @@ refresh_token=SYNTHETIC_REFRESH
             self.assertNotIn("SYNTHETIC_BASIC", stderr_output)
             self.assertNotIn("synthetic/payload+suffix=", stderr_output)
             
-            # Trace blocks stripped out by truncating at the block start
-            self.assertIn("==== request start ====\n***REDACTED REQUEST***", stderr_output)
-            
-        finally:
-            sys.stderr = original_stderr
-            
-        # Test 1a: Bound assertions (1024 char limit)
-        fixture_long = '''ERROR: (gcloud.logging.read) PERMISSION_DENIED: ''' + "X" * 2000
-        mock_run.side_effect = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture_long, output="")
-        captured_stderr = io.StringIO()
-        sys.stderr = captured_stderr
-        try:
-            with self.assertRaises(subprocess.CalledProcessError):
-                self.mod.run(["gcloud", "logging", "read"])
-            stderr_output = captured_stderr.getvalue()
-            self.assertIn("... [TRUNCATED]", stderr_output)
-            self.assertLessEqual(len(stderr_output), 1200) # 1024 + prefix + suffix
         finally:
             sys.stderr = original_stderr
             
         # Test 1b: Additional explicit regression fixtures for tricky edge cases
         edge_fixtures = [
-            'Request body: {"password":"prefix}SYNTHETIC_PASSWORD"}',
-            'Request body: {"metadata":{},"access_token":"SYNTHETIC_ACCESS","data":"SYNTHETIC_BODY"}',
-            '== headers start ==\nCookie: session=SYNTHETIC_COOKIE\n',
-            'Request body: api_key=SYNTHETIC_KEY&payload=SYNTHETIC_BODY',
-            'ERROR: failed\nRequest body: first line\nNOTE: SYNTHETIC_BODY',
-            'ERROR: failed\nResponse body: payload=SYNTHETIC_RESPONSE',
-            'ERROR: failed\n  Cookie: session=SYNTHETIC_COOKIE',
-            'ERROR: failed\n{"refresh_token": "SYNTHETIC_REFRESH'
+            ('Request body: {"password":"prefix}SYNTHETIC_PASSWORD"}', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('Request body: {"metadata":{},"access_token":"SYNTHETIC_ACCESS","data":"SYNTHETIC_BODY"}', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('== headers start ==\nCookie: session=first;\n session_token=SYNTHETIC_COOKIE\n', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('Request body: api_key=SYNTHETIC_KEY&payload=SYNTHETIC_BODY', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('ERROR: (gcloud.logging.read) PERMISSION_DENIED\nRequest body : payload=SYNTHETIC_BODY', '[redacted: PERMISSION_DENIED / 403]'),
+            ('ERROR: failed\nResponse body: payload=SYNTHETIC_RESPONSE', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('ERROR: (gcloud.logging.read) UNAUTHENTICATED\n  Cookie: session=SYNTHETIC_COOKIE', '[redacted: UNAUTHENTICATED / 401]'),
+            ('ERROR: failed\n{"refresh_token": "SYNTHETIC_REFRESH', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('client_secret: SYNTHETIC_CLIENT\nrefresh_token: SYNTHETIC_REFRESH', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('<response><access_token>SYNTHETIC_ACCESS</access_token></response>', '[redacted: UNKNOWN_ERROR_FORMAT]')
         ]
         
-        for edge_fixture in edge_fixtures:
+        for edge_fixture, expected_msg in edge_fixtures:
             err_edge = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=edge_fixture, output="normal stdout")
             mock_run.side_effect = err_edge
             
@@ -631,6 +615,7 @@ refresh_token=SYNTHETIC_REFRESH
                     self.mod.run(["gcloud", "logging", "read"])
                 out_edge = captured_stderr_edge.getvalue()
                 self.assertNotIn("SYNTHETIC", out_edge, f"Leak detected in edge fixture:\n{edge_fixture}\nOutput:\n{out_edge}")
+                self.assertIn(expected_msg, out_edge)
                 self.assertEqual(cm_edge.exception.stderr, edge_fixture)
             finally:
                 sys.stderr = original_stderr

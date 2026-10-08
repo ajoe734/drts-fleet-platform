@@ -19,46 +19,18 @@ import re
 def _sanitize_stderr(text):
     if not text:
         return text
-
-    # 1. Redact individual tokens and headers
-    text = re.sub(r"(?i)^([ \t]*authorization:\s*)[^\n]+", r"\1***REDACTED***", text, flags=re.MULTILINE)
-    text = re.sub(r"(?i)^([ \t]*cookie:\s*)[^\n]+", r"\1***REDACTED***", text, flags=re.MULTILINE)
-    text = re.sub(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9_.~+/-]+=*)", r"\1 ***REDACTED***", text)
-    text = re.sub(r"(?i)ya29\.[a-zA-Z0-9_-]+", "ya29.***REDACTED***", text)
-    text = re.sub(r"(?i)ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+", "ey***REDACTED***", text)
     
-    # Explicit fallback redaction for named keys in case they appear outside blocks
-    keys = ["refresh_token", "client_secret", "private_key", "password", "secret", "Authorization", "access_token", "api_key"]
-    for k in keys:
-        text = re.sub(rf'(?i)("{k}"\s*:\s*")[^"\n\r]+', rf'\1***REDACTED***', text)
-        text = re.sub(rf'(?i)({k}=)[^\s&]+', rf'\1***REDACTED***', text)
+    upper_text = text.upper()
+    if "PERMISSION_DENIED" in upper_text or "403" in upper_text:
+        return "[redacted: PERMISSION_DENIED / 403]"
+    if "UNAUTHENTICATED" in upper_text or "UNAUTHORIZED" in upper_text or "401" in upper_text:
+        return "[redacted: UNAUTHENTICATED / 401]"
+    if "NOT_FOUND" in upper_text or "404" in upper_text:
+        return "[redacted: NOT_FOUND / 404]"
+    if "DEADLINE_EXCEEDED" in upper_text or "TIMEOUT" in upper_text:
+        return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
 
-    # Redact PEM keys
-    text = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*", "-----BEGIN PRIVATE KEY-----***REDACTED***", text, flags=re.DOTALL)
-
-    # 2. Fail closed: truncate at any block marker or body
-    markers = [
-        (r'\{', '{ ***REDACTED BODY*** }'),
-        (r'(?i)Request body:', 'Request body: ***REDACTED BODY***'),
-        (r'(?i)Response body:', 'Response body: ***REDACTED BODY***'),
-        (r'== headers start ==', '== headers start ==\n***REDACTED HEADERS***'),
-        (r'==== request start ====', '==== request start ====\n***REDACTED REQUEST***'),
-        (r'==== response start ====', '==== response start ====\n***REDACTED RESPONSE***')
-    ]
-    
-    earliest_idx = len(text)
-    best_marker = None
-    
-    for pattern, replacement in markers:
-        match = re.search(pattern, text)
-        if match and match.start() < earliest_idx:
-            earliest_idx = match.start()
-            best_marker = replacement
-            
-    if best_marker:
-        text = text[:earliest_idx] + best_marker
-
-    return text
+    return "[redacted: UNKNOWN_ERROR_FORMAT]"
 
 def run(cmd, **kwargs):
     print(f"Running: {' '.join(cmd)}")
