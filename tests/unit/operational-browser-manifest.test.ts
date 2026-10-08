@@ -35,15 +35,18 @@ describe("operational browser journeys manifest guard", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
-          body: expect.objectContaining({
-            supportedServiceProductCodes: ["business_dispatch"],
-          }),
-          capture: expect.objectContaining({
-            fleetSubmissionId: "data.submission.submission_id",
-          }),
         }),
         expect.objectContaining({
-          confirmPath: expect.stringContaining("documents/confirm"),
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
         }),
       ]),
     );
@@ -68,6 +71,24 @@ describe("operational browser journeys manifest guard", () => {
     expect(adminJourney.setup[0].body.supportedServiceProductCodes).toEqual([
       "business_dispatch",
     ]);
+    expect(adminJourney.setup).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+      ]),
+    );
     const approveOp = adminJourney.operations[0];
     expect(approveOp.kind).toBe("request");
     expect(approveOp.responseKind).toBe("json");
