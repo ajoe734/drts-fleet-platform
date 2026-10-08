@@ -1,10 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { uploadOperationalDocument } from "./operational-document-upload";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type TemplateVariables = Record<string, unknown>;
-type SetupRequest = {
+type HttpRequestSetup = {
+  kind?: "http";
   baseUrlEnv?: string;
   path: string;
   method: HttpMethod;
@@ -12,6 +14,15 @@ type SetupRequest = {
   headers?: Record<string, string>;
   capture?: Record<string, string>;
 };
+type DocumentUploadSetup = {
+  kind: "document-upload";
+  baseUrlEnv?: string;
+  intentPath: string;
+  intentBody: Record<string, unknown>;
+  confirmPath: string;
+  confirmBody: Record<string, unknown>;
+};
+type SetupRequest = HttpRequestSetup | DocumentUploadSetup;
 type JourneyStep =
   | { kind: "navigate"; path: string }
   | { kind: "click"; control: string }
@@ -370,9 +381,6 @@ async function runSetup(
   for (const setup of journey.setup ?? []) {
     const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
     const origin = requiredOrigin(setupBaseUrlEnv);
-    const body = setup.body
-      ? materializeValue(setup.body, variables)
-      : undefined;
     const rawHeaders = setup.headers
       ? (materializeValue(setup.headers, variables) as Record<string, string>)
       : undefined;
@@ -384,6 +392,43 @@ async function runSetup(
     ) {
       headers["Authorization"] = `Bearer ${setupIdToken}`;
     }
+
+    if (setup.kind === "document-upload") {
+      const intentPath = materializeString(setup.intentPath, variables);
+      const confirmPath = materializeString(setup.confirmPath, variables);
+      const intentBody = materializeValue(
+        setup.intentBody,
+        variables,
+      ) as Record<string, unknown>;
+      const confirmBody = materializeValue(
+        setup.confirmBody,
+        variables,
+      ) as Record<string, unknown>;
+
+      await uploadOperationalDocument(
+        page.context().request,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      );
+
+      record({
+        kind: "setup-document-upload",
+        journey: journey.id,
+        surface: journey.surface,
+        actorScope: journey.actorScope,
+        intentUrl: new URL(intentPath, origin).toString(),
+        confirmUrl: new URL(confirmPath, origin).toString(),
+      });
+      continue;
+    }
+
+    const body = setup.body
+      ? materializeValue(setup.body, variables)
+      : undefined;
     const response = await page
       .context()
       .request.fetch(
