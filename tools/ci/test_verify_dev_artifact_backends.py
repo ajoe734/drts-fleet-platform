@@ -598,6 +598,29 @@ refresh_token=SYNTHETIC_REFRESH
         finally:
             sys.stderr = original_stderr
             
+        # Test 1b: Additional explicit regression fixtures for tricky edge cases
+        edge_fixtures = [
+            'Request body: {"password":"prefix}SYNTHETIC_PASSWORD"}',
+            'Request body: {"metadata":{},"access_token":"SYNTHETIC_ACCESS","data":"SYNTHETIC_BODY"}',
+            '== headers start ==\nCookie: session=SYNTHETIC_COOKIE\n',
+            'Request body: api_key=SYNTHETIC_KEY&payload=SYNTHETIC_BODY'
+        ]
+        
+        for edge_fixture in edge_fixtures:
+            err_edge = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=edge_fixture, output="normal stdout")
+            mock_run.side_effect = err_edge
+            
+            captured_stderr_edge = io.StringIO()
+            sys.stderr = captured_stderr_edge
+            try:
+                with self.assertRaises(subprocess.CalledProcessError) as cm_edge:
+                    self.mod.run(["gcloud", "logging", "read"])
+                out_edge = captured_stderr_edge.getvalue()
+                self.assertNotIn("SYNTHETIC", out_edge, f"Leak detected in edge fixture:\n{edge_fixture}\nOutput:\n{out_edge}")
+                self.assertEqual(cm_edge.exception.stderr, edge_fixture)
+            finally:
+                sys.stderr = original_stderr
+                
         # Test 2: Successful run does not print to stderr or alter stdout
         mock_run.side_effect = None
         mock_result = MagicMock()

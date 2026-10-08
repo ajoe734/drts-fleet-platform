@@ -20,29 +20,33 @@ def _sanitize_stderr(text):
     if not text:
         return text
 
-    # 1. Exclude bodies entirely (JSON blocks)
-    text = re.sub(r'\{.*?\}', '{ ***REDACTED BODY*** }', text, flags=re.DOTALL)
+    # 1. Exclude bodies entirely (JSON and non-JSON, catching multiline up to the next block marker)
+    text = re.sub(r'\{.*\}', '{ ***REDACTED BODY*** }', text, flags=re.DOTALL)
     
-    # 2. Exclude trace blocks if present
-    text = re.sub(r'== headers start ==.*?== headers end ==', '== headers start ==\n***REDACTED HEADERS***\n== headers end ==', text, flags=re.DOTALL)
-    text = re.sub(r'==== request start ====.*?==== request end ====', '==== request start ====\n***REDACTED REQUEST***\n==== request end ====', text, flags=re.DOTALL)
-    text = re.sub(r'==== response start ====.*?==== response end ====', '==== response start ====\n***REDACTED RESPONSE***\n==== response end ====', text, flags=re.DOTALL)
+    # 2. Exclude trace blocks if present, explicitly dealing with truncated blocks
+    text = re.sub(r'== headers start ==.*?(?:== headers end ==|$)', '== headers start ==\n***REDACTED HEADERS***\n== headers end ==', text, flags=re.DOTALL)
+    text = re.sub(r'==== request start ====.*?(?:==== request end ====|$)', '==== request start ====\n***REDACTED REQUEST***\n==== request end ====', text, flags=re.DOTALL)
+    text = re.sub(r'==== response start ====.*?(?:==== response end ====|$)', '==== response start ====\n***REDACTED RESPONSE***\n==== response end ====', text, flags=re.DOTALL)
 
     # 3. Redact individual tokens and headers
     text = re.sub(r"(?i)^(authorization:\s*)[^\n]+", r"\1***REDACTED***", text, flags=re.MULTILINE)
+    text = re.sub(r"(?i)^(cookie:\s*)[^\n]+", r"\1***REDACTED***", text, flags=re.MULTILINE)
     text = re.sub(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9_.~+/-]+=*)", r"\1 ***REDACTED***", text)
     text = re.sub(r"(?i)ya29\.[a-zA-Z0-9_-]+", "ya29.***REDACTED***", text)
     text = re.sub(r"(?i)ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+", "ey***REDACTED***", text)
     
-    # 4. Explicit fallback redaction for named keys in case they appear outside JSON
-    keys = ["refresh_token", "client_secret", "private_key", "password", "secret", "Authorization"]
+    # 4. Explicit fallback redaction for named keys in case they appear outside blocks
+    keys = ["refresh_token", "client_secret", "private_key", "password", "secret", "Authorization", "access_token", "api_key"]
     for k in keys:
         text = re.sub(rf'(?i)("{k}"\s*:\s*")[^"]+(")', rf'\1***REDACTED***\2', text)
         text = re.sub(rf'(?i)({k}=)[^\s&]+', rf'\1***REDACTED***', text)
 
-    # 5. Redact PEM keys
-    text = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----***REDACTED***-----END PRIVATE KEY-----", text, flags=re.DOTALL)
+    # 5. Redact PEM keys (which can be truncated)
+    text = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)", "-----BEGIN PRIVATE KEY-----***REDACTED***-----END PRIVATE KEY-----", text, flags=re.DOTALL)
     
+    # Also exclude non-JSON Request bodies:
+    text = re.sub(r'(?i)(Request body:\s*).*?(?=\n[A-Z]+: |\n={4}|$)', r'\1***REDACTED BODY***', text, flags=re.DOTALL)
+
     return text
 
 def run(cmd, **kwargs):
