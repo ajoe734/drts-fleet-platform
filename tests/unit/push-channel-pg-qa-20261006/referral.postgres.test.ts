@@ -204,6 +204,16 @@ describe.skipIf(!databaseUrl)(
       const frozen = await h.taxi.findOrderPartnerNotificationRoute(
         first.orderId,
       );
+      vi.restoreAllMocks();
+      expect(frozen).not.toBeNull();
+      for (const writer of [h.taxi, h.owned]) {
+        expect(
+          await writer.writeOrderPartnerNotificationRoute({
+            ...frozen!,
+            partnerUserRef: "attempted-recipient-replacement",
+          }),
+        ).toEqual(frozen);
+      }
       const replay = await b.service.createReferralPassengerBooking(
         b.command,
         b.identity,
