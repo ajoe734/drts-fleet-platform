@@ -4,6 +4,24 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008 — planning resolved; acceptance audit routed
+
+No product decision or scope cut is needed. The original harness repair is
+reviewed and merged; existing Operator run `37776386019` completed successfully
+on 2026-10-08 at 12:30:46Z against exact source `65d4285d4930f3625d4b8c3f4af4f5b1dd94f392`.
+Its eight passing cases include all original genuine/framing controls with zero
+skips and a real daily version transition. Supervisor/Operator must audit F2
+main/daily/bytecode content/signatures and independent private IAM, restoration
+and exact-generation cleanup evidence before recording the original three keys.
+Do not repeat the run merely because older notes say in-progress or unrun.
+
+Preserve Gemini2/Codex ownership and the blocked parent until acceptance evidence
+is reconciled. The planning worker's dispatch guard rejected parent and helper
+disposition writes; Supervisor must record the concrete next step and
+`resolved_parent_status: blocked` before this helper can be handed off for merge.
+No new login, IAM grant, source repair, deployment or acceptance waiver is implied.
+See the [decision and evidence ledger](support/unblock/SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008/SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-SR-GCP-ARTIFACT-ACTIVATION-20261004 — planning resolved; hosted activation pending
 
 No new product choice or acceptance scope cut is needed. PRD §9.8.3 and service
