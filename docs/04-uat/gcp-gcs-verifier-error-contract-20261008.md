@@ -100,12 +100,12 @@ mutation. Genuine denial remains for Operator after source integration.
 
 SDK source SHA256:
 
-| File under snap revision 503 | SHA256 |
-| --- | --- |
-| `lib/googlecloudsdk/core/credentials/store.py` | `c282350721554451173b7721c9b09cd8b2b70d396557dc09e79771f5a2607907` |
+| File under snap revision 503                                     | SHA256                                                             |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `lib/googlecloudsdk/core/credentials/store.py`                   | `c282350721554451173b7721c9b09cd8b2b70d396557dc09e79771f5a2607907` |
 | `lib/googlecloudsdk/core/credentials/google_auth_credentials.py` | `10bfbd2989207638461fde3544fb7619d7430980999e8b47e00c37c45441b413` |
-| `lib/third_party/google/auth/credentials.py` | `53a1ff1fdb2877110ea7e7182398d2b63a5151a6c5c3fa489dae2ca385d2ad9f` |
-| `lib/third_party/google/auth/_credentials_base.py` | `2b1742672a05cafadf5a125b367b98929521c6cd1b99bc58bdc1fcfb1a79854b` |
+| `lib/third_party/google/auth/credentials.py`                     | `53a1ff1fdb2877110ea7e7182398d2b63a5151a6c5c3fa489dae2ca385d2ad9f` |
+| `lib/third_party/google/auth/_credentials_base.py`               | `2b1742672a05cafadf5a125b367b98929521c6cd1b99bc58bdc1fcfb1a79854b` |
 
 ## Finding and acceptance ledger
 
@@ -117,24 +117,24 @@ verifier blob. Tested test-file SHA256:
 `143981f9febb81c25ae885915439f41744f6f642f30fa7d3c4b074522df76e82`.
 The final full candidate SHA/branch/PR are recorded by lifecycle handoff.
 
-| Finding / acceptance | Source and regression | Old → repaired result | Commands / evidence / exit | Pending or limitation |
-| --- | --- | --- | --- | --- |
-| Confirmed Test11 typed-error rejection | `test_gcs`; `test_gcs_success` uses actual hosted error shape | 5f57 fails at Test11; both rejected intermediate candidates and repaired source reach Test12b with exact cleanup | C1, `E/compare.json`, exit0 | Subprocess and HTTPS transport are synthetic; no hosted rerun |
-| R1 repeated quoted-resource cause defect | `is_gcs_precondition_failed`; `test_gcs_precondition_failed_classifier`, `test_gcs_cas_rejection_preserves_exception_and_cleanup` | Both adjacent rejected candidates return true and report production Test11 PASS for actual not-found; repair returns false, re-raises original exception, skips Test12 and cleans exact generations | C1/C3, compare and verifier logs, exit0 | Unknown formats deliberately fail closed |
-| R1 original fixtures and exception contract | Tests4/8/11, `run`; class/path/body/warning/status-prefix/secret-shaped negatives and typed/HTTP positives | All prior cases retained; new regression covers all three CAS sites, exact exception identity/properties and cleanup; logging diagnostic tests retained | C3, 62 PASS, exit0 | External subprocess responses modeled, no classification/control-flow mock |
-| R2 official-endpoint denial boundary | `assert_gcs_unauthenticated_denial`, `_RejectGcsRedirects`; HTTP/redirect/transport/recovery tests | Both intermediate candidates follow official302→foreign403 and pass; repair rejects before any second request. 401/403 pass; 200/404/500/503, 301/302/303/307/308 and transport/timeout fail with closed responses and exact cleanup. Recovery generation/bytes corruption fails | C1/C3; compare plus verifier log, exit0 | Real urllib opener/redirect/HTTPErrorProcessor; only HTTPS transport fake. No actual GCS denial |
-| R3 inaccurate evidence and SDK preflight claim | This retained artifact; installed SDK loader and before_request | Corrected old assertion, removed obsolete quote-stripping/phrase-search descriptions, replaced branch-only identity and nonexistent-old-helper claim, recorded source hashes and actual SDK behavior | C2, `E/sdk-probe.json`, exit0 | SDK probe is not full storage cp or hosted SDK |
-| `gcs_verifier_expected_error_and_negative_control_regression` | Above regression cases plus provider/readiness/activation suites | Local evidence ready for independent review: C3 62 PASS; C4 17 PASS; C5 13 PASS / 3 SKIP | C1–C6 all exit0; E logs | Source acceptance not self-approved; skipped real-container tests are not passes |
-| `gcs_verifier_exact_sha_review_ci_merge` | New candidate must receive Codex2 review, matching CI and true merge/source blob comparison | Pending lifecycle; no approval or merge claimed | Final SHA/PR supplied through handoff | Existing Gemini2 PR2438 is a rejected predecessor, not this candidate |
-| Parent GCS/engine/C125/final16of16 gates | Original activation task and hosted receipts | Unchanged, outstanding | Original task machine truth | Operator-only live retest after exact source integration; no waiver or worker dispatch |
+| Finding / acceptance                                          | Source and regression                                                                                                             | Old → repaired result                                                                                                                                                                                                                                                            | Commands / evidence / exit              | Pending or limitation                                                                           |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Confirmed Test11 typed-error rejection                        | `test_gcs`; `test_gcs_success` uses actual hosted error shape                                                                     | 5f57 fails at Test11; both rejected intermediate candidates and repaired source reach Test12b with exact cleanup                                                                                                                                                                 | C1, `E/compare.json`, exit0             | Subprocess and HTTPS transport are synthetic; no hosted rerun                                   |
+| R1 repeated quoted-resource cause defect                      | `is_gcs_precondition_failed`; `test_gcs_precondition_failed_classifier`, `test_gcs_cas_rejection_preserves_exception_and_cleanup` | Both adjacent rejected candidates return true and report production Test11 PASS for actual not-found; repair returns false, re-raises original exception, skips Test12 and cleans exact generations                                                                              | C1/C3, compare and verifier logs, exit0 | Unknown formats deliberately fail closed                                                        |
+| R1 original fixtures and exception contract                   | Tests4/8/11, `run`; class/path/body/warning/status-prefix/secret-shaped negatives and typed/HTTP positives                        | All prior cases retained; new regression covers all three CAS sites, exact exception identity/properties and cleanup; logging diagnostic tests retained                                                                                                                          | C3, 62 PASS, exit0                      | External subprocess responses modeled, no classification/control-flow mock                      |
+| R2 official-endpoint denial boundary                          | `assert_gcs_unauthenticated_denial`, `_RejectGcsRedirects`; HTTP/redirect/transport/recovery tests                                | Both intermediate candidates follow official302→foreign403 and pass; repair rejects before any second request. 401/403 pass; 200/404/500/503, 301/302/303/307/308 and transport/timeout fail with closed responses and exact cleanup. Recovery generation/bytes corruption fails | C1/C3; compare plus verifier log, exit0 | Real urllib opener/redirect/HTTPErrorProcessor; only HTTPS transport fake. No actual GCS denial |
+| R3 inaccurate evidence and SDK preflight claim                | This retained artifact; installed SDK loader and before_request                                                                   | Corrected old assertion, removed obsolete quote-stripping/phrase-search descriptions, replaced branch-only identity and nonexistent-old-helper claim, recorded source hashes and actual SDK behavior                                                                             | C2, `E/sdk-probe.json`, exit0           | SDK probe is not full storage cp or hosted SDK                                                  |
+| `gcs_verifier_expected_error_and_negative_control_regression` | Above regression cases plus provider/readiness/activation suites                                                                  | Local evidence ready for independent review: C3 62 PASS; C4 17 PASS; C5 13 PASS / 3 SKIP                                                                                                                                                                                         | C1–C6 all exit0; E logs                 | Source acceptance not self-approved; skipped real-container tests are not passes                |
+| `gcs_verifier_exact_sha_review_ci_merge`                      | New candidate must receive Codex2 review, matching CI and true merge/source blob comparison                                       | Pending lifecycle; no approval or merge claimed                                                                                                                                                                                                                                  | Final SHA/PR supplied through handoff   | Existing Gemini2 PR2438 is a rejected predecessor, not this candidate                           |
+| Parent GCS/engine/C125/final16of16 gates                      | Original activation task and hosted receipts                                                                                      | Unchanged, outstanding                                                                                                                                                                                                                                                           | Original task machine truth             | Operator-only live retest after exact source integration; no waiver or worker dispatch          |
 
 Verifier source SHA256 comparison:
 
-| Source commit | SHA256 |
-| --- | --- |
-| `5f57e39bd2eb00ebdffba0a966ed772629a468d0` | `e23136e5f3200edbed7224f353bdbf03f7e8265141949d777ee2fd9e63135d48` |
-| `8ddeec4081b7fbaa53a41d03037bc55a5542e030` | `23bc13ac9fe6bc7b9489508a2d91702d837726e97da7d7d2ddafc61fd575dda6` |
-| `de1da70ff4cd499aad978680d3c7a5eacd58daa2` | `dbc85782943ee9dd7a2ec1bc21a78253574a5ea4de80a9df2474c8146d066c71` |
+| Source commit                                       | SHA256                                                             |
+| --------------------------------------------------- | ------------------------------------------------------------------ |
+| `5f57e39bd2eb00ebdffba0a966ed772629a468d0`          | `e23136e5f3200edbed7224f353bdbf03f7e8265141949d777ee2fd9e63135d48` |
+| `8ddeec4081b7fbaa53a41d03037bc55a5542e030`          | `23bc13ac9fe6bc7b9489508a2d91702d837726e97da7d7d2ddafc61fd575dda6` |
+| `de1da70ff4cd499aad978680d3c7a5eacd58daa2`          | `dbc85782943ee9dd7a2ec1bc21a78253574a5ea4de80a9df2474c8146d066c71` |
 | `f5c4ad2f6959ecdfa1818c9f4ed0700f254a475a` (repair) | `287c7116e22387eaca3aaae4045c312b4040fd0f987fbc71b5b33eec7cb556fd` |
 
 ## Reproduction commands and limits
@@ -167,7 +167,7 @@ env -u CLAMD_IMAGE -u GATEWAY_IMAGE PYTHONDONTWRITEBYTECODE=1 python3 -m unittes
 
 # C6: affected source/doc checks
 git diff --check
-pnpm exec prettier --check docs/04-uat/gcp-gcs-verifier-error-contract-20261008.md
+npm exec --yes --package=prettier@3.8.2 -- prettier --check docs/04-uat/gcp-gcs-verifier-error-contract-20261008.md
 ```
 
 Tests call production functions. Mock scope is subprocess execution and HTTPS
@@ -176,3 +176,8 @@ an HTTPError at OpenerDirector.open to verify URL rejection and response closure
 No product server, browser server, Docker infrastructure, cloud workflow,
 principal/key/IAM grant, provider variable or deployment was started/changed.
 Local unittest success is source regression evidence only.
+
+The initial local `pnpm exec prettier` write/check attempts exited1 because this
+worktree lacks the linked Prettier module. The lockfile pins 3.8.2; C6 uses that
+exact version through npm exec without changing repository dependencies. The
+pinned formatter write/check completed successfully.
