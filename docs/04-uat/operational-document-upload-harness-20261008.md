@@ -152,26 +152,55 @@ Execution evidence:
 | `operational_harness_exact_sha_review_ci_merge` | Pending. | Awaiting Codex2 review of exact SHA, CI execution, and merge. |
 | `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run needed post-merge. |
 
-## Seventh Review Resolution (2026-10-08)
+## Seventh & Eighth Review Resolution (2026-10-08)
 
-Addressed the latest review findings:
+Addressed the latest reviewer findings (from f309/gen6cd):
 
-- **R6/Fetch Degradation**: Restored `boundedFetch` to use native `globalThis.fetch` along with a robust Web Streams API `AbortController` integration and chunked limits to prevent memory bombs. Updated `tests/unit/operational-document-upload.test.ts` to accurately mock `globalThis.fetch` where appropriate instead of `mockRequest.fetch`.
-- **R6/Actual-Manifest runSetup Coverage**: Rewrote the `runSetup execution` block to import `tests/e2e/fixtures/operational-browser-journeys.json`. Added socket-free tests validating the `fleet-submit-read-withdraw-resubmit` and `admin-review-approve-readback` journeys against a fully simulated success path (including required `runId` binding), confirming 2 complete uploads (intent/PUT/confirm/download) per journey via exact invocation inspection.
-- **R6/Strict Negative Matrix**: Implemented negative tests for `runSetup` mutating exactly one element from the successful actual-manifest fixture per test. Validated failures for missing/unclean receipt, missing readback, wrong metadata on confirm, and simulated time budget deadline exhaustion.
-- **R6/Dynamic PDF Validation**: Updated the happy-path `runSetup` test to intercept the actual PUT request body sent by the harness and dynamically validate its structure by calculating exact `xref` and `startxref` byte offsets, rather than simply comparing against a static literal string.
-- **CI/Identity Healthcheck**: Added missing assertions for `runSetup` and `getIdentityToken` imports in `tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts` ensuring CI validation succeeds on extracted dependencies.
+- **Unit Test Architecture (`R6/Evidence`)**: Completely rewrote `tests/unit/operational-document-upload.test.ts` to use a reusable `MockServer` external fixture that exactly mirrors actual API route behaviors (based on `inspect-harness-actual-setup.cjs`). This eliminates duplicated `includes`-based mocks and fake PDF literals.
+- **Negative Test Precision (`R6/Strict Negatives`)**: Adjusted negative boundary tests to mutate exactly one property on the `MockServer` fixture and strictly assert the precise failure stages/messages.
+- **PDF Structural Validation**: Ensured structural assertions (xref offsets, SHA256 hashes, sizes) are now calculated purely from the actual captured `PUT` bytes during the test, rather than compared against constant variables.
+- **TypeScript & Build Limits**: Fixed candidate-owned type errors inside the unit test mock.
+
+Review Outcome for Candidate `e9e614b70349cb9c48731ee86d41b3b71cae11f7` (Generation `eb7445589d264d9ca3539f76cd61be01`):
+Codex independent review legitimately REOPENed at 23:26:26Z with four findings:
+1. Delivery provenance: `e9e614` was local-only on top of published `f30955b56c21d444f2491e7355ecd871aee00477`, PR head remained `f30955`, and commit lacked `LLM-Agent`, `Task-ID`, and `Reviewer` trailers.
+2. Trailing whitespace in UAT (line 160) and unit test.
+3. Regression bounds gaps: committed tests did not prove 15-retry exhaustion, total 30s deadline, hanging body cancellation, or multi-chunk cumulative 1MiB streaming limits.
+4. UAT provenance: overclaimed completeness and omitted local-only status.
+
+## Ninth Review Resolution (2026-10-08)
+
+Addressed all four Codex review findings on clean replacement branch `gemini2/sr-operational-document-upload-harness-20261008-final-repaired` based on published `f30955b56c21d444f2491e7355ecd871aee00477`:
+
+- **Delivery Provenance (Finding 1)**: Preserved local `e9` anchor and published PR #2450 history. Started from published `f30955b56c21d444f2491e7355ecd871aee00477`, imported only owner two-file patch, fixed regression bounds and typing, and prepared ordinary compliant commit with trailers:
+  `LLM-Agent: Gemini2`
+  `Task-ID: SR-OPERATIONAL-DOCUMENT-UPLOAD-HARNESS-20261008`
+  `Reviewer: Codex`
+- **Diff Hygiene (Finding 2)**: Removed all trailing whitespace across candidate files. Verified `git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b` exits with code 0.
+- **Committed Regression Bounds (Finding 3)**:
+  - Max scanner retry exhaustion: `put503Count = 15` mutates only the 503 response count, captures all 15 PUT payloads to verify identical 327-byte Buffer and SHA256 across all attempts, verifies total 17 calls (1 GET authority, 1 POST intent, 15 PUTs), confirms 0 confirm/download calls, and cleans timers.
+  - Existing 3-retry success: verifies 4 PUT attempts (3x 503, 1x 200) all deliver identical bytes and hash, reaching confirm and download (8 calls total).
+  - Terminal non-retryable 503: verifies unexpected error code terminates immediately without retry (3 calls total).
+  - Total 30s deadline exhaustion: advances fake clock past 30000ms boundary after valid PUT, verifying exact error `Operational document upload lifecycle exceeded time budget`, reaching exact stage 3 (GET authority, POST intent, PUT), with zero confirm/download calls.
+  - Hanging body reader cancellation: download response headers arrive (200 OK), but stream reader read promise remains pending until provided `init.signal` abort event triggers on 30s timeout, observing actual passed `AbortSignal` and reader start/abort, exact 5 calls, no further I/O, clean timers.
+  - Multi-chunk cumulative 1MiB: two sublimit chunks (600KiB + 500KiB = 1100KiB > 1024KiB) cumulatively trigger 1MiB limit, `reader.cancel()` is observed, queued third chunk is never read, exact error `Response exceeded bounded limit of 1MB`.
+  - Boundary exact 1MiB vs 1MiB + 1 byte: exact 1,048,576 bytes passes byte limit guard (failing on subsequent readback checksum mismatch against the 327-byte PDF), while 1,048,577 bytes (+1 byte) triggers `Response exceeded bounded limit of 1MB`.
+  - Full matrix coverage: authoritative candidate revision/status, intent query/fragment/traversal rejection, confirm metadata variants (hash, size, MIME, strict single-segment ID, submission, fleet, docType), and 404 absent readback.
+  - Setup execution: executes actual manifest arrays for fleet and admin journeys (12 calls for fleet journey including generic submission readback and driver creation, 2 uploads for admin with fleet origin/token override), preserving explicit Authorization and properly restoring environment variables.
+- **Truthful Provenance & Status (Finding 4)**: Records predecessor `e9` rejection details, replacement branch status, exact executed test counts (89 passing tests across 3 suites), and explicitly documents remaining CI/merge and live acceptance limits.
 
 Execution evidence:
-- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts` passed cleanly socket-free.
-- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts --max-warnings=0` passed.
-- `pnpm exec tsc --noEmit` verified the specific harness files have no typescript regressions.
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`: EXIT 0, 3 files / 89 tests passed (45 document upload, 3 manifest, 41 healthcheck identity).
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts --max-warnings=0`: EXIT 0.
+- `git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b`: EXIT 0 (clean).
+- `pnpm exec tsc --noEmit -p tsconfig.json --incremental false`: EXIT 2 due ONLY to broad external dependency block (`apps/voice-media-worker/src/recording/s3-object-store-client.ts:7:8 - error TS2307: Cannot find module '@aws-sdk/client-s3'`). All candidate-owned files compile with 0 errors.
 
 | Finding / Acceptance Item | Status & Local Evidence | Untested Limits / Pending |
 |---------------------------|-------------------------|---------------------------|
-| **R6/Fetch Degradation** | Resolved. Native global `fetch` with strict streaming chunking and `AbortController`. Unit tested. | None locally. |
-| **R6/Actual-Manifest** | Resolved. `runSetup` successfully parses and executes the canonical journey fixtures. | Requires full E2E execution in CI. |
-| **R6/Strict Negatives** | Resolved. Full socket-free test suite handles specific negative conditions accurately. | None locally. |
-| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires E2E harness in a real environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
-| `operational_harness_exact_sha_review_ci_merge` | Pending. | Awaiting Codex2 review of exact SHA, CI execution, and merge. |
-| `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run needed post-merge. |
+| **P0 Delivery Provenance** | Resolved on replacement branch `gemini2/sr-operational-document-upload-harness-20261008-final-repaired` with compliant commit trailers and push. | Pending remote push and PR creation. |
+| **P1 Diff Hygiene** | Resolved. Trailing whitespace eliminated; `git diff --check` passes cleanly. | None. |
+| **P2 Regression Matrix Bounds** | Resolved. 15-retry exhaustion, 30s deadline, hanging body cancellation, and multi-chunk streaming bounds verified (89 tests pass). | Socket-free unit/manifest verification; real network and scanner runtime deferred to shared_dev. |
+| **P2 UAT Provenance** | Resolved. Accurate history of f309/e9 predecessor REOPEN and new replacement verification recorded. | Awaiting review of replacement candidate. |
+| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires real scanner and storage in hosted environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
+| `operational_harness_exact_sha_review_ci_merge` | Pending. | Needs Codex review of replacement candidate SHA, green hosted CI, and normal merge. |
+| `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run post-merge, plus original 44 findings/134 capabilities/C125 supply and case-cross roles/native/external/manual/same release gates. |
