@@ -144,16 +144,19 @@ def container_logs_since(container_name, since):
     res = run_cmd(["docker", "logs", "--since", since, container_name], timeout=15)
     return (res.stdout or "") + (res.stderr or "")
 
-def container_published_port(container_name, container_port):
+def container_published_port(container_name, container_port, timeout=10.0):
     """Reads back the host port Docker actually published for
     `container_port` on `container_name` (set via `-p 0:<container_port>` at
     creation) -- the same readback a real caller would use, not a value
     this harness invents."""
-    res = run_cmd(["docker", "port", container_name, str(container_port)])
-    if res.returncode != 0 or not res.stdout.strip():
+    try:
+        res = run_cmd(["docker", "port", container_name, str(container_port)], timeout=timeout)
+        if res.returncode != 0 or not res.stdout.strip():
+            return None
+        line = res.stdout.strip().splitlines()[0]
+        return int(line.rsplit(":", 1)[1])
+    except subprocess.TimeoutExpired:
         return None
-    line = res.stdout.strip().splitlines()[0]
-    return int(line.rsplit(":", 1)[1])
 
 def start_gateway_sidecar(gateway_image, gateway_container_name, clamd_container_name, ready_host_dir, clamd_port=3310):
     """Starts the real gateway image (operations/artifact-scanner/gateway,
@@ -203,6 +206,8 @@ def gateway_scan(host_port, data, content_type="application/pdf", timeout=10):
             return exc.code, (json.loads(body) if body else None)
         except (ValueError, TypeError):
             return exc.code, None
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        return None, str(exc)
 
 # Mirrors clamd-entrypoint.sh#daily_reference_file's tie-break: equal
 # versions -> .cld (incremental patch) wins; otherwise the strictly
@@ -356,6 +361,8 @@ def poll_genuine_watchdog_renewal(container_name, expected_ref, expected_ref_ver
                     res_logs = bounded_run(["docker", "logs", "--since", unchanged_time, container_name])
                     logs = res_logs.stdout + res_logs.stderr
                     if expected_pattern.search(logs):
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"Renewal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
                         marker_mtime_after_unchanged = current_marker_mtime
                         watchdog_output = logs
                         break
@@ -393,6 +400,8 @@ def poll_genuine_marker_removal(container_name, timeout_s=30):
             res1 = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready"])
             res2 = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
             if res1.returncode != 0 and res2.returncode != 0:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Removal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
                 removed = True
                 break
             else:
@@ -429,6 +438,8 @@ def poll_genuine_activation(container_name, new_expected_version, timeout_s=30):
                 if match:
                     activated_loaded = match.group(1)
                     if activated_loaded == new_expected_version:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"Activation loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
                         break
                     else:
                         last_diag = f"loaded version {activated_loaded} != expected {new_expected_version}"
@@ -463,6 +474,8 @@ def poll_genuine_pending_version(container_name, seed_version, timeout_s=60):
         try:
             res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
             if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != seed_version:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Pending loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
                 new_expected_version = res.stdout.strip()
                 break
             else:
@@ -955,8 +968,10 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 while True:
                     remain = port_deadline - time.monotonic()
                     if remain <= 0: break
-                    gateway_port = container_published_port(self.container_name, 8080)
+                    gateway_port = container_published_port(self.container_name, 8080, timeout=min(2.0, remain))
                     if gateway_port:
+                        if time.monotonic() >= port_deadline:
+                            gateway_port = None
                         break
                     time.sleep(max(0, min(1, port_deadline - time.monotonic())))
                 self.assertIsNotNone(gateway_port, "Gateway's published port 8080 never became available")
@@ -1310,13 +1325,19 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             while True:
                 remain = deadline - time.monotonic()
                 if remain <= 0: break
-                res = run_cmd([
-                    "docker", "exec", self.clamd_container_name, "sh", "-c",
-                    f"printf 'zPING\\0' | nc -w 3 127.0.0.1 {RELAY_LISTEN_PORT}",
-                ])
-                if res.returncode == 0 and "PONG" in res.stdout:
-                    relay_ready = True
-                    break
+                try:
+                    res = run_cmd([
+                        "docker", "exec", self.clamd_container_name, "sh", "-c",
+                        f"printf 'zPING\\0' | nc -w 3 127.0.0.1 {RELAY_LISTEN_PORT}",
+                    ], timeout=min(4.0, remain))
+                    if res.returncode == 0 and "PONG" in res.stdout:
+                        if time.monotonic() >= deadline:
+                            relay_ready = False
+                        else:
+                            relay_ready = True
+                        break
+                except subprocess.TimeoutExpired:
+                    pass
                 time.sleep(max(0, min(1, deadline - time.monotonic())))
             self.assertTrue(relay_ready, "Relay never answered a passthrough PING via the real clamd")
 
@@ -1333,8 +1354,10 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             while True:
                 remain = deadline - time.monotonic()
                 if remain <= 0: break
-                gateway_port = container_published_port(self.clamd_container_name, 8080)
+                gateway_port = container_published_port(self.clamd_container_name, 8080, timeout=min(2.0, remain))
                 if gateway_port:
+                    if time.monotonic() >= deadline:
+                        gateway_port = None
                     break
                 time.sleep(max(0, min(1, deadline - time.monotonic())))
             self.assertIsNotNone(gateway_port, "Gateway's published port 8080 never became available")
@@ -1350,8 +1373,10 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             while True:
                 remain = deadline - time.monotonic()
                 if remain <= 0: break
-                ok_status, ok_body = gateway_scan(gateway_port, b"clean data", timeout=max(1, min(10, remain)))
+                ok_status, ok_body = gateway_scan(gateway_port, b"clean data", timeout=min(2.0, remain))
                 if ok_status == 200:
+                    if time.monotonic() >= deadline:
+                        ok_status = None
                     break
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
             self.assertEqual(
@@ -1421,8 +1446,10 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             while True:
                 remain = deadline - time.monotonic()
                 if remain <= 0: break
-                recovered_status, recovered_body = gateway_scan(gateway_port, b"clean data", timeout=max(1, min(10, remain)))
+                recovered_status, recovered_body = gateway_scan(gateway_port, b"clean data", timeout=min(2.0, remain))
                 if recovered_status == 200:
+                    if time.monotonic() >= deadline:
+                        recovered_status = None
                     break
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
             self.assertEqual(

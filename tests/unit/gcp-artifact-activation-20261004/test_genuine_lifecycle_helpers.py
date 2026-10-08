@@ -340,6 +340,90 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         ver = harness.poll_genuine_pending_version("container", "123", timeout_s=10)
         self.assertEqual(ver, "456")
 
+    def test_watchdog_renewal_delayed_log(self):
+        import subprocess
+        import re
+        self.current_time = 0.0
+
+        def run_cmd_side_effect(cmd, **kwargs):
+            elapsed = self.current_time
+            cmd_str = " ".join(cmd)
+            self.current_time += 1.0
+
+            if "stat" in cmd_str and "ready" in cmd_str:
+                return self._make_res(stdout="123456\n")
+            if "logs" in cmd_str:
+                if elapsed < 5.0:
+                    return self._make_res(stdout="Other logs\n")
+                return self._make_res(stdout="Watchdog updated successfully\n")
+            return self._make_res(returncode=1)
+
+        self.mock_run_cmd.side_effect = run_cmd_side_effect
+        mtime, logs = harness.poll_genuine_watchdog_renewal(
+            "container", "daily.cvd", "123", "123450", "since_time",
+            re.compile("Watchdog updated successfully"), "/db", timeout_s=10
+        )
+        self.assertEqual(mtime, "123456")
+        self.assertIn("Watchdog updated", logs)
+        self.assertGreaterEqual(self.current_time, 5.0)
+
+    def test_watchdog_renewal_late_success_rejected(self):
+        import subprocess
+        import re
+        self.current_time = 0.0
+
+        def run_cmd_side_effect(cmd, **kwargs):
+            self.current_time += 15.0  # Take longer than timeout_s=10
+            cmd_str = " ".join(cmd)
+            if "stat" in cmd_str:
+                return self._make_res(stdout="123456\n")
+            if "logs" in cmd_str:
+                return self._make_res(stdout="Watchdog updated successfully\n")
+            return self._make_res(returncode=1)
+
+        self.mock_run_cmd.side_effect = run_cmd_side_effect
+        with self.assertRaisesRegex(TimeoutError, "Renewal loop incomplete"):
+            harness.poll_genuine_watchdog_renewal(
+                "container", "daily.cvd", "123", "123450", "since_time",
+                re.compile("Watchdog updated successfully"), "/db", timeout_s=10
+            )
+
+    def test_marker_removal_late_success_rejected(self):
+        import subprocess
+        self.current_time = 0.0
+
+        def run_cmd_side_effect(cmd, **kwargs):
+            self.current_time += 15.0
+            return self._make_res(returncode=1) # Missing file implies removed
+
+        self.mock_run_cmd.side_effect = run_cmd_side_effect
+        with self.assertRaisesRegex(TimeoutError, "Removal loop incomplete"):
+            harness.poll_genuine_marker_removal("container", timeout_s=10)
+
+    def test_activation_late_success_rejected(self):
+        import subprocess
+        self.current_time = 0.0
+
+        def run_cmd_side_effect(cmd, **kwargs):
+            self.current_time += 15.0
+            return self._make_res(stdout="ClamAV 1.0.0/789/date\n")
+
+        self.mock_run_cmd.side_effect = run_cmd_side_effect
+        with self.assertRaisesRegex(TimeoutError, "Activation loop incomplete"):
+            harness.poll_genuine_activation("container", "789", timeout_s=10)
+
+    def test_pending_version_late_success_rejected(self):
+        import subprocess
+        self.current_time = 0.0
+
+        def run_cmd_side_effect(cmd, **kwargs):
+            self.current_time += 15.0
+            return self._make_res(stdout="456\n")
+
+        self.mock_run_cmd.side_effect = run_cmd_side_effect
+        with self.assertRaisesRegex(TimeoutError, "Pending loop incomplete"):
+            harness.poll_genuine_pending_version("container", "123", timeout_s=10)
+
 if __name__ == "__main__":
 
     unittest.main()
