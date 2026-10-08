@@ -24,7 +24,7 @@ export class PostgresHarness {
   private readonly name = `push_qa_${randomUUID().replaceAll("-", "")}`;
   private admin?: InstanceType<typeof Pool>;
   private created = false;
-  private activeName?: string;
+  private activeName: string | undefined;
   private poolClosed = false;
   pool!: InstanceType<typeof Pool>;
   database!: DatabaseService;
