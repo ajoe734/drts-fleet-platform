@@ -114,7 +114,7 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
 
       expect(dashboardSource).toContain('data-drt-operation="channel-overview-export"');
       expect(dashboardSource).toContain("statements/${encodeURIComponent(currentPeriod)}/artifact");
-      expect(dashboardSource).toContain("download={`referral-statement-${currentPeriod}.csv`}");
+      expect(dashboardSource).not.toContain("download={`referral-statement-${currentPeriod}.csv`}");
     });
   });
 });

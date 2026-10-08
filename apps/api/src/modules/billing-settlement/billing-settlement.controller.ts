@@ -56,6 +56,7 @@ import {
   IdempotencyService,
 } from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { authorizeInvoiceTenant } from "./invoice-mail.service";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -129,24 +130,26 @@ export class BillingSettlementController {
   getTenantBillingProfile(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.getTenantBillingProfile(
-        this.requireTenantId(tenantId),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
       ),
       requestId,
     );
   }
 
   @Post("tenant/billing/profile")
-  updateTenantBillingProfile(
+  async updateTenantBillingProfile(
     @Body() command: UpdateTenantBillingProfileCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.updateTenantBillingProfile(
-        this.requireTenantId(tenantId),
+      await this.billingSettlementService.updateTenantBillingProfile(
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:write"),
         command,
         requestId,
       ),
@@ -159,10 +162,11 @@ export class BillingSettlementController {
     @Body() command: GenerateTenantInvoiceCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
       await this.billingSettlementService.generateTenantInvoice(
-        this.requireTenantId(tenantId),
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:write"),
         command,
         requestId,
       ),
@@ -243,25 +247,27 @@ export class BillingSettlementController {
   }
 
   @Get("tenant/invoices")
-  listTenantInvoices(
+  async listTenantInvoices(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
-    const data = this.billingSettlementService.listTenantInvoicesRuntime(
-      this.requireTenantId(tenantId),
+    const data = await this.billingSettlementService.listTenantInvoicesFresh(
+      authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
     );
     return toApiSuccessEnvelope(data, requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")
-  getTenantInvoice(
+  async getTenantInvoice(
     @Param("invoiceId") invoiceId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getTenantInvoice(
-        this.requireTenantId(tenantId),
+      await this.billingSettlementService.getTenantInvoiceFresh(
+        authorizeInvoiceTenant(identity, tenantId, "tenant:billing:read"),
         invoiceId,
       ),
       requestId,
@@ -308,13 +314,16 @@ export class BillingSettlementController {
   @Post("driver-fee-plans/publish")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:write")
-  publishDriverFeePlan(
+  async publishDriverFeePlan(
     @Body() command: PublishDriverFeePlanCommand,
     @CurrentIdentity() _identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.publishDriverFeePlan(command, requestId),
+      await this.billingSettlementService.publishDriverFeePlan(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -463,7 +472,7 @@ export class BillingSettlementController {
   @Post("settlement/reconciliation-issues")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:write")
-  createReconciliationIssue(
+  async createReconciliationIssue(
     @Body() command: CreateReconciliationIssueCommand,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
@@ -480,7 +489,7 @@ export class BillingSettlementController {
       command.tenantId = visibility.tenantId;
     }
     return toApiSuccessEnvelope(
-      this.billingSettlementService.createReconciliationIssue(
+      await this.billingSettlementService.createReconciliationIssue(
         command,
         requestId,
       ),
@@ -491,7 +500,7 @@ export class BillingSettlementController {
   @Post("settlement/reconciliation-issues/:issueId/assign")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:write")
-  assignReconciliationIssue(
+  async assignReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: AssignReconciliationIssueCommand,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
@@ -507,7 +516,7 @@ export class BillingSettlementController {
       { issueId },
     );
     return toApiSuccessEnvelope(
-      this.billingSettlementService.assignReconciliationIssue(
+      await this.billingSettlementService.assignReconciliationIssue(
         issueId,
         command,
         requestId,
@@ -519,7 +528,7 @@ export class BillingSettlementController {
   @Post("settlement/reconciliation-issues/:issueId/comment")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:write")
-  addReconciliationIssueComment(
+  async addReconciliationIssueComment(
     @Param("issueId") issueId: string,
     @Body() command: AddReconciliationIssueCommentCommand,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
@@ -535,7 +544,7 @@ export class BillingSettlementController {
       { issueId },
     );
     return toApiSuccessEnvelope(
-      this.billingSettlementService.addReconciliationIssueComment(
+      await this.billingSettlementService.addReconciliationIssueComment(
         issueId,
         command,
         requestId,
@@ -547,7 +556,7 @@ export class BillingSettlementController {
   @Post("settlement/reconciliation-issues/:issueId/resolve")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:write")
-  resolveReconciliationIssue(
+  async resolveReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ResolveReconciliationIssueCommand,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
@@ -563,7 +572,7 @@ export class BillingSettlementController {
       { issueId },
     );
     return toApiSuccessEnvelope(
-      this.billingSettlementService.resolveReconciliationIssue(
+      await this.billingSettlementService.resolveReconciliationIssue(
         issueId,
         command,
         requestId,
@@ -575,7 +584,7 @@ export class BillingSettlementController {
   @Post("settlement/reconciliation-issues/:issueId/reopen")
   @RequireRealms("system", "platform", "tenant", "ops")
   @RequireScopes("billing:write")
-  reopenReconciliationIssue(
+  async reopenReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ReopenReconciliationIssueCommand,
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
@@ -591,7 +600,7 @@ export class BillingSettlementController {
       { issueId },
     );
     return toApiSuccessEnvelope(
-      this.billingSettlementService.reopenReconciliationIssue(
+      await this.billingSettlementService.reopenReconciliationIssue(
         issueId,
         command,
         requestId,

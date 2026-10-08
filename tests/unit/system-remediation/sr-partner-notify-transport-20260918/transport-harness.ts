@@ -160,6 +160,16 @@ export function harness(productionHttps = false) {
     findOrderPartnerNotificationRoute: vi.fn(
       async () => route as OrderPartnerNotificationRoute | null,
     ),
+    // PUSH-CHANNEL-ROUTER-20261006: the router's channel lookup is a
+    // separate query from findOrderPartnerNotificationRoute above (which
+    // some tests override independently to simulate a governance-level
+    // route_missing deep inside deliverPartnerNotification). This harness's
+    // order always has exactly one frozen route — the partner one — so the
+    // channel resolution itself is static regardless of those overrides.
+    resolvePassengerNotificationChannel: vi.fn(async () => ({
+      channel: "partner_webhook" as const,
+      route,
+    })),
     findPartnerNotificationContext: vi.fn(
       async () => stored && structuredClone(stored),
     ),

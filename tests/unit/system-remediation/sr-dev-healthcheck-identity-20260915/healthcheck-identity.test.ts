@@ -43,6 +43,22 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(workflowContent).toContain(
       'curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}"',
     );
+    // CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005: platform admin, ops console,
+    // fleet partner portal and channel partner portal were converted from
+    // allUsers-invokable to private Cloud Run services; their health probes
+    // must authenticate the same way tenant/bank/enterprise already do.
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.platform_admin }}" "${PLATFORM_ADMIN_ID_TOKEN}"',
+    );
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.ops_console }}" "${OPS_CONSOLE_ID_TOKEN}"',
+    );
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.fleet_partner_portal }}" "${FLEET_PARTNER_PORTAL_ID_TOKEN}"',
+    );
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.channel_partner_portal }}" "${CHANNEL_PARTNER_PORTAL_ID_TOKEN}"',
+    );
 
     // Assert Cloud Run infrastructure-reserved path /healthz is not probed over public GFE
     expect(workflowContent).not.toContain(
@@ -53,20 +69,26 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     );
   });
 
-  it("maintains anonymous probes for public services", () => {
+  it("maintains anonymous probes only for the services that stay public", () => {
+    // The API and the referral embed page are explicitly out of scope for
+    // CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 and keep their current
+    // anonymous access.
     expect(workflowContent).toContain(
       'curl_ready "${{ steps.urls.outputs.api }}/health"',
     );
-    expect(workflowContent).toContain(
+
+    // Platform admin, ops console, fleet partner portal and channel partner
+    // portal are now private and must never be probed anonymously again.
+    expect(workflowContent).not.toContain(
       'curl_ready "${{ steps.urls.outputs.platform_admin }}"',
     );
-    expect(workflowContent).toContain(
+    expect(workflowContent).not.toContain(
       'curl_ready "${{ steps.urls.outputs.ops_console }}"',
     );
-    expect(workflowContent).toContain(
+    expect(workflowContent).not.toContain(
       'curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}"',
     );
-    expect(workflowContent).toContain(
+    expect(workflowContent).not.toContain(
       'curl_ready "${{ steps.urls.outputs.channel_partner_portal }}"',
     );
   });
@@ -82,6 +104,54 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(workflowContent).toContain(
       'enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" false)"',
     );
+    expect(workflowContent).toContain(
+      'platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"',
+    );
+    expect(workflowContent).toContain(
+      'ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"',
+    );
+    expect(workflowContent).toContain(
+      'fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"',
+    );
+    expect(workflowContent).toContain(
+      'channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"',
+    );
+  });
+
+  it("explicitly retracts any stray allUsers invoker binding on the four newly private consoles", () => {
+    // Acceptance item 2: confirm (or, if gcloud's flag alone cannot be
+    // trusted, explicitly enforce in the deploy step) that deploying with
+    // the exposure flag false actually removes a pre-existing allUsers
+    // binding rather than merely withholding a new grant.
+    //
+    // CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005 R1: a raw
+    // `gcloud run services remove-iam-policy-binding` call here is not
+    // idempotent -- it exits non-zero when the binding is already absent
+    // (e.g. because the deploy step already retracted it), which would fail
+    // the whole job. The enforcement steps delegate to
+    // enforce-no-public-access.sh, which checks the policy first; that
+    // script's own present/absent/failure behavior is covered by
+    // tests/unit/enforce-no-public-access.test.ts.
+    expect(workflowContent).not.toContain("remove-iam-policy-binding is idempotent");
+    for (const [service, output, flagOutput] of [
+      ["platform-admin-web", "platform_admin_service", "platform_admin_exposure_flag"],
+      ["ops-console-web", "ops_console_service", "ops_console_exposure_flag"],
+      ["fleet-partner-portal-web", "fleet_partner_portal_service", "fleet_partner_portal_exposure_flag"],
+      ["channel-partner-portal-web", "channel_partner_portal_service", "channel_partner_portal_exposure_flag"],
+    ] as const) {
+      expect(workflowContent).toContain(`Enforce no public access — ${service}`);
+      expect(workflowContent).toContain(
+        `if: \${{ needs.prepare.outputs.${flagOutput} == '--no-allow-unauthenticated' }}`,
+      );
+      const stepIndex = workflowContent.indexOf(`Enforce no public access — ${service}`);
+      const nextStepIndex = workflowContent.indexOf("\n      - name:", stepIndex + 1);
+      const stepBody = workflowContent.slice(
+        stepIndex,
+        nextStepIndex === -1 ? undefined : nextStepIndex,
+      );
+      expect(stepBody).toContain("./operations/deployment/enforce-no-public-access.sh");
+      expect(stepBody).toContain(`needs.prepare.outputs.${output}`);
+    }
   });
 
   it("implements tenant-console-web /healthz route handler and includes it in PUBLIC_AUTH_PATHS", async () => {
@@ -128,6 +198,18 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(workflowContent).toContain(
       "Mint identity token — enterprise dispatch (operational candidate)",
     );
+    expect(workflowContent).toContain(
+      "Mint identity token — platform admin (operational candidate)",
+    );
+    expect(workflowContent).toContain(
+      "Mint identity token — ops console (operational candidate)",
+    );
+    expect(workflowContent).toContain(
+      "Mint identity token — fleet partner portal (operational candidate)",
+    );
+    expect(workflowContent).toContain(
+      "Mint identity token — channel partner portal (operational candidate)",
+    );
 
     // Assert tokens are passed to Execute candidate-bound operational journeys step
     expect(workflowContent).toContain(
@@ -138,6 +220,18 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     );
     expect(workflowContent).toContain(
       "DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN: ${{ steps.id_token_enterprise_dispatch.outputs.id_token }}",
+    );
+    expect(workflowContent).toContain(
+      "DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}",
+    );
+    expect(workflowContent).toContain(
+      "DRTS_DEV_OPS_CONSOLE_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}",
+    );
+    expect(workflowContent).toContain(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_fleet_partner_portal.outputs.id_token }}",
+    );
+    expect(workflowContent).toContain(
+      "DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_channel_partner_portal.outputs.id_token }}",
     );
   });
 
@@ -158,6 +252,18 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(runnerContent).toContain(
       'export DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN="${DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN:-${DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN:-}}"',
     );
+    expect(runnerContent).toContain(
+      'export DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN="${DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN:-${DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN:-}}"',
+    );
+    expect(runnerContent).toContain(
+      'export DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN="${DRTS_DEV_OPS_CONSOLE_ID_TOKEN:-${DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN:-}}"',
+    );
+    expect(runnerContent).toContain(
+      'export DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN="${DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN:-${DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN:-}}"',
+    );
+    expect(runnerContent).toContain(
+      'export DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN="${DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN:-${DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN:-}}"',
+    );
   });
 
   it("applies Authorization header and extraHTTPHeaders to private services in operational-candidate.spec.ts", () => {
@@ -171,6 +277,14 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(specContent).toContain("DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN");
     expect(specContent).toContain(
       "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN",
+    );
+    expect(specContent).toContain("DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN");
+    expect(specContent).toContain("DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN");
+    expect(specContent).toContain(
+      "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN",
+    );
+    expect(specContent).toContain(
+      "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN",
     );
 
     // Request and browser context authentication
@@ -198,6 +312,13 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(specContent).toContain("DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN");
     expect(specContent).toContain(
       "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN",
+    );
+    expect(specContent).toContain("DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN");
+    expect(specContent).toContain(
+      "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN",
+    );
+    expect(specContent).toContain(
+      "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN",
     );
 
     // Browser context extraHTTPHeaders for journeys and routes

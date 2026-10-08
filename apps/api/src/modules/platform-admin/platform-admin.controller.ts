@@ -110,35 +110,38 @@ export class PlatformAdminController {
   }
 
   @Get("placards")
-  listPlacardVersions(@Headers("x-request-id") requestId?: string) {
+  async listPlacardVersions(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
-        items: this.platformAdminService.listPlacardVersions(),
+        items: await this.platformAdminService.listPlacardVersions(),
       },
       requestId,
     );
   }
 
   @Post("placards")
-  generatePlacardVersion(
+  async generatePlacardVersion(
     @Body() command: GeneratePlacardVersionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.generatePlacardVersion(command, requestId),
+      await this.platformAdminService.generatePlacardVersion(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("placards/:placardVersionId/publish")
-  publishPlacardVersion(
+  async publishPlacardVersion(
     @Param("placardVersionId") placardVersionId: string,
     @Body() command: PublishPlacardVersionCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.publishPlacardVersion(
+      await this.platformAdminService.publishPlacardVersion(
         placardVersionId,
         command,
         requestId,

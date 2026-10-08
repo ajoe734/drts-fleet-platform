@@ -132,9 +132,8 @@ describe("SR-QA-CONCURRENCY-001: C089 Cross-Month Batch Billing, Rerun & Reconci
     expect(invoice1.lines.length).toBeGreaterThan(0);
     expect(invoice1.amount.amountMinor).toBeGreaterThan(0);
 
-    const artifactBytes1 = store.get(
-      "tenant-invoice",
-      invoice1.invoiceId,
+    const artifactBytes1 = (
+      await store.get("tenant-invoice", invoice1.invoiceId)
     )?.bytes;
     expect(artifactBytes1).toBeDefined();
 

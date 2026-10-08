@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   DriverLocationHeartbeatBatchResponse,
-  DriverRegistryRecord,
   DriverTrackingStatus,
   GeoPoint,
   ServiceAreaEvaluationResult,
@@ -18,6 +17,12 @@ import {
 import { verifyLiveDeployment } from "./deployment-check";
 import { MAP_DRIVER_SCOPES, MAP_OBSERVER_ID } from "./session-bootstrap";
 import { normalizeApiResponse } from "./wire-response";
+import {
+  assertMapDriverIsolation,
+  DriverIsolationError,
+  inspectMapDriverIsolation,
+  type DriverIsolationEvidence,
+} from "./driver-isolation";
 import {
   baselineService,
   decisionProjection,
@@ -36,6 +41,7 @@ type Evidence = {
   location: unknown[];
   stage: string;
   failure?: string;
+  driver_isolation?: DriverIsolationEvidence;
 };
 type Deps = {
   fetch: typeof fetch;
@@ -107,17 +113,15 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
       config.driverToken,
     );
   const checkIsolation = async () => {
-    const { items } = await api<{ items: DriverRegistryRecord[] }>(
+    const registry = await api<unknown>(
       "regulatory-registry/drivers",
       config.observerToken,
     );
-    const driver = items.find((item) => item.driverId === config.driverId);
-    assert(
-      driver &&
-        driver.workState === "offline" &&
-        driver.dispatchEligible === false,
-      "Dedicated test driver must be offline and non-dispatchable",
+    evidence.driver_isolation = inspectMapDriverIsolation(
+      { data: registry },
+      config.driverId,
     );
+    assertMapDriverIsolation(evidence.driver_isolation);
     const tasks = await api<{ items: unknown[] }>(
       "driver/tasks",
       config.driverToken,
@@ -339,10 +343,10 @@ export async function runCoverage(env: LiveEnv, deps: Deps) {
     }
     evidence.status = "passed";
     evidence.stage = "complete";
-  } catch {
+  } catch (error) {
     // Do not serialize assertion actual/expected or provider errors: session
     // identities and provider errors may contain credentials or personal data.
-    evidence.failure = `Live coverage failed at ${evidence.stage}; inspect recorded case evidence`;
+    evidence.failure = `Live coverage failed at ${evidence.stage}; ${error instanceof DriverIsolationError ? error.message : "inspect recorded case evidence"}`;
     throw new Error(evidence.failure);
   } finally {
     deps.save(evidence);

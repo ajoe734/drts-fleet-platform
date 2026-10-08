@@ -1,0 +1,341 @@
+# PUSH-CHANNEL-PG-QA-20261006
+
+Owner: Codex2. Reviewer: Codex. Baseline: `7785a1abd1cf1fffe06cfdef50df2956fc2eaf9f`.
+All original dependencies and the route-exclusion repair are `done` as of
+2026-10-08. Hosted QA on preserved branch checkpoint
+`ed5446b4e3f4df8f03a2146a240d7d82c86bdeae` now passes **30 new PG cases,
+zero failed and zero skipped**, including both unchanged PG-QA-F1 reproducers.
+The complete new gate passes 584 cases across 51 required suites, zero skips.
+Owner verification is complete; independent review, final-candidate CI, true
+merge and the two named acceptance records remain separate lifecycle gates.
+
+## Scope and execution boundary
+
+Follow `AI_COLLABORATION_GUIDE.md` §0.7 and the channel design D2–D7.
+The new harness creates an isolated random database on the explicitly configured
+hosted PostgreSQL service and applies all files in `infra/migrations` unchanged.
+It calls production services/repositories. No substitute table definitions or
+SQL simulators stand in for those boundaries. No server is started on the VM.
+
+## Findings and acceptance ledger
+
+| Finding / acceptance                                                 | Source and change                                                                                                                                                        | Baseline → repaired result                                                                                                                                         | Command / evidence                                                                               | Remaining limitation                                                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| PG-QA-F1: partner writer accepts an order already routed first-party | Shared `persistOrderPartnerNotificationRoute`; reviewed repair PR #2437 adds the same per-order transaction advisory lock and V0107 check used by the first-party writer | Both original sequential/concurrent PG reproducers fail on `74f7f0444` → pass on `ed5446b4e`; both production wrappers execute successfully in the sequential case | Runs 37727675410 → 37736191673; exact names, hashes and preservation proof below                 | Resolved dynamically; final QA candidate still needs assigned independent review          |
+| PG-QA-H1: cleanup violates append-only audit trigger                 | `postgres-harness.ts` clones the fully migrated, closed template per case                                                                                                | 28 setup failures → all 30 cases execute against unchanged production migrations/triggers                                                                          | Runs 37725218260 → 37726276435 → 37736191673                                                     | Resolved; no constraint or audit-trigger bypass                                           |
+| `push-channel-pg-qa_hosted_postgres_suites_zero_skips`               | Production-migration suites and exact-count CI gate                                                                                                                      | New PG 9/11/10 passed, legacy PG 7/7/7 passed; zero failed/skipped                                                                                                 | Run 37736191673, artifact 11532645869; both gate scripts rerun against downloaded reports exit 0 | Final-candidate CI, independent review, true merge and named acceptance recording pending |
+| `push-channel-pg-qa_regression_and_dormant_proof`                    | Partner, cancellation, C111–C115 and disabled-first-party checks; SQL matrix below                                                                                       | All 51 gate suites / 584 cases passed with zero skips, including dormant 3 and C111–C115 34; API 1640 passed                                                       | Run 37736191673; terminal job log and JSON read                                                  | Same lifecycle gates remain; external FCM/real-device delivery is outside scope           |
+
+SQL/migration comparison, per-case counts, commands and hosted run evidence are
+recorded below. The hosted round 3 ledger supersedes the historical failure
+results above: F1 now passes the same reproducer on the reviewed source repair.
+
+## Implemented checks and first anchor evidence
+
+Published anchor `d7f9bd0577d5ef31a690bbf472562f0bd099e6b0`,
+[draft PR #2433](https://github.com/ajoe734/drts-fleet-platform/pull/2433).
+This is not a review candidate. The first hosted run is
+[CI 37725218260](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37725218260);
+results pending when this section was written. Do not infer PG success from
+local test collection or the separate integration workflow's skipped jobs.
+
+| Suite                                 | Exact required passed cases | Production behavior                                                                                                                                                                                                                                                                 |
+| ------------------------------------- | --------------------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `referral.postgres.test.ts`           |                           9 | Referral booking/route transaction visibility, replay, absent/revoked durable identity, SQL savepoint recovery, assignment/reassignment generations, superseded transport relevance, outbox failure rollback, cancellation, delayed ETA generation, disclosure MAX/profile fallback |
+| `registry.postgres.test.ts`           |                          11 | Partial unique index, concurrent cross-passenger rebind, rotation, fenced invalidation, concurrent cap, cross-rebind deadlock regression, 60-day resolver, SQL failure rollback, concurrent route replay, both-direction route exclusion                                            |
+| `delivery.postgres.test.ts`           |                          10 | Four channel decisions, no-channel/ambiguous sealed outcomes, competing service workers, frozen retry recipients, twelve immutable context fields, expired/replaced fence, outcome rollback, disabled service, revocation during metadata await                                     |
+| `dormant.test.ts`                     |                           3 | Production provider/transport early guard, tracked deployment config scan, production AST caller inventory plus Nest controller metadata                                                                                                                                            |
+| Existing sequence / transport / UI PG |                   7 / 7 / 7 | Existing suite files and original gate assertions unchanged                                                                                                                                                                                                                         |
+| C111–C115                             |                          34 | Existing hosted receiver/API-key/webhook/settlement/geo/recording regressions unchanged                                                                                                                                                                                             |
+
+The new gate additionally discovers every partner notification `.test.ts` and
+`.test.tsx` suite and all referral/registry/router/FCM suites, requiring each to
+appear exactly once, run at least one case, and have no skipped/failed case or
+hook failure. It rejects duplicate case identities and missing reports. Nine
+Python regressions prove rejection of missing/duplicate suites, non-passed
+statuses, under/over counts, hook failures, wrong paths and skipped regressions.
+
+Completed local checks on the anchor's code, Node 22.23.2 / pnpm 10.33.0:
+
+- `pnpm exec tsc -p tsconfig.json --noEmit`: exit 0.
+- `pnpm exec eslint tests/unit/push-channel-pg-qa-20261006 --max-warnings=0`: exit 0.
+- `python3 -m unittest tools/ci/test_partner_notification_postgres_gate.py`: exit 0, 9 passed.
+- Scoped Vitest over new QA, router, registry, FCM, referral and all
+  `sr-partner-notify` suites: exit 0, **467 passed, 49 PG skipped**, 42 passing
+  files / 6 skipped files. The PG URLs and `DATABASE_URL` were explicitly unset.
+  No C111–C115 receiver was started on this VM.
+- Running the new gate on that incomplete local report: exit 1, correctly
+  rejecting all six skipped PG suites and the absent hosted C111–C115 suite.
+
+Machine-specific logs: assigned worker `.local/push-channel-pg-qa-20261006/`
+(`typecheck.log`, `lint.log`, `gate-tests.log`, `local-tests.log`,
+`local-tests.json`, `local-gate-negative.log`). Initial formatting could not run
+because dependency links were broken; frozen-lockfile installation restored
+the dependencies before the successful checks. A package setup failure is not
+a product regression or a PG execution result.
+
+## SQL / migration field comparison
+
+This compares the SQL actually executed by the wave's production repositories,
+including shared reads/writes reached from its services. Types below are the
+SQL types, not mock fixture types. Every new PG database applies **all**
+production migration files; these are the relevant authorities:
+
+- [V0011 runtime snapshots](../../../infra/migrations/V0011__phase1_runtime_snapshots.sql),
+  [V0021 partner registry](../../../infra/migrations/V0021__partner_registry_and_eligibility_persistence.sql),
+  [V0030 identity links](../../../infra/migrations/V0030__partner_user_identity_link_persistence.sql).
+- [V0056 runtime/outbox](../../../infra/migrations/V0056__multi_taxi_runtime_compliance_closure.sql),
+  [V0064 generated booking ownership](../../../infra/migrations/V0064__owned_booking_cross_instance_identity.sql),
+  [V0087 reservations](../../../infra/migrations/V0087__dispatch_resource_reservations.sql),
+  [V0088 voice/actor identity](../../../infra/migrations/V0088__voice_runtime_identity_linkage.sql),
+  [V0089 aggregate version](../../../infra/migrations/V0089__owned_order_aggregate_version.sql),
+  [V0090 assignment reservation fence](../../../infra/migrations/V0090__dispatch_assignment_reservation_fence.sql).
+- [V0099 claims/receipts](../../../infra/migrations/V0099__sr_passenger_push_delivery.sql),
+  [V0104 partner route/counter](../../../infra/migrations/V0104__sr_partner_notification_binding_and_routing.sql),
+  [V0105 partner delivery context](../../../infra/migrations/V0105__sr_partner_notification_delivery_context.sql),
+  [V0107 devices/first-party route](../../../infra/migrations/V0107__push_channel_first_party_registry_and_routing.sql),
+  [V0108 first-party context](../../../infra/migrations/V0108__push_channel_first_party_delivery_context.sql).
+
+| Production symbol / table                                                                                                  | Columns used and migration agreement                                                                                                                                                                                                                                                                                                                                                                                                                          | Behavior / drift disposition                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PartnerUserIdentityLinkRepository.resolveOrCreate`, `findByDrtsPassengerId`; `admin.phase1_partner_user_identity_links`   | V0030: entry_slug varchar(150), partner_user_ref / record recipient varchar(255), drts_passenger_id varchar(100), status/consent_scope varchar(50), linked_at/last_seen_at/created_at/updated_at timestamptz, record jsonb; composite PK entry_slug+partner_user_ref                                                                                                                                                                                          | Durable identity used by real referral service; no invented tenant column in this table                                                                                                                                                                                 |
+| `persistOrderPartnerNotificationRoute` (called by both repositories); `mobility.phase1_order_partner_notification_routes`  | V0104: order_id/partner_user_ref/passenger_subject_ref/ride_ref varchar(255), tenant_id/partner_id/drts_passenger_id varchar(100), entry_slug varchar(150) FK, consent_bundle_version/notification_policy_version varchar(50), identity_linked_at/created_at timestamptz; order PK + ride_ref unique                                                                                                                                                          | Columns match. F1 repaired: same per-order transaction advisory lock, then SELECT order_id from V0107 before either partner insert; both order_id columns are varchar(255). Schema has no cross-table exclusion constraint                                              |
+| Shared route writer and `allocateNotificationEventSequence`; `mobility.phase1_partner_notification_sequences`              | V0104: order_id varchar(255) PK/FK to partner route; next_sequence bigint                                                                                                                                                                                                                                                                                                                                                                                     | INSERT only after new route; UPDATE RETURNING next_sequence-1 shares outbox transaction; bigint converted to JS number; original concurrent/replay/rollback 7-case suite retained                                                                                       |
+| `OwnedMobilityRepository.persistOrderWorkflow`, order locks                                                                | V0011 order_id/order_no, status, order_source, service_bucket, dispatch_semantics, timestamps, record jsonb; V0056 runtime_profile_code; V0064 generated tenant_id/booking_id; V0088 actor/link columns; V0089 generated aggregate_version integer >0                                                                                                                                                                                                         | Uses real generated columns and existing snapshot writes; booking+route visibility and rollback checked                                                                                                                                                                 |
+| `loadOrderCancellationForUpdate`; assignments/jobs/tasks                                                                   | V0011 assignment_id/dispatch_job_id/order_id/task_id varchar(100), status varchar(50), created_at/updated_at timestamptz, record jsonb; tasks have assignment_id; V0087 reservations use uuid IDs, assignment/order FKs and active resource partial unique index; V0090 deferrable assignment trigger                                                                                                                                                         | Assignment generation is `count(*)`, **not** a nonexistent assignment_version column; durable route scope checks order/tenant/partner/entry/passenger                                                                                                                   |
+| `persistChangesWithExecutor` ETA and outbox write                                                                          | V0056 outbox_id/order_id/passenger_subject_ref varchar(255), event_type text, assignment_version nullable integer, payload jsonb, status checked text, attempt_count integer, next_attempt_at/created_at/delivered_at timestamptz; V0011 task assignment_id and V0104 order route join                                                                                                                                                                        | ETA reads its task's stable `referral-assignment:` outbox generation. No migration enum change needed for trip_cancelled because event_type is text. PG probes cover the production ETA write, delayed old-task generation after reassignment, and MAX/profile fallback |
+| `findPartnerNotificationRelevance`                                                                                         | V0011/V0056 order_id, status, runtime_profile_code; V0056 disclosure order_id and assignment_version integer; V0011 assignments order_id                                                                                                                                                                                                                                                                                                                      | MAX(disclosure assignment_version) first, then business_dispatch count fallback only; mapped to number                                                                                                                                                                  |
+| `PassengerPushDevicesRepository.registerDevice`, cap, touch/revoke/invalidate/resolve; `iam.phase1_passenger_push_devices` | V0107 device_id uuid default gen_random_uuid; passenger varchar(100); platform varchar(10); provider varchar(20); app_id varchar(150); app_version/consent varchar(50); token text; token_sha256 varchar(64); status varchar(10); status_reason text; registered_at/last_seen_at/invalidated_at/created_at/updated_at timestamptz                                                                                                                             | Active-only provider+hash unique index allows preserved revoked history. Global transaction advisory lock serializes registration/cap. Null/stale last_seen_at excluded; cap=10 and cutoff=60 days executed in PG. Public records exclude raw token                     |
+| `writeFirstPartyRoute`, `findOrderFirstPartyNotificationRoute`                                                             | V0107 order_id varchar(255) PK, tenant_id/passenger varchar(100), subject/ride_ref varchar(255), app_id varchar(150), policy/consent varchar(50), created_at timestamptz; ride_ref unique; policy CHECK first_party_notification_v1                                                                                                                                                                                                                           | Field mappings match; first-party replay/content mismatch enforced. Both channel writers now check the opposite table under the same per-order advisory lock; unchanged F1 sequential/concurrent probes pass                                                            |
+| `resolvePassengerNotificationChannel`                                                                                      | `to_jsonb` on V0104 + V0107 rows by order_id; all mapped fields listed above                                                                                                                                                                                                                                                                                                                                                                                  | Snapshot-based partner/first-party/ambiguous/none; explicit corruption fixture tests the fail-closed ambiguous case independently of the mutually exclusive production writers                                                                                          |
+| `listDuePartnerNotifications`, `claimPartnerNotification`                                                                  | V0056 outbox state, payload and dates; V0105 retry_disposition/retry_policy_snapshot/expires_at; V0099 outbox_id varchar(255), subject varchar(255), worker_id text, claim_state checked text, fence_token integer, lease_expires_at/claimed_at timestamptz                                                                                                                                                                                                   | channelRouting → firstPartyNotification → partner context → partner payload priority preserved; row lock plus claim UPSERT fence shared by all channels                                                                                                                 |
+| `prepareFirstPartyNotificationContext`, context mapper                                                                     | V0108 outbox_id varchar(255) PK/FK, order_id varchar(255) FK to V0107, tenant_id varchar(100); route_snapshot/retry_policy_snapshot jsonb object, target_devices/device_outcomes jsonb array, wire_message jsonb, wire_message_hash text, event_sequence positive bigint, expires_at/created_at/delivered_at timestamptz, delivery_target varchar(30), delivery_stage varchar(20), retry_disposition varchar(30), failure_reason varchar(50), receipt_id text | INSERT columns and mapping match. Trigger guards every field except six outcome/evidence fields; twelve mutation probes and idempotent preparation exercise immutability                                                                                                |
+| `findFirstPartyNotificationDeviceToken`                                                                                    | V0108 target_devices JSON parsed as deviceId uuid/tokenSha256 text; V0107 device_id/token_sha256/token/status/passenger/app/last_seen_at; V0099 fence_token/claim_state/lease_expires_at                                                                                                                                                                                                                                                                      | Join and casts match physical types. Eligibility and clock_timestamp fence rechecked just before send; rotated/rebound/revoked devices cannot be replaced with new recipients                                                                                           |
+| `recordPushDeliveryOutcome`                                                                                                | V0099 receipt_id uuid default, outbox_id/subject varchar(255), dedupe_key/provider fields text, fence_token integer, device_delivery_state defaults unknown; V0108 delivery_stage/retry_disposition/failure_reason/receipt_id/delivered_at/device_outcomes; V0056 payload JSON plus outcome status/counters/dates                                                                                                                                             | Context, receipt, outbox update and claim release share transaction. Bad final status must roll everything back. FCM accepted receipt remains provider_accepted, never device_received                                                                                  |
+
+No SQL column/type mismatch is established by this comparison. F1 was a
+behavioral invariant gap, repaired in the shared writer without changing schema. Runtime conclusions are in the
+hosted round ledger; the independent reviewer must inspect the final
+candidate and the result ledger, not infer success from this table.
+
+## Hosted round 1 — fixture failure, not a product reproduction
+
+Run 37725218260, published anchor `d7f9bd0577d5ef31a690bbf472562f0bd099e6b0`,
+Product smoke job `113141976285`, artifact `11527404674` (`test-results`).
+Downloaded and read the Vitest JSON on 2026-10-08. Root result: **6094 passed,
+28 failed, 49 pending**. All 28 new PG failures came from `beforeEach`:
+`booking_audit_intent is append-only; TRUNCATE is not permitted`.
+All production migrations had applied; the harness's cascading reset was invalid.
+This is QA finding **PG-QA-H1**, and is not a dynamic reproduction of F1.
+
+- Existing sequence/transport/UI PG suites: **7/7/7 passed, zero skipped**;
+  reran the unchanged original gate against the downloaded JSON: exit 0.
+- C111–C115: **34 passed, zero skipped**. Partner notification suites, including
+  component, cross-app and navigation integration cases, passed with zero skips.
+- Dormant checks: **3 passed**. New PG gate correctly failed.
+- API unit step did not run after root test failure. The unrelated 49 pending
+  root tests are not represented as successful PG acceptance.
+- Integration run 37725218325 completed successfully only as an owner draft
+  checkpoint; its product jobs were skipped. Full log read and saved locally.
+
+H1 repair: preserve all production audit triggers and create each test database
+with `CREATE DATABASE ... TEMPLATE <closed migrated database>`. Only the
+harness's randomly named databases are dropped. No TRUNCATE, trigger disabling,
+schema rewrite or shared-database cleanup remains in the harness. Each test
+gets all production tables, constraints and migrations with fresh data.
+
+The follow-up also adds delayed ETA and disclosure MAX/profile probes (new PG
+counts now **9/11/10**, 30 total). Narrow collection: 3 dormant passed / 30 PG
+skipped, typecheck and lint exit 0, nine gate tests passed. These local results
+only establish compilation/discovery. The follow-up hosted result is still due.
+
+## Hosted round 2 — H1 resolved, F1 reproduced
+
+[CI 37726276435](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37726276435)
+completed **failure** on published anchor
+`7cc2ba490e1bdff90dcb05a558fa96748ee4f683`.
+[Product smoke job 113145292739](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37726276435/job/113145292739),
+artifact `11528810614`. Full job log and JSON were downloaded and read.
+JSON SHA-256: `b392b2f479cecf8cee3d08f054fdf4e1e3818af75f31f413efde6c4c9b0050f3`.
+
+| Result set                          | Passed | Failed | Skipped | Interpretation                                                                                                                             |
+| ----------------------------------- | -----: | -----: | ------: | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| New referral PG                     |      9 |      0 |       0 | Booking/replay, savepoint, assignment/rollback, cancellation, delayed ETA and MAX/profile behavior executed against full production schema |
+| New registry PG                     |      9 |      2 |       0 | Device lifecycle, uniqueness, concurrency and first-party writer pass; opposite-channel writes fail F1                                     |
+| New delivery PG                     |     10 |      0 |       0 | Frozen contexts, all immutable fields, retries, fences, rollback, routing and disabled/late-revoked sends pass                             |
+| Dormant static/runtime unit checks  |      3 |      0 |       0 | No FCM or metadata request when disabled, deployment configuration absent, no first-party registration HTTP seam                           |
+| Legacy PG sequence / transport / UI |     21 |      0 |       0 | Exactly 7 each; unchanged original gate rerun locally against artifact exits 0                                                             |
+| C111–C115                           |     34 |      0 |       0 | Existing hosted receiver and full named suite pass                                                                                         |
+| Entire root suite                   |   6122 |      2 |      49 | Only failures are F1; unrelated pre-existing opt-in skips remain explicitly pending                                                        |
+
+All suites listed by the new gate except registry PG passed. Its exit 1 reports
+registry `passed=9 expected=11 other=2 expected=0`; neither failing case was
+skipped or relabeled. Hosted Python gate unit tests also passed. API unit tests
+were skipped after root failure. Integration workflow 37726276425 completed as
+a **draft checkpoint only**, with product jobs skipped; its log was read.
+
+### F1 minimal reproduction and repair boundary
+
+Production chain:
+
+1. `PassengerPushDevicesRepository.writeFirstPartyRoute` creates the V0107 row
+   after checking V0104, holding the transaction advisory lock keyed by
+   `passenger-push-first-party-route:<orderId>`.
+2. `MultiTaxiRepository.writeOrderPartnerNotificationRoute` calls the shared
+   [partner route writer](../../../apps/api/src/modules/tenant-partner/order-partner-notification-route.ts)
+   inside its transaction. The shared function inserts V0104 plus the sequence
+   without checking V0107 or taking that lock. The owned-mobility wrapper calls
+   the same shared function under its transaction/savepoint.
+3. `resolvePassengerNotificationChannel` reads both persisted rows and returns
+   **`ambiguous`**, where sequential reverse-write rejection must leave
+   **`first_party_app`**. The concurrent two-writer probe also returned
+   `ambiguous` in this hosted run.
+
+The two failing tests are named `PG-QA-F1 rejects the reverse write through both
+production partner writers` and `PG-QA-F1 concurrent opposite-channel writers
+commit at most one route` in `registry.postgres.test.ts`. The sequential case
+fails at its first (multi-taxi) writer; the second wrapper shares the exact
+production helper and must also pass after repair. This does not claim the
+second loop iteration ran after the first assertion failed.
+
+Repair must serialize both channel writers on the same per-order transaction
+lock, inspect the opposite table before insertion, and leave **both** partner
+route and sequence absent on rejection. Preserve the existing route replay,
+booking savepoint and non-blocking notification-setup behavior. Both sequential
+directions and the concurrent case must then pass, together with all current
+positive tests. Do not reduce registry's required count or use `skip`/`fails`.
+
+The product helper is outside this task's write scopes. Supervisor was notified
+through owner `progress` with the exact source path and hosted evidence. Also
+coordinate the legacy sequence PG fixture: it currently only applies V0104 and
+the V0056 outbox DDL, so a new V0107 read needs the real migration added to that
+fixture while preserving its seven assertions. Do not add a production
+table-existence fallback merely to accommodate an incomplete test fixture.
+
+### Reproduction commands and remaining work
+
+Only on the authorized hosted PostgreSQL runner, with
+`PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL` set to its service database:
+
+```bash
+pnpm exec vitest run tests/unit/push-channel-pg-qa-20261006 --reporter=default --reporter=json --outputFile.json=push-pg-results.json
+# For the complete gate, use the root report emitted by the existing CI workflow:
+python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json
+python3 tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json
+```
+
+The follow-up QA checkpoint adds direct replay assertions for both partner
+repository writers in the existing referral case (counts unchanged). Its CI
+results must be read before any future handoff. Final acceptance needs the
+Supervisor-coordinated F1 repair, fresh exact-candidate CI, independent Codex
+review and normal lifecycle integration. No candidate handoff, acceptance
+record or `done` was issued for the failing checkpoint.
+
+## Hosted round 3 — original F1 reproducers pass after reviewed source repair
+
+Preserved published QA head `74f7f04440cdc1cd3ec9db26b218fa12f9c909fe` and
+PR #2433, then normally merged `origin/dev` at
+`e35fe2762e872e9db9cbfc89e5458353cbe0b6b2`. The merge checkpoint is
+`ed5446b4e3f4df8f03a2146a240d7d82c86bdeae`; no reset, rebase, amend or force
+push was used. The source repair is
+[PR #2437](https://github.com/ajoe734/drts-fleet-platform/pull/2437), reviewed
+candidate `74d63f3ce7da08d1f5fa7fb31c71db6f411a424e`, true merge
+`e35fe2762e872e9db9cbfc89e5458353cbe0b6b2`. Its source-only acceptance does
+not substitute for this QA task's two original keys.
+
+[CI 37736191673](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37736191673)
+completed **success** on the QA merge checkpoint.
+[Product smoke job 113176326839](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37736191673/job/113176326839)
+applied the migrations, ran root and API tests and both PG gates. Downloaded
+artifact **11532645869** (`test-results`) and the terminal workflow log;
+read the assertions, totals, gate outputs and completed job/step conclusions.
+
+| Result set                                                   |    Passed | Failed |    Skipped |
+| ------------------------------------------------------------ | --------: | -----: | ---------: |
+| Referral PG                                                  |         9 |      0 |          0 |
+| Registry PG (both exact F1 reproducers included)             |        11 |      0 |          0 |
+| Delivery PG                                                  |        10 |      0 |          0 |
+| Dormant checks                                               |         3 |      0 |          0 |
+| Legacy sequence / transport / UI PG                          | 7 / 7 / 7 |      0 |          0 |
+| C111–C115 required suite                                     |        34 |      0 |          0 |
+| All 51 suites required by the new gate (includes rows above) |       584 |      0 |          0 |
+| Entire root report                                           |      6137 |      0 | 49 pending |
+| API report                                                   |      1640 |      0 |          0 |
+
+The 49 root pending cases are outside the required gate; they remain unverified,
+not passed. Partner unit/component/cross-app/navigation and cancellation
+regressions are included in the 51-suite zero-skip gate. Its Python self-tests
+also passed all nine cases in hosted CI.
+
+Exact original F1 cases, both now **passed**:
+
+- `PG-QA-F1 rejects the reverse write through both production partner writers`:
+  first-party route remains the only channel and partner sequence remains absent
+  through both multi-taxi and owned-mobility wrappers.
+- `PG-QA-F1 concurrent opposite-channel writers commit at most one route`:
+  concurrent production writers leave one legal channel, never `ambiguous`.
+
+For the adjacent published baseline, also downloaded and read
+[CI 37727675410](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37727675410)
+at `74f7f04440cdc1cd3ec9db26b218fa12f9c909fe`: registry was 9 passed / 2 failed,
+zero skipped, with both cases producing `ambiguous`. Its root JSON SHA-256 is
+`1792b9b4734c7de9b8148fef7d2861f6adcd1efcca17ab2ea855a5f35c5c2121`.
+Git blob comparison proves the entire new QA directory, both gate scripts,
+Python gate tests and CI definition are unchanged between that baseline and
+the successful checkpoint. The repaired helper blob equals the independently
+reviewed source candidate and its true merge. No assertion/count was weakened.
+
+Successful report SHA-256 values:
+
+- Root: `dacc8a0081b0f5351909d0a20ef171fad31a31649428b829d8ad1fb7bff83694`.
+- API: `ae5cc2df12c9915e0d54eb5fdebca93eb69b71952819620363d749362625cdf8`.
+
+Machine-specific evidence is in the assigned QA worktree under
+`.local/push-channel-pg-qa-20261006/resume-20261008/`: `hosted-37736191673/`,
+`hosted-37736191673.log`, workflow JSON, `hosted-summary-37736191673.json`,
+`preservation-proof.json`, baseline artifact/log and the local check logs.
+The two downloaded-report gate commands both completed with exit 0:
+
+```bash
+python3 tools/ci/verify_partner_notification_postgres_gate.py .local/push-channel-pg-qa-20261006/resume-20261008/hosted-37736191673/unit-test-results.json .local/push-channel-pg-qa-20261006/resume-20261008/hosted-37736191673/apps/api/api-test-results.json
+python3 tools/ci/verify_passenger_push_channel_postgres_gate.py .local/push-channel-pg-qa-20261006/resume-20261008/hosted-37736191673/unit-test-results.json
+```
+
+Local checks on the merged source, Node 22.23.2 / pnpm 10.33.0:
+
+- Root `pnpm exec tsc -p tsconfig.json --noEmit`: exit 0 after isolated dependency
+  installation. The first attempt exited 2 because supervisor-provisioned
+  dependency symlinks resolved `ApiClient` through another worktree. Only this
+  worktree's symlinks were detached; target directories were preserved. Ran
+  `CI=true pnpm install --frozen-lockfile` (exit 0) and reran the checks.
+- Scoped Vitest command below: exit 0, 480 passed / 51 PG skipped. Hosted
+  execution above supplies the actual PG results. No receiver/server ran here.
+- `pnpm exec eslint tests/unit/push-channel-pg-qa-20261006 --max-warnings=0`:
+  exit 0; `python3 -m unittest tools/ci/test_partner_notification_postgres_gate.py`:
+  exit 0, nine tests passed.
+
+```bash
+env -u DATABASE_URL -u PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL \
+  -u PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL -u PARTNER_NOTIFY_UI_TEST_DATABASE_URL \
+  -u PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL pnpm exec vitest run \
+  tests/unit/push-channel-pg-qa-20261006 tests/unit/push-channel-route-exclusion-20261008 \
+  tests/unit/push-referral-route-write-20261006 tests/unit/push-referral-assignment-event-20261006 \
+  tests/unit/push-first-party-registry-20261006 tests/unit/push-channel-router-20261006 \
+  tests/unit/push-first-party-fcm-20261006 tests/unit/system-remediation/sr-partner-notify-* \
+  --reporter=default --reporter=json \
+  --outputFile.json=.local/push-channel-pg-qa-20261006/resume-20261008/local-tests-isolated.json
+```
+
+Integration workflow 37736191678 completed successfully as a **draft checkpoint**;
+its terminal log explicitly says full integration CI starts for a locked
+candidate. Its skipped product jobs are not full integration acceptance.
+
+The delivery commit updates only this ledger after the verified merge checkpoint.
+The full final `CANDIDATE_SHA`, branch `codex2/push-channel-pg-qa-20261006` and
+PR #2433 are bound by canonical owner handoff after local/remote/PR-head readback.
+The reviewer must check that exact SHA and SQL matrix. GitHub bus must collect
+the final same-SHA CI and actual merge; the authorized acceptance context must
+record both original `push-channel-pg-qa_*` keys. Neither source-task completion
+nor this owner report claims those lifecycle steps have already happened.
+No VM hosting/DB/browser/Compose, deployment, first-party enablement or real
+push was performed.
