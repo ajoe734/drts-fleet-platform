@@ -139,7 +139,12 @@
           "kind": "request",
           "name": "cancel",
           "control": "[data-drt-operation='enterprise-cancel']",
-          "before": [{ "kind": "navigate", "path": "/bookings/{resultId}" }],
+          "before": [
+            {
+              "kind": "navigate",
+              "path": "/bookings/{resultId}"
+            }
+          ],
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
@@ -180,29 +185,16 @@
           }
         },
         {
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
-          "method": "POST",
-          "body": {
+          "kind": "document-upload",
+          "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          "intentBody": {
             "expectedRevisionNo": "{{fleetRevision}}",
-            "documentType": "professional_driver_license",
-            "originalFileName": "professional-driver-license.txt",
-            "contentType": "text/plain"
+            "documentType": "professional_driver_license"
           },
-          "capture": {
-            "fleetLicenseObjectKey": "data.object_key"
-          }
-        },
-        {
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
-          "method": "POST",
-          "body": {
+          "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+          "confirmBody": {
             "expectedRevisionNo": "{{fleetRevision}}",
-            "documentType": "professional_driver_license",
-            "objectKey": "{{fleetLicenseObjectKey}}",
-            "originalFileName": "professional-driver-license.txt",
-            "contentType": "text/plain",
-            "fileSize": 1,
-            "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "documentType": "professional_driver_license"
           }
         },
         {
@@ -213,29 +205,16 @@
           }
         },
         {
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
-          "method": "POST",
-          "body": {
+          "kind": "document-upload",
+          "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          "intentBody": {
             "expectedRevisionNo": "{{fleetRevision}}",
-            "documentType": "taxi_driver_registration",
-            "originalFileName": "taxi-driver-registration.txt",
-            "contentType": "text/plain"
+            "documentType": "taxi_driver_registration"
           },
-          "capture": {
-            "fleetRegistrationObjectKey": "data.object_key"
-          }
-        },
-        {
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
-          "method": "POST",
-          "body": {
+          "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+          "confirmBody": {
             "expectedRevisionNo": "{{fleetRevision}}",
-            "documentType": "taxi_driver_registration",
-            "objectKey": "{{fleetRegistrationObjectKey}}",
-            "originalFileName": "taxi-driver-registration.txt",
-            "contentType": "text/plain",
-            "fileSize": 1,
-            "checksumSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            "documentType": "taxi_driver_registration"
           }
         }
       ],
@@ -316,30 +295,16 @@
         },
         {
           "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
-          "method": "POST",
-          "body": {
+          "kind": "document-upload",
+          "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          "intentBody": {
             "expectedRevisionNo": "{{adminRevision}}",
-            "documentType": "professional_driver_license",
-            "originalFileName": "admin-professional-driver-license.txt",
-            "contentType": "text/plain"
+            "documentType": "professional_driver_license"
           },
-          "capture": {
-            "adminLicenseObjectKey": "data.object_key"
-          }
-        },
-        {
-          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
-          "method": "POST",
-          "body": {
+          "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+          "confirmBody": {
             "expectedRevisionNo": "{{adminRevision}}",
-            "documentType": "professional_driver_license",
-            "objectKey": "{{adminLicenseObjectKey}}",
-            "originalFileName": "admin-professional-driver-license.txt",
-            "contentType": "text/plain",
-            "fileSize": 1,
-            "checksumSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "documentType": "professional_driver_license"
           }
         },
         {
@@ -352,30 +317,16 @@
         },
         {
           "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
-          "method": "POST",
-          "body": {
+          "kind": "document-upload",
+          "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          "intentBody": {
             "expectedRevisionNo": "{{adminRevision}}",
-            "documentType": "taxi_driver_registration",
-            "originalFileName": "admin-taxi-driver-registration.txt",
-            "contentType": "text/plain"
+            "documentType": "taxi_driver_registration"
           },
-          "capture": {
-            "adminRegistrationObjectKey": "data.object_key"
-          }
-        },
-        {
-          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
-          "method": "POST",
-          "body": {
+          "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+          "confirmBody": {
             "expectedRevisionNo": "{{adminRevision}}",
-            "documentType": "taxi_driver_registration",
-            "objectKey": "{{adminRegistrationObjectKey}}",
-            "originalFileName": "admin-taxi-driver-registration.txt",
-            "contentType": "text/plain",
-            "fileSize": 1,
-            "checksumSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            "documentType": "taxi_driver_registration"
           }
         },
         {
