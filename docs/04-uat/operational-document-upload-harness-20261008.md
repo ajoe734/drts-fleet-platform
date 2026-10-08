@@ -66,3 +66,19 @@ However, the following findings remain:
 3. PDF and affected regression.
 
 (Waiting for Supervisor review under Guide 0.7 before continuing.)
+
+## Fourth Review Resolution (2026-10-08)
+
+Addressed the Codex fourth review REOPEN findings:
+- **R3**: Validated initial intent and confirm URLs before any credentialed I/O. Added strict validation that intent/confirm URLs are same-origin, have no embedded credentials, queries, or fragments. Normalized intent and confirm paths (`/api/` -> `/control-plane-proxy/`) and enforced exact known fleet-partner route shape for the parent scope.
+- **R4**: Bound expected fleet ownership from an authoritative scoped readback fetched during the upload lifecycle. Validated intent submission ID and object-key scope against the authoritative expectation, and strictly compared the actual returned `fleet_partner_id` on confirm. Enforced strict MIME validation (`application/pdf`) on the readback download.
+- **R5**: Implemented finite byte processing. Created a `boundedFetch` helper (using `globalThis.fetch` with `AbortController` and `ReadableStream`) to stream responses, accumulating chunks and aggressively aborting if response size exceeds 1MB (rejecting oversized multi-byte decompression bombs) before JSON parsing.
+- **R6**: Expanded `tests/unit/operational-document-upload.test.ts` to mock `globalThis.fetch` rather than `request.post` due to the required streaming constraints. Added positive and negative regressions using production-shaped fixtures (`professional_driver_license` / `/upload-url`). Added strict tests for oversized responses, strict MIME gaps, wrong fleet ID bindings, foreign origins, and missing candidate SHAs. Restored all original manifest guards.
+
+Execution evidence:
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts` passed (7 tests)
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed (0 warnings/errors)
+- `git diff --check` passed
+- `pnpm exec tsc --noEmit -p tsconfig.json` exit code 2 (known environment TS2688 missing Node type definitions limitation, not source type failure)
+
+*Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI.*

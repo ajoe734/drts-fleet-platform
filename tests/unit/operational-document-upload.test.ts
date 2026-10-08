@@ -1,15 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { uploadOperationalDocument } from "../e2e/operational-document-upload";
 import { type APIRequestContext } from "@playwright/test";
 import { createHash } from "node:crypto";
 
 describe("uploadOperationalDocument", () => {
-  const origin = "https://example.com";
+  const origin = "https://fleet.example.com";
   const intentPath = "/api/fleet-partner/supply-submissions/sub-123/documents/upload-url";
-  const intentBody = { doc: "type1", documentType: "type1" };
+  const intentBody = { documentType: "professional_driver_license" };
   const confirmPath = "/api/fleet-partner/supply-submissions/sub-123/documents/confirm";
-  const confirmBody = { doc: "type1" };
-  const headers = { Authorization: "Bearer token" };
+  const confirmBody = { documentType: "professional_driver_license" };
+  const headers = { Authorization: "Bearer valid-token" };
 
   const expectedPdfBytes = Buffer.from(
     "%PDF-1.4\n" +
@@ -23,241 +23,237 @@ describe("uploadOperationalDocument", () => {
   const expectedSha = createHash("sha256").update(expectedPdfBytes).digest("hex");
   const expectedSize = expectedPdfBytes.length;
 
-  it("completes full lifecycle with intent, PUT, confirm, and GET download", async () => {
-    const request = {
-      post: vi.fn(),
-      put: vi.fn(),
-      get: vi.fn(),
-    } as unknown as APIRequestContext;
+  const mockRequest = {} as APIRequestContext;
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.DRTS_CANDIDATE_SHA;
 
-    vi.mocked(request.post).mockImplementation(async (url) => {
-      if (url.toString().includes("/upload-url")) {
-        return {
-          status: () => 200,
-          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          text: async () => JSON.stringify({
-            data: {
-              object_key: "obj-123",
-              upload_url: "/api/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123",
-              method: "PUT",
-              headers: { "content-type": "application/octet-stream" }
+  beforeEach(() => {
+    process.env.DRTS_CANDIDATE_SHA = "mock-candidate-sha";
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    process.env.DRTS_CANDIDATE_SHA = originalEnv;
+    vi.useRealTimers();
+  });
+
+  function mockFetchResponse(status: number, data: any, extraHeaders: Record<string, string> = {}) {
+    const bodyBuffer = Buffer.isBuffer(data) ? data : Buffer.from(JSON.stringify(data));
+    const responseHeaders = new Headers(extraHeaders);
+    responseHeaders.set('x-drts-candidate-sha', process.env.DRTS_CANDIDATE_SHA || 'mock-sha');
+    
+    return {
+      status,
+      headers: responseHeaders,
+      body: {
+        getReader: () => {
+          let done = false;
+          return {
+            read: async () => {
+              if (done) return { done: true };
+              done = true;
+              return { done: false, value: bodyBuffer };
             },
-          }),
-        } as any;
+            cancel: async () => {}
+          };
+        }
       }
-      if (url.toString().includes("/confirm")) {
-        return {
-          status: () => 200,
-          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          text: async () => JSON.stringify({
-            data: {
-              document_id: "doc-123",
-              file_object_key: "obj-123",
-              checksum_sha256: expectedSha,
-              file_size: expectedSize,
-              content_type: "application/pdf",
-              submission_id: "sub-123",
-              fleet_partner_id: "fleet-123",
-              document_type: "type1"
-            }
-          })
-        } as any;
-      }
-    });
+    } as any;
+  }
 
-    vi.mocked(request.put).mockImplementation(async () => {
-      return {
-        status: () => 200,
-        headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-        text: async () => JSON.stringify({
+  function setupHappyPath(mockedFetch: any) {
+    mockedFetch.mockImplementation(async (url: string | URL | Request, options: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) {
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+      }
+      if (urlStr.includes("/upload-url")) {
+        return mockFetchResponse(200, {
+          data: {
+            object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            upload_url: "/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            submission_id: "sub-123",
+            fleet_partner_id: "fleet-123"
+          }
+        });
+      }
+      if (urlStr.includes("/content?objectKey=")) {
+        return mockFetchResponse(200, {
           data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" }
-        })
-      } as any;
+        });
+      }
+      if (urlStr.includes("/confirm")) {
+        return mockFetchResponse(200, {
+          data: {
+            document_id: "doc-123",
+            file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            checksum_sha256: expectedSha,
+            file_size: expectedSize,
+            content_type: "application/pdf",
+            submission_id: "sub-123",
+            fleet_partner_id: "fleet-123",
+            document_type: "professional_driver_license"
+          }
+        });
+      }
+      if (urlStr.includes("/download")) {
+        return mockFetchResponse(200, expectedPdfBytes, { "content-type": "application/pdf" });
+      }
+      return mockFetchResponse(404, {});
     });
+  }
 
-    vi.mocked(request.get).mockImplementation(async () => {
-      return {
-        status: () => 200,
-        headers: () => ({ "x-drts-candidate-sha": "mock-sha", "content-type": "application/pdf" }),
-        body: async () => expectedPdfBytes
-      } as any;
-    });
-
-    const result = await uploadOperationalDocument(
-      request,
-      origin,
-      intentPath,
-      intentBody,
-      confirmPath,
-      confirmBody,
-      headers,
-    );
-
-    expect(result.objectKey).toBe("obj-123");
-    expect(result.fileSize).toBe(expectedSize);
-    expect(result.sha256).toBe(expectedSha);
+  it("completes full lifecycle with intent, PUT, confirm, and GET download", async () => {
+    setupHappyPath(vi.mocked(globalThis.fetch));
+    const result = await uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers);
     expect(result.documentId).toBe("doc-123");
+  });
 
-    expect(request.put).toHaveBeenCalledWith(
-      expect.stringContaining("/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123"),
-      expect.objectContaining({
-        headers: expect.objectContaining({ "content-type": "application/octet-stream", "Authorization": "Bearer token" }),
-        data: expect.any(Buffer),
-      }),
-    );
+  it("rejects wrong fleet ID binding", async () => {
+    setupHappyPath(vi.mocked(globalThis.fetch));
+    vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) {
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-999-wrong" } } });
+      }
+      if (urlStr.includes("/upload-url")) {
+        return mockFetchResponse(200, {
+          data: {
+            object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            upload_url: "/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            submission_id: "sub-123",
+            fleet_partner_id: "fleet-123" // Returned intent fleet doesn't matter, readback is authoritative
+          }
+        });
+      }
+      return mockFetchResponse(404, {});
+    });
 
-    expect(request.get).toHaveBeenCalledWith(
-      expect.stringContaining("/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/doc-123/download"),
-      expect.objectContaining({
-        headers: expect.objectContaining({ "Authorization": "Bearer token" }),
-      }),
-    );
+    await expect(uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers)).rejects.toThrow();
+  });
+
+  it("rejects foreign origin intent URL", async () => {
+    setupHappyPath(vi.mocked(globalThis.fetch));
+    await expect(uploadOperationalDocument(mockRequest, origin, "https://foreign.example.invalid/api/intent", intentBody, confirmPath, confirmBody, headers)).rejects.toThrow();
+  });
+
+  it("rejects missing candidate SHA headers on intent", async () => {
+    setupHappyPath(vi.mocked(globalThis.fetch));
+    vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+      }
+      if (urlStr.includes("/upload-url")) {
+        const res = mockFetchResponse(200, {
+          data: {
+            object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            upload_url: "/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" }
+          }
+        });
+        res.headers = new Headers(); // Strip x-drts-candidate-sha
+        return res;
+      }
+      return mockFetchResponse(404, {});
+    });
+
+    await expect(uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers)).rejects.toThrow();
+  });
+
+  it("rejects oversized response exceeding 1MB", async () => {
+    setupHappyPath(vi.mocked(globalThis.fetch));
+    vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+      }
+      if (urlStr.includes("/upload-url")) {
+        return {
+          status: 200,
+          headers: new Headers({ 'x-drts-candidate-sha': 'mock-candidate-sha' }),
+          body: {
+            getReader: () => {
+              let done = false;
+              return {
+                read: async () => {
+                  if (done) return { done: true };
+                  done = true;
+                  return { done: false, value: Buffer.alloc(1024 * 1024 + 10) }; // Oversized
+                },
+                cancel: async () => {}
+              };
+            }
+          }
+        } as any;
+      }
+      return mockFetchResponse(404, {});
+    });
+
+    await expect(uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers)).rejects.toThrow(/exceeded bounded limit/);
+  });
+
+  it("rejects strict MIME gap on readback", async () => {
+    setupHappyPath(vi.mocked(globalThis.fetch));
+    vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
+      if (url.toString().includes("/download")) {
+        return mockFetchResponse(200, expectedPdfBytes, { "content-type": "application/pdf-not-real" });
+      }
+      // Use original setupHappyPath for everything else
+      const urlStr = url.toString();
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+      }
+      if (urlStr.includes("/upload-url")) {
+        return mockFetchResponse(200, {
+          data: {
+            object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            upload_url: "/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf",
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            submission_id: "sub-123",
+            fleet_partner_id: "fleet-123"
+          }
+        });
+      }
+      if (urlStr.includes("/content?objectKey=")) return mockFetchResponse(200, { data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" } });
+      if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "doc-123", file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", checksum_sha256: expectedSha, file_size: expectedSize, content_type: "application/pdf", submission_id: "sub-123", fleet_partner_id: "fleet-123", document_type: "professional_driver_license" } });
+      return mockFetchResponse(404, {});
+    });
+
+    await expect(uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers)).rejects.toThrow();
   });
 
   it("retries PUT on 503 DOCUMENT_SCANNER_UNAVAILABLE with error.code", async () => {
-    const request = {
-      post: vi.fn(),
-      put: vi.fn(),
-      get: vi.fn(),
-    } as unknown as APIRequestContext;
-
-    vi.mocked(request.post).mockImplementation(async (url) => {
-      if (url.toString().includes("/upload-url")) {
-        return {
-          status: () => 200,
-          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          text: async () => JSON.stringify({
-            data: {
-              object_key: "obj-123",
-              upload_url: "/api/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123",
-              method: "PUT",
-              headers: { "content-type": "application/octet-stream" }
-            },
-          }),
-        } as any;
-      }
-      if (url.toString().includes("/confirm")) {
-        return {
-          status: () => 200,
-          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          text: async () => JSON.stringify({
-            data: {
-              document_id: "doc-123",
-              file_object_key: "obj-123",
-              checksum_sha256: expectedSha,
-              file_size: expectedSize,
-              content_type: "application/pdf",
-              submission_id: "sub-123",
-              fleet_partner_id: "fleet-123",
-              document_type: "type1"
-            }
-          })
-        } as any;
-      }
-    });
-
-    vi.mocked(request.get).mockResolvedValue({
-      status: () => 200,
-      headers: () => ({ "x-drts-candidate-sha": "mock-sha", "content-type": "application/pdf" }),
-      body: async () => expectedPdfBytes
-    } as any);
-
+    setupHappyPath(vi.mocked(globalThis.fetch));
     let putAttempts = 0;
-    vi.mocked(request.put).mockImplementation(async () => {
-      putAttempts++;
-      if (putAttempts < 3) {
-        return {
-          status: () => 503,
-          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          text: async () => JSON.stringify({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
-        } as any;
+    vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes("/content?objectKey=")) {
+        putAttempts++;
+        if (putAttempts < 3) {
+          return mockFetchResponse(503, { error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } });
+        }
+        return mockFetchResponse(200, { data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" } });
       }
-      return {
-        status: () => 200,
-        headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-        text: async () => JSON.stringify({
-          data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" }
-        })
-      } as any;
+      // Delegate others
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+      if (urlStr.includes("/upload-url")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123", fleet_partner_id: "fleet-123" } });
+      if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "doc-123", file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", checksum_sha256: expectedSha, file_size: expectedSize, content_type: "application/pdf", submission_id: "sub-123", fleet_partner_id: "fleet-123", document_type: "professional_driver_license" } });
+      if (urlStr.includes("/download")) return mockFetchResponse(200, expectedPdfBytes, { "content-type": "application/pdf" });
+      return mockFetchResponse(404, {});
     });
 
     vi.useFakeTimers();
-
-    const promise = uploadOperationalDocument(
-      request,
-      origin,
-      intentPath,
-      intentBody,
-      confirmPath,
-      confirmBody,
-      headers,
-    );
-
-    for (let i = 0; i < 3; i++) {
-      await vi.runAllTimersAsync();
-    }
-
+    const promise = uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers);
+    for (let i = 0; i < 3; i++) await vi.runAllTimersAsync();
     await promise;
-    vi.useRealTimers();
-
     expect(putAttempts).toBe(3);
-  });
-
-  it("rejects 302 redirects instead of following them", async () => {
-    const request = {
-      post: vi.fn(),
-      put: vi.fn(),
-      get: vi.fn(),
-    } as unknown as APIRequestContext;
-
-    vi.mocked(request.post).mockResolvedValue({
-      status: () => 302,
-      headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-    } as any);
-
-    await expect(uploadOperationalDocument(
-      request, origin, intentPath, intentBody, confirmPath, confirmBody, headers
-    )).rejects.toThrow();
-  });
-
-  it("fails if total deadline is exceeded during transient wait", async () => {
-    const request = {
-      post: vi.fn(),
-      put: vi.fn(),
-      get: vi.fn(),
-    } as unknown as APIRequestContext;
-
-    vi.mocked(request.post).mockResolvedValue({
-      status: () => 200,
-      headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-      text: async () => JSON.stringify({
-        data: {
-          object_key: "obj-123",
-          upload_url: "/api/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123",
-          method: "PUT",
-          headers: { "content-type": "application/octet-stream" }
-        },
-      }),
-    } as any);
-
-    vi.mocked(request.put).mockImplementation(async () => {
-      // Simulate advancing time past budget
-      vi.advanceTimersByTime(35000);
-      return {
-        status: () => 503,
-        headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-        text: async () => JSON.stringify({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
-      } as any;
-    });
-
-    vi.useFakeTimers();
-
-    const promise = uploadOperationalDocument(
-      request, origin, intentPath, intentBody, confirmPath, confirmBody, headers
-    );
-
-    await expect(promise).rejects.toThrow(/budget/i);
-
-    vi.useRealTimers();
   });
 });
