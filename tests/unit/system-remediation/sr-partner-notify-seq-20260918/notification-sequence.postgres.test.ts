@@ -46,10 +46,12 @@ describe.skipIf(!databaseUrl)(
       CREATE SCHEMA ops;
       CREATE SCHEMA mobility;
       CREATE SCHEMA admin;
+      CREATE SCHEMA iam;
       CREATE TABLE admin.phase1_partner_channel_entries (entry_slug varchar(150) PRIMARY KEY);
       CREATE TABLE admin.phase1_tenant_webhook_endpoints (webhook_id varchar(100) PRIMARY KEY);
     `);
-      // Apply the actual route/counter migration and actual outbox table DDL.
+      // Apply the actual route/counter and first-party migrations plus the
+      // actual outbox table DDL. Both route tables are required by the writer.
       const routeMigration = await readFile(
         "infra/migrations/V0104__sr_partner_notification_binding_and_routing.sql",
         "utf8",
@@ -58,11 +60,16 @@ describe.skipIf(!databaseUrl)(
         "infra/migrations/V0056__multi_taxi_runtime_compliance_closure.sql",
         "utf8",
       );
+      const firstPartyMigration = await readFile(
+        "infra/migrations/V0107__push_channel_first_party_registry_and_routing.sql",
+        "utf8",
+      );
       const outboxDdl = outboxMigration.match(
         /CREATE TABLE IF NOT EXISTS ops\.consumer_notification_outbox \([\s\S]*?\n\);/,
       )?.[0];
       if (!outboxDdl) throw new Error("outbox migration DDL missing");
       await pool.query(routeMigration);
+      await pool.query(firstPartyMigration);
       await pool.query(outboxDdl);
       await pool.query(
         "INSERT INTO admin.phase1_partner_channel_entries VALUES ('entry-seq')",
