@@ -20,30 +20,31 @@ def _sanitize_stderr(text):
     if not text:
         return text
 
-    # anchor error headers rather than matching payload substrings
-    error_lines = []
+    # Extract only the explicit error cause from the first error line,
+    # ignoring incidental details, resource names, or request payloads.
+    cause = None
     for line in text.splitlines():
-        if re.match(r"^\s*(?:ERROR|EXCEPTION):", line, re.IGNORECASE):
-            error_lines.append(line.upper())
+        match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*?)(?::|$)", line, re.IGNORECASE)
+        if match:
+            cause = match.group(1).strip().upper()
+            break
 
-    if not error_lines:
+    if not cause:
         return "[redacted: UNKNOWN_ERROR_FORMAT]"
 
-    error_context = " ".join(error_lines)
-
-    if "UNAUTHENTICATED" in error_context or "UNAUTHORIZED" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*401\b", error_context):
+    if "UNAUTHENTICATED" in cause or "UNAUTHORIZED" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*401\b", cause):
         return "[redacted: UNAUTHENTICATED / 401]"
-    if "PERMISSION_DENIED" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*403\b", error_context):
+    if "PERMISSION_DENIED" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*403\b", cause):
         return "[redacted: PERMISSION_DENIED / 403]"
-    if "NOT_FOUND" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*404\b", error_context):
+    if "NOT_FOUND" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*404\b", cause):
         return "[redacted: NOT_FOUND / 404]"
-    if "DEADLINE_EXCEEDED" in error_context or "TIMEOUT" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*504\b", error_context):
+    if "DEADLINE_EXCEEDED" in cause or "TIMEOUT" in cause or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*504\b", cause):
         return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
 
-    if "UNRECOGNIZED ARGUMENT" in error_context or "INVALID ARGUMENT" in error_context or "USAGE:" in error_context or "USAGE " in error_context:
+    if "UNRECOGNIZED ARGUMENT" in cause or "INVALID ARGUMENT" in cause or "USAGE" in cause:
         return "[redacted: SDK / ARGUMENT_ISSUE]"
 
-    if "ACTIVE ACCOUNT SELECTED" in error_context or "CREDENTIALS" in error_context or "REAUTH" in error_context:
+    if "ACTIVE ACCOUNT SELECTED" in cause or "CREDENTIALS" in cause or "REAUTH" in cause:
         return "[redacted: AUTH / ACCOUNT_ISSUE]"
 
     return "[redacted: UNKNOWN_ERROR_FORMAT]"
