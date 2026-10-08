@@ -45,3 +45,24 @@ Execution evidence:
 - `pnpm exec tsc --noEmit -p tsconfig.json` passed
 
 *Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI.*
+
+## Third Review Findings (2026-10-08)
+
+Codex third review REOPEN. REVIEWED_SHA=1f442107f622a6db1cd0fff0d341bff5a53c096a; generation=48346cf66e854663b490e101fbe2e31d.
+
+Confirmed improvements: redirects now fail instead of passing; transient 503 checks candidate SHA; confirm precedes proper documentId download; confirm key/hash/size/MIME checks exist; request timeouts use remaining budget and late responses are checked; runSetup records IDs/hash/size/attempt counts; both admin upload origins remain fleet-partner. Current manifest outside setup deep-equals original source base 4b26dd008.
+
+However, the following findings remain:
+
+- **R3 [P1, new route regression while repairing prior scope defect]:** Production-shaped requests ALWAYS fail before PUT. `tests/e2e/operational-document-upload.ts:102` requires `/documents/intent`, while ALL FOUR actual manifest uploads (`:189,209,299,321`) and `fleet-partner.controller.ts:createSupplyDocumentUploadUrl` use `/documents/upload-url`. `runSetup:398-416` forwards manifest path unchanged, in both callers `:638/:884`. Socket-free probe feeds each actual manifest setup with production-shaped successful intent: all four reject `Received:null` at `parentPrefixMatch`; exactly one POST and zero PUT/confirm/GET. Furthermore `:105-108` compares returned `/api/...` content path to the frontend `/control-plane-proxy/...` parent BEFORE normalization at `:121`: fixing suffix alone still rejects legitimate upload. Independent synthetic probe reproduced this second comparison failure.
+- **R3 [P1, remaining validation boundary]:** `:94` merely checks headers truthiness; `headers:{}` passes and emits PUT without required `application/octet-stream`. `:184-185` sends credentials to arbitrary `confirmPath` without same-origin/parent validation. `:205-219` treats any truthy `documentId` as a raw path segment, so returned `../../../outside` yields authenticated GET `/control-plane-proxy/fleet-partner/outside/download`. Synthetic inputs reproduced all three. Validate all destinations before credentialed I/O, exact same parent/route/query/key and required transport header values, strict/encoded single-segment document ID and final download path.
+- **R4 [P1/P2, repeated incomplete confirmation/evidence]:** `helper:200-215` ignores confirmation `submission_id`/`fleet_partner_id`/`document_type`. Same downstream probe returned WRONG-SUBMISSION/WRONG-FLEET/WRONG-TYPE with matching bytes metadata and was accepted. Bind actual intent/confirm ownership/type to requested submission and authoritative fleet scope. `helper:245-254` and `runSetup:419-438` now record local expected hash/size + IDs/counts, but still omit observed per-stage status, clean receipt fields, readback metadata and transient status/recovery history required by task.
+- **R5 [P2, repeated read-bound gap]:** `helper:81,145,161,200,238` reads JSON/body with no explicit size limit. Deadline checks after reading do not implement the requested finite response/read bounds. Probe supplied a 2 MiB irrelevant intent field; full lifecycle still accepted. Add meaningful bounded response processing appropriate to tiny PDF/metadata and tests for oversized/missing/mismatched responses.
+- **R6 [P2, repeated valid-PDF/regression/evidence gap]:** `helper:41-43` xref/startxref values are wrong: declared offsets 9,58,122,200; actual emitted offsets 9,58,115,184. Construct a well-formed harmless document and validate its structure/parser, not a duplicated literal. `tests/unit/operational-document-upload.test.ts` uses nonexistent `/api/.../documents/intent` and `{doc:type1}`; copied PDF masks bad offsets. Only four helper tests; missing candidate env enabled, other status/candidate/scope/receipt/readback negatives or setup-origin/token execution in both modes. Manifest additions cover both uploads but do not execute helper. This revision also removes existing fleet `supportedServiceProductCodes/capture` assertions from manifest test `:35-38`; restore original guards.
+
+### Next minimal repair unit/scope:
+1. Real manifest/helper route normalization and full lifecycle positive test.
+2. Bounded/scoped evidence and negatives.
+3. PDF and affected regression.
+
+(Waiting for Supervisor review under Guide 0.7 before continuing.)
