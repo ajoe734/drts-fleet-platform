@@ -189,3 +189,28 @@ Raw machine-specific evidence is under this assigned worker's
 `supervisor-metadata.json`, `ci-summary.json`, downloaded JSON and CI log.
 The tracked report contains the durable conclusions, SHAs, reproduction source
 and external links even if ephemeral worker files are later removed.
+
+## Delivery evidence
+
+Published anchor: `13fea4be9065f663af2be676c13451e8dba0785e`, normal
+`git push -u origin codex2/push-channel-pg-qa-20261006-unblock-history-repair`,
+exit 0. [Draft PR #2435](https://github.com/ajoe734/drts-fleet-platform/pull/2435)
+targets `dev` and changes only this report. Subsequent evidence commits remain
+append-only; the final published head and CI results belong in the canonical
+task receipt and PR, not a self-referential commit hash in this file.
+
+Local document checks completed, all exit 0:
+
+- Prettier 3.8.2 `--check` on this report (isolated tool installation).
+- `git diff --check origin/dev...HEAD`.
+- `python3 tools/ci/git/check_staged_generated_files.py --staged` before commit.
+- `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`.
+- `node tools/ci/check-repo-classification.mjs`: 6100 repository files validated.
+- Read-only audit assertions: parent local/live remote/PR identity, eight
+  task-scoped commits, nine allowed final paths, and downloaded report hash.
+
+The initial worktree Prettier command failed because of the dangling shared
+dependency link, as recorded above; it is not counted as a pass. No new product
+tests are appropriate for this documentation-only change. Automatically started
+helper PR workflows must reach terminal results and be read before the owner
+yields; their receipts cannot satisfy the parent's F1 acceptance.
