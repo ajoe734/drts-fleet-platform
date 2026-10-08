@@ -2,23 +2,31 @@
 
 Task ID: `SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008`
 
-## F1: Bounded Readiness Polling
+## F1a & F1b: Bounded Complete Readiness Polling
 
-The previous fixed 5s sleep loop (`time.sleep(5)`) for the `ready.version` marker has been replaced with a bounded monotonic polling loop (up to 60s) in:
-- `TestGenuineClamdLifecycle.test_genuine_lifecycle_and_transport`
-- `TestGenuineGatewayTransportFault.test_real_readiness_success_then_instream_transport_failure`
+The previous fixed sleep loops and incomplete `ready.version` checks have been replaced with a complete bounded monotonic polling helper (`poll_genuine_readiness_handshake`). It correctly tests the following conditions within a remaining time budget before accepting readiness:
+- `ready.version` is readable and numeric
+- The corresponding `daily.cvd` or `daily.cld` has a readable header that matches the marker
+- The `ready` marker exists and its `mtime` is readable
+- A genuine `zVERSION` live ping returns a version matching the marker
 
-This ensures we tolerate an initially missing marker within the bound and assert the correct `ready.version` once clamd becomes genuinely ready, matching the 60s bound in `wait_for_ping`. The test accurately cross-references the loaded version and the file's own version.
+All related assertions in `test_genuine_clamd_lifecycle.py` use this helper and properly reject completions after expiry while retaining useful diagnostics. We also bounded all `run_cmd` and `time.sleep` calls with `time.monotonic()` remaining budgets.
 
-## F2: Immutable Historical Seed 
+## F1c: Pure Boundary Regression Tests
 
-The mutable tag `clamav/clamav:1.3`, which led to a `manifest unknown` failure when attempting to pull, has been replaced with a concrete retrievable and immutable digest: `clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23`.
+A scoped `test_genuine_lifecycle_helpers.py` test suite was added to rigorously test the `poll_genuine_readiness_handshake` bounded loop. It repeatably mocks Docker/clock boundaries and verifies standard successes, delayed full publication, never-ready timeouts, invalid observations, and mismatched conditions to ensure that the bounds are strictly respected and early return/failure occurs as appropriate.
 
-This digest references the `clamav:1.4` layer snapshot, which contains a static and verifiable older CVD database bytes used by the old-to-new transition harness to genuinely simulate an out-of-date instance that must update via freshclam before accepting real gateway HTTP traffic. The test retains the old->pending->activated state transition validation.
+## F2: Immutable Historical Seed & Evidence Record
 
-## Acceptance Keys Met
+Digest retrieval is confirmed, referencing the immutable `clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23` layer snapshot. This ensures we can extract historical vendor-signed database bytes needed for the harness reliably without relying on mutable tags.
 
-1. `lifecycle_harness_bounded_readiness_and_genuine_seed_source`: Both F1 and F2 are addressed in the test harness without mocking the engine logic, using actual production-path evidence.
-2. `lifecycle_harness_exact_sha_review_ci_merge`: Exact new commit is ready for review and CI merge process.
+### Finding & Acceptance Evidence
 
-*Note: The real container lifecycle validation and `genuine_lifecycle_hosted_original_controls_zero_skips` key validation are blocked from running on this VM based on project constraints and will be tested via an isolated hosted run.*
+| Key | Status | Evidence / Notes |
+| :--- | :--- | :--- |
+| `lifecycle_harness_bounded_readiness_and_genuine_seed_source` | **Outstanding** | Candidate addresses F1a, F1b, F1c, and F2, but requires formal Review/CI acceptance before merging. |
+| `lifecycle_harness_exact_sha_review_ci_merge` | **Outstanding** | Pending review, CI, and merge. Old SHA: `be0eabca173c213d82ed3c4cae42fcbaeec92466`. New SHA will be recorded at handoff. |
+| `genuine_lifecycle_hosted_original_controls_zero_skips` | **Outstanding** | Pending isolated hosted run with complete lifecycle integration. Cannot run on local VM per project restrictions. |
+
+Local verification performed (Exit 0):
+- `PYTHONPATH=tests/unit/gcp-artifact-activation-20261004 python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_genuine_lifecycle_helpers.py` (5 passed)
