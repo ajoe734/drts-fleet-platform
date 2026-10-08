@@ -87,6 +87,13 @@ export interface FirstPartyPushDeviceTarget {
   deviceId: string;
   token: string;
 }
+/** Server-owned check of the captured context/recipient after credential IO.
+ * false skips only this device; domain and persistence failures retain identity.
+ * This is never populated from a client payload or serialized into the context.
+ */
+export type FirstPartyPushLateValidation = (
+  signal: AbortSignal,
+) => Promise<boolean>;
 export type FirstPartyPushProviderResult =
   | { kind: "accepted"; messageId: string }
   | { kind: "invalid"; errorCode?: string }
@@ -94,6 +101,7 @@ export type FirstPartyPushProviderResult =
   | { kind: "credential_rejected"; errorCode?: string }
   | { kind: "configuration_blocked"; errorCode?: string }
   | { kind: "internal_error" }
+  | { kind: "ineligible" }
   | { kind: "expired" };
 export const FIRST_PARTY_PUSH_PROVIDER = Symbol("FIRST_PARTY_PUSH_PROVIDER");
 export interface FirstPartyPushProvider {
@@ -101,6 +109,7 @@ export interface FirstPartyPushProvider {
   send(
     message: FirstPartyPushMessage,
     target: FirstPartyPushDeviceTarget,
+    validateBeforeSend: FirstPartyPushLateValidation,
   ): Promise<FirstPartyPushProviderResult>;
 }
 
@@ -254,8 +263,8 @@ export class FirstPartyNotificationTransport {
         )
       )
         continue;
-      // Relevance and active captured identity are checked just before each IO,
-      // including retries and later devices in a slow multi-device attempt.
+      // Early checks avoid credential IO for known-ineligible work. The provider
+      // must repeat these after metadata IO using the same captured identities.
       try {
         await this.checkRelevance(request, context);
       } catch (error) {
@@ -268,10 +277,33 @@ export class FirstPartyNotificationTransport {
         fenceContext.fenceToken,
       );
       if (!token) continue;
-      const result = await this.provider.send(context.wireMessage, {
-        deviceId: target.deviceId,
-        token,
-      });
+      const capturedContext = context;
+      let result: FirstPartyPushProviderResult;
+      try {
+        result = await this.provider.send(
+          capturedContext.wireMessage,
+          { deviceId: target.deviceId, token },
+          async (signal) => {
+            signal.throwIfAborted();
+            await this.checkRelevance(request, capturedContext);
+            signal.throwIfAborted();
+            const currentToken =
+              await this.repository.findFirstPartyNotificationDeviceToken(
+                capturedContext,
+                target,
+                fenceContext.fenceToken!,
+              );
+            // Never replace the captured token or select a new recipient.
+            return currentToken === token;
+          },
+        );
+      } catch (error) {
+        // Preserve already accepted device evidence, but never hide a lost
+        // persistence fence as a successful or retryable provider outcome.
+        if (firstReceiptId && error instanceof FirstPartyPushFailure) break;
+        throw error;
+      }
+      if (result.kind === "ineligible") continue;
       outcomes.set(target.deviceId, {
         deviceId: target.deviceId,
         kind: result.kind,

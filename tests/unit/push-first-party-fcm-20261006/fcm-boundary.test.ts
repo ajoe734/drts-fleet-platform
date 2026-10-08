@@ -45,7 +45,9 @@ describe("FCM production provider boundary", () => {
     "flag %s blocks metadata and HTTP",
     async (flag) => {
       vi.stubEnv("PASSENGER_PUSH_FIRST_PARTY_ENABLED", flag);
-      expect(await provider.send(message(), target)).toMatchObject({
+      expect(
+        await provider.send(message(), target, async () => true),
+      ).toMatchObject({
         kind: "configuration_blocked",
       });
       expect(accessToken).not.toHaveBeenCalled();
@@ -56,7 +58,9 @@ describe("FCM production provider boundary", () => {
     "missing project %s blocks all IO",
     async (project) => {
       vi.stubEnv("PASSENGER_PUSH_FCM_PROJECT_ID", project);
-      expect(await provider.send(message(), target)).toMatchObject({
+      expect(
+        await provider.send(message(), target, async () => true),
+      ).toMatchObject({
         kind: "configuration_blocked",
       });
       expect(accessToken).not.toHaveBeenCalled();
@@ -68,7 +72,7 @@ describe("FCM production provider boundary", () => {
     vi.setSystemTime(new Date("2026-10-07T00:00:00Z"));
     const input = message();
     input.data.phone = "forbidden";
-    expect(await provider.send(input, target)).toMatchObject({
+    expect(await provider.send(input, target, async () => true)).toMatchObject({
       kind: "accepted",
       messageId: name,
     });
@@ -95,7 +99,9 @@ describe("FCM production provider boundary", () => {
   it("never sends expired messages", async () => {
     const input = message();
     input.data.expires_at = new Date(Date.now() - 1000).toISOString();
-    expect((await provider.send(input, target)).kind).not.toBe("accepted");
+    expect(
+      (await provider.send(input, target, async () => true)).kind,
+    ).not.toBe("accepted");
     expect(fetchStub).not.toHaveBeenCalled();
   });
   it.each([
@@ -134,7 +140,7 @@ describe("FCM production provider boundary", () => {
         { status: status as number },
       ),
     );
-    const result = await provider.send(message(), target);
+    const result = await provider.send(message(), target, async () => true);
     expect(result.kind).toBe(kind);
     expect(JSON.stringify(result)).not.toContain(target.token);
   });
@@ -146,7 +152,9 @@ describe("FCM production provider boundary", () => {
       fetchStub.mockResolvedValue(
         Response.json({}, { status: 503, headers: { "Retry-After": header } }),
       );
-      expect(await provider.send(message(), target)).toMatchObject({
+      expect(
+        await provider.send(message(), target, async () => true),
+      ).toMatchObject({
         kind: "transient",
         retryAfterSeconds: header === "1" ? 1 : 3600,
       });
@@ -160,9 +168,9 @@ describe("FCM production provider boundary", () => {
     { name: "projects/test/messages/" },
   ])("rejects malformed ack %j", async (body) => {
     fetchStub.mockResolvedValue(Response.json(body));
-    expect((await provider.send(message(), target)).kind).toBe(
-      "internal_error",
-    );
+    expect(
+      (await provider.send(message(), target, async () => true)).kind,
+    ).toBe("internal_error");
   });
   it("cancels oversized response body", async () => {
     const cancel = vi.fn();
@@ -176,9 +184,9 @@ describe("FCM production provider boundary", () => {
         }),
       ),
     );
-    expect((await provider.send(message(), target)).kind).toBe(
-      "internal_error",
-    );
+    expect(
+      (await provider.send(message(), target, async () => true)).kind,
+    ).toBe("internal_error");
     expect(cancel).toHaveBeenCalled();
   });
   it("bounds an actual stalled request at ten seconds without exposing tokens", async () => {
@@ -191,7 +199,7 @@ describe("FCM production provider boundary", () => {
           ),
         ),
     );
-    const pending = provider.send(message(), target);
+    const pending = provider.send(message(), target, async () => true);
     await vi.advanceTimersByTimeAsync(10001);
     const result = await pending;
     expect(result.kind).toBe("transient");
