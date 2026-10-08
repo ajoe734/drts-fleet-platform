@@ -250,54 +250,123 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.mod.test_scanner("http://fake")
 
-    @patch("subprocess.run")
-    def test_gcs_success(self, mock_run):
-        state = {"generation": 12346}
-        def side_effect(cmd, **kwargs):
-            res = MagicMock()
+    OBSERVED_TYPED = "ERROR: Task 'gs://bucket/verify-test.txt-absent' failed: GcsPreconditionFailedError('')"
+    REPEATED_R1 = "ERROR: Task 'gs://bucket/file failed: GcsPreconditionFailedError.txt' failed: GcsNotFoundError('')"
+
+    def _exercise_gcs(self, *, cas_error=None, cas_stage=11, http_status=401,
+                      redirect=None, transport_error=None, recovery_fault=None):
+        """Run production control flow with only subprocess/HTTPS transport fake.
+
+        The real urllib opener, redirect handler and HTTPErrorProcessor run.
+        No servers, sockets, gcloud invocations or cloud resources are used.
+        """
+        import io
+        from email.message import Message
+        from urllib.response import addinfourl
+
+        state = {"generation": None, "updated": False}
+        commands, requests, responses, errors = [], [], [], []
+        http_command_index = []
+        temp_paths = set()
+
+        def reject(cmd, stderr):
+            error = subprocess.CalledProcessError(7, cmd, output="original stdout", stderr=stderr)
+            errors.append(error)
+            raise error
+
+        def subprocess_boundary(cmd, **kwargs):
+            self.assertEqual(kwargs, {"check": True, "capture_output": True, "text": True})
+            commands.append(cmd)
+            self.assertEqual(cmd[:3], ["gcloud", "--impersonate-service-account=fake-sa", "storage"])
+            res = subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             if "describe" in cmd:
                 res.stdout = str(state["generation"])
+                if requests and recovery_fault == "generation":
+                    res.stdout = "99999"
+            elif "rm" in cmd:
+                pass
+            elif "cp" in cmd:
+                src, dst = cmd[4:6]
+                if src.startswith("gs://"):
+                    temp_paths.add(dst)
+                    data = "test data v2" if src.endswith("#12347") else "test data v1"
+                    if requests and recovery_fault == "bytes":
+                        data = "corrupt recovery"
+                    Path(dst).write_text(data)
+                else:
+                    temp_paths.add(src)
+                    condition = cmd[6]
+                    if dst.endswith("-absent"):
+                        reject(cmd, cas_error if cas_stage == 11 and cas_error is not None else self.OBSERVED_TYPED)
+                    if condition == "--if-generation-match=not_a_number":
+                        reject(cmd, "ERROR: invalid generation argument")
+                    if condition == "--if-generation-match=0" and state["generation"] is not None:
+                        reject(cmd, cas_error if cas_stage == 4 and cas_error is not None else
+                               "ERROR: (gcloud.storage.cp) HTTPError 412: Precondition Failed")
+                    if condition == "--if-generation-match=12346" and state["updated"]:
+                        reject(cmd, cas_error if cas_stage == 8 and cas_error is not None else
+                               "ERROR: (gcloud.storage.cp) HTTPError 412: Precondition Failed")
+                    state["updated"] = state["generation"] is not None
+                    state["generation"] = 12347 if state["updated"] else 12346
             else:
-                res.stdout = "12345"
-
-            cp_idx = cmd.index("cp") if "cp" in cmd else -1
-            if "cp" in cmd and "#" in cmd[cp_idx+1] and cmd[cp_idx+1].startswith("gs://"):
-                with open(cmd[cp_idx+2], "w") as f:
-                    requested_gen = cmd[cp_idx+1].split("#")[1]
-                    if requested_gen == "12347":
-                        f.write("test data v2")
-                    else:
-                        f.write("test data v1")
-            elif "cp" in cmd and "--if-generation-match=0" in cmd:
-                if "--access-token-file=/dev/null" in cmd:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
-                    raise err
-                if len(mock_run.call_args_list) > 3:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
-                    raise err
-                state["generation"] = 12346
-            elif "cp" in cmd and any("--if-generation-match=" in arg and arg != "--if-generation-match=0" for arg in cmd):
-                match_arg = next(arg for arg in cmd if arg.startswith("--if-generation-match="))
-                if match_arg == f"--if-generation-match={state['generation'] - 1}":
-                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
-                    raise err
-                if match_arg == "--if-generation-match=not_a_number":
-                    err = subprocess.CalledProcessError(1, cmd, stderr="Invalid argument")
-                    raise err
-                if "absent" in cmd[cp_idx+2] or "absent" in cmd[cp_idx+1]:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
-                    raise err
-                state["generation"] += 1
-
+                self.fail(f"Unexpected subprocess command: {cmd}")
             return res
 
-        mock_run.side_effect = side_effect
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_err = urllib.error.HTTPError("url", 401, "Unauthorized", hdrs={}, fp=None)
-            mock_urlopen.side_effect = mock_err
-            self.mod.test_gcs("fake-bucket", "fake-sa")
+        def https_boundary(handler, req):
+            requests.append(req)
+            http_command_index.append(len(commands))
+            if transport_error is not None:
+                raise transport_error
+            headers = Message()
+            if redirect:
+                headers["Location"] = redirect
+            response = addinfourl(io.BytesIO(b"synthetic HTTP body"), headers, req.full_url, http_status)
+            response.msg = "Synthetic response"
+            responses.append(response)
+            return response
 
-    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
+        failure = None
+        with patch("subprocess.run", side_effect=subprocess_boundary), \
+             patch("urllib.request.HTTPSHandler.https_open", new=https_boundary):
+            try:
+                self.mod.test_gcs("fake-bucket", "fake-sa")
+            except Exception as exc:
+                failure = exc
+
+        # Assert exact generations on the actual run-owned path, and local cleanup.
+        test_file = commands[0][5]
+        expected_generations = ["12347", "12346"] if state["updated"] else ["12346"]
+        self.assertEqual([c for c in commands if "rm" in c], [
+            ["gcloud", "--impersonate-service-account=fake-sa", "storage", "rm", f"{test_file}#{gen}"]
+            for gen in expected_generations
+        ])
+        self.assertTrue(all(not Path(p).exists() for p in temp_paths))
+        for req in requests:
+            self.assertEqual(req.full_url,
+                             "https://storage.googleapis.com/storage/v1/b/fake-bucket/o/" + test_file.rsplit("/", 1)[1])
+            self.assertEqual(req.get_method(), "GET")
+            self.assertIsNone(req.data)
+            self.assertEqual(req.timeout, 10.0)
+            for header in ("Authorization", "Proxy-authorization", "Cookie"):
+                self.assertIsNone(req.get_header(header))
+        self.assertTrue(all(response.closed for response in responses))
+        recovery_commands = commands[http_command_index[0]:-2] if requests else []
+        if failure is None:
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(recovery_commands, [
+                ["gcloud", "--impersonate-service-account=fake-sa", "storage", "objects",
+                 "describe", test_file, "--format=value(generation)"],
+                ["gcloud", "--impersonate-service-account=fake-sa", "storage", "cp",
+                 test_file + "#12347", commands[2][5]],
+            ])
+        elif recovery_fault is None:
+            self.assertEqual(recovery_commands, [])
+        return failure, errors, requests
+
+    def test_gcs_success(self):
+        failure, _, _ = self._exercise_gcs()
+        self.assertIsNone(failure)
+
     def test_gcs_precondition_failed_classifier(self):
         cases_false = [
             "ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden for gs://bucket/object-412",
@@ -308,93 +377,112 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             "ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden\nRequest body:\nERROR: Task 'gs://bucket/object' failed: GcsPreconditionFailedError('')",
             "ERROR: (gcloud.storage.cp) HTTPError 403: backend message Precondition Failed",
             "ERROR: (gcloud.storage.cp) HTTPError 4120: unsupported code",
-            "ERROR: (gcloud.storage.cp) HTTPError 403: credential=GcsPreconditionFailedError"
+            "ERROR: (gcloud.storage.cp) HTTPError 403: credential=GcsPreconditionFailedError",
+            self.REPEATED_R1,
+            'ERROR: Task "gs://bucket/file failed: GcsPreconditionFailedError.txt" failed: GcsNotFoundError("")',
+            "ERROR: Task 'gs://bucket/file' failed: GcsPreconditionFailedError.txt",
+            "ERROR: Task 'gs://bucket/file' failed: GcsPreconditionFailedError('') trailing unknown",
+            "ERROR: Task gs://bucket/file failed: GcsPreconditionFailedError('')",
+            "ERROR: Task 'unterminated failed: GcsPreconditionFailedError('')",
+            "ERROR: GcsNotFoundError('GcsPreconditionFailedError')",
+            "ERROR: HTTPError 412.txt",
+            "ERROR: 412345 generation does not exist",
+            "ERROR: gs://bucket/412",
+            "ERROR: credential=GcsPreconditionFailedError",
+            "Request body:\nERROR: GcsPreconditionFailedError('')",
+            '{"error":"ERROR: HTTPError 412: Precondition Failed"}',
+            "SYNTHETIC_SECRET_412",
+            "WARNING: GcsPreconditionFailedError",
+            "ERROR: (gcloud.auth) GcsPreconditionFailedError('')",
+            "", None,
         ]
-        for c in cases_false:
-            e = subprocess.CalledProcessError(1, ["cmd"], stderr=c)
-            self.assertFalse(self.mod.is_gcs_precondition_failed(e), f"Falsely classified as True: {c!r}")
+        for fixture in cases_false:
+            with self.subTest(stderr=fixture):
+                error = subprocess.CalledProcessError(1, ["gcloud"], stderr=fixture)
+                self.assertFalse(self.mod.is_gcs_precondition_failed(error))
 
         cases_true = [
+            self.OBSERVED_TYPED,
             "ERROR: (gcloud.storage.cp) HTTPError 412: Precondition Failed",
             "ERROR: Task 'gs://bucket/file.txt' failed: GcsPreconditionFailedError('412 Precondition Failed')",
-            "EXCEPTION: (gcloud.storage.cp) HTTPError 412: Precondition Failed"
+            "EXCEPTION: (gcloud.storage.cp) HTTPError 412: Precondition Failed",
+            "ERROR: (gcloud.storage.cp) HTTP 412: Precondition Failed",
+            "ERROR: HTTPError: 412",
+            "ERROR: 412: Precondition Failed",
+            "ERROR: GcsPreconditionFailedError",
+            "ERROR: GcsPreconditionFailedError()",
+            "ERROR: Task failed: GcsPreconditionFailedError('')",
+            'ERROR: Task "gs://bucket/file failed: GcsNotFoundError.txt" failed: GcsPreconditionFailedError("")',
+            r"ERROR: Task 'gs://bucket/escaped\'name' failed: GcsPreconditionFailedError('')",
+            "ERROR: Task 'gs://bucket/path' failed: HTTPError 412: Precondition Failed",
         ]
-        for c in cases_true:
-            e = subprocess.CalledProcessError(1, ["cmd"], stderr=c)
-            self.assertTrue(self.mod.is_gcs_precondition_failed(e), f"Falsely classified as False: {c!r}")
+        for fixture in cases_true:
+            with self.subTest(stderr=fixture):
+                error = subprocess.CalledProcessError(1, ["gcloud"], stderr=fixture)
+                self.assertTrue(self.mod.is_gcs_precondition_failed(error))
 
-    @patch("subprocess.run")
-    def test_gcs_http_boundaries(self, mock_run):
-        import urllib.error
-        import socket
-        state = {"generation": 12346}
-        def side_effect(cmd, **kwargs):
-            res = MagicMock()
-            if "describe" in cmd:
-                res.stdout = str(state["generation"])
-            else:
-                res.stdout = "12345"
+    def test_gcs_cas_rejection_preserves_exception_and_cleanup(self):
+        for stage in (4, 8, 11):
+            for stderr in (self.REPEATED_R1, "ERROR: HTTPError 403: object-412",
+                           "ERROR: Task 'gs://bucket/x' failed: GcsNotFoundError('')",
+                           "ERROR: network unavailable"):
+                with self.subTest(stage=stage, stderr=stderr):
+                    failure, errors, requests = self._exercise_gcs(cas_error=stderr, cas_stage=stage)
+                    self.assertIs(failure, errors[-1])
+                    self.assertEqual(failure.returncode, 7)
+                    self.assertEqual(failure.stdout, "original stdout")
+                    self.assertEqual(failure.stderr, stderr)
+                    self.assertEqual(requests, [])
 
-            cp_idx = cmd.index("cp") if "cp" in cmd else -1
-            if "cp" in cmd and "#" in cmd[cp_idx+1] and cmd[cp_idx+1].startswith("gs://"):
-                with open(cmd[cp_idx+2], "w") as f:
-                    requested_gen = cmd[cp_idx+1].split("#")[1]
-                    if requested_gen == "12347":
-                        f.write("test data v2")
-                    else:
-                        f.write("test data v1")
-            elif "cp" in cmd and "--if-generation-match=0" in cmd:
-                if "--access-token-file=/dev/null" in cmd:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
-                    raise err
-                if len(mock_run.call_args_list) > 3:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
-                    raise err
-                state["generation"] = 12346
-            elif "cp" in cmd and any("--if-generation-match=" in arg and arg != "--if-generation-match=0" for arg in cmd):
-                match_arg = next(arg for arg in cmd if arg.startswith("--if-generation-match="))
-                if match_arg == f"--if-generation-match={state['generation'] - 1}":
-                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
-                    raise err
-                if match_arg == "--if-generation-match=not_a_number":
-                    err = subprocess.CalledProcessError(1, cmd, stderr="Invalid argument")
-                    raise err
-                if "absent" in cmd[cp_idx+2] or "absent" in cmd[cp_idx+1]:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
-                    raise err
-                state["generation"] += 1
+    def test_run_preserves_gcs_exception_contract(self):
+        cmd = ["gcloud", "--impersonate-service-account=fake-sa", "storage", "cp", "in", "gs://bucket/x"]
+        error = subprocess.CalledProcessError(9, cmd, output="stdout", stderr=self.OBSERVED_TYPED)
+        with patch("subprocess.run", side_effect=error), self.assertRaises(subprocess.CalledProcessError) as caught:
+            self.mod.run(cmd)
+        self.assertIs(caught.exception, error)
+        self.assertIs(caught.exception.cmd, cmd)
+        self.assertEqual((error.returncode, error.stdout, error.stderr), (9, "stdout", self.OBSERVED_TYPED))
 
-            return res
-        mock_run.side_effect = side_effect
+    def test_gcs_http_boundaries(self):
+        for code in (401, 403, 200, 404, 500, 503):
+            with self.subTest(code=code):
+                failure, _, requests = self._exercise_gcs(http_status=code)
+                self.assertEqual(len(requests), 1)
+                if code in (401, 403):
+                    self.assertIsNone(failure)
+                else:
+                    self.assertIsInstance(failure, AssertionError)
 
-        for code in (401, 403):
-            mock_run.reset_mock()
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_err = urllib.error.HTTPError("url", code, "Denied", hdrs={}, fp=None)
-                mock_urlopen.side_effect = mock_err
-                self.mod.test_gcs("fake-bucket", "fake-sa")
+    def test_gcs_redirects_are_rejected_before_second_request(self):
+        for code in (301, 302, 303, 307, 308):
+            for target in ("https://example.invalid/denial",
+                           "https://storage.googleapis.com/other-object"):
+                with self.subTest(code=code, target=target):
+                    failure, _, requests = self._exercise_gcs(http_status=code, redirect=target)
+                    self.assertIsInstance(failure, AssertionError)
+                    self.assertEqual(len(requests), 1)
 
-        mock_run.reset_mock()
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value = MagicMock()
-            with self.assertRaises(AssertionError) as cm:
-                self.mod.test_gcs("fake-bucket", "fake-sa")
-            self.assertIn("Expected unauthenticated request to fail", str(cm.exception))
+    def test_gcs_transport_failure_and_timeout_cleanup(self):
+        for error in (TimeoutError("timed out"), urllib.error.URLError("DNS unavailable")):
+            with self.subTest(error=error):
+                failure, _, requests = self._exercise_gcs(transport_error=error)
+                self.assertIs(failure, error)
+                self.assertEqual(len(requests), 1)
 
-        for code in (404, 500, 503):
-            mock_run.reset_mock()
-            with patch("urllib.request.urlopen") as mock_urlopen:
-                mock_err = urllib.error.HTTPError("url", code, "Error", hdrs={}, fp=None)
-                mock_urlopen.side_effect = mock_err
-                with self.assertRaises(AssertionError) as cm:
-                    self.mod.test_gcs("fake-bucket", "fake-sa")
-                self.assertIn("Expected external denial", str(cm.exception))
+    def test_gcs_recovery_generation_and_bytes_are_verified(self):
+        for fault in ("generation", "bytes"):
+            with self.subTest(fault=fault):
+                failure, _, _ = self._exercise_gcs(recovery_fault=fault)
+                self.assertIsInstance(failure, AssertionError)
 
-        mock_run.reset_mock()
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.URLError(socket.timeout("timed out"))
-            with self.assertRaises(urllib.error.URLError):
-                self.mod.test_gcs("fake-bucket", "fake-sa")
+    def test_gcs_nonofficial_denial_is_rejected_and_closed(self):
+        import io
+        body = io.BytesIO(b"foreign response")
+        error = urllib.error.HTTPError("https://example.invalid/denial", 403, "Forbidden", {}, body)
+        with patch("urllib.request.OpenerDirector.open", side_effect=error):
+            with self.assertRaisesRegex(AssertionError, "requested GCS URL"):
+                self.mod.assert_gcs_unauthenticated_denial("fake-bucket", "owned.txt")
+        self.assertTrue(body.closed)
 
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main(self):
