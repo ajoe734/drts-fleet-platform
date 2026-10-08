@@ -22,6 +22,8 @@ def regression_paths():
     patterns = [
         "tests/unit/system-remediation/sr-partner-notify-*/*.test.ts",
         "tests/unit/system-remediation/sr-partner-notify-*/*.test.tsx",
+        "tests/unit/cross-app/sr-partner-notify-*.test.ts",
+        "tests/integration/sr-partner-notify-*.test.ts",
         "tests/unit/push-referral-*/*.test.ts",
         "tests/unit/push-first-party-*/*.test.ts",
         "tests/unit/push-channel-router-*/*.test.ts",

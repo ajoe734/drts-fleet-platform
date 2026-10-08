@@ -110,3 +110,34 @@ No SQL column/type mismatch is established by this static comparison. F1 is a
 behavioral invariant gap, not a renamed column. Runtime conclusions remain
 pending hosted execution; the independent reviewer must inspect the final
 candidate and the result ledger, not infer success from this table.
+
+## Hosted round 1 — fixture failure, not a product reproduction
+
+Run 37725218260, published anchor `d7f9bd0577d5ef31a690bbf472562f0bd099e6b0`,
+Product smoke job `113141976285`, artifact `11527404674` (`test-results`).
+Downloaded and read the Vitest JSON on 2026-10-08. Root result: **6094 passed,
+28 failed, 49 pending**. All 28 new PG failures came from `beforeEach`:
+`booking_audit_intent is append-only; TRUNCATE is not permitted`.
+All production migrations had applied; the harness's cascading reset was invalid.
+This is QA finding **PG-QA-H1**, and is not a dynamic reproduction of F1.
+
+- Existing sequence/transport/UI PG suites: **7/7/7 passed, zero skipped**;
+  reran the unchanged original gate against the downloaded JSON: exit 0.
+- C111–C115: **34 passed, zero skipped**. Partner notification suites, including
+  component, cross-app and navigation integration cases, passed with zero skips.
+- Dormant checks: **3 passed**. New PG gate correctly failed.
+- API unit step did not run after root test failure. The unrelated 49 pending
+  root tests are not represented as successful PG acceptance.
+- Integration run 37725218325 completed successfully only as an owner draft
+  checkpoint; its product jobs were skipped. Full log read and saved locally.
+
+H1 repair: preserve all production audit triggers and create each test database
+with `CREATE DATABASE ... TEMPLATE <closed migrated database>`. Only the
+harness's randomly named databases are dropped. No TRUNCATE, trigger disabling,
+schema rewrite or shared-database cleanup remains in the harness. Each test
+gets all production tables, constraints and migrations with fresh data.
+
+The follow-up also adds delayed ETA and disclosure MAX/profile probes (new PG
+counts now **9/11/10**, 30 total). Narrow collection: 3 dormant passed / 30 PG
+skipped, typecheck and lint exit 0, nine gate tests passed. These local results
+only establish compilation/discovery. The follow-up hosted result is still due.

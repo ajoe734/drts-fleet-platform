@@ -24,6 +24,8 @@ export class PostgresHarness {
   private readonly name = `push_qa_${randomUUID().replaceAll("-", "")}`;
   private admin?: InstanceType<typeof Pool>;
   private created = false;
+  private activeName?: string;
+  private poolClosed = false;
   pool!: InstanceType<typeof Pool>;
   database!: DatabaseService;
   taxi!: MultiTaxiRepository;
@@ -58,6 +60,9 @@ export class PostgresHarness {
         });
       }
     }
+  }
+
+  private repositories() {
     this.database = {
       isEnabled: () => true,
       query: this.pool.query.bind(this.pool),
@@ -69,8 +74,10 @@ export class PostgresHarness {
   }
 
   async close() {
-    await this.pool?.end();
+    await this.closePool();
     try {
+      if (this.activeName)
+        await this.admin!.query(`DROP DATABASE "${this.activeName}"`);
       if (this.created) await this.admin!.query(`DROP DATABASE "${this.name}"`);
     } finally {
       await this.admin?.end();
@@ -78,14 +85,35 @@ export class PostgresHarness {
   }
 
   async reset() {
-    await this.pool
-      .query(`TRUNCATE ops.phase1_owned_orders, ops.phase1_dispatch_jobs,
-      ops.phase1_dispatch_assignments, ops.phase1_driver_tasks, ops.phase1_dispatch_attempts,
-      ops.phase1_dispatch_trace_logs, ops.consumer_notification_outbox,
-      ops.passenger_dispatch_disclosure_snapshots,
-      mobility.phase1_order_partner_notification_routes,
-      mobility.phase1_order_first_party_notification_routes,
-      iam.phase1_passenger_push_devices, admin.phase1_partner_user_identity_links CASCADE`);
+    // Full migrations include append-only audit tables: TRUNCATE CASCADE must
+    // stay forbidden. Clone the closed, migrated template for each case instead
+    // of weakening audit triggers or leaking state between cases.
+    await this.closePool();
+    if (this.activeName) {
+      await this.admin!.query(`DROP DATABASE "${this.activeName}"`);
+      this.activeName = undefined;
+    }
+    const name = `push_case_${randomUUID().replaceAll("-", "")}`;
+    await this.admin!.query(
+      `CREATE DATABASE "${name}" TEMPLATE "${this.name}"`,
+    );
+    this.activeName = name;
+    const url = new URL(databaseUrl!);
+    url.pathname = `/${name}`;
+    this.pool = new Pool({
+      connectionString: url.toString(),
+      max: 16,
+      connectionTimeoutMillis: 10000,
+    });
+    this.poolClosed = false;
+    this.repositories();
+  }
+
+  private async closePool() {
+    if (this.pool && !this.poolClosed) {
+      await this.pool.end();
+      this.poolClosed = true;
+    }
   }
 
   async entry(entrySlug = "entry-qa") {
