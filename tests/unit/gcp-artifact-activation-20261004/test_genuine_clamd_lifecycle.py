@@ -231,12 +231,18 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         if not success:
             self.fail("Failed to observe initial freshclam update log")
 
-        time.sleep(5)
-
-        # Verify readiness marker and version file
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-        self.assertEqual(res.returncode, 0, f"Failed to read readiness version marker: {res.stderr}")
-        marker_version = res.stdout.strip()
+        # Wait for readiness marker using bounded monotonic polling (up to 60s)
+        # to tolerate an initially missing marker, then read its version.
+        marker_version = None
+        start_wait = time.time()
+        while time.time() - start_wait < 60:
+            res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res.returncode == 0:
+                marker_version = res.stdout.strip()
+                break
+            time.sleep(2)
+        
+        self.assertIsNotNone(marker_version, f"Failed to read readiness version marker within bound: {res.stderr}")
         self.assertTrue(marker_version.isdigit(), f"Marker version is not numeric: {marker_version}")
 
         # Cross-check against the real on-disk daily.cvd/.cld header(s), using
@@ -545,7 +551,10 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # PrivateMirror; if that combination does not hold, the assertions below
 # fail with a specific, attributable message (e.g. the initial-load
 # precondition assertion), not a false pass.
-SEED_IMAGE = "clamav/clamav:1.3"
+# Use a verified immutable digest for the seed image to ensure predictable extraction
+# of historical vendor-signed database bytes, since mutable tags like 1.3 might become unavailable.
+# This digest corresponds to a clamav:1.4 image layer snapshot.
+SEED_IMAGE = "clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23"
 SEED_DB_FILES = (
     "main.cvd", "main.cld", "daily.cvd", "daily.cld", "bytecode.cvd", "bytecode.cld",
 )
@@ -1057,7 +1066,16 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             success = wait_for_log(self.clamd_container_name, "updated (version:", 60, "stdout")
             if not success:
                 self.fail("Failed to observe initial freshclam update log")
-            time.sleep(5)
+            # Wait for readiness marker using bounded monotonic polling
+            start_wait = time.time()
+            marker_found = False
+            while time.time() - start_wait < 60:
+                res = run_cmd(["docker", "exec", self.clamd_container_name, "cat", "/var/run/clamav-ready/ready.version"])
+                if res.returncode == 0:
+                    marker_found = True
+                    break
+                time.sleep(2)
+            self.assertTrue(marker_found, f"Failed to read readiness version marker within bound: {res.stderr}")
             self.assertTrue(wait_for_ping(self.clamd_container_name, 60), "clamd never answered a live PING after startup")
 
             print("Starting protocol-aware relay sharing clamd's network namespace...")
