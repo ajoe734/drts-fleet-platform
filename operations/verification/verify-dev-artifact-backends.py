@@ -20,26 +20,31 @@ def _sanitize_stderr(text):
     if not text:
         return text
 
-    error_lines = [line.upper() for line in text.splitlines() if "ERROR:" in line.upper() or "EXCEPTION:" in line.upper()]
+    # anchor error headers rather than matching payload substrings
+    error_lines = []
+    for line in text.splitlines():
+        if re.match(r"^\s*(?:ERROR|EXCEPTION):", line, re.IGNORECASE):
+            error_lines.append(line.upper())
+
     if not error_lines:
         return "[redacted: UNKNOWN_ERROR_FORMAT]"
 
     error_context = " ".join(error_lines)
 
-    if "UNRECOGNIZED ARGUMENT" in error_context or "INVALID ARGUMENT" in error_context or "USAGE" in error_context:
+    if "UNAUTHENTICATED" in error_context or "UNAUTHORIZED" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*401\b", error_context):
+        return "[redacted: UNAUTHENTICATED / 401]"
+    if "PERMISSION_DENIED" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*403\b", error_context):
+        return "[redacted: PERMISSION_DENIED / 403]"
+    if "NOT_FOUND" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*404\b", error_context):
+        return "[redacted: NOT_FOUND / 404]"
+    if "DEADLINE_EXCEEDED" in error_context or "TIMEOUT" in error_context or re.search(r"\b(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*504\b", error_context):
+        return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+    if "UNRECOGNIZED ARGUMENT" in error_context or "INVALID ARGUMENT" in error_context or "USAGE:" in error_context or "USAGE " in error_context:
         return "[redacted: SDK / ARGUMENT_ISSUE]"
 
     if "ACTIVE ACCOUNT SELECTED" in error_context or "CREDENTIALS" in error_context or "REAUTH" in error_context:
         return "[redacted: AUTH / ACCOUNT_ISSUE]"
-
-    if "UNAUTHENTICATED" in error_context or "UNAUTHORIZED" in error_context or re.search(r"\b(?:HTTP|STATUS)\s*:?\s*401\b", error_context):
-        return "[redacted: UNAUTHENTICATED / 401]"
-    if "PERMISSION_DENIED" in error_context or re.search(r"\b(?:HTTP|STATUS)\s*:?\s*403\b", error_context):
-        return "[redacted: PERMISSION_DENIED / 403]"
-    if "NOT_FOUND" in error_context or re.search(r"\b(?:HTTP|STATUS)\s*:?\s*404\b", error_context):
-        return "[redacted: NOT_FOUND / 404]"
-    if "DEADLINE_EXCEEDED" in error_context or "TIMEOUT" in error_context or re.search(r"\b(?:HTTP|STATUS)\s*:?\s*504\b", error_context):
-        return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
 
     return "[redacted: UNKNOWN_ERROR_FORMAT]"
 

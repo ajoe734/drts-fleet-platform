@@ -609,7 +609,11 @@ refresh_token=SYNTHETIC_REFRESH
             ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-403-project does not exist', '[redacted: NOT_FOUND / 404]'),
             ('access_token: SYNTHETIC-403-TOKEN', '[redacted: UNKNOWN_ERROR_FORMAT]'),
             ('ERROR: (gcloud.logging.read) PERMISSION_DENIED\nRequest body: {"url":"https://example.invalid/401"}', '[redacted: PERMISSION_DENIED / 403]'),
-            ('ERROR: (gcloud.logging.read) unrecognized arguments: --account-synthetic', '[redacted: SDK / ARGUMENT_ISSUE]')
+            ('ERROR: (gcloud.logging.read) unrecognized arguments: --account-synthetic', '[redacted: SDK / ARGUMENT_ISSUE]'),
+            ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-usage-project does not exist', '[redacted: NOT_FOUND / 404]'),
+            ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-credentials-project does not exist', '[redacted: NOT_FOUND / 404]'),
+            ('ERROR: (gcloud.logging.read) PERMISSION_DENIED\nRequest body: {"error: ": "UNAUTHENTICATED", "secret": "SYNTHETIC_SECRET"}', '[redacted: PERMISSION_DENIED / 403]'),
+            ('ERROR: (gcloud.logging.read) HTTPError 403: The caller does not have permission', '[redacted: PERMISSION_DENIED / 403]')
         ]
 
         for edge_fixture, expected_msg in edge_fixtures:
