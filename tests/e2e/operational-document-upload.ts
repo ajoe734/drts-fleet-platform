@@ -245,7 +245,7 @@ export async function uploadOperationalDocument(
   const confirmText = await confirmResponse.text();
   expect(confirmText.length, "confirm response size bounded").toBeLessThan(1024 * 1024);
   const confirmData = JSON.parse(confirmText) as {
-    data?: { document_id?: string; documentId?: string; file_object_key?: string; fileObjectKey?: string; checksum_sha256?: string; checksumSha256?: string; file_size?: number; fileSize?: number; content_type?: string; contentType?: string }
+    data?: { document_id?: string; documentId?: string; file_object_key?: string; fileObjectKey?: string; checksum_sha256?: string; checksumSha256?: string; file_size?: number; fileSize?: number; content_type?: string; contentType?: string; submission_id?: string; submissionId?: string; fleet_partner_id?: string; fleetPartnerId?: string; document_type?: string; documentType?: string }
   };
   checkDeadline();
 
