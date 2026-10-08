@@ -1,7 +1,10 @@
 # PUSH-CHANNEL-PG-QA-20261006
 
 Owner: Codex2. Reviewer: Codex. Baseline: `7785a1abd1cf1fffe06cfdef50df2956fc2eaf9f`.
-All five dependencies are `done` as of 2026-10-08. Work is in progress; no PG pass or acceptance is claimed yet.
+All five dependencies are `done` as of 2026-10-08. Hosted PG now reproduces
+PG-QA-F1: **28 passed / 2 failed / 0 skipped** across 30 new cases. The QA harness
+setup defect is fixed. Acceptance remains blocked on the product route writer;
+this branch is an owner checkpoint, not a completed/reviewed candidate.
 
 ## Scope and execution boundary
 
@@ -13,14 +16,15 @@ SQL simulators stand in for those boundaries. No server is started on the VM.
 
 ## Findings and acceptance ledger
 
-| Finding / acceptance                                                 | Source and change                                                                                                                                       | Baseline → current result                                                                             | Command / evidence                                        | Remaining limitation                                                               |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| PG-QA-F1: partner writer accepts an order already routed first-party | `tenant-partner/order-partner-notification-route.ts` `persistOrderPartnerNotificationRoute`; first-party writer has a one-sided check and advisory lock | Static evidence: partner INSERT neither checks V0107 nor takes the same lock; PG reproduction pending | Reported via owner `progress` to Supervisor on 2026-10-08 | Product source is outside QA write scopes; Supervisor must coordinate owner repair |
-| `push-channel-pg-qa_hosted_postgres_suites_zero_skips`               | New production-migration suites and CI gate                                                                                                             | Pending                                                                                               | Hosted run not started                                    | Must read exact candidate results, including original 7/7/7 PG gates               |
-| `push-channel-pg-qa_regression_and_dormant_proof`                    | Partner, C111–C115, cancellation and disabled-first-party checks                                                                                        | Pending                                                                                               | Checks not started                                        | C111–C115 receiver tests must run hosted; no local receiver                        |
+| Finding / acceptance                                                 | Source and change                                                                                                                                       | Baseline → current result                                                                                  | Command / evidence                                   | Remaining limitation                                                                                     |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| PG-QA-F1: partner writer accepts an order already routed first-party | `tenant-partner/order-partner-notification-route.ts` `persistOrderPartnerNotificationRoute`; first-party writer has a one-sided check and advisory lock | Hosted sequential and concurrent probes both produce `ambiguous`, violating one-route expectation; unfixed | Run 37726276435, artifact 11528810614; details below | Product source is outside QA write scopes; Supervisor must coordinate owner repair                       |
+| PG-QA-H1: cleanup violates append-only audit trigger                 | New `postgres-harness.ts`                                                                                                                               | 28 setup failures → per-case migrated database clones; all 30 cases reach production behavior              | Runs 37725218260 → 37726276435                       | Resolved; no schema constraint or trigger bypass                                                         |
+| `push-channel-pg-qa_hosted_postgres_suites_zero_skips`               | Production-migration suites and exact-count CI gate                                                                                                     | New PG 28 passed / 2 failed / 0 skipped; legacy PG 7/7/7 passed; gate correctly fails F1                   | Run 37726276435, JSON and complete product log read  | Not satisfied until F1 repair and same-candidate green CI/review                                         |
+| `push-channel-pg-qa_regression_and_dormant_proof`                    | Partner, C111–C115, cancellation and disabled-first-party checks                                                                                        | All targeted regressions passed with zero skips; dormant 3/3 plus PG disabled-send check passed            | Run 37726276435; original gate rerun exit 0          | Evidence available; candidate lifecycle/independent review not complete; no live device delivery claimed |
 
-SQL/migration comparison, per-case counts, commands and hosted run evidence will
-be added here as each verification unit completes. The F1 finding stays open
+SQL/migration comparison, per-case counts, commands and hosted run evidence are
+recorded below. The F1 finding stays open
 until a corrected production writer passes the same reproducer.
 
 ## Implemented checks and first anchor evidence
@@ -106,9 +110,9 @@ production migration files; these are the relevant authorities:
 | `findFirstPartyNotificationDeviceToken`                                                                                    | V0108 target_devices JSON parsed as deviceId uuid/tokenSha256 text; V0107 device_id/token_sha256/token/status/passenger/app/last_seen_at; V0099 fence_token/claim_state/lease_expires_at                                                                                                                                                                                                                                                                      | Join and casts match physical types. Eligibility and clock_timestamp fence rechecked just before send; rotated/rebound/revoked devices cannot be replaced with new recipients                                                                                           |
 | `recordPushDeliveryOutcome`                                                                                                | V0099 receipt_id uuid default, outbox_id/subject varchar(255), dedupe_key/provider fields text, fence_token integer, device_delivery_state defaults unknown; V0108 delivery_stage/retry_disposition/failure_reason/receipt_id/delivered_at/device_outcomes; V0056 payload JSON plus outcome status/counters/dates                                                                                                                                             | Context, receipt, outbox update and claim release share transaction. Bad final status must roll everything back. FCM accepted receipt remains provider_accepted, never device_received                                                                                  |
 
-No SQL column/type mismatch is established by this static comparison. F1 is a
-behavioral invariant gap, not a renamed column. Runtime conclusions remain
-pending hosted execution; the independent reviewer must inspect the final
+No SQL column/type mismatch is established by this comparison. F1 is a
+behavioral invariant gap, not a renamed column. Runtime conclusions are in the
+hosted round ledger; the independent reviewer must inspect the final
 candidate and the result ledger, not infer success from this table.
 
 ## Hosted round 1 — fixture failure, not a product reproduction
@@ -141,3 +145,85 @@ The follow-up also adds delayed ETA and disclosure MAX/profile probes (new PG
 counts now **9/11/10**, 30 total). Narrow collection: 3 dormant passed / 30 PG
 skipped, typecheck and lint exit 0, nine gate tests passed. These local results
 only establish compilation/discovery. The follow-up hosted result is still due.
+
+## Hosted round 2 — H1 resolved, F1 reproduced
+
+[CI 37726276435](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37726276435)
+completed **failure** on published anchor
+`7cc2ba490e1bdff90dcb05a558fa96748ee4f683`.
+[Product smoke job 113145292739](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37726276435/job/113145292739),
+artifact `11528810614`. Full job log and JSON were downloaded and read.
+JSON SHA-256: `b392b2f479cecf8cee3d08f054fdf4e1e3818af75f31f413efde6c4c9b0050f3`.
+
+| Result set                          | Passed | Failed | Skipped | Interpretation                                                                                                                             |
+| ----------------------------------- | -----: | -----: | ------: | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| New referral PG                     |      9 |      0 |       0 | Booking/replay, savepoint, assignment/rollback, cancellation, delayed ETA and MAX/profile behavior executed against full production schema |
+| New registry PG                     |      9 |      2 |       0 | Device lifecycle, uniqueness, concurrency and first-party writer pass; opposite-channel writes fail F1                                     |
+| New delivery PG                     |     10 |      0 |       0 | Frozen contexts, all immutable fields, retries, fences, rollback, routing and disabled/late-revoked sends pass                             |
+| Dormant static/runtime unit checks  |      3 |      0 |       0 | No FCM or metadata request when disabled, deployment configuration absent, no first-party registration HTTP seam                           |
+| Legacy PG sequence / transport / UI |     21 |      0 |       0 | Exactly 7 each; unchanged original gate rerun locally against artifact exits 0                                                             |
+| C111–C115                           |     34 |      0 |       0 | Existing hosted receiver and full named suite pass                                                                                         |
+| Entire root suite                   |   6122 |      2 |      49 | Only failures are F1; unrelated pre-existing opt-in skips remain explicitly pending                                                        |
+
+All suites listed by the new gate except registry PG passed. Its exit 1 reports
+registry `passed=9 expected=11 other=2 expected=0`; neither failing case was
+skipped or relabeled. Hosted Python gate unit tests also passed. API unit tests
+were skipped after root failure. Integration workflow 37726276425 completed as
+a **draft checkpoint only**, with product jobs skipped; its log was read.
+
+### F1 minimal reproduction and repair boundary
+
+Production chain:
+
+1. `PassengerPushDevicesRepository.writeFirstPartyRoute` creates the V0107 row
+   after checking V0104, holding the transaction advisory lock keyed by
+   `passenger-push-first-party-route:<orderId>`.
+2. `MultiTaxiRepository.writeOrderPartnerNotificationRoute` calls the shared
+   [partner route writer](../../../apps/api/src/modules/tenant-partner/order-partner-notification-route.ts)
+   inside its transaction. The shared function inserts V0104 plus the sequence
+   without checking V0107 or taking that lock. The owned-mobility wrapper calls
+   the same shared function under its transaction/savepoint.
+3. `resolvePassengerNotificationChannel` reads both persisted rows and returns
+   **`ambiguous`**, where sequential reverse-write rejection must leave
+   **`first_party_app`**. The concurrent two-writer probe also returned
+   `ambiguous` in this hosted run.
+
+The two failing tests are named `PG-QA-F1 rejects the reverse write through both
+production partner writers` and `PG-QA-F1 concurrent opposite-channel writers
+commit at most one route` in `registry.postgres.test.ts`. The sequential case
+fails at its first (multi-taxi) writer; the second wrapper shares the exact
+production helper and must also pass after repair. This does not claim the
+second loop iteration ran after the first assertion failed.
+
+Repair must serialize both channel writers on the same per-order transaction
+lock, inspect the opposite table before insertion, and leave **both** partner
+route and sequence absent on rejection. Preserve the existing route replay,
+booking savepoint and non-blocking notification-setup behavior. Both sequential
+directions and the concurrent case must then pass, together with all current
+positive tests. Do not reduce registry's required count or use `skip`/`fails`.
+
+The product helper is outside this task's write scopes. Supervisor was notified
+through owner `progress` with the exact source path and hosted evidence. Also
+coordinate the legacy sequence PG fixture: it currently only applies V0104 and
+the V0056 outbox DDL, so a new V0107 read needs the real migration added to that
+fixture while preserving its seven assertions. Do not add a production
+table-existence fallback merely to accommodate an incomplete test fixture.
+
+### Reproduction commands and remaining work
+
+Only on the authorized hosted PostgreSQL runner, with
+`PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL` set to its service database:
+
+```bash
+pnpm exec vitest run tests/unit/push-channel-pg-qa-20261006 --reporter=default --reporter=json --outputFile.json=push-pg-results.json
+# For the complete gate, use the root report emitted by the existing CI workflow:
+python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json
+python3 tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json
+```
+
+The follow-up QA checkpoint adds direct replay assertions for both partner
+repository writers in the existing referral case (counts unchanged). Its CI
+results must be read before any future handoff. Final acceptance needs the
+Supervisor-coordinated F1 repair, fresh exact-candidate CI, independent Codex
+review and normal lifecycle integration. No candidate handoff, acceptance
+record or `done` was issued for the failing checkpoint.
