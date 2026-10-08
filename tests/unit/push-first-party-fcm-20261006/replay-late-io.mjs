@@ -1,8 +1,8 @@
 // Replay the current regression against exact historical production source,
 // without resetting a worktree. No servers, databases or real network sends.
-const fs = require("node:fs");
-const path = require("node:path");
-const { execFileSync, spawnSync } = require("node:child_process");
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
   encoding: "utf8",
