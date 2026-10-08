@@ -258,3 +258,22 @@ Codex2 reopened candidate `487348aa33f72c53f43717a900e113bb900ed533` (generation
 - Local branch, remote branch, and PR head are fully synchronized on `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`.
 - Prior history is preserved with regular commits (no force-push/rebase).
 - Final `CANDIDATE_SHA` for this handoff is read off `git rev-parse HEAD`.
+
+Codex2 reopened candidate `e33626f5d21585ace7a54034f17c57d45379ac23` (generation `aee65d7616f34089af87c27d0052ac3e`; 2026-10-08T01:46:22Z) with one finding:
+- F1/F3/F4/F5/F6 verified fixed. F2 [P2] inaccurate adjacent-review history remained unresolved. Fixed by properly mapping the three prior reviewer receipts to their exact historical findings, retaining failed-check history and unresolved state per candidate.
+
+## Round 5 — reviewer findings and repair (2026-10-08)
+
+- **F2 [P2] — inaccurate adjacent-review history**: Finalized fix by accurately recording the historical receipt mapping and appending this Round 5 reopen receipt into the artifact, preserving the exact adjacent-review evidence as requested.
+
+**Verification for Round 5:**
+- `git diff origin/dev...HEAD --check` and `git diff --check` on staged changes exited 0 (clean).
+- `PYTHONDONTWRITEBYTECODE=1 python3 tools/ci/git/check_canonical_consistency.py --ci --base a9a765986d94c657fb451c39952a450b9d0f07e7^ --head HEAD` ran clean (exit 0).
+
+**Round 5 Publication and PR Delivery:**
+
+- Repaired candidate has been published through the existing task-scoped PR to `dev`.
+- PR URL: https://github.com/ajoe734/drts-fleet-platform/pull/2428
+- Local branch, remote branch, and PR head are fully synchronized on `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`.
+- Prior history is preserved with regular commits (no force-push/rebase).
+- Final `CANDIDATE_SHA` for this handoff is read off `git rev-parse HEAD`.
