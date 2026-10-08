@@ -373,7 +373,7 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         self.current_time = 0.0
 
         def run_cmd_side_effect(cmd, **kwargs):
-            self.current_time += 15.0  # Take longer than timeout_s=10
+            self.current_time += 0.5
             cmd_str = " ".join(cmd)
             if "stat" in cmd_str:
                 return self._make_res(stdout="123456\n")
@@ -385,7 +385,7 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         with self.assertRaisesRegex(TimeoutError, "Renewal loop incomplete"):
             harness.poll_genuine_watchdog_renewal(
                 "container", "daily.cvd", "123", "123450", "since_time",
-                re.compile("Watchdog updated successfully"), "/db", timeout_s=10
+                re.compile("Watchdog updated successfully"), "/db", timeout_s=1
             )
 
     def test_marker_removal_late_success_rejected(self):
@@ -393,36 +393,36 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         self.current_time = 0.0
 
         def run_cmd_side_effect(cmd, **kwargs):
-            self.current_time += 15.0
+            self.current_time += 1.0
             return self._make_res(returncode=1) # Missing file implies removed
 
         self.mock_run_cmd.side_effect = run_cmd_side_effect
         with self.assertRaisesRegex(TimeoutError, "Removal loop incomplete"):
-            harness.poll_genuine_marker_removal("container", timeout_s=10)
+            harness.poll_genuine_marker_removal("container", timeout_s=1)
 
     def test_activation_late_success_rejected(self):
         import subprocess
         self.current_time = 0.0
 
         def run_cmd_side_effect(cmd, **kwargs):
-            self.current_time += 15.0
+            self.current_time += 1.0
             return self._make_res(stdout="ClamAV 1.0.0/789/date\n")
 
         self.mock_run_cmd.side_effect = run_cmd_side_effect
         with self.assertRaisesRegex(TimeoutError, "Activation loop incomplete"):
-            harness.poll_genuine_activation("container", "789", timeout_s=10)
+            harness.poll_genuine_activation("container", "789", timeout_s=1)
 
     def test_pending_version_late_success_rejected(self):
         import subprocess
         self.current_time = 0.0
 
         def run_cmd_side_effect(cmd, **kwargs):
-            self.current_time += 15.0
+            self.current_time += 1.0
             return self._make_res(stdout="456\n")
 
         self.mock_run_cmd.side_effect = run_cmd_side_effect
         with self.assertRaisesRegex(TimeoutError, "Pending loop incomplete"):
-            harness.poll_genuine_pending_version("container", "123", timeout_s=10)
+            harness.poll_genuine_pending_version("container", "123", timeout_s=1)
 
 if __name__ == "__main__":
 

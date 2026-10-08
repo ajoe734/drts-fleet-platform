@@ -8,6 +8,8 @@ Task ID: `SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008`
 - **8e7017fc93a85f857954858bd80431d7e65fed10**: Second candidate (Generation 7904ac0908bf40b6b748bf427521ed6b). Fixed wall-clock dependence but still failed elapsed-time enforcement with a concrete elapsed 67s probe.
 - **3f961a6360800ead1009302941c642c8cfd37d50**: Third candidate. Missed auditing the renewal/removal/activation loops. Loops lacked timeout checks, fractional bounds, and accepted late results. Also had a watchdog cutoff race where checking for mtime advance missed logs.
 - **c38f5dc31a93c454633b8630aad012ecfc13c662**: Fourth candidate (Generation d7d7702c30c64bd99a2f1d3e10b4f81e). Failed to properly bound the three defective loops (renewal/removal/activation), retaining unchanged AST statement blocks. Missing test coverage for the exact findings, fractional timeout, terminal expiry, and live-version lag.
+- **668c1eb6205a3a6ddb8f9442bfa1cc2756532acc**: Fifth candidate. Resolved helper/port/relay deadlines but explicitly requested transient HTTP retry and faithful terminal regressions were incomplete. Left the HTTP body-read trigger missing `TimeoutError` and `ConnectionResetError` catches inside the `gateway_scan` inner try block, causing startup/recovery loop abortion instead of retry. Also missed faithful terminal success regression tests for watchdog renewal and marker removal (the early-command mock advanced 15s before the final command, masking the missing terminal success check).
+- **db13e91a94dceb27a1f4f53a6c1c37ca52f57b8a**: Sixth candidate (Generation 308f820f37a14a0ab0a3ca6f3682c625). Reviewer identified that transient HTTP body-read defects and renewal/removal regression gaps remained. Current commit addresses this by nesting the HTTPError block to catch read timeouts, bounding late-success tests to 0.5s calls under timeout_s=1, and adding `TestGatewayScanBoundary` for 503 HTTPError body read connection and timeout errors.
 
 ## F1a & F1b: Bounded Complete Readiness Polling
 
@@ -54,4 +56,4 @@ Main/daily/bytecode availability, signatures/readability, old<new verification, 
 | `genuine_lifecycle_hosted_original_controls_zero_skips` | **Outstanding** | Pending isolated hosted run. Cannot run on local VM per project restrictions. Hosted verification must establish main/daily/bytecode availability and signatures. |
 
 Local verification performed (Exit 0):
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests/unit/gcp-artifact-activation-20261004 python3 -m unittest test_genuine_lifecycle_helpers test_genuine_clamd_lifecycle.TestRelayScriptInstreamFraming -v` (20 passed)
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests/unit/gcp-artifact-activation-20261004 python3 -m unittest test_genuine_lifecycle_helpers test_genuine_clamd_lifecycle.TestRelayScriptInstreamFraming test_genuine_clamd_lifecycle.TestGatewayScanBoundary -v` (22 passed)
