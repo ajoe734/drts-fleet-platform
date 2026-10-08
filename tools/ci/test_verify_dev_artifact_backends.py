@@ -645,18 +645,18 @@ refresh_token=SYNTHETIC_REFRESH
             ("ERROR: (gcloud.logging.read) PERMISSION_DENIED\n" + "SYNTHETIC_SECRET" * 65536, "[redacted: PERMISSION_DENIED / 403]"),
             ("ERROR: (gcloud.logging.read) unknown\n" + "SYNTHETIC_SECRET" * 65536, "[redacted: UNKNOWN_ERROR_FORMAT]")
         ]
-        
+
         for fixture, expected in oversized_fixtures:
             err_oversize = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture, output="normal stdout")
             mock_run.side_effect = err_oversize
-    
+
             captured_stderr_oversize = io.StringIO()
             sys.stderr = captured_stderr_oversize
             try:
                 with self.assertRaises(subprocess.CalledProcessError) as cm_oversize:
                     self.mod.run(["gcloud", "logging", "read"])
                 out_oversize = captured_stderr_oversize.getvalue()
-                
+
                 # Assert bounds and preservation
                 self.assertLessEqual(len(out_oversize), 1100, f"Output size {len(out_oversize)} exceeds bound 1100")
                 self.assertIn(expected, out_oversize)
