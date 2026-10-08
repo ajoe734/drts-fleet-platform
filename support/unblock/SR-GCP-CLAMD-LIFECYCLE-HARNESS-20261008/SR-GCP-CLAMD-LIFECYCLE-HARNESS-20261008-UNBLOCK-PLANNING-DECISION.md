@@ -112,7 +112,7 @@ Supervisor must write the following through its authorized release CLI context:
 - Parent: preserve blocked state, owner/reviewer and all candidate/acceptance
   evidence; record the four-step audit above as its next action.
 - Helper metadata: `resolved_parent_status: blocked`,
-  `resolved_parent_waiting_for: Supervisor`, and `resolved_parent_next` pointing
+  `resolved_parent_waiting_for: Claude` (Supervisor coordination lane), and `resolved_parent_next` pointing
   to Operator/Supervisor audit of run 37776386019, F2 three-family validation,
   independent IAM/restoration/cleanup readbacks and original-key recording.
   Lifecycle supplies `resolved_parent_at`; do not fabricate a timestamp.
@@ -160,3 +160,7 @@ reconstitute these two planning-file changes on an approved fresh delivery
 branch with compliant subjects, rerun the full-range checks, and supersede the
 draft PR while retaining its history. A subsequent compliant commit on this
 branch cannot erase the invalid ancestor. No candidate handoff is claimed.
+
+The first helper blocker write using waiting-for `Supervisor` was rejected
+(exit 1, `Unknown agent: Supervisor`). Route waiting-for to registered lane
+`Claude` for Supervisor coordination; this does not change parent ownership.
