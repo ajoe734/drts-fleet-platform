@@ -66,7 +66,7 @@ describe("uploadOperationalDocument", () => {
     mockedFetch.mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
       if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) {
-        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
         return mockFetchResponse(200, {
@@ -147,7 +147,7 @@ describe("uploadOperationalDocument", () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
       if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
-        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
         const res = mockFetchResponse(200, {
@@ -172,7 +172,7 @@ describe("uploadOperationalDocument", () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
       if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
-        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
         return {
@@ -208,7 +208,7 @@ describe("uploadOperationalDocument", () => {
       // Use original setupHappyPath for everything else
       const urlStr = url.toString();
       if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
-        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+        return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
         return mockFetchResponse(200, {
@@ -243,7 +243,7 @@ describe("uploadOperationalDocument", () => {
         return mockFetchResponse(200, { data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" } });
       }
       // Delegate others
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123", fleet_partner_id: "fleet-123" } });
       if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "doc-123", file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", checksum_sha256: expectedSha, file_size: expectedSize, content_type: "application/pdf", submission_id: "sub-123", fleet_partner_id: "fleet-123", document_type: "professional_driver_license" } });
       if (urlStr.includes("/download")) return mockFetchResponse(200, expectedPdfBytes, { "content-type": "application/pdf" });

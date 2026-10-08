@@ -109,10 +109,23 @@ export async function uploadOperationalDocument(
   if (intentPathname.startsWith('/api/')) {
     intentPathname = intentPathname.replace(/^\/api\//, '/control-plane-proxy/');
   }
-  const parentPrefixMatch = intentPathname.match(/^(.*\/supply-submissions\/([^/]+))\/documents\/(?:intent|upload-url)$/);
-  expect(parentPrefixMatch, "intentPath must match parent prefix shape (supply-submissions/...).").toBeTruthy();
+  const parentPrefixMatch = intentPathname.match(/^(\/control-plane-proxy\/fleet-partner\/supply-submissions\/([^/]+))\/documents\/(?:intent|upload-url)$/);
+  expect(parentPrefixMatch, "intentPath must match exact parent prefix shape (/control-plane-proxy/fleet-partner/supply-submissions/...).").toBeTruthy();
   const parentPrefix = parentPrefixMatch![1] as string;
   const expectedSubmissionId = parentPrefixMatch![2] as string;
+
+  const parsedConfirmUrl = new URL(confirmPath, origin);
+  expect(parsedConfirmUrl.origin, "confirm URL must be same origin").toBe(new URL(origin).origin);
+  expect(parsedConfirmUrl.username, "confirm URL must not contain credentials").toBe("");
+  expect(parsedConfirmUrl.password, "confirm URL must not contain credentials").toBe("");
+  expect(Array.from(parsedConfirmUrl.searchParams.keys()).length, "confirm URL must not contain extra queries").toBe(0);
+  expect(parsedConfirmUrl.hash, "confirm URL must not contain fragment").toBe("");
+
+  let confirmPathname = parsedConfirmUrl.pathname;
+  if (confirmPathname.startsWith('/api/')) {
+    confirmPathname = confirmPathname.replace(/^\/api\//, '/control-plane-proxy/');
+  }
+  expect(confirmPathname, "confirm URL pathname must match parent scope").toBe(`${parentPrefix}/documents/confirm`);
 
   // R4: Authoritative Fleet readback
   const readbackResponse = await boundedFetch(new URL(parentPrefix, origin).toString(), {
@@ -121,9 +134,12 @@ export async function uploadOperationalDocument(
   });
   checkDeadline();
   expect(readbackResponse.status, `readback submission ${parentPrefix}`).toBe(200);
+  expectCandidateRevision(readbackResponse.headers, `readback submission ${parentPrefix}`);
   const readbackData = JSON.parse(readbackResponse.body.toString("utf8")) as any;
   const authoritativeFleetId = readbackData?.data?.submission?.fleet_id || readbackData?.data?.submission?.fleet_partner_id || readbackData?.data?.fleet_id || readbackData?.data?.fleet_partner_id;
+  const authoritativeSubmissionId = readbackData?.data?.submission?.submission_id || readbackData?.data?.submission?.id;
   expect(authoritativeFleetId, "authoritative expected fleet").toBeTruthy();
+  expect(authoritativeSubmissionId, "authoritative submission ID must match intent URL").toBe(expectedSubmissionId);
 
   // 1. Intent execution
   const intentResponse = await boundedFetch(parsedIntentUrl.toString(), {
@@ -153,8 +169,7 @@ export async function uploadOperationalDocument(
   const uploadHeaders = intentData.data.headers;
 
   expect(objectKey, "object_key from intent").toBeTruthy();
-  expect(objectKey.includes(authoritativeFleetId), "object_key must be scoped to authoritative fleet").toBeTruthy();
-  expect(objectKey.includes(expectedSubmissionId), "object_key must be scoped to authoritative submission").toBeTruthy();
+  expect(objectKey.startsWith(`fleet-partner/${authoritativeFleetId}/supply-submissions/${expectedSubmissionId}/`), "object_key must begin with exact authoritative prefix").toBeTruthy();
   
   if (intentData.data.submission_id) {
     expect(intentData.data.submission_id, "intent submission_id must match").toBe(expectedSubmissionId);
@@ -237,19 +252,6 @@ export async function uploadOperationalDocument(
   expect(scanReceiptOk, "Scanner must eventually process the bytes and return clean receipt within deadline").toBeTruthy();
 
   // 3. Confirm (R3 validate first)
-  const parsedConfirmUrl = new URL(confirmPath, origin);
-  expect(parsedConfirmUrl.origin, "confirm URL must be same origin").toBe(new URL(origin).origin);
-  expect(parsedConfirmUrl.username, "confirm URL must not contain credentials").toBe("");
-  expect(parsedConfirmUrl.password, "confirm URL must not contain credentials").toBe("");
-  expect(Array.from(parsedConfirmUrl.searchParams.keys()).length, "confirm URL must not contain extra queries").toBe(0);
-  expect(parsedConfirmUrl.hash, "confirm URL must not contain fragment").toBe("");
-
-  let confirmPathname = parsedConfirmUrl.pathname;
-  if (confirmPathname.startsWith('/api/')) {
-    confirmPathname = confirmPathname.replace(/^\/api\//, '/control-plane-proxy/');
-  }
-  expect(confirmPathname, "confirm URL pathname must match parent scope").toBe(`${parentPrefix}/documents/confirm`);
-
   const finalConfirmBody = {
     ...confirmBody,
     objectKey,

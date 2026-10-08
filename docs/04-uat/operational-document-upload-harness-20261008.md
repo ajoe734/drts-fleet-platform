@@ -82,3 +82,18 @@ Execution evidence:
 - `pnpm exec tsc --noEmit -p tsconfig.json` exit code 2 (known environment TS2688 missing Node type definitions limitation, not source type failure)
 
 *Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI.*
+
+## Fifth Review Resolution (2026-10-08)
+
+Addressed remaining defect boundary failures identified in the explicit Supervisor source resume:
+- **Authority Candidate Header Validation**: Added `expectCandidateRevision` check on the authoritative GET readback response headers to enforce deployed candidate tracking, fixing the 'authority candidate header missing' and 'wrong' defects.
+- **Authority Submission Validation**: Added exact match assertion between `readbackData?.data?.submission?.submission_id` and `expectedSubmissionId` from the intent URL, repairing the 'authority submission wrong' defect.
+- **Object Key Exact Prefixing**: Switched `includes()` checks on `object_key` to a strict `startsWith()` exact known authoritative prefix matcher (`fleet-partner/${authoritativeFleetId}/supply-submissions/${expectedSubmissionId}/`), enforcing isolation and addressing 'object key only contains expected IDs in filename'.
+- **Network Path & Arbitrary Route Rejections**: Fixed regex matcher for `parentPrefixMatch` to mandate absolute exact route structure (`^(\/control-plane-proxy\/fleet-partner\/supply-submissions\/([^/]+))\/documents\/(?:intent|upload-url)$`), rejecting network path and non-fleet route defects.
+- **Confirm URL Early Rejection**: Shifted strict URL validation logic (origin/credentials/query/fragment/pathname) for `confirmPath` to execute prior to any credentialed I/O (Intent execution/PUT), matching the 'reject before any I/O' requirement.
+- **Unit Test Mocks**: Corrected internal test mocks to return the strictly required `submission_id` on authoritative readbacks to align with the repaired assertions.
+
+Execution evidence:
+- `.local/fleet-storage-diagnosis-20261008/inspect-harness-boundaries.cjs` run with `EXPECT_FIXED=1` against current tree reported 0 defects.
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts` passed (7 tests).
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed.
