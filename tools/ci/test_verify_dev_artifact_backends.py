@@ -558,7 +558,7 @@ Here is JSON:
 {"Authorization": "Basic SYNTHETIC_BASIC"}
 Bearer synthetic/payload+suffix=
 refresh_token=SYNTHETIC_REFRESH
-''' + "X" * 1048576
+'''
         
         err = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture, output="normal stdout")
         mock_run.side_effect = err
@@ -588,13 +588,23 @@ refresh_token=SYNTHETIC_REFRESH
             self.assertNotIn("SYNTHETIC_BASIC", stderr_output)
             self.assertNotIn("synthetic/payload+suffix=", stderr_output)
             
-            # JSON bodies stripped
-            self.assertIn("{ ***REDACTED BODY*** }", stderr_output)
+            # Trace blocks stripped out by truncating at the block start
+            self.assertIn("==== request start ====\n***REDACTED REQUEST***", stderr_output)
             
-            # Bound assertions
+        finally:
+            sys.stderr = original_stderr
+            
+        # Test 1a: Bound assertions (1024 char limit)
+        fixture_long = '''ERROR: (gcloud.logging.read) PERMISSION_DENIED: ''' + "X" * 2000
+        mock_run.side_effect = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture_long, output="")
+        captured_stderr = io.StringIO()
+        sys.stderr = captured_stderr
+        try:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.mod.run(["gcloud", "logging", "read"])
+            stderr_output = captured_stderr.getvalue()
             self.assertIn("... [TRUNCATED]", stderr_output)
             self.assertLessEqual(len(stderr_output), 1200) # 1024 + prefix + suffix
-            
         finally:
             sys.stderr = original_stderr
             
@@ -603,7 +613,11 @@ refresh_token=SYNTHETIC_REFRESH
             'Request body: {"password":"prefix}SYNTHETIC_PASSWORD"}',
             'Request body: {"metadata":{},"access_token":"SYNTHETIC_ACCESS","data":"SYNTHETIC_BODY"}',
             '== headers start ==\nCookie: session=SYNTHETIC_COOKIE\n',
-            'Request body: api_key=SYNTHETIC_KEY&payload=SYNTHETIC_BODY'
+            'Request body: api_key=SYNTHETIC_KEY&payload=SYNTHETIC_BODY',
+            'ERROR: failed\nRequest body: first line\nNOTE: SYNTHETIC_BODY',
+            'ERROR: failed\nResponse body: payload=SYNTHETIC_RESPONSE',
+            'ERROR: failed\n  Cookie: session=SYNTHETIC_COOKIE',
+            'ERROR: failed\n{"refresh_token": "SYNTHETIC_REFRESH'
         ]
         
         for edge_fixture in edge_fixtures:
