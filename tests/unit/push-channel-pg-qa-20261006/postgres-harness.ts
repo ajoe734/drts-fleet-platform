@@ -82,6 +82,7 @@ export class PostgresHarness {
       .query(`TRUNCATE ops.phase1_owned_orders, ops.phase1_dispatch_jobs,
       ops.phase1_dispatch_assignments, ops.phase1_driver_tasks, ops.phase1_dispatch_attempts,
       ops.phase1_dispatch_trace_logs, ops.consumer_notification_outbox,
+      ops.passenger_dispatch_disclosure_snapshots,
       mobility.phase1_order_partner_notification_routes,
       mobility.phase1_order_first_party_notification_routes,
       iam.phase1_passenger_push_devices, admin.phase1_partner_user_identity_links CASCADE`);

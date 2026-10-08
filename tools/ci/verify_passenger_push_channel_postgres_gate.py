@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "tests/unit/push-channel-pg-qa-20261006/"
 EXPECTED = {
-    PREFIX + "referral.postgres.test.ts": 7,
+    PREFIX + "referral.postgres.test.ts": 9,
     PREFIX + "registry.postgres.test.ts": 11,
     PREFIX + "delivery.postgres.test.ts": 10,
     PREFIX + "dormant.test.ts": 3,

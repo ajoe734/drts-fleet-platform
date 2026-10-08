@@ -372,6 +372,62 @@ describe.skipIf(!databaseUrl)(
       }
     });
 
+    it("retains the original task generation on delayed ETA after reassignment", async () => {
+      const a = await assignmentHarness();
+      const first = await a.assign();
+      await a.service.updateDriverTaskEta(first.taskId, 7);
+      const eta = (await h.taxi.listDuePartnerNotifications()).find(
+        (event) => event.eventType === "eta_changed",
+      )!;
+      expect(eta).toMatchObject({
+        assignmentVersion: 1,
+        payload: { eventSequence: 2, taskId: first.taskId },
+      });
+      await a.assign(first.assignmentId);
+      await h.owned.withTransaction((tx) =>
+        h.owned.persistOrderWorkflow(tx, {
+          consumerNotificationOutbox: [
+            { ...eta, outboxId: "delayed-eta", assignmentVersion: null },
+          ],
+        }),
+      );
+      expect(
+        (await h.taxi.listDuePartnerNotifications()).find(
+          (event) => event.outboxId === "delayed-eta",
+        ),
+      ).toMatchObject({ assignmentVersion: 1, payload: { eventSequence: 4 } });
+      expect(await h.taxi.findPartnerNotificationRelevance("order-qa")).toEqual(
+        { status: "assigned", assignmentVersion: 2 },
+      );
+    });
+
+    it("gives disclosure MAX priority and limits the count fallback to business dispatch", async () => {
+      const a = await assignmentHarness();
+      const first = await a.assign();
+      await a.assign(first.assignmentId);
+      await h.pool.query(
+        `INSERT INTO ops.passenger_dispatch_disclosure_snapshots
+      (snapshot_id,order_id,dispatch_job_id,assignment_id,assignment_version,record,created_at)
+      VALUES ('snapshot','order-qa','job-qa',$1,9,'{}',now())`,
+        [first.assignmentId],
+      );
+      expect(await h.taxi.findPartnerNotificationRelevance("order-qa")).toEqual(
+        { status: "assigned", assignmentVersion: 9 },
+      );
+      await h.pool.query(
+        "DELETE FROM ops.passenger_dispatch_disclosure_snapshots",
+      );
+      expect(await h.taxi.findPartnerNotificationRelevance("order-qa")).toEqual(
+        { status: "assigned", assignmentVersion: 2 },
+      );
+      await h.pool.query(
+        "UPDATE ops.phase1_owned_orders SET runtime_profile_code='multi_taxi_direct' WHERE order_id='order-qa'",
+      );
+      expect(await h.taxi.findPartnerNotificationRelevance("order-qa")).toEqual(
+        { status: "assigned", assignmentVersion: 0 },
+      );
+    });
+
     it("persists cancellation with its assignment generation and the next notification sequence", async () => {
       const a = await assignmentHarness();
       await a.assign();
