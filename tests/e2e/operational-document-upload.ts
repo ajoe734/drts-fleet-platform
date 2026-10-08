@@ -36,7 +36,7 @@ export type LifecycleEvidence = {
 };
 
 export async function uploadOperationalDocument(
-  requestContext: APIRequestContext, // Keeping this parameter for backward compatibility if needed by the signature, but we'll use fetch
+  request: APIRequestContext,
   origin: string,
   intentPath: string,
   intentBody: Record<string, unknown>,
@@ -73,25 +73,18 @@ export async function uploadOperationalDocument(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(new Error("Timeout")), getRemainingTime());
     try {
-      const res = await fetch(url, { ...options, signal: controller.signal, redirect: "manual" });
-      const chunks: Uint8Array[] = [];
-      let received = 0;
-      if (res.body) {
-        const reader = res.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            received += value.length;
-            if (received > 1024 * 1024) {
-              reader.cancel();
-              throw new Error("Response exceeded bounded limit of 1MB");
-            }
-            chunks.push(value);
-          }
-        }
+      const res = await request.fetch(url, {
+        method: options.method,
+        headers: options.headers as Record<string, string>,
+        data: options.body,
+        maxRedirects: 0,
+      });
+      const bodyBuffer = await res.body();
+      if (bodyBuffer.length > 1024 * 1024) {
+        throw new Error("Response exceeded bounded limit of 1MB");
       }
-      return { status: res.status, headers: res.headers, body: Buffer.concat(chunks) };
+      const headers = new Headers(res.headers() as Record<string, string>);
+      return { status: res.status(), headers, body: bodyBuffer };
     } finally {
       clearTimeout(timeoutId);
     }
@@ -504,7 +497,6 @@ export function materializeValue(
 export interface SetupExecutorContext {
   request: APIRequestContext;
   record: (entry: Record<string, unknown>) => void;
-  fetchFn?: (url: string, init: RequestInit) => Promise<Response>;
 }
 
 export async function runSetup(
@@ -591,46 +583,25 @@ export async function runSetup(
     let responseHeaders: Headers | Record<string, string>;
     let responseBody: any;
 
-    if (context.fetchFn) {
-      const res = await context.fetchFn(
-        new URL(materializeString(setup.path, variables), origin).toString(),
-        {
-          method: setup.method,
-          ...(body
-            ? {
-                body: JSON.stringify(body),
-                headers: { "Content-Type": "application/json", ...headers },
-              }
-            : Object.keys(headers).length > 0
-              ? { headers }
-              : {}),
-        }
-      );
-      responseStatus = res.status;
-      responseUrl = res.url;
-      responseHeaders = res.headers;
-      responseBody = await res.json().catch(() => null);
-    } else {
-      const response = await context.request.fetch(
-        new URL(materializeString(setup.path, variables), origin).toString(),
-        {
-          method: setup.method,
-          maxRedirects: 0,
-          ...(body
-            ? {
-                data: body,
-                headers: { "Content-Type": "application/json", ...headers },
-              }
-            : Object.keys(headers).length > 0
-              ? { headers }
-              : {}),
-        },
-      );
-      responseStatus = response.status();
-      responseUrl = response.url();
-      responseHeaders = response.headers();
-      responseBody = await response.json().catch(() => null);
-    }
+    const response = await context.request.fetch(
+      new URL(materializeString(setup.path, variables), origin).toString(),
+      {
+        method: setup.method,
+        maxRedirects: 0,
+        ...(body
+          ? {
+              data: body,
+              headers: { "Content-Type": "application/json", ...headers },
+            }
+          : Object.keys(headers).length > 0
+            ? { headers }
+            : {}),
+      },
+    );
+    responseStatus = response.status();
+    responseUrl = response.url();
+    responseHeaders = response.headers();
+    responseBody = await response.json().catch(() => null);
 
     expect(responseStatus, `${journey.id} setup ${setup.path}`).toBeLessThan(
       400,

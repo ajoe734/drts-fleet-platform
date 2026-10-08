@@ -306,29 +306,37 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
       path.join(repoRoot, "tests/e2e/operational-browser-acceptance.spec.ts"),
       "utf8",
     );
-    // Identity token resolution
-    expect(specContent).toContain("getIdentityToken");
-    expect(specContent).toContain("DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN");
-    expect(specContent).toContain("DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN");
-    expect(specContent).toContain(
+    const helperContent = readFileSync(
+      path.join(repoRoot, "tests/e2e/operational-document-upload.ts"),
+      "utf8",
+    );
+
+    // Identity token resolution in the helper
+    expect(helperContent).toContain("getIdentityToken");
+    expect(helperContent).toContain("DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN");
+    expect(helperContent).toContain("DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN");
+    expect(helperContent).toContain(
       "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN",
     );
-    expect(specContent).toContain("DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN");
-    expect(specContent).toContain(
+    expect(helperContent).toContain("DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN");
+    expect(helperContent).toContain(
       "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN",
     );
-    expect(specContent).toContain(
+    expect(helperContent).toContain(
       "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN",
     );
 
-    // Browser context extraHTTPHeaders for journeys and routes
-    expect(specContent).toContain("await page.context().setExtraHTTPHeaders({");
-    expect(specContent).toContain("Authorization: `Bearer ${idToken}`,");
-
-    // Setup and readback requests carry Authorization header for private services
-    expect(specContent).toContain(
+    // Setup requests carry Authorization header for private services in the helper
+    expect(helperContent).toContain(
       'headers["Authorization"] = `Bearer ${setupIdToken}`;',
     );
+
+    // Browser context extraHTTPHeaders for journeys and routes in the spec delegating to the helper
+    expect(specContent).toContain("getIdentityToken");
+    expect(specContent).toContain("await page.context().setExtraHTTPHeaders({");
+    expect(specContent).toContain("Authorization: `Bearer ${idToken}`");
+
+    // Readback requests carry Authorization header for private services in the spec
     expect(specContent).toContain(
       'readbackHeaders["Authorization"] = `Bearer ${idToken}`;',
     );
