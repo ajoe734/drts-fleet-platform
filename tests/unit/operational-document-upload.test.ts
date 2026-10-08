@@ -5,8 +5,8 @@ import { createHash } from "node:crypto";
 
 describe("uploadOperationalDocument", () => {
   const origin = "https://example.com";
-  const intentPath = "/api/fleet-partner/supply-submissions/sub-123/documents/intent";
-  const intentBody = { doc: "type1" };
+  const intentPath = "/api/fleet-partner/supply-submissions/sub-123/documents/upload-url";
+  const intentBody = { doc: "type1", documentType: "type1" };
   const confirmPath = "/api/fleet-partner/supply-submissions/sub-123/documents/confirm";
   const confirmBody = { doc: "type1" };
   const headers = { Authorization: "Bearer token" };
@@ -16,9 +16,9 @@ describe("uploadOperationalDocument", () => {
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
     "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
     "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n" +
-    "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000122 00000 n \n" +
+    "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n" +
     "trailer\n<< /Size 4 /Root 1 0 R >>\n" +
-    "startxref\n200\n%%EOF\n"
+    "startxref\n184\n%%EOF\n"
   );
   const expectedSha = createHash("sha256").update(expectedPdfBytes).digest("hex");
   const expectedSize = expectedPdfBytes.length;
@@ -31,11 +31,11 @@ describe("uploadOperationalDocument", () => {
     } as unknown as APIRequestContext;
 
     vi.mocked(request.post).mockImplementation(async (url) => {
-      if (url.toString().includes("/intent")) {
+      if (url.toString().includes("/upload-url")) {
         return {
           status: () => 200,
           headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          json: async () => ({
+          text: async () => JSON.stringify({
             data: {
               object_key: "obj-123",
               upload_url: "/api/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123",
@@ -49,13 +49,16 @@ describe("uploadOperationalDocument", () => {
         return {
           status: () => 200,
           headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          json: async () => ({
+          text: async () => JSON.stringify({
             data: {
               document_id: "doc-123",
               file_object_key: "obj-123",
               checksum_sha256: expectedSha,
               file_size: expectedSize,
-              content_type: "application/pdf"
+              content_type: "application/pdf",
+              submission_id: "sub-123",
+              fleet_partner_id: "fleet-123",
+              document_type: "type1"
             }
           })
         } as any;
@@ -66,7 +69,7 @@ describe("uploadOperationalDocument", () => {
       return {
         status: () => 200,
         headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-        json: async () => ({
+        text: async () => JSON.stringify({
           data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" }
         })
       } as any;
@@ -119,11 +122,11 @@ describe("uploadOperationalDocument", () => {
     } as unknown as APIRequestContext;
 
     vi.mocked(request.post).mockImplementation(async (url) => {
-      if (url.toString().includes("/intent")) {
+      if (url.toString().includes("/upload-url")) {
         return {
           status: () => 200,
           headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          json: async () => ({
+          text: async () => JSON.stringify({
             data: {
               object_key: "obj-123",
               upload_url: "/api/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123",
@@ -137,13 +140,16 @@ describe("uploadOperationalDocument", () => {
         return {
           status: () => 200,
           headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          json: async () => ({
+          text: async () => JSON.stringify({
             data: {
               document_id: "doc-123",
               file_object_key: "obj-123",
               checksum_sha256: expectedSha,
               file_size: expectedSize,
-              content_type: "application/pdf"
+              content_type: "application/pdf",
+              submission_id: "sub-123",
+              fleet_partner_id: "fleet-123",
+              document_type: "type1"
             }
           })
         } as any;
@@ -163,13 +169,13 @@ describe("uploadOperationalDocument", () => {
         return {
           status: () => 503,
           headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-          json: async () => ({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
+          text: async () => JSON.stringify({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
         } as any;
       }
       return {
         status: () => 200,
         headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-        json: async () => ({
+        text: async () => JSON.stringify({
           data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" }
         })
       } as any;
@@ -224,7 +230,7 @@ describe("uploadOperationalDocument", () => {
     vi.mocked(request.post).mockResolvedValue({
       status: () => 200,
       headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-      json: async () => ({
+      text: async () => JSON.stringify({
         data: {
           object_key: "obj-123",
           upload_url: "/api/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=obj-123",
@@ -240,7 +246,7 @@ describe("uploadOperationalDocument", () => {
       return {
         status: () => 503,
         headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
-        json: async () => ({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
+        text: async () => JSON.stringify({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
       } as any;
     });
 
