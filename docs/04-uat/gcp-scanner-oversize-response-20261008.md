@@ -21,6 +21,19 @@ New `tests/unit/gcp-artifact-activation-20261004/test_gateway_oversize_response.
 | F1 oversized transport prematurely destroyed; `oversize_actual_handler_response_lifecycle_and_bounds` | handler.ts readBoundedBody -> createRequestHandler -> sendJson | old handler blob14d1f8ac7 is identical at593 and baselinee788: new7 tests give2 lifecycle failures/5pass, exit1; fixed source gives7pass/0fail, exit0 | actual Vitest28pass across3files; helper51pass; Python16total=13pass+3genuine-engine skips; readiness17pass; scopedtsc/ESLint/discovery91/diff exit0 (commands/logs below) | mocked HTTP/clamd; actual listener prohibited here |
 | `oversize_exact_sha_review_ci_and_merge`                                                              | existing candidate lifecycle and CI unit discovery             | candidate handoff/review/CI/merge pending                                          | assigned Codex exact-source independent review required                                                    | no source result fills parent live keys            |
 
+## R1 independent rejection and bounded repair (adjacent candidate history)
+
+Assigned Codex independently REOPENED candidate `1a53d2b5548e19c9260d114f78f91312b6a9d46d` / PR2430. The earlier28pass covered the activation folder but omitted an actual caller regression in `tests/unit/audit-gcp-artifact-infra-20261004/handler.test.ts`: the old title and assertion required destruction after oversized413. The actual handler's intended new behavior makes that obsolete assertion fail; independent combined eightfiles gave87pass/1fail/exit1. The production lifecycle fix was sound, but those local checks were not sufficient. Original rejection retained in canonical worker_outcomes and task.next; no source/CI green claim on rejected1a.
+
+Supervisor approved this exact extra test path after conflict scan. Pi updates ONLY the oversized test title/one expected destruction condition to response-safe `false`, retaining size rejection and adding exact JSON error plus zero readiness/scan/log assertions. No old premature destroy, test exclusion or generic assertion removal. Native stream lifecycle tests remain unchanged and still distinguish old-source destruction. Source tracked delta now four approved paths.
+
+Private frozen/offline/ignore-scripts installation completed exit0 in this locked worktree after removing ONLY its own readonly dependency symlinks; shared/root dependency trees not altered. Earlier dependency-link setup failures and original28pass remain history, not the full affected regression.
+
+- Full actual caller/provider regression: `pnpm exec vitest run tests/unit/audit-gcp-artifact-infra-20261004 tests/unit/audit-gcp-artifact-providers-20261004 tests/unit/gcp-artifact-activation-20261004`: exit0,11files/157pass (`oversize-r1-full-scanner.log`). No real HTTP/socket/DB/engine servers; provider/socket boundaries synthetic.
+- Task-owned scoped tsc config now includes the added old-handler test as well as actual handler/new native-stream test, with correct parent extends/includes. Full unfiltered tsc and ESLint of allthree TS changedpaths exit0 (`oversize-r1-typecheck.log`, `oversize-r1-lint.log`).
+- Existing51 mocked helpers,13 artifact passes/3genuine-engine skips and17 mocked readiness checks are unaffected and remain recorded below. No engine/live result inferred.
+- Fresh successor requires its OWN Codex review and sameSHA CI/true merge; old1a approval/CI are not reused. No force-push/reset/rebase of published anchor/rejected history.
+
 ## Completed source checks and explicit limitations
 
 Node22.23.2, pnpm10.33.0, TypeScript5.9.3, Vitest4.1.4, Python3.12.3. Commands ran inside locked task worktree; machine logs under `.local/full-system-completion-20261008/`:
