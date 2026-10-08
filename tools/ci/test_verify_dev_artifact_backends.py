@@ -298,6 +298,100 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             self.mod.test_gcs("fake-bucket", "fake-sa")
 
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
+    def test_gcs_precondition_failed_classifier(self):
+        cases_false = [
+            "ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden for gs://bucket/object-412",
+            "ERROR: Task 'gs://bucket/GcsPreconditionFailedError.txt' failed: GcsNotFoundError('')",
+            "ERROR: (gcloud.storage.cp) HTTPError 401: Unauthorized\nRequest body: {\"message\":\"412 Precondition Failed\"}",
+            "WARNING: credential contains GcsPreconditionFailedError\nERROR: (gcloud.storage.cp) HTTPError 403: Forbidden"
+        ]
+        for c in cases_false:
+            e = subprocess.CalledProcessError(1, ["cmd"], stderr=c)
+            self.assertFalse(self.mod.is_gcs_precondition_failed(e), f"Falsely classified as True: {c!r}")
+
+        cases_true = [
+            "ERROR: (gcloud.storage.cp) HTTPError 412: Precondition Failed",
+            "ERROR: Task 'gs://bucket/file.txt' failed: GcsPreconditionFailedError('412 Precondition Failed')",
+            "EXCEPTION: (gcloud.storage.cp) HTTPError 412: Precondition Failed"
+        ]
+        for c in cases_true:
+            e = subprocess.CalledProcessError(1, ["cmd"], stderr=c)
+            self.assertTrue(self.mod.is_gcs_precondition_failed(e), f"Falsely classified as False: {c!r}")
+
+    @patch("subprocess.run")
+    def test_gcs_http_boundaries(self, mock_run):
+        import urllib.error
+        import socket
+        state = {"generation": 12346}
+        def side_effect(cmd, **kwargs):
+            res = MagicMock()
+            if "describe" in cmd:
+                res.stdout = str(state["generation"])
+            else:
+                res.stdout = "12345"
+
+            cp_idx = cmd.index("cp") if "cp" in cmd else -1
+            if "cp" in cmd and "#" in cmd[cp_idx+1] and cmd[cp_idx+1].startswith("gs://"):
+                with open(cmd[cp_idx+2], "w") as f:
+                    requested_gen = cmd[cp_idx+1].split("#")[1]
+                    if requested_gen == "12347":
+                        f.write("test data v2")
+                    else:
+                        f.write("test data v1")
+            elif "cp" in cmd and "--if-generation-match=0" in cmd:
+                if "--access-token-file=/dev/null" in cmd:
+                    err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
+                    raise err
+                if len(mock_run.call_args_list) > 3:
+                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
+                    raise err
+                state["generation"] = 12346
+            elif "cp" in cmd and any("--if-generation-match=" in arg and arg != "--if-generation-match=0" for arg in cmd):
+                match_arg = next(arg for arg in cmd if arg.startswith("--if-generation-match="))
+                if match_arg == f"--if-generation-match={state['generation'] - 1}":
+                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
+                    raise err
+                if match_arg == "--if-generation-match=not_a_number":
+                    err = subprocess.CalledProcessError(1, cmd, stderr="Invalid argument")
+                    raise err
+                if "absent" in cmd[cp_idx+2] or "absent" in cmd[cp_idx+1]:
+                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
+                    raise err
+                state["generation"] += 1
+
+            return res
+        mock_run.side_effect = side_effect
+
+        for code in (401, 403):
+            mock_run.reset_mock()
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                mock_err = urllib.error.HTTPError("url", code, "Denied", hdrs={}, fp=None)
+                mock_urlopen.side_effect = mock_err
+                self.mod.test_gcs("fake-bucket", "fake-sa")
+
+        mock_run.reset_mock()
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value = MagicMock()
+            with self.assertRaises(AssertionError) as cm:
+                self.mod.test_gcs("fake-bucket", "fake-sa")
+            self.assertIn("Expected unauthenticated request to fail", str(cm.exception))
+
+        for code in (404, 500, 503):
+            mock_run.reset_mock()
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                mock_err = urllib.error.HTTPError("url", code, "Error", hdrs={}, fp=None)
+                mock_urlopen.side_effect = mock_err
+                with self.assertRaises(AssertionError) as cm:
+                    self.mod.test_gcs("fake-bucket", "fake-sa")
+                self.assertIn("Expected external denial", str(cm.exception))
+
+        mock_run.reset_mock()
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = urllib.error.URLError(socket.timeout("timed out"))
+            with self.assertRaises(urllib.error.URLError):
+                self.mod.test_gcs("fake-bucket", "fake-sa")
+
+    @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main(self):
         with patch.object(self.mod, "test_scanner") as mock_scanner, \
              patch.object(self.mod, "test_gcs") as mock_gcs:

@@ -512,23 +512,24 @@ def is_gcs_precondition_failed(e: subprocess.CalledProcessError) -> bool:
     """Classify genuine external GCS precondition failures from CLI output."""
     stderr = e.stderr or ""
     
-    # Must have an explicit precondition signal
-    if "GcsPreconditionFailedError" in stderr:
-        return True
-        
     for line in stderr.splitlines():
         match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*)", line, re.IGNORECASE)
         if match:
-            cause = match.group(1).upper()
-            if "PRECONDITION FAILED" in cause or ("PRECONDITION" in cause and "412" in cause):
-                return True
-            if "HTTP" in cause and "412" in cause:
-                return True
+            cause = match.group(1)
+            # Exclude quoted paths/payloads
+            cause_no_quotes = re.sub(r"'[^']*'", "''", cause)
+            cause_no_quotes = re.sub(r'"[^"]*"', '""', cause_no_quotes)
+            # Exclude gs:// paths
+            cause_no_quotes = re.sub(r"gs://\S+", "", cause_no_quotes)
             
-    # Also support "412 Precondition Failed" anywhere just in case
-    if "412 Precondition Failed" in stderr:
-        return True
-        
+            cause_upper = cause_no_quotes.upper()
+            if "GCSPRECONDITIONFAILEDERROR" in cause_upper:
+                return True
+            if "PRECONDITION FAILED" in cause_upper:
+                return True
+            if "HTTPERROR 412" in cause_upper or "HTTP ERROR 412" in cause_upper or "HTTP 412" in cause_upper:
+                return True
+                
     return False
 
 def test_gcs(bucket_name, runtime_sa):
@@ -630,7 +631,7 @@ def test_gcs(bucket_name, runtime_sa):
         import urllib.error
         try:
             req = urllib.request.Request(f"https://storage.googleapis.com/storage/v1/b/{bucket_name}/o/{test_key}")
-            urllib.request.urlopen(req)
+            urllib.request.urlopen(req, timeout=10.0)
             assert False, "Expected unauthenticated request to fail"
         except urllib.error.HTTPError as e:
             assert e.code in (401, 403), f"Expected external denial (401/403), got HTTP {e.code}"
