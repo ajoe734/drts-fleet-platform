@@ -585,12 +585,12 @@ export async function runSetup(
     const body = setup.body
       ? materializeValue(setup.body, variables)
       : undefined;
-      
+
     let responseStatus: number;
     let responseUrl: string;
     let responseHeaders: Headers | Record<string, string>;
     let responseBody: any;
-    
+
     if (context.fetchFn) {
       const res = await context.fetchFn(
         new URL(materializeString(setup.path, variables), origin).toString(),
@@ -631,7 +631,7 @@ export async function runSetup(
       responseHeaders = response.headers();
       responseBody = await response.json().catch(() => null);
     }
-    
+
     expect(responseStatus, `${journey.id} setup ${setup.path}`).toBeLessThan(
       400,
     );

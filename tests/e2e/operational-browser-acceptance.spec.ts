@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { 
+import {
   runSetup,
   requiredOrigin,
   getIdentityToken,

@@ -385,13 +385,13 @@ describe("runSetup execution", () => {
       return { status: 200, url, headers: new Headers({ "x-drts-candidate-sha": "mock-sha" }), json: async () => ({ id: "123" }) } as any;
     };
     const context = { request: {} as any, record: vi.fn(), fetchFn };
-    
+
     const journey = {
       id: "j-1", surface: "web", baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL", route: "/", actorScope: "admin",
       setup: [{ path: "/api/test", method: "GET" as any }]
     };
     process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL = "https://fleet.example.com";
-    
+
     await runSetup(context, journey, {});
     expect(fetchCalled).toBe(true);
     expect(context.record).toHaveBeenCalled();
@@ -404,7 +404,7 @@ describe("runSetup execution", () => {
       setup: [{ kind: "document-upload" as any, intentPath: "/api/intent", intentBody: {}, confirmPath: "/api/confirm", confirmBody: {} }]
     };
     process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL = "https://fleet.example.com";
-    
+
     // We mock fetch globally for uploadOperationalDocument
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
