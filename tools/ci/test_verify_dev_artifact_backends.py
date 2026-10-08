@@ -474,5 +474,67 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "Failed to restore scanner config"):
             self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
 
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    @patch("urllib.request.urlopen")
+    @patch("os.environ.get")
+    def test_scanner_hosted_log_diagnostic_redaction(self, mock_env, mock_urlopen, mock_sleep, mock_run):
+        '''Proves exact-revision log diagnostic surfaces actionable error without leaking tokens.'''
+        import io
+        import sys
+        
+        mock_env.return_value = "fake-token"
+        container_env = {"gateway": {}, "clamd": {}}
+        cold_start_polls = {"n": 0}
+
+        def mock_side_effect(cmd, **kwargs):
+            if cmd[:3] == ["gcloud", "logging", "read"]:
+                err = "PERMISSION_DENIED: caller missing roles/logging.viewer. Token: ya29.aBcDeFgH1234567890"
+                raise subprocess.CalledProcessError(1, cmd, stderr=err)
+            
+            # For other cmds, use the env-aware mock logic if it's an update, else mock success
+            if cmd[0] == "gcloud" and cmd[1] == "run" and cmd[2] == "services" and cmd[3] == "update":
+                if "--update-env-vars" in cmd:
+                    idx = cmd.index("--update-env-vars")
+                    for kv in cmd[idx+1].split(","):
+                        k, v = kv.split("=")
+                        c = cmd[cmd.index("--container")+1]
+                        container_env[c][k] = v
+                if "--remove-env-vars" in cmd:
+                    idx = cmd.index("--remove-env-vars")
+                    for k in cmd[idx+1].split(","):
+                        c = cmd[cmd.index("--container")+1]
+                        if k in container_env[c]:
+                            del container_env[c][k]
+                mock_res = MagicMock()
+                mock_res.stdout = ""
+                return mock_res
+                
+            mock_res = MagicMock()
+            mock_res.stdout = '{"spec": {"template": {"spec": {"containers": [{"name": "gateway", "env": []}, {"name": "clamd", "env": []}]}}}}' if "describe" in cmd else "drts-dev-scanner-00009-bst"
+            return mock_res
+
+        mock_run.side_effect = mock_side_effect
+        mock_urlopen.side_effect = self._make_env_aware_urlopen_side_effect(container_env, cold_start_polls)
+
+        captured_stderr = io.StringIO()
+        original_stderr = sys.stderr
+        sys.stderr = captured_stderr
+        try:
+            with self.assertRaises(subprocess.CalledProcessError) as cm:
+                self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
+            
+            stderr_output = captured_stderr.getvalue()
+            self.assertIn("Diagnostic (gcloud logging read failed):", stderr_output)
+            self.assertIn("PERMISSION_DENIED: caller missing roles/logging.viewer", stderr_output)
+            self.assertNotIn("ya29.aBcDeFgH1234567890", stderr_output)
+            self.assertIn("ya29.***REDACTED***", stderr_output)
+            
+            # The exception contract should be unmodified.
+            self.assertEqual(cm.exception.returncode, 1)
+        finally:
+            sys.stderr = original_stderr
+
 if __name__ == "__main__":
     unittest.main()

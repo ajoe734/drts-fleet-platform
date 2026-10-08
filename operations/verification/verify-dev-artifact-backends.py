@@ -14,9 +14,27 @@ import time
 import urllib.request
 import urllib.error
 
+import re
+
+def _sanitize_stderr(text):
+    if not text:
+        return text
+    text = re.sub(r"ya29\.[a-zA-Z0-9_-]+", "ya29.***REDACTED***", text)
+    text = re.sub(r"ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+", "ey***REDACTED***", text)
+    text = re.sub(r"(?i)(bearer\s+)[a-zA-Z0-9_.-]+", r"\1***REDACTED***", text)
+    text = re.sub(r"(?i)(authorization:\s*)[^\n]+", r"\1***REDACTED***", text)
+    return text
+
 def run(cmd, **kwargs):
     print(f"Running: {' '.join(cmd)}")
-    return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
+    try:
+        return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if len(cmd) >= 3 and cmd[0] == "gcloud" and cmd[1] == "logging" and cmd[2] == "read":
+            if e.stderr:
+                print(f"Diagnostic (gcloud logging read failed): {_sanitize_stderr(e.stderr).strip()}", file=sys.stderr)
+        raise
+
 
 def get_identity_token(audience):
     import os
