@@ -8,7 +8,7 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         self.mock_sleep = patch('test_genuine_clamd_lifecycle.time.sleep').start()
         self.mock_run_cmd = patch('test_genuine_clamd_lifecycle.run_cmd').start()
         self.addCleanup(patch.stopall)
-        
+
         # Default clock: starts at 1000, advances by what is requested in sleep
         self.current_time = 1000.0
         def fake_monotonic():
@@ -17,7 +17,7 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
             self.current_time += n
         self.mock_monotonic.side_effect = fake_monotonic
         self.mock_sleep.side_effect = fake_sleep
-        
+
         self.container = "test-container"
         self.db_dir = "/var/lib/clamav"
 
@@ -44,13 +44,15 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
             if "zVERSION" in cmd_str:
                 return self._make_res(stdout="ClamAV 1.0.0/12345/date\n")
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         result = harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=60)
         self.assertEqual(result["marker_version"], "12345")
         self.assertEqual(result["expected_ref"], "daily.cvd")
         self.assertEqual(result["expected_ref_version"], "12345")
+        self.assertEqual(result["daily_mtime"], "88888")
+        self.assertEqual(result["marker_mtime"], "99999")
 
     def test_delayed_full_publication(self):
         # publication at 6s
@@ -58,7 +60,7 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
         def run_cmd_side_effect(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             elapsed = self.current_time - 1000.0
-            
+
             if "stat" in cmd_str and "ready" in cmd_str and "ready." not in cmd_str:
                 if elapsed < 6.0:
                     return self._make_res(returncode=1)
@@ -80,9 +82,9 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
                     return self._make_res(stdout="ClamAV 1.0.0/0/date\n")
                 return self._make_res(stdout="ClamAV 1.0.0/123/date\n")
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         result = harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=60)
         self.assertEqual(result["marker_version"], "123")
         self.assertTrue(self.current_time >= 1006.0)
@@ -90,12 +92,12 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
     def test_never_ready_timeout(self):
         def run_cmd_side_effect(cmd, **kwargs):
             return self._make_res(returncode=1, stderr="Not found")
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         with self.assertRaises(TimeoutError) as ctx:
             harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=60)
-            
+
         self.assertIn("Readiness handshake incomplete within 60s", str(ctx.exception))
         self.assertIn("missing or unreadable", str(ctx.exception))
         self.assertTrue(self.current_time >= 1060.0)
@@ -117,12 +119,12 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
             if "zVERSION" in cmd_str:
                 return self._make_res(stdout="ClamAV 1.0.0/456/date\n")
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         with self.assertRaises(TimeoutError) as ctx:
             harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=6)
-            
+
         self.assertIn("loaded 456 != marker 123", str(ctx.exception))
         self.assertTrue(self.current_time >= 1006.0)
 
@@ -132,28 +134,28 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
             if "ready.version" in cmd_str:
                 return self._make_res(stdout="invalid\n")
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         with self.assertRaises(TimeoutError) as ctx:
             harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=5)
-            
+
         self.assertIn("ready.version not numeric: invalid", str(ctx.exception))
 
     def test_fractional_remaining_and_no_commands_after_deadline(self):
         import subprocess
         self.current_time = 0.0
         self.cmd_calls = []
-        
+
         def run_cmd_side_effect(cmd, **kwargs):
             self.cmd_calls.append(self.current_time)
             elapsed = self.current_time
             if elapsed < 58.0:
                 return self._make_res(returncode=1, stderr="Not found")
-            
+
             self.current_time += 1.5
             cmd_str = " ".join(cmd)
-            
+
             if "stat" in cmd_str and "ready" in cmd_str and "ready." not in cmd_str:
                 return self._make_res(stdout="100\n")
             if "stat" in cmd_str and "daily.cvd" in cmd_str:
@@ -166,28 +168,28 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
                 return self._make_res(returncode=1)
             if "zVERSION" in cmd_str:
                 return self._make_res(stdout="ClamAV 1.4.6/123/date\n")
-                
+
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         with self.assertRaises(TimeoutError) as ctx:
             harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=60)
-            
+
         self.assertLessEqual(self.cmd_calls[-1], 60.0)
 
     def test_transient_timeout_recovery(self):
         self.current_time = 0.0
         import subprocess
-        
+
         def run_cmd_side_effect(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             elapsed = self.current_time
-            
+
             if elapsed < 10.0:
                 self.current_time += 10.0
                 raise subprocess.TimeoutExpired(cmd, 10.0)
-                
+
             if "stat" in cmd_str and "ready" in cmd_str and "ready." not in cmd_str:
                 return self._make_res(stdout="999\n")
             if "stat" in cmd_str and "daily.cvd" in cmd_str:
@@ -201,19 +203,19 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
             if "zVERSION" in cmd_str:
                 return self._make_res(stdout="ClamAV 1.0.0/123/date\n")
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         result = harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=60)
         self.assertEqual(result["marker_version"], "123")
 
     def test_staggered_publication(self):
         self.current_time = 0.0
-        
+
         def run_cmd_side_effect(cmd, **kwargs):
             cmd_str = " ".join(cmd)
             elapsed = self.current_time
-            
+
             if "stat" in cmd_str and "ready" in cmd_str and "ready." not in cmd_str:
                 if elapsed < 6.0:
                     return self._make_res(returncode=1)
@@ -231,9 +233,9 @@ class TestGenuineLifecycleHelpers(unittest.TestCase):
                     return self._make_res(stdout="ClamAV 1.0.0/0/date\n")
                 return self._make_res(stdout="ClamAV 1.0.0/123/date\n")
             return self._make_res(returncode=1)
-            
+
         self.mock_run_cmd.side_effect = run_cmd_side_effect
-        
+
         result = harness.poll_genuine_readiness_handshake(self.container, self.db_dir, timeout_s=60)
         self.assertEqual(result["marker_version"], "123")
         self.assertTrue(self.current_time >= 6.0)

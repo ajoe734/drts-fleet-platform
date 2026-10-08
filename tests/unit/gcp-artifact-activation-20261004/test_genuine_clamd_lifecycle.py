@@ -220,35 +220,35 @@ def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expec
     """
     deadline = time.monotonic() + timeout_s
     last_diag = "No observations made"
-    
-    def bounded_run(cmd):
+
+    def bounded_run(cmd, cmd_timeout=2.0):
         rem = deadline - time.monotonic()
         if rem <= 0:
             raise subprocess.TimeoutExpired(cmd, rem)
-        return run_cmd(cmd, timeout=rem)
-        
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
     while True:
         if time.monotonic() >= deadline:
             raise TimeoutError(f"Readiness handshake incomplete within {timeout_s}s bound. Last diag: {last_diag}")
-            
+
         try:
             res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
             if res.returncode != 0:
                 last_diag = f"ready.version missing or unreadable: {res.stderr.strip()}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             marker_version = res.stdout.strip()
             if not marker_version.isdigit():
                 last_diag = f"ready.version not numeric: {marker_version}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             if expected_version is not None and marker_version != expected_version:
                 last_diag = f"ready.version {marker_version} != expected {expected_version}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             # check reference file
             def bounded_cvd_version(path):
                 res_hdr = bounded_run(["docker", "exec", container_name, "sh", "-c", f"head -c 512 {path} 2>/dev/null | cat -v"])
@@ -261,30 +261,30 @@ def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expec
                 if len(fields) < 3 or not fields[2].isdigit():
                     return None
                 return fields[2]
-                
+
             cvd_ver = bounded_cvd_version(f"{db_dir}/daily.cvd")
             cld_ver = bounded_cvd_version(f"{db_dir}/daily.cld")
-            
+
             if cvd_ver is None and cld_ver is None:
                 last_diag = "Neither daily.cvd nor daily.cld has a readable ClamAV-VDB header"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             expected_ref = expected_reference_file(cvd_ver, cld_ver)
             expected_ref_version = cvd_ver if expected_ref == "daily.cvd" else cld_ver
-            
+
             if marker_version != expected_ref_version:
                 last_diag = f"marker version {marker_version} != on-disk header {expected_ref_version} for {expected_ref}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-    
+
             res_daily_mtime = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", f"{db_dir}/{expected_ref}"])
             if res_daily_mtime.returncode != 0:
                 last_diag = f"Could not stat selected reference file {expected_ref}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
             daily_mtime = res_daily_mtime.stdout.strip()
-                
+
             # stat ready marker
             res_ready = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
             if res_ready.returncode != 0:
@@ -292,29 +292,29 @@ def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expec
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
             marker_mtime = res_ready.stdout.strip()
-            
+
             # zVERSION query
             res_zver = bounded_run(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
             if res_zver.returncode != 0:
                 last_diag = f"zVERSION query failed: {res_zver.stderr.strip()}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             match = re.search(r'ClamAV [^/]+/([^/]+)/', res_zver.stdout.strip())
             if not match:
                 last_diag = f"Could not parse version from zVERSION reply: {res_zver.stdout.strip()}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             loaded = match.group(1)
             if loaded != marker_version:
                 last_diag = f"zVERSION loaded {loaded} != marker {marker_version}"
                 time.sleep(max(0, min(2, deadline - time.monotonic())))
                 continue
-                
+
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Readiness handshake incomplete within {timeout_s}s bound. Last diag: {last_diag}")
-                
+
             return {
                 "marker_version": marker_version,
                 "expected_ref": expected_ref,
@@ -322,9 +322,8 @@ def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expec
                 "daily_mtime": daily_mtime,
                 "marker_mtime": marker_mtime
             }
-        except subprocess.TimeoutExpired:
-            last_diag = "Subprocess timed out"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"subprocess timeout: {e.cmd}"
             continue
 
 class TestGenuineClamdLifecycle(unittest.TestCase):
@@ -364,7 +363,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
             readiness = poll_genuine_readiness_handshake(self.container_name, self.db_dir, timeout_s=60)
         except TimeoutError as e:
             self.fail(str(e))
-        
+
         marker_version = readiness["marker_version"]
         expected_ref = readiness["expected_ref"]
         expected_ref_version = readiness["expected_ref_version"]
@@ -406,7 +405,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
                     marker_mtime_after_unchanged = current_marker_mtime
                     break
             time.sleep(1)
-            
+
         self.assertIsNotNone(marker_mtime_after_unchanged, "Marker mtime did not advance within 30s")
         daily_file_mtime_after_unchanged = stat_mtime(self.container_name, f"{self.db_dir}/{expected_ref}")
         self.assertEqual(daily_file_mtime_after_unchanged, daily_file_mtime_1,
@@ -502,7 +501,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
                 removed = True
                 break
             time.sleep(1)
-            
+
         self.assertTrue(removed, "Readiness marker and version file should be deleted after failure within bound")
 
         print("Injecting recovery...")
@@ -516,7 +515,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
             readiness_2 = poll_genuine_readiness_handshake(self.container_name, self.db_dir, timeout_s=60)
         except TimeoutError as e:
             self.fail(f"Failed to observe complete recovery readiness: {e}")
-            
+
         recovered_version = readiness_2["marker_version"]
         expected_ref_2 = readiness_2["expected_ref"]
         expected_ref_version_2 = readiness_2["expected_ref_version"]
@@ -794,12 +793,12 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 self.assertEqual(start.returncode, 0, f"Failed to start seeded container: {start.stderr}")
 
                 self.assertTrue(wait_for_ping(self.container_name, 60), "clamd never answered a live PING after seeded startup")
-                
+
                 try:
                     seeded_readiness = poll_genuine_readiness_handshake(self.container_name, self.db_dir, timeout_s=60, expected_version=seed_version)
                 except TimeoutError as e:
                     self.fail(f"Precondition not met or readiness not observed after seeded startup: {e}")
-                
+
                 initial_loaded = seeded_readiness["marker_version"]
                 self.assertEqual(
                     initial_loaded, seed_version,

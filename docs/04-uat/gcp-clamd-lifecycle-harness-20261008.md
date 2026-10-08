@@ -9,7 +9,7 @@ Task ID: `SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008`
 
 ## F1a & F1b: Bounded Complete Readiness Polling
 
-The previous fixed sleep loops and incomplete `ready.version` checks have been replaced with a complete bounded monotonic polling helper (`poll_genuine_readiness_handshake`). 
+The previous fixed sleep loops and incomplete `ready.version` checks have been replaced with a complete bounded monotonic polling helper (`poll_genuine_readiness_handshake`).
 - Polling bounds evaluate `remain = deadline - time.monotonic()` *before* each subprocess.
 - Subprocesses use exact fractional remainder for timeouts.
 - `subprocess.TimeoutExpired` exceptions are caught, treated as a failure observation, and retried if the deadline permits.
@@ -29,18 +29,19 @@ A scoped `test_genuine_lifecycle_helpers.py` test suite rigorously tests the `po
 
 ## F2: Immutable Historical Seed & Evidence Record
 
-The target `clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23` is an OCI index, not a layer. 
+The target `clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23` is an OCI index, not a layer.
 The official registry digest verification maps to linux/amd64 child `sha256:da8463f630e2c9467c74f3da1dee6f096e61a71650e4e9f1ff9b5f687ba91aa0`, config `5ca07785ce6993ebdac0dc329b1866e09ca28a6336223879f839b7c530d39bd9`, created `2026-09-28T01:25:25.384859292Z`.
 Because the `freshclam` build step allows failure, signature files or old<new guarantees cannot be inferred from index metadata alone.
 Main/daily/bytecode availability, signatures/readability, old<new verification, and engine compatibility remain explicitly pending hosted extraction. Hosted verification must explicitly establish all three database families, as existing seed extraction only requires any daily file.
 
 ### Findings Review Matrix
 
-| Finding | Pre-Fix (be0eabca / 8e7017fc) | Post-Fix Result | Limit / Bound |
+| Finding | Previous Command/Behavior (be0eabca / 8e7017fc) | New Command/Behavior | Limit / Bound |
 | :--- | :--- | :--- | :--- |
-| **F1a (deadline)** | `timeout_s=60` probe succeeded at elapsed 67s | Rejects at 60s exactly | 60 seconds strict |
-| **F1b (audit)** | `time.sleep(3)` and `time.sleep(7)` blind assumptions | Active polling for marker/version updates | 30 seconds bound |
-| **F1c (probes)** | Missing timeout simulations & regression probes | 8 helper tests executing logic | Unit test suite |
+| **F1a (deadline)** | Probe with simulated 58s wait and 1.5s subprocess advances yielded success at 67s (elapsed > 60s limit). | `poll_genuine_readiness_handshake` recomputes `remain` before EACH subprocess and raises `TimeoutError` strictly at exactly 60s elapsed. | 60 seconds strict monotonic bound |
+| **F1b (audit)** | `time.sleep(3)` after `zRELOAD`; `time.sleep(7)` for watchdog mtime advance. | Polling loop dynamically queries activation/renewal to bounded deadlines. | Bounded by monotonic deadline dynamically |
+| **F1c (probes)** | Mismatched mock `daily.cvd` order and missing timeout propagation probes. | Added mock probes testing timeout propagation, fractional remaining time, no commands after deadline, and fixed command dispatch. | 11 tests, 0 skips, exit 0 |
+| **F2 (evidence)** | Claimed OCI index implies signed older seed extraction and engine compatibility. | Removed unsupported success claims. Factual provenance established (OCI child sha256). All availability/readability/compatibility explicitly pending hosted extraction. | Hosted extraction establishes all 3 families |
 
 ### Acceptance Evidence
 
