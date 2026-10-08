@@ -105,10 +105,10 @@ export async function uploadOperationalDocument(
   expect(Array.from(parsedIntentUrl.searchParams.keys()).length, "intent URL must not contain extra queries").toBe(0);
   expect(parsedIntentUrl.hash, "intent URL must not contain fragment").toBe("");
 
-  let intentPathname = parsedIntentUrl.pathname;
-  if (intentPathname.startsWith('/api/')) {
-    intentPathname = intentPathname.replace(/^\/api\//, '/control-plane-proxy/');
+  if (parsedIntentUrl.pathname.startsWith('/api/')) {
+    parsedIntentUrl.pathname = parsedIntentUrl.pathname.replace(/^\/api\//, '/control-plane-proxy/');
   }
+  const intentPathname = parsedIntentUrl.pathname;
   const parentPrefixMatch = intentPathname.match(/^(\/control-plane-proxy\/fleet-partner\/supply-submissions\/([^/]+))\/documents\/(?:intent|upload-url)$/);
   expect(parentPrefixMatch, "intentPath must match exact parent prefix shape (/control-plane-proxy/fleet-partner/supply-submissions/...).").toBeTruthy();
   const parentPrefix = parentPrefixMatch![1] as string;
@@ -121,10 +121,10 @@ export async function uploadOperationalDocument(
   expect(Array.from(parsedConfirmUrl.searchParams.keys()).length, "confirm URL must not contain extra queries").toBe(0);
   expect(parsedConfirmUrl.hash, "confirm URL must not contain fragment").toBe("");
 
-  let confirmPathname = parsedConfirmUrl.pathname;
-  if (confirmPathname.startsWith('/api/')) {
-    confirmPathname = confirmPathname.replace(/^\/api\//, '/control-plane-proxy/');
+  if (parsedConfirmUrl.pathname.startsWith('/api/')) {
+    parsedConfirmUrl.pathname = parsedConfirmUrl.pathname.replace(/^\/api\//, '/control-plane-proxy/');
   }
+  const confirmPathname = parsedConfirmUrl.pathname;
   expect(confirmPathname, "confirm URL pathname must match parent scope").toBe(`${parentPrefix}/documents/confirm`);
 
   // R4: Authoritative Fleet readback
@@ -170,7 +170,7 @@ export async function uploadOperationalDocument(
 
   expect(objectKey, "object_key from intent").toBeTruthy();
   expect(objectKey.startsWith(`fleet-partner/${authoritativeFleetId}/supply-submissions/${expectedSubmissionId}/`), "object_key must begin with exact authoritative prefix").toBeTruthy();
-  
+
   if (intentData.data.submission_id) {
     expect(intentData.data.submission_id, "intent submission_id must match").toBe(expectedSubmissionId);
   }
@@ -296,7 +296,7 @@ export async function uploadOperationalDocument(
   expect(confirmType, "confirm mime metadata").toBe(contentType);
   expect(confirmSubmissionId, "confirm submission_id metadata must match URL").toBe(expectedSubmissionId);
   expect(confirmDocType, "confirm document_type metadata must match intent body").toBe(intentBody.documentType || confirmBody.documentType);
-  
+
   // R4: Bind authoritative fleet
   expect(confirmFleetId, "confirm fleet_partner_id must match authoritative readback").toBe(authoritativeFleetId);
 
@@ -319,7 +319,7 @@ export async function uploadOperationalDocument(
   const readbackSha256 = createHash("sha256").update(readbackBuffer).digest("hex");
   expect(readbackSha256, "readback checksum").toBe(sha256);
   expect(readbackBuffer.length, "readback file_size").toBe(fileSize);
-  
+
   // R4 strict MIME gap
   const returnedType = downloadResponse.headers.get("content-type") || "";
   expect((returnedType.split(";")[0] || "").trim().toLowerCase(), "readback content_type exactly application/pdf").toBe("application/pdf");
@@ -346,4 +346,318 @@ export async function uploadOperationalDocument(
     readbackContentType: returnedType,
     transientHistory,
   };
+}
+
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type TemplateVariables = Record<string, unknown>;
+export type HttpRequestSetup = {
+  kind?: "http";
+  baseUrlEnv?: string;
+  path: string;
+  method: HttpMethod;
+  body?: unknown;
+  headers?: Record<string, string>;
+  capture?: Record<string, string>;
+};
+export type DocumentUploadSetup = {
+  kind: "document-upload";
+  baseUrlEnv?: string;
+  intentPath: string;
+  intentBody: Record<string, unknown>;
+  confirmPath: string;
+  confirmBody: Record<string, unknown>;
+  headers?: Record<string, string>;
+};
+export type SetupRequest = HttpRequestSetup | DocumentUploadSetup;
+export type Journey = {
+  id: string;
+  surface: string;
+  baseUrlEnv: string;
+  route: string;
+  actorScope: string;
+  environmentVariables?: Record<string, string>;
+  setup?: SetupRequest[];
+  [key: string]: any;
+};
+
+export function requiredOrigin(envName: string) {
+  const value = process.env[envName]?.trim();
+  if (!value) {
+    throw new Error(
+      `${envName} is required: release acceptance must target a deployed candidate URL.`,
+    );
+  }
+  return new URL(value).toString();
+}
+
+export function getIdentityToken(baseUrlEnv?: string): string | undefined {
+  if (!baseUrlEnv) return undefined;
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_TENANT_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_TENANT_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_BANK_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_BANK_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_BANK_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL" ||
+    baseUrlEnv === "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN ||
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL" ||
+    baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN ||
+      process.env.DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_OPS_CONSOLE_URL" ||
+    baseUrlEnv === "DRTS_DEV_OPS_CONSOLE_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN ||
+      process.env.DRTS_DEV_OPS_CONSOLE_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL" ||
+    baseUrlEnv === "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN ||
+      process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN
+    );
+  }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL" ||
+    baseUrlEnv === "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN ||
+      process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN
+    );
+  }
+  return undefined;
+}
+
+export function valueAtPath(value: unknown, dotPath: string): unknown {
+  return dotPath.split(".").reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object") return undefined;
+    return (current as Record<string, unknown>)[key];
+  }, value);
+}
+
+export function variableValue(name: string, variables: TemplateVariables) {
+  const value = variables[name];
+  expect(value, `template variable ${name}`).not.toBeUndefined();
+  return value;
+}
+
+export function materializeString(template: string, variables: TemplateVariables) {
+  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_, name) =>
+    String(variableValue(name, variables)),
+  );
+}
+
+export function materializeValue(
+  value: unknown,
+  variables: TemplateVariables,
+): unknown {
+  if (typeof value === "string") {
+    const wholeVariable = value.match(/^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/);
+    return wholeVariable
+      ? variableValue(wholeVariable[1]!, variables)
+      : materializeString(value, variables);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => materializeValue(item, variables));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        materializeValue(item, variables),
+      ]),
+    );
+  }
+  return value;
+}
+
+export interface SetupExecutorContext {
+  request: APIRequestContext;
+  record: (entry: Record<string, unknown>) => void;
+  fetchFn?: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+export async function runSetup(
+  context: SetupExecutorContext,
+  journey: Journey,
+  variables: TemplateVariables,
+) {
+  for (const setup of journey.setup ?? []) {
+    const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
+    const origin = requiredOrigin(setupBaseUrlEnv);
+    const rawHeaders = setup.headers
+      ? (materializeValue(setup.headers, variables) as Record<string, string>)
+      : undefined;
+    const headers: Record<string, string> = { ...(rawHeaders ?? {}) };
+    const setupIdToken = getIdentityToken(setupBaseUrlEnv);
+    if (
+      setupIdToken &&
+      !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
+    ) {
+      headers["Authorization"] = `Bearer ${setupIdToken}`;
+    }
+
+    if (setup.kind === "document-upload") {
+      const intentPath = materializeString(setup.intentPath, variables);
+      const confirmPath = materializeString(setup.confirmPath, variables);
+      const intentBody = materializeValue(
+        setup.intentBody,
+        variables,
+      ) as Record<string, unknown>;
+      const confirmBody = materializeValue(
+        setup.confirmBody,
+        variables,
+      ) as Record<string, unknown>;
+
+      const evidence = await uploadOperationalDocument(
+        context.request,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      );
+
+      context.record({
+        kind: "setup-document-upload",
+        journey: journey.id,
+        surface: journey.surface,
+        actorScope: journey.actorScope,
+        intentUrl: new URL(intentPath, origin).toString(),
+        confirmUrl: new URL(confirmPath, origin).toString(),
+        documentId: evidence.documentId,
+        objectKey: evidence.objectKey,
+        fileSize: evidence.fileSize,
+        sha256: evidence.sha256,
+        attempts: {
+          intent: evidence.intentAttempts,
+          put: evidence.putAttempts,
+          confirm: evidence.confirmAttempts,
+          download: evidence.downloadAttempts
+        },
+        intentStatus: evidence.intentStatus,
+        putStatus: evidence.putStatus,
+        putScanState: evidence.putScanState,
+        confirmStatus: evidence.confirmStatus,
+        confirmSubmissionId: evidence.confirmSubmissionId,
+        confirmFleetPartnerId: evidence.confirmFleetPartnerId,
+        confirmDocumentType: evidence.confirmDocumentType,
+        downloadStatus: evidence.downloadStatus,
+        readbackSha256: evidence.readbackSha256,
+        readbackFileSize: evidence.readbackFileSize,
+        readbackContentType: evidence.readbackContentType,
+        transientHistory: evidence.transientHistory,
+      });
+      continue;
+    }
+
+    const body = setup.body
+      ? materializeValue(setup.body, variables)
+      : undefined;
+      
+    let responseStatus: number;
+    let responseUrl: string;
+    let responseHeaders: Headers | Record<string, string>;
+    let responseBody: any;
+    
+    if (context.fetchFn) {
+      const res = await context.fetchFn(
+        new URL(materializeString(setup.path, variables), origin).toString(),
+        {
+          method: setup.method,
+          ...(body
+            ? {
+                body: JSON.stringify(body),
+                headers: { "Content-Type": "application/json", ...headers },
+              }
+            : Object.keys(headers).length > 0
+              ? { headers }
+              : {}),
+        }
+      );
+      responseStatus = res.status;
+      responseUrl = res.url;
+      responseHeaders = res.headers;
+      responseBody = await res.json().catch(() => null);
+    } else {
+      const response = await context.request.fetch(
+        new URL(materializeString(setup.path, variables), origin).toString(),
+        {
+          method: setup.method,
+          maxRedirects: 0,
+          ...(body
+            ? {
+                data: body,
+                headers: { "Content-Type": "application/json", ...headers },
+              }
+            : Object.keys(headers).length > 0
+              ? { headers }
+              : {}),
+        },
+      );
+      responseStatus = response.status();
+      responseUrl = response.url();
+      responseHeaders = response.headers();
+      responseBody = await response.json().catch(() => null);
+    }
+    
+    expect(responseStatus, `${journey.id} setup ${setup.path}`).toBeLessThan(
+      400,
+    );
+    expectCandidateRevision(
+      responseHeaders,
+      `${journey.id} setup ${setup.path}`,
+    );
+    if (setup.capture) {
+      for (const [name, valuePath] of Object.entries(setup.capture)) {
+        const value = valueAtPath(responseBody, valuePath);
+        expect(
+          value,
+          `${journey.id} setup ${setup.path} capture ${name}`,
+        ).toBeTruthy();
+        variables[name] = value;
+      }
+    }
+    context.record({
+      kind: "setup",
+      journey: journey.id,
+      surface: journey.surface,
+      actorScope: journey.actorScope,
+      method: setup.method,
+      url: responseUrl,
+      status: responseStatus,
+      captures: setup.capture ? Object.keys(setup.capture) : [],
+    });
+  }
 }

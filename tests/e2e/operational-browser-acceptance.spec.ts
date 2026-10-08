@@ -1,29 +1,18 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { uploadOperationalDocument } from "./operational-document-upload";
-
-type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-type TemplateVariables = Record<string, unknown>;
-type HttpRequestSetup = {
-  kind?: "http";
-  baseUrlEnv?: string;
-  path: string;
-  method: HttpMethod;
-  body?: unknown;
-  headers?: Record<string, string>;
-  capture?: Record<string, string>;
-};
-type DocumentUploadSetup = {
-  kind: "document-upload";
-  baseUrlEnv?: string;
-  intentPath: string;
-  intentBody: Record<string, unknown>;
-  confirmPath: string;
-  confirmBody: Record<string, unknown>;
-  headers?: Record<string, string>;
-};
-type SetupRequest = HttpRequestSetup | DocumentUploadSetup;
+import { 
+  uploadOperationalDocument, 
+  runSetup,
+  requiredOrigin,
+  getIdentityToken,
+  valueAtPath,
+  materializeString,
+  materializeValue,
+  type HttpMethod,
+  type TemplateVariables,
+  type SetupRequest,
+} from "./operational-document-upload";
 type JourneyStep =
   | { kind: "navigate"; path: string }
   | { kind: "click"; control: string }
@@ -111,15 +100,6 @@ const evidenceDir =
 const evidence: Array<Record<string, unknown>> = [];
 const interactionTimeoutMs = 10_000;
 
-function requiredOrigin(envName: string) {
-  const value = process.env[envName]?.trim();
-  if (!value) {
-    throw new Error(
-      `${envName} is required: release acceptance must target a deployed candidate URL.`,
-    );
-  }
-  return new URL(value).toString();
-}
 
 function requiredEnvironmentValue(envName: string) {
   const value = process.env[envName]?.trim();
@@ -131,73 +111,6 @@ function requiredEnvironmentValue(envName: string) {
   return value;
 }
 
-function getIdentityToken(baseUrlEnv?: string): string | undefined {
-  if (!baseUrlEnv) return undefined;
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
-    baseUrlEnv === "DRTS_DEV_TENANT_CONSOLE_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN ||
-      process.env.DRTS_DEV_TENANT_CONSOLE_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_BANK_CONSOLE_URL" ||
-    baseUrlEnv === "DRTS_DEV_BANK_CONSOLE_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN ||
-      process.env.DRTS_DEV_BANK_CONSOLE_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL" ||
-    baseUrlEnv === "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN ||
-      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL" ||
-    baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN ||
-      process.env.DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_OPS_CONSOLE_URL" ||
-    baseUrlEnv === "DRTS_DEV_OPS_CONSOLE_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN ||
-      process.env.DRTS_DEV_OPS_CONSOLE_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL" ||
-    baseUrlEnv === "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN ||
-      process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL" ||
-    baseUrlEnv === "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN ||
-      process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN
-    );
-  }
-  return undefined;
-}
 
 function record(entry: Record<string, unknown>) {
   evidence.push({
@@ -217,48 +130,9 @@ function expectCandidateRevision(
   ).toBe(candidateSha);
 }
 
-function valueAtPath(value: unknown, dotPath: string): unknown {
-  return dotPath.split(".").reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object") return undefined;
-    return (current as Record<string, unknown>)[key];
-  }, value);
-}
 
-function variableValue(name: string, variables: TemplateVariables) {
-  const value = variables[name];
-  expect(value, `template variable ${name}`).not.toBeUndefined();
-  return value;
-}
 
-function materializeString(template: string, variables: TemplateVariables) {
-  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_, name) =>
-    String(variableValue(name, variables)),
-  );
-}
 
-function materializeValue(
-  value: unknown,
-  variables: TemplateVariables,
-): unknown {
-  if (typeof value === "string") {
-    const wholeVariable = value.match(/^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/);
-    return wholeVariable
-      ? variableValue(wholeVariable[1]!, variables)
-      : materializeString(value, variables);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => materializeValue(item, variables));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        materializeValue(item, variables),
-      ]),
-    );
-  }
-  return value;
-}
 
 function interpolatePath(
   template: string,
@@ -647,7 +521,7 @@ for (const journey of manifest.journeys) {
       });
     }
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup(page, journey, variables);
+    await runSetup({ request: page.context().request, record }, journey, variables);
     await navigate(
       page,
       origin,
@@ -893,7 +767,7 @@ for (const journey of manifest.journeys) {
       });
     }
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup(page, journey, variables);
+    await runSetup({ request: page.context().request, record }, journey, variables);
     const response = await page.goto(
       new URL(
         interpolatePath(journey.route, null, variables),
