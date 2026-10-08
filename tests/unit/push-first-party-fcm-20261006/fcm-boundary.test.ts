@@ -104,6 +104,77 @@ describe("FCM production provider boundary", () => {
     ).not.toBe("accepted");
     expect(fetchStub).not.toHaveBeenCalled();
   });
+  it("fails closed without a trusted server validator", async () => {
+    expect(await provider.send(message(), target, undefined as any)).toEqual({
+      kind: "configuration_blocked",
+    });
+    expect(accessToken).not.toHaveBeenCalled();
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("deducts validation time from the outgoing TTL", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const input = message();
+    await provider.send(input, target, async () => {
+      vi.setSystemTime(now + 5000);
+      return true;
+    });
+    expect(
+      JSON.parse(fetchStub.mock.calls[0]![1].body).message.android.ttl,
+    ).toBe("55s");
+  });
+  it("does not POST after expiry during validation", async () => {
+    vi.useFakeTimers();
+    const input = message();
+    expect(
+      await provider.send(input, target, async () => {
+        vi.setSystemTime(Date.parse(input.data.expires_at));
+        return true;
+      }),
+    ).toEqual({ kind: "expired" });
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("cannot resume POST after a timed-out validator eventually resolves", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: boolean) => void;
+    const validate = vi.fn(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = provider.send(message(), target, validate);
+    await vi.advanceTimersByTimeAsync(10001);
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(await pending).toEqual({
+      kind: "transient",
+      errorCode: "TRANSPORT_ERROR",
+    });
+    resolve(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it("cannot resume validation or POST after timed-out metadata resolves", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: string) => void;
+    accessToken.mockImplementation(
+      () =>
+        new Promise<string>((done) => {
+          resolve = done;
+        }),
+    );
+    const validate = vi.fn(async () => true);
+    const pending = provider.send(message(), target, validate);
+    await vi.advanceTimersByTimeAsync(10001);
+    expect(await pending).toEqual({
+      kind: "transient",
+      errorCode: "TRANSPORT_ERROR",
+    });
+    resolve("synthetic-late-access-token");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(validate).not.toHaveBeenCalled();
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
   it.each([
     [404, "NOT_FOUND", [fcmError("UNREGISTERED")], "invalid"],
     [404, "NOT_FOUND", [], "configuration_blocked"],

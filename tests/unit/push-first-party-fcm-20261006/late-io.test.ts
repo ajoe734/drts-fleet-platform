@@ -7,6 +7,7 @@ import {
   FirstPartyPushFailure,
 } from "../../../apps/api/src/modules/multi-taxi/first-party-notification.transport";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
+import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 
 const deviceId = "00000000-0000-4000-8000-000000000001";
 const token = "synthetic-captured-device-token";
@@ -101,10 +102,18 @@ function harness(eventType = "driver_arrived") {
     query,
   } as any);
   const reachedMetadata = deferred<void>();
-  const metadataResponse = deferred<Response>();
+  const metadataResponse = deferred<void>();
   const metadataFetch = vi.fn(async () => {
     reachedMetadata.resolve();
-    return metadataResponse.promise;
+    await metadataResponse.promise;
+    return Response.json(
+      {
+        token_type: "Bearer",
+        access_token: "synthetic-access-token",
+        expires_in: 3600,
+      },
+      { headers: { "Metadata-Flavor": "Google" } },
+    );
   });
   const fcmFetch = vi.fn(async () => Response.json({ name }));
   const provider = new FcmFirstPartyPushProvider(
@@ -131,18 +140,9 @@ function harness(eventType = "driver_arrived") {
     },
     context: { fenceToken: 7 },
   } as any;
-  const release = () =>
-    metadataResponse.resolve(
-      Response.json(
-        {
-          token_type: "Bearer",
-          access_token: "synthetic-access-token",
-          expires_in: 3600,
-        },
-        { headers: { "Metadata-Flavor": "Google" } },
-      ),
-    );
+  const release = () => metadataResponse.resolve();
   return {
+    stored,
     transport,
     request,
     reachedMetadata,
@@ -272,6 +272,171 @@ describe("actual metadata-await late I/O boundary", () => {
       });
       expect(h.fcmFetch).toHaveBeenCalledTimes(1);
       expect(h.devices.resolveActiveDevices).not.toHaveBeenCalled();
+    },
+  );
+  it("does not replace the captured token if a lookup returns another token", async () => {
+    const h = harness();
+    const pending = h.transport.send(h.request).catch((e: unknown) => e);
+    await h.reachedMetadata.promise;
+    h.state.eligibility.token = "synthetic-replacement-token";
+    h.release();
+    expect(await pending).toMatchObject({
+      failure: { failureReason: "no_active_device" },
+    });
+    expect(h.fcmFetch).not.toHaveBeenCalled();
+  });
+  it("preserves route_missing with the captured context", async () => {
+    const h = harness();
+    const pending = h.transport.send(h.request).catch((e: unknown) => e);
+    await h.reachedMetadata.promise;
+    h.state.route = null;
+    h.release();
+    expect(await pending).toMatchObject({
+      failure: { failureReason: "route_missing" },
+      deliveryContext: { outboxId: "outbox1" },
+    });
+    expect(h.fcmFetch).not.toHaveBeenCalled();
+  });
+  it.each(["trip_cancelled", "receipt_ready"])(
+    "%s exemption cannot bypass device eligibility",
+    async (event) => {
+      const h = harness(event);
+      const pending = h.transport.send(h.request).catch((e: unknown) => e);
+      await h.reachedMetadata.promise;
+      h.state.relevance.status = "cancelled";
+      h.state.eligibility.token = null;
+      h.release();
+      expect(await pending).toMatchObject({
+        failure: { failureReason: "no_active_device" },
+      });
+      expect(h.fcmFetch).not.toHaveBeenCalled();
+    },
+  );
+  it("invalidates only the captured device/hash after token rejection", async () => {
+    const h = harness();
+    h.fcmFetch.mockImplementation(async () => {
+      h.state.eligibility.token = "synthetic-rotated-after-post";
+      return Response.json(
+        {
+          error: {
+            details: [
+              {
+                "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                errorCode: "UNREGISTERED",
+              },
+            ],
+          },
+        },
+        { status: 404 },
+      );
+    });
+    const pending = h.transport.send(h.request).catch((e: unknown) => e);
+    await h.reachedMetadata.promise;
+    h.release();
+    expect(await pending).toMatchObject({
+      failure: { failureReason: "no_active_device" },
+    });
+    expect(h.devices.invalidateDevice).toHaveBeenCalledExactlyOnceWith(
+      deviceId,
+      "provider_invalid",
+      hash,
+    );
+    expect(h.fcmFetch).toHaveBeenCalledTimes(1);
+  });
+  it.each(["cancelled", "fence_lost"])(
+    "retains correct outcome if second device becomes %s during metadata",
+    async (mode) => {
+      const h = harness();
+      h.stored.target_devices.push({
+        deviceId: "00000000-0000-4000-8000-000000000002",
+        tokenSha256: hash,
+      });
+      const metadata = h.metadataFetch.getMockImplementation()!;
+      h.metadataFetch.mockImplementation(async () => {
+        if (h.metadataFetch.mock.calls.length === 2) {
+          if (mode === "cancelled") h.state.relevance.status = "cancelled";
+          else h.state.eligibility.fence_valid = false;
+        }
+        return metadata();
+      });
+      const pending = h.transport.send(h.request).catch((e: unknown) => e);
+      await h.reachedMetadata.promise;
+      h.release();
+      const result = await pending;
+      expect(h.fcmFetch).toHaveBeenCalledTimes(1);
+      if (mode === "cancelled")
+        expect(result).toMatchObject({
+          providerMessageRef: name,
+          deliveryContext: {
+            deviceOutcomes: [{ deviceId, kind: "accepted", messageId: name }],
+          },
+        });
+      else {
+        expect(result).toBeInstanceOf(Error);
+        expect((result as Error).message).toContain("fence lost");
+      }
+    },
+  );
+  it.each(["cancelled", "fence_lost"])(
+    "service preserves %s persistence semantics after metadata await",
+    async (mode) => {
+      const h = harness();
+      // Claim/outcome IO is synthetic; the full real send chain above remains intact.
+      const recordPushDeliveryOutcome = vi.fn(async (_input: unknown) => {
+        void _input;
+        return { recorded: true };
+      });
+      const service = new MultiTaxiService(
+        {} as any,
+        {
+          resolvePassengerNotificationChannel: async () => ({
+            channel: "first_party_app",
+          }),
+          claimPartnerNotification: async () => ({
+            record: h.request.message,
+            fenceToken: 7,
+          }),
+          recordPushDeliveryOutcome,
+        } as any,
+        undefined,
+        undefined,
+        undefined,
+        { transportMode: "partner_webhook" } as any,
+        undefined,
+        undefined,
+        undefined,
+        h.transport,
+      );
+      const pending = service
+        .deliverPassengerNotification(h.request.message)
+        .catch((e: unknown) => e);
+      await h.reachedMetadata.promise;
+      if (mode === "cancelled") h.state.relevance.status = "cancelled";
+      else h.state.eligibility.fence_valid = false;
+      h.release();
+      const result = await pending;
+      expect(h.fcmFetch).not.toHaveBeenCalled();
+      if (mode === "cancelled") {
+        expect(result).toMatchObject({
+          result: "provider_error",
+          failureReason: "notification_obsolete",
+          retryDisposition: "terminal",
+        });
+        expect(recordPushDeliveryOutcome).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            fenceToken: 7,
+            firstPartyMetadata: expect.objectContaining({
+              failureReason: "notification_obsolete",
+              deviceOutcomes: [],
+            }),
+          }),
+        );
+      } else {
+        expect(result).toMatchObject({
+          name: "PassengerPushPersistenceUnknownError",
+        });
+        expect(recordPushDeliveryOutcome).not.toHaveBeenCalled();
+      }
     },
   );
 });
