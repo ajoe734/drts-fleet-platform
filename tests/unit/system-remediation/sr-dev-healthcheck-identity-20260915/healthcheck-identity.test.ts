@@ -333,8 +333,8 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
     // Browser context extraHTTPHeaders for journeys and routes in the spec delegating to the helper
     expect(specContent).toContain("getIdentityToken");
-    expect(specContent).toMatch(/import\s+\{.*getIdentityToken.*\}\s+from\s+["']\.\/operational-document-upload["']/);
-    expect(specContent).toMatch(/import\s+\{.*runSetup.*\}\s+from\s+["']\.\/operational-document-upload["']/);
+    expect(specContent).toMatch(/import\s+\{[\s\S]*getIdentityToken[\s\S]*\}\s+from\s+["']\.\/operational-document-upload["']/);
+    expect(specContent).toMatch(/import\s+\{[\s\S]*runSetup[\s\S]*\}\s+from\s+["']\.\/operational-document-upload["']/);
 
     // Assert BOTH spec delegations to the helper (one in regular execution, one in route checking)
     const runSetupCalls = specContent.match(/await\s+runSetup\(/g);

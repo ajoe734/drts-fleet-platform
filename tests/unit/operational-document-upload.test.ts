@@ -225,7 +225,7 @@ describe("uploadOperationalDocument", () => {
   it("retries PUT on 503 DOCUMENT_SCANNER_UNAVAILABLE with error.code", async () => {
     setupHappyPath(vi.mocked(globalThis.fetch as any));
     let putAttempts = 0;
-    vi.mocked(globalThis.fetch as any).mockImplementation(async (url: string | URL | Request) => {
+    vi.mocked(globalThis.fetch as any).mockImplementation(async (url: string | URL | Request, _options?: any) => {
       const urlStr = url.toString();
       if (urlStr.includes("/content?objectKey=fleet-partner")) {
         putAttempts++;
