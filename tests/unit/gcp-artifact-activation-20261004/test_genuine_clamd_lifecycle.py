@@ -116,14 +116,17 @@ def wait_for_ping(container_name, timeout=60):
         time.sleep(max(0, min(1, deadline - time.monotonic())))
     return False
 
-def query_loaded_version(container_name):
+def query_loaded_version(container_name, timeout=10.0):
     """Real, null-terminated zVERSION query -- the same live proof
     readiness.ts#createIsReady itself requires, not a parsed log line."""
-    res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
-    if res.returncode != 0:
+    try:
+        res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"], timeout=timeout)
+        if res.returncode != 0:
+            return None
+        match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
+        return match.group(1) if match else None
+    except subprocess.TimeoutExpired:
         return None
-    match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
-    return match.group(1) if match else None
 
 def file_exists(container_name, path):
     return run_cmd(["docker", "exec", container_name, "test", "-f", path]).returncode == 0
@@ -326,6 +329,153 @@ def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expec
             last_diag = f"subprocess timeout: {e.cmd}"
             continue
 
+
+def poll_genuine_watchdog_renewal(container_name, expected_ref, expected_ref_version, marker_mtime_1, unchanged_time, expected_pattern, db_dir, timeout_s=30):
+    import time
+    import subprocess
+    deadline = time.monotonic() + timeout_s
+    marker_mtime_after_unchanged = None
+    watchdog_output = ""
+    last_diag = "No renewal observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Renewal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+            if res.returncode == 0:
+                current_marker_mtime = res.stdout.strip()
+                if current_marker_mtime.isdigit() and int(current_marker_mtime) > int(marker_mtime_1):
+                    res_logs = bounded_run(["docker", "logs", "--since", unchanged_time, container_name])
+                    logs = res_logs.stdout + res_logs.stderr
+                    if expected_pattern.search(logs):
+                        marker_mtime_after_unchanged = current_marker_mtime
+                        watchdog_output = logs
+                        break
+                    else:
+                        last_diag = f"Marker advanced to {current_marker_mtime} but expected log pattern missing"
+                else:
+                    last_diag = f"Marker mtime {current_marker_mtime} <= {marker_mtime_1}"
+            else:
+                last_diag = f"Marker stat failed: {res.stderr}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    return marker_mtime_after_unchanged, watchdog_output
+
+def poll_genuine_marker_removal(container_name, timeout_s=30):
+    import time
+    import subprocess
+    deadline = time.monotonic() + timeout_s
+    removed = False
+    last_diag = "No removal observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Removal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res1 = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready"])
+            res2 = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res1.returncode != 0 and res2.returncode != 0:
+                removed = True
+                break
+            else:
+                last_diag = f"ready={res1.returncode}, ready.version={res2.returncode}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    return removed
+
+def poll_genuine_activation(container_name, new_expected_version, timeout_s=30):
+    import time
+    import subprocess
+    import re
+    deadline = time.monotonic() + timeout_s
+    activated_loaded = None
+    last_diag = "No activation observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Activation loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
+            if res.returncode == 0:
+                match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
+                if match:
+                    activated_loaded = match.group(1)
+                    if activated_loaded == new_expected_version:
+                        break
+                    else:
+                        last_diag = f"loaded version {activated_loaded} != expected {new_expected_version}"
+                else:
+                    last_diag = f"Could not parse zVERSION reply: {res.stdout.strip()}"
+            else:
+                last_diag = f"zVERSION query failed: {res.stderr}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    return activated_loaded
+
+def poll_genuine_pending_version(container_name, seed_version, timeout_s=60):
+    import time
+    import subprocess
+    new_expected_version = None
+    deadline = time.monotonic() + timeout_s
+    last_diag = "No version advance observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            break
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != seed_version:
+                new_expected_version = res.stdout.strip()
+                break
+            else:
+                last_diag = f"Version file: rc={res.returncode}, out={res.stdout.strip()}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    if new_expected_version is None:
+        raise TimeoutError(f"Pending loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+    return new_expected_version
+
 class TestGenuineClamdLifecycle(unittest.TestCase):
     def setUp(self):
         self.image = os.environ.get("CLAMD_IMAGE")
@@ -395,16 +545,9 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # start). Sleeping past that interval lets the watchdog's own pass
         # observe the same still-unchanged on-disk database and republish
         # the marker; this does not depend on the manual call's output.
-        deadline = time.monotonic() + 30
-        marker_mtime_after_unchanged = None
-        while time.monotonic() < deadline:
-            res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
-            if res.returncode == 0:
-                current_marker_mtime = res.stdout.strip()
-                if int(current_marker_mtime) > int(marker_mtime_1):
-                    marker_mtime_after_unchanged = current_marker_mtime
-                    break
-            time.sleep(1)
+        marker_mtime_after_unchanged, watchdog_output = poll_genuine_watchdog_renewal(
+            self.container_name, expected_ref, expected_ref_version, marker_mtime_1, unchanged_time, expected_pattern, self.db_dir, timeout_s=30
+        )
 
         self.assertIsNotNone(marker_mtime_after_unchanged, "Marker mtime did not advance within 30s")
         daily_file_mtime_after_unchanged = stat_mtime(self.container_name, f"{self.db_dir}/{expected_ref}")
@@ -426,7 +569,6 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # loop itself printed since `unchanged_time` is -- uniquely --
         # the watchdog's own invocation, not the manual call already
         # checked above.
-        watchdog_output = container_logs_since(self.container_name, unchanged_time)
         self.assertTrue(
             expected_pattern.search(watchdog_output) is not None,
             f"Watchdog's own periodic freshclam pass did not itself confirm '{expected_ref}' "
@@ -492,15 +634,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # After failure, clamd-entrypoint.sh#refresh_daily_readiness removes
         # BOTH the marker and its sibling version file in the same call --
         # a pending/failed reload must leave neither artifact behind.
-        deadline = time.monotonic() + 30
-        removed = False
-        while time.monotonic() < deadline:
-            res1 = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready"])
-            res2 = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-            if res1.returncode != 0 and res2.returncode != 0:
-                removed = True
-                break
-            time.sleep(1)
+        removed = poll_genuine_marker_removal(self.container_name, timeout_s=30)
 
         self.assertTrue(removed, "Readiness marker and version file should be deleted after failure within bound")
 
@@ -850,18 +984,10 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             # from whatever is genuinely on disk afterward -- the same
             # mechanism the sibling test above already relies on for its
             # "unchanged" assertion, not a new invented path.
-            new_expected_version = None
-            deadline = time.monotonic() + 60
-            while True:
-                remain = deadline - time.monotonic()
-                if remain <= 0:
-                    break
-                cmd_timeout = max(1, min(10, remain))
-                res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"], timeout=cmd_timeout)
-                if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != seed_version:
-                    new_expected_version = res.stdout.strip()
-                    break
-                time.sleep(max(0, min(2, deadline - time.monotonic())))
+            try:
+                new_expected_version = poll_genuine_pending_version(self.container_name, seed_version, timeout_s=60)
+            except TimeoutError:
+                new_expected_version = None
             self.assertIsNotNone(
                 new_expected_version,
                 "Readiness marker never advanced past the seeded stale version -- no genuine "
@@ -914,13 +1040,7 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
                             "printf 'zRELOAD\\0' | nc -w 3 127.0.0.1 3310"])
             self.assertEqual(res.returncode, 0, f"Failed to issue RELOAD: {res.stderr}")
-            deadline = time.monotonic() + 30
-            activated_loaded = None
-            while time.monotonic() < deadline:
-                activated_loaded = query_loaded_version(self.container_name)
-                if activated_loaded == new_expected_version:
-                    break
-                time.sleep(1)
+            activated_loaded = poll_genuine_activation(self.container_name, new_expected_version, timeout_s=30)
 
             self.assertEqual(
                 activated_loaded, new_expected_version,

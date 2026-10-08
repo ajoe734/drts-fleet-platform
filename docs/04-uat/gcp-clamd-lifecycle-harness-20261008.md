@@ -6,6 +6,8 @@ Task ID: `SR-GCP-CLAMD-LIFECYCLE-HARNESS-20261008`
 
 - **be0eabca173c213d82ed3c4cae42fcbaeec92466**: Original candidate. Failed the 60-second contract with an elapsed 80s wall-clock rollback probe.
 - **8e7017fc93a85f857954858bd80431d7e65fed10**: Second candidate (Generation 7904ac0908bf40b6b748bf427521ed6b). Fixed wall-clock dependence but still failed elapsed-time enforcement with a concrete elapsed 67s probe.
+- **3f961a6360800ead1009302941c642c8cfd37d50**: Third candidate. Missed auditing the renewal/removal/activation loops. Loops lacked timeout checks, fractional bounds, and accepted late results. Also had a watchdog cutoff race where checking for mtime advance missed logs.
+- **c38f5dc31a93c454633b8630aad012ecfc13c662**: Fourth candidate (Generation d7d7702c30c64bd99a2f1d3e10b4f81e). Failed to properly bound the three defective loops (renewal/removal/activation), retaining unchanged AST statement blocks. Missing test coverage for the exact findings, fractional timeout, terminal expiry, and live-version lag.
 
 ## F1a & F1b: Bounded Complete Readiness Polling
 
@@ -39,8 +41,8 @@ Main/daily/bytecode availability, signatures/readability, old<new verification, 
 | Finding | Previous Command/Behavior (be0eabca / 8e7017fc) | New Command/Behavior | Limit / Bound |
 | :--- | :--- | :--- | :--- |
 | **F1a (deadline)** | Probe with simulated 58s wait and 1.5s subprocess advances yielded success at 67s (elapsed > 60s limit). | `poll_genuine_readiness_handshake` recomputes `remain` before EACH subprocess and raises `TimeoutError` strictly at exactly 60s elapsed. | 60 seconds strict monotonic bound |
-| **F1b (audit)** | `time.sleep(3)` after `zRELOAD`; `time.sleep(7)` for watchdog mtime advance. | Polling loop dynamically queries activation/renewal to bounded deadlines. | Bounded by monotonic deadline dynamically |
-| **F1c (probes)** | Mismatched mock `daily.cvd` order and missing timeout propagation probes. | Added mock probes testing timeout propagation, fractional remaining time, no commands after deadline, and fixed command dispatch. | 11 tests, 0 skips, exit 0 |
+| **F1b (audit)** | `time.sleep(3)` after `zRELOAD`; `time.sleep(7)` for watchdog mtime advance. (3f961a63 and c38f5dc3 failed to bound renewal/removal/activation loops and accept late results) | All four auxiliary loops (renewal, removal, activation, pending) extracted to polling helpers dynamically bounded by monotonic deadlines, rejecting late results, with a 2s cap per command, retrying on transient command timeouts, checking watchdog log correctly within the loop to avoid cutoff race. | Bounded by monotonic deadline dynamically |
+| **F1c (probes)** | Mismatched mock `daily.cvd` order and missing timeout propagation probes. Missing regression for loops and lag. | Added mock probes testing timeout propagation, fractional remaining time, transient timeout cap (2-second cap), staggered live-version lag, and dedicated test boundaries for renewal/removal/activation/pending loop helpers. | 15 tests, 0 skips, exit 0 |
 | **F2 (evidence)** | Claimed OCI index implies signed older seed extraction and engine compatibility. | Removed unsupported success claims. Factual provenance established (OCI child sha256). All availability/readability/compatibility explicitly pending hosted extraction. | Hosted extraction establishes all 3 families |
 
 ### Acceptance Evidence
@@ -52,4 +54,4 @@ Main/daily/bytecode availability, signatures/readability, old<new verification, 
 | `genuine_lifecycle_hosted_original_controls_zero_skips` | **Outstanding** | Pending isolated hosted run. Cannot run on local VM per project restrictions. Hosted verification must establish main/daily/bytecode availability and signatures. |
 
 Local verification performed (Exit 0):
-- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests/unit/gcp-artifact-activation-20261004 python3 -m unittest test_genuine_lifecycle_helpers test_genuine_clamd_lifecycle.TestRelayScriptInstreamFraming -v` (11 passed)
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tests/unit/gcp-artifact-activation-20261004 python3 -m unittest test_genuine_lifecycle_helpers test_genuine_clamd_lifecycle.TestRelayScriptInstreamFraming -v` (15 passed)
