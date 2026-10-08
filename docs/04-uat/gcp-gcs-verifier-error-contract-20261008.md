@@ -22,6 +22,11 @@ Test 12 was also modified. Previously it passed `--access-token-file=/dev/null` 
 
 ## Finding and Acceptance Ledger
 
+| Finding／驗收項                                | 原始碼依據與修改位置   | 舊版重現 → 修正版結果                     | 命令、退出碼、執行版本與證據位置                            | 未驗項與具體限制               |
+| ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| gcs_verifier_expected_error_and_negative_control_regression | `operations/verification/verify-dev-artifact-backends.py`, `is_gcs_precondition_failed` | 舊 SHA 誤判 5 項 false-positive 缺陷；修正版精確比對 cause 標頭，排除雜訊 | 本機 `python3 -m unittest tools/ci/test_verify_dev_artifact_backends.py` (Pass) | 無 |
+| gcs_verifier_exact_sha_review_ci_merge | | | | 需等 CI / Reviewer |
+
 - **Exact Source Hashes**:
   - Base: `5f57e39bd2eb00ebdffba0a966ed772629a468d0` (Old)
   - Candidate: Current HEAD exact branch (`gemini2/sr-gcp-gcs-verifier-error-contract-20261008`)

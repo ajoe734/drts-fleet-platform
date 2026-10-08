@@ -303,7 +303,12 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             "ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden for gs://bucket/object-412",
             "ERROR: Task 'gs://bucket/GcsPreconditionFailedError.txt' failed: GcsNotFoundError('')",
             "ERROR: (gcloud.storage.cp) HTTPError 401: Unauthorized\nRequest body: {\"message\":\"412 Precondition Failed\"}",
-            "WARNING: credential contains GcsPreconditionFailedError\nERROR: (gcloud.storage.cp) HTTPError 403: Forbidden"
+            "WARNING: credential contains GcsPreconditionFailedError\nERROR: (gcloud.storage.cp) HTTPError 403: Forbidden",
+            "ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden for object GcsPreconditionFailedError",
+            "ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden\nRequest body:\nERROR: Task 'gs://bucket/object' failed: GcsPreconditionFailedError('')",
+            "ERROR: (gcloud.storage.cp) HTTPError 403: backend message Precondition Failed",
+            "ERROR: (gcloud.storage.cp) HTTPError 4120: unsupported code",
+            "ERROR: (gcloud.storage.cp) HTTPError 403: credential=GcsPreconditionFailedError"
         ]
         for c in cases_false:
             e = subprocess.CalledProcessError(1, ["cmd"], stderr=c)

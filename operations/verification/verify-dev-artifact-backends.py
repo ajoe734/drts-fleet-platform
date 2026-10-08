@@ -515,22 +515,15 @@ def is_gcs_precondition_failed(e: subprocess.CalledProcessError) -> bool:
     for line in stderr.splitlines():
         match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*)", line, re.IGNORECASE)
         if match:
-            cause = match.group(1)
-            # Exclude quoted paths/payloads
-            cause_no_quotes = re.sub(r"'[^']*'", "''", cause)
-            cause_no_quotes = re.sub(r'"[^"]*"', '""', cause_no_quotes)
-            # Exclude gs:// paths
-            cause_no_quotes = re.sub(r"gs://\S+", "", cause_no_quotes)
-            
-            cause_upper = cause_no_quotes.upper()
-            if "GCSPRECONDITIONFAILEDERROR" in cause_upper:
+            cause = match.group(1).strip()
+            if re.match(r"^(?:HTTP(?:Error)?\s*)?:?\s*412\b", cause, re.IGNORECASE):
                 return True
-            if "PRECONDITION FAILED" in cause_upper:
+            if re.match(r"^Task(?:\s+.*?)?\s+failed:\s*GcsPreconditionFailedError\b", cause, re.IGNORECASE):
                 return True
-            if "HTTPERROR 412" in cause_upper or "HTTP ERROR 412" in cause_upper or "HTTP 412" in cause_upper:
-                return True
+            return False
                 
     return False
+
 
 def test_gcs(bucket_name, runtime_sa):
     print(f"Testing GCS bucket: {bucket_name}")
