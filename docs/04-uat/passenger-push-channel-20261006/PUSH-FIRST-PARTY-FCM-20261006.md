@@ -1,5 +1,13 @@
 # PUSH-FIRST-PARTY-FCM-20261006 — repair evidence
 
+## Current parent continuation — 2026-10-08
+
+Supervisor resumed original owner Codex and reviewer Codex2 after the late-I/O child reached `done`. The parent is now preparing a **new source-only candidate**, with the reviewed repair included; independent parent review, same-candidate CI/merge and both original named acceptance records remain required. The previous containment status and F1–F13 ledger below are retained as historical evidence, not current approval. Formal PostgreSQL behavior remains the separate downstream `PUSH-CHANNEL-PG-QA-20261006` requirement; it is not a prerequisite that circularly blocks this parent source handoff.
+
+Source provenance, current finding disposition and completed checks are recorded in [Parent source acceptance renewal](#parent-source-acceptance-renewal--2026-10-08). No first-party enablement, deployment, credentials, real push or VM services are authorized by this continuation.
+
+## Historical containment and original repair record
+
 2026-10-08 containment update: the historical F1–F13 ledger and all candidate/review/CI/merge evidence below remain preserved. Candidate `a10e0b23032a2ae1176f59f02660dedd25dd7fdf` was approved by Codex2 and merged as `5c09db37f1824b6565a7546280c8b6fadabd6450`, but the subsequent actual metadata-await counterexample invalidates any reading of F3/F10 as complete privacy acceptance. The parent remains **blocked**, with no provider enablement or privacy acceptance. The bounded source repair and old/new executable evidence are recorded in [PUSH-FIRST-PARTY-FCM-LATE-IO-20261008](PUSH-FIRST-PARTY-FCM-LATE-IO-20261008.md). Original-parent adjudication/disposition belongs to assigned reviewer Codex2; this owner update is neither a retroactive rejection nor a replacement for that decision. Historical text below describes the earlier repair round.
 
 Status: implementation repaired and local checks complete; candidate review, same-SHA hosted CI and formal-schema PG acceptance remain outstanding. Earlier assertions of complete tests and reviewer approval were incorrect and are withdrawn.
