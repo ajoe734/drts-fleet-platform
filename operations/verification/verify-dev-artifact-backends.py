@@ -14,9 +14,59 @@ import time
 import urllib.request
 import urllib.error
 
+import re
+
+def _sanitize_stderr(text):
+    if not text:
+        return text
+
+    # Extract only the explicit error cause from the first error line,
+    # ignoring incidental details, resource names, or request payloads.
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*)", line, re.IGNORECASE)
+        if match:
+            cause_line = match.group(1).strip().upper()
+
+            http_match = re.match(r"^(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*(\d{3})\b", cause_line)
+            if http_match:
+                code = http_match.group(1)
+                if code == "401": return "[redacted: UNAUTHENTICATED / 401]"
+                if code == "403": return "[redacted: PERMISSION_DENIED / 403]"
+                if code == "404": return "[redacted: NOT_FOUND / 404]"
+                if code == "504": return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+            if cause_line.startswith("UNAUTHENTICATED") or cause_line.startswith("UNAUTHORIZED"):
+                return "[redacted: UNAUTHENTICATED / 401]"
+            if cause_line.startswith("PERMISSION_DENIED"):
+                return "[redacted: PERMISSION_DENIED / 403]"
+            if cause_line.startswith("NOT_FOUND"):
+                return "[redacted: NOT_FOUND / 404]"
+            if cause_line.startswith("DEADLINE_EXCEEDED") or cause_line.startswith("TIMEOUT"):
+                return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+            if cause_line.startswith("UNRECOGNIZED ARGUMENT") or cause_line.startswith("INVALID ARGUMENT") or cause_line.startswith("USAGE"):
+                return "[redacted: SDK / ARGUMENT_ISSUE]"
+
+            if cause_line.startswith("YOU DO NOT CURRENTLY HAVE AN ACTIVE ACCOUNT SELECTED") or cause_line.startswith("CREDENTIALS") or cause_line.startswith("REAUTH") or cause_line.startswith("ACTIVE ACCOUNT SELECTED"):
+                return "[redacted: AUTH / ACCOUNT_ISSUE]"
+
+            break
+
+    return "[redacted: UNKNOWN_ERROR_FORMAT]"
+
 def run(cmd, **kwargs):
     print(f"Running: {' '.join(cmd)}")
-    return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
+    try:
+        return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if len(cmd) >= 3 and cmd[0] == "gcloud" and cmd[1] == "logging" and cmd[2] == "read":
+            if e.stderr:
+                sanitized = _sanitize_stderr(e.stderr).strip()
+                if len(sanitized) > 1024:
+                    sanitized = sanitized[:1024] + "... [TRUNCATED]"
+                print(f"Diagnostic (gcloud logging read failed): {sanitized}", file=sys.stderr)
+        raise
+
 
 def get_identity_token(audience):
     import os
