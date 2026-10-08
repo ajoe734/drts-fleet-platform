@@ -20,15 +20,24 @@ def _sanitize_stderr(text):
     if not text:
         return text
     
-    upper_text = text.upper()
-    if "PERMISSION_DENIED" in upper_text or "403" in upper_text:
-        return "[redacted: PERMISSION_DENIED / 403]"
-    if "UNAUTHENTICATED" in upper_text or "UNAUTHORIZED" in upper_text or "401" in upper_text:
+    error_lines = [line.upper() for line in text.splitlines() if "ERROR:" in line.upper() or "HTTP" in line.upper() or "EXCEPTION:" in line.upper()]
+    if not error_lines:
+        error_lines = [line.upper() for line in text.splitlines()][:2]
+        
+    error_context = " ".join(error_lines)
+
+    if "UNAUTHENTICATED" in error_context or "UNAUTHORIZED" in error_context or re.search(r"\b401\b", error_context):
         return "[redacted: UNAUTHENTICATED / 401]"
-    if "NOT_FOUND" in upper_text or "404" in upper_text:
+    if "PERMISSION_DENIED" in error_context or re.search(r"\b403\b", error_context):
+        return "[redacted: PERMISSION_DENIED / 403]"
+    if "NOT_FOUND" in error_context or re.search(r"\b404\b", error_context):
         return "[redacted: NOT_FOUND / 404]"
-    if "DEADLINE_EXCEEDED" in upper_text or "TIMEOUT" in upper_text:
+    if "DEADLINE_EXCEEDED" in error_context or "TIMEOUT" in error_context or re.search(r"\b504\b", error_context):
         return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+    if "ACTIVE ACCOUNT SELECTED" in error_context or "CREDENTIALS" in error_context or "REAUTH" in error_context or "ACCOUNT" in error_context:
+        return "[redacted: AUTH / ACCOUNT_ISSUE]"
+    if "UNRECOGNIZED ARGUMENT" in error_context or "INVALID ARGUMENT" in error_context or "USAGE" in error_context:
+        return "[redacted: SDK / ARGUMENT_ISSUE]"
 
     return "[redacted: UNKNOWN_ERROR_FORMAT]"
 

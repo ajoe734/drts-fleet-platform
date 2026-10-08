@@ -601,7 +601,11 @@ refresh_token=SYNTHETIC_REFRESH
             ('ERROR: (gcloud.logging.read) UNAUTHENTICATED\n  Cookie: session=SYNTHETIC_COOKIE', '[redacted: UNAUTHENTICATED / 401]'),
             ('ERROR: failed\n{"refresh_token": "SYNTHETIC_REFRESH', '[redacted: UNKNOWN_ERROR_FORMAT]'),
             ('client_secret: SYNTHETIC_CLIENT\nrefresh_token: SYNTHETIC_REFRESH', '[redacted: UNKNOWN_ERROR_FORMAT]'),
-            ('<response><access_token>SYNTHETIC_ACCESS</access_token></response>', '[redacted: UNKNOWN_ERROR_FORMAT]')
+            ('<response><access_token>SYNTHETIC_ACCESS</access_token></response>', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('ERROR: (gcloud.logging.read) UNAUTHENTICATED\naccess_token: SYNTHETIC_403_TOKEN', '[redacted: UNAUTHENTICATED / 401]'),
+            ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-403123 does not exist', '[redacted: NOT_FOUND / 404]'),
+            ('ERROR: (gcloud.logging.read) You do not currently have an active account selected.', '[redacted: AUTH / ACCOUNT_ISSUE]'),
+            ('ERROR: (gcloud.logging.read) unrecognized arguments: --synthetic-invalid-flag', '[redacted: SDK / ARGUMENT_ISSUE]')
         ]
         
         for edge_fixture, expected_msg in edge_fixtures:
