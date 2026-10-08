@@ -41,6 +41,34 @@ afterEach(() => {
 });
 
 describe("cloud transport ambiguity and hard resource bounds", () => {
+  it.each([
+    "",
+    " application/pdf",
+    "application/pdf ",
+    "application/pdf\r\nX-Injected: yes",
+    "application/pdf\n\nforeign body",
+    "application/pdf\t",
+    "application/pdf\u0000",
+    "application/pdf\u007f",
+    "application/pdf; name=非ASCII",
+    "a".repeat(1025),
+  ])(
+    "rejects unsafe multipart MIME %j before credentials or network",
+    async (contentType) => {
+      const auth = {
+        accessToken: vi.fn(async () => "fixture"),
+        identityToken: vi.fn(),
+      };
+      const fetchImpl = vi.fn();
+      const client = new GoogleCloudObjectClient(bucket, auth, fetchImpl);
+      await expect(
+        client.put("key", bytes, contentType, {}, null),
+      ).rejects.toThrow("Invalid GCS content type");
+      expect(auth.accessToken).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([404, 412])(
     "metadata HTTP%d is not a storage absence/precondition verdict",
     async (status) => {
