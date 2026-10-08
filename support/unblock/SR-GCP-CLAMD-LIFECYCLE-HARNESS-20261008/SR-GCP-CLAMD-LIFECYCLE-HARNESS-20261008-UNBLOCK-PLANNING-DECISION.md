@@ -147,3 +147,16 @@ Publication check correction: the first `git diff --check HEAD^ HEAD` on anchor
 It was removed in a normal follow-up commit; the chained canonical/trailer
 checks had not run at that point. Final check results are recorded in the helper
 status receipt, separately from this initial failure.
+
+Final publication checks on `aef3142a1c80` passed whitespace, canonical
+consistency (all four categories zero findings), two task-local Markdown links
+and the parent specification hash. Commit-trailer validation failed exit 1:
+that follow-up commit's subject `docs: finalize clamd lifecycle acceptance routing evidence`
+omits the required Task-ID. It had already been normally pushed; no amend,
+rebase, reset, force-push or gate bypass is permitted. This is an additional
+delivery blocker caused by this helper, not a parent product defect. Preserve
+both published commits and request Supervisor-coordinated history recovery:
+reconstitute these two planning-file changes on an approved fresh delivery
+branch with compliant subjects, rerun the full-range checks, and supersede the
+draft PR while retaining its history. A subsequent compliant commit on this
+branch cannot erase the invalid ancestor. No candidate handoff is claimed.
