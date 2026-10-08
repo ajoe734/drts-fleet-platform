@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { 
   uploadOperationalDocument, 
@@ -145,8 +145,7 @@ function interpolatePath(
     resultId,
     `${materialized} requires a prior operation result ID`,
   ).toBeTruthy();
-  return materialized.replaceAll(
-    "{resultId}",
+  return materialized.split("{resultId}").join(
     encodeURIComponent(String(resultId)),
   );
 }
@@ -168,7 +167,7 @@ function interpolateOperationValue(
     resultId,
     `${value} requires a prior operation result ID`,
   ).toBeTruthy();
-  return materialized.replaceAll("{resultId}", String(resultId));
+  return materialized.split("{resultId}").join(String(resultId));
 }
 
 async function assertReadback(
@@ -245,132 +244,6 @@ async function runSteps(
     } else {
       await control.click();
     }
-  }
-}
-
-async function runSetup(
-  page: Page,
-  journey: Journey,
-  variables: TemplateVariables,
-) {
-  for (const setup of journey.setup ?? []) {
-    const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
-    const origin = requiredOrigin(setupBaseUrlEnv);
-    const rawHeaders = setup.headers
-      ? (materializeValue(setup.headers, variables) as Record<string, string>)
-      : undefined;
-    const headers: Record<string, string> = { ...(rawHeaders ?? {}) };
-    const setupIdToken = getIdentityToken(setupBaseUrlEnv);
-    if (
-      setupIdToken &&
-      !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
-    ) {
-      headers["Authorization"] = `Bearer ${setupIdToken}`;
-    }
-
-    if (setup.kind === "document-upload") {
-      const intentPath = materializeString(setup.intentPath, variables);
-      const confirmPath = materializeString(setup.confirmPath, variables);
-      const intentBody = materializeValue(
-        setup.intentBody,
-        variables,
-      ) as Record<string, unknown>;
-      const confirmBody = materializeValue(
-        setup.confirmBody,
-        variables,
-      ) as Record<string, unknown>;
-
-      const evidence = await uploadOperationalDocument(
-        page.context().request,
-        origin,
-        intentPath,
-        intentBody,
-        confirmPath,
-        confirmBody,
-        headers,
-      );
-
-      record({
-        kind: "setup-document-upload",
-        journey: journey.id,
-        surface: journey.surface,
-        actorScope: journey.actorScope,
-        intentUrl: new URL(intentPath, origin).toString(),
-        confirmUrl: new URL(confirmPath, origin).toString(),
-        documentId: evidence.documentId,
-        objectKey: evidence.objectKey,
-        fileSize: evidence.fileSize,
-        sha256: evidence.sha256,
-        attempts: {
-          intent: evidence.intentAttempts,
-          put: evidence.putAttempts,
-          confirm: evidence.confirmAttempts,
-          download: evidence.downloadAttempts
-        },
-        intentStatus: evidence.intentStatus,
-        putStatus: evidence.putStatus,
-        putScanState: evidence.putScanState,
-        confirmStatus: evidence.confirmStatus,
-        confirmSubmissionId: evidence.confirmSubmissionId,
-        confirmFleetPartnerId: evidence.confirmFleetPartnerId,
-        confirmDocumentType: evidence.confirmDocumentType,
-        downloadStatus: evidence.downloadStatus,
-        readbackSha256: evidence.readbackSha256,
-        readbackFileSize: evidence.readbackFileSize,
-        readbackContentType: evidence.readbackContentType,
-        transientHistory: evidence.transientHistory,
-      });
-      continue;
-    }
-
-    const body = setup.body
-      ? materializeValue(setup.body, variables)
-      : undefined;
-    const response = await page
-      .context()
-      .request.fetch(
-        new URL(materializeString(setup.path, variables), origin).toString(),
-        {
-          method: setup.method,
-          maxRedirects: 0,
-          ...(body
-            ? {
-                data: body,
-                headers: { "Content-Type": "application/json", ...headers },
-              }
-            : Object.keys(headers).length > 0
-              ? { headers }
-              : {}),
-        },
-      );
-    expect(response.status(), `${journey.id} setup ${setup.path}`).toBeLessThan(
-      400,
-    );
-    expectCandidateRevision(
-      response.headers(),
-      `${journey.id} setup ${setup.path}`,
-    );
-    if (setup.capture) {
-      const responseBody = (await response.json()) as unknown;
-      for (const [name, valuePath] of Object.entries(setup.capture)) {
-        const value = valueAtPath(responseBody, valuePath);
-        expect(
-          value,
-          `${journey.id} setup ${setup.path} capture ${name}`,
-        ).toBeTruthy();
-        variables[name] = value;
-      }
-    }
-    record({
-      kind: "setup",
-      journey: journey.id,
-      surface: journey.surface,
-      actorScope: journey.actorScope,
-      method: setup.method,
-      url: response.url(),
-      status: response.status(),
-      captures: setup.capture ? Object.keys(setup.capture) : [],
-    });
   }
 }
 

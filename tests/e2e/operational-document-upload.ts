@@ -1,10 +1,10 @@
 import { expect, type APIRequestContext } from "@playwright/test";
 import { createHash } from "node:crypto";
 
-function expectCandidateRevision(headers: Headers, label: string) {
+function expectCandidateRevision(headers: Headers | Record<string, string>, label: string) {
   const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim();
   if (candidateSha) {
-    const headerValue = headers.get("x-drts-candidate-sha");
+    const headerValue = 'get' in headers && typeof headers.get === 'function' ? headers.get("x-drts-candidate-sha") : (headers as Record<string, string>)["x-drts-candidate-sha"];
     expect(
       headerValue,
       `${label} must report the deployed immutable candidate SHA`
