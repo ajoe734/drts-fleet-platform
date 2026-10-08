@@ -56,8 +56,10 @@ trailers; every changed path is within the parent's recorded write scopes.
 
 The nine final changed paths are `.github/workflows/ci.yml`, the original parent
 UAT artifact, five files under `tests/unit/push-channel-pg-qa-20261006/`,
-`tools/ci/test_partner_notification_postgres_gate.py`, and
-`tools/ci/verify_passenger_push_channel_postgres_gate.py`. The one newer dev
+[test_partner_notification_postgres_gate.py](https://github.com/ajoe734/drts-fleet-platform/blob/74f7f04440cdc1cd3ec9db26b218fa12f9c909fe/tools/ci/test_partner_notification_postgres_gate.py), and
+[verify_passenger_push_channel_postgres_gate.py](https://github.com/ajoe734/drts-fleet-platform/blob/74f7f04440cdc1cd3ec9db26b218fa12f9c909fe/tools/ci/verify_passenger_push_channel_postgres_gate.py).
+Those two files exist on the preserved parent branch, not this helper's dev base.
+The one newer dev
 commit concerns scanner diagnostics and touches none of these paths. Trunk
 movement alone does not justify changing the published QA head.
 
@@ -214,3 +216,13 @@ dependency link, as recorded above; it is not counted as a pass. No new product
 tests are appropriate for this documentation-only change. Automatically started
 helper PR workflows must reach terminal results and be read before the owner
 yields; their receipts cannot satisfy the parent's F1 acceptance.
+
+Helper check finding H-D1: [run 37729957532](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37729957532),
+head `e5e8728352f14f41051db735608bf9ac5f79cb69`, failed canonical consistency
+because the two parent-only gate files above were presented as local paths.
+The local command `python3 tools/ci/git/check_canonical_consistency.py --ci
+--base origin/dev --head HEAD` reproduced both findings, exit 1. The correction
+links each file to its immutable parent SHA and explicitly identifies the
+branch boundary; no parent source was copied or checker exception added.
+Rerun the same check on the corrected report and record its final result in
+the task receipt. The superseded CI result is not a pass.
