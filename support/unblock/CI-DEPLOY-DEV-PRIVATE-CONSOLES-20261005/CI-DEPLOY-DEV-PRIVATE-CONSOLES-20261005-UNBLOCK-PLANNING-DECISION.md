@@ -39,8 +39,8 @@ the audited base.
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Resolve or route the missing product/contract decision             | Parent acceptance text items 1–4; SD-DP-20261007-002 §"Decision and authority" | Chairman assumed a spec ambiguity → confirmed none exists; routed to the scanner/GCS activation chain                          | Re-read of parent `ai-status.sh show` output, `deploy-dev.yml` identity-token steps, sibling `UNBLOCK-MANUAL-UNBLOCK` source trace                                   | No code/harness reviewed beyond what the sibling helper and Codex already verified on the parent candidate                   |
 | Record decision, scope cut, or explicit follow-up                  | SD-DP-20261007-002                                                             | No canonical planning record for this helper → named chain with owners (Claude/Claude2/Gemini2/Supervisor) and no scope cut    | Content/link checks below                                                                                                                                            | Chain timeline depends on scanner-readiness and GCP-provisioning owners, not recorded here                                   |
-| Task-scoped commit / push / PR                                     | This branch, decision and helper ledgers                                       | New tracked planning delivery                                                                                                  | Final SHA/PR-head comparison recorded after push, below                                                                                                              | Draft hold until canonical metadata/parent-note writes land (see limitation below)                                           |
-| Update parent with concrete unblocked next step                    | Canonical parent note + helper `resolved_parent_*` metadata                    | Dispatch-guard rejection for direct writes (reproduced below) → Supervisor operator-command block provided in the decision doc | Active-release CLI: parent `note` exit 1, helper `assign` exit 1; logs below                                                                                         | Machine-truth parent update is pending Supervisor action, not full helper completion by itself                               |
+| Task-scoped commit / push / PR                                     | This branch, decision and helper ledgers                                       | New tracked planning delivery                                                                                                  | Final SHA/PR-head comparison recorded after push, below                                                                                                              | None; publication unblocked as canonical writes have successfully landed                                                     |
+| Update parent with concrete unblocked next step                    | Canonical parent note + helper `resolved_parent_*` metadata                    | Historic dispatch-guard rejection → Supervisor operator readbacks now confirm successful canonical metadata update             | Readback evidence provided below (Round 3)                                                                                                                           | None; canonical routing and metadata already updated, old operator instructions superseded                                   |
 | Parent `真實deploy-dev綠燈`                                        | `deploy-dev.yml`; `required_acceptance`                                        | Pending → pending                                                                                                              | `ai-status.sh show CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`: `required_acceptance` lists it as the sole item without recorded evidence                               | Full 16/16 operational-acceptance run against a live-provisioned store is absent; depends on the chain in SD-DP-20261007-002 |
 | Parent items 1 and 3 (identity-token wiring; same-SHA CI + review) | `deploy-dev.yml` lines ~1438-1480; CI runs 37334127377/381                     | Done → unchanged                                                                                                               | Re-confirmed `candidate_sha=reviewed_sha=ci_sha=13656eb14818edc0c9ed85358d360e2fa588c764`, `merge_sha=f8725220d0ee67e90b185cf0dd339b250bcb3d2b`, `ci_status=success` | None; fully evidenced, not reopened                                                                                          |
 
@@ -93,23 +93,27 @@ commands`.
 
 No role/dispatch environment variable was removed or impersonated to bypass
 these guards. An own-task `start` succeeded and routes this helper's own
-status into `in_progress`. Before approving or merging this candidate,
-Supervisor must run, in its own operator context (not this dispatch), the
-exact command block in
-[SD-DP-20261007-002 §"Parent disposition and acceptance"](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md#parent-disposition-and-acceptance),
-writing `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Claude2`
-and the itemized `resolved_parent_next` onto this helper, and the same text as
-a direct `note` on the parent. Do not set `resolved_parent_at` manually; merge
-lifecycle owns that field.
+status into `in_progress`.
 
-`tools/development-orchestrator/github_bus.py` makes a draft PR ready once
-`handoff` locks its candidate. This helper's content does not depend on that
-metadata write to be correct or reviewable, so the owner hands off normally
-once published; but Supervisor should still perform the metadata/parent-note
-write at or before this candidate's merge reconciliation, because
-`apply_unblock_parent_resolution`'s default (`resolved_parent_status` absent →
-`todo`) would otherwise wrongly resume the parent for fresh owner dispatch the
-moment this helper merges, despite none of the chain's prerequisites existing.
+*(The following operator instruction is superseded history. The routing has already been correctly established and verified as of Round 3. Expected current guidance: read back and preserve the already-correct routing, with no prerequisite re-write. Retain history without directing another assign/note.)*
+
+> Before approving or merging this candidate,
+> Supervisor must run, in its own operator context (not this dispatch), the
+> exact command block in
+> [SD-DP-20261007-002 §"Parent disposition and acceptance"](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md#parent-disposition-and-acceptance),
+> writing `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Claude2`
+> and the itemized `resolved_parent_next` onto this helper, and the same text as
+> a direct `note` on the parent. Do not set `resolved_parent_at` manually; merge
+> lifecycle owns that field.
+> 
+> `tools/development-orchestrator/github_bus.py` makes a draft PR ready once
+> `handoff` locks its candidate. This helper's content does not depend on that
+> metadata write to be correct or reviewable, so the owner hands off normally
+> once published; but Supervisor should still perform the metadata/parent-note
+> write at or before this candidate's merge reconciliation, because
+> `apply_unblock_parent_resolution`'s default (`resolved_parent_status` absent →
+> `todo`) would otherwise wrongly resume the parent for fresh owner dispatch the
+> moment this helper merges, despite none of the chain's prerequisites existing.
 
 ## Round 2 — reviewer findings and repair (2026-10-07)
 
