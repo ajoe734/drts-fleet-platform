@@ -432,7 +432,19 @@ async function runSetup(
           put: evidence.putAttempts,
           confirm: evidence.confirmAttempts,
           download: evidence.downloadAttempts
-        }
+        },
+        intentStatus: evidence.intentStatus,
+        putStatus: evidence.putStatus,
+        putScanState: evidence.putScanState,
+        confirmStatus: evidence.confirmStatus,
+        confirmSubmissionId: evidence.confirmSubmissionId,
+        confirmFleetPartnerId: evidence.confirmFleetPartnerId,
+        confirmDocumentType: evidence.confirmDocumentType,
+        downloadStatus: evidence.downloadStatus,
+        readbackSha256: evidence.readbackSha256,
+        readbackFileSize: evidence.readbackFileSize,
+        readbackContentType: evidence.readbackContentType,
+        transientHistory: evidence.transientHistory,
       });
       continue;
     }

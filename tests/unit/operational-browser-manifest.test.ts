@@ -35,6 +35,12 @@ describe("operational browser journeys manifest guard", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+          body: expect.objectContaining({
+            supportedServiceProductCodes: ["business_dispatch"],
+          }),
+          capture: expect.objectContaining({
+            fleetSubmissionId: "data.submission.submission_id",
+          }),
         }),
         expect.objectContaining({
           kind: "document-upload",
