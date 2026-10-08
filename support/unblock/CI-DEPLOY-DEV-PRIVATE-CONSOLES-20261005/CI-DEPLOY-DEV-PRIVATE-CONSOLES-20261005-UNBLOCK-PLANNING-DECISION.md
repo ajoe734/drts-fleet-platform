@@ -2,8 +2,8 @@
 
 - Task: `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005-UNBLOCK-PLANNING-DECISION`
 - Parent: `CI-DEPLOY-DEV-PRIVATE-CONSOLES-20261005`
-- Owner / reviewer: Claude2 / Codex
-- Branch: `claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+- Owner / reviewer: Gemini / Codex2
+- Branch: `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
 - Audited base: parent candidate `13656eb14818edc0c9ed85358d360e2fa588c764` /
   merge `f8725220d0ee67e90b185cf0dd339b250bcb3d2b` via PR #2331
 - Decision: [SD-DP-20261007-002](../../../docs/01-decisions/SD-DP-20261007-002-ci-deploy-dev-private-consoles-acceptance-provisioning.md)
@@ -173,12 +173,12 @@ captured earlier because the write has not happened yet as of this handoff.
 ## Publication and final checks
 
 - Round 2 repair landed as two commits on
-  `claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+  `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
   off prior reviewed candidate `a9a765986d94c657fb451c39952a450b9d0f07e7`: the
   F1/F2 fix itself, then this publication-evidence note. Each was pushed to
   `origin` with a normal (non-force) push immediately after committing, and
   `git rev-parse HEAD` was confirmed equal to
-  `git rev-parse origin/claude2/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
+  `git rev-parse origin/gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`
   after each push (local/remote branch heads matched, no divergence). Per the
   prior round's own note on avoiding self-referential SHA edits, the final
   candidate SHA for this handoff is read off `git rev-parse HEAD` /
@@ -189,7 +189,7 @@ captured earlier because the write has not happened yet as of this handoff.
   change exited clean (no whitespace errors).
 - No source, workflow, or test file modified this round; only the two
   planning documents, consistent with this task's scope.
-- Existing open PR #2418 (`head`/`base` = this branch/`dev`) carries these new
+- Existing open PR #2428 (`head`/`base` = this branch/`dev`) carries these new
   commits once GitHub syncs; no new PR opened. Hosted CI for this round has
   not been separately polled as of this writing — treat as pending/unknown,
   not claimed green, until Codex's next review round confirms.
@@ -231,3 +231,12 @@ All prerequisites are now complete. The parent correctly remains blocked, while 
 - Helper metadata matches canonical `resolved_parent_next`.
 - Correct producer (`Gemini`) recorded.
 - Task is ready for fresh review, CI, and merge.
+
+
+**Round 3 Publication and PR Delivery:**
+
+- Repaired candidate has been published through a task-scoped PR to `dev`.
+- PR URL: https://github.com/ajoe734/drts-fleet-platform/pull/2428
+- Local branch, remote branch, and PR head are fully synchronized on `gemini/ci-deploy-dev-private-consoles-20261005-unblock-planning-decision`.
+- Prior history is preserved with regular commits (no force-push/rebase).
+- Final `CANDIDATE_SHA` for this handoff is read off `git rev-parse HEAD`.
