@@ -32,6 +32,12 @@ The external transport mock now implements the independently observed GCS MIME-e
 
 Machine-specific receipts and scoped probes remain under `.local/fleet-storage-diagnosis-20261008/`; no tokens, user objects or recipient data are committed.
 
+## Normal dev-based delivery after inherited CI history failure
+
+Initial PR #2447 / candidate `958efd59749f3bd66ad1a3fbc4399b8d6a93ae0e` failed the unchanged commit-trailers gate on **inherited** lifecycle feature commit `be0eabca173c213d82ed3c4cae42fcbaeec92466` (`fix(test): ...`), not either repair commit. The canonical bus returned the task to implementation; that failed candidate, its source/review/CI history and branch are preserved.
+
+The owner created a **new ordinary branch from origin/dev**, cherry-picked only the two scoped repair/documentation commits, and repeated the checks. The actual client/tests remain byte-identical to the first repaired checkpoint, so its genuine GCS diagnosis/readback/cleanup still proves that same client implementation, not a new runtime deployment. No force-push, amendment, rebase, source-parent rewrite or trailer/security bypass was used to evade the failure. The replacement final candidate requires **new** assigned independent exact-SHA review and **new matching** CI/normal protected merge; no old review or green result is carried over.
+
 ## Unclosed gates
 
 No new product deployment has been performed for this fix. Actual shared-dev application runtime/provider readback and full **16/16 zero-skip operational acceptance** remain outstanding. A separately assigned harness child must finish real intent → raw PUT → clean receipt → confirm → authenticated download instead of metadata-only confirmation. Independent source review/CI/merge must precede a fresh no-overlap immutable authorized hosted window.
