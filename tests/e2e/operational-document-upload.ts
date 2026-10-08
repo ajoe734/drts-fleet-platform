@@ -73,27 +73,25 @@ export async function uploadOperationalDocument(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(new Error("Timeout")), getRemainingTime());
     try {
-      if (request && typeof request.fetch === "function") {
-        const res = await request.fetch(url, {
-          method: options.method,
-          headers: options.headers as Record<string, string>,
-          data: options.body,
-          maxRedirects: 0,
-        });
-        const bodyBuffer = await res.body();
-        if (bodyBuffer.length > 1024 * 1024) {
-          throw new Error("Response exceeded bounded limit of 1MB");
+      const res = await fetch(url, { ...options, signal: controller.signal, redirect: "manual" });
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      if (res.body) {
+        const reader = res.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            received += value.length;
+            if (received > 1024 * 1024) {
+              reader.cancel();
+              throw new Error("Response exceeded bounded limit of 1MB");
+            }
+            chunks.push(value);
+          }
         }
-        const headers = new Headers(res.headers() as Record<string, string>);
-        return { status: res.status(), headers, body: bodyBuffer };
-      } else {
-        const res = await fetch(url, { ...options, signal: controller.signal, redirect: "manual" });
-        const arrayBuf = await res.arrayBuffer();
-        if (arrayBuf.byteLength > 1024 * 1024) {
-          throw new Error("Response exceeded bounded limit of 1MB");
-        }
-        return { status: res.status, headers: res.headers, body: Buffer.from(arrayBuf) };
       }
+      return { status: res.status, headers: res.headers, body: Buffer.concat(chunks) };
     } finally {
       clearTimeout(timeoutId);
     }

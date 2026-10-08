@@ -151,3 +151,27 @@ Execution evidence:
 | `operational_harness_real_document_bytes_and_receipts` | Pending. Requires E2E harness in a real environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
 | `operational_harness_exact_sha_review_ci_merge` | Pending. | Awaiting Codex2 review of exact SHA, CI execution, and merge. |
 | `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run needed post-merge. |
+
+## Seventh Review Resolution (2026-10-08)
+
+Addressed the latest review findings:
+
+- **R6/Fetch Degradation**: Restored `boundedFetch` to use native `globalThis.fetch` along with a robust Web Streams API `AbortController` integration and chunked limits to prevent memory bombs. Updated `tests/unit/operational-document-upload.test.ts` to accurately mock `globalThis.fetch` where appropriate instead of `mockRequest.fetch`.
+- **R6/Actual-Manifest runSetup Coverage**: Rewrote the `runSetup execution` block to import `tests/e2e/fixtures/operational-browser-journeys.json`. Added socket-free tests validating the `fleet-submit-read-withdraw-resubmit` and `admin-review-approve-readback` journeys against a fully simulated success path (including required `runId` binding), confirming 2 complete uploads (intent/PUT/confirm/download) per journey via exact invocation inspection.
+- **R6/Strict Negative Matrix**: Implemented negative tests for `runSetup` mutating exactly one element from the successful actual-manifest fixture per test. Validated failures for missing/unclean receipt, missing readback, wrong metadata on confirm, and simulated time budget deadline exhaustion.
+- **R6/Dynamic PDF Validation**: Updated the happy-path `runSetup` test to intercept the actual PUT request body sent by the harness and dynamically validate its structure by calculating exact `xref` and `startxref` byte offsets, rather than simply comparing against a static literal string.
+- **CI/Identity Healthcheck**: Added missing assertions for `runSetup` and `getIdentityToken` imports in `tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts` ensuring CI validation succeeds on extracted dependencies.
+
+Execution evidence:
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts` passed cleanly socket-free.
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts --max-warnings=0` passed.
+- `pnpm exec tsc --noEmit` verified the specific harness files have no typescript regressions.
+
+| Finding / Acceptance Item | Status & Local Evidence | Untested Limits / Pending |
+|---------------------------|-------------------------|---------------------------|
+| **R6/Fetch Degradation** | Resolved. Native global `fetch` with strict streaming chunking and `AbortController`. Unit tested. | None locally. |
+| **R6/Actual-Manifest** | Resolved. `runSetup` successfully parses and executes the canonical journey fixtures. | Requires full E2E execution in CI. |
+| **R6/Strict Negatives** | Resolved. Full socket-free test suite handles specific negative conditions accurately. | None locally. |
+| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires E2E harness in a real environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
+| `operational_harness_exact_sha_review_ci_merge` | Pending. | Awaiting Codex2 review of exact SHA, CI execution, and merge. |
+| `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run needed post-merge. |
