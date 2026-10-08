@@ -218,6 +218,16 @@ export class GoogleCloudObjectClient {
     expected?: string | null,
   ): Promise<string> {
     if (!key || !input.length) throw new Error("Empty GCS object.");
+    // This value is now also a multipart header, not only JSON metadata.
+    // Preserve MIME parameters, but reject header injection/control characters
+    // and unbounded values before acquiring credentials or issuing any I/O.
+    if (
+      typeof contentType !== "string" ||
+      contentType.length > 1024 ||
+      !/^[\x21-\x7e][\x20-\x7e]*$/.test(contentType) ||
+      contentType.trim() !== contentType
+    )
+      throw new Error("Invalid GCS content type.");
     if (expected !== undefined && expected !== null && !generation(expected))
       throw new Error("Invalid GCS generation fence.");
     const bytes = Buffer.from(input);
@@ -231,7 +241,7 @@ export class GoogleCloudObjectClient {
     });
     const payload = Buffer.concat([
       Buffer.from(
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${descriptor}\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`,
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${descriptor}\r\n--${boundary}\r\nContent-Type: ${contentType}\r\n\r\n`,
       ),
       bytes,
       Buffer.from(`\r\n--${boundary}--\r\n`),
