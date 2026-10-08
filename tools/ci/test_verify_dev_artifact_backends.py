@@ -483,16 +483,16 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         '''Proves exact-revision log diagnostic surfaces actionable error without leaking tokens.'''
         import io
         import sys
-        
+
         mock_env.return_value = "fake-token"
         container_env = {"gateway": {}, "clamd": {}}
         cold_start_polls = {"n": 0}
 
         def mock_side_effect(cmd, **kwargs):
             if cmd[:3] == ["gcloud", "logging", "read"]:
-                err = "PERMISSION_DENIED: caller missing roles/logging.viewer. Token: ya29.aBcDeFgH1234567890"
+                err = "ERROR: (gcloud.logging.read) PERMISSION_DENIED: caller missing roles/logging.viewer. Token: ya29.aBcDeFgH1234567890"
                 raise subprocess.CalledProcessError(1, cmd, stderr=err)
-            
+
             # For other cmds, use the env-aware mock logic if it's an update, else mock success
             if cmd[0] == "gcloud" and cmd[1] == "run" and cmd[2] == "services" and cmd[3] == "update":
                 if "--update-env-vars" in cmd:
@@ -510,7 +510,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                 mock_res = MagicMock()
                 mock_res.stdout = ""
                 return mock_res
-                
+
             mock_res = MagicMock()
             mock_res.stdout = '{"spec": {"template": {"spec": {"containers": [{"name": "gateway", "env": []}, {"name": "clamd", "env": []}]}}}}' if "describe" in cmd else "drts-dev-scanner-00009-bst"
             return mock_res
@@ -524,12 +524,12 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         try:
             with self.assertRaises(subprocess.CalledProcessError) as cm:
                 self.mod.test_scanner("http://fake", scanner_service="s", project="p", region="r")
-            
+
             stderr_output = captured_stderr.getvalue()
             self.assertIn("Diagnostic (gcloud logging read failed):", stderr_output)
             self.assertIn("[redacted: PERMISSION_DENIED / 403]", stderr_output)
             self.assertNotIn("ya29.aBcDeFgH1234567890", stderr_output)
-            
+
             # The exception contract should be unmodified.
             self.assertEqual(cm.exception.returncode, 1)
         finally:
@@ -540,7 +540,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
         '''Proves exact-revision log diagnostic surfaces actionable error without leaking tokens, bodies, headers, and enforces a size bound.'''
         import io
         import sys
-        
+
         # Test 1: Bounded output and secrets redaction using fixed categories
         fixture = '''ERROR: (gcloud.logging.read) PERMISSION_DENIED: ...
 ==== request start ====
@@ -558,38 +558,38 @@ Here is JSON:
 Bearer synthetic/payload+suffix=
 refresh_token=SYNTHETIC_REFRESH
 '''
-        
+
         err = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture, output="normal stdout")
         mock_run.side_effect = err
-        
+
         captured_stderr = io.StringIO()
         original_stderr = sys.stderr
         sys.stderr = captured_stderr
         try:
             with self.assertRaises(subprocess.CalledProcessError) as cm:
                 self.mod.run(["gcloud", "logging", "read"])
-                
+
             stderr_output = captured_stderr.getvalue()
-            
+
             # Assertions on standard properties preservation
             self.assertEqual(cm.exception.returncode, 7)
             self.assertEqual(cm.exception.stdout, "normal stdout")
             self.assertEqual(cm.exception.stderr, fixture)
-            
+
             # Redaction assertions
             self.assertIn("Diagnostic (gcloud logging read failed):", stderr_output)
             self.assertIn("[redacted: PERMISSION_DENIED / 403]", stderr_output)
-            
+
             self.assertNotIn("SYNTHETIC_REFRESH", stderr_output)
             self.assertNotIn("SYNTHETIC_CLIENT", stderr_output)
             self.assertNotIn("SYNTHETIC_PASSWORD", stderr_output)
             self.assertNotIn("SYNTHETIC_SECRET", stderr_output)
             self.assertNotIn("SYNTHETIC_BASIC", stderr_output)
             self.assertNotIn("synthetic/payload+suffix=", stderr_output)
-            
+
         finally:
             sys.stderr = original_stderr
-            
+
         # Test 1b: Additional explicit regression fixtures for tricky edge cases
         edge_fixtures = [
             ('Request body: {"password":"prefix}SYNTHETIC_PASSWORD"}', '[redacted: UNKNOWN_ERROR_FORMAT]'),
@@ -605,13 +605,17 @@ refresh_token=SYNTHETIC_REFRESH
             ('ERROR: (gcloud.logging.read) UNAUTHENTICATED\naccess_token: SYNTHETIC_403_TOKEN', '[redacted: UNAUTHENTICATED / 401]'),
             ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-403123 does not exist', '[redacted: NOT_FOUND / 404]'),
             ('ERROR: (gcloud.logging.read) You do not currently have an active account selected.', '[redacted: AUTH / ACCOUNT_ISSUE]'),
-            ('ERROR: (gcloud.logging.read) unrecognized arguments: --synthetic-invalid-flag', '[redacted: SDK / ARGUMENT_ISSUE]')
+            ('ERROR: (gcloud.logging.read) unrecognized arguments: --synthetic-invalid-flag', '[redacted: SDK / ARGUMENT_ISSUE]'),
+            ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-403-project does not exist', '[redacted: NOT_FOUND / 404]'),
+            ('access_token: SYNTHETIC-403-TOKEN', '[redacted: UNKNOWN_ERROR_FORMAT]'),
+            ('ERROR: (gcloud.logging.read) PERMISSION_DENIED\nRequest body: {"url":"https://example.invalid/401"}', '[redacted: PERMISSION_DENIED / 403]'),
+            ('ERROR: (gcloud.logging.read) unrecognized arguments: --account-synthetic', '[redacted: SDK / ARGUMENT_ISSUE]')
         ]
-        
+
         for edge_fixture, expected_msg in edge_fixtures:
             err_edge = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=edge_fixture, output="normal stdout")
             mock_run.side_effect = err_edge
-            
+
             captured_stderr_edge = io.StringIO()
             sys.stderr = captured_stderr_edge
             try:
@@ -623,7 +627,7 @@ refresh_token=SYNTHETIC_REFRESH
                 self.assertEqual(cm_edge.exception.stderr, edge_fixture)
             finally:
                 sys.stderr = original_stderr
-                
+
         # Test 2: Successful run does not print to stderr or alter stdout
         mock_run.side_effect = None
         mock_result = MagicMock()
@@ -631,7 +635,7 @@ refresh_token=SYNTHETIC_REFRESH
         mock_result.stderr = "silent_stderr"
         mock_result.returncode = 0
         mock_run.return_value = mock_result
-        
+
         captured_stderr = io.StringIO()
         sys.stderr = captured_stderr
         try:
