@@ -73,18 +73,27 @@ export async function uploadOperationalDocument(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(new Error("Timeout")), getRemainingTime());
     try {
-      const res = await request.fetch(url, {
-        method: options.method,
-        headers: options.headers as Record<string, string>,
-        data: options.body,
-        maxRedirects: 0,
-      });
-      const bodyBuffer = await res.body();
-      if (bodyBuffer.length > 1024 * 1024) {
-        throw new Error("Response exceeded bounded limit of 1MB");
+      if (request && typeof request.fetch === "function") {
+        const res = await request.fetch(url, {
+          method: options.method,
+          headers: options.headers as Record<string, string>,
+          data: options.body,
+          maxRedirects: 0,
+        });
+        const bodyBuffer = await res.body();
+        if (bodyBuffer.length > 1024 * 1024) {
+          throw new Error("Response exceeded bounded limit of 1MB");
+        }
+        const headers = new Headers(res.headers() as Record<string, string>);
+        return { status: res.status(), headers, body: bodyBuffer };
+      } else {
+        const res = await fetch(url, { ...options, signal: controller.signal, redirect: "manual" });
+        const arrayBuf = await res.arrayBuffer();
+        if (arrayBuf.byteLength > 1024 * 1024) {
+          throw new Error("Response exceeded bounded limit of 1MB");
+        }
+        return { status: res.status, headers: res.headers, body: Buffer.from(arrayBuf) };
       }
-      const headers = new Headers(res.headers() as Record<string, string>);
-      return { status: res.status(), headers, body: bodyBuffer };
     } finally {
       clearTimeout(timeoutId);
     }
@@ -578,11 +587,6 @@ export async function runSetup(
       ? materializeValue(setup.body, variables)
       : undefined;
 
-    let responseStatus: number;
-    let responseUrl: string;
-    let responseHeaders: Headers | Record<string, string>;
-    let responseBody: any;
-
     const response = await context.request.fetch(
       new URL(materializeString(setup.path, variables), origin).toString(),
       {
@@ -598,10 +602,10 @@ export async function runSetup(
             : {}),
       },
     );
-    responseStatus = response.status();
-    responseUrl = response.url();
-    responseHeaders = response.headers();
-    responseBody = await response.json().catch(() => null);
+    const responseStatus = response.status();
+    const responseUrl = response.url();
+    const responseHeaders = response.headers();
+    const responseBody = await response.json().catch(() => null);
 
     expect(responseStatus, `${journey.id} setup ${setup.path}`).toBeLessThan(
       400,

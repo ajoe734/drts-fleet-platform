@@ -339,7 +339,7 @@ describe("uploadOperationalDocument", () => {
 
 
 describe("runSetup execution", () => {
-  let mockRequest = { fetch: vi.fn() } as any;
+  const mockRequest = { fetch: vi.fn() } as any;
   const originalEnv = process.env.DRTS_CANDIDATE_SHA;
 
   function mockFetchResponse(status: number, data: any, extraHeaders: Record<string, string> = {}) {
@@ -366,7 +366,7 @@ describe("runSetup execution", () => {
 
   it("executes setup successfully without browser for HTTP kind", async () => {
     let fetchCalled = false;
-    const mockFetch = async (url: any, options?: any) => {
+    const mockFetch = async (url: any) => {
       fetchCalled = true;
       return {
         status: () => 200,
