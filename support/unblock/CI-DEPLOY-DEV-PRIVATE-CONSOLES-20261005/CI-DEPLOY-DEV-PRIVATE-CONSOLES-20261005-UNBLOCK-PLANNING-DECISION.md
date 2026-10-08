@@ -234,14 +234,18 @@ All prerequisites are now complete. The parent correctly remains blocked, while 
 - Correct producer (`Gemini`) recorded.
 - Task is ready for fresh review, CI, and merge.
 
-Codex2 then reopened candidate `954f401589136830dcc4d1916acfce2079d159c0` (2026-10-08T01:26:57Z) with one finding (missing PR publication evidence). Repaired in candidate `af6ed9bf9b7eb08ccf868659fac5648bcdcdc59e`.
+Codex2 then reopened candidate `954f401589136830dcc4d1916acfce2079d159c0` (generation `462a139497f747fe98b1b64165a48d56`; 2026-10-08T01:18:50Z) with unresolved findings:
+- F1 fixed; F2 inaccurate quoted readbacks/rejection evidence, F3 repeated nonexistent-path failure, F4 missing PR all unresolved. Historical canonical check exit 1; whitespace checks exit 0.
+
+Codex2 reopened candidate `af6ed9bf9b7eb08ccf868659fac5648bcdcdc59e` (generation `409dff63aa784b7d893106061688690d`; 2026-10-08T01:26:57Z) with unresolved findings:
+- F1/F3/F4 fixed; F2 still unresolved (wrong next/notes field, unsupported raw receipt, unsuperseded mandatory rewrite guidance; retain original publication history). Historical canonical and whitespace checks exit 0; hosted CI pending.
 
 ## Round 4 — reviewer findings and repair (2026-10-08)
 
-Codex2 reopened candidate `af6ed9bf9b7eb08ccf868659fac5648bcdcdc59e` (delivered as `487348aa33f72c53f43717a900e113bb900ed533`) with three findings:
-- **F2 [P2] — repeated documentary-history defect**: Round 2 publication history rewrote Claude2 branch as Gemini. Fixed by restoring original branch/PR labels in the historical subsection.
+Codex2 reopened candidate `487348aa33f72c53f43717a900e113bb900ed533` (generation `3a3ea0709479452cb66047c24100279f`; 2026-10-08T01:41:44Z) with three findings:
+- **F2 [P2] — repeated documentary-history defect**: routing/readback and superseded-block fixes confirmed; F2 historical labels and missing adjacent-review evidence still open. Round 2 publication history rewrote Claude2 branch as Gemini. Fixed by restoring original branch/PR labels in the historical subsection and recording this accurate adjacent-review history.
 - **F5 [P2] — inaccurate current-role guidance**: Conflated parent and helper roles. Fixed by distinguishing parent roles (Claude2/Codex) from helper roles (Gemini/Codex2).
-- **F6 [P3] — failed required whitespace regression**: Blockquote blank line had a trailing space. Fixed by removing the trailing space.
+- **F6 [P3] — failed required whitespace regression**: Blockquote blank line had a trailing space. Historical canonical check exit 0; whitespace checks exit 2. Fixed by removing the trailing space.
 
 **Verification for Round 4:**
 - `git diff origin/dev...HEAD --check` and `git diff --check` on staged changes exited 0 (clean).
