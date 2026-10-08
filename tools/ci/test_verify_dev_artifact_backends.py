@@ -251,6 +251,17 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             self.mod.test_scanner("http://fake")
 
     OBSERVED_TYPED = "ERROR: Task 'gs://bucket/verify-test.txt-absent' failed: GcsPreconditionFailedError('')"
+    IMPERSONATION_WARNING = (
+        "WARNING: This command is using service account impersonation. "
+        "All API calls will be executed as [fake-sa@example.iam.gserviceaccount.com]."
+    )
+    # Full hosted stderr shape, with only resource/account identifiers replaced.
+    FULL_OBSERVED_TYPED = (
+        IMPERSONATION_WARNING + "\n"
+        "Copying file:///tmp/owned.txt to gs://bucket/verify-test.txt-absent\n  \n"
+        + (IMPERSONATION_WARNING + "\n") * 3
+        + OBSERVED_TYPED + "\n..........\n"
+    )
     REPEATED_R1 = "ERROR: Task 'gs://bucket/file failed: GcsPreconditionFailedError.txt' failed: GcsNotFoundError('')"
 
     def _exercise_gcs(self, *, cas_error=None, cas_stage=11, http_status=401,
@@ -297,7 +308,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     temp_paths.add(src)
                     condition = cmd[6]
                     if dst.endswith("-absent"):
-                        reject(cmd, cas_error if cas_stage == 11 and cas_error is not None else self.OBSERVED_TYPED)
+                        reject(cmd, cas_error if cas_stage == 11 and cas_error is not None else self.FULL_OBSERVED_TYPED)
                     if condition == "--if-generation-match=not_a_number":
                         reject(cmd, "ERROR: invalid generation argument")
                     if condition == "--if-generation-match=0" and state["generation"] is not None:
@@ -394,6 +405,9 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
             "SYNTHETIC_SECRET_412",
             "WARNING: GcsPreconditionFailedError",
             "ERROR: (gcloud.auth) GcsPreconditionFailedError('')",
+            self.IMPERSONATION_WARNING + "\nRequest body:\n" + self.OBSERVED_TYPED,
+            "Copying file:///tmp/GcsPreconditionFailedError to gs://bucket/412\nERROR: HTTPError 403: Forbidden",
+            self.IMPERSONATION_WARNING + "\n" + self.REPEATED_R1,
             "", None,
         ]
         for fixture in cases_false:
@@ -403,6 +417,7 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
 
         cases_true = [
             self.OBSERVED_TYPED,
+            self.FULL_OBSERVED_TYPED,
             "ERROR: (gcloud.storage.cp) HTTPError 412: Precondition Failed",
             "ERROR: Task 'gs://bucket/file.txt' failed: GcsPreconditionFailedError('412 Precondition Failed')",
             "EXCEPTION: (gcloud.storage.cp) HTTPError 412: Precondition Failed",

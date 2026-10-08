@@ -516,13 +516,22 @@ def is_gcs_precondition_failed(e: subprocess.CalledProcessError) -> bool:
     would also accept class-looking filenames such as "...Error.txt".
     """
     quoted = r"""(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""
-    line = (e.stderr or "").strip().splitlines()
-    if not line:
-        return False
-    diagnostic = re.fullmatch(
-        r"(?:ERROR|EXCEPTION):\s*(?:\(gcloud\.storage\.cp\)\s*)?(.*)",
-        line[0].strip(),
-    )
+    diagnostic = None
+    for line in (e.stderr or "").splitlines():
+        line = line.strip()
+        # These are the progress lines in the actual hosted stderr. Skip
+        # complete known lines, never search their contents for an error.
+        if not line or re.fullmatch(
+            r"WARNING: This command is using service account impersonation\. "
+            r"All API calls will be executed as \[[^\]\r\n]+\]\.", line,
+        ) or re.fullmatch(r"Copying file://\S+ to gs://\S+", line):
+            continue
+        diagnostic = re.fullmatch(
+            r"(?:ERROR|EXCEPTION):\s*(?:\(gcloud\.storage\.cp\)\s*)?(.*)",
+            line,
+        )
+        # The first non-progress line is authoritative, even when unknown.
+        break
     if not diagnostic:
         return False
     cause = diagnostic.group(1)
