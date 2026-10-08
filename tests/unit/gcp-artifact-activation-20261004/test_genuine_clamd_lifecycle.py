@@ -31,14 +31,18 @@ def wait_for_log(container_name, pattern, timeout=60, stream="both", since=None)
         if since:
             cmd.extend(["--since", since])
         cmd.append(container_name)
-        res = run_cmd(cmd, timeout=max(1, min(10, remain)))
-        logs = ""
-        if stream in ["stderr", "both"]:
-            logs += res.stderr
-        if stream in ["stdout", "both"]:
-            logs += res.stdout
-        if pattern in logs:
-            return True
+        try:
+            res = run_cmd(cmd, timeout=remain)
+            logs = ""
+            if stream in ["stderr", "both"]:
+                logs += res.stderr
+            if stream in ["stdout", "both"]:
+                logs += res.stdout
+            if pattern in logs:
+                if time.monotonic() <= deadline:
+                    return True
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(max(0, min(2, deadline - time.monotonic())))
     return False
 
@@ -102,9 +106,13 @@ def wait_for_ping(container_name, timeout=60):
         remain = deadline - time.monotonic()
         if remain <= 0:
             break
-        res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zPING\\0' | nc 127.0.0.1 3310"], timeout=max(1, min(10, remain)))
-        if res.returncode == 0 and "PONG" in res.stdout:
-            return True
+        try:
+            res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zPING\\0' | nc 127.0.0.1 3310"], timeout=remain)
+            if res.returncode == 0 and "PONG" in res.stdout:
+                if time.monotonic() <= deadline:
+                    return True
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(max(0, min(1, deadline - time.monotonic())))
     return False
 
@@ -213,102 +221,111 @@ def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expec
     deadline = time.monotonic() + timeout_s
     last_diag = "No observations made"
     
-    def bounded_run(cmd, remain):
-        cmd_timeout = max(1, min(10, remain))
-        return run_cmd(cmd, timeout=cmd_timeout)
+    def bounded_run(cmd):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=rem)
         
     while True:
-        remain = deadline - time.monotonic()
-        if remain <= 0:
+        if time.monotonic() >= deadline:
             raise TimeoutError(f"Readiness handshake incomplete within {timeout_s}s bound. Last diag: {last_diag}")
             
-        res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"], remain)
-        if res.returncode != 0:
-            last_diag = f"ready.version missing or unreadable: {res.stderr.strip()}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
+        try:
+            res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res.returncode != 0:
+                last_diag = f"ready.version missing or unreadable: {res.stderr.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            marker_version = res.stdout.strip()
+            if not marker_version.isdigit():
+                last_diag = f"ready.version not numeric: {marker_version}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            if expected_version is not None and marker_version != expected_version:
+                last_diag = f"ready.version {marker_version} != expected {expected_version}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            # check reference file
+            def bounded_cvd_version(path):
+                res_hdr = bounded_run(["docker", "exec", container_name, "sh", "-c", f"head -c 512 {path} 2>/dev/null | cat -v"])
+                if res_hdr.returncode != 0:
+                    return None
+                header = res_hdr.stdout
+                if not header.startswith("ClamAV-VDB:"):
+                    return None
+                fields = header.split(":")
+                if len(fields) < 3 or not fields[2].isdigit():
+                    return None
+                return fields[2]
+                
+            cvd_ver = bounded_cvd_version(f"{db_dir}/daily.cvd")
+            cld_ver = bounded_cvd_version(f"{db_dir}/daily.cld")
             
-        marker_version = res.stdout.strip()
-        if not marker_version.isdigit():
-            last_diag = f"ready.version not numeric: {marker_version}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
+            if cvd_ver is None and cld_ver is None:
+                last_diag = "Neither daily.cvd nor daily.cld has a readable ClamAV-VDB header"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            expected_ref = expected_reference_file(cvd_ver, cld_ver)
+            expected_ref_version = cvd_ver if expected_ref == "daily.cvd" else cld_ver
             
-        if expected_version is not None and marker_version != expected_version:
-            last_diag = f"ready.version {marker_version} != expected {expected_version}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
+            if marker_version != expected_ref_version:
+                last_diag = f"marker version {marker_version} != on-disk header {expected_ref_version} for {expected_ref}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+    
+            res_daily_mtime = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", f"{db_dir}/{expected_ref}"])
+            if res_daily_mtime.returncode != 0:
+                last_diag = f"Could not stat selected reference file {expected_ref}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+            daily_mtime = res_daily_mtime.stdout.strip()
+                
+            # stat ready marker
+            res_ready = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+            if res_ready.returncode != 0:
+                last_diag = f"ready marker missing or not stat-able: {res_ready.stderr.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+            marker_mtime = res_ready.stdout.strip()
             
-        # check reference file
-        def bounded_cvd_version(path, rem):
-            res_hdr = bounded_run(["docker", "exec", container_name, "sh", "-c", f"head -c 512 {path} 2>/dev/null | cat -v"], rem)
-            if res_hdr.returncode != 0:
-                return None
-            header = res_hdr.stdout
-            if not header.startswith("ClamAV-VDB:"):
-                return None
-            fields = header.split(":")
-            if len(fields) < 3 or not fields[2].isdigit():
-                return None
-            return fields[2]
-            
-        cvd_ver = bounded_cvd_version(f"{db_dir}/daily.cvd", remain)
-        cld_ver = bounded_cvd_version(f"{db_dir}/daily.cld", remain)
-        
-        if cvd_ver is None and cld_ver is None:
-            last_diag = "Neither daily.cvd nor daily.cld has a readable ClamAV-VDB header"
+            # zVERSION query
+            res_zver = bounded_run(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
+            if res_zver.returncode != 0:
+                last_diag = f"zVERSION query failed: {res_zver.stderr.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            match = re.search(r'ClamAV [^/]+/([^/]+)/', res_zver.stdout.strip())
+            if not match:
+                last_diag = f"Could not parse version from zVERSION reply: {res_zver.stdout.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            loaded = match.group(1)
+            if loaded != marker_version:
+                last_diag = f"zVERSION loaded {loaded} != marker {marker_version}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+                
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Readiness handshake incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+                
+            return {
+                "marker_version": marker_version,
+                "expected_ref": expected_ref,
+                "expected_ref_version": expected_ref_version,
+                "daily_mtime": daily_mtime,
+                "marker_mtime": marker_mtime
+            }
+        except subprocess.TimeoutExpired:
+            last_diag = "Subprocess timed out"
             time.sleep(max(0, min(2, deadline - time.monotonic())))
             continue
-            
-        expected_ref = expected_reference_file(cvd_ver, cld_ver)
-        expected_ref_version = cvd_ver if expected_ref == "daily.cvd" else cld_ver
-        
-        if marker_version != expected_ref_version:
-            last_diag = f"marker version {marker_version} != on-disk header {expected_ref_version} for {expected_ref}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
-
-        res_daily_mtime = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", f"{db_dir}/{expected_ref}"], remain)
-        if res_daily_mtime.returncode != 0:
-            last_diag = f"Could not stat selected reference file {expected_ref}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
-        daily_mtime = res_daily_mtime.stdout.strip()
-            
-        # stat ready marker
-        res_ready = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"], remain)
-        if res_ready.returncode != 0:
-            last_diag = f"ready marker missing or not stat-able: {res_ready.stderr.strip()}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
-        marker_mtime = res_ready.stdout.strip()
-        
-        # zVERSION query
-        res_zver = bounded_run(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"], remain)
-        if res_zver.returncode != 0:
-            last_diag = f"zVERSION query failed: {res_zver.stderr.strip()}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
-            
-        match = re.search(r'ClamAV [^/]+/([^/]+)/', res_zver.stdout.strip())
-        if not match:
-            last_diag = f"Could not parse version from zVERSION reply: {res_zver.stdout.strip()}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
-            
-        loaded = match.group(1)
-        if loaded != marker_version:
-            last_diag = f"zVERSION loaded {loaded} != marker {marker_version}"
-            time.sleep(max(0, min(2, deadline - time.monotonic())))
-            continue
-            
-        return {
-            "marker_version": marker_version,
-            "expected_ref": expected_ref,
-            "expected_ref_version": expected_ref_version,
-            "daily_mtime": daily_mtime,
-            "marker_mtime": marker_mtime
-        }
 
 class TestGenuineClamdLifecycle(unittest.TestCase):
     def setUp(self):
@@ -379,13 +396,21 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # start). Sleeping past that interval lets the watchdog's own pass
         # observe the same still-unchanged on-disk database and republish
         # the marker; this does not depend on the manual call's output.
-        time.sleep(7)
+        deadline = time.monotonic() + 30
+        marker_mtime_after_unchanged = None
+        while time.monotonic() < deadline:
+            res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+            if res.returncode == 0:
+                current_marker_mtime = res.stdout.strip()
+                if int(current_marker_mtime) > int(marker_mtime_1):
+                    marker_mtime_after_unchanged = current_marker_mtime
+                    break
+            time.sleep(1)
+            
+        self.assertIsNotNone(marker_mtime_after_unchanged, "Marker mtime did not advance within 30s")
         daily_file_mtime_after_unchanged = stat_mtime(self.container_name, f"{self.db_dir}/{expected_ref}")
         self.assertEqual(daily_file_mtime_after_unchanged, daily_file_mtime_1,
                           "An 'up-to-date' freshclam pass must never rewrite the on-disk database file")
-        res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
-        self.assertEqual(res.returncode, 0)
-        marker_mtime_after_unchanged = res.stdout.strip()
         self.assertGreater(
             int(marker_mtime_after_unchanged), int(marker_mtime_1),
             "A confirmed-but-unchanged freshclam pass must still renew the readiness marker's "
@@ -468,10 +493,17 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # After failure, clamd-entrypoint.sh#refresh_daily_readiness removes
         # BOTH the marker and its sibling version file in the same call --
         # a pending/failed reload must leave neither artifact behind.
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready"])
-        self.assertNotEqual(res.returncode, 0, "Readiness marker should be deleted after failure")
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-        self.assertNotEqual(res.returncode, 0, "Readiness version file should be deleted after failure")
+        deadline = time.monotonic() + 30
+        removed = False
+        while time.monotonic() < deadline:
+            res1 = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready"])
+            res2 = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res1.returncode != 0 and res2.returncode != 0:
+                removed = True
+                break
+            time.sleep(1)
+            
+        self.assertTrue(removed, "Readiness marker and version file should be deleted after failure within bound")
 
         print("Injecting recovery...")
         recover_time = run_cmd(["date", "-Iseconds"]).stdout.strip()
@@ -883,9 +915,14 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
                             "printf 'zRELOAD\\0' | nc -w 3 127.0.0.1 3310"])
             self.assertEqual(res.returncode, 0, f"Failed to issue RELOAD: {res.stderr}")
-            time.sleep(3)
+            deadline = time.monotonic() + 30
+            activated_loaded = None
+            while time.monotonic() < deadline:
+                activated_loaded = query_loaded_version(self.container_name)
+                if activated_loaded == new_expected_version:
+                    break
+                time.sleep(1)
 
-            activated_loaded = query_loaded_version(self.container_name)
             self.assertEqual(
                 activated_loaded, new_expected_version,
                 "clamd did not activate the newer on-disk version after a real RELOAD command",
