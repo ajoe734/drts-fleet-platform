@@ -508,6 +508,29 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
         return False
 
     return True
+def is_gcs_precondition_failed(e: subprocess.CalledProcessError) -> bool:
+    """Classify genuine external GCS precondition failures from CLI output."""
+    stderr = e.stderr or ""
+    
+    # Must have an explicit precondition signal
+    if "GcsPreconditionFailedError" in stderr:
+        return True
+        
+    for line in stderr.splitlines():
+        match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*)", line, re.IGNORECASE)
+        if match:
+            cause = match.group(1).upper()
+            if "PRECONDITION FAILED" in cause or ("PRECONDITION" in cause and "412" in cause):
+                return True
+            if "HTTP" in cause and "412" in cause:
+                return True
+            
+    # Also support "412 Precondition Failed" anywhere just in case
+    if "412 Precondition Failed" in stderr:
+        return True
+        
+    return False
+
 def test_gcs(bucket_name, runtime_sa):
     print(f"Testing GCS bucket: {bucket_name}")
     import uuid
@@ -546,7 +569,7 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
             assert False, "Expected upload to fail with mismatched generation"
         except subprocess.CalledProcessError as e:
-            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            assert is_gcs_precondition_failed(e), f"Expected Precondition Failed, got: {e.stderr}"
 
         print("Test 5: Update with correct generation match")
         with open(temp_in, "w") as f:
@@ -576,7 +599,7 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to fail with stale generation"
         except subprocess.CalledProcessError as e:
-            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            assert is_gcs_precondition_failed(e), f"Expected Precondition Failed, got: {e.stderr}"
 
         print("Test 9: Verify winning generation remains unchanged")
         res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
@@ -600,14 +623,17 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, absent_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to absent path with generation match to fail"
         except subprocess.CalledProcessError as e:
-            assert "412" in e.stderr or "Precondition Failed" in e.stderr, f"Absent object with CAS should return 412 Precondition Failed, got: {e.stderr}"
+            assert is_gcs_precondition_failed(e), f"Absent object with CAS should return 412 Precondition Failed, got: {e.stderr}"
 
         print("Test 12: Network fault / permission denial regressions")
+        import urllib.request
+        import urllib.error
         try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0", "--access-token-file=/dev/null"])
-            assert False, "Expected upload to fail with invalid token"
-        except subprocess.CalledProcessError as e:
-            assert "401" in e.stderr or "403" in e.stderr or "Unauthorized" in e.stderr or "Authentication required" in e.stderr, f"Expected external denial (401/403/Unauthorized), got: {e.stderr}"
+            req = urllib.request.Request(f"https://storage.googleapis.com/storage/v1/b/{bucket_name}/o/{test_key}")
+            urllib.request.urlopen(req)
+            assert False, "Expected unauthenticated request to fail"
+        except urllib.error.HTTPError as e:
+            assert e.code in (401, 403), f"Expected external denial (401/403), got HTTP {e.code}"
 
         print("Test 12b: Post-fault recovery readback")
         # Prove that we can still read normally and generation is intact

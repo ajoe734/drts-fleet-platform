@@ -23,6 +23,37 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
     def setUp(self):
         self.mod = load_module()
 
+    def test_is_gcs_precondition_failed(self):
+        # Repaired source passes observed typed-error case
+        err_typed = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: Task 'gs://bucket/file' failed: GcsPreconditionFailedError('')")
+        self.assertTrue(self.mod.is_gcs_precondition_failed(err_typed))
+
+        # Legitimate HTTP 412/class forms remain positives
+        err_412_http = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: (gcloud.storage.cp) HTTPError 412: Precondition Failed")
+        self.assertTrue(self.mod.is_gcs_precondition_failed(err_412_http))
+
+        err_412_plain = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: (gcloud.storage.cp) 412 Precondition Failed")
+        self.assertTrue(self.mod.is_gcs_precondition_failed(err_412_plain))
+
+        # auth 401/403, missing resource, arbitrary/secret-shaped input, incidental 412 in names/generations, other SDK errors remain negatives
+        err_403 = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: (gcloud.storage.cp) HTTPError 403: Forbidden")
+        self.assertFalse(self.mod.is_gcs_precondition_failed(err_403))
+
+        err_404 = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: (gcloud.storage.cp) HTTPError 404: Not Found")
+        self.assertFalse(self.mod.is_gcs_precondition_failed(err_404))
+
+        err_secret = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: Task failed: some secret token 412")
+        self.assertFalse(self.mod.is_gcs_precondition_failed(err_secret))
+
+        err_incidental = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: Task 'gs://bucket-412/file' failed")
+        self.assertFalse(self.mod.is_gcs_precondition_failed(err_incidental))
+
+        err_incidental_gen = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: Task failed for generation 412412412")
+        self.assertFalse(self.mod.is_gcs_precondition_failed(err_incidental_gen))
+
+        err_other_sdk = subprocess.CalledProcessError(1, ["cmd"], stderr="ERROR: Task failed: GcsNotFoundError('')")
+        self.assertFalse(self.mod.is_gcs_precondition_failed(err_other_sdk))
+
     def test_help(self):
         result = subprocess.run([sys.executable, str(SCRIPT_PATH), "--help"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
@@ -242,26 +273,29 @@ class TestVerifyDevArtifactBackends(unittest.TestCase):
                     err = subprocess.CalledProcessError(1, cmd, stderr="401 Unauthorized")
                     raise err
                 if len(mock_run.call_args_list) > 3:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
+                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
                     raise err
                 state["generation"] = 12346
             elif "cp" in cmd and any("--if-generation-match=" in arg and arg != "--if-generation-match=0" for arg in cmd):
                 match_arg = next(arg for arg in cmd if arg.startswith("--if-generation-match="))
                 if match_arg == f"--if-generation-match={state['generation'] - 1}":
-                    err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
+                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
                     raise err
                 if match_arg == "--if-generation-match=not_a_number":
                     err = subprocess.CalledProcessError(1, cmd, stderr="Invalid argument")
                     raise err
                 if "absent" in cmd[cp_idx+2] or "absent" in cmd[cp_idx+1]:
-                    err = subprocess.CalledProcessError(1, cmd, stderr="Precondition Failed")
+                    err = subprocess.CalledProcessError(1, cmd, stderr="ERROR: Task failed: GcsPreconditionFailedError('')")
                     raise err
                 state["generation"] += 1
 
             return res
 
         mock_run.side_effect = side_effect
-        self.mod.test_gcs("fake-bucket", "fake-sa")
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_err = urllib.error.HTTPError("url", 401, "Unauthorized", hdrs={}, fp=None)
+            mock_urlopen.side_effect = mock_err
+            self.mod.test_gcs("fake-bucket", "fake-sa")
 
     @patch("sys.argv", ["script", "--document-bucket", "d", "--remittance-bucket", "r", "--scanner-url", "s", "--runtime-sa", "sa", "--scanner-service", "ss", "--project", "p", "--region", "rg"])
     def test_main(self):
