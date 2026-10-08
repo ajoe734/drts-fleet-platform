@@ -2,13 +2,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { 
-  uploadOperationalDocument, 
   runSetup,
   requiredOrigin,
   getIdentityToken,
   valueAtPath,
   materializeString,
-  materializeValue,
   type HttpMethod,
   type TemplateVariables,
   type SetupRequest,

@@ -65,7 +65,7 @@ describe("uploadOperationalDocument", () => {
   function setupHappyPath(mockedFetch: any) {
     mockedFetch.mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) {
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) {
         return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
@@ -116,7 +116,7 @@ describe("uploadOperationalDocument", () => {
     setupHappyPath(vi.mocked(globalThis.fetch));
     vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) {
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) {
         return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-999-wrong" } } });
       }
       if (urlStr.includes("/upload-url")) {
@@ -146,7 +146,7 @@ describe("uploadOperationalDocument", () => {
     setupHappyPath(vi.mocked(globalThis.fetch));
     vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET") {
         return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
@@ -171,7 +171,7 @@ describe("uploadOperationalDocument", () => {
     setupHappyPath(vi.mocked(globalThis.fetch));
     vi.mocked(globalThis.fetch).mockImplementation(async (url: string | URL | Request, options: any) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET") {
         return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
@@ -207,7 +207,7 @@ describe("uploadOperationalDocument", () => {
       }
       // Use original setupHappyPath for everything else
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET") {
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET") {
         return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
@@ -243,7 +243,7 @@ describe("uploadOperationalDocument", () => {
         return mockFetchResponse(200, { data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" } });
       }
       // Delegate others
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "https://fleet.example.com/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content?objectKey=fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123", fleet_partner_id: "fleet-123" } });
       if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "doc-123", file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", checksum_sha256: expectedSha, file_size: expectedSize, content_type: "application/pdf", submission_id: "sub-123", fleet_partner_id: "fleet-123", document_type: "professional_driver_license" } });
       if (urlStr.includes("/download")) return mockFetchResponse(200, expectedPdfBytes, { "content-type": "application/pdf" });
@@ -267,10 +267,9 @@ describe("uploadOperationalDocument", () => {
   });
 
   it("rejects when receipt is unclean or wrong method", async () => {
-    let callCount = 0;
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) {
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) {
         return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       }
       if (urlStr.includes("/upload-url")) {
@@ -292,7 +291,7 @@ describe("uploadOperationalDocument", () => {
   it("rejects missing/mismatched readback metadata (wrong MIME type)", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "https://fleet.example.com/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123" } });
       if (urlStr.includes("/content")) return mockFetchResponse(200, {});
       if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "doc-123", file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", checksum_sha256: expectedSha, file_size: expectedSize, content_type: "application/pdf", submission_id: "sub-123", fleet_partner_id: "fleet-123" } });
@@ -305,7 +304,7 @@ describe("uploadOperationalDocument", () => {
   it("rejects mismatched confirm metadata variants", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "https://fleet.example.com/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123" } });
       if (urlStr.includes("/content")) return mockFetchResponse(200, {});
       if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "doc-123", file_object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", checksum_sha256: "wrong-sha", file_size: expectedSize, content_type: "application/pdf", submission_id: "sub-123", fleet_partner_id: "fleet-123" } });
@@ -317,7 +316,7 @@ describe("uploadOperationalDocument", () => {
   it("handles terminal errors and deadline exhaustion", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "https://fleet.example.com/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123" } });
       if (urlStr.includes("/content")) return mockFetchResponse(200, {});
       if (urlStr.includes("/confirm")) return mockFetchResponse(500, { error: "Terminal error" }); // 500 is terminal
@@ -329,7 +328,7 @@ describe("uploadOperationalDocument", () => {
   it("rejects final candidate mismatch", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) {
         const res = mockFetchResponse(200, { data: { object_key: "fleet-partner/fleet-123/supply-submissions/sub-123/upload-harmless.pdf", upload_url: "https://fleet.example.com/control-plane-proxy/fleet-partner/supply-submissions/sub-123/documents/content", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "sub-123" } });
         res.headers.set("x-drts-candidate-sha", "wrong-sha");
@@ -343,7 +342,7 @@ describe("uploadOperationalDocument", () => {
   it("rejects redirect status 302 handling", async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
-      if (urlStr.includes("supply-submissions/sub-123") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
+      if (urlStr.includes("supply-submissions/sub-123") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "fleet-123", submission_id: "sub-123" } } });
       if (urlStr.includes("/upload-url")) return mockFetchResponse(302, {});
       return mockFetchResponse(404, {});
     });
@@ -355,6 +354,21 @@ describe("uploadOperationalDocument", () => {
 describe("runSetup execution", () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = process.env.DRTS_CANDIDATE_SHA;
+
+  function mockFetchResponse(status: number, data: any, extraHeaders: Record<string, string> = {}) {
+    const bodyBuffer = Buffer.isBuffer(data) ? data : Buffer.from(JSON.stringify(data));
+    const responseHeaders = new Headers(extraHeaders);
+    responseHeaders.set('x-drts-candidate-sha', process.env.DRTS_CANDIDATE_SHA || 'mock-sha');
+
+    return {
+      status,
+      ok: status >= 200 && status < 300,
+      headers: responseHeaders,
+      json: async () => JSON.parse(bodyBuffer.toString('utf-8')),
+      arrayBuffer: async () => bodyBuffer.buffer.slice(bodyBuffer.byteOffset, bodyBuffer.byteOffset + bodyBuffer.byteLength),
+    } as unknown as Response;
+  }
+
   beforeEach(() => {
     process.env.DRTS_CANDIDATE_SHA = "mock-sha";
     globalThis.fetch = vi.fn();
@@ -366,7 +380,7 @@ describe("runSetup execution", () => {
 
   it("executes setup successfully without browser for HTTP kind", async () => {
     let fetchCalled = false;
-    const fetchFn = async (url, options) => {
+    const fetchFn = async (url: any) => {
       fetchCalled = true;
       return { status: 200, url, headers: new Headers({ "x-drts-candidate-sha": "mock-sha" }), json: async () => ({ id: "123" }) } as any;
     };
@@ -384,7 +398,6 @@ describe("runSetup execution", () => {
   });
 
   it("executes setup successfully without browser for document-upload kind", async () => {
-    let putCalled = false;
     const context = { request: {} as any, record: vi.fn(), fetchFn: async () => ({}) as any };
     const journey = {
       id: "j-1", surface: "web", baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL", route: "/", actorScope: "admin",
@@ -396,8 +409,8 @@ describe("runSetup execution", () => {
     vi.mocked(globalThis.fetch).mockImplementation(async (url, options) => {
       const urlStr = url.toString();
       if (urlStr.includes("/intent")) return mockFetchResponse(200, { data: { object_key: "fleet-partner/f/supply-submissions/s/1.pdf", upload_url: "https://fleet.example.com/control-plane-proxy/f/supply-submissions/s/documents/content", method: "PUT", headers: { "content-type": "application/octet-stream" }, submission_id: "s", fleet_partner_id: "f" } });
-      if (urlStr.includes("supply-submissions/s") && options.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "f", submission_id: "s" } } });
-      if (urlStr.includes("/content")) { putCalled = true; return mockFetchResponse(200, {}); }
+      if (urlStr.includes("supply-submissions/s") && options?.method === "GET" && !urlStr.includes("download")) return mockFetchResponse(200, { data: { submission: { fleet_partner_id: "f", submission_id: "s" } } });
+      if (urlStr.includes("/content")) { return mockFetchResponse(200, {}); }
       if (urlStr.includes("/confirm")) return mockFetchResponse(200, { data: { document_id: "d", file_object_key: "fleet-partner/f/supply-submissions/s/1.pdf", checksum_sha256: "fake-sha", file_size: 1, content_type: "application/pdf", submission_id: "s", fleet_partner_id: "f" } });
       if (urlStr.includes("/download")) return mockFetchResponse(200, Buffer.alloc(1), { "content-type": "application/pdf" });
       return mockFetchResponse(404, {});
