@@ -278,6 +278,7 @@ jobs:
       PARTNER_NOTIFY_SEQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PARTNER_NOTIFY_TRANSPORT_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       PARTNER_NOTIFY_UI_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      PASSENGER_PUSH_CHANNEL_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
@@ -330,6 +331,11 @@ jobs:
         run: |
           pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1 --reporter=default --reporter=json --outputFile.json=api-test-results.json
           python3 tools/ci/verify_partner_notification_postgres_gate.py unit-test-results.json apps/api/api-test-results.json
+      - name: Verify passenger push PostgreSQL and regression gates
+        if: always()
+        run: |
+          python3 -m unittest tools/ci/test_partner_notification_postgres_gate.py
+          python3 tools/ci/verify_passenger_push_channel_postgres_gate.py unit-test-results.json
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
