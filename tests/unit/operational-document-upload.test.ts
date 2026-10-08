@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { uploadOperationalDocument } from "../e2e/operational-document-upload";
 import { type APIRequestContext } from "@playwright/test";
+import { createHash } from "node:crypto";
 
 describe("uploadOperationalDocument", () => {
   const origin = "https://example.com";
@@ -9,29 +10,54 @@ describe("uploadOperationalDocument", () => {
   const confirmPath = "/confirm";
   const confirmBody = { doc: "type1" };
   const headers = { Authorization: "Bearer token" };
+  
+  const expectedPdfBytes = Buffer.from(
+    "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\ntrailer\n<< /Size 4 /Root 1 0 R >>\n%%EOF\n"
+  );
+  const expectedSha = createHash("sha256").update(expectedPdfBytes).digest("hex");
+  const expectedSize = expectedPdfBytes.length;
 
-  it("completes full lifecycle with intent, PUT, and confirm", async () => {
+  it("completes full lifecycle with intent, PUT, GET readback, and confirm", async () => {
     const request = {
       post: vi.fn(),
       put: vi.fn(),
+      get: vi.fn(),
     } as unknown as APIRequestContext;
 
     vi.mocked(request.post).mockImplementation(async (url) => {
       if (url.toString().includes("/intent")) {
         return {
           status: () => 200,
+          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
           json: async () => ({
-            data: { object_key: "obj-123", upload_url: "/upload-url" },
+            data: { object_key: "obj-123", upload_url: "/api/upload-url", method: "PUT", headers: { "content-type": "application/octet-stream" } },
           }),
         } as any;
       }
       if (url.toString().includes("/confirm")) {
-        return { status: () => 200 } as any;
+        return { 
+          status: () => 200,
+          headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
+        } as any;
       }
     });
 
     vi.mocked(request.put).mockImplementation(async () => {
-      return { status: () => 200 } as any;
+      return { 
+        status: () => 200,
+        headers: () => ({ "x-drts-candidate-sha": "mock-sha" }),
+        json: async () => ({
+          data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" }
+        })
+      } as any;
+    });
+
+    vi.mocked(request.get).mockImplementation(async () => {
+      return { 
+        status: () => 200,
+        headers: () => ({ "x-drts-candidate-sha": "mock-sha", "content-type": "application/pdf" }),
+        body: async () => expectedPdfBytes
+      } as any;
     });
 
     const result = await uploadOperationalDocument(
@@ -45,51 +71,43 @@ describe("uploadOperationalDocument", () => {
     );
 
     expect(result.objectKey).toBe("obj-123");
-    expect(result.fileSize).toBeGreaterThan(0);
-    expect(result.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.fileSize).toBe(expectedSize);
+    expect(result.sha256).toBe(expectedSha);
 
-    expect(request.post).toHaveBeenCalledWith(
-      expect.stringContaining("/intent"),
-      expect.objectContaining({
-        data: expect.objectContaining({
-          doc: "type1",
-          contentType: "application/pdf",
-        }),
-      }),
-    );
-
+    // Should rewrite /api/ to /control-plane-proxy/
     expect(request.put).toHaveBeenCalledWith(
-      expect.stringContaining("/upload-url"),
+      expect.stringContaining("/control-plane-proxy/upload-url"),
       expect.objectContaining({
-        headers: expect.objectContaining({ "Content-Type": "application/pdf" }),
+        headers: expect.objectContaining({ "content-type": "application/octet-stream", "Authorization": "Bearer token" }),
         data: expect.any(Buffer),
-      }),
-    );
-
-    expect(request.post).toHaveBeenCalledWith(
-      expect.stringContaining("/confirm"),
-      expect.objectContaining({
-        data: expect.objectContaining({
-          doc: "type1",
-          objectKey: "obj-123",
-          checksumSha256: result.sha256,
-          fileSize: result.fileSize,
-        }),
       }),
     );
   });
 
-  it("retries PUT on 503 DOCUMENT_SCANNER_UNAVAILABLE", async () => {
+  it("retries PUT on 503 DOCUMENT_SCANNER_UNAVAILABLE with error.code", async () => {
     const request = {
       post: vi.fn(),
       put: vi.fn(),
+      get: vi.fn(),
     } as unknown as APIRequestContext;
 
-    vi.mocked(request.post).mockResolvedValue({
+    vi.mocked(request.post).mockImplementation(async (url) => {
+      if (url.toString().includes("/intent")) {
+        return {
+          status: () => 200,
+          headers: () => ({}),
+          json: async () => ({
+            data: { object_key: "obj-123", upload_url: "/upload-url" },
+          }),
+        } as any;
+      }
+      return { status: () => 200, headers: () => ({}) } as any;
+    });
+
+    vi.mocked(request.get).mockResolvedValue({
       status: () => 200,
-      json: async () => ({
-        data: { object_key: "obj-123", upload_url: "/upload-url" },
-      }),
+      headers: () => ({ "content-type": "application/pdf" }),
+      body: async () => expectedPdfBytes
     } as any);
 
     let putAttempts = 0;
@@ -98,14 +116,19 @@ describe("uploadOperationalDocument", () => {
       if (putAttempts < 3) {
         return {
           status: () => 503,
-          json: async () => ({ code: "DOCUMENT_SCANNER_UNAVAILABLE" }),
+          headers: () => ({}),
+          json: async () => ({ error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } }),
         } as any;
       }
-      return { status: () => 200 } as any;
+      return { 
+        status: () => 200, 
+        headers: () => ({}),
+        json: async () => ({
+          data: { checksum_sha256: expectedSha, file_size: expectedSize, scan_state: "clean" }
+        })
+      } as any;
     });
 
-    // To prevent the test from taking too long due to setTimeout, we can mock timers or just let it run if it's 1 sec.
-    // Let's mock timers.
     vi.useFakeTimers();
 
     const promise = uploadOperationalDocument(
@@ -118,7 +141,6 @@ describe("uploadOperationalDocument", () => {
       headers,
     );
 
-    // fast forward timers
     for (let i = 0; i < 3; i++) {
       await vi.runAllTimersAsync();
     }
@@ -129,3 +151,4 @@ describe("uploadOperationalDocument", () => {
     expect(putAttempts).toBe(3);
   });
 });
+

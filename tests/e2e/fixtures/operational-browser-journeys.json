@@ -294,6 +294,7 @@
           }
         },
         {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
           "kind": "document-upload",
           "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
           "intentBody": {
@@ -315,6 +316,7 @@
           }
         },
         {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
           "kind": "document-upload",
           "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
           "intentBody": {
