@@ -617,7 +617,11 @@ refresh_token=SYNTHETIC_REFRESH
             ('ERROR: (gcloud.logging.read) HTTP: 403', '[redacted: PERMISSION_DENIED / 403]'),
             ('ERROR: (gcloud.logging.read) HTTPError: 401', '[redacted: UNAUTHENTICATED / 401]'),
             ('ERROR: (gcloud.logging.read) request failed for project synthetic-unauthenticated-project', '[redacted: UNKNOWN_ERROR_FORMAT]'),
-            ('ERROR: (gcloud.logging.read) HTTPError 404 for project synthetic-unauthenticated-project', '[redacted: NOT_FOUND / 404]')
+            ('ERROR: (gcloud.logging.read) HTTPError 404 for project synthetic-unauthenticated-project', '[redacted: NOT_FOUND / 404]'),
+            ('ERROR: (gcloud.logging.read) NOT_FOUND: project synthetic-unauthenticated-project does not exist', '[redacted: NOT_FOUND / 404]'),
+            ('ERROR: (gcloud.logging.read) PERMISSION_DENIED\nRequest body:\nERROR: UNAUTHENTICATED\nsecret=SYNTHETIC_SECRET', '[redacted: PERMISSION_DENIED / 403]'),
+            ('ERROR: (gcloud.logging.read) unrecognized arguments: --synthetic-timeout', '[redacted: SDK / ARGUMENT_ISSUE]'),
+            ('ERROR: (gcloud.logging.read) PERMISSION_DENIED: Request body: {"error":"UNAUTHENTICATED","secret":"SYNTHETIC_SECRET"}', '[redacted: PERMISSION_DENIED / 403]')
         ]
 
         for edge_fixture, expected_msg in edge_fixtures:
@@ -633,6 +637,31 @@ refresh_token=SYNTHETIC_REFRESH
                 self.assertNotIn("SYNTHETIC", out_edge, f"Leak detected in edge fixture:\n{edge_fixture}\nOutput:\n{out_edge}")
                 self.assertIn(expected_msg, out_edge)
                 self.assertEqual(cm_edge.exception.stderr, edge_fixture)
+            finally:
+                sys.stderr = original_stderr
+
+        # Test 1c: Oversized output and bound check
+        oversized_fixtures = [
+            ("ERROR: (gcloud.logging.read) PERMISSION_DENIED\n" + "SYNTHETIC_SECRET" * 65536, "[redacted: PERMISSION_DENIED / 403]"),
+            ("ERROR: (gcloud.logging.read) unknown\n" + "SYNTHETIC_SECRET" * 65536, "[redacted: UNKNOWN_ERROR_FORMAT]")
+        ]
+        
+        for fixture, expected in oversized_fixtures:
+            err_oversize = subprocess.CalledProcessError(7, ["gcloud", "logging", "read"], stderr=fixture, output="normal stdout")
+            mock_run.side_effect = err_oversize
+    
+            captured_stderr_oversize = io.StringIO()
+            sys.stderr = captured_stderr_oversize
+            try:
+                with self.assertRaises(subprocess.CalledProcessError) as cm_oversize:
+                    self.mod.run(["gcloud", "logging", "read"])
+                out_oversize = captured_stderr_oversize.getvalue()
+                
+                # Assert bounds and preservation
+                self.assertLessEqual(len(out_oversize), 1100, f"Output size {len(out_oversize)} exceeds bound 1100")
+                self.assertIn(expected, out_oversize)
+                self.assertNotIn("SYNTHETIC_SECRET", out_oversize)
+                self.assertEqual(cm_oversize.exception.stderr, fixture)
             finally:
                 sys.stderr = original_stderr
 
