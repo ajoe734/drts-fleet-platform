@@ -233,8 +233,14 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
         import zipfile
         import io
         
-        self.run_meta = {"id": cleanup.EXPECTED_PRODUCT_RUN_ID, "head_sha": cleanup.EXPECTED_SOURCE_SHA}
-        self.jobs_meta = {"jobs": [{"status": "completed", "conclusion": "success"}]}
+        self.run_meta = {
+            "id": cleanup.EXPECTED_PRODUCT_RUN_ID, 
+            "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA,
+            "status": "completed",
+            "conclusion": "success",
+            "repository": {"full_name": "ajoe734/drts-fleet-platform"}
+        }
+        self.jobs_meta = {"jobs": [{"name": "acceptance tests", "status": "completed", "conclusion": "success"}]}
         
         # Create a real zip containing report.json and operational-browser-evidence.json
         buf = io.BytesIO()
@@ -677,7 +683,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         }
         with self.assertRaises(ValueError) as ctx:
             cleanup.inspect_and_validate_gcs_target(desc, target)
-        self.assertIn("Stale or invalid object timestamp", str(ctx.exception))
+        self.assertIn("Stale, future, or out-of-run timestamp", str(ctx.exception))
 
     def test_gcs_target_prior_receipt_validation(self):
         target = {

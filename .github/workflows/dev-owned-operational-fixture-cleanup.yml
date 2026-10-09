@@ -21,13 +21,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Execution mode ('dry-run' inspects without mutations; 'apply' executes generation-matched GCS deletions)"
+        description: "Execution mode (only 'dry-run' is supported; mutation is disabled)"
         required: true
         default: 'dry-run'
         type: choice
         options:
           - 'dry-run'
-          - 'apply'
       source_ref:
         description: 'Immutable product commit SHA (must match source SHA 4a166f3ed2a7000061acc737ee475ae3c47dca56)'
         required: true
@@ -293,7 +292,7 @@ jobs:
           EOF
           
           python3 operations/verification/cleanup-owned-operational-fixtures.py \
-            --mode "dry-run" \
+            --mode "${{ inputs.mode }}" \
             --offline \
             --inventory "test-results/cleanup/offline-inventory.json" \
             --source-sha "$INPUT_SOURCE_REF" \

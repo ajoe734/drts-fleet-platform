@@ -463,7 +463,10 @@ def load_and_validate_authoritative_artifact(
     with open(run_meta_path, "r", encoding="utf-8") as f:
         run_meta = json.load(f)
     require(run_meta.get("id") == expected_run_id, f"run.json ID mismatch: expected {expected_run_id}, got {run_meta.get('id')}")
-    require(run_meta.get("head_sha") == expected_source_sha, f"run.json head_sha mismatch: expected {expected_source_sha}, got {run_meta.get('head_sha')}")
+    require(run_meta.get("head_sha") == expected_workflow_def_sha, f"run.json head_sha mismatch: expected {expected_workflow_def_sha}, got {run_meta.get('head_sha')}")
+    require(run_meta.get("status") == "completed", f"run.json status mismatch: expected completed, got {run_meta.get('status')}")
+    require(run_meta.get("conclusion") == "success", f"run.json conclusion mismatch: expected success, got {run_meta.get('conclusion')}")
+    require(run_meta.get("repository", {}).get("full_name") == "ajoe734/drts-fleet-platform", f"run.json repository mismatch")
 
     jobs_meta_path = artifact_dir / "jobs.json"
     if not jobs_meta_path.is_file():
@@ -471,7 +474,18 @@ def load_and_validate_authoritative_artifact(
     require(jobs_meta_path.is_file(), f"jobs.json not found under {artifact_dir}")
     with open(jobs_meta_path, "r", encoding="utf-8") as f:
         jobs_meta = json.load(f)
-    require(isinstance(jobs_meta.get("jobs"), list), "Invalid jobs.json: missing jobs list")
+    jobs_list = jobs_meta.get("jobs")
+    require(isinstance(jobs_list, list), "Invalid jobs.json: missing jobs list")
+    
+    acceptance_job = None
+    for job in jobs_list:
+        if job.get("name") and "acceptance" in job.get("name", "").lower():
+            acceptance_job = job
+            break
+            
+    require(acceptance_job is not None, "Missing successful acceptance job in jobs.json")
+    require(acceptance_job.get("status") == "completed", "Acceptance job is not completed")
+    require(acceptance_job.get("conclusion") == "success", "Acceptance job was not successful")
     
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
@@ -569,6 +583,9 @@ def load_and_validate_authoritative_artifact(
         f"Expected exactly {OWNED_OBJECT_COUNT} storage documents in evidence, got {len(storage_docs)}",
     )
 
+    run_start_str = run_meta.get("run_started_at") or run_meta.get("created_at") or "2026-10-09T00:00:00Z"
+    job_completed_str = acceptance_job.get("completed_at") or run_meta.get("updated_at") or "2026-10-09T23:59:59Z"
+    
     inventory_data = {
         "source_sha": expected_source_sha,
         "run_id": expected_run_id,
@@ -577,6 +594,7 @@ def load_and_validate_authoritative_artifact(
         "artifact_digest": EXPECTED_ARTIFACT_DIGEST,
         "storage_documents": storage_docs,
         "mutation_records": mutation_records,
+        "run_bounds": {"start": run_start_str, "end": job_completed_str},
         "cleanup_not_performed": True,
         "preserve_failed_8d_03a_and_user_data": True,
     }
@@ -605,23 +623,25 @@ def build_cleanup_plan(
 
     # Derive physical GCS keys using the immutable GcsDocumentArtifactStoreAdapter contract
     # Physical: document-artifacts/fleet-upload-content/<encodeURIComponent(logicalKey)>
+    run_bounds = inventory_data.get("run_bounds")
     gcs_targets = []
     for doc in validated_docs:
         logical_key = doc["object_key"]
         physical_key = logical_to_physical_gcs_key(logical_key)
-        gcs_targets.append(
-            {
-                "bucket": BUCKET,
-                "key": physical_key,
-                "physical_key": physical_key,
-                "logical_key": logical_key,
-                "expected_size": doc["file_size"],
-                "expected_sha256": doc["sha256"],
-                "expected_content_type": doc["content_type"],
-                "documentId": doc["documentId"],
-                "confirmSubmissionId": doc["confirmSubmissionId"],
-            }
-        )
+        target_dict = {
+            "bucket": BUCKET,
+            "key": physical_key,
+            "physical_key": physical_key,
+            "logical_key": logical_key,
+            "expected_size": doc["file_size"],
+            "expected_sha256": doc["sha256"],
+            "expected_content_type": doc["content_type"],
+            "documentId": doc["documentId"],
+            "confirmSubmissionId": doc["confirmSubmissionId"],
+        }
+        if run_bounds:
+            target_dict["run_bounds"] = run_bounds
+        gcs_targets.append(target_dict)
 
     # Note: fleet.supply_review_events is NEVER deleted.
     # It is an audit record table referenced by foreign key constraints.
@@ -859,12 +879,17 @@ def default_gcs_runner(
                 "error_type": "permission_or_network",
             }
         
+        if "bucket not found" in stderr_lower or "no such bucket" in stderr_lower:
+            return {
+                "status": "error",
+                "returncode": res.returncode,
+                "stderr": res.stderr,
+                "error_type": "bucket_not_found",
+            }
+
         if (
             "no such object" in stderr_lower
-            or "httperror 404" in stderr_lower
-            or "httpstatus 404" in stderr_lower
-            or "status code 404" in stderr_lower
-            or "notfoundexception: 404" in stderr_lower
+            or "object not found" in stderr_lower
         ):
             return {
                 "status": "not_found",
@@ -995,26 +1020,41 @@ def inspect_and_validate_gcs_target(
 
     # Creation/update timestamp or stored-at time validation
     custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
-    present_times = []
-    if meta.get("timeCreated"): present_times.append(meta.get("timeCreated"))
-    if meta.get("updated"): present_times.append(meta.get("updated"))
-    if custom_meta.get("stored-at"): present_times.append(custom_meta.get("stored-at"))
-
-    require(len(present_times) > 0, f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}")
-    first_time = present_times[0]
-    for pt in present_times:
-        require(pt == first_time, f"Conflicting timestamps for gs://{bucket}/{key}")
     
-    time_created = first_time
-    require(isinstance(time_created, str) and time_created.startswith("2026-10-09T"), f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}")
-    try:
-        dt_str = time_created.replace("Z", "+00:00")
-        dt = datetime.datetime.fromisoformat(dt_str)
-        run_start = datetime.datetime.fromisoformat("2026-10-09T00:00:00+00:00")
-        now = datetime.datetime.now(datetime.timezone.utc)
-        require(run_start <= dt <= now, f"Stale or future timestamp for gs://{bucket}/{key}: {time_created}")
-    except ValueError:
-        raise ValueError(f"Malformed timestamp for gs://{bucket}/{key}: {time_created}")
+    def parse_time(ts_str):
+        if not ts_str: return None
+        try:
+            return datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(f"Malformed timestamp for gs://{bucket}/{key}: {ts_str}")
+
+    tc_str = meta.get("timeCreated")
+    up_str = meta.get("updated")
+    sa_str = custom_meta.get("stored-at")
+    
+    require(tc_str or up_str or sa_str, f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}")
+    
+    tc = parse_time(tc_str)
+    up = parse_time(up_str)
+    sa = parse_time(sa_str)
+    
+    # Semantic chronology validation
+    if tc and up:
+        require(tc == up, f"Conflicting timeCreated and updated for gs://{bucket}/{key}: {tc_str} vs {up_str}")
+    if sa and tc:
+        require(sa <= tc + datetime.timedelta(seconds=5), f"stored-at must be before or near timeCreated for gs://{bucket}/{key}")
+        
+    primary_time = tc or up or sa
+    
+    run_bounds = expected_item.get("run_bounds")
+    if run_bounds:
+        run_start = parse_time(run_bounds["start"])
+        run_end = parse_time(run_bounds["end"])
+    else:
+        run_start = datetime.datetime.fromisoformat("2026-10-09T08:30:00+00:00")
+        run_end = datetime.datetime.fromisoformat("2026-10-09T09:10:00+00:00")
+
+    require(run_start <= primary_time <= run_end, f"Stale, future, or out-of-run timestamp for gs://{bucket}/{key}: {primary_time}")
 
     # Live hash and body verification: MUST read body because Google GCS describe does not provide sha256 natively
     # Rejecting synthetic hash from metadata ensures we actually do media reads
@@ -1038,6 +1078,9 @@ def inspect_and_validate_gcs_target(
         try:
             body_res = runner("read_body", bucket, key, generation=generation)
             if body_res.get("status") == "ok":
+                if body_res.get("synthetic"):
+                    is_synthetic = True
+                    
                 # Must check bytes/size if returned
                 read_size = body_res.get("size")
                 if read_size is not None:
@@ -1058,6 +1101,7 @@ def inspect_and_validate_gcs_target(
                 elif simulation_mode and "sha256" in body_res:
                     # In simulation mode only, fallback to trust if body_bytes not provided but size matched
                     if read_size == expected_size:
+                        live_hash = body_res["sha256"]
                         live_hash = body_res["sha256"]
                 else:
                     raise ValueError(f"read_body runner failed to return body_bytes for {bucket}/{key}")
@@ -1202,6 +1246,21 @@ def execute_db_cleanup(
         }
 
     preflight_receipts = []
+    
+    # 1. Run strict DB preflight using the actual runner
+    preflight_res = preflight_db_cleanup(plan, db_runner)
+    if preflight_res.get("status") == "blocked":
+        return {
+            "status": "blocked",
+            "mode": "dry-run",
+            "concrete_blocker": preflight_res.get("concrete_blocker"),
+            "plan_prepared": True,
+            "receipts": preflight_receipts,
+        }
+        
+    preflight_receipts.append({"operation": "PREFLIGHT", "status": "ok"})
+    
+    # 2. Generic dry-run inspection (retaining the protected submission blocker, because we are not applying)
     for stmt in plan["db_targets"]["guarded_statements"]:
         table = stmt["table"]
         preflight_sql = f"SELECT count(*) as cnt FROM {table}"
@@ -1221,10 +1280,11 @@ def execute_db_cleanup(
                 "inspection_result": res,
             }
         )
+        
     return {
         "status": "dry_run_inspected",
         "mode": "dry-run",
-        "concrete_blocker": None,
+        "concrete_blocker": plan["db_blocker"],
         "plan_prepared": True,
         "receipts": preflight_receipts,
     }
