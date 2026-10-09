@@ -39,6 +39,22 @@ describe("PAX-SD-20261009 Unit Tests", () => {
         expect(alloc.version).toBe(expected.version);
       }
     });
+
+    it("respects cross-ledger boundaries by referencing existing common tables instead of creating new ones", () => {
+      const content = JSON.parse(fs.readFileSync(allocationPath, "utf8"));
+      const allocations = content.passenger_app_allocations;
+      
+      const paymentAlloc = allocations.find((a: any) => a.task_id === "PAX-PAYMENT-CORE-20261009");
+      expect(paymentAlloc.primary_tables).not.toContain("passenger.payment_states");
+      expect(paymentAlloc.referenced_tables).toContain("billing.multi_taxi_passenger_payments");
+
+      const pushAlloc = allocations.find((a: any) => a.task_id === "PAX-PUSH-DEVICE-API-20261009");
+      expect(pushAlloc.primary_tables).not.toContain("passenger.push_devices");
+      expect(pushAlloc.referenced_tables).toContain("iam.phase1_passenger_push_devices");
+      
+      const fareAlloc = allocations.find((a: any) => a.task_id === "PAX-FARE-QUOTE-20261009");
+      expect(fareAlloc.primary_tables).toContain("passenger.fare_quote_snapshots");
+    });
   });
 
   describe("Passenger App Contracts", () => {
