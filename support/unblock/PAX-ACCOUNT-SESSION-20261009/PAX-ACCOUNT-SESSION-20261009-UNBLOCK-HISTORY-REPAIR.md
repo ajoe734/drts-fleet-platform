@@ -4,7 +4,11 @@ Owner: Codex. Reviewer: Codex2. Audit date: 2026-10-09 UTC.
 Helper: `PAX-ACCOUNT-SESSION-20261009-UNBLOCK-HISTORY-REPAIR`.
 Parent: `PAX-ACCOUNT-SESSION-20261009`.
 
-## Diagnosis
+## Initial audit diagnosis (18:48 UTC)
+
+The initial audit and coordination gate below preserve the original findings.
+The 22:58 UTC continuation at the end records their subsequent resolution and
+the helper's CI repair; the initial blocked disposition is historical.
 
 No parent branch divergence, foreign PR commits, missing commit trailers or
 refname collision was found. The actual implementation blocker is **F4: the
@@ -12,10 +16,10 @@ legacy migration allocation guard omits the accepted passenger allocation
 group**, and the parent owner cannot edit that guard within its current
 `write_scopes`. This helper does not repair product code or authorize that scope.
 
-The parent's original finding ledger remains
-`docs/04-uat/passenger-app-20261009/PAX-ACCOUNT-SESSION-20261009.md` on its
-published branch. Read it with `git show
-refs/heads/codex/pax-account-session-20261009:docs/04-uat/passenger-app-20261009/PAX-ACCOUNT-SESSION-20261009.md`;
+The parent's original finding ledger remains in the
+[published parent UAT at the audited f36049 commit](https://github.com/ajoe734/drts-fleet-platform/blob/f36049d71d10a59432677a3aaa19cb125d86cca9/docs/04-uat/passenger-app-20261009/PAX-ACCOUNT-SESSION-20261009.md).
+Read it with `git show
+f36049d71d10a59432677a3aaa19cb125d86cca9:docs/04-uat/passenger-app-20261009/PAX-ACCOUNT-SESSION-20261009.md`;
 it is not yet on `dev`. Findings F1–F4 and both named acceptance keys remain
 there, without being overwritten by this helper's diagnosis. Its last dispatch
 records F3 repaired and F4 still open. This is not an independent product review.
@@ -209,3 +213,61 @@ Publishing record: checkpoint `e73f30f78` was committed and normally pushed on
 the expected helper branch. The final documentation head and PR are recorded
 by CLI progress/blocker, after their live identities are compared. No parent
 commit, branch, PR head or product file was changed by this helper.
+
+## Dispatch continuation: coordination resolved and helper CI repair (22:58 UTC)
+
+The active-release CLI now records the Supervisor's explicit helper disposition
+as `resolved_parent_status=in_progress`, `resolved_parent_waiting_for=Codex`,
+and the concrete one-line F4 continuation in `resolved_parent_next`. The parent
+slice includes the exact guard in both artifacts and `write_scopes`, remains
+`in_progress`, and records that its owner applied and normally pushed the fix.
+Its restored isolated worktree is registered on the original parent branch at
+`4282733f6a8dc0c408bd579225379138340dd80d`; local ref, fetched remote ref, live
+remote and [PR #2469](https://github.com/ajoe734/drts-fleet-platform/pull/2469)
+head match. These read-only observations supersede the initial coordination
+BLOCKED row. This helper did not mutate another task or bypass its dispatch guard.
+
+The parent commit adds the one allocation group to the formal guard and appends
+its own before/after evidence to the
+[updated parent ledger](https://github.com/ajoe734/drts-fleet-platform/blob/4282733f6a8dc0c408bd579225379138340dd80d/docs/04-uat/passenger-app-20261009/PAX-ACCOUNT-SESSION-20261009.md).
+Its owner's 25 pass / 1 fail to 90 scoped pass result is attributed evidence;
+this helper has not rerun product tests or reviewed the product candidate.
+Concrete parent next step is now **finish reading final checks and hosted CI
+for the normally pushed PR #2469 head, then handoff the matching SHA to Codex2**.
+Both named product acceptance keys and hosted production-schema PG/retention
+evidence remain with the parent/PAX-QA lifecycle.
+
+Helper candidate `b240e1fbfad6ad05db488c9887e98387a042d11b` completed
+[integration CI 37975783069](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37975783069)
+successfully, but
+[CI 37975782979](https://github.com/ajoe734/drts-fleet-platform/actions/runs/37975782979)
+failed its Canonical consistency job. The downloaded full failed-job log and
+the actual local checker both identify exactly one `cited-paths` finding: the
+parent ledger was cited as a local file although it exists only on the parent
+branch. A Git object existing on another branch does not satisfy the helper's
+checked-out-file contract. The release's `cmd_reconcile_candidate` failure path
+returns the helper to `in_progress` and completes its handoff, so this dispatch
+repairs the failed candidate instead of resubmitting it unchanged.
+
+Repair boundary: replace the off-branch local citation with the immutable parent
+commit URL and pin the `git show` command to the audited commit; append this
+resolution ledger. The formal checker, parent files, accepted allocations and
+all earlier published helper commits remain unchanged. New delivery is an
+additive task-scoped commit and ordinary push to existing
+[PR #2476](https://github.com/ajoe734/drts-fleet-platform/pull/2476).
+
+| Finding / acceptance | Source / change | Before → repaired result; command and evidence | Remaining limits |
+| --- | --- | --- | --- |
+| H1 off-branch ledger cited as checked-out path | Formal `tools/ci/git/check_canonical_consistency.py`, `check_cited_paths`; immutable parent links above | Old b240e1fb: formal checker exits 1, exactly one finding, also in hosted job 113973600458. Repaired document: same checker exits 0, zero findings. Command: `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`; `canonical-local-before.log` / `canonical-local-after.log` | New SHA's hosted CI is pending at commit time; old integration success is not new-SHA evidence |
+| Identify contamination / safe recovery | Original ref and seven-commit audit above; refreshed Git refs, PR heads and worktree registry | No divergent parent history; restored original branch/worktree and scope resolution verified; no reset, rebase or force push | Parent product review and CI are independent |
+| Scoped commit/push/PR evidence | Existing helper branch and PR #2476; formal commit trailer checker and `git diff --check` | Final SHA/local/remote/PR equality and check exits recorded by release CLI handoff after ordinary push | Review/merge remain lifecycle gates |
+| Update parent concrete next step | Active-release `show` for helper and parent; Supervisor `resolved_parent_*` metadata and current parent `next` | Earlier guard rejection preserved above; authorized Supervisor disposition and resumed owner progress now verified | Helper owner cannot edit parent metadata; no cross-task command attempted again |
+
+Machine-specific logs remain under the canonical
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/account-session-evidence/history-repair-20261009/handoff-b240e1fb/`.
+The first fresh failed-log download was refused because of terminal escape
+sequences; retrying `gh api --allow-escape-sequences` succeeded and the real log
+was read. That refusal is not CI evidence. This documentation repair uses content,
+reference, trailer and diff checks; no product tests, VM servers, deployment or
+new hosted workflow dispatch is required. Hosted CI from the ordinary push is
+reported separately at handoff.
