@@ -1,3 +1,7 @@
+import {
+  fleetStorageFixture,
+  byteStream,
+} from "../../helpers/fleet-document-fixture";
 import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
@@ -38,6 +42,7 @@ function setupSupplyStack() {
   const documentService = new SupplyDocumentService(
     submissionService,
     repository,
+    fleetStorageFixture().storage,
   );
   return { regService, submissionService, documentService };
 }
@@ -210,6 +215,13 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
     );
     expect(uploadUrl.objectKey).toContain(submissionId);
 
+    await documentService.uploadContent(
+      FLEET_PARTNER_ID,
+      submissionId,
+      uploadUrl.objectKey,
+      byteStream(Buffer.from(fileContents)),
+      "application/octet-stream",
+    );
     const document = await documentService.confirmUpload(
       FLEET_PARTNER_ID,
       submissionId,
@@ -393,6 +405,13 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
         },
       );
       const contents = `${documentType}-${submissionId}`;
+      await documentService.uploadContent(
+        FLEET_PARTNER_ID,
+        submissionId,
+        uploadUrl.objectKey,
+        byteStream(Buffer.from(contents)),
+        "application/octet-stream",
+      );
       await documentService.confirmUpload(
         FLEET_PARTNER_ID,
         submissionId,
@@ -451,6 +470,13 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
         contentType: "application/pdf",
       },
     );
+    await documentService.uploadContent(
+      FLEET_PARTNER_ID,
+      submissionId,
+      uploadUrl.objectKey,
+      byteStream(Buffer.from("expired-doc")),
+      "application/octet-stream",
+    );
     await documentService.confirmUpload(
       FLEET_PARTNER_ID,
       submissionId,
@@ -461,7 +487,7 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
         objectKey: uploadUrl.objectKey,
         originalFileName: "registration.pdf",
         contentType: "application/pdf",
-        fileSize: 10,
+        fileSize: 11,
         checksumSha256: realPdfChecksum("expired-doc"),
         effectiveFrom: "2020-01-01",
         effectiveUntil: "2020-06-01", // already expired relative to "today"
@@ -498,6 +524,13 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
         contentType: "application/pdf",
       },
     );
+    await documentService.uploadContent(
+      FLEET_PARTNER_ID,
+      submissionId,
+      firstUploadUrl.objectKey,
+      byteStream(Buffer.from("first-upload")),
+      "application/octet-stream",
+    );
     await documentService.confirmUpload(
       FLEET_PARTNER_ID,
       submissionId,
@@ -508,7 +541,7 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
         objectKey: firstUploadUrl.objectKey,
         originalFileName: "registration.pdf",
         contentType: "application/pdf",
-        fileSize: 10,
+        fileSize: 12,
         checksumSha256: realPdfChecksum("first-upload"),
       },
     );
@@ -547,6 +580,13 @@ describe("SR-QA-SUPPLY-001 — C065 文件上傳→檢查→送件→退補／�
         originalFileName: "registration.pdf",
         contentType: "application/pdf",
       },
+    );
+    await documentService.uploadContent(
+      FLEET_PARTNER_ID,
+      submissionId,
+      uploadUrl.objectKey,
+      byteStream(Buffer.from("scoped-doc")),
+      "application/octet-stream",
     );
     const document = await documentService.confirmUpload(
       FLEET_PARTNER_ID,

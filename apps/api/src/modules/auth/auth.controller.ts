@@ -1,6 +1,5 @@
-import { Body, Controller, Get, Headers, Optional, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Logger, Optional, Param, Post, Query, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
-import jwt from "jsonwebtoken";
 
 import type {
   CanonicalIdentitySessionRecord,
@@ -46,7 +45,10 @@ import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extracto
 import type { AuthBootstrapHeaders, AuthRealm, AuthActorType } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
+import {
+  DEV_MFA_WAIVED_AMR,
+  isDevWorkforceMfaWaiverEnabled,
+} from "../../common/auth/trusted-mfa.policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
@@ -92,7 +94,6 @@ type JwtExpiresIn = NonNullable<
 const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 const TENANT_BOOTSTRAP_FIXTURE_MODE = "fixture";
 const TENANT_BOOTSTRAP_FIXTURE_MODE_ENV = "DRTS_TENANT_BOOTSTRAP_MODE" as const;
-const TENANT_OIDC_SESSION_EXPIRES_IN: JwtExpiresIn = "8h";
 
 function resolveBootstrapTokenAssurance(identity: BootstrapRequestIdentity): {
   amr?: string[];
@@ -101,10 +102,17 @@ function resolveBootstrapTokenAssurance(identity: BootstrapRequestIdentity): {
   switch (identity.actorType) {
     case "platform_admin":
     case "ops_user":
-      return {
-        amr: ["verified_iap_workforce"],
-        acr: "aal2",
-      };
+      // Bootstrap headers (`x-actor-type: platform_admin|ops_user`) are a dev
+      // fixture, not a verified IAP assertion: stamping `verified_iap_workforce`
+      // / `aal2` here was a fabricated MFA claim (ENTRY-IAP-WORKFORCE-AUTH-20261005).
+      // The real IAP path (`issueToken`'s `rawAssertion` branch) derives amr/acr
+      // from `IAPSubjectAdapter.resolveSubject`'s verified assertion instead.
+      // An explicit, audited dev waiver is the only way this identity clears
+      // the workforce step-up gate without a real MFA signal; see
+      // `isDevWorkforceMfaWaiverEnabled` in trusted-mfa.policy.ts.
+      return isDevWorkforceMfaWaiverEnabled()
+        ? { amr: [DEV_MFA_WAIVED_AMR] }
+        : {};
     case "tenant_admin":
       return {
         amr: ["tenant_bootstrap_fixture"],
@@ -127,6 +135,8 @@ function isStrictAuthEnvironment(): boolean {
 
 @Controller("auth")
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
@@ -196,6 +206,40 @@ export class AuthController {
       tenantId: tenantId ?? null,
       partnerId: partnerId ?? null,
     });
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/invitation-login")
+  getTenantInvitationLoginUrl(
+    @Body()
+    command: {
+      invitationToken: string;
+      redirectUri: string;
+      tenantId?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (
+      typeof command.invitationToken !== "string" ||
+      !command.invitationToken.trim() ||
+      command.invitationToken.length > 512
+    ) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "Invitation token is required.",
+      );
+    }
+    const result = this.requireOidcPkceService().generateLoginParameters(
+      "tenant",
+      {
+        redirectUri: command.redirectUri,
+        tenantId: command.tenantId || null,
+        invitationToken: command.invitationToken.trim(),
+      },
+    );
     return toApiSuccessEnvelope(result, requestId);
   }
 
@@ -337,6 +381,13 @@ export class AuthController {
       allowAnonymous: false,
       method: request.method,
       requestUrl: request.originalUrl ?? request.url,
+      // This endpoint mints a durable iam.identity_sessions row below; it
+      // must never fall back to the deterministic bootstrap:<actorId>
+      // session id, or two independent exchanges for the same actor (e.g.
+      // a mail bootstrap call and a running deploy acceptance session)
+      // collide on one session row and the newer exchange revokes the
+      // older, still-valid one.
+      requireExplicitSessionId: true,
     });
 
     if (strictEnvironment && bootstrapIdentity && !rawGoogleAssertion) {
@@ -424,6 +475,7 @@ export class AuthController {
     // Transitional dual-send fallback remains for existing non-system callers
     // only when the registry/identity is absent; provisioning fails closed.
     let googleCiTenantActorVerified = false;
+    let googleOpsActorVerified = false;
     if (rawGoogleAssertion) {
       if (!bootstrapIdentity) {
         throw new ApiRequestError(
@@ -508,6 +560,7 @@ export class AuthController {
         ) {
           // Direct authentication! The Google SA is asking for a token for ITSELF.
           googleCiTenantActorVerified = true;
+          googleOpsActorVerified = true;
           bootstrapIdentity.principalId = resolvedGoogle.principalId;
           bootstrapIdentity.roleFamilies = ["ops"];
         } else if (isCiTenantActorGateEnabled() && bootstrapIdentity.realm === "tenant" && bootstrapIdentity.actorType === "tenant_admin") {
@@ -554,7 +607,6 @@ export class AuthController {
           ...(expectedAudience ? { expectedAudience } : {}),
           ...(expectedIssuer ? { expectedIssuer } : {}),
           ...(jwtSecretOrPublicKey ? { jwtSecretOrPublicKey } : {}),
-          autoProvision: !isStrictIap,
         },
       );
 
@@ -651,12 +703,11 @@ export class AuthController {
         }
       : identity;
 
-    // Only the principal row is mutated by this same issuance call (via
-    // ensurePrincipal below), so its post-write updatedAt would race a
-    // timestamp guessed here. Membership and role bindings are read-only in
-    // this request, so their already-fetched updatedAt values are safe to
-    // carry forward unchanged for the durable-version computation.
+    // Bootstrap issuance still ensures its principal and needs the post-write
+    // timestamp. Google ops issuance instead preserves the verifier's principal
+    // and signs the version of the existing durable rows.
     let workforceVersionTimestamps: string[] | undefined;
+    let verifiedGoogleWorkforceVersion: number | undefined;
     if (
       (durableIdentity.realm === "ops" || durableIdentity.realm === "platform") &&
       !durableIdentity.membershipId &&
@@ -666,9 +717,22 @@ export class AuthController {
         throw new ApiRequestError(500, "IDENTITY_REPOSITORY_UNAVAILABLE", "Identity repository is required for ops/platform session issuance.");
       }
       const principalToLookup = durableIdentity.principalId ?? durableIdentity.actorId;
+      let verifiedGooglePrincipalUpdatedAt: string | undefined;
+      if (googleOpsActorVerified) {
+        const principal = await this.identityRepository.findPrincipalById(
+          principalToLookup,
+        );
+        if (!principal || principal.status !== "active") {
+          this.denyWorkloadSessionIdentity("principal_not_active");
+        }
+        verifiedGooglePrincipalUpdatedAt = principal.updatedAt;
+      }
       const memberships = await this.identityRepository.findMembershipsByPrincipalId(principalToLookup);
       const membership = memberships.find((m) => m.realm === durableIdentity.realm && m.status === "active");
       if (!membership) {
+        if (googleOpsActorVerified) {
+          this.denyWorkloadSessionIdentity("membership_not_active");
+        }
         throw new ApiRequestError(401, "MEMBERSHIP_NOT_FOUND", "The requested ops/platform session subject has no active membership.");
       }
       durableIdentity.membershipId = membership.membershipId;
@@ -678,6 +742,12 @@ export class AuthController {
       const activeBindings = roleBindings.filter(
         (b) => (!b.validTo || new Date(b.validTo) > now) && new Date(b.validFrom) <= now,
       );
+      if (
+        googleOpsActorVerified &&
+        !activeBindings.some((binding) => binding.roleCode === durableIdentity.actorType)
+      ) {
+        this.denyWorkloadSessionIdentity("role_binding_not_active");
+      }
 
       const allowedRoles = activeBindings.map((b) => b.roleCode);
       const allowedScopes = new Set<string>();
@@ -696,6 +766,11 @@ export class AuthController {
         membership.updatedAt,
         ...roleBindings.map((b) => b.updatedAt),
       ];
+      if (verifiedGooglePrincipalUpdatedAt) {
+        verifiedGoogleWorkforceVersion = Math.max(
+          ...[verifiedGooglePrincipalUpdatedAt, ...workforceVersionTimestamps].map(Date.parse),
+        );
+      }
     }
 
     const expiresIn: JwtExpiresIn =
@@ -707,16 +782,37 @@ export class AuthController {
       principalId: durableIdentity.principalId ?? durableIdentity.actorId,
       membershipId: durableIdentity.membershipId ?? null,
       subject: durableIdentity.subject ?? durableIdentity.actorId,
-      ensurePrincipal: true,
+      // The Google verifier already persisted this principal under its own
+      // source_ref. Bootstrap-upserting it again changes that authority and
+      // collides with the principal_id PK in PostgreSQL (V0068).
+      ensurePrincipal: !googleOpsActorVerified,
       authTime: issuedAt,
       ...(assurance.amr ? { amr: assurance.amr } : {}),
       ...(assurance.acr ? { acr: assurance.acr } : {}),
-      tokenVersion: tenantUser
-        ? Date.parse(tenantUser.updatedAt)
-        : Date.parse(issuedAt),
-      ...(workforceVersionTimestamps ? { workforceVersionTimestamps } : {}),
+      tokenVersion: verifiedGoogleWorkforceVersion ?? (
+        tenantUser ? Date.parse(tenantUser.updatedAt) : Date.parse(issuedAt)
+      ),
+      ...(workforceVersionTimestamps && !googleOpsActorVerified
+        ? { workforceVersionTimestamps }
+        : {}),
     });
     return { token: issued.token, expiresIn };
+  }
+
+  private denyWorkloadSessionIdentity(
+    reason:
+      | "principal_not_active"
+      | "membership_not_active"
+      | "role_binding_not_active",
+  ): never {
+    // Detailed reason stays server-side. Never include proof, tokens, headers,
+    // database errors or caller identifiers in either the log or response.
+    this.logger.warn(`[WORKLOAD_SESSION_IDENTITY_UNAVAILABLE] reason=${reason}`);
+    throw new ApiRequestError(
+      403,
+      "WORKLOAD_SESSION_IDENTITY_UNAVAILABLE",
+      "The verified workload cannot establish an active session.",
+    );
   }
 
   @Post("driver/device/invite")
@@ -858,96 +954,14 @@ export class AuthController {
     @Headers("user-agent") userAgent?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
-    let tenantId: string | null = null;
-    let email: string | null = null;
-
     try {
-      const oidcIdentity = this.verifyTenantOidcIdToken(command.idToken);
-      const resolvedEmail = oidcIdentity.email;
-      email = resolvedEmail;
-      const resolvedTenantId =
-        command.tenantId?.trim() || this.tenantPartnerService.getDefaultTenantId();
-      tenantId = resolvedTenantId;
-      const existingUser = this.tenantPartnerService
-        .listTenantUsers(resolvedTenantId)
-        .find((user) => user.email === resolvedEmail) ?? null;
-
-      if (!existingUser || !this.isTenantBootstrapEligibleStatus(existingUser.status)) {
-        throw this.buildTenantBootstrapDeniedError();
-      }
-
-      const roleCode = this.resolveExistingUserRoleCode(
-        this.tenantPartnerService.listTenantRoles(),
-        existingUser,
-      );
-      if (this.isHighPrivilegeTenantRole(roleCode) && !oidcIdentity.hasTrustedMfa) {
-        throw new ApiRequestError(
-          403,
-          "AUTH_MFA_REQUIRED",
-          "A trusted OIDC MFA assertion is required for this tenant role.",
+      const session =
+        await this.requireOidcPkceService().exchangeTenantIdTokenSession(
+          command,
+          this.buildMeta(forwardedFor, realIp, userAgent, requestId),
         );
-      }
-
-      const profile = this.buildTenantPortalProfile(
-        resolvedTenantId,
-        resolvedEmail,
-        existingUser,
-        roleCode,
-      );
-      const identity = this.buildIdentityContext(profile);
-      const issued = await this.issueJwtSession(
-        {
-          authMode: "jwt_bearer",
-          actorType: identity.actorType,
-          actorId: identity.actorId,
-          principalId: identity.actorId,
-          subject: oidcIdentity.subject,
-          realm: identity.realm,
-          tenantId: identity.tenantId,
-          roleFamilies: identity.roleFamilies,
-          roles: identity.roles,
-          scopes: identity.scopes,
-          requestId: requestId ?? null,
-        },
-        {
-          expiresIn: TENANT_OIDC_SESSION_EXPIRES_IN,
-          principalId: identity.actorId,
-          subject: oidcIdentity.subject,
-          ensurePrincipal: true,
-          authTime: oidcIdentity.authTime,
-          amr: oidcIdentity.amr,
-          acr: oidcIdentity.acr,
-          tokenVersion: Date.parse(existingUser.updatedAt),
-        },
-      );
-      const session: TenantBootstrapSession = {
-        accessToken: issued.token,
-        tokenType: "Bearer",
-        expiresIn: TENANT_OIDC_SESSION_EXPIRES_IN,
-        profile,
-        identity,
-      };
-      this.securityEventsService?.recordEvent({
-        actorId: identity.actorId, actorType: identity.actorType, subjectId: oidcIdentity.subject,
-        realm: "tenant", tenantId, partnerId: null, eventType: "tenant_oidc_session.issued",
-        eventFamily: "auth", outcome: "success", severity: "low", targetType: "tenant_portal_session",
-        targetId: profile.id, sessionId: issued.sessionId, tokenId: issued.tokenId,
-        authMethods: issued.amr, sourceIp, userAgent: userAgent ?? null, requestId: requestId ?? null,
-        traceId: null, reasonCode: null, approvalId: null, beforeSummary: null,
-        afterSummary: { actorId: identity.actorId, roleCode, tenantId },
-        maskedContext: { email },
-      });
       return toApiSuccessEnvelope(session, requestId);
     } catch (error) {
-      this.securityEventsService?.recordEvent({
-        actorId: null, actorType: "system", subjectId: email, realm: "tenant", tenantId,
-        partnerId: null, eventType: "tenant_oidc_session.denied", eventFamily: "auth",
-        outcome: "denied", severity: "medium", targetType: "tenant_portal_session", targetId: null,
-        sessionId: null, tokenId: null, authMethods: ["oidc"], sourceIp, userAgent: userAgent ?? null,
-        requestId: requestId ?? null, traceId: null, reasonCode: this.extractErrorCode(error), approvalId: null,
-        beforeSummary: null, afterSummary: null, maskedContext: { email, tenantId },
-      });
       throw toPublicTenantAuthError(error);
     }
   }
@@ -1634,45 +1648,6 @@ export class AuthController {
       process.env[TENANT_BOOTSTRAP_FIXTURE_MODE_ENV]?.trim().toLowerCase() ??
       "";
     return mode === TENANT_BOOTSTRAP_FIXTURE_MODE;
-  }
-
-  private verifyTenantOidcIdToken(idToken: string) {
-    const issuer = process.env.TENANT_OIDC_ISSUER?.trim() || process.env.OIDC_ISSUER?.trim();
-    const audience = process.env.TENANT_OIDC_AUDIENCE?.trim() || process.env.OIDC_AUDIENCE?.trim();
-    const key = process.env.TENANT_OIDC_JWT_PUBLIC_KEY?.trim() || process.env.TENANT_OIDC_JWT_SECRET?.trim();
-    if (!issuer || !audience || !key) {
-      throw new ApiRequestError(503, "TENANT_OIDC_NOT_CONFIGURED", "Tenant OIDC validation is not configured.");
-    }
-    if (!idToken?.trim()) {
-      throw new ApiRequestError(400, "FIELD_REQUIRED", "idToken is required.", { field: "idToken" });
-    }
-    const algorithms = (process.env.TENANT_OIDC_ALGORITHMS?.split(/[;,]/).map((value) => value.trim()).filter(Boolean) ??
-      [/BEGIN (PUBLIC KEY|CERTIFICATE|RSA PUBLIC KEY)/.test(key) ? "RS256" : "HS256"]) as jwt.Algorithm[];
-    let payload: jwt.JwtPayload;
-    try {
-      payload = jwt.verify(idToken, key, { issuer, audience, algorithms }) as jwt.JwtPayload;
-    } catch {
-      throw new ApiRequestError(401, "AUTH_CREDENTIALS_INVALID", "OIDC ID token is invalid or expired.");
-    }
-    const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
-    const subject = typeof payload.sub === "string" ? payload.sub.trim() : "";
-    if (!email || !subject || payload.email_verified === false) {
-      throw new ApiRequestError(401, "AUTH_CREDENTIALS_INVALID", "OIDC ID token is missing a verified subject or email claim.");
-    }
-    const amr = Array.isArray(payload.amr) ? payload.amr.filter((value): value is string => typeof value === "string") : [];
-    const acr = typeof payload.acr === "string" && payload.acr.trim() ? payload.acr.trim() : "aal1";
-    return {
-      email,
-      subject,
-      amr: [...new Set(["oidc", ...amr])],
-      acr,
-      hasTrustedMfa: hasTrustedMfa({ amr, acr }),
-      authTime: typeof payload.auth_time === "number" ? new Date(payload.auth_time * 1000).toISOString() : new Date().toISOString(),
-    };
-  }
-
-  private isHighPrivilegeTenantRole(roleCode: string): boolean {
-    return ["tenant_admin", "tenant_ops_admin"].includes(roleCode);
   }
 
   private buildTenantBootstrapDeniedError() {

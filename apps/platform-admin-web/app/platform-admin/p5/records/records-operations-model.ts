@@ -99,6 +99,32 @@ export function createExportIdempotencyKey() {
 }
 
 export function requireControlledDownloadUrl(value: string) {
+  if (value.startsWith("/downloads/")) {
+    // Same-origin signed links use the console's download rewrite. Only the
+    // exact API route shape is allowed; other relative paths remain rejected.
+    const url = new URL(value, "https://controlled-download.invalid");
+    const segments = url.pathname.slice("/downloads/".length).split("/");
+    if (
+      url.pathname !== value.split("?")[0] ||
+      url.hash ||
+      segments.length !== 2 ||
+      segments.some((segment) => {
+        const decoded = decodeURIComponent(segment);
+        return (
+          !decoded ||
+          decoded === "." ||
+          decoded === ".." ||
+          decoded.includes("/") ||
+          decoded.includes("\\")
+        );
+      })
+    ) {
+      throw new Error(
+        "Controlled download URL must use a valid download route.",
+      );
+    }
+    return value;
+  }
   const url = new URL(value);
   if (url.protocol !== "https:") {
     throw new Error("Controlled download URL must use HTTPS.");

@@ -43,8 +43,16 @@ describe("operational browser journeys manifest guard", () => {
           }),
         }),
         expect.objectContaining({
-          path: expect.stringContaining("documents/confirm"),
-          method: "POST",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
         }),
       ]),
     );
@@ -69,6 +77,24 @@ describe("operational browser journeys manifest guard", () => {
     expect(adminJourney.setup[0].body.supportedServiceProductCodes).toEqual([
       "business_dispatch",
     ]);
+    expect(adminJourney.setup).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+      ]),
+    );
     const approveOp = adminJourney.operations[0];
     expect(approveOp.kind).toBe("request");
     expect(approveOp.responseKind).toBe("json");
@@ -186,5 +212,48 @@ describe("operational browser journeys manifest guard", () => {
       );
       expect(operation.expectedContentTypeIncludes).toBeTruthy();
     }
+  });
+
+  it("does not force statement download anchors through the native download attribute, which drops the per-origin identity-token header on a now-private Cloud Run service", () => {
+    // Regression for channel-statement-download: Chromium's <a download> request
+    // is issued outside the page navigation that carries
+    // page.context().setExtraHTTPHeaders()'s Authorization bearer token, so the
+    // now-IAM-gated channel-partner-portal-web origin rejects it and the
+    // Playwright download event resolves as "canceled". The server already sets
+    // Content-Disposition: attachment with a filename, so the attribute is not
+    // needed; bank-console-web's working anchor (tested by
+    // bank-statement-download) never carried one.
+    const anchorAttributesFor = (filePath: string, marker: string) => {
+      const source = readFileSync(path.join(process.cwd(), filePath), "utf8");
+      const markerIndex = source.indexOf(marker);
+      expect(
+        markerIndex,
+        `${marker} must exist in ${filePath}`,
+      ).toBeGreaterThan(-1);
+      const tagStart = source.lastIndexOf("<a", markerIndex);
+      const tagEnd = source.indexOf(">", markerIndex);
+      expect(tagStart).toBeGreaterThan(-1);
+      expect(tagEnd).toBeGreaterThan(tagStart);
+      return source.slice(tagStart, tagEnd);
+    };
+
+    expect(
+      anchorAttributesFor(
+        "apps/channel-partner-portal-web/app/statements/[period]/page.tsx",
+        'data-drt-operation="channel-statement-download"',
+      ),
+    ).not.toMatch(/\bdownload=/);
+    expect(
+      anchorAttributesFor(
+        "apps/channel-partner-portal-web/app/dashboard/page.tsx",
+        'data-drt-operation="channel-overview-export"',
+      ),
+    ).not.toMatch(/\bdownload=/);
+    expect(
+      anchorAttributesFor(
+        "apps/bank-console-web/app/statements/page.tsx",
+        'data-drt-operation="bank-statement-download"',
+      ),
+    ).not.toMatch(/\bdownload=/);
   });
 });

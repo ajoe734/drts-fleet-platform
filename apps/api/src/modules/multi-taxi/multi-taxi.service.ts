@@ -1,3 +1,5 @@
+import { FirstPartyNotificationTransport, FirstPartyPushFailure, type FirstPartyDeliveryMetadata } from "./first-party-notification.transport";
+import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import {
   PartnerNotificationFailure,
   type PartnerDeliveryMetadata,
@@ -79,9 +81,11 @@ import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
   MultiTaxiRepository,
+  type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
 } from "./multi-taxi.repository";
+import { resolveNonPartnerChannelOutcome } from "./passenger-notification-channel-router";
 import {
   InjectPassengerPushPort,
   type PassengerPushPort,
@@ -180,6 +184,8 @@ export class MultiTaxiService implements OnModuleInit {
     private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    private readonly firstPartyTransport?: FirstPartyNotificationTransport,
   ) {}
 
   async onModuleInit() {
@@ -467,75 +473,21 @@ export class MultiTaxiService implements OnModuleInit {
     return this.createRideAccessResult(order, requestId);
   }
 
-  /**
-   * SR-PARTNER-NOTIFY-ROUTE-20260917 design §4: freezes "which partner app /
-   * which resident" for this order from the authenticated session and the
-   * existing identity link only — never from `command` (a caller could put
-   * anything in the request body). A call-center ride's `identity` is always
-   * `null` (see `createCallCenterRide` above), so it never reaches here.
-   *
-   * This is not literally inside the same DB transaction as the
-   * `phase1_owned_orders` INSERT (that transaction lives in
-   * `OwnedMobilityRepository`, outside this task's write scope) — it runs
-   * synchronously immediately after order creation returns, before any
-   * caller observes the order and before any assignment/outbox cycle can
-   * run, so "a route exists before the first outbox row" (design §4) still
-   * holds. A resolvable route write failure never fails ride creation
-   * (`writeOrderPartnerNotificationRoute` swallows and logs) — design §9:
-   * notification setup gaps must not become a ride-creation gate.
-   */
+  /** Preserve the multi-taxi entry point, sharing trusted resolution and SQL
+   * with referral embed bookings without adding a module dependency cycle. */
   private async writeOrderPartnerNotificationRouteIfApplicable(
     order: OwnedOrderRecord,
     identity: BootstrapRequestIdentity | null,
   ) {
-    const entrySlug = identity?.partnerEntrySlug?.trim();
-    const drtsPassengerId = identity?.drtsPassengerId?.trim();
-    if (
-      !entrySlug ||
-      !drtsPassengerId ||
-      !this.partnerUserIdentityLinkRepository
-    ) {
-      return;
-    }
-    const link = await this.partnerUserIdentityLinkRepository
-      .findByDrtsPassengerId(entrySlug, drtsPassengerId)
-      .catch(() => null);
-    if (!link || link.status !== "active") {
-      return;
-    }
-    // tenantId/partnerId come from the platform partner-entry registry (the
-    // canonical source per design §3.1), not from the order record (multi-
-    // taxi standard-taxi orders are tenant-less by design) or from any
-    // caller-suppliable field.
-    let entry: { tenantId: string; partnerId: string } | null = null;
-    try {
-      entry = this.tenantPartnerService?.getPartnerEntry(entrySlug) ?? null;
-    } catch {
-      entry = null;
-    }
-    if (!entry) {
-      return;
-    }
-    const now = new Date().toISOString();
+    const route = await resolveOrderPartnerNotificationRoute(
+      order,
+      identity,
+      this.partnerUserIdentityLinkRepository,
+      this.tenantPartnerService,
+    );
+    if (!route) return;
     await this.repository
-      ?.writeOrderPartnerNotificationRoute({
-        orderId: order.orderId,
-        tenantId: entry.tenantId,
-        partnerId: entry.partnerId,
-        entrySlug,
-        partnerUserRef: link.partnerUserRef,
-        drtsPassengerId: link.drtsPassengerId,
-        passengerSubjectRef: this.resolvePassengerSubjectRef(order),
-        identityLinkedAt: link.linkedAt,
-        // No dedicated versioned consent-bundle store exists yet (design §6
-        // asks for one for the notification-consent notice, future work);
-        // the identity link's own consentScope is the closest existing
-        // record of what was granted and is reused here pending that.
-        consentBundleVersion: link.consentScope,
-        notificationPolicyVersion: "partner_notification_v1",
-        rideRef: order.orderId,
-        createdAt: now,
-      })
+      ?.writeOrderPartnerNotificationRoute(route)
       .catch((error) =>
         this.repository?.reportPersistenceFailure(
           error,
@@ -1059,7 +1011,7 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ): Promise<PassengerPushDeliveryOutcome> {
     if (this.passengerPushPort?.transportMode === "partner_webhook") {
-      return this.deliverPartnerNotification(record.outboxId, requestId);
+      return this.deliverRoutedPassengerNotification(record, requestId);
     }
     const attemptCount = record.attemptCount + 1;
     const attemptedAt = new Date();
@@ -1310,6 +1262,223 @@ export class MultiTaxiService implements OnModuleInit {
       });
       if (!persisted.recorded)
         throw new Error("Partner notification fence lost");
+    } catch (error) {
+      throw new PassengerPushPersistenceUnknownError(outboxId, error);
+    }
+    return outcome;
+  }
+
+  private async deliverFirstPartyNotification(
+    outboxId: string,
+    requestId?: string,
+  ): Promise<PassengerPushDeliveryOutcome> {
+    if (!this.firstPartyTransport) {
+      return this.deliverNonPartnerChannelOutcome(outboxId, "first_party_app");
+    }
+
+    const claim = await this.repository!.claimPartnerNotification(
+      outboxId,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (!claim) throw new PassengerPushClaimConflictError(outboxId);
+    const { record, fenceToken } = claim;
+
+    const message = {
+      outboxId: record.outboxId,
+      orderId: record.orderId,
+      passengerSubjectRef: record.passengerSubjectRef,
+      eventType: record.eventType,
+      assignmentVersion: record.assignmentVersion,
+      payload: record.payload,
+      createdAt: record.createdAt,
+      attemptCount: record.attemptCount,
+    };
+
+    let metadata: FirstPartyDeliveryMetadata;
+    let outcome: PassengerPushDeliveryOutcome;
+    try {
+      const receipt = await this.firstPartyTransport.send({
+        providerName: "first_party_app",
+        message,
+        context: { requestId, fenceToken },
+      });
+
+      if (!receipt.deliveryContext || !receipt.deliveredAt) {
+        throw new Error("First party receipt context missing");
+      }
+
+      const c = receipt.deliveryContext;
+      metadata = {
+        deliveryTarget: c.deliveryTarget,
+        deliveryStage: c.deliveryStage,
+        retryDisposition: c.retryDisposition,
+        failureReason: c.failureReason,
+        expiresAt: c.expiresAt,
+        receiptId: c.receiptId,
+        deviceOutcomes: c.deviceOutcomes,
+      };
+
+      outcome = {
+        ...metadata,
+        outboxId,
+        status: "delivered",
+        result: "delivered",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: receipt.deliveredAt,
+        deliveredAt: receipt.deliveredAt,
+        providerName: receipt.providerName,
+      };
+    } catch (error) {
+      if (!(error instanceof FirstPartyPushFailure)) {
+        throw new PassengerPushPersistenceUnknownError(outboxId, error);
+      }
+
+      const failure = error.failure;
+      const context = error.deliveryContext;
+      let expiresAt: string;
+      try {
+        expiresAt = context?.expiresAt ?? record.createdAt;
+      } catch {
+        expiresAt = record.createdAt;
+      }
+
+      const retryDisposition = failure.retryDisposition;
+      const nextAttemptAt = failure.suggestedNextAttemptAt;
+
+      metadata = {
+        deliveryTarget: "first_party_device",
+        deliveryStage: context?.deliveryStage || null,
+        failureReason: failure.failureReason,
+        retryDisposition,
+        expiresAt,
+        receiptId: null,
+        deviceOutcomes: context?.deviceOutcomes ?? [],
+      };
+
+      outcome = {
+        ...metadata,
+        outboxId,
+        status: "failed",
+        result: retryDisposition === "configuration_blocked" ? "provider_not_configured" : "provider_error",
+        attemptCount: record.attemptCount,
+        nextAttemptAt: nextAttemptAt ?? new Date().toISOString(),
+        deliveredAt: null,
+        providerName: "first_party_app",
+      };
+    }
+
+    try {
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: outcome.providerName,
+        providerMessageRef: metadata.receiptId,
+        providerAckState:
+          outcome.result === "delivered"
+            ? "provider_acknowledged"
+            : outcome.result === "provider_not_configured"
+              ? "provider_not_configured"
+              : "provider_rejected",
+        deliveryOutcome: outcome,
+        firstPartyMetadata: metadata,
+      });
+      if (!persisted.recorded) {
+        throw new Error("First party notification fence lost");
+      }
+    } catch (error) {
+      throw new PassengerPushPersistenceUnknownError(outboxId, error);
+    }
+    return outcome;
+  }
+
+  /**
+   * PUSH-CHANNEL-ROUTER-20261006 D2/D7 — the per-order channel decision
+   * point. A partner route resolves exactly as before (unchanged
+   * `deliverPartnerNotification`); every other resolution (ambiguous, no
+   * channel at all, or the dormant first-party skeleton) gets a terminal
+   * typed outcome here instead of falling into the generic `route_missing`
+   * that `PartnerNotificationTransport` would otherwise report for an order
+   * with no partner route.
+   */
+  private async deliverRoutedPassengerNotification(
+    record: ConsumerNotificationOutboxRecord,
+    requestId?: string,
+  ): Promise<PassengerPushDeliveryOutcome> {
+    const resolution =
+      await this.repository!.resolvePassengerNotificationChannel(
+        record.orderId,
+      );
+    if (resolution.channel === "partner_webhook") {
+      return this.deliverPartnerNotification(record.outboxId, requestId);
+    }
+    if (resolution.channel === "first_party_app") {
+      return this.deliverFirstPartyNotification(record.outboxId, requestId);
+    }
+    return this.deliverNonPartnerChannelOutcome(
+      record.outboxId,
+      resolution.channel,
+    );
+  }
+
+  /**
+   * D3/D6 — seals a row that resolved to `ambiguous`, `none`, or the dormant
+   * `first_party_app` skeleton. Shares the exact same claim/fence/receipt
+   * transaction as the partner path (D7: one retry owner for every
+   * channel) so a concurrent or restarted caller cannot double-seal the
+   * same row, and so a row already sealed here is never reclaimed by
+   * `listDuePartnerNotifications` again (its `channelRouting.retryDisposition`
+   * is never `automatic`).
+   */
+  private async deliverNonPartnerChannelOutcome(
+    outboxId: string,
+    channel: "first_party_app" | "ambiguous" | "none",
+  ): Promise<PassengerPushDeliveryOutcome & PassengerNotificationChannelMetadata> {
+    const claim = await this.repository!.claimPartnerNotification(
+      outboxId,
+      this.pushDeliveryWorkerId,
+      MultiTaxiService.PUSH_DELIVERY_LEASE_SECONDS,
+    );
+    if (!claim) throw new PassengerPushClaimConflictError(outboxId);
+    const { record, fenceToken } = claim;
+    const decision = resolveNonPartnerChannelOutcome(channel);
+    const channelMetadata: PassengerNotificationChannelMetadata = {
+      resolvedChannel: channel,
+      deliveryTarget: null,
+      deliveryStage: null,
+      retryDisposition: decision.retryDisposition,
+      failureReason: decision.failureReason,
+      receiptId: null,
+      downstreamStatus: "unknown",
+      expiresAt: null,
+    };
+    const outcome = {
+      ...channelMetadata,
+      outboxId,
+      status: "failed" as const,
+      result: decision.result,
+      attemptCount: record.attemptCount,
+      nextAttemptAt: new Date().toISOString(),
+      deliveredAt: null,
+      providerName: null,
+    };
+    try {
+      const persisted = await this.repository!.recordPushDeliveryOutcome({
+        outboxId,
+        passengerSubjectRef: record.passengerSubjectRef,
+        fenceToken,
+        providerName: null,
+        providerMessageRef: null,
+        providerAckState:
+          outcome.result === "provider_not_configured"
+            ? "provider_not_configured"
+            : "provider_rejected",
+        deliveryOutcome: outcome,
+        channelMetadata,
+      });
+      if (!persisted.recorded)
+        throw new Error("Passenger notification channel fence lost");
     } catch (error) {
       throw new PassengerPushPersistenceUnknownError(outboxId, error);
     }

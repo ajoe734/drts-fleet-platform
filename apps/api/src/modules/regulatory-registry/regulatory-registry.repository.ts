@@ -17,6 +17,7 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+import { ensureLiveMapFixture, resetLiveMapFixture } from "./live-map-fixture";
 
 type JsonRecordRow = {
   record: unknown;
@@ -234,13 +235,27 @@ export type UpdateDeliveryIntentParams = {
 @Injectable()
 export class RegulatoryRegistryRepository {
   private readonly logger = new Logger(RegulatoryRegistryRepository.name);
-  private readonly inMemoryExpiryEvents = new Map<string, RegistryExpiryEventRow>();
-  private readonly inMemoryDeliveryIntents = new Map<string, RegistryExpiryDeliveryIntentRow>();
+  private readonly inMemoryExpiryEvents = new Map<
+    string,
+    RegistryExpiryEventRow
+  >();
+  private readonly inMemoryDeliveryIntents = new Map<
+    string,
+    RegistryExpiryDeliveryIntentRow
+  >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async ensureLiveMapTestDriver() {
+    return ensureLiveMapFixture(this.databaseService);
+  }
+
+  async resetLiveMapTestDriver() {
+    return resetLiveMapFixture(this.databaseService);
   }
 
   async loadState(): Promise<RegulatoryRegistryState> {
@@ -1224,7 +1239,9 @@ export class RegulatoryRegistryRepository {
       status: row.status as VehiclePassengerDisclosureProfile["status"],
       missingFieldCodes: this.toStringArray(row.missing_field_codes),
       verifiedByActorId: row.verified_by_actor_id,
-      verifiedAt: row.verified_at ? new Date(row.verified_at).toISOString() : null,
+      verifiedAt: row.verified_at
+        ? new Date(row.verified_at).toISOString()
+        : null,
       sourceSubmissionId: row.source_submission_id,
       version: Number(row.version),
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -1238,12 +1255,18 @@ export class RegulatoryRegistryRepository {
       driverId: row.driver_id,
       registrationNo: row.registration_no,
       registrationArea: row.registration_area,
-      effectiveFrom: row.effective_from ? new Date(row.effective_from).toISOString().slice(0, 10) : null,
-      effectiveUntil: row.effective_until ? new Date(row.effective_until).toISOString().slice(0, 10) : null,
+      effectiveFrom: row.effective_from
+        ? new Date(row.effective_from).toISOString().slice(0, 10)
+        : null,
+      effectiveUntil: row.effective_until
+        ? new Date(row.effective_until).toISOString().slice(0, 10)
+        : null,
       status: row.status as DriverPublicRegistrationCredential["status"],
       maskedDisplay: row.masked_display,
       verifiedByActorId: row.verified_by_actor_id,
-      verifiedAt: row.verified_at ? new Date(row.verified_at).toISOString() : null,
+      verifiedAt: row.verified_at
+        ? new Date(row.verified_at).toISOString()
+        : null,
       sourceSubmissionId: row.source_submission_id,
       version: Number(row.version),
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -1267,7 +1290,9 @@ export class RegulatoryRegistryRepository {
     return [];
   }
 
-  private getExpiryExecutor(client?: PoolClient): RegulatoryRegistryQueryExecutor {
+  private getExpiryExecutor(
+    client?: PoolClient,
+  ): RegulatoryRegistryQueryExecutor {
     if (client) {
       return {
         query: async <T extends { [key: string]: unknown }>(
@@ -1282,7 +1307,9 @@ export class RegulatoryRegistryRepository {
     return this.databaseService!;
   }
 
-  async withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+  async withTransaction<T>(
+    work: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
     if (!this.isEnabled()) {
       const fakeClient = {
         query: async () => ({ rows: [] }),
@@ -1339,7 +1366,8 @@ export class RegulatoryRegistryRepository {
     limit: number = 100,
     client?: PoolClient,
   ): Promise<DriverRegistryRecord[]> {
-    const asOfIso = asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
+    const asOfIso =
+      asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
     if (this.isEnabled()) {
       const executor = this.getExpiryExecutor(client);
       const result = await executor.query<{ record: DriverRegistryRecord }>(
@@ -1366,7 +1394,8 @@ export class RegulatoryRegistryRepository {
     limit: number = 100,
     client?: PoolClient,
   ): Promise<InsurancePolicyRecord[]> {
-    const asOfIso = asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
+    const asOfIso =
+      asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
     if (this.isEnabled()) {
       const executor = this.getExpiryExecutor(client);
       const result = await executor.query<{ record: InsurancePolicyRecord }>(
@@ -1558,7 +1587,10 @@ export class RegulatoryRegistryRepository {
         evt.superseded_by_event_id = supersededByEventId ?? null;
         evt.updated_at = nowIso;
         for (const intent of this.inMemoryDeliveryIntents.values()) {
-          if (intent.event_id === evt.event_id && intent.delivery_status === "pending") {
+          if (
+            intent.event_id === evt.event_id &&
+            intent.delivery_status === "pending"
+          ) {
             intent.delivery_status = "superseded";
             intent.updated_at = nowIso;
           }
@@ -1576,7 +1608,11 @@ export class RegulatoryRegistryRepository {
       .filter((e) => !supersededByEventId || e.event_id !== supersededByEventId)
       .map((e) => e.event_id);
     if (toSupersede.length > 0) {
-      await this.supersedeExpiryEvents(toSupersede, supersededByEventId, client);
+      await this.supersedeExpiryEvents(
+        toSupersede,
+        supersededByEventId,
+        client,
+      );
     }
     return toSupersede.length;
   }
@@ -1725,12 +1761,14 @@ export class RegulatoryRegistryRepository {
   }
 
   async listExpiryEvents(
-    filter?: {
-      scope?: string | undefined;
-      entityType?: ExpiryEntityType | undefined;
-      status?: ExpiryEventStatus | undefined;
-      limit?: number | undefined;
-    } | undefined,
+    filter?:
+      | {
+          scope?: string | undefined;
+          entityType?: ExpiryEntityType | undefined;
+          status?: ExpiryEventStatus | undefined;
+          limit?: number | undefined;
+        }
+      | undefined,
     client?: PoolClient,
   ): Promise<RegistryExpiryEventWithIntent[]> {
     if (this.isEnabled()) {
@@ -1749,7 +1787,9 @@ export class RegulatoryRegistryRepository {
         params.push(filter.status);
         conditions.push(`e.status = $${params.length}`);
       }
-      const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const whereClause = conditions.length
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
       const limitClause = filter?.limit ? `LIMIT ${filter.limit}` : "LIMIT 100";
 
       const result = await executor.query<
@@ -1839,12 +1879,15 @@ export class RegulatoryRegistryRepository {
       });
     }
 
-    const events = Array.from(this.inMemoryExpiryEvents.values()).filter((e) => {
-      if (filter?.scope && e.scope !== filter.scope) return false;
-      if (filter?.entityType && e.entity_type !== filter.entityType) return false;
-      if (filter?.status && e.status !== filter.status) return false;
-      return true;
-    });
+    const events = Array.from(this.inMemoryExpiryEvents.values()).filter(
+      (e) => {
+        if (filter?.scope && e.scope !== filter.scope) return false;
+        if (filter?.entityType && e.entity_type !== filter.entityType)
+          return false;
+        if (filter?.status && e.status !== filter.status) return false;
+        return true;
+      },
+    );
 
     return events.slice(0, filter?.limit ?? 100).map((e) => {
       const intent =
@@ -1856,11 +1899,13 @@ export class RegulatoryRegistryRepository {
   }
 
   async listDeliveryIntents(
-    filter?: {
-      tenantId?: string | undefined;
-      deliveryStatus?: DeliveryIntentStatus | undefined;
-      limit?: number | undefined;
-    } | undefined,
+    filter?:
+      | {
+          tenantId?: string | undefined;
+          deliveryStatus?: DeliveryIntentStatus | undefined;
+          limit?: number | undefined;
+        }
+      | undefined,
     client?: PoolClient,
   ): Promise<RegistryExpiryDeliveryIntentRow[]> {
     if (this.isEnabled()) {
@@ -1875,7 +1920,9 @@ export class RegulatoryRegistryRepository {
         params.push(filter.deliveryStatus);
         conditions.push(`delivery_status = $${params.length}`);
       }
-      const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const whereClause = conditions.length
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
       const limitClause = filter?.limit ? `LIMIT ${filter.limit}` : "LIMIT 100";
 
       const result = await executor.query<RegistryExpiryDeliveryIntentRow>(
@@ -1894,7 +1941,11 @@ export class RegulatoryRegistryRepository {
     return Array.from(this.inMemoryDeliveryIntents.values())
       .filter((i) => {
         if (filter?.tenantId && i.tenant_id !== filter.tenantId) return false;
-        if (filter?.deliveryStatus && i.delivery_status !== filter.deliveryStatus) return false;
+        if (
+          filter?.deliveryStatus &&
+          i.delivery_status !== filter.deliveryStatus
+        )
+          return false;
         return true;
       })
       .slice(0, filter?.limit ?? 100);
