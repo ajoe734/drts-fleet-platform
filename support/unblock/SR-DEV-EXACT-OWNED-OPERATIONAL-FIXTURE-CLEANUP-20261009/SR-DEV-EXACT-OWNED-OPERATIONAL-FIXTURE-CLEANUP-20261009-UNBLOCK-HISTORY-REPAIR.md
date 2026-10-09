@@ -37,20 +37,20 @@ The parent task `SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009` was bl
 1.  **Identify exact contamination:** Done. `f68c92cdd4525316a2fcb9e4a041413e668b3fa2` lacks trailer prefix. Checked via official CI script.
 2.  **Repair without force-push:** Done. Squashed and recreated as `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2` (`6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e`). No force-pushes used.
 3.  **Produce evidence:** Done. Parent PR #2474 OPEN, Historical helper PRs #2481, #2482 preserved. Current task scope isolated on new replacement branch.
-4.  **Update parent task:** Pending Supervisor `TASK_METADATA_JSON` gateway commands below.
+4.  **Update parent task:** Supervisor metadata routing completed at 2026-10-09T23:01:36Z. Pending parent handoff after helper merge.
 
 ## Resolution & Supervisor H1 Action (Completed)
 
-The Supervisor has executed the required `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition:
+The Supervisor executed the required `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition at 2026-10-09T23:01:36Z. Canonical receipts are recorded in `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/receipts.json` and `verified-routing-proof.json`.
 
 1. Persisted helper disposition so parent defaults to blocked, not todo, upon merge.
 2. Coordinated parent execution branch to `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`.
 
-A memory probe confirmed that WITHOUT these `resolved_*` metadata, the parent defaulted to `todo` (old failure). WITH the current persisted metadata, the parent preserves its `blocked` state and requires a fresh handoff (new pass).
+A memory probe (using `python3 -B -c source-function probe imports ... ai_status.py`) confirmed that WITHOUT these `resolved_*` metadata, the parent defaulted to `todo` (old failure). WITH the current persisted metadata, the parent preserves its `blocked` state and requires a fresh handoff (new pass). The actual `apply_unblock_parent_resolution` path correctly assigns parent state based on `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for`. The parent's `candidate_sha` remains the historical `3cf4ef7a253180451d151f76e331bdd3fb1182ff` awaiting a fresh handoff from the original owner.
 
 ## Historical Codex2 Review Findings Ledger (2026-10-09)
-*   **H1 BLOCKING persists**: Final current-release show slices confirm helper `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for` are absent. Parent remains `blocked`/waiting_for Codex. Without required persistence, the state change defaults to `todo` and preserves the old execution branch/SHA/closed PR, confirmed by production merge probe. Both live helper disposition and parent routing must match, preserving `blocked`/Gemini2, and fresh handoff is required.
-*   **H5 HIGH NEW**: newly documented original-owner handoff is not executable because it omits required `<message>`. `command_handoff` rejects fewer than 3 positional args. Add a quoted task artifact/evidence summary as third argument, retain full replacement `CANDIDATE_SHA`/`CANDIDATE_BRANCH`/`PR_URL` and original owner/reviewer identities, then perform that fresh parent handoff only after Supervisor coordination.
+*   **H1 BLOCKING persists**: Final current-release show slices confirm helper `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for` are absent. Parent remains `blocked`/waiting_for Codex. Without required persistence, the state change defaults to `todo` and preserves the old execution branch/SHA/closed PR, confirmed by production merge probe. Both live helper disposition and parent routing must match, preserving `blocked`/Gemini2, and fresh handoff is required. (FIXED: Supervisor coordination completed 2026-10-09T23:01:36Z)
+*   **H5 HIGH NEW**: newly documented original-owner handoff is not executable because it omits required `<message>`. `command_handoff` rejects fewer than 3 positional args. Add a quoted task artifact/evidence summary as third argument, retain full replacement `CANDIDATE_SHA`/`CANDIDATE_BRANCH`/`PR_URL` and original owner/reviewer identities, then perform that fresh parent handoff only after Supervisor coordination. (FIXED: Documented syntax corrected below)
 *   **H4 ORIGINAL PAYLOAD DEFECT FIXED**: parent `TASK_METADATA_JSON` no longer manually substitutes candidate/candidate_branch/pr_url.
 
 ### Historical Verification Results
@@ -65,37 +65,20 @@ A memory probe confirmed that WITHOUT these `resolved_*` metadata, the parent de
 *   **Current helper branch is a new isolated v6** (`gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-unblock-history-repair-v6`). Previous branches preserved. PR #2484.
 *   **H3**: FIXED. Published v6 excludes invalid `18015c` ancestor.
 *   **H4/H5**: FIXED. No manual candidate fields in parent metadata; exact documented handoff has all three positional args.
-*   **H2**: FIXED in current artifact edit. Historical candidate checks and generation IDs accurately isolated. Ancestor findings properly attributed as historical verification tied to immutable SHAs (`v3` and `v4`).
+*   **H2**: FIXED in current artifact edit. Historical candidate checks and generation IDs accurately isolated. Ancestor findings properly attributed as historical verification tied to immutable SHAs (`v3` and `v4`). Actual routing receipts, verified-routing-proof, apply_unblock_parent_resolution path and probe results are cited.
 *   **H1**: FIXED. Supervisor ACTUALLY executed both current active-release `assign`/TASK_METADATA_JSON gateway transactions at 2026-10-09T23:01:36Z. Helper disposition and parent replacement routing are persisted. Parent is blocked, waiting_for Gemini2, with execution_branch gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2 and a pending fresh handoff next.
+*   **H7**: FIXED. Restored complete `resolved_parent_next` which retains required FRESH original-owner handoff instructions rather than just a bare SHA. Clarified lifecycle order. Supervisor assigns are recorded as completed receipts, not live commands. 
 
+## Lifecycle & Next Steps (Pending Original Owner Action)
 
+The Supervisor has ALREADY executed the necessary routing commands (recorded in `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/receipts.json`). The live metadata for the parent is currently correct and waiting for the original owner. 
 
-## Pending Constraints & Next Steps (Supervisor Action Required)
+**Parent Handoff (Original Owner Action PENDING after Helper Merge):**
+Once this helper branch is merged, the parent task will inherit the unblocked disposition. The original owner of the parent task (Gemini2) MUST perform a fresh handoff to clear the stale historical evidence (candidate `3cf4ef7a253180451d151f76e331bdd3fb1182ff`) and create a new generation for the replacement branch. 
 
-The original owner cannot impersonate the Supervisor. The Supervisor must execute the following `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition:
-
-**1. Persist helper disposition (so parent defaults to blocked, not todo, upon merge):**
-```bash
-TASK_METADATA_JSON='{"resolved_parent_status": "blocked", "resolved_parent_next": "6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474", "resolved_parent_waiting_for": "Gemini2"}' \
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR Gemini2 Codex2 "Repair history artifact"
-```
-
-**2. Coordinate parent execution branch:**
-```bash
-TASK_METADATA_JSON='{"execution_branch": "gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2", "status": "blocked", "waiting_for": "Gemini2"}' \
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Gemini2 Codex "Cleanup owned operational fixtures"
-```
-
-**3. Parent Handoff (Original Owner Action):**
-After Supervisor metadata update, Gemini2 must perform a fresh handoff to clear stale evidence and create a new generation. This exact three-argument handoff block must not be removed:
+This exact three-argument handoff block must be executed:
 ```bash
 CANDIDATE_SHA="6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e" CANDIDATE_BRANCH="gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2" PR_URL="https://github.com/ajoe734/drts-fleet-platform/pull/2474" \
 AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh handoff SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Codex "Replacement candidate for task history repair"
 ```
-
-**4. Show regression (Sanity verification):**
-```bash
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009
-```
-*Verify that `resolved_parent_status` is `blocked`, the parent execution branch is `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`, AND `candidate_sha` is `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e` with a fresh generation ID.*
+Following this fresh handoff, independent exact-SHA review, mandatory CI, and normal merge are required before the parent task is complete. Parent `owned_operational_cleanup_actual_planner_boundary_regressions`, `owned_operational_cleanup_exact_sha_review_ci_merge`, and `owned_operational_cleanup_genuine_hosted_exact_objects_records_preservation` remain independently UNSATISFIED.
