@@ -1,0 +1,82 @@
+# PAX-ACCOUNT-SESSION-20261009 — owner implementation evidence
+
+Owner: Codex. Independent reviewer: Codex2. Branch: `codex/pax-account-session-20261009`, base `dev`.
+
+The exact final candidate SHA / PR are recorded by canonical `handoff`; the checkpoint SHAs below are implementation history, **not** approved candidates. No review/CI/merge/PG acceptance is claimed by this document.
+
+## Authority and implementation
+
+Read the task spec and `common.md` under `/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/`, accepted `01_system_sa_sd.md` §§2–3/6/8 and `02_content_and_rules.md`, `AI_COLLABORATION_GUIDE.md` §0.7, branch strategy §11 and candidate/anchor protocols. SD dependency merged as `8ec22133a28f2fa19974ae0c0a3b3127cc5aa747`. Allocation is exclusively `V0109__passenger_account_session.sql`: `passenger.accounts`, `passenger.logins`, `passenger.sessions`.
+
+- Separate `PassengerRequestIdentity`, realm `passenger`, actor `first_party_passenger`. Legacy IAM `BootstrapRequestIdentity`/membership contracts retain their existing union; `RequestIdentity` permits both at the HTTP boundary. Legacy workforce/tenant/partner role families and scope presets stay intact.
+- `PassengerJwtService` uses the existing rotating signing key ring, distinct issuer `drts:passenger` / audience `drts:passenger-api`, exact 900-second TTL, account subject and family `sid`. It never logs credentials. `BootstrapAuthGuard` checks the passenger database family and active account on each protected passenger request; legacy JWT verification explicitly excludes passenger identity. Passenger bootstrap headers are rejected in dev as well as strict environments.
+- Protected passenger namespace defaults to passenger-only; platform subpaths remain platform-only. Realm/scope decorators still restrict passenger routes. Public BFF routes verify workload credentials without the general middleware's arbitrary-Bearer bypass. Login/link/verify purpose bindings remain the OTP/OAuth task's responsibility.
+- `findOrCreateByIdentity` looks up **only** `(provider, subject)`, with a transaction advisory lock and account row lock/re-read. Verified email/phone attributes never merge accounts. Proof-verifying OTP/OAuth adapters call these internal service methods; no login-provider endpoint is added here. Canonicalization of verified provider subjects is the adapter's responsibility.
+- `linkIdentity` requires a current passenger session; identities owned by another account conflict. `unlinkIdentity` locks the account, enforces at least one remaining login and conceals foreign identity IDs. Public identity inventory keeps `identityId`, provider and account, but replaces raw provider subjects with `[linked]`.
+- Refresh tokens are random 256-bit opaque values; only SHA-256 hashes persist. Each rotation retains the consumed generation and preserves the family's original 30-day absolute expiry. Replay commits family revocation **before** returning `invalid_grant`; revocation immediately disables all access tokens in that family. `logout` revokes the supplied family (even an older consumed token), `logoutAll` revokes all devices for the account.
+- API: `GET/PATCH/DELETE me`, `GET me/identities`, `DELETE me/identities/:id`, `POST auth/refresh`, `POST auth/logout` under `/api/passenger-app/`. Bodies accept canonical snake_case and contract camelCase, reject ambiguous aliases/unknown fields. Profile ownership is always from the authenticated subject. Phone edits clear verification; `verifyContactPhone` is an internal session-bound proof-consumption hook for OTP. Consent versions and `contactConsent` persist; the account contract adds the previously missing optional consent response field.
+- Delete locks the caller account, revokes all sessions, nulls account PII, removes provider subject rows and clears session UA. Account ID, creation/deletion dates and consent versions survive. No trip/finance table is touched; historical account references stay stable. PAYMENT-CORE adds the pending-payment check inside this deletion transaction, as the task spec explicitly assigns it there.
+
+## SQL / migration reconciliation (owner; reviewer must independently compare)
+
+Production path: `PassengerAccountRepository.transaction` → `PostgresPassengerAccountTransaction`; only bound parameters, no interpolated identities. All account mutations hold the account `FOR UPDATE` lock. `findOrCreate`/link additionally acquire the identity advisory lock first. Refresh re-reads its generation after locking the account. Unlink/delete serialize against issuance/link/refresh. Transactions commit/release, or rollback/release on errors; there is no in-memory production fallback.
+
+| Table | Every migration column | Production mapping/write |
+| --- | --- | --- |
+| accounts | `drts_passenger_id varchar(100) PK` | `drtsPassengerId`; immutable server `drts_passenger_<uuid>`; bind `$1` on reads/updates |
+| accounts | `display_name varchar(100)` | `displayName`; insert/save; delete NULL |
+| accounts | `contact_phone varchar(32)` | `contactPhone`; insert/save; delete NULL |
+| accounts | `contact_phone_verified boolean NOT NULL default false` | `contactPhoneVerified`; only proof method sets true; edits clear; delete false |
+| accounts | `verified_phone varchar(32)`, `verified_email varchar(320)` | verified internal attributes; insert/save; delete NULL; neither is UNIQUE |
+| accounts | `terms_version`, `privacy_version`, `fee_acknowledgement_version varchar(100)` | three contract version fields; insert/save; retained on deletion |
+| accounts | `contact_consent boolean NOT NULL default false` | `contactConsent`; insert/save; delete false |
+| accounts | `status varchar(10) NOT NULL default active` | contract active/suspended/deleted; active checks everywhere; delete deleted |
+| accounts | `created_at timestamptz NOT NULL default now()` | `createdAt` ISO; explicitly supplied on insert, never overwritten |
+| accounts | `updated_at timestamptz NOT NULL default now()` | save uses DB `now()`; anonymize uses deletion timestamp; not exposed |
+| accounts | `deleted_at timestamptz` | `deletedAt` ISO when present; anonymize sets together with deleted status |
+| logins | `identity_id uuid PK` | `identityId` server UUID; insert/list/delete by caller ownership |
+| logins | `drts_passenger_id varchar(100) NOT NULL FK accounts` | no tenant/partner lookup; bound account ID; no cascading account deletion |
+| logins | `provider varchar(10) NOT NULL` | phone/email/google/facebook/line in service and SQL CHECK |
+| logins | `subject varchar(512) NOT NULL` | verified provider identifier; lookup and unique `(provider, subject)`; delete on account deletion; masked in public list |
+| logins | `created_at timestamptz NOT NULL default now()` | DB default; inventory ordered by creation and identity ID |
+| sessions | `session_id uuid PK` | `sessionId`, server UUID per generation; consumption update by this ID |
+| sessions | `drts_passenger_id varchar(100) NOT NULL FK accounts` | account ownership in every family/all-session query |
+| sessions | `refresh_token_family uuid NOT NULL` | `refreshTokenFamily`; server UUID on issuance, carried unchanged on rotation and JWT `sid` |
+| sessions | `refresh_token_hash varchar(64) NOT NULL UNIQUE` | `refreshTokenHash`, lowercase SHA-256; raw token never bound/stored |
+| sessions | `device_ua varchar(512)` | `deviceUa`; truncate at issue; rotation carries it; deletion NULL |
+| sessions | `created_at`, `expires_at timestamptz NOT NULL` | explicit ISO timestamps; expiry > creation CHECK; original expiry preserved across rotation |
+| sessions | `consumed_at timestamptz` | `consumedAt`; set before successor insertion; consumed rows retained for replay |
+| sessions | `revoked_at timestamptz`, `revocation_reason varchar(32)` | family/all updates write both; reasons refresh_reuse/logout/logout_all/account_deleted; mapper exposes no reason/credential to API |
+
+Constraints/indexes: deleted status iff deleted_at; verified contact requires a phone; provider CHECK; FK without destructive cascades; session hash format/unique; revocation timestamp iff reason; account/family lookup indexes; partial unique live-family index (`consumed_at IS NULL AND revoked_at IS NULL`). PG execution/locking/constraint enforcement is **unverified locally**; production migration/repository hosted probes are assigned to PAX-QA per common A12.
+
+## Finding / acceptance evidence
+
+Evidence directory (machine-specific, gitignored): `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-pax-account-session-20261009/.local/pax-account-session-20261009/`.
+
+| Finding / acceptance | Source / change | Before → after | Command, version, exit and evidence | Remaining limits |
+| --- | --- | --- | --- | --- |
+| F1 concurrent unlink during identity login can use a stale binding | `PassengerAccountService.findOrCreateByIdentity`; re-read after account lock | checkpoint `9965978fc` login path: focused assertion FAIL (1 failed, 26 skipped), former account incorrectly returned → re-read fix PASS in subsequent 57-test and 380-test suites | `DATABASE_URL= pnpm exec vitest run tests/unit/pax-account-session-20261009/account-session.test.ts -t 'rechecks the identity'`, exit 1; `unlink-race-before.log`. Fixed source checkpoint `f6030b6ab1c8f330abc21650c9d8530f1701ae77`; `unit-complete.log`, `auth-full-f6030b6ab.log`, exit 0. Vitest 4.1.4. Not a prior reviewed candidate. | Persistence stub schedules the concurrent unlink at lock acquisition; actual PG timing remains PAX-QA |
+| F2 strict public route arbitrary Bearer bypass | `BootstrapAuthGuard.activatePassenger`, `verifyGoogleAssertionOrInternalKey` | static original middleware bypass identified; passenger branch now re-verifies BFF credential without bypass; valid stub metadata accepts, invalid/missing strict metadata rejects | `realm-guard.test.ts`; `auth-full-f6030b6ab.log`, exit 0, real guard/token/service; only Google verifier mocked | Real metadata principal enrollment/routing belongs shared-dev BFF setup / hosted QA |
+| pax-account_realm_session_and_linking | Passenger JWT/service/guard, identity uniqueness, refresh/replay/logout/expired-session tests | Positive live session/link/refresh + negative legacy realm, foreign/last login, expiry, suspended, replay and mass-assignment cases pass | Root affected regression: 29 files / 380 tests, exit 0, `auth-full-f6030b6ab.log`; API auth regression 1 file / 101 tests, exit 0, `api-auth-f6030b6ab.log`. New task suite 3 files / 57 tests, exit 0, `unit-complete.log`. Node 22.23.2 / pnpm 10.33.0 / Vitest 4.1.4 | Same-candidate hosted CI/reviewer conclusion pending; PG race/constraints pending QA |
+| pax-account_profile_delete_and_isolation | Controller strict commands; service session ownership, proof-only phone verification; repository scoped anonymization SQL; V0109 | Consent updates succeed; spoofed/foreign verification fields reject; deleted account PII and identities removed in service persistence-boundary tests; sessions reject immediately; other accounts remain usable | Above task/affected suites; `repository.test.ts` executes production query path with Pool stub, verifies replay COMMIT, rollback/release, account mapping and every delete write's account predicate. Public response tests exclude tokens/hash/provider subject. | No real PG retention/rollback/concurrency claim. Historic trip/financial retention supported by code/SQL review (no writes to those tables), awaiting hosted production-schema probe |
+
+The persistence stub implements only the repository boundary; service, controller, JWT and guard logic run unchanged. SQL tests use the production repository with a PoolClient stub and are **not** PG acceptance. No alternate database schema or copied business SQL is used.
+
+## Checks and unsuccessful setup attempts
+
+At source checkpoint `f6030b6ab1c8f330abc21650c9d8530f1701ae77`:
+
+- Root regression command selects existing `auth-`, `bootstrap-auth`, `jwt-`, `control-plane-auth`, `driver-device-session`, `identity-session`, `iam-`, `step-up`, `trusted-mfa`, `sr-auth-*`, `sr-iam-*`, `sr-qa-identity-*` tests, plus this task, SD and schema allocation guard suites. Explicit `DATABASE_URL=` prevents any local product DB access. Result: 380/380, 29 files, exit 0; start 17:34:25 UTC, duration 10.25s.
+- `DATABASE_URL= DRTS_DEV_MFA_WAIVED=true pnpm --filter @drts/api exec vitest run tests/unit/auth-bootstrap.test.ts`: 101/101, one file, exit 0; start 17:34:25 UTC, duration 8.83s. Waiver matches the existing hosted API-unit job; the root strict/IAP suite runs without this waiver.
+- Formatting check on new/changed task paths: exit 0, all files formatted.
+- Static checks (contracts build, API/root typecheck, API/task lint) are recorded in `static-f6030b6ab.log`; final results are added before candidate handoff.
+- Initial API typecheck before dependency builds failed: missing control-plane-auth declarations and broad passenger union incompatibilities. Dependencies built; passenger HTTP identity isolated from legacy IAM; subsequent API typecheck exit 0. Later transient typecheck failures (incorrect import rename / inferred UUID parameter type) corrected before the checkpoint. These failures are not product pass evidence.
+- `unit-first.log`: exit 1, **zero tests**, missing root-level reflect-metadata import. Removed redundant test import; Nest dependency supplies its own metadata. This is setup failure, not reproduction evidence.
+- `lint-first.log`: exit 1, control-character regex / unused stub parameters; corrected before checkpoint. Subsequent lint must pass before handoff.
+
+## Pending integration / external acceptance
+
+No VM development server, preview, browser, database or Compose infrastructure was started. No real SMS/OAuth/PSP calls or provider secrets were used. Task does not implement OTP/OAuth/login methods, booking/financial table mutations, production deployments or BFF cookie management.
+
+Reviewer Codex2 must inspect the exact locked candidate and independently compare every SQL column with V0109. Same-SHA hosted CI, merge and both named acceptance keys remain canonical lifecycle gates. Hosted production-schema PG tests (actual rotation races, uniqueness, transaction rollback and historic trip/payment retention) remain PAX-QA scope. PAYMENT-CORE must add its unpaid-trip delete block; this task records the explicit hook and does not claim that future check exists.
