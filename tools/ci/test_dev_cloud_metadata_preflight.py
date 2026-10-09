@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -21,9 +22,10 @@ SECRET = "secret-must-never-enter-metadata-evidence"
 def external_fixture():
     documents = {}
     policies = {}
+    revisions = {}
     for name in collector.SERVICES:
         scanner = name == "drts-dev-scanner"
-        revision = name + ("-00045-xcv" if scanner else "-00063-unit")
+        revision = name + ("-00045-xcv" if scanner else "-00063-unt")
         containers = [{"name": "gateway" if scanner else "app",
                        "image": f"us-central1-docker.pkg.dev/{collector.PROJECT}/drts/"
                                 + ("artifact-scanner-gateway" if scanner else "api")
@@ -55,12 +57,21 @@ def external_fixture():
             rows = [{"role": "roles/run.invoker", "members": [
                 "serviceAccount:" + collector.RUNTIME, "serviceAccount:" + collector.DEPLOYER]}]
         policies[name] = {"bindings": rows}
-    return documents, policies
+        revision_spec = copy.deepcopy(documents[name]["spec"]["template"]["spec"])
+        digest = revision_spec["containers"][0]["image"]
+        if not scanner:
+            requested = digest.split("@")[0] + ":" + SHA[:12]
+            documents[name]["spec"]["template"]["spec"]["containers"][0]["image"] = requested
+            revision_spec["containers"][0]["image"] = requested
+        revisions[revision] = {"metadata": {"name": revision, "labels": {"serving.knative.dev/service": name}},
+                               "spec": revision_spec, "status": {"imageDigest": digest,
+                               "conditions": [{"type": "Ready", "status": "True"}]}}
+    return documents, policies, revisions
 
 
 class ReadonlyMetadataTests(unittest.TestCase):
     def setUp(self):
-        self.documents, self.policies = external_fixture()
+        self.documents, self.policies, self.revisions = external_fixture()
         self.calls = []
         self.env = patch.dict(os.environ, {"DEV_GCP_PROJECT_ID": collector.PROJECT,
                                           "DEV_GCP_REGION": collector.REGION})
@@ -69,13 +80,19 @@ class ReadonlyMetadataTests(unittest.TestCase):
 
     def external_run(self, command, **kwargs):
         self.calls.append(command)
-        self.assertEqual(command[:3], ["gcloud", "run", "services"])
+        self.assertEqual(command[:2], ["gcloud", "run"])
+        self.assertIn(command[2], ("services", "revisions"))
         self.assertIn(command[3], ("describe", "get-iam-policy"))
-        self.assertIn(command[4], collector.SERVICES)
+        if command[2] == "revisions":
+            self.assertEqual(command[3], "describe")
+            self.assertIn(command[4], self.revisions)
+        else:
+            self.assertIn(command[4], collector.SERVICES)
         self.assertEqual(command[5:], ["--project", collector.PROJECT, "--region", collector.REGION,
                                       "--format=json", "--quiet"])
         self.assertEqual(kwargs, {"capture_output": True, "text": True, "timeout": 30, "check": True})
-        source = self.documents if command[3] == "describe" else self.policies
+        source = self.revisions if command[2] == "revisions" else (
+            self.documents if command[3] == "describe" else self.policies)
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(source[command[4]]), stderr=SECRET)
 
     def run_collector(self):
@@ -89,9 +106,17 @@ class ReadonlyMetadataTests(unittest.TestCase):
 
     def test_actual_collector_reads_exact_inventory_and_redacts_secrets(self):
         result = self.run_collector()
-        self.assertEqual(len(self.calls), 18)
-        self.assertEqual([(c[4], c[3]) for c in self.calls],
-                         [(n, v) for n in collector.SERVICES for v in ("describe", "get-iam-policy")])
+        self.assertEqual(len(self.calls), 27)
+        self.assertEqual([(c[2], c[3], c[4]) for c in self.calls],
+                         [entry for n in collector.SERVICES for entry in (
+                             ("services", "describe", n), ("services", "get-iam-policy", n),
+                             ("revisions", "describe", self.documents[n]["status"]["latestReadyRevisionName"]))])
+        self.assertEqual(result["read_commands"], 27)
+        api = result["services"]["drts-dev-api"]
+        self.assertEqual(api["requested_images"]["app"],
+                         f"us-central1-docker.pkg.dev/{collector.PROJECT}/drts/api:" + SHA[:12])
+        self.assertEqual(api["images"]["app"],
+                         f"us-central1-docker.pkg.dev/{collector.PROJECT}/drts/api@sha256:" + "a" * 64)
         self.assertEqual(set(result["services"]), set(collector.SERVICES))
         self.assertEqual(result["services"]["drts-dev-api"]["runtime_sha"], SHA)
         self.assertEqual(result["definition_sha"], DEFINITION)
@@ -175,7 +200,7 @@ class ReadonlyMetadataTests(unittest.TestCase):
 
     def test_mutable_image_rejected(self):
         self.documents["drts-dev-api"]["spec"]["template"]["spec"]["containers"][0]["image"] = "api:latest"
-        self.rejection("immutable digest")
+        self.rejection("Requested image is outside current project")
 
     def test_all_seven_console_public_members_rejected(self):
         for name in collector.PRIVATE_SERVICES:
@@ -237,6 +262,150 @@ class ReadonlyMetadataTests(unittest.TestCase):
     def test_scanner_command_override_rejected(self):
         self.documents["drts-dev-scanner"]["spec"]["template"]["spec"]["containers"][0]["args"] = [SECRET]
         self.rejection("command override")
+
+    def api_revision(self):
+        return self.revisions[self.documents["drts-dev-api"]["status"]["latestReadyRevisionName"]]
+
+    def test_actual_old_helper_fails_same_legitimate_tag_revision_scenario(self):
+        # Original immutable source, not a copied or parallel implementation.
+        source = subprocess.check_output(["git", "show",
+            "616e5d1c9157a33e0fff47a6a6332598f48a2272:operations/verification/read-dev-cloud-metadata.py"],
+            cwd=ROOT, text=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old_actual_helper.py"
+            path.write_text(source)
+            spec = importlib.util.spec_from_file_location("old_actual_helper", path)
+            old = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(old)
+            with patch.object(old.subprocess, "run", self.external_run):
+                with self.assertRaisesRegex(ValueError, "Image is not a current-project immutable digest"):
+                    old.collect(SHA, DEFINITION)
+        self.assertEqual(len(self.calls), 2)
+        self.calls.clear()
+        result = self.run_collector()
+        self.assertEqual(len(self.calls), 27)
+        self.assertEqual(result["services"]["drts-dev-api"]["runtime_sha"], SHA)
+
+    def test_revision_escape_and_forbidden_verb_fail_before_read(self):
+        with patch.object(collector.subprocess, "run") as external:
+            for revision, verb in (("other-00063-unt", "describe"),
+                                   ("drts-dev-api-00063-unt;echo bad", "describe"),
+                                   ("drts-dev-api-00063-unt", "get-iam-policy"),
+                                   ("drts-dev-api-00063-unt", "delete")):
+                with self.subTest(revision=revision, verb=verb), self.assertRaises(ValueError):
+                    collector.read_json("drts-dev-api", verb, revision)
+            external.assert_not_called()
+
+    def test_untrusted_service_ready_revision_rejected_before_revision_read(self):
+        status = self.documents["drts-dev-api"]["status"]
+        status["latestReadyRevisionName"] = status["latestCreatedRevisionName"] = "drts-dev-api-00063-unt;echo bad"
+        status["traffic"][0]["revisionName"] = status["latestReadyRevisionName"]
+        self.rejection("Revision is not fully ready")
+        self.assertEqual(len(self.calls), 2)
+
+    def test_wrong_revision_name(self):
+        self.api_revision()["metadata"]["name"] = "other-00063-unt"
+        self.rejection("Revision service linkage mismatch")
+
+    def test_wrong_revision_service_label(self):
+        self.api_revision()["metadata"]["labels"]["serving.knative.dev/service"] = "other"
+        self.rejection("Revision service linkage mismatch")
+
+    def test_revision_not_ready(self):
+        self.api_revision()["status"]["conditions"][0]["status"] = "False"
+        self.rejection("Revision is not Ready")
+
+    def test_revision_identity_mismatch(self):
+        self.api_revision()["spec"]["serviceAccountName"] = collector.SCANNER_IDENTITY
+        self.rejection("Revision identity mismatch")
+
+    def test_bad_revision_digest_never_borrows_requested_tag(self):
+        for digest in (None, "sha256:" + "a" * 64, "api:latest", SECRET,
+                       f"us-central1-docker.pkg.dev/foreign/drts/api@sha256:" + "a" * 64,
+                       f"us-central1-docker.pkg.dev/{collector.PROJECT}/drts/foreign@sha256:" + "a" * 64,
+                       f"us-central1-docker.pkg.dev/{collector.PROJECT}/drts/api@sha256:" + "a" * 63):
+            self.api_revision()["status"]["imageDigest"] = digest
+            with self.subTest(digest=digest):
+                self.rejection("Revision image is not a current-project immutable digest")
+
+    def test_revision_requested_reference_mismatch(self):
+        self.api_revision()["spec"]["containers"][0]["image"] = (
+            f"us-central1-docker.pkg.dev/{collector.PROJECT}/drts/api:different")
+        self.rejection("Revision requested image mismatch")
+
+    def test_revision_container_inventory_mismatch(self):
+        for action in (lambda spec: spec["containers"].clear(),
+                       lambda spec: spec["containers"].append(copy.deepcopy(spec["containers"][0]))):
+            original = copy.deepcopy(self.api_revision()["spec"])
+            action(self.api_revision()["spec"])
+            self.rejection("Revision container inventory mismatch")
+            self.api_revision()["spec"] = original
+
+    def test_explicit_resolved_revision_reference_must_match_status_digest(self):
+        container = self.api_revision()["spec"]["containers"][0]
+        container["image"] = self.api_revision()["status"]["imageDigest"]
+        self.run_collector()
+        self.api_revision()["status"]["imageDigest"] = container["image"][:-64] + "c" * 64
+        self.rejection("Revision resolved digest mismatch")
+
+    def test_scanner_two_container_resolved_digest_inventory(self):
+        revision = self.revisions[self.documents["drts-dev-scanner"]["status"]["latestReadyRevisionName"]]
+        revision["status"]["containerStatuses"] = [
+            {"name": c["name"], "imageDigest": c["image"]} for c in revision["spec"]["containers"]]
+        result = self.run_collector()
+        self.assertEqual(set(result["services"]["drts-dev-scanner"]["images"]), {"gateway", "clamd"})
+        revision["status"]["containerStatuses"].pop()
+        self.rejection("Partial revision container digest inventory")
+
+    def test_duplicate_service_container_does_not_collapse_inventory(self):
+        containers = self.documents["drts-dev-api"]["spec"]["template"]["spec"]["containers"]
+        containers.append(copy.deepcopy(containers[0]))
+        self.rejection("Service container inventory mismatch")
+
+    def test_service_requested_digest_bound_to_actual_revision_digest(self):
+        original = self.api_revision()["status"]["imageDigest"]
+        self.documents["drts-dev-api"]["spec"]["template"]["spec"]["containers"][0]["image"] = original
+        self.api_revision()["spec"]["containers"][0]["image"] = original[:-64] + "d" * 64
+        self.api_revision()["status"]["imageDigest"] = original[:-64] + "d" * 64
+        self.rejection("Service requested digest differs from ready revision")
+
+    def test_actual_unnamed_single_container_inventory_shape(self):
+        self.documents["drts-dev-api"]["spec"]["template"]["spec"]["containers"][0].pop("name")
+        self.api_revision()["spec"]["containers"][0].pop("name")
+        result = self.run_collector()
+        self.assertEqual(set(result["services"]["drts-dev-api"]["images"]), {"0"})
+
+    def test_multi_scanner_immutable_revision_refs_without_legacy_primary_status(self):
+        revision = self.revisions[self.documents["drts-dev-scanner"]["status"]["latestReadyRevisionName"]]
+        revision["status"].pop("imageDigest")
+        result = self.run_collector()
+        self.assertEqual(result["services"]["drts-dev-scanner"]["images"],
+                         {c["name"]: c["image"] for c in revision["spec"]["containers"]})
+        revision["spec"]["containers"][0]["image"] = "gateway:latest"
+        self.rejection("Revision requested image mismatch")
+
+    def test_scanner_secondary_mutable_image_not_accepted(self):
+        revision = self.revisions[self.documents["drts-dev-scanner"]["status"]["latestReadyRevisionName"]]
+        revision["spec"]["containers"][1]["image"] = "clamd:latest"
+        self.rejection("Revision requested image mismatch")
+
+    def test_conflicting_primary_digests_rejected(self):
+        revision = self.api_revision()
+        revision["status"]["containerStatuses"] = [{"name": "app", "imageDigest":
+            revision["status"]["imageDigest"][:-64] + "b" * 64}]
+        self.rejection("Conflicting revision digests")
+
+    def test_partial_revision_read_does_not_create_complete_snapshot(self):
+        original_run = self.external_run
+        def fail(command, **kwargs):
+            if command[2] == "revisions":
+                raise subprocess.CalledProcessError(1, command, stderr=SECRET)
+            return original_run(command, **kwargs)
+        with patch.object(collector.subprocess, "run", fail):
+            with self.assertRaisesRegex(ValueError, "Control-plane read failed") as caught:
+                collector.collect(SHA, DEFINITION)
+        self.assertNotIn(SECRET, str(caught.exception))
+        self.assertEqual(len(self.calls), 2)
 
     def test_workflow_manual_immutable_existing_wif_and_full_ci_contract(self):
         text = (ROOT / ".github/workflows/ci-integ.yml").read_text()

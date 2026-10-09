@@ -46,10 +46,15 @@ def full_sha(value):
     return value
 
 
-def read_json(service, verb):
+def read_json(service, verb, revision=None):
     require(service in SERVICES and verb in ("describe", "get-iam-policy"),
             "Read command is outside fixed inventory")
-    command = ["gcloud", "run", "services", verb, service, "--project", PROJECT,
+    if revision is not None:
+        require(verb == "describe" and isinstance(revision, str) and
+                re.fullmatch(re.escape(service) + r"-[0-9]{5}-[a-z0-9]{3}", revision),
+                "Revision read is outside fixed service namespace")
+    command = ["gcloud", "run", "revisions" if revision is not None else "services",
+               verb, revision if revision is not None else service, "--project", PROJECT,
                "--region", REGION, "--format=json", "--quiet"]
     try:
         result = subprocess.run(command, capture_output=True, text=True,
@@ -81,7 +86,8 @@ def service_view(name, value):
     require(any(c.get("type") == "Ready" and c.get("status") == "True"
                 for c in status.get("conditions", [])), "Service is not Ready")
     revision = status.get("latestReadyRevisionName")
-    require(isinstance(revision, str) and revision.startswith(name + "-")
+    require(isinstance(revision, str) and
+            re.fullmatch(re.escape(name) + r"-[0-9]{5}-[a-z0-9]{3}", revision)
             and revision == status.get("latestCreatedRevisionName"), "Revision is not fully ready")
     traffic = status.get("traffic", [])
     require(traffic and all(t.get("revisionName") == revision for t in traffic)
@@ -92,12 +98,66 @@ def service_view(name, value):
     expected_identity = SCANNER_IDENTITY if name == "drts-dev-scanner" else RUNTIME
     require(spec.get("serviceAccountName") == expected_identity, "Unexpected service identity")
     containers = spec.get("containers", [])
+    names = [c.get("name", str(i)) for i, c in enumerate(containers)]
+    require(len(containers) == (2 if name == "drts-dev-scanner" else 1) and
+            len(set(names)) == len(names), "Service container inventory mismatch")
     require(containers and all(isinstance(c.get("image"), str) and
             re.fullmatch(r"us-central1-docker\.pkg\.dev/" + PROJECT +
-                         r"/drts/[a-z0-9-]+@sha256:[0-9a-f]{64}", c["image"])
-            for c in containers), "Image is not a current-project immutable digest")
+                         r"/drts/[a-z0-9-]+(?:@sha256:[0-9a-f]{64}|:[a-zA-Z0-9_.-]+)", c["image"])
+            for c in containers), "Requested image is outside current project")
     return {"service": name, "ready_revision": revision, "identity": expected_identity,
-            "images": {c.get("name", str(i)): c["image"] for i, c in enumerate(containers)}}
+            "requested_images": {c.get("name", str(i)): c["image"] for i, c in enumerate(containers)}}
+
+
+def revision_images(view, value):
+    metadata = value.get("metadata", {})
+    require(metadata.get("name") == view["ready_revision"] and
+            metadata.get("labels", {}).get("serving.knative.dev/service") == view["service"],
+            "Revision service linkage mismatch")
+    status = value.get("status", {})
+    require(any(c.get("type") == "Ready" and c.get("status") == "True"
+                for c in status.get("conditions", [])), "Revision is not Ready")
+    spec = value.get("spec", {})
+    require(spec.get("serviceAccountName") == view["identity"], "Revision identity mismatch")
+    containers = spec.get("containers", [])
+    names = [c.get("name", str(i)) for i, c in enumerate(containers)]
+    require(len(names) == len(set(names)) and set(names) == set(view["requested_images"]),
+            "Revision container inventory mismatch")
+    statuses = status.get("containerStatuses")
+    resolved = {}
+    if statuses is not None:
+        require(isinstance(statuses, list) and len(statuses) == len(names) and
+                len({c.get("name") for c in statuses}) == len(names) and
+                {c.get("name") for c in statuses} == set(names), "Partial revision container digest inventory")
+        resolved = {c["name"]: c.get("imageDigest") for c in statuses}
+    images = {}
+    for i, container in enumerate(containers):
+        name = names[i]
+        requested = view["requested_images"][name]
+        repository = re.split(r"[@:]", requested, maxsplit=1)[0]
+        revision_reference = container.get("image")
+        require(isinstance(revision_reference, str) and
+                re.split(r"[@:]", revision_reference, maxsplit=1)[0] == repository and
+                (revision_reference == requested or
+                 re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", revision_reference)),
+                "Revision requested image mismatch")
+        # Multi-container revisions may expose digests in the actual revision's
+        # immutable container references instead of the legacy primary status field.
+        fallback = status.get("imageDigest") if i == 0 else revision_reference
+        if i == 0 and fallback is None and len(containers) > 1:
+            fallback = revision_reference
+        digest = resolved.get(name, fallback)
+        if i == 0 and resolved and status.get("imageDigest") is not None:
+            require(digest == status["imageDigest"], "Conflicting revision digests")
+        require(isinstance(digest, str) and
+                re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", digest),
+                "Revision image is not a current-project immutable digest")
+        if "@sha256:" in revision_reference:
+            require(digest == revision_reference, "Revision resolved digest mismatch")
+        if "@sha256:" in requested:
+            require(digest == requested, "Service requested digest differs from ready revision")
+        images[name] = digest
+    return images
 
 
 def collect(expected_runtime_sha, definition_sha):
@@ -121,6 +181,7 @@ def collect(expected_runtime_sha, definition_sha):
             require(policy == [{"role": "roles/run.invoker", "members": sorted([
                 "serviceAccount:" + RUNTIME, "serviceAccount:" + DEPLOYER])}],
                     "Scanner invokers changed")
+        view["images"] = revision_images(view, read_json(name, "describe", view["ready_revision"]))
         view["bindings"] = policy
         snapshots[name] = view
         raw[name] = value
@@ -162,7 +223,7 @@ def collect(expected_runtime_sha, definition_sha):
     return {"schema": "dev-readonly-cloud-metadata-v1", "observed_at": datetime.datetime.now(
                 datetime.timezone.utc).isoformat(), "definition_sha": definition_sha,
             "project": PROJECT, "region": REGION, "services": snapshots,
-            "read_commands": len(SERVICES) * 2, "product_http_invocations": 0,
+            "read_commands": len(SERVICES) * 3, "product_http_invocations": 0,
             "mutations": 0, "product_acceptance": False}
 
 
@@ -179,7 +240,7 @@ def main():
         raise SystemExit(1) from None
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
-    print("Fixed inventory metadata collected: 18 reads, 0 mutations, 0 product HTTP; not product acceptance.")
+    print("Fixed inventory metadata collected: 27 reads, 0 mutations, 0 product HTTP; not product acceptance.")
 
 
 if __name__ == "__main__":
