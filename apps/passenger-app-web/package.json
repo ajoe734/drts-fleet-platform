@@ -28,6 +28,6 @@
     "@drts/eslint-config": "workspace:*",
     "typescript": "^5.3.3",
     "vitest": "^1.4.0",
-    "eslint": "^8.56.0"
+    "eslint": "^9.39.1"
   }
 }
