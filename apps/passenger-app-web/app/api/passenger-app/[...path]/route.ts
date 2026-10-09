@@ -103,7 +103,6 @@ async function applyUpstreamAuth(
 ) {
   if (token) {
     headers.set("authorization", `Bearer ${token}`);
-    return;
   }
   const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   const audience =
@@ -172,21 +171,22 @@ async function forward(
     const refreshHeaders = new Headers({ "Content-Type": "application/json" });
     await applyUpstreamAuth(refreshHeaders, refreshTargetUrl);
     
-    try {
-      const res = await fetch(refreshTargetUrl.toString(), {
-        method: "POST",
-        headers: refreshHeaders,
-        body: JSON.stringify({ refreshToken }),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (data && typeof data.accessToken === "string" && typeof data.refreshToken === "string") {
-        return data as { accessToken: string; refreshToken: string };
+    const res = await fetch(refreshTargetUrl.toString(), {
+      method: "POST",
+      headers: refreshHeaders,
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) {
+      if (res.status >= 500) {
+        throw new Error("Upstream server error");
       }
       return null;
-    } catch {
-      return null;
     }
+    const data = await res.json();
+    if (data && typeof data.accessToken === "string" && typeof data.refreshToken === "string") {
+      return data as { accessToken: string; refreshToken: string };
+    }
+    return null;
   }
 
   // handle explicit refresh
@@ -197,20 +197,28 @@ async function forward(
       resp.cookies.delete("pax_refresh");
       return withSecurityHeaders(resp);
     }
-    const data = await doRefresh();
-    if (data) {
-      const resp = NextResponse.json({ success: true }, { status: 200 });
-      const opts = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax" as const,
-        path: "/",
-      };
-      resp.cookies.set("pax_session", data.accessToken, opts);
-      resp.cookies.set("pax_refresh", data.refreshToken, opts);
-      return withSecurityHeaders(resp);
-    } else {
-      const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+    try {
+      const data = await doRefresh();
+      if (data) {
+        const resp = NextResponse.json({ success: true }, { status: 200 });
+        const opts = {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax" as const,
+          path: "/",
+        };
+        resp.cookies.set("pax_session", data.accessToken, opts);
+        resp.cookies.set("pax_refresh", data.refreshToken, opts);
+        return withSecurityHeaders(resp);
+      } else {
+        const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+        resp.cookies.delete("pax_session");
+        resp.cookies.delete("pax_refresh");
+        return withSecurityHeaders(resp);
+      }
+    } catch (e) {
+      console.error("EXPLICIT REFRESH ERROR:", e);
+      const resp = NextResponse.json({ error: "PASSENGER_AUTHORITY_UNAVAILABLE" }, { status: 503 });
       resp.cookies.delete("pax_session");
       resp.cookies.delete("pax_refresh");
       return withSecurityHeaders(resp);
@@ -219,14 +227,14 @@ async function forward(
 
   const targetUrl = buildTargetUrl(request, path);
 
-  let bodyBuffer: ArrayBuffer | null = null;
+  let bodyData: BodyInit | null = null;
   if (!["GET", "HEAD"].includes(method)) {
-    bodyBuffer = await request.arrayBuffer();
+    bodyData = await request.arrayBuffer();
   }
   
   // handle logout specific body
   if (fullPath === "auth/logout" && method === "POST") {
-    bodyBuffer = new TextEncoder().encode(JSON.stringify({ refreshToken }));
+    bodyData = JSON.stringify({ refreshToken });
   }
 
   const buildInit = async (currentToken: string | undefined): Promise<RequestInit> => {
@@ -241,7 +249,7 @@ async function forward(
       cache: "no-store",
       redirect: "manual",
     };
-    if (bodyBuffer) init.body = bodyBuffer;
+    if (bodyData) init.body = bodyData;
     return init;
   };
 
@@ -324,7 +332,8 @@ async function forward(
     }
 
     return nextResponse;
-  } catch {
+  } catch (e) {
+    console.error("BFF ERROR:", e);
     const resp = NextResponse.json(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
       { status: 503 }
