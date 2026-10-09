@@ -204,3 +204,58 @@ Execution evidence:
 | `operational_harness_real_document_bytes_and_receipts` | Pending. Requires real scanner and storage in hosted environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
 | `operational_harness_exact_sha_review_ci_merge` | Pending. | Needs Codex review of replacement candidate SHA, green hosted CI, and normal merge. |
 | `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run post-merge, plus original 44 findings/134 capabilities/C125 supply and case-cross roles/native/external/manual/same release gates. |
+
+## Tenth Review Resolution — Real Cold-Readiness Bound Alignment (2026-10-09)
+
+### 1. Historical Review & Predecessor Provenance
+Predecessor candidate `1c73331babbf14a5b1fe0f56001685a6636aea27` (generation `896f73bf4b974c70918e8cdcbc5b3d8a`) was reviewed by independent reviewer Codex and received an APPROVE verdict. All 89 socket-free unit tests passed, scoped ESLint passed with 0 warnings, diff hygiene clean (0 trailing whitespace), all 3 external socket-free probes passed (0 sockets), commit trailers passed in CI, matching green CI across all jobs, and merged normally into `dev` at commit `8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7` (PR #2453).
+
+### 2. Live Runtime Observation & Finding R10/P1 REOPEN
+Operator authorized immutable deployment of `8d7e14eaa` in shared_dev run `37864425192`:
+- Contract tests passed (14/14).
+- Operational tests resulted in 15 passed, 1 failed, 0 skipped, 0 flaky.
+- Six genuine 327-byte PDF lifecycles passed completely (intent 201 -> PUT 200 clean receipt -> confirm 201 -> download 200 readback, SHA256 `4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784`, MIME `application/pdf`), proving the native GCS client fix, storage rails, MIME handling, and product integration work in real dev environment.
+- The sole failing test was `fleet-submit-read-withdraw-resubmit` at `tests/e2e/operational-document-upload.ts:252` with error: `Scanner must eventually process the bytes and return clean receipt within deadline`.
+- Cold timing evidence (`cold-readiness-bound-diagnosis.json`, `api-put-window-logs.json`, `scanner-start-window-logs.json`):
+  - Submission `3da4b80e-1ac8-434a-957e-4d878a6f2185` made exactly 15 same-object PUT attempts, all returning 503 `DOCUMENT_SCANNER_UNAVAILABLE`, from 2026-10-09T00:50:58.452330Z to 2026-10-09T00:51:19.715281Z (~21.26s).
+  - Scanner Cloud Run instance `default-00045` cold-started at 2026-10-09T00:50:58.890533Z, fetched fresh ClamAV signatures (28136 -> 28147), started clamd at 2026-10-09T00:51:08.598474Z, logged clamd ready at 2026-10-09T00:51:24.882Z, and returned the first real 200 clean scan at 2026-10-09T00:51:26.297Z (~27.4s after first PUT / cold start).
+  - Old harness bounds (`totalBudget = 30000ms`, `maxAttempts = 15`) were too tight to observe genuine cold engine initialization (~27-28s), while the production scanner request timeout is configured for 60000ms.
+  - Subsequent admin journey document required 3 PUTs with two transient 503s before returning clean receipt, confirming error classification and retry logic are sound.
+- Canonical finding R10/P1 REOPEN recorded by Codex at 2026-10-09T01:06:30Z.
+
+### 3. Approved Minimal Repair Unit
+Modifications restricted strictly to the 3 authorized candidate files:
+1. `tests/e2e/operational-document-upload.ts`:
+   - Aligned finite bounds to `totalBudget = 60000ms` (line 60) and `maxAttempts = 45` (line 207).
+   - Retained strict 503 `DOCUMENT_SCANNER_UNAVAILABLE` classification only, idempotent exact same-byte retry with 1s bounded delay, native AbortSignal cancellation, manual redirect, and 1MiB bounded stream reader.
+2. `tests/unit/operational-document-upload.test.ts`:
+   - Exported `MockServer` and added `put503Delay` mutation support.
+   - Added positive cold-start observation test (`succeeds after cold-start pending observation (>15 attempts, ~400ms overhead + 1s delay) with identical bytes and clean receipt`) with 20 pending 503 responses, 400ms response overhead + 1s delay (~28s elapsed, representing real ~27-28s cold start), verifying 21 PUT attempts with identical 327 bytes and SHA256, clean receipt, confirm, and download readback (25 total calls).
+   - Updated finite pending retry exhaustion test to 45 attempts (verifying exact 47 calls: 1 authority GET + 1 intent POST + 45 PUTs, 0 confirm, 0 download, and terminal rejection).
+   - Updated overall lifecycle budget deadline test to 60s (+1ms).
+   - Updated hanging body reader timeout test to 60s (+1ms).
+   - Maintained all 89 prior regression tests, multi-chunk bounds, security controls, manifest setup, and identity consumer assertions (now 90 total tests passing).
+3. `docs/04-uat/operational-document-upload-harness-20261008.md`:
+   - Updated with complete Tenth Review resolution, dev runtime diagnostic proofs, executed commands, and pending acceptance gates.
+
+### 4. Executed Verification Evidence
+- `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`: EXIT 0, 3 test files / 90 tests passed (46 document upload, 3 manifest, 41 healthcheck identity).
+- `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts --max-warnings=0`: EXIT 0 (0 errors, 0 warnings).
+- `git diff --check 8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7`: EXIT 0 (clean, 0 trailing whitespace).
+- `git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b`: EXIT 0 (clean, 0 trailing whitespace).
+- Diagnostic mirror cold comparison proof (`.local/fleet-storage-diagnosis-20261008/owner-cold-repair-20261009T012221Z/cold-readiness-proof.json`): EXIT 0, proving legacy 1c helper fails at 15 attempts (~21s) with `Scanner must eventually process the bytes and return clean receipt within deadline` (17 calls, 0 confirm), while repaired helper succeeds after 20 pending attempts (~28s) with 21 identical-byte PUTs and clean receipt / readback (25 calls).
+- `pnpm exec tsc --noEmit -p tsconfig.json --incremental false`: EXIT 2 due strictly to external missing SDK dependency (`@aws-sdk/client-s3`), zero candidate-owned compiler errors.
+
+### 5. Compliance Evidence Table
+
+| Finding / Acceptance Item | Source Reference & Modified Location | Old Reproduction -> Fixed Result | Command, Exit Code, Version & Evidence Location | Untested Limits & Concrete Constraints |
+|---------------------------|-------------------------------------|----------------------------------|--------------------------------------------------|---------------------------------------|
+| **R10/P1 Cold-Readiness Bound** | `tests/e2e/operational-document-upload.ts` (lines 60, 207) | 15 attempts (~21s) exited before cold readiness (27-28s) -> 45 attempts / 60000ms covers cold start | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0, 46/46 passed | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
+| **P1 Diff Hygiene** | Candidate 3 files under worktree | 0 trailing whitespace | `git diff --check 8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7`, EXIT 0 | None. |
+| **P2 Cold Observation Regression** | `tests/unit/operational-document-upload.test.ts` (line 608) | Added positive cold-start fixture with 20 pending 503s + 400ms overhead + 1s delay | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0 | Socket-free unit/manifest verification. |
+| **P2 Pending Exhaustion to 45** | `tests/unit/operational-document-upload.test.ts` (line 648) | Updated from 15 to 45 attempts (exact 47 calls, 0 confirm/download, identical bytes) | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0 | Socket-free unit verification. |
+| **P2 Deadline & Signal Bounds** | `tests/unit/operational-document-upload.test.ts` (lines 679, 690) | Updated total budget and hanging body timeouts from 30001ms to 60001ms | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0 | Socket-free unit verification. |
+| **Legacy Proof Generation** | `.local/fleet-storage-diagnosis-20261008/owner-cold-repair-20261009T012221Z/cold-comparison.test.ts` | 1c fails at 15 attempts (~21s), new helper passes after 20 pending attempts (~28s) | `pnpm exec vitest run -c .../vitest.config.ts`, EXIT 0, proof in `cold-readiness-proof.json` | Reuses published 1c helper and new helper without duplication. |
+| `operational_harness_real_document_bytes_and_receipts` | Shared dev run 37864425192 (6 receipts verified) | Pending full 16/16 run | Live hosted shared_dev deployment post-merge | VM restriction prohibits running product on VM. |
+| `operational_harness_exact_sha_review_ci_merge` | Task board lifecycle | Pending fresh exact-SHA review by Codex, CI, and normal merge | `ai-status.sh handoff` | Awaiting independent reviewer review. |
+| `shared_dev_full_16_operational_cases_zero_skips` | Live acceptance gate | Pending full 16/16 operational cases | Operator authorized fresh run post-merge | Requires Operator immutable deployment. |
