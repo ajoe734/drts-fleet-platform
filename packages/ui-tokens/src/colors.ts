@@ -12,6 +12,7 @@ export interface ToneRamp {
   readonly fg: string;
   readonly bg: string;
   readonly border: string;
+  readonly headerBg?: string;
 }
 
 export const CORE_SURFACES = {
