@@ -52,6 +52,9 @@ export class PassengerClient implements PassengerViewModel {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        this.sessionStatus = { isActive: false };
+      }
       throw new Error(`API error: ${response.status}`);
     }
 
@@ -73,16 +76,24 @@ export class PassengerClient implements PassengerViewModel {
   }
 
   async login(request: import("./types.js").LoginRequest): Promise<import("./types.js").LoginResponse> {
-    return this.request<import("./types.js").LoginResponse>("/api/passenger-app/auth/login", {
+    const res = await this.request<import("./types.js").LoginResponse>("/api/passenger-app/auth/login", {
       method: "POST",
       body: JSON.stringify(request)
     });
+    if (res.account) {
+      this.sessionStatus = { isActive: true, account: res.account };
+    }
+    return res;
   }
 
   async logout(): Promise<void> {
-    return this.request<void>("/api/passenger-app/auth/logout", {
-      method: "POST"
-    });
+    try {
+      await this.request<void>("/api/passenger-app/auth/logout", {
+        method: "POST"
+      });
+    } finally {
+      this.sessionStatus = { isActive: false };
+    }
   }
 
   async refreshSession(): Promise<void> {

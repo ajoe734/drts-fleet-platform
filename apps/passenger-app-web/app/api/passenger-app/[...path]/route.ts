@@ -90,7 +90,7 @@ async function mintMetadataIdentityToken(audience: string) {
       cache: "no-store",
       headers: { "Metadata-Flavor": "Google" },
     });
-    return response.ok ? response.text() : null;
+    return response.ok ? await response.text() : null;
   } catch {
     return null;
   }
@@ -144,6 +144,11 @@ function withSecurityHeaders(response: NextResponse) {
   return response;
 }
 
+function deleteCookies(resp: NextResponse) {
+  resp.cookies.delete("pax_session");
+  resp.cookies.delete("pax_refresh");
+}
+
 async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
@@ -162,7 +167,7 @@ async function forward(
   }
 
   let token = request.cookies.get("pax_session")?.value;
-  const refreshToken = request.cookies.get("pax_refresh")?.value;
+  let refreshToken = request.cookies.get("pax_refresh")?.value;
 
   const fullPath = path.join("/");
 
@@ -177,68 +182,51 @@ async function forward(
       body: JSON.stringify({ refreshToken }),
     });
     if (!res.ok) {
-      if (res.status >= 500) {
-        throw new Error("Upstream server error");
-      }
-      return null;
+      throw new Error(`Upstream server error: ${res.status}`);
     }
     const data = await res.json();
-    if (data && typeof data.accessToken === "string" && typeof data.refreshToken === "string") {
+    if (data && data.accessToken && data.refreshToken && typeof data.accessToken === "string" && typeof data.refreshToken === "string" && data.accessToken !== "" && data.refreshToken !== "") {
       return data as { accessToken: string; refreshToken: string };
     }
-    return null;
+    throw new Error("Invalid tokens received");
   }
 
   // handle explicit refresh
   if (fullPath === "auth/refresh" && method === "POST") {
     if (!refreshToken) {
       const resp = NextResponse.json({ error: "NO_REFRESH_TOKEN" }, { status: 401 });
-      resp.cookies.delete("pax_session");
-      resp.cookies.delete("pax_refresh");
+      deleteCookies(resp);
       return withSecurityHeaders(resp);
     }
     try {
       const data = await doRefresh();
-      if (data) {
-        const resp = NextResponse.json({ success: true }, { status: 200 });
-        const opts = {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax" as const,
-          path: "/",
-        };
-        resp.cookies.set("pax_session", data.accessToken, opts);
-        resp.cookies.set("pax_refresh", data.refreshToken, opts);
-        return withSecurityHeaders(resp);
-      } else {
-        const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
-        resp.cookies.delete("pax_session");
-        resp.cookies.delete("pax_refresh");
-        return withSecurityHeaders(resp);
-      }
+      const resp = NextResponse.json({ success: true }, { status: 200 });
+      const opts = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax" as const,
+        path: "/",
+      };
+      resp.cookies.set("pax_session", data.accessToken, opts);
+      resp.cookies.set("pax_refresh", data.refreshToken, opts);
+      return withSecurityHeaders(resp);
     } catch (e) {
       console.error("EXPLICIT REFRESH ERROR:", e);
-      const resp = NextResponse.json({ error: "PASSENGER_AUTHORITY_UNAVAILABLE" }, { status: 503 });
-      resp.cookies.delete("pax_session");
-      resp.cookies.delete("pax_refresh");
+      const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+      deleteCookies(resp);
       return withSecurityHeaders(resp);
     }
   }
 
   const targetUrl = buildTargetUrl(request, path);
 
-  let bodyData: BodyInit | null = null;
+  let initialBodyData: BodyInit | null = null;
   if (!["GET", "HEAD"].includes(method)) {
-    bodyData = await request.arrayBuffer();
+    initialBodyData = await request.arrayBuffer();
   }
   
-  // handle logout specific body
-  if (fullPath === "auth/logout" && method === "POST") {
-    bodyData = JSON.stringify({ refreshToken });
-  }
-
-  const buildInit = async (currentToken: string | undefined): Promise<RequestInit> => {
-    let headers = copyHeaders(request.headers);
+  const buildInit = async (currentToken: string | undefined, currentRefresh: string | undefined): Promise<RequestInit> => {
+    const headers = copyHeaders(request.headers);
     if (fullPath === "auth/logout") {
       headers.set("Content-Type", "application/json");
     }
@@ -249,39 +237,42 @@ async function forward(
       cache: "no-store",
       redirect: "manual",
     };
-    if (bodyData) init.body = bodyData;
+    if (fullPath === "auth/logout" && method === "POST") {
+      init.body = JSON.stringify({ refreshToken: currentRefresh });
+    } else if (initialBodyData) {
+      init.body = initialBodyData;
+    }
     return init;
   };
 
   try {
-    let init = await buildInit(token);
+    let init = await buildInit(token, refreshToken);
     let upstream = await fetch(targetUrl.toString(), init);
 
     let refreshedTokens: { accessToken: string; refreshToken: string } | null = null;
     let didClearTokens = false;
 
-    if (upstream.status === 401 && token && refreshToken) {
-      refreshedTokens = await doRefresh();
-      if (refreshedTokens) {
+    if (upstream.status === 401 && refreshToken) {
+      try {
+        refreshedTokens = await doRefresh();
         token = refreshedTokens.accessToken;
-        init = await buildInit(token);
+        refreshToken = refreshedTokens.refreshToken;
+        init = await buildInit(token, refreshToken);
         upstream = await fetch(targetUrl.toString(), init);
-      } else {
+      } catch (e) {
         didClearTokens = true;
       }
     }
 
     if (fullPath === "auth/logout" && method === "POST") {
-      if (!upstream.ok && upstream.status !== 401) {
+      if (!upstream.ok) {
          // Propagate failure for logout
          const resp = NextResponse.json({ error: "LOGOUT_FAILED" }, { status: upstream.status });
-         resp.cookies.delete("pax_session");
-         resp.cookies.delete("pax_refresh");
+         deleteCookies(resp);
          return withSecurityHeaders(resp);
       }
       const resp = NextResponse.json({ success: true }, { status: 200 });
-      resp.cookies.delete("pax_session");
-      resp.cookies.delete("pax_refresh");
+      deleteCookies(resp);
       return withSecurityHeaders(resp);
     }
 
@@ -327,8 +318,7 @@ async function forward(
       nextResponse.cookies.set("pax_session", refreshedTokens.accessToken, opts);
       nextResponse.cookies.set("pax_refresh", refreshedTokens.refreshToken, opts);
     } else if (didClearTokens) {
-      nextResponse.cookies.delete("pax_session");
-      nextResponse.cookies.delete("pax_refresh");
+      deleteCookies(nextResponse);
     }
 
     return nextResponse;
@@ -338,10 +328,10 @@ async function forward(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
       { status: 503 }
     );
-    if (fullPath === "auth/refresh" || fullPath === "auth/logout") {
-       resp.cookies.delete("pax_session");
-       resp.cookies.delete("pax_refresh");
-    }
+    // As per R2, clear both cookies on network/parse/invalid-token failures
+    // which includes any unhandled error inside doRefresh which bubbles up here
+    // IF it was triggered during an auto-refresh or explicitly
+    deleteCookies(resp);
     return withSecurityHeaders(resp);
   }
 }

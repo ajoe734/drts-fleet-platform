@@ -33,10 +33,10 @@ describe("Passenger App BFF", () => {
 
   it("adds security headers on success and error", async () => {
     // success
-    let req = new NextRequest(
+    const req = new NextRequest(
       "http://localhost/api/passenger-app/fares/quote",
     );
-    let res = await GET(req, {
+    const res = await GET(req, {
       params: Promise.resolve({ path: ["fares", "quote"] }),
     });
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
@@ -154,11 +154,7 @@ describe("Passenger App BFF", () => {
       expect(accCookie?.value).toBe(""); // cleared
       expect(refCookie?.value).toBe(""); // cleared
       
-      if (sc === null || sc.status === 503) {
-        expect(res.status).toBe(503);
-      } else {
-        expect(res.status).toBe(401);
-      }
+      expect(res.status).toBe(401);
     }
   });
 
@@ -169,10 +165,20 @@ describe("Passenger App BFF", () => {
       if (url.includes("metadata")) return { ok: true, text: async () => "token" };
       callCount++;
       if (url.includes("auth/logout")) {
-        const body = JSON.parse(init.body);
-        expect(body.refreshToken).toBe("stored-ref");
-        if (callCount === 1) return { ok: false, status: 401, headers: new Headers() };
-        if (callCount === 3) return { ok: true, status: 200, headers: new Headers() };
+        let body;
+        try {
+          body = typeof init.body === "string" ? JSON.parse(init.body) : JSON.parse(new TextDecoder().decode(init.body));
+        } catch {
+          body = {};
+        }
+        if (callCount === 1) {
+          expect(body.refreshToken).toBe("stored-ref");
+          return { ok: false, status: 401, headers: new Headers() };
+        }
+        if (callCount === 3) {
+          expect(body.refreshToken).toBe("new-ref");
+          return { ok: true, status: 200, headers: new Headers() };
+        }
       }
       if (url.includes("auth/refresh")) {
         return { ok: true, status: 200, json: async () => ({ accessToken: "new-acc", refreshToken: "new-ref" }), headers: new Headers() };
@@ -184,11 +190,9 @@ describe("Passenger App BFF", () => {
       headers: { Origin: "http://localhost", Cookie: "pax_session=expired-access; pax_refresh=stored-ref" }
     });
     
-    // First it hits 401 on logout, then refresh kicks in, then retries logout
     const res = await POST(req, { params: Promise.resolve({ path: ["auth", "logout"] }) });
     expect(res.status).toBe(200);
     
-    // Cookies must be cleared on successful logout
     const accCookie = res.cookies.get("pax_session");
     expect(accCookie?.value).toBe("");
   });

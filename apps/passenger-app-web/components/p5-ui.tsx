@@ -225,15 +225,19 @@ export function P5Card({
 }
 
 export function P5Map({
-  state = "fresh",
+  state = "missing",
   pickupAddress,
   updateNotice,
   routeSvgPath,
+  carPosition,
+  pinPosition,
 }: {
   state?: "fresh" | "stale" | "missing";
   pickupAddress?: string;
   updateNotice?: string;
   routeSvgPath?: string;
+  carPosition?: { left?: number | string; top?: number | string; right?: number | string; bottom?: number | string };
+  pinPosition?: { left?: number | string; top?: number | string; right?: number | string; bottom?: number | string };
 }) {
   return (
     <div
@@ -242,7 +246,7 @@ export function P5Map({
         borderRadius: 14,
         overflow: "hidden",
         border: "1px solid " + P5.line,
-        background: "linear-gradient(140deg,#DCE9F5,#EDF3F8)",
+        background: `linear-gradient(140deg, ${P5.brandBg}, ${STATUS_TONES.neutral.light.bg})`,
         height: 150,
         position: "relative",
         flexShrink: 0,
@@ -250,7 +254,7 @@ export function P5Map({
     >
       {state !== "missing" && (
         <>
-          {routeSvgPath && (
+          {routeSvgPath && carPosition && pinPosition && (
             <svg
               style={{
                 position: "absolute",
@@ -269,35 +273,37 @@ export function P5Map({
               />
             </svg>
           )}
-          <div
-            style={{
-              position: "absolute",
-              left: 38,
-              top: 108,
-              width: 26,
-              height: 26,
-              borderRadius: 13,
-              background: P5.brand,
-              border: "3px solid #fff",
-              boxShadow: "0 2px 8px rgba(11,92,171,.4)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff",
-            }}
-          >
-            <P5Icon name="car" size={13} />
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              right: 64,
-              top: 30,
-              color: P5.danger,
-            }}
-          >
-            <P5Icon name="pin" size={24} />
-          </div>
+          {carPosition && (
+            <div
+              style={{
+                position: "absolute",
+                ...carPosition,
+                width: 26,
+                height: 26,
+                borderRadius: 13,
+                background: P5.brand,
+                border: `3px solid ${P5.surface}`,
+                boxShadow: "0 2px 8px rgba(0,0,0,.2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: P5.surface,
+              }}
+            >
+              <P5Icon name="car" size={13} />
+            </div>
+          )}
+          {pinPosition && (
+            <div
+              style={{
+                position: "absolute",
+                ...pinPosition,
+                color: P5.danger,
+              }}
+            >
+              <P5Icon name="pin" size={24} />
+            </div>
+          )}
         </>
       )}
       {state === "missing" && (
@@ -406,6 +412,7 @@ export function P5VehicleCard({
   carModel,
   carDetails,
   registration,
+  registrationValid,
   tag,
 }: {
   rating?: "rated" | "new";
@@ -418,6 +425,7 @@ export function P5VehicleCard({
   carModel?: string;
   carDetails?: string;
   registration?: string;
+  registrationValid?: boolean;
   tag?: ReactNode;
 }) {
   return (
@@ -508,7 +516,7 @@ export function P5VehicleCard({
             }}
           >
             <span style={{ fontSize: 14, fontWeight: 700 }}>{driver || "未知"}</span>
-            {registration && (
+            {registrationValid === true && (
               <span
                 style={{
                   display: "inline-flex",
@@ -525,6 +533,25 @@ export function P5VehicleCard({
               >
                 <P5Icon name="shield" size={10} />
                 執登有效
+              </span>
+            )}
+            {registrationValid === false && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  color: P5.danger,
+                  background: P5.dangerBg,
+                  border: "1px solid " + P5.dangerBd,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                }}
+              >
+                <P5Icon name="warn" size={10} />
+                執登已失效
               </span>
             )}
           </div>
@@ -551,13 +578,13 @@ export function P5VehicleCard({
               >
                 <span
                   style={{
-                    color: "#C7860B",
+                    color: STATUS_TONES.warning.light.fg,
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 3,
                   }}
                 >
-                  <P5Icon name="star" size={13} style={{ fill: "#C7860B" }} />
+                  <P5Icon name="star" size={13} style={{ fill: STATUS_TONES.warning.light.fg }} />
                   <b style={{ fontSize: 15, color: P5.ink }}>{ratingScore}</b>
                 </span>
                 <span style={{ fontSize: 11, color: P5.mut }}>{ratingCount || 0} 則評價</span>

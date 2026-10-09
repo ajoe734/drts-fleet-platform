@@ -297,6 +297,10 @@ jobs:
         run: pnpm run lint
       - name: Reject cross-app relative imports
         run: node tools/ci/check-cross-app-imports.mjs
+      - name: Verify Passenger Client Portability & Export
+        run: |
+          pnpm --filter @drts/passenger-client run build
+          test -f packages/passenger-client/dist/index.d.ts
       - name: Typecheck
         run: pnpm run typecheck
       - name: Apply migrations
