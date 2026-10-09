@@ -410,6 +410,8 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         desc = {
             "status": "ok",
             "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
                 "generation": "1728464600123456",
                 "metageneration": "1",
                 "size": 327,
@@ -432,6 +434,8 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         desc = {
             "status": "ok",
             "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
                 "generation": "1728464600123456",
                 "metageneration": "1",
                 "size": 327,
@@ -455,6 +459,8 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         desc = {
             "status": "ok",
             "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
                 "generation": "not-numeric",
                 "metageneration": "1",
                 "size": 327,
@@ -580,6 +586,8 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         desc = {
             "status": "ok",
             "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
                 "generation": "1728464600123456",
                 "size": 327,
                 "contentType": "application/pdf",
@@ -602,6 +610,8 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         desc = {
             "status": "ok",
             "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
                 "generation": "1728464600123456",
                 "metageneration": "1",
                 "size": 327,
@@ -624,6 +634,8 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         desc = {
             "status": "ok",
             "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
                 "generation": "1728464600123456",
                 "metageneration": "1",
                 "size": 327,
@@ -656,8 +668,9 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         self.assertIn("Pre-existing absence", str(ctx.exception))
 
         valid_receipt = [{"key": target["key"], "bucket": cleanup.BUCKET, "status": "deleted", "generation": "1728464600123456", "verified_absent": True}]
-        res = cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=valid_receipt)
-        self.assertEqual(res["status"], "already_deleted_with_receipt")
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=valid_receipt)
+        self.assertIn("authoritative authenticated", str(ctx.exception))
 
     def test_all_preflights_before_mutation_halts_db_on_gcs_failure(self):
         trace = []
@@ -672,7 +685,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
 
         def bad_first_gcs(action, bucket, key, generation=None):
             trace.append("GCS " + action)
-            return {"status": "ok", "metadata": {"generation": "123", "metageneration": "1", "size": 327, "contentType": "text/plain", "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
+            return {"status": "ok", "metadata": {"bucket": cleanup.BUCKET, "name": key, "generation": "123", "metageneration": "1", "size": 327, "contentType": "text/plain", "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
 
         with self.assertRaises(ValueError) as ctx:
             cleanup.run_cleanup_pipeline(inv, mode="dry-run", gcs_runner=bad_first_gcs, db_runner=good_db)

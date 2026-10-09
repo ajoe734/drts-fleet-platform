@@ -170,6 +170,11 @@ jobs:
           fi
           echo "DEV WIF pre-auth identity and project constraints verified."
 
+      - name: Enforce mandatory Operator lane and CI/merge proofs (Disable hosted auth)
+        run: |
+          echo "::error::Hosted authenticated read lane is explicitly disabled. Fenced Operator-only runtime, no-overlap guards, private connectivity, and immutable CI/merge proofs are not yet implemented. Supplying source-only safe planning." >&2
+          exit 1
+
       - name: Authenticate to GCP via DEV WIF
         uses: google-github-actions/auth@v2
         with:

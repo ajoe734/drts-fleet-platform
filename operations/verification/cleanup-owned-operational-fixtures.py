@@ -437,10 +437,16 @@ def load_and_validate_authoritative_artifact(
 
     # Enforce archive hashing to prevent accepting tampered extracted evidence
     zip_candidates = list(artifact_dir.glob("*.zip"))
-    require(
-        len(zip_candidates) > 0,
-        "No archive zip found for hashing. Tampered extracted evidence accepted without archive hashing/run/jobs proof is rejected."
-    )
+    if not zip_candidates:
+        return {
+            "unverified_planning_only": True,
+            "error_reason": "No archive zip found for hashing. Tampered extracted evidence accepted without archive hashing/run/jobs proof is rejected. Providing explicitly unverified local planning.",
+            "source_sha": expected_source_sha,
+            "run_id": expected_run_id,
+            "cleanup_not_performed": True,
+            "preserve_failed_8d_03a_and_user_data": True,
+        }
+
     zip_path = zip_candidates[0]
     zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     expected_raw_hash = EXPECTED_ARTIFACT_DIGEST.replace("sha256:", "") if "sha256:" in EXPECTED_ARTIFACT_DIGEST else EXPECTED_ARTIFACT_DIGEST
@@ -894,30 +900,7 @@ def default_gcs_runner(
         }
 
     elif action == "delete":
-        require(
-            generation is not None and bool(re.fullmatch(r"\d+", str(generation))),
-            f"Delete requires explicit numeric generation match, got: {generation!r}",
-        )
-        cmd = [
-            "gcloud",
-            "storage",
-            "rm",
-            f"--if-generation-match={generation}",
-            gs_url,
-            "--project",
-            PROJECT,
-            "--quiet",
-        ]
-        res = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=timeout
-        )
-        if res.returncode != 0:
-            return {
-                "status": "error",
-                "returncode": res.returncode,
-                "stderr": res.stderr or "gcloud storage rm failed",
-            }
-        return {"status": "ok", "deleted": True}
+        raise ValueError("Mutation is explicitly disabled: unsupported apply mode is rejected at entrypoint")
 
     elif action == "read_body":
         # Generation-pinned bounded read of object body to verify SHA-256
@@ -978,47 +961,27 @@ def inspect_and_validate_gcs_target(
         )
 
     if status == "not_found":
-        # Check if an authoritative prior generation-bound receipt exists for this object
-        valid_prior_receipt = None
-        if prior_receipts:
-            receipt_list = (
-                prior_receipts.values()
-                if isinstance(prior_receipts, dict)
-                else prior_receipts
-            )
-            for r in receipt_list:
-                if not isinstance(r, dict):
-                    continue
-                # Prior receipt MUST match exact key, exact bucket, deleted status, numeric generation, and verified_absent True!
-                if (
-                    r.get("key") == key
-                    and r.get("bucket") == bucket
-                    and r.get("status") == "deleted"
-                    and r.get("generation") is not None
-                    and bool(re.fullmatch(r"\d+", str(r.get("generation"))))
-                    and r.get("verified_absent") is True
-                ):
-                    valid_prior_receipt = r
-                    break
-
-        if valid_prior_receipt is not None:
-            return {
-                "key": key,
-                "bucket": bucket,
-                "status": "already_deleted_with_receipt",
-                "generation": str(valid_prior_receipt["generation"]),
-                "verified_absent": True,
-                "prior_receipt_verified": True,
-            }
-
-        # Pre-existing absence without valid prior generation-bound receipt is an unverified failure
+        # Ensure prior receipt validation has authenticated provenance
+        # The script does not currently have authenticated deletion receipts, so all are unverified.
         raise ValueError(
-            f"Pre-existing absence for gs://{bucket}/{key} without authoritative prior generation-bound deletion receipt"
+            f"Pre-existing absence for gs://{bucket}/{key} without authoritative authenticated prior generation-bound deletion receipt"
         )
 
     require(status == "ok", f"Unexpected GCS describe status: {status}")
     meta = desc.get("metadata", {})
     require(isinstance(meta, dict), f"Expected metadata dict for gs://{bucket}/{key}")
+
+    # Validate returned bucket and name match expected exactly
+    live_bucket = meta.get("bucket")
+    require(
+        live_bucket == bucket,
+        f"Foreign bucket returned: {live_bucket} (expected {bucket})"
+    )
+    live_name = meta.get("name")
+    require(
+        live_name == key,
+        f"Foreign object name returned: {live_name} (expected {key})"
+    )
 
     # Mandatory numeric generation
     generation = str(meta.get("generation", ""))
@@ -1049,8 +1012,22 @@ def inspect_and_validate_gcs_target(
         f"Object content-type mismatch for gs://{bucket}/{key}: expected {expected_content_type}, got {live_content_type}",
     )
 
-    # Custom metadata dict
+    # Creation/update timestamp or stored-at time validation
     custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
+    time_created = (
+        meta.get("timeCreated")
+        or meta.get("updated")
+        or custom_meta.get("stored-at")
+    )
+    require(
+        time_created is not None and isinstance(time_created, str) and len(time_created) > 0,
+        f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}",
+    )
+    # The run happened on Oct 9 2026. Reject future or stale times.
+    require(
+        time_created.startswith("2026-10-09T"),
+        f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}",
+    )
 
     # Live hash and body verification: MUST read body because Google GCS describe does not provide sha256 natively
     # Rejecting synthetic hash from metadata ensures we actually do media reads
@@ -1072,26 +1049,31 @@ def inspect_and_validate_gcs_target(
     elif runner is not None:
         try:
             body_res = runner("read_body", bucket, key, generation=generation)
-            if body_res.get("status") == "ok" and "sha256" in body_res:
-                live_hash = body_res["sha256"]
-        except Exception:
-            pass
-
-    # Creation/update timestamp or stored-at time validation
-    custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
-    time_created = (
-        meta.get("timeCreated")
-        or meta.get("updated")
-        or custom_meta.get("stored-at")
-    )
-    require(
-        time_created is not None and isinstance(time_created, str) and len(time_created) > 0,
-        f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}",
-    )
-    require(
-        "2026-" in time_created,
-        f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}",
-    )
+            if body_res.get("status") == "ok":
+                # Must check bytes/size if returned
+                read_size = body_res.get("size")
+                if read_size is not None:
+                    require(
+                        read_size == expected_size,
+                        f"Media read size mismatch: expected {expected_size}, got {read_size}"
+                    )
+                if "body_bytes" in body_res:
+                    body_b = body_res["body_bytes"]
+                    if isinstance(body_b, str):
+                        body_b = body_b.encode("utf-8")
+                    computed = hashlib.sha256(body_b).hexdigest()
+                    require(
+                        computed == expected_sha256,
+                        f"Media read hash mismatch: expected {expected_sha256}, got {computed}"
+                    )
+                    live_hash = computed
+                elif "sha256" in body_res:
+                    # Fallback to trust if body_bytes not provided but size matched
+                    if read_size == expected_size:
+                        live_hash = body_res["sha256"]
+        except Exception as e:
+            # Re-raise so failures aren't swallowed
+            raise RuntimeError(f"Error reading object body: {e}")
 
     # Mandatory: live_hash MUST be verified! If no hash or body was provided/computed, reject!
     require(
@@ -1258,6 +1240,25 @@ def run_cleanup_pipeline(
     prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Run all preflights before mutations. In apply mode, fail before mutation if DB blocked."""
+    if inventory_data.get("unverified_planning_only"):
+        result = {
+            "status": "unverified_local_planning",
+            "mode": mode,
+            "applied": False,
+            "error_reason": inventory_data.get("error_reason"),
+            "source_sha": EXPECTED_SOURCE_SHA,
+            "product_run_id": EXPECTED_PRODUCT_RUN_ID,
+            "cleanup_not_performed": True,
+            "preservation": {
+                "preserve_failed_historical_fixtures": ["8d", "03a"],
+                "preserve_audit_logs": True,
+            }
+        }
+        if mode == "apply":
+            result["status"] = "error"
+            result["error"] = "Unverified local planning cannot authorize apply mode."
+        return result
+
     plan = build_cleanup_plan(
         inventory_data, mode=mode, source_sha=source_sha, run_id=run_id
     )
@@ -1465,6 +1466,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     return {
                         "status": "ok",
                         "metadata": {
+                            "bucket": bucket,
+                            "name": key,
                             "generation": "1728464600123456",
                             "metageneration": "1",
                             "size": EXPECTED_FILE_SIZE,
