@@ -160,8 +160,41 @@ describe("passenger identity linkage and account ownership", () => {
       (await f.service.getMe(f.identity)).account.verifiedEmail,
     ).toBeUndefined();
   });
+  it("rejects a session-shaped identity for an active account with no persisted session", async () => {
+    const f = await signedIn();
+    f.store.sessions.clear();
+    const before = structuredClone([...f.store.logins.values()]);
+    await expect(
+      f.service.linkIdentity(f.identity, "line", "sessionless"),
+    ).rejects.toMatchObject({ code: "unauthorized" });
+    expect([...f.store.logins.values()]).toEqual(before);
+  });
+  it("rejects a different account's session even when the caller switches all account claims", async () => {
+    const f = await signedIn();
+    const other = await signedIn(f, "other-session-owner");
+    await expect(
+      f.service.linkIdentity(
+        {
+          ...f.identity,
+          actorId: other.account.drtsPassengerId,
+          subject: other.account.drtsPassengerId,
+          drtsPassengerId: other.account.drtsPassengerId,
+        },
+        "line",
+        "cross-account",
+      ),
+    ).rejects.toMatchObject({ code: "unauthorized" });
+    expect(await f.store.findIdentity("line", "cross-account")).toBeNull();
+  });
   it("blocks linking with logged-out, expired-access or mismatched subject identities", async () => {
     const f = await signedIn();
+    await expect(
+      f.service.linkIdentity(
+        { ...f.identity, subject: "another-account" },
+        "line",
+        "wrong-subject",
+      ),
+    ).rejects.toMatchObject({ code: "unauthorized" });
     await expect(
       f.service.linkIdentity(
         { ...f.identity, actorId: "other" },
@@ -300,6 +333,53 @@ describe("refresh rotation, replay, logout and expiration", () => {
       success: true,
     });
   });
+  it.each(["reuse-first", "rotation-first"])(
+    "revokes every successor when consumed-token reuse races a successor rotation (%s; unit persistence boundary)",
+    async (order) => {
+      const f = await signedIn();
+      const successor = await f.service.refresh(f.session.refreshToken);
+      const operations =
+        order === "reuse-first"
+          ? [f.session.refreshToken, successor.refreshToken]
+          : [successor.refreshToken, f.session.refreshToken];
+      const results = await Promise.allSettled(
+        operations.map((token) => f.service.refresh(token)),
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          expect(
+            await f.service.authenticateAccessToken(result.value.accessToken),
+          ).toBeNull();
+          await expect(
+            f.service.refresh(result.value.refreshToken),
+          ).rejects.toMatchObject({ code: "invalid_grant" });
+        }
+      }
+      expect([...f.store.sessions.values()].every((s) => s.revokedAt)).toBe(
+        true,
+      );
+      expect(
+        await f.service.authenticateAccessToken(successor.accessToken),
+      ).toBeNull();
+    },
+  );
+  it("propagates revocation write failures and permits a retry without falsely reporting logout success", async () => {
+    const f = await signedIn();
+    vi.spyOn(f.store, "revokeFamily").mockRejectedValueOnce(
+      new Error("revocation write failed"),
+    );
+    await expect(f.service.logout(f.session.refreshToken)).rejects.toThrow(
+      "revocation write failed",
+    );
+    expect(f.store.rollbacks).toBe(1);
+    expect(
+      await f.service.authenticateAccessToken(f.session.accessToken),
+    ).not.toBeNull(); // Failed transaction is reported as failure, never success.
+    await f.service.logout(f.session.refreshToken);
+    expect(
+      await f.service.authenticateAccessToken(f.session.accessToken),
+    ).toBeNull();
+  });
   it("logoutAll revokes all devices on that account and preserves a different account", async () => {
     const f = await signedIn();
     const device = await f.service.issueSession(f.account.drtsPassengerId);
@@ -393,6 +473,18 @@ describe("profile, deletion and API boundary", () => {
       (await f.service.updateMe(f.identity, { contactPhone: "+886922222222" }))
         .account.contactPhoneVerified,
     ).toBe(false);
+    await f.service.linkIdentity(f.identity, "phone", "+886933333333");
+    await f.controller.update(f.identity, { contact_phone: "+886944444444" });
+    expect((await f.controller.me(f.identity)).data.account).toMatchObject({
+      verifiedPhone: "+886933333333",
+      verifiedEmail: "passenger@example.test",
+      contactPhone: "+886944444444",
+      contactPhoneVerified: false,
+      contactConsent: true,
+      termsVersion: "terms-v1",
+      privacyVersion: "privacy-v1",
+      feeAcknowledgementVersion: "fee-v1",
+    });
   });
   it.each([
     { drts_passenger_id: "victim" },
@@ -458,6 +550,12 @@ describe("profile, deletion and API boundary", () => {
     await expect(f.service.getMe(f.identity)).rejects.toMatchObject({
       code: "unauthorized",
     });
+    await expect(
+      f.service.issueSession(deleted.drtsPassengerId),
+    ).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(
+      f.service.linkIdentity(f.identity, "line", "deleted-account-link"),
+    ).rejects.toMatchObject({ code: "unauthorized" });
     expect(
       await f.service.authenticateAccessToken(other.session.accessToken),
     ).not.toBeNull();

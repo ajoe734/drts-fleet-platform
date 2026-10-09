@@ -172,6 +172,7 @@ export class PassengerAccountService {
       identity.actorType !== "first_party_passenger" ||
       !identity.drtsPassengerId ||
       identity.actorId !== identity.drtsPassengerId ||
+      identity.subject !== identity.drtsPassengerId ||
       !identity.sessionId ||
       !identity.expiresAt ||
       !Number.isFinite(Date.parse(identity.expiresAt)) ||
