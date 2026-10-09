@@ -1,0 +1,308 @@
+name: Dev Owned Operational Fixture Cleanup
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - '.github/workflows/dev-owned-operational-fixture-cleanup.yml'
+      - 'operations/verification/cleanup-owned-operational-fixtures.py'
+      - 'tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py'
+      - 'docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md'
+  push:
+    branches:
+      - dev
+      - 'gemini2/**'
+      - 'codex/**'
+    paths:
+      - '.github/workflows/dev-owned-operational-fixture-cleanup.yml'
+      - 'operations/verification/cleanup-owned-operational-fixtures.py'
+      - 'tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py'
+      - 'docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Execution mode (only 'dry-run' is supported; mutation is disabled)"
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - 'dry-run'
+      source_ref:
+        description: 'Immutable product commit SHA (must match source SHA 4a166f3ed2a7000061acc737ee475ae3c47dca56)'
+        required: true
+        default: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
+        type: string
+      product_run_id:
+        description: 'Authoritative product run ID'
+        required: true
+        default: '37906298090'
+        type: string
+      workflow_def_sha:
+        description: 'Authoritative deploy workflow definition SHA'
+        required: true
+        default: '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c'
+        type: string
+      artifact_id:
+        description: 'Authoritative operational browser evidence artifact ID'
+        required: true
+        default: '11606165993'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-owned-operational-fixture-cleanup
+  cancel-in-progress: false
+
+env:
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  EXPECTED_PROJECT_ID: 'drts-dev-devcc-20260825'
+  EXPECTED_REGION: 'us-central1'
+  EXPECTED_PRODUCT_RUN_ID: '37906298090'
+  EXPECTED_SOURCE_SHA: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
+  EXPECTED_WORKFLOW_DEF_SHA: '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c'
+  EXPECTED_ARTIFACT_ID: '11606165993'
+  EXPECTED_WIF_PROVIDER: 'projects/24645990627/locations/global/workloadIdentityPools/github-actions/providers/github'
+  EXPECTED_WIF_SERVICE_ACCOUNT: 'github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com'
+
+jobs:
+  unit-tests:
+    name: Unit tests & safety guards
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout tool definition
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile python sources
+        run: |
+          python3 -m py_compile \
+            operations/verification/cleanup-owned-operational-fixtures.py \
+            tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py
+
+      - name: Execute relocated unit test suite
+        run: |
+          python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
+
+  cleanup-fixtures:
+    name: Owned fixture cleanup (GCS generation-bound / guarded DB)
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout tool definition
+        uses: actions/checkout@v4
+
+      - name: Enforce immutable product source & run identity guards
+        env:
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_PRODUCT_RUN_ID: ${{ inputs.product_run_id }}
+          INPUT_WORKFLOW_DEF_SHA: ${{ inputs.workflow_def_sha }}
+          INPUT_ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          SRC_REF="${INPUT_SOURCE_REF:-}"
+          PRUN_ID="${INPUT_PRODUCT_RUN_ID:-}"
+          WDEF_SHA="${INPUT_WORKFLOW_DEF_SHA:-}"
+          ART_ID="${INPUT_ARTIFACT_ID:-}"
+          if [ "$SRC_REF" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "::error::source_ref '$SRC_REF' does not match required product source $EXPECTED_SOURCE_SHA" >&2
+            exit 1
+          fi
+          if [ "$PRUN_ID" != "$EXPECTED_PRODUCT_RUN_ID" ]; then
+            echo "::error::product_run_id '$PRUN_ID' does not match required $EXPECTED_PRODUCT_RUN_ID" >&2
+            exit 1
+          fi
+          if [ "$WDEF_SHA" != "$EXPECTED_WORKFLOW_DEF_SHA" ]; then
+            echo "::error::workflow_def_sha '$WDEF_SHA' does not match required $EXPECTED_WORKFLOW_DEF_SHA" >&2
+            exit 1
+          fi
+          if [ "$ART_ID" != "$EXPECTED_ARTIFACT_ID" ]; then
+            echo "::error::artifact_id '$ART_ID' does not match required $EXPECTED_ARTIFACT_ID" >&2
+            exit 1
+          fi
+          echo "Product source and run provenance guards verified successfully."
+
+      - name: Enforce DEV WIF lane pre-auth guards (no generic fallback)
+        env:
+          WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+          WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          WIF_PROV="${WIF_PROVIDER:-${{ secrets.DEV_WIF_PROVIDER }}}"
+          WIF_SA="${WIF_SERVICE_ACCOUNT:-${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}}"
+          if [ -z "$WIF_PROV" ]; then
+            echo "::error::DEV_WIF_PROVIDER secret is required and must not be empty. Generic WIF fallback is prohibited." >&2
+            exit 1
+          fi
+          if [ -z "$WIF_SA" ]; then
+            echo "::error::DEV_WIF_SERVICE_ACCOUNT secret is required and must not be empty. Generic WIF fallback is prohibited." >&2
+            exit 1
+          fi
+          if [ "$WIF_PROV" != "$EXPECTED_WIF_PROVIDER" ]; then
+            echo "::error::DEV_WIF_PROVIDER ('$WIF_PROV') does not match authorized DEV provider '$EXPECTED_WIF_PROVIDER'" >&2
+            exit 1
+          fi
+          if [ "$WIF_SA" != "$EXPECTED_WIF_SERVICE_ACCOUNT" ]; then
+            echo "::error::DEV_WIF_SERVICE_ACCOUNT ('$WIF_SA') does not match authorized DEV deployer '$EXPECTED_WIF_SERVICE_ACCOUNT'" >&2
+            exit 1
+          fi
+          if [ "${DEV_GCP_PROJECT_ID:-}" != "$EXPECTED_PROJECT_ID" ]; then
+            echo "::error::DEV_GCP_PROJECT_ID ('${DEV_GCP_PROJECT_ID:-}') does not match expected dev project '$EXPECTED_PROJECT_ID'" >&2
+            exit 1
+          fi
+          if [ "${DEV_GCP_REGION:-}" != "$EXPECTED_REGION" ]; then
+            echo "::error::DEV_GCP_REGION ('${DEV_GCP_REGION:-}') does not match expected dev region '$EXPECTED_REGION'" >&2
+            exit 1
+          fi
+          echo "DEV WIF pre-auth identity and project constraints verified."
+
+      - name: Enforce mandatory Operator lane and CI/merge proofs (Disable hosted auth)
+        run: |
+          echo "Hosted authenticated read lane is explicitly disabled until Fenced Operator-only runtime and immutable CI/merge proofs are implemented."
+          echo "Supplying source-only safe planning via offline mode."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Execute fixture cleanup planner in offline mode
+        env:
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_PRODUCT_RUN_ID: ${{ inputs.product_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/cleanup
+          
+          # Create a minimal inventory for offline planning
+          cat << 'EOF' > test-results/cleanup/offline-inventory.json
+          {
+            "source_sha": "4a166f3ed2a7000061acc737ee475ae3c47dca56",
+            "run_id": 37906298090,
+            "workflow_definition_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+            "artifact_id": 11606165993,
+            "artifact_digest": "sha256:2fc9ef568f7b37cf709475fd1e1bb470f1b18e55383751254cef179753b539b5",
+            "storage_documents": [
+              {
+                "documentId": "43e91900-b03d-4319-8bd1-25d438372f4d",
+                "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/18f06410-510c-4107-ae21-16ab61383b95-harmless-upload.pdf",
+                "confirmDocumentType": "professional_driver_license",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "dc3aaed4-7f9c-4e61-a532-c6acd49cdf59",
+                "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/8ad02a30-c584-4deb-b2c8-5883f9a5345a-harmless-upload.pdf",
+                "confirmDocumentType": "taxi_driver_registration",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "f26201ec-7e67-4866-94fc-8a5bfd5ecbca",
+                "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/f88f9320-7c81-4df9-9abd-d7ced9c0c50a-harmless-upload.pdf",
+                "confirmDocumentType": "professional_driver_license",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "9e863fbe-0ba0-4b48-b2ac-a88c8d8e8a47",
+                "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/195565d9-9f64-4a29-8446-f93bb0fe252b-harmless-upload.pdf",
+                "confirmDocumentType": "taxi_driver_registration",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "4f93a852-9031-44e2-ac06-3c808c9e84cb",
+                "confirmSubmissionId": "f735275c-151d-4f25-a9f0-174f2602f919",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/f735275c-151d-4f25-a9f0-174f2602f919/e6a71c74-a036-4ea9-a025-0386d9ed1861-harmless-upload.pdf",
+                "confirmDocumentType": "professional_driver_license",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "d2c8b8d5-c5ac-4bd5-a5ef-94a413ac5046",
+                "confirmSubmissionId": "f735275c-151d-4f25-a9f0-174f2602f919",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/f735275c-151d-4f25-a9f0-174f2602f919/a627cd09-ebc8-4024-88ba-91a4f5489574-harmless-upload.pdf",
+                "confirmDocumentType": "taxi_driver_registration",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "279550a2-3eac-4c5e-b315-cb86308d9ae7",
+                "confirmSubmissionId": "93430506-d016-4b07-897f-ab9b4d3530df",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/93430506-d016-4b07-897f-ab9b4d3530df/3bbb4f20-0cd5-4676-9ae1-e428ce26461b-harmless-upload.pdf",
+                "confirmDocumentType": "professional_driver_license",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              },
+              {
+                "documentId": "c5e2a567-df7a-42dc-8aa6-481e5eb9e823",
+                "confirmSubmissionId": "93430506-d016-4b07-897f-ab9b4d3530df",
+                "confirmFleetPartnerId": "fleet-demo-001",
+                "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/93430506-d016-4b07-897f-ab9b4d3530df/024c77c7-8d95-4c29-8fd1-51dc0a89f8ba-harmless-upload.pdf",
+                "confirmDocumentType": "taxi_driver_registration",
+                "fileSize": 327,
+                "sha256": "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
+                "readbackContentType": "application/pdf"
+              }
+            ],
+            "mutation_records": [
+              {
+                "operation": "cancel",
+                "resultId": "6d571eec-f271-46b8-b01f-b176994fe71e"
+              },
+              {
+                "operation": "cancel",
+                "resultId": "booking-2e367210-fc7b-4bf0-9512-8ff7626b5165"
+              }
+            ],
+            "preserve_failed_8d_03a_and_user_data": true
+          }
+          EOF
+          
+          python3 operations/verification/cleanup-owned-operational-fixtures.py \
+            --mode "${{ inputs.mode }}" \
+            --offline \
+            --inventory "test-results/cleanup/offline-inventory.json" \
+            --source-sha "$INPUT_SOURCE_REF" \
+            --run-id "$INPUT_PRODUCT_RUN_ID" \
+            --output "test-results/cleanup/cleanup-receipts.json"
+
+      - name: Upload cleanup receipts artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owned-operational-fixture-cleanup-receipts
+          path: test-results/cleanup/cleanup-receipts.json
+          retention-days: 90
