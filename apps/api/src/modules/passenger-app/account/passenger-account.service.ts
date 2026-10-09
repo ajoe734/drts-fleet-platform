@@ -34,6 +34,9 @@ const PROVIDERS = new Set<AuthProvider>([
 ]);
 const REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
 const PHONE = /^\+?[0-9]{8,15}$/;
+function hasControlCharacters(value: string) {
+  return [...value].some((char) => char.charCodeAt(0) < 32);
+}
 function unauthorized(): never {
   throw new ApiRequestError(
     401,
@@ -61,7 +64,7 @@ function identityKey(provider: AuthProvider, subject: string) {
     typeof subject !== "string" ||
     !subject.length ||
     subject.length > 512 ||
-    /[\x00-\x1f]/.test(subject)
+    hasControlCharacters(subject)
   )
     validation();
   if (provider === "phone" && !PHONE.test(subject)) validation();
@@ -86,7 +89,8 @@ function attributes(a: VerifiedPassengerAttributes) {
     a.displayName !== undefined &&
     (typeof a.displayName !== "string" ||
       !a.displayName.trim() ||
-      a.displayName.length > 100)
+      a.displayName.length > 100 ||
+      hasControlCharacters(a.displayName))
   )
     validation();
   if (
@@ -98,6 +102,7 @@ function attributes(a: VerifiedPassengerAttributes) {
     a.verifiedEmail !== undefined &&
     (typeof a.verifiedEmail !== "string" ||
       a.verifiedEmail.length > 320 ||
+      hasControlCharacters(a.verifiedEmail) ||
       !/^[^\s@]+@[^\s@]+$/.test(a.verifiedEmail))
   )
     validation();
@@ -129,8 +134,12 @@ export class PassengerAccountService {
       const existing = await tx.findIdentity(provider, subject);
       if (existing) {
         const a = await tx.lockAccount(existing.drtsPassengerId);
-        if (!a || a.status !== "active") unauthorized();
-        return a;
+        const currentIdentity = await tx.findIdentity(provider, subject);
+        // Unlink/delete may commit while this login waits for the account lock.
+        if (currentIdentity?.identityId === existing.identityId) {
+          if (!a || a.status !== "active") unauthorized();
+          return a;
+        }
       }
       const a: AccountRecord = {
         drtsPassengerId: `drts_passenger_${randomUUID()}`,
@@ -164,7 +173,9 @@ export class PassengerAccountService {
       !identity.drtsPassengerId ||
       identity.actorId !== identity.drtsPassengerId ||
       !identity.sessionId ||
-      !identity.expiresAt || Date.parse(identity.expiresAt) <= Date.now()
+      !identity.expiresAt ||
+      !Number.isFinite(Date.parse(identity.expiresAt)) ||
+      Date.parse(identity.expiresAt) <= Date.now()
     )
       unauthorized();
     const a = await tx.lockAccount(identity.drtsPassengerId);
@@ -187,11 +198,11 @@ export class PassengerAccountService {
     if (!identity) return null;
     // DB/config failures propagate as availability failures, never an in-memory fallback.
     return this.store.transaction(async (tx) => {
-      const a = await tx.lockAccount(identity.drtsPassengerId!);
+      const a = await tx.lockAccount(identity.drtsPassengerId);
       return a?.status === "active" &&
         (await tx.findLiveFamily(
           a.drtsPassengerId,
-          identity.sessionId!,
+          identity.sessionId,
           new Date().toISOString(),
         ))
         ? identity
@@ -230,7 +241,7 @@ export class PassengerAccountService {
         (typeof v !== "string" ||
           !v.trim() ||
           v.length > 100 ||
-          /[\x00-\x1f]/.test(v))
+          hasControlCharacters(v))
       )
         validation();
     }
@@ -259,15 +270,15 @@ export class PassengerAccountService {
   }
   async listIdentities(identity: RequestIdentity | null) {
     return this.store.transaction(async (tx) => ({
-      identities: await tx.listIdentities(
-        (await this.current(tx, identity)).drtsPassengerId,
-      ).then(list => list.map(i => ({ ...i, subject: '[linked]' }))),
+      identities: await tx
+        .listIdentities((await this.current(tx, identity)).drtsPassengerId)
+        .then((list) => list.map((i) => ({ ...i, subject: "[linked]" }))),
     }));
   }
   /** Called only after a session-bound contact-phone OTP proof has been consumed. */
   async verifyContactPhone(identity: RequestIdentity | null, phone: string) {
-    if (typeof phone !== 'string' || !PHONE.test(phone)) validation();
-    return this.store.transaction(async tx => {
+    if (typeof phone !== "string" || !PHONE.test(phone)) validation();
+    return this.store.transaction(async (tx) => {
       const a = await this.current(tx, identity);
       a.contactPhone = phone;
       a.contactPhoneVerified = true;

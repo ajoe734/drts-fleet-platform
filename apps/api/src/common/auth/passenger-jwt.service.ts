@@ -7,6 +7,7 @@ import type { PassengerRequestIdentity } from "./auth.types";
 export const PASSENGER_JWT_ISSUER = "drts:passenger";
 export const PASSENGER_JWT_AUDIENCE = "drts:passenger-api";
 export const PASSENGER_ACCESS_SECONDS = 15 * 60;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Separate issuer/audience and exact claims keep passenger tokens outside legacy IAM. */
 @Injectable()
@@ -51,13 +52,15 @@ export class PassengerJwtService {
         p.actorType !== "first_party_passenger" ||
         typeof p.sub !== "string" ||
         p.drtsPassengerId !== p.sub ||
-        !/^drts_passenger_[0-9a-f-]{36}$/.test(p.sub) ||
+        !p.sub.startsWith("drts_passenger_") ||
+        !UUID.test(p.sub.slice("drts_passenger_".length)) ||
         typeof p.sid !== "string" ||
-        !/^[0-9a-f-]{36}$/.test(p.sid) ||
+        !UUID.test(p.sid) ||
         typeof p.jti !== "string" ||
         typeof p.iat !== "number" ||
         typeof p.exp !== "number" ||
         p.exp - p.iat !== PASSENGER_ACCESS_SECONDS ||
+        p.iat > Math.floor(Date.now() / 1000) ||
         p.aud !== PASSENGER_JWT_AUDIENCE ||
         p.tenantId != null ||
         p.partnerId != null ||

@@ -90,6 +90,8 @@ export interface PassengerRequestIdentity extends Omit<
   "actorType" | "realm" | "drtsPassengerId" | "sessionId"
 > {
   actorType: typeof PASSENGER_AUTH_ACTOR_TYPE;
+  tenantId: null;
+  actorId: string;
   realm: typeof PASSENGER_AUTH_REALM;
   drtsPassengerId: string;
   sessionId: string;

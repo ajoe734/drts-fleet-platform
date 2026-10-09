@@ -15,6 +15,7 @@ export interface PassengerAccount {
   termsVersion?: string;
   privacyVersion?: string;
   feeAcknowledgementVersion?: string;
+  contactConsent?: boolean;
   status: "active" | "suspended" | "deleted";
   createdAt: string;
   deletedAt?: string;
