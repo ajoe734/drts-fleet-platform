@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/dev-owned-operational-fixture-cleanup.yml'
       - 'operations/verification/cleanup-owned-operational-fixtures.py'
-      - 'operations/verification/test_cleanup_owned_operational_fixtures.py'
+      - 'tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py'
       - 'docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md'
   push:
     branches:
@@ -16,7 +16,7 @@ on:
     paths:
       - '.github/workflows/dev-owned-operational-fixture-cleanup.yml'
       - 'operations/verification/cleanup-owned-operational-fixtures.py'
-      - 'operations/verification/test_cleanup_owned_operational_fixtures.py'
+      - 'tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py'
       - 'docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md'
   workflow_dispatch:
     inputs:
@@ -29,7 +29,7 @@ on:
           - 'dry-run'
           - 'apply'
       source_ref:
-        description: 'Immutable Git commit SHA (must match source SHA 4a166f3ed2a7000061acc737ee475ae3c47dca56)'
+        description: 'Immutable product commit SHA (must match source SHA 4a166f3ed2a7000061acc737ee475ae3c47dca56)'
         required: true
         default: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
         type: string
@@ -38,17 +38,29 @@ on:
         required: true
         default: '37906298090'
         type: string
+      workflow_def_sha:
+        description: 'Authoritative deploy workflow definition SHA'
+        required: true
+        default: '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c'
+        type: string
+      artifact_id:
+        description: 'Authoritative operational browser evidence artifact ID'
+        required: true
+        default: '11606165993'
+        type: string
 
 permissions:
   contents: read
 
 env:
-  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID || 'drts-dev-devcc-20260825' }}
-  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION || 'us-central1' }}
-  DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
-  DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  EXPECTED_PROJECT_ID: 'drts-dev-devcc-20260825'
+  EXPECTED_REGION: 'us-central1'
   EXPECTED_PRODUCT_RUN_ID: '37906298090'
   EXPECTED_SOURCE_SHA: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
+  EXPECTED_WORKFLOW_DEF_SHA: '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c'
+  EXPECTED_ARTIFACT_ID: '11606165993'
 
 jobs:
   unit-tests:
@@ -57,7 +69,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout
+      - name: Checkout tool definition
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -69,11 +81,11 @@ jobs:
         run: |
           python3 -m py_compile \
             operations/verification/cleanup-owned-operational-fixtures.py \
-            operations/verification/test_cleanup_owned_operational_fixtures.py
+            tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py
 
-      - name: Execute unit test suite
+      - name: Execute relocated unit test suite
         run: |
-          python3 -m unittest operations/verification/test_cleanup_owned_operational_fixtures.py -v
+          python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
 
   cleanup-fixtures:
     name: Owned fixture cleanup (GCS generation-bound / guarded DB)
@@ -84,45 +96,78 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Checkout deploy source
+      - name: Checkout tool definition
         uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.source_ref }}
 
-      - name: Enforce immutable source & run identity guard
+      - name: Enforce immutable product source & run identity guards
         run: |
           set -euo pipefail
-          if ! [[ "${{ inputs.source_ref }}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::source_ref must be a 40-character commit SHA" >&2
-            exit 1
-          fi
-          HEAD_SHA=$(git rev-parse HEAD)
-          if [ "$HEAD_SHA" != "${{ inputs.source_ref }}" ]; then
-            echo "::error::Checked out HEAD ($HEAD_SHA) does not match required SHA (${{ inputs.source_ref }})" >&2
+          if [ "${{ inputs.source_ref }}" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "::error::source_ref '${{ inputs.source_ref }}' does not match required product source $EXPECTED_SOURCE_SHA" >&2
             exit 1
           fi
           if [ "${{ inputs.product_run_id }}" != "$EXPECTED_PRODUCT_RUN_ID" ]; then
-            echo "::error::Product run ID must equal $EXPECTED_PRODUCT_RUN_ID" >&2
+            echo "::error::product_run_id '${{ inputs.product_run_id }}' does not match required $EXPECTED_PRODUCT_RUN_ID" >&2
             exit 1
           fi
-          echo "Source guard verified: $HEAD_SHA against run ${{ inputs.product_run_id }}"
+          if [ "${{ inputs.workflow_def_sha }}" != "$EXPECTED_WORKFLOW_DEF_SHA" ]; then
+            echo "::error::workflow_def_sha '${{ inputs.workflow_def_sha }}' does not match required $EXPECTED_WORKFLOW_DEF_SHA" >&2
+            exit 1
+          fi
+          if [ "${{ inputs.artifact_id }}" != "$EXPECTED_ARTIFACT_ID" ]; then
+            echo "::error::artifact_id '${{ inputs.artifact_id }}' does not match required $EXPECTED_ARTIFACT_ID" >&2
+            exit 1
+          fi
+          echo "Product source and run provenance guards verified successfully."
 
-      - name: Authenticate to GCP via WIF
+      - name: Enforce DEV WIF lane pre-auth guards (no generic fallback)
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.DEV_WIF_PROVIDER }}" ]; then
+            echo "::error::DEV_WIF_PROVIDER secret is required and must not be empty. Generic WIF fallback is prohibited." >&2
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}" ]; then
+            echo "::error::DEV_WIF_SERVICE_ACCOUNT secret is required and must not be empty. Generic WIF fallback is prohibited." >&2
+            exit 1
+          fi
+          if [ "${DEV_GCP_PROJECT_ID:-}" != "$EXPECTED_PROJECT_ID" ]; then
+            echo "::error::DEV_GCP_PROJECT_ID ('${DEV_GCP_PROJECT_ID:-}') does not match expected dev project '$EXPECTED_PROJECT_ID'" >&2
+            exit 1
+          fi
+          if [ "${DEV_GCP_REGION:-}" != "$EXPECTED_REGION" ]; then
+            echo "::error::DEV_GCP_REGION ('${DEV_GCP_REGION:-}') does not match expected dev region '$EXPECTED_REGION'" >&2
+            exit 1
+          fi
+          echo "DEV WIF pre-auth identity and project constraints verified."
+
+      - name: Authenticate to GCP via DEV WIF
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER }}
-          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT }}
-          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.EXPECTED_PROJECT_ID }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+          project_id: ${{ env.EXPECTED_PROJECT_ID }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Fetch and validate authoritative GitHub run artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p authoritative-artifact/payload
+          gh api "repos/${{ github.repository }}/actions/runs/${{ inputs.product_run_id }}/artifacts" > authoritative-artifact/artifacts.json
+          gh run download "${{ inputs.product_run_id }}" \
+            --name "operational-browser-evidence-${{ inputs.source_ref }}" \
+            --dir authoritative-artifact/payload
 
       - name: Execute fixture cleanup planner & executor
         run: |
@@ -130,7 +175,7 @@ jobs:
           mkdir -p test-results/cleanup
           python3 operations/verification/cleanup-owned-operational-fixtures.py \
             --mode "${{ inputs.mode }}" \
-            --inventory ".local/fleet-storage-diagnosis-20261008/referral-reviewed-composition-dev-deployment-20261009/exact-owned-fixture-inventory.json" \
+            --artifact-dir "authoritative-artifact" \
             --source-sha "${{ inputs.source_ref }}" \
             --run-id "${{ inputs.product_run_id }}" \
             --output "test-results/cleanup/cleanup-receipts.json"

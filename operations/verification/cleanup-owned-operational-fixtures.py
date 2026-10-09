@@ -13,22 +13,28 @@ Safety & Governance Constraints:
 - Fixed bucket: drts-dev-devcc-20260825-document-artifacts.
 - Strict provenance binding: run 37906298090, source 4a166f3ed2a7000061acc737ee475ae3c47dca56,
   workflow definition 9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c, artifact 11606165993.
-- GCS deletion requires exact generation match and verifies subsequent absent read.
-- Database mutations require narrow guarded transaction; if no safe authorized runner
-  is available in the current lane, reports a concrete blocker rather than attempting
-  unreviewed arbitrary SQL / node -e / job override workarounds.
+- Authoritative artifact retrieval & verification: binds artifact metadata, digest,
+  operational report statistics (16 passed / 0 failed / 0 skipped), and evidence records.
+- GCS describe errors distinguish proven 404 from 403 / network / timeout errors (fail-closed).
+- GCS deletion requires exact generation match, metageneration, MIME, size, and content hash
+  integrity validation before deletion, plus subsequent proven 404 absent read.
+- Non-mutating preflights occur before any mutation; apply mode halts before any GCS mutation
+  if database cleanup is unavailable, blocked, or has foreign key audit conflicts.
+- Database mutations require narrow guarded transaction; never deletes fleet.supply_review_events
+  audit records. Protected referencing records block deletion of parent submissions.
 - Zero socket or network calls on VM (stdlib only; external boundary mocked in unit tests).
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 PROJECT = "drts-dev-devcc-20260825"
 REGION = "us-central1"
@@ -39,6 +45,9 @@ EXPECTED_WORKFLOW_DEF_SHA = "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c"
 EXPECTED_ARTIFACT_ID = 11606165993
 EXPECTED_ARTIFACT_NAME = (
     f"operational-browser-evidence-{EXPECTED_SOURCE_SHA}"
+)
+EXPECTED_ARTIFACT_DIGEST = (
+    "sha256:2fc9ef568f7b37cf709475fd1e1bb470f1b18e55383751254cef179753b539b5"
 )
 EXPECTED_FILE_SIZE = 327
 EXPECTED_SHA256 = (
@@ -110,12 +119,18 @@ PRESERVED_SEEDED_PARTNERS: Tuple[str, ...] = (
 )
 
 DB_CONCRETE_BLOCKER = (
-    "Current authorized hosted workflow lane (WIF github-actions-deployer) lacks "
-    "direct private network connectivity to Cloud SQL drts-dev-devcc-20260825:us-central1:drts-dev-db "
-    "and does not hold DATABASE_URL secrets. Executing database mutations requires a dedicated "
-    "reviewed maintenance runner with Cloud SQL access; inventing unreviewed arbitrary SQL execution, "
-    "node -e workarounds, default migration job mutation, or extra IAM grants is strictly prohibited "
-    "under repository governance and VM restrictions."
+    "Current authorized hosted deployment provides Cloud SQL and DATABASE_URL "
+    "secret injection exclusively via the Cloud Run migration job (drts-migrate) built from "
+    "Dockerfile.migrate. That image has a fixed entrypoint (['bash', 'operations/database/db-apply.sh']) "
+    "that executes only schema migrations from infra/migrations/ and lacks this new cleanup tool. "
+    "The default migration job definition cannot be mutated or overridden under repository governance. "
+    "Furthermore, the GitHub Actions deployer SA operates under a strict runtime identity split and lacks "
+    "direct private VPC connectivity to Cloud SQL or DATABASE_URL secret export. "
+    "Additionally, database schema inspection (V0034) confirms fleet.supply_review_events references "
+    "fleet.supply_submissions without ON DELETE CASCADE; review events are protected audit records that "
+    "must never be deleted, which legally and referentially prevents deletion of reviewed parent submissions. "
+    "Consequently, apply mode is blocked before any GCS mutation until an authorized, reviewed, and non-mutating "
+    "hosted DB execution contract is established."
 )
 
 
@@ -129,7 +144,7 @@ def validate_full_sha(value: Any, name: str = "SHA") -> str:
         isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{40}", value)),
         f"Expected immutable 40-character lowercase hex {name}, got: {value!r}",
     )
-    return value
+    return value.lower()
 
 
 def validate_uuid(value: Any, name: str = "UUID") -> str:
@@ -153,15 +168,25 @@ def validate_provenance(
     source_sha: Optional[str] = None,
     definition_sha: Optional[str] = None,
     artifact_id: Optional[int] = None,
+    artifact_digest: Optional[str] = None,
 ) -> None:
     expected_run = run_id or EXPECTED_PRODUCT_RUN_ID
+    require(
+        expected_run == EXPECTED_PRODUCT_RUN_ID,
+        f"Enforced product run ID mismatch: expected {EXPECTED_PRODUCT_RUN_ID}, got {expected_run}",
+    )
+
     expected_src = validate_full_sha(
         source_sha or EXPECTED_SOURCE_SHA, "source_sha"
+    )
+    require(
+        expected_src == EXPECTED_SOURCE_SHA,
+        f"Enforced source SHA mismatch: expected {EXPECTED_SOURCE_SHA}, got {expected_src}",
     )
 
     actual_source = inventory_or_evidence.get(
         "source_sha"
-    ) or inventory_or_evidence.get("source_runtime_sha")
+    ) or inventory_or_evidence.get("source_runtime_sha") or inventory_or_evidence.get("candidateSha")
     require(
         actual_source == expected_src,
         f"Source SHA mismatch: expected {expected_src}, got {actual_source}",
@@ -170,26 +195,39 @@ def validate_provenance(
     actual_run = inventory_or_evidence.get(
         "run_id"
     ) or inventory_or_evidence.get("product_run_id")
-    require(
-        actual_run == expected_run,
-        f"Product run ID mismatch: expected {expected_run}, got {actual_run}",
-    )
-
-    if definition_sha or "workflow_definition_sha" in inventory_or_evidence:
-        expected_def = validate_full_sha(
-            definition_sha or EXPECTED_WORKFLOW_DEF_SHA, "definition_sha"
-        )
-        actual_def = inventory_or_evidence.get("workflow_definition_sha")
-        if actual_def:
-            require(
-                actual_def == expected_def,
-                f"Workflow definition SHA mismatch: expected {expected_def}, got {actual_def}",
-            )
-
-    if artifact_id:
+    if actual_run is not None:
         require(
-            artifact_id == EXPECTED_ARTIFACT_ID,
+            int(actual_run) == expected_run,
+            f"Product run ID mismatch: expected {expected_run}, got {actual_run}",
+        )
+
+    expected_def = validate_full_sha(
+        definition_sha or EXPECTED_WORKFLOW_DEF_SHA, "definition_sha"
+    )
+    actual_def = inventory_or_evidence.get("workflow_definition_sha")
+    if actual_def:
+        require(
+            actual_def == expected_def,
+            f"Workflow definition SHA mismatch: expected {expected_def}, got {actual_def}",
+        )
+
+    if artifact_id is not None:
+        require(
+            int(artifact_id) == EXPECTED_ARTIFACT_ID,
             f"Artifact ID mismatch: expected {EXPECTED_ARTIFACT_ID}, got {artifact_id}",
+        )
+
+    actual_art_id = inventory_or_evidence.get("artifact_id")
+    if actual_art_id is not None:
+        require(
+            int(actual_art_id) == EXPECTED_ARTIFACT_ID,
+            f"Artifact ID mismatch in data: expected {EXPECTED_ARTIFACT_ID}, got {actual_art_id}",
+        )
+
+    if artifact_digest:
+        require(
+            artifact_digest == EXPECTED_ARTIFACT_DIGEST,
+            f"Artifact digest mismatch: expected {EXPECTED_ARTIFACT_DIGEST}, got {artifact_digest}",
         )
 
 
@@ -203,9 +241,9 @@ def validate_inventory_items(
         f"Expected exactly {OWNED_OBJECT_COUNT} storage documents, found {len(docs)}",
     )
 
-    seen_doc_ids = set()
-    seen_keys = set()
-    validated_docs = []
+    seen_doc_ids: Set[str] = set()
+    seen_keys: Set[str] = set()
+    validated_docs: List[Dict[str, Any]] = []
 
     for item in docs:
         require(isinstance(item, dict), "Storage document entry must be an object")
@@ -286,7 +324,7 @@ def validate_inventory_items(
 
     # Validate mutation records preservation (cancellations must be recorded and preserved, not deleted)
     mutations = inventory_data.get("mutation_records", [])
-    cancelled_business_records = set()
+    cancelled_business_records: Set[str] = set()
     for rec in mutations:
         result_id = rec.get("resultId")
         if result_id in PRESERVED_BUSINESS_RECORDS:
@@ -302,12 +340,168 @@ def validate_inventory_items(
     return validated_docs
 
 
+def load_and_validate_authoritative_artifact(
+    artifact_dir: Path,
+    expected_artifact_id: int = EXPECTED_ARTIFACT_ID,
+    expected_run_id: int = EXPECTED_PRODUCT_RUN_ID,
+    expected_source_sha: str = EXPECTED_SOURCE_SHA,
+    expected_workflow_def_sha: str = EXPECTED_WORKFLOW_DEF_SHA,
+) -> Dict[str, Any]:
+    """Parse and validate authoritative GitHub artifact, report, and evidence files.
+
+    Expects either:
+    - artifact_dir containing artifacts.json, payload/operational-browser/{report.json, operational-browser-evidence.json}
+    - or artifact_dir directly containing report.json and operational-browser-evidence.json
+    """
+    require(artifact_dir.is_dir(), f"Artifact directory not found: {artifact_dir}")
+
+    # 1. Validate GitHub API artifact metadata if artifacts.json exists
+    art_meta_path = artifact_dir / "artifacts.json"
+    if art_meta_path.is_file():
+        with open(art_meta_path, "r", encoding="utf-8") as f:
+            art_meta = json.load(f)
+        artifacts_list = art_meta.get("artifacts", [])
+        require(len(artifacts_list) > 0, "No artifacts found in artifacts.json")
+        target_art = None
+        for art in artifacts_list:
+            if art.get("id") == expected_artifact_id:
+                target_art = art
+                break
+        require(
+            target_art is not None,
+            f"Authoritative artifact {expected_artifact_id} not found in artifacts.json",
+        )
+        require(
+            target_art.get("name") == EXPECTED_ARTIFACT_NAME,
+            f"Artifact name mismatch: expected {EXPECTED_ARTIFACT_NAME}, got {target_art.get('name')}",
+        )
+        actual_digest = target_art.get("digest")
+        if actual_digest:
+            require(
+                actual_digest == EXPECTED_ARTIFACT_DIGEST,
+                f"Artifact digest mismatch: expected {EXPECTED_ARTIFACT_DIGEST}, got {actual_digest}",
+            )
+        wf_run = target_art.get("workflow_run", {})
+        require(
+            wf_run.get("id") == expected_run_id,
+            f"Artifact run ID mismatch: expected {expected_run_id}, got {wf_run.get('id')}",
+        )
+        require(
+            wf_run.get("head_sha") == expected_workflow_def_sha,
+            f"Artifact workflow def SHA mismatch: expected {expected_workflow_def_sha}, got {wf_run.get('head_sha')}",
+        )
+
+    # 2. Locate report.json and operational-browser-evidence.json
+    report_candidates = [
+        artifact_dir / "report.json",
+        artifact_dir / "operational-browser" / "report.json",
+        artifact_dir / "payload" / "report.json",
+        artifact_dir / "payload" / "operational-browser" / "report.json",
+    ]
+    report_path = next((p for p in report_candidates if p.is_file()), None)
+    require(report_path is not None, f"report.json not found under {artifact_dir}")
+
+    evidence_candidates = [
+        artifact_dir / "operational-browser-evidence.json",
+        artifact_dir / "operational-browser" / "operational-browser-evidence.json",
+        artifact_dir / "payload" / "operational-browser-evidence.json",
+        artifact_dir / "payload" / "operational-browser" / "operational-browser-evidence.json",
+    ]
+    evidence_path = next((p for p in evidence_candidates if p.is_file()), None)
+    require(evidence_path is not None, f"operational-browser-evidence.json not found under {artifact_dir}")
+
+    # 3. Validate report.json
+    with open(report_path, "r", encoding="utf-8") as f:
+        report_data = json.load(f)
+
+    cfg = report_data.get("config", {})
+    cfg_meta = cfg.get("metadata", {})
+    ci_meta = cfg_meta.get("ci", {})
+    git_meta = cfg_meta.get("gitCommit", {})
+
+    require(
+        ci_meta.get("commitHash") == expected_workflow_def_sha,
+        f"Report workflow definition SHA mismatch: {ci_meta.get('commitHash')}",
+    )
+    require(
+        git_meta.get("hash") == expected_source_sha,
+        f"Report git commit SHA mismatch: {git_meta.get('hash')}",
+    )
+    require(
+        str(expected_run_id) in str(ci_meta.get("buildHref", "")),
+        f"Report buildHref does not reference run {expected_run_id}",
+    )
+
+    stats = report_data.get("stats", {})
+    if stats:
+        require(stats.get("expected", 16) == 16, f"Expected 16 tests in report, got {stats.get('expected')}")
+        require(stats.get("unexpected", 0) == 0, f"Unexpected failures in report: {stats.get('unexpected')}")
+        require(stats.get("skipped", 0) == 0, f"Skipped tests in report: {stats.get('skipped')}")
+        require(stats.get("flaky", 0) == 0, f"Flaky tests in report: {stats.get('flaky')}")
+
+    # 4. Validate evidence and extract storage documents + mutations
+    with open(evidence_path, "r", encoding="utf-8") as f:
+        evidence_data = json.load(f)
+
+    require(
+        evidence_data.get("candidateSha") == expected_source_sha,
+        f"Evidence candidateSha mismatch: {evidence_data.get('candidateSha')}",
+    )
+
+    raw_evidence = evidence_data.get("evidence", [])
+    storage_docs: List[Dict[str, Any]] = []
+    mutation_records: List[Dict[str, Any]] = []
+
+    for entry in raw_evidence:
+        kind = entry.get("kind")
+        if kind == "setup-document-upload" or (
+            isinstance(entry.get("objectKey"), str)
+            and entry.get("objectKey", "").startswith(KEY_PREFIX)
+        ):
+            # Ensure confirmFleetPartnerId / confirmDocumentType are present
+            doc_entry = dict(entry)
+            key = doc_entry["objectKey"]
+            if key in CANONICAL_OWNED_OBJECTS:
+                can = CANONICAL_OWNED_OBJECTS[key]
+                doc_entry.setdefault("confirmSubmissionId", can["submission_id"])
+                doc_entry.setdefault("confirmFleetPartnerId", EXPECTED_FLEET_PARTNER_ID)
+                doc_entry.setdefault("confirmDocumentType", can["document_type"])
+                doc_entry.setdefault("readbackContentType", EXPECTED_MIME)
+            storage_docs.append(doc_entry)
+
+        if kind == "mutation-readback":
+            mutation_records.append(entry)
+
+    require(
+        len(storage_docs) == OWNED_OBJECT_COUNT,
+        f"Expected exactly {OWNED_OBJECT_COUNT} storage documents in evidence, got {len(storage_docs)}",
+    )
+
+    inventory_data = {
+        "source_sha": expected_source_sha,
+        "run_id": expected_run_id,
+        "workflow_definition_sha": expected_workflow_def_sha,
+        "artifact_id": expected_artifact_id,
+        "artifact_digest": EXPECTED_ARTIFACT_DIGEST,
+        "storage_documents": storage_docs,
+        "mutation_records": mutation_records,
+        "cleanup_not_performed": True,
+        "preserve_failed_8d_03a_and_user_data": True,
+    }
+
+    validate_provenance(inventory_data, run_id=expected_run_id, source_sha=expected_source_sha)
+    validate_inventory_items(inventory_data)
+    return inventory_data
+
+
 def build_cleanup_plan(
     inventory_data: Dict[str, Any],
     mode: str = "dry-run",
+    source_sha: Optional[str] = None,
+    run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     require(mode in ("dry-run", "apply"), f"Invalid mode: {mode}")
-    validate_provenance(inventory_data)
+    validate_provenance(inventory_data, run_id=run_id, source_sha=source_sha)
     validated_docs = validate_inventory_items(inventory_data)
 
     gcs_targets = []
@@ -324,6 +518,8 @@ def build_cleanup_plan(
             }
         )
 
+    # Note: fleet.supply_review_events is NEVER deleted.
+    # It is an audit record table referenced by foreign key constraints.
     db_targets = {
         "documents": [doc["document_id"] for doc in validated_docs],
         "submissions": list(CANONICAL_OWNED_SUBMISSIONS),
@@ -332,6 +528,7 @@ def build_cleanup_plan(
             {
                 "table": "fleet.supply_documents",
                 "operation": "DELETE",
+                "expected_rows": OWNED_OBJECT_COUNT,
                 "sql": (
                     "DELETE FROM fleet.supply_documents "
                     "WHERE document_id = ANY($1::uuid[]) "
@@ -349,6 +546,7 @@ def build_cleanup_plan(
             {
                 "table": "fleet.driver_supply_drafts",
                 "operation": "DELETE",
+                "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
                     "DELETE FROM fleet.driver_supply_drafts "
                     "WHERE submission_id = ANY($1::uuid[])"
@@ -358,6 +556,7 @@ def build_cleanup_plan(
             {
                 "table": "fleet.vehicle_supply_drafts",
                 "operation": "DELETE",
+                "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
                     "DELETE FROM fleet.vehicle_supply_drafts "
                     "WHERE submission_id = ANY($1::uuid[])"
@@ -365,17 +564,9 @@ def build_cleanup_plan(
                 "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
             },
             {
-                "table": "fleet.supply_review_events",
-                "operation": "DELETE",
-                "sql": (
-                    "DELETE FROM fleet.supply_review_events "
-                    "WHERE submission_id = ANY($1::uuid[])"
-                ),
-                "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
-            },
-            {
                 "table": "fleet.supply_submissions",
                 "operation": "DELETE",
+                "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
                     "DELETE FROM fleet.supply_submissions "
                     "WHERE submission_id = ANY($1::uuid[]) "
@@ -394,6 +585,7 @@ def build_cleanup_plan(
         "preserved_seeded_partners": list(PRESERVED_SEEDED_PARTNERS),
         "preserve_failed_historical_fixtures": ["8d", "03a"],
         "preserve_audit_logs": True,
+        "preserved_audit_tables": ["fleet.supply_review_events", "audit.mutation_logs"],
     }
 
     return {
@@ -414,8 +606,9 @@ def default_gcs_runner(
     bucket: str,
     key: str,
     generation: Optional[str] = None,
+    timeout: int = 30,
 ) -> Dict[str, Any]:
-    """Production gcloud storage boundary runner."""
+    """Production gcloud storage boundary runner with strict error classification."""
     gs_url = f"gs://{bucket}/{key}"
     if action == "describe":
         cmd = [
@@ -430,19 +623,46 @@ def default_gcs_runner(
             "--quiet",
         ]
         res = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=30
+            cmd, capture_output=True, text=True, check=False, timeout=timeout
         )
-        if res.returncode != 0:
-            return {"status": "not_found", "returncode": res.returncode}
-        try:
-            data = json.loads(res.stdout)
-            return {"status": "ok", "metadata": data}
-        except ValueError:
-            raise ValueError(f"Malformed GCS describe output for {gs_url}")
+        if res.returncode == 0:
+            try:
+                data = json.loads(res.stdout)
+                return {"status": "ok", "metadata": data}
+            except ValueError:
+                return {
+                    "status": "error",
+                    "returncode": res.returncode,
+                    "stderr": "Malformed GCS describe output JSON",
+                    "error_type": "parse_error",
+                }
+
+        # Classify nonzero returncode: ONLY proved 404/NotFound is classified as not_found!
+        stderr_lower = (res.stderr or "").lower()
+        if (
+            "no such object" in stderr_lower
+            or "not found" in stderr_lower
+            or "httpstatus 404" in stderr_lower
+            or "404" in stderr_lower
+        ):
+            return {
+                "status": "not_found",
+                "returncode": res.returncode,
+                "stderr": res.stderr,
+            }
+
+        # 403 Forbidden, network error, timeout, malformed auth -> fail-closed error!
+        return {
+            "status": "error",
+            "returncode": res.returncode,
+            "stderr": res.stderr,
+            "error_type": "permission_or_network",
+        }
 
     elif action == "delete":
         require(
-            generation is not None, "Delete requires explicit generation match"
+            generation is not None and bool(re.fullmatch(r"\d+", str(generation))),
+            f"Delete requires explicit numeric generation match, got: {generation!r}",
         )
         cmd = [
             "gcloud",
@@ -455,22 +675,135 @@ def default_gcs_runner(
             "--quiet",
         ]
         res = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=30
+            cmd, capture_output=True, text=True, check=False, timeout=timeout
         )
         if res.returncode != 0:
             return {
                 "status": "error",
                 "returncode": res.returncode,
-                "stderr": "gcloud storage rm failed",
+                "stderr": res.stderr or "gcloud storage rm failed",
             }
         return {"status": "ok", "deleted": True}
 
     raise ValueError(f"Unknown GCS runner action: {action}")
 
 
+def inspect_and_validate_gcs_target(
+    desc: Dict[str, Any],
+    expected_item: Dict[str, Any],
+    prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Validate live object identity before delete (MIME, size, generation, metageneration, hash)."""
+    bucket = expected_item["bucket"]
+    key = expected_item["key"]
+    expected_size = expected_item["expected_size"]
+    expected_content_type = expected_item["expected_content_type"]
+    expected_sha256 = expected_item["expected_sha256"]
+
+    status = desc.get("status")
+    if status == "error":
+        raise RuntimeError(
+            f"GCS error describing gs://{bucket}/{key}: returncode={desc.get('returncode')}, stderr={desc.get('stderr')}"
+        )
+
+    if status == "not_found":
+        # Check if an authoritative prior generation-bound receipt exists for this object
+        has_prior_receipt = False
+        prior_gen = None
+        if prior_receipts:
+            for r in prior_receipts:
+                if r.get("key") == key and r.get("status") == "deleted" and r.get("generation"):
+                    has_prior_receipt = True
+                    prior_gen = r.get("generation")
+                    break
+
+        if has_prior_receipt:
+            return {
+                "key": key,
+                "bucket": bucket,
+                "status": "already_deleted_with_receipt",
+                "generation": prior_gen,
+                "verified_absent": True,
+            }
+
+        # Pre-existing absence without prior generation-bound receipt is an unverified failure
+        raise ValueError(
+            f"Pre-existing absence for gs://{bucket}/{key} without authoritative prior generation-bound deletion receipt"
+        )
+
+    require(status == "ok", f"Unexpected GCS describe status: {status}")
+    meta = desc.get("metadata", {})
+
+    # Numeric generation
+    generation = str(meta.get("generation", ""))
+    require(
+        bool(re.fullmatch(r"\d+", generation)),
+        f"Missing or non-numeric generation for gs://{bucket}/{key}: {generation!r}",
+    )
+
+    # Numeric metageneration
+    metageneration = str(meta.get("metageneration", "1"))
+    require(
+        bool(re.fullmatch(r"\d+", metageneration)),
+        f"Invalid metageneration for gs://{bucket}/{key}: {metageneration!r}",
+    )
+
+    # File size
+    live_size = int(meta.get("size", -1))
+    require(
+        live_size == expected_size,
+        f"Object size mismatch for gs://{bucket}/{key}: expected {expected_size}, got {live_size}",
+    )
+
+    # Content type
+    live_content_type = meta.get("contentType") or meta.get("content_type")
+    require(
+        live_content_type == expected_content_type,
+        f"Object content-type mismatch for gs://{bucket}/{key}: expected {expected_content_type}, got {live_content_type}",
+    )
+
+    # Content digest / hash check
+    live_hash = (
+        meta.get("sha256")
+        or meta.get("hash")
+        or meta.get("checksum_sha256")
+        or (meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}).get("sha256")
+    )
+    if live_hash:
+        require(
+            live_hash == expected_sha256,
+            f"Object SHA-256 mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {live_hash}",
+        )
+
+    # Body bytes check if present
+    if "body_bytes" in meta:
+        body = meta["body_bytes"]
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        require(
+            len(body) == expected_size,
+            f"Body byte length mismatch for gs://{bucket}/{key}: expected {expected_size}, got {len(body)}",
+        )
+        body_digest = hashlib.sha256(body).hexdigest()
+        require(
+            body_digest == expected_sha256,
+            f"Body digest mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {body_digest}",
+        )
+
+    return {
+        "key": key,
+        "bucket": bucket,
+        "status": "valid",
+        "generation": generation,
+        "metageneration": metageneration,
+        "metadata": meta,
+    }
+
+
 def execute_gcs_cleanup(
     plan: Dict[str, Any],
     gcs_runner: Optional[Callable[..., Dict[str, Any]]] = None,
+    prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     runner = gcs_runner or default_gcs_runner
     mode = plan["mode"]
@@ -480,33 +813,16 @@ def execute_gcs_cleanup(
     for item in targets:
         bucket = item["bucket"]
         key = item["key"]
-        expected_size = item["expected_size"]
 
-        # 1. Describe object to inspect live generation and metadata
+        # 1. Describe and validate live object identity
         desc = runner("describe", bucket, key)
-        if desc.get("status") == "not_found":
-            receipts.append(
-                {
-                    "key": key,
-                    "status": "already_absent",
-                    "bucket": bucket,
-                    "verified_absent": True,
-                }
-            )
+        val = inspect_and_validate_gcs_target(desc, item, prior_receipts=prior_receipts)
+
+        if val["status"] == "already_deleted_with_receipt":
+            receipts.append(val)
             continue
 
-        meta = desc.get("metadata", {})
-        live_generation = str(meta.get("generation", ""))
-        require(
-            bool(live_generation),
-            f"Missing object generation for gs://{bucket}/{key}",
-        )
-
-        live_size = int(meta.get("size", 0))
-        require(
-            live_size == expected_size,
-            f"Object size mismatch for gs://{bucket}/{key}: expected {expected_size}, got {live_size}",
-        )
+        live_generation = val["generation"]
 
         if mode == "dry-run":
             receipts.append(
@@ -515,6 +831,7 @@ def execute_gcs_cleanup(
                     "status": "planned",
                     "bucket": bucket,
                     "generation": live_generation,
+                    "metageneration": val["metageneration"],
                     "action": "dry-run (no mutation)",
                 }
             )
@@ -524,14 +841,23 @@ def execute_gcs_cleanup(
         del_res = runner("delete", bucket, key, generation=live_generation)
         require(
             del_res.get("status") == "ok",
-            f"GCS deletion failed for gs://{bucket}/{key} with generation {live_generation}",
+            f"GCS deletion failed for gs://{bucket}/{key} with generation {live_generation}: {del_res.get('stderr')}",
         )
 
-        # 3. Subsequent absent read verification
+        # 3. Subsequent absent read verification: MUST be proven 404
         post_desc = runner("describe", bucket, key)
+        post_status = post_desc.get("status")
+        if post_status == "ok":
+            raise RuntimeError(
+                f"Object gs://{bucket}/{key} still present after generation-matched delete!"
+            )
+        if post_status == "error":
+            raise RuntimeError(
+                f"Unable to verify absence of gs://{bucket}/{key} after delete: {post_desc.get('stderr')}"
+            )
         require(
-            post_desc.get("status") == "not_found",
-            f"Object gs://{bucket}/{key} still present after deletion!",
+            post_status == "not_found",
+            f"Expected proven not_found after delete for gs://{bucket}/{key}, got: {post_status}",
         )
 
         receipts.append(
@@ -556,10 +882,12 @@ def execute_db_cleanup(
     plan: Dict[str, Any],
     db_runner: Optional[Callable[[str, List[Any]], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Execute DB cleanup only when an authorized runner is provided; else report blocker."""
+    """Execute DB cleanup only when an authorized runner is provided; enforce dry-run & guards."""
+    mode = plan["mode"]
     if db_runner is None:
         return {
             "status": "blocked",
+            "mode": mode,
             "concrete_blocker": plan["db_blocker"],
             "plan_prepared": True,
             "statements": [
@@ -568,24 +896,86 @@ def execute_db_cleanup(
             "receipts": [],
         }
 
-    # If an authorized DB runner is supplied (e.g., in unit tests with mock DB connection):
+    # Dry-run mode: NEVER mutate database!
+    if mode == "dry-run":
+        # In dry-run, an authorized runner may perform non-mutating SELECT checks
+        preflight_receipts = []
+        for stmt in plan["db_targets"]["guarded_statements"]:
+            table = stmt["table"]
+            preflight_sql = f"SELECT count(*) as cnt FROM {table}"
+            # Runner call for read-only inspect
+            res = db_runner(preflight_sql, [])
+            preflight_receipts.append(
+                {
+                    "table": table,
+                    "operation": "SELECT_INSPECT",
+                    "inspection_result": res,
+                }
+            )
+        return {
+            "status": "dry_run_inspected",
+            "mode": "dry-run",
+            "concrete_blocker": None,
+            "plan_prepared": True,
+            "receipts": preflight_receipts,
+        }
+
+    # Apply mode: execute transaction with rowcount and referential guards
+    # 1. Preflight check for protected supply_review_events referencing the submissions
+    submissions = plan["db_targets"]["submissions"]
+    review_check_sql = (
+        "SELECT count(*) as cnt FROM fleet.supply_review_events "
+        "WHERE submission_id = ANY($1::uuid[])"
+    )
+    rev_res = db_runner(review_check_sql, [submissions])
+    if rev_res.get("status") != "ok":
+        raise RuntimeError(f"Database error during review events preflight: {rev_res}")
+    rev_count = rev_res.get("count") or rev_res.get("rows_affected", 0)
+    if rev_count > 0:
+        # Protected review audit records exist and cannot be deleted.
+        # This makes the referencing submissions non-deletable under FK constraints.
+        return {
+            "status": "blocked",
+            "mode": "apply",
+            "concrete_blocker": (
+                f"Referential integrity blocker: {rev_count} protected audit records in "
+                "fleet.supply_review_events reference owned submissions. Because audit records "
+                "must never be deleted, parent submissions cannot be deleted without violating FK constraints."
+            ),
+            "plan_prepared": True,
+            "receipts": [],
+        }
+
+    # 2. Execute deletion statements in transaction with exact rowcount verification
     db_receipts = []
     for stmt in plan["db_targets"]["guarded_statements"]:
         res = db_runner(stmt["sql"], stmt["params"])
         require(
             res.get("status") == "ok",
-            f"DB execution error on table {stmt['table']}",
+            f"DB execution error on table {stmt['table']}: {res}",
+        )
+        rows_affected = res.get("rows_affected", 0)
+        expected_rows = stmt["expected_rows"]
+        require(
+            rows_affected > 0,
+            f"DB deletion affected 0 rows on {stmt['table']}; zero rows affected rejected",
+        )
+        require(
+            rows_affected == expected_rows,
+            f"DB row count mismatch on {stmt['table']}: expected {expected_rows}, got {rows_affected}",
         )
         db_receipts.append(
             {
                 "table": stmt["table"],
                 "operation": stmt["operation"],
-                "rows_affected": res.get("rows_affected", 0),
+                "rows_affected": rows_affected,
+                "expected_rows": expected_rows,
             }
         )
 
     return {
         "status": "applied",
+        "mode": "apply",
         "concrete_blocker": None,
         "plan_prepared": True,
         "receipts": db_receipts,
@@ -597,13 +987,78 @@ def run_cleanup_pipeline(
     mode: str = "dry-run",
     gcs_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     db_runner: Optional[Callable[[str, List[Any]], Dict[str, Any]]] = None,
+    source_sha: Optional[str] = None,
+    run_id: Optional[int] = None,
+    prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    plan = build_cleanup_plan(inventory_data, mode=mode)
-    gcs_result = execute_gcs_cleanup(plan, gcs_runner=gcs_runner)
+    """Run all preflights before mutations. In apply mode, fail before mutation if DB blocked."""
+    plan = build_cleanup_plan(
+        inventory_data, mode=mode, source_sha=source_sha, run_id=run_id
+    )
+
+    # In apply mode: check DB lane BEFORE any GCS mutation!
+    if mode == "apply":
+        if db_runner is None:
+            # DB cleanup is blocked/unavailable. Halt before any GCS delete!
+            db_blocked = execute_db_cleanup(plan, db_runner=None)
+            return {
+                "status": "blocked",
+                "mode": mode,
+                "applied": False,
+                "source_sha": EXPECTED_SOURCE_SHA,
+                "product_run_id": EXPECTED_PRODUCT_RUN_ID,
+                "gcs_cleanup": {
+                    "status": "skipped_due_to_db_blocker",
+                    "total_targets": len(plan["gcs_targets"]),
+                    "receipts": [],
+                },
+                "db_cleanup": db_blocked,
+                "preservation": plan["preservation_plan"],
+            }
+
+        # If DB runner is present, execute DB apply first (or preflight)
+        db_result = execute_db_cleanup(plan, db_runner=db_runner)
+        if db_result.get("status") != "applied":
+            return {
+                "status": "blocked",
+                "mode": mode,
+                "applied": False,
+                "source_sha": EXPECTED_SOURCE_SHA,
+                "product_run_id": EXPECTED_PRODUCT_RUN_ID,
+                "gcs_cleanup": {
+                    "status": "skipped_due_to_db_blocker",
+                    "total_targets": len(plan["gcs_targets"]),
+                    "receipts": [],
+                },
+                "db_cleanup": db_result,
+                "preservation": plan["preservation_plan"],
+            }
+
+        # DB cleanup succeeded, now execute GCS cleanup
+        gcs_result = execute_gcs_cleanup(
+            plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
+        )
+        return {
+            "status": "success",
+            "mode": mode,
+            "applied": True,
+            "source_sha": EXPECTED_SOURCE_SHA,
+            "product_run_id": EXPECTED_PRODUCT_RUN_ID,
+            "gcs_cleanup": gcs_result,
+            "db_cleanup": db_result,
+            "preservation": plan["preservation_plan"],
+        }
+
+    # Mode is dry-run: execute non-mutating inspections
+    gcs_result = execute_gcs_cleanup(
+        plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
+    )
     db_result = execute_db_cleanup(plan, db_runner=db_runner)
 
     return {
+        "status": "dry_run_complete",
         "mode": mode,
+        "applied": False,
         "source_sha": EXPECTED_SOURCE_SHA,
         "product_run_id": EXPECTED_PRODUCT_RUN_ID,
         "gcs_cleanup": gcs_result,
@@ -625,8 +1080,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--inventory",
         type=str,
-        required=True,
+        default=None,
         help="Path to exact-owned-fixture-inventory.json",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        type=str,
+        default=None,
+        help="Path to directory containing authoritative downloaded GitHub artifact files",
     )
     parser.add_argument(
         "--source-sha",
@@ -655,14 +1116,46 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
-    inventory_path = Path(args.inventory)
-    if not inventory_path.is_file():
-        sys.stderr.write(f"Inventory file not found: {args.inventory}\n")
+    # Enforce CLI source/run inputs against expected constants
+    if args.source_sha != EXPECTED_SOURCE_SHA:
+        sys.stderr.write(
+            f"CLI argument mismatch: --source-sha {args.source_sha} != expected {EXPECTED_SOURCE_SHA}\n"
+        )
+        return 1
+
+    if args.run_id != EXPECTED_PRODUCT_RUN_ID:
+        sys.stderr.write(
+            f"CLI argument mismatch: --run-id {args.run_id} != expected {EXPECTED_PRODUCT_RUN_ID}\n"
+        )
         return 1
 
     try:
-        with open(inventory_path, "r", encoding="utf-8") as f:
-            inventory_data = json.load(f)
+        if args.artifact_dir:
+            art_dir = Path(args.artifact_dir)
+            if not art_dir.is_dir():
+                sys.stderr.write(f"Artifact directory not found: {args.artifact_dir}\n")
+                return 1
+            inventory_data = load_and_validate_authoritative_artifact(
+                art_dir,
+                expected_run_id=args.run_id,
+                expected_source_sha=args.source_sha,
+            )
+        elif args.inventory:
+            inventory_path = Path(args.inventory)
+            if not inventory_path.is_file():
+                sys.stderr.write(f"Inventory file not found: {args.inventory}\n")
+                return 1
+            with open(inventory_path, "r", encoding="utf-8") as f:
+                inventory_data = json.load(f)
+            validate_provenance(
+                inventory_data,
+                run_id=args.run_id,
+                source_sha=args.source_sha,
+            )
+            validate_inventory_items(inventory_data)
+        else:
+            sys.stderr.write("Must specify either --artifact-dir or --inventory\n")
+            return 1
 
         gcs_runner = None
         if args.offline:
@@ -673,9 +1166,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     return {
                         "status": "ok",
                         "metadata": {
-                            "generation": "offline-inventory-generation",
+                            "generation": "1728464600123456",
+                            "metageneration": "1",
                             "size": EXPECTED_FILE_SIZE,
                             "contentType": EXPECTED_MIME,
+                            "sha256": EXPECTED_SHA256,
                         },
                     }
                 raise ValueError("Mutation prohibited in offline mode")
@@ -686,6 +1181,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             inventory_data=inventory_data,
             mode=args.mode,
             gcs_runner=gcs_runner,
+            source_sha=args.source_sha,
+            run_id=args.run_id,
         )
 
         output_str = json.dumps(result, indent=2)
@@ -697,6 +1194,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"Receipt written to {args.output}")
         else:
             print(output_str)
+
+        # In apply mode, fail nonzero if cleanup was blocked or incomplete
+        if args.mode == "apply":
+            if (
+                result.get("status") != "success"
+                or result.get("gcs_cleanup", {}).get("status") != "success"
+                or result.get("db_cleanup", {}).get("status") != "applied"
+            ):
+                return 1
 
         return 0
     except Exception as exc:
