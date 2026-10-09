@@ -7,7 +7,6 @@
 - `owner`: `Human / system-design via accepted 2026-04-22 review`
 - `date`: `2026-04-22`
 - `status`: `accepted`
-- **附註 (2026-10-09)**：本文件關於「不做第一方乘客 App」及「不提供乘客登入/叫車/收據中心」的限制，已由新決策 [SD-DP-20261009-001-first-party-passenger-app.md](./SD-DP-20261009-001-first-party-passenger-app.md) 取代。其餘針對 Phase 1 B2B2C 的 topology 限制維持歷史紀錄。
 - `affected_docs`:
   - `ROADMAP.md`
   - `PHASE1_OPEN_QUESTIONS.md`
@@ -19,7 +18,7 @@
   - `phase1_system_analysis_v1.md` passenger-entry wording
   - `PHASE1_OPEN_QUESTIONS.md` `Q-009`, `Q-010`
 - `superseding_decision`:
-  - Phase 1 removes first-party `Passenger App / Web` from the current completion bar.
+  - Phase 1 removes first-party `Passenger App / Web` from the current completion bar. **[2026-10-09 附註]** 此決定已被 `SD-DP-20261009-001` 推翻，正式開啟第一方乘客身分、登入、預約與收據。
   - Current Phase 1 demand entry is limited to third-party ride-hailing platforms, partner / tenant channels, and operator / backoffice manual entry.
   - Phase 1 does not ship a passenger receipt UI or passenger receipt delivery center.
   - Receipt ownership follows order source: third-party platforms own third-party receipts; partner / tenant channels own their customer-facing receipt delivery; DRTS keeps canonical finance, settlement, and audit records plus admin / tenant / backoffice retrieval.

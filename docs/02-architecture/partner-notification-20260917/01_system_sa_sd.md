@@ -14,17 +14,17 @@ Repository：ajoe734/drts-fleet-platform
 
 已核實：
 
-| 檔案                                                            | 可直接確認的事實                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| packages/contracts/src/index.ts: 960–1210                       | PartnerChannelEntryRecord.tenantId 必填；entry 同時有 partnerId、programId、entrySlug；UpdatePartnerChannelEntryCommand 可變更 tenantId。這不是 entry 與 tenant 一對一的證明。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| packages/contracts/src/index.ts: 1680–1800                      | TenantWebhookEndpoint 屬 tenant，有 events、狀態、密鑰版本、retry policy；沒有 entry 專用通知綁定欄位。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| packages/contracts/src/referral-channel.ts: 1–180               | 既有 PartnerUserIdentityLinkRecord 保存 entrySlug、partnerUserRef、drtsPassengerId、active/revoked；既有簽章 handoff 與同意資料可沿用。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| apps/api/src/modules/tenant-partner/webhook-dispatch.service.ts | HMAC-SHA256、snake_case 序列化、HTTP timeout、shouldRetry/backoff 已存在；WebhookFetch 只回 ok/status，沒有讀取接收回執 body。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| apps/api/src/modules/multi-taxi/passenger-push.adapter.ts       | 可注入 PassengerPushTransport；存在可選 device resolver；generic HTTP 分支會以 receipt-${outboxId} 作缺回執時的 fallback。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| apps/api/src/modules/multi-taxi/multi-taxi.module.ts            | PASSENGER_PUSH_TRANSPORT 目前仍綁 WebPushTransport，並注入 PassengerPushDeviceResolver。只新增一個 class 不會切換現行行為。 **[2026-10-06 附註，不改本行原文]** 此行所述現況已過時：目前 PASSENGER_PUSH_TRANSPORT 綁的是 PartnerNotificationTransport（transportMode: "partner_webhook"），WebPushTransport／PassengerPushDeviceResolver 已不是現行注入對象。本表其餘各行與下文六項決議不受影響。每張單依來源分流到哪個管道、沒有 App 來源明確標無管道，以及預備第一方 App 接收端的補篇設計，見 `docs/02-architecture/passenger-notification-channel-routing-20261006.md` 與 `docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md`。 |
-| apps/api/src/modules/multi-taxi/multi-taxi.service.ts: 950–1100 | 已有 outbox claim、fence 與 receipt/outcome 同交易寫入；通用錯誤目前會摺疊成 provider_error。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| packages/contracts/src/phase1-p5-s3-multi-taxi.ts: 620–665      | outbox 四狀態 pending/sending/delivered/failed；五種事件；result 為 delivered/provider_not_configured/provider_error。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| docs/03-runbooks/tenant-api-webhook-governance-runbook.md       | 記載 tenant webhook 自動重試、重啟恢復、停用、測試及輪替機制。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 檔案 | 可直接確認的事實 |
+|---|---|
+| packages/contracts/src/index.ts: 960–1210 | PartnerChannelEntryRecord.tenantId 必填；entry 同時有 partnerId、programId、entrySlug；UpdatePartnerChannelEntryCommand 可變更 tenantId。這不是 entry 與 tenant 一對一的證明。 |
+| packages/contracts/src/index.ts: 1680–1800 | TenantWebhookEndpoint 屬 tenant，有 events、狀態、密鑰版本、retry policy；沒有 entry 專用通知綁定欄位。 |
+| packages/contracts/src/referral-channel.ts: 1–180 | 既有 PartnerUserIdentityLinkRecord 保存 entrySlug、partnerUserRef、drtsPassengerId、active/revoked；既有簽章 handoff 與同意資料可沿用。 |
+| apps/api/src/modules/tenant-partner/webhook-dispatch.service.ts | HMAC-SHA256、snake_case 序列化、HTTP timeout、shouldRetry/backoff 已存在；WebhookFetch 只回 ok/status，沒有讀取接收回執 body。 |
+| apps/api/src/modules/multi-taxi/passenger-push.adapter.ts | 可注入 PassengerPushTransport；存在可選 device resolver；generic HTTP 分支會以 receipt-${outboxId} 作缺回執時的 fallback。 |
+| apps/api/src/modules/multi-taxi/multi-taxi.module.ts | PASSENGER_PUSH_TRANSPORT 目前仍綁 WebPushTransport，並注入 PassengerPushDeviceResolver。只新增一個 class 不會切換現行行為。 **[2026-10-06 附註，不改本行原文]** 此行所述現況已過時：目前 PASSENGER_PUSH_TRANSPORT 綁的是 PartnerNotificationTransport（transportMode: "partner_webhook"），WebPushTransport／PassengerPushDeviceResolver 已不是現行注入對象。本表其餘各行與下文六項決議不受影響。每張單依來源分流到哪個管道、沒有 App 來源明確標無管道，以及預備第一方 App 接收端的補篇設計，見 `docs/02-architecture/passenger-notification-channel-routing-20261006.md` 與 `docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md`。 |
+| apps/api/src/modules/multi-taxi/multi-taxi.service.ts: 950–1100 | 已有 outbox claim、fence 與 receipt/outcome 同交易寫入；通用錯誤目前會摺疊成 provider_error。 |
+| packages/contracts/src/phase1-p5-s3-multi-taxi.ts: 620–665 | outbox 四狀態 pending/sending/delivered/failed；五種事件；result 為 delivered/provider_not_configured/provider_error。 |
+| docs/03-runbooks/tenant-api-webhook-governance-runbook.md | 記載 tenant webhook 自動重試、重啟恢復、停用、測試及輪替機制。 |
 
 SA 所稱 C111–C115 已完整驗收，是本輪提供的狀態敘述。本次有檢視相關 runbook／程式，沒有重跑這組測試，也沒有把既有綠燈當作新通知傳輸的驗收。
 
@@ -35,14 +35,14 @@ SA 所稱 C111–C115 已完整驗收，是本輪提供的狀態敘述。本次�
 
 ## 1. 六項決策：直接定案
 
-| 問題                       | 決議                                                                                                                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. entry/tenant 與端點歸屬 | 一個 entry 有一個當前 tenant；一個 tenant 可有多個 entry。端點、密鑰與治理沿用 TenantWebhookEndpoint；新增 entry→webhook 的顯式綁定，不建立第二套 PartnerWebhookEndpoint。                                       |
-| 2. 2xx 是否 delivered      | 200/201/202 + 合約相符的 accepted/duplicate 回執，才完成「交付夥伴端點」。單獨 2xx 不足。既有 delivered 保留，但新增 deliveryTarget=partner_endpoint、deliveryStage=partner_accepted；不得展示為裝置送達或已讀。 |
-| 3. 夥伴未接好              | 只使該 entry 通知能力未就緒；outbox 不得 delivered。配置缺失／停用不做無限 HTTP 重試；保留失敗原因、Ops 待處理、受控重送與有效期限。進行中行程不能因通知失敗被取消或停止更新。                                   |
-| 4. 最小 payload            | 通知識別、原 entry 的 partnerUserRef、不可作授權的 rideRef、事件／版本／時間／有效期、通用文案；ETA 只在相關事件提供分鐘。首版不送 GPS、路線、地址、原始電話、完整執登、支付資料或任何 bearer token。            |
-| 5. 名稱／版本              | 五個內部事件不改名；外部用 passenger.<原事件名>.v1，body schema_version=1.0，顯式訂閱、不用 wildcard。                                                                                                           |
-| 6. 首版幾家                | 實作自第一天支持多 tenant、多 entry；第一家真實 pilot 用 yuhe-residence。自動化至少測兩個 tenant，並包含同 tenant 的兩個不同 entry。沒有真實夥伴端點就停在內部驗收，不稱 live。                                  |
+| 問題 | 決議 |
+|---|---|
+| 1. entry/tenant 與端點歸屬 | 一個 entry 有一個當前 tenant；一個 tenant 可有多個 entry。端點、密鑰與治理沿用 TenantWebhookEndpoint；新增 entry→webhook 的顯式綁定，不建立第二套 PartnerWebhookEndpoint。 |
+| 2. 2xx 是否 delivered | 200/201/202 + 合約相符的 accepted/duplicate 回執，才完成「交付夥伴端點」。單獨 2xx 不足。既有 delivered 保留，但新增 deliveryTarget=partner_endpoint、deliveryStage=partner_accepted；不得展示為裝置送達或已讀。 |
+| 3. 夥伴未接好 | 只使該 entry 通知能力未就緒；outbox 不得 delivered。配置缺失／停用不做無限 HTTP 重試；保留失敗原因、Ops 待處理、受控重送與有效期限。進行中行程不能因通知失敗被取消或停止更新。 |
+| 4. 最小 payload | 通知識別、原 entry 的 partnerUserRef、不可作授權的 rideRef、事件／版本／時間／有效期、通用文案；ETA 只在相關事件提供分鐘。首版不送 GPS、路線、地址、原始電話、完整執登、支付資料或任何 bearer token。 |
+| 5. 名稱／版本 | 五個內部事件不改名；外部用 passenger.<原事件名>.v1，body schema_version=1.0，顯式訂閱、不用 wildcard。 |
+| 6. 首版幾家 | 實作自第一天支持多 tenant、多 entry；第一家真實 pilot 用 yuhe-residence。自動化至少測兩個 tenant，並包含同 tenant 的兩個不同 entry。沒有真實夥伴端點就停在內部驗收，不稱 live。 |
 
 ## 2. 範圍與責任
 
@@ -64,7 +64,9 @@ DRTS 責任：選對 entry／住戶、生成必要且最小事件、簽章、可
 夥伴責任：核驗來源、durable inbox、去重、找到住戶 App 帳戶、原生 token／OS 權限、送往原生推播、打開正確行程。
 共同責任：至少一次原生裝置整合驗收，以及故障聯絡／處置。
 
-首版不新增第一方乘客 App，不重建 retired passenger-web，不讓 DRTS 持有夥伴 APNs/FCM 憑證與 device token，不加入 SMS／CTI 或行銷推播。外部叫車平台原生負責通知的 forwarded 訂單不轉送這條通知鏈。 **[2026-10-09 附註]**：「不新增第一方乘客 App」及「不重建 passenger-web」的限制已由 [SD-DP-20261009-001](../../01-decisions/SD-DP-20261009-001-first-party-passenger-app.md) 取代。
+首版不新增第一方乘客 App，不重建 retired passenger-web，不讓 DRTS 持有夥伴 APNs/FCM 憑證與 device token，不加入 SMS／CTI 或行銷推播。外部叫車平台原生負責通知的 forwarded 訂單不轉送這條通知鏈。
+**[2026-10-09 附註]** 本節「首版不新增第一方乘客 App」之限制已被 `SD-DP-20261009-001` 推翻，但「不重建 retired passenger-web」的禁令仍保留（將建立新的 `apps/passenger-app-web`）。
+
 
 前景行程頁仍用既有即時讀取／SSE；背景通知不能取代頁面的正式資料。通知回執也不等於 P-5 揭露頁已顯示。
 
@@ -80,11 +82,11 @@ interface PartnerEntryNotificationBinding {
   partnerId: string;
   webhookId: string;
   version: number;
-  state: "test_pending" | "ready" | "disabled";
-  purpose: "passenger_notification";
+  state: 'test_pending' | 'ready' | 'disabled';
+  purpose: 'passenger_notification';
   eventTypes: PartnerPassengerEventType[];
-  schemaVersion: "1.0";
-  acknowledgementPolicy: "durable_partner_acceptance_v1";
+  schemaVersion: '1.0';
+  acknowledgementPolicy: 'durable_partner_acceptance_v1';
   validatedEndpointFingerprint: string | null;
   validatedAt: string | null;
   updatedAt: string;
@@ -95,7 +97,7 @@ interface PartnerEntryNotificationBinding {
 
 必須檢查：entry.tenantId == binding.tenantId == webhook.tenantId；entry.partnerId == binding.partnerId；entry active；binding ready；webhook active；所送事件同時在 binding 和 endpoint.events 的 allowlist。
 
-重要：不能用「列出 tenant 下訂閱此事件的所有 webhooks」做 fanout。不可因 passengerSubjectRef 在多個 entry 出現就送到全部 App。普通 tenant webhook 訂閱也不能自動取得 passenger.\* 事件。
+重要：不能用「列出 tenant 下訂閱此事件的所有 webhooks」做 fanout。不可因 passengerSubjectRef 在多個 entry 出現就送到全部 App。普通 tenant webhook 訂閱也不能自動取得 passenger.* 事件。
 
 實作一個受控的精準派送 façade，執行 endpoint-by-id 解析、生命週期檢查、密鑰選取、使用紀錄、delivery log、失敗計數。它委派 WebhookDispatchService.dispatchAttempt，不直接暴露 secret 給新 transport。
 
@@ -129,13 +131,13 @@ interface OrderPartnerNotificationRoute {
   tenantId: string;
   partnerId: string;
   entrySlug: string;
-  partnerUserRef: string; // 原 handoff 的夥伴使用者參照；受限儲存
-  drtsPassengerId: string; // 內部核對，不放通知 payload
-  passengerSubjectRef: string; // 內部核對，不放通知 payload
+  partnerUserRef: string;       // 原 handoff 的夥伴使用者參照；受限儲存
+  drtsPassengerId: string;      // 內部核對，不放通知 payload
+  passengerSubjectRef: string;  // 內部核對，不放通知 payload
   identityLinkedAt: string;
   consentBundleVersion: string;
-  notificationPolicyVersion: "partner_notification_v1";
-  rideRef: string; // 不可當 bearer credential
+  notificationPolicyVersion: 'partner_notification_v1';
+  rideRef: string;              // 不可當 bearer credential
   createdAt: string;
 }
 ```
@@ -148,13 +150,13 @@ interface OrderPartnerNotificationRoute {
 
 ## 5. 五種事件、次序、時效
 
-| 內部 eventType              | 外部 event（含 major 版）                | 內容／設計預設有效期        |
-| --------------------------- | ---------------------------------------- | --------------------------- |
+| 內部 eventType | 外部 event（含 major 版） | 內容／設計預設有效期 |
+|---|---|---|
 | assignment_disclosure_ready | passenger.assignment_disclosure_ready.v1 | 已派車、回行程提示；10 分鐘 |
-| assignment_replaced         | passenger.assignment_replaced.v1         | 改派提示；10 分鐘           |
-| eta_changed                 | passenger.eta_changed.v1                 | eta_minutes + as_of；2 分鐘 |
-| driver_arrived              | passenger.driver_arrived.v1              | 到場提示；5 分鐘            |
-| receipt_ready               | passenger.receipt_ready.v1               | 乘車證明已備妥；7 日        |
+| assignment_replaced | passenger.assignment_replaced.v1 | 改派提示；10 分鐘 |
+| eta_changed | passenger.eta_changed.v1 | eta_minutes + as_of；2 分鐘 |
+| driver_arrived | passenger.driver_arrived.v1 | 到場提示；5 分鐘 |
+| receipt_ready | passenger.receipt_ready.v1 | 乘車證明已備妥；7 日 |
 
 以上有效期是本次產品預設，不是法規門檻。先到 expiresAt 或 maxAttempts 者即停止自動重試。
 
@@ -190,13 +192,13 @@ partnerUserRef 必須是夥伴側不含直接個資的穩定參照；若現有�
 
 ## 7. delivered 的正式定義
 
-| 層級              | 證據                                        | 是否可說乘客已收到               |
-| ----------------- | ------------------------------------------- | -------------------------------- |
-| outbox_persisted  | DRTS DB 已存事件                            | 否                               |
-| partner_accepted  | 已核驗接收回執，夥伴承諾 durable inbox 接收 | 否                               |
-| provider_accepted | 夥伴的 APNs/FCM 等接受                      | 否                               |
-| device_received   | 有對應 device/SDK 或裝置測試證據            | 可說該裝置收到，不可說已讀       |
-| opened            | App 開啟通知事件                            | 可說通知已開啟，不推論內容已理解 |
+| 層級 | 證據 | 是否可說乘客已收到 |
+|---|---|---|
+| outbox_persisted | DRTS DB 已存事件 | 否 |
+| partner_accepted | 已核驗接收回執，夥伴承諾 durable inbox 接收 | 否 |
+| provider_accepted | 夥伴的 APNs/FCM 等接受 | 否 |
+| device_received | 有對應 device/SDK 或裝置測試證據 | 可說該裝置收到，不可說已讀 |
+| opened | App 開啟通知事件 | 可說通知已開啟，不推論內容已理解 |
 
 兼容既有 enum：保留 outbox.status=delivered、result=delivered，但對本 transport 加 deliveryTarget=partner_endpoint、deliveryStage=partner_accepted，前端標「夥伴端已接受」。舊 Web Push 回執不可回填為 partner_accepted。
 
@@ -235,18 +237,18 @@ HTTP security：精準核准 HTTPS endpoint；不跟隨 redirect；限制私有�
 
 retryDisposition = automatic | configuration_blocked | manual_only | terminal | none。
 
-| 情境                             | outbox/result                  | 伴隨 reason／處理                                    |
-| -------------------------------- | ------------------------------ | ---------------------------------------------------- |
-| 無 binding、未啟用、test_pending | failed/provider_not_configured | configuration_blocked；配置變更後再喚醒              |
-| entry/endpoint 停用              | failed/provider_not_configured | endpoint_disabled；沿既有重測規則恢復                |
-| route 缺失／多重／owner 改變     | failed/provider_error          | route_missing/ambiguous/owner_changed；manual_only   |
-| recipient link revoked           | failed/provider_error          | recipient_revoked；terminal，不外送                  |
-| 408/429/指定 5xx/timeout         | failed/provider_error          | automatic，但受最大次數和 expiresAt 限制             |
-| 401/403                          | failed/provider_error          | credential_rejected；configuration_blocked，禁止盲試 |
-| 404/410                          | failed/provider_error          | endpoint_unavailable；configuration_blocked          |
-| 非相符 ack、204／假 200          | failed/provider_error          | partner_ack_invalid；manual_only，避免未知通知重複   |
-| 超時效／已取消／被新事件取代     | failed/provider_error          | notification_expired/obsolete/superseded；terminal   |
-| 200/201/202 + 合法 ack           | delivered/delivered            | partner_accepted；downstream unknown                 |
+| 情境 | outbox/result | 伴隨 reason／處理 |
+|---|---|---|
+| 無 binding、未啟用、test_pending | failed/provider_not_configured | configuration_blocked；配置變更後再喚醒 |
+| entry/endpoint 停用 | failed/provider_not_configured | endpoint_disabled；沿既有重測規則恢復 |
+| route 缺失／多重／owner 改變 | failed/provider_error | route_missing/ambiguous/owner_changed；manual_only |
+| recipient link revoked | failed/provider_error | recipient_revoked；terminal，不外送 |
+| 408/429/指定 5xx/timeout | failed/provider_error | automatic，但受最大次數和 expiresAt 限制 |
+| 401/403 | failed/provider_error | credential_rejected；configuration_blocked，禁止盲試 |
+| 404/410 | failed/provider_error | endpoint_unavailable；configuration_blocked |
+| 非相符 ack、204／假 200 | failed/provider_error | partner_ack_invalid；manual_only，避免未知通知重複 |
+| 超時效／已取消／被新事件取代 | failed/provider_error | notification_expired/obsolete/superseded；terminal |
+| 200/201/202 + 合法 ack | delivered/delivered | partner_accepted；downstream unknown |
 
 worker 選取需同時檢查原狀態、nextAttemptAt、retryDisposition、expiresAt。否則所有 failed 仍會被通用 worker 無限重掃。
 
@@ -287,18 +289,18 @@ session 失效、App logout、冷啟動、錯 entry、已結束行程都要有�
 
 ## 12. 程式異動清單
 
-| 位置                                                               | 本次動作                                                                                                             |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| contracts：新 partner-passenger-notification.ts                    | 新增 binding／route／wire ack／typed failure；export；原 outbox 及結果 enum 保留                                     |
-| tenant-partner：notification binding service/repository/controller | 精準綁定、版本、scope、測試、治理 façade                                                                             |
-| webhook-dispatch.service.ts                                        | opt-in partner_ack_v1 回執模式；限量 body + deadline；一般 tenant 行為不變                                           |
-| multi-taxi：partner-notification.transport.ts                      | 實作 PassengerPushTransport，載入可信 route 並委派一次派送                                                           |
-| passenger-push.adapter.ts                                          | partner 模式不解析 PassengerDevice；不可用 synthetic receipt；錯誤保留分類                                           |
-| multi-taxi.module.ts                                               | 顯式 transportMode=partner_webhook 的 DI；移除此模式下 WebPushTransport/DeviceResolver 注入，避免只新增 class 未啟用 |
-| multi-taxi.service.ts/repository.ts                                | typed failure、route-aware availability、單一重試政策、context receipt 同 fence transaction                          |
-| 訂單建單／outbox producer                                          | 原交易寫 route、sequence、事件原始版本與 expiresAt                                                                   |
-| referral-embed BFF                                                 | fresh handoff 後導回指定受權限保護的 ride；原前景更新機制保留                                                        |
-| Platform/Ops                                                       | 綁定、就緒、未交付原因、真實 stage 與受控 retry；UI 細節另檔                                                         |
+| 位置 | 本次動作 |
+|---|---|
+| contracts：新 partner-passenger-notification.ts | 新增 binding／route／wire ack／typed failure；export；原 outbox 及結果 enum 保留 |
+| tenant-partner：notification binding service/repository/controller | 精準綁定、版本、scope、測試、治理 façade |
+| webhook-dispatch.service.ts | opt-in partner_ack_v1 回執模式；限量 body + deadline；一般 tenant 行為不變 |
+| multi-taxi：partner-notification.transport.ts | 實作 PassengerPushTransport，載入可信 route 並委派一次派送 |
+| passenger-push.adapter.ts | partner 模式不解析 PassengerDevice；不可用 synthetic receipt；錯誤保留分類 |
+| multi-taxi.module.ts | 顯式 transportMode=partner_webhook 的 DI；移除此模式下 WebPushTransport/DeviceResolver 注入，避免只新增 class 未啟用 |
+| multi-taxi.service.ts/repository.ts | typed failure、route-aware availability、單一重試政策、context receipt 同 fence transaction |
+| 訂單建單／outbox producer | 原交易寫 route、sequence、事件原始版本與 expiresAt |
+| referral-embed BFF | fresh handoff 後導回指定受權限保護的 ride；原前景更新機制保留 |
+| Platform/Ops | 綁定、就緒、未交付原因、真實 stage 與受控 retry；UI 細節另檔 |
 
 isAvailable() 只能表示 transport 的服務級能力，不能因存在 transport object 就把每個 entry 說成可通知。新增 route-aware readiness；缺配置必須回明確不可用。
 
@@ -326,18 +328,18 @@ C. 乘客通知功能 pilot 放行：第一家夥伴原生 App 背景／冷啟�
 
 ### 本輪新工作 ID（工程排程使用）
 
-| Task                                 | Owner       | 交付／依賴                                                                              |
-| ------------------------------------ | ----------- | --------------------------------------------------------------------------------------- |
-| SR-PARTNER-NOTIFY-CON-20260917       | SA/Contract | 六決策、wire schema、compat、migration 配號；最先                                       |
-| SR-PARTNER-NOTIFY-ROUTE-20260917     | Backend     | entry binding + order route + scoped identity + counters                                |
-| SR-PARTNER-NOTIFY-ACK-20260917       | Backend     | webhook 單次派送 façade + opt-in 回執；先回歸一般 webhook                               |
-| SR-PARTNER-NOTIFY-TRANSPORT-20260917 | Backend     | transport/DI/錯誤分類/單一 retry/receipt fencing；依上兩項                              |
-| SR-PARTNER-NOTIFY-NAV-20260917       | BFF/Partner | safe rideRef resolve + fresh handoff，夥伴 integration guide                            |
-| SR-PARTNER-NOTIFY-UI-20260917        | Web/UI      | 按獨立設計 brief 接真狀態，不冒稱裝置送達                                               |
-| SR-PARTNER-NOTIFY-LEGACY-20260917    | DevOps/Web  | 停用本拓撲 Web Push；不刪 secret；production config guard                               |
-| SR-PARTNER-NOTIFY-QA-20260917        | QA          | 下面全部負向／故障／多租戶案例；不可覆蓋既有 C111–C115                                  |
-| SR-LIVE-PUSH-001                     | Integration | 真夥伴 endpoint 證據；接續第一家原生裝置 pilot                                          |
-| SR-REFERRAL-START-ERROR-20260917     | Web/QA      | 「開始叫車」另案：client console、request ID、network、後端對應事件；不從 HTML 推定無錯 |
+| Task | Owner | 交付／依賴 |
+|---|---|---|
+| SR-PARTNER-NOTIFY-CON-20260917 | SA/Contract | 六決策、wire schema、compat、migration 配號；最先 |
+| SR-PARTNER-NOTIFY-ROUTE-20260917 | Backend | entry binding + order route + scoped identity + counters |
+| SR-PARTNER-NOTIFY-ACK-20260917 | Backend | webhook 單次派送 façade + opt-in 回執；先回歸一般 webhook |
+| SR-PARTNER-NOTIFY-TRANSPORT-20260917 | Backend | transport/DI/錯誤分類/單一 retry/receipt fencing；依上兩項 |
+| SR-PARTNER-NOTIFY-NAV-20260917 | BFF/Partner | safe rideRef resolve + fresh handoff，夥伴 integration guide |
+| SR-PARTNER-NOTIFY-UI-20260917 | Web/UI | 按獨立設計 brief 接真狀態，不冒稱裝置送達 |
+| SR-PARTNER-NOTIFY-LEGACY-20260917 | DevOps/Web | 停用本拓撲 Web Push；不刪 secret；production config guard |
+| SR-PARTNER-NOTIFY-QA-20260917 | QA | 下面全部負向／故障／多租戶案例；不可覆蓋既有 C111–C115 |
+| SR-LIVE-PUSH-001 | Integration | 真夥伴 endpoint 證據；接續第一家原生裝置 pilot |
+| SR-REFERRAL-START-ERROR-20260917 | Web/QA | 「開始叫車」另案：client console、request ID、network、後端對應事件；不從 HTML 推定無錯 |
 
 最低自動化案例：同 tenant 兩 entry 僅送原 entry；跨 tenant 相同 URL 隔離；同住戶在兩 App 不串單；entry 改 tenant 後舊消息不移轉；link 撤銷停送；endpoint 停用／輪替重測；缺 route 不猜；204／HTML200／錯 receipt 拒絕；partner 已入列但我方 timeout 後 duplicate ack；ack 後 DB 寫入失敗與 worker lease 到期；兩個 worker 競爭；五次 maxattempt；expiresAt；改派舊 ETA；取消後舊到場；缺 driver 情報不洩漏；錯 entry／logout 冷啟動點擊；未配置不可 available；既有一般 tenant webhook C111–C115 回歸。
 
