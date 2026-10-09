@@ -11,6 +11,17 @@ export interface PassengerSession {
   expiresAt: string;
 }
 
+export interface SessionStatus {
+  isActive: boolean;
+  account?: PassengerAccount;
+}
+
+export interface PassengerViewModel {
+  sessionStatus: SessionStatus;
+  refreshSession(): Promise<void>;
+  getSessionStatus(): Promise<SessionStatus>;
+}
+
 export interface AuthProviders {
   phone: boolean;
   email: boolean;

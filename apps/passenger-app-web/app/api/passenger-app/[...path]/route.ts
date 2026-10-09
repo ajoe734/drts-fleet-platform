@@ -167,23 +167,29 @@ async function forward(
 
   const fullPath = path.join("/");
 
-  // handle logout
-  if (fullPath === "auth/logout" && method === "POST") {
-    const targetUrl = buildTargetUrl(request, path);
-    const headers = new Headers();
-    await applyUpstreamAuth(headers, targetUrl, token);
+  async function doRefresh() {
+    const refreshTargetUrl = buildTargetUrl(request, ["auth", "refresh"]);
+    const refreshHeaders = new Headers({ "Content-Type": "application/json" });
+    await applyUpstreamAuth(refreshHeaders, refreshTargetUrl);
+    
     try {
-      await fetch(targetUrl.toString(), { method: "POST", headers });
+      const res = await fetch(refreshTargetUrl.toString(), {
+        method: "POST",
+        headers: refreshHeaders,
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && typeof data.accessToken === "string" && typeof data.refreshToken === "string") {
+        return data as { accessToken: string; refreshToken: string };
+      }
+      return null;
     } catch {
-      // ignore
+      return null;
     }
-    const resp = NextResponse.json({ success: true }, { status: 200 });
-    resp.cookies.delete("pax_session");
-    resp.cookies.delete("pax_refresh");
-    return withSecurityHeaders(resp);
   }
 
-  // handle refresh
+  // handle explicit refresh
   if (fullPath === "auth/refresh" && method === "POST") {
     if (!refreshToken) {
       const resp = NextResponse.json({ error: "NO_REFRESH_TOKEN" }, { status: 401 });
@@ -191,95 +197,84 @@ async function forward(
       resp.cookies.delete("pax_refresh");
       return withSecurityHeaders(resp);
     }
-    const targetUrl = buildTargetUrl(request, path);
-    const headers = new Headers({ "Content-Type": "application/json" });
-    await applyUpstreamAuth(headers, targetUrl);
-    try {
-      const upstream = await fetch(targetUrl.toString(), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ refreshToken })
-      });
-      if (upstream.ok) {
-        const data = await upstream.json();
-        const resp = NextResponse.json({ success: true }, { status: 200 });
-        const opts = {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax" as const,
-          path: "/",
-        };
-        resp.cookies.set("pax_session", data.accessToken, opts);
-        resp.cookies.set("pax_refresh", data.refreshToken, opts);
-        return withSecurityHeaders(resp);
-      } else {
-        const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
-        resp.cookies.delete("pax_session");
-        resp.cookies.delete("pax_refresh");
-        return withSecurityHeaders(resp);
-      }
-    } catch {
-      return withSecurityHeaders(NextResponse.json({ error: "PASSENGER_AUTHORITY_UNAVAILABLE" }, { status: 503 }));
+    const data = await doRefresh();
+    if (data) {
+      const resp = NextResponse.json({ success: true }, { status: 200 });
+      const opts = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax" as const,
+        path: "/",
+      };
+      resp.cookies.set("pax_session", data.accessToken, opts);
+      resp.cookies.set("pax_refresh", data.refreshToken, opts);
+      return withSecurityHeaders(resp);
+    } else {
+      const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+      resp.cookies.delete("pax_session");
+      resp.cookies.delete("pax_refresh");
+      return withSecurityHeaders(resp);
     }
   }
 
   const targetUrl = buildTargetUrl(request, path);
-  let headers = copyHeaders(request.headers);
-  await applyUpstreamAuth(headers, targetUrl, token);
-
-  const init: RequestInit = {
-    method,
-    headers,
-    cache: "no-store",
-    redirect: "manual",
-  };
 
   let bodyBuffer: ArrayBuffer | null = null;
   if (!["GET", "HEAD"].includes(method)) {
     bodyBuffer = await request.arrayBuffer();
-    init.body = bodyBuffer;
+  }
+  
+  // handle logout specific body
+  if (fullPath === "auth/logout" && method === "POST") {
+    bodyBuffer = new TextEncoder().encode(JSON.stringify({ refreshToken }));
   }
 
+  const buildInit = async (currentToken: string | undefined): Promise<RequestInit> => {
+    let headers = copyHeaders(request.headers);
+    if (fullPath === "auth/logout") {
+      headers.set("Content-Type", "application/json");
+    }
+    await applyUpstreamAuth(headers, targetUrl, currentToken);
+    const init: RequestInit = {
+      method,
+      headers,
+      cache: "no-store",
+      redirect: "manual",
+    };
+    if (bodyBuffer) init.body = bodyBuffer;
+    return init;
+  };
+
   try {
+    let init = await buildInit(token);
     let upstream = await fetch(targetUrl.toString(), init);
 
-    // Attempt auto-refresh
-    let refreshedTokens: { accessToken: string; refreshToken: string } | null =
-      null;
+    let refreshedTokens: { accessToken: string; refreshToken: string } | null = null;
     let didClearTokens = false;
 
     if (upstream.status === 401 && token && refreshToken) {
-      const refreshUrl = new URL(
-        `/api/passenger-app/auth/refresh`,
-        resolveTargetOrigin(),
-      );
-      try {
-        const refreshRes = await fetch(refreshUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
-        });
-        if (refreshRes.ok) {
-          const data = await refreshRes.json();
-          if (data.accessToken && data.refreshToken) {
-            token = data.accessToken;
-            refreshedTokens = data;
-
-            // retry original request
-            headers = copyHeaders(request.headers);
-            await applyUpstreamAuth(headers, targetUrl, token);
-            init.headers = headers;
-            if (bodyBuffer) init.body = bodyBuffer;
-            upstream = await fetch(targetUrl.toString(), init);
-          } else {
-            didClearTokens = true;
-          }
-        } else {
-          didClearTokens = true;
-        }
-      } catch {
+      refreshedTokens = await doRefresh();
+      if (refreshedTokens) {
+        token = refreshedTokens.accessToken;
+        init = await buildInit(token);
+        upstream = await fetch(targetUrl.toString(), init);
+      } else {
         didClearTokens = true;
       }
+    }
+
+    if (fullPath === "auth/logout" && method === "POST") {
+      if (!upstream.ok && upstream.status !== 401) {
+         // Propagate failure for logout
+         const resp = NextResponse.json({ error: "LOGOUT_FAILED" }, { status: upstream.status });
+         resp.cookies.delete("pax_session");
+         resp.cookies.delete("pax_refresh");
+         return withSecurityHeaders(resp);
+      }
+      const resp = NextResponse.json({ success: true }, { status: 200 });
+      resp.cookies.delete("pax_session");
+      resp.cookies.delete("pax_refresh");
+      return withSecurityHeaders(resp);
     }
 
     const responseHeaders = copyHeaders(upstream.headers);
@@ -290,11 +285,15 @@ async function forward(
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
       try {
         loginData = await upstream.json();
-        const redacted = { ...loginData };
-        delete redacted.accessToken;
-        delete redacted.refreshToken;
-        finalBody = JSON.stringify(redacted) as any;
-        responseHeaders.set("Content-Type", "application/json");
+        if (loginData.accessToken && loginData.refreshToken) {
+            const redacted = { ...loginData };
+            delete redacted.accessToken;
+            delete redacted.refreshToken;
+            finalBody = JSON.stringify(redacted) as any;
+            responseHeaders.set("Content-Type", "application/json");
+        } else {
+            loginData = null; // invalid token payload
+        }
       } catch {
         // ignore JSON parsing error
       }
@@ -306,32 +305,19 @@ async function forward(
     });
     withSecurityHeaders(nextResponse);
 
+    const opts = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax" as const,
+      path: "/",
+    };
+
     if (loginData && loginData.accessToken && loginData.refreshToken) {
-      const opts = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax" as const,
-        path: "/",
-      };
       nextResponse.cookies.set("pax_session", loginData.accessToken, opts);
       nextResponse.cookies.set("pax_refresh", loginData.refreshToken, opts);
     } else if (refreshedTokens) {
-      const opts = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax" as const,
-        path: "/",
-      };
-      nextResponse.cookies.set(
-        "pax_session",
-        refreshedTokens.accessToken,
-        opts,
-      );
-      nextResponse.cookies.set(
-        "pax_refresh",
-        refreshedTokens.refreshToken,
-        opts,
-      );
+      nextResponse.cookies.set("pax_session", refreshedTokens.accessToken, opts);
+      nextResponse.cookies.set("pax_refresh", refreshedTokens.refreshToken, opts);
     } else if (didClearTokens) {
       nextResponse.cookies.delete("pax_session");
       nextResponse.cookies.delete("pax_refresh");
@@ -339,10 +325,15 @@ async function forward(
 
     return nextResponse;
   } catch {
-    return withSecurityHeaders(NextResponse.json(
+    const resp = NextResponse.json(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
       { status: 503 }
-    ));
+    );
+    if (fullPath === "auth/refresh" || fullPath === "auth/logout") {
+       resp.cookies.delete("pax_session");
+       resp.cookies.delete("pax_refresh");
+    }
+    return withSecurityHeaders(resp);
   }
 }
 

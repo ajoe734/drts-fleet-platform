@@ -1,4 +1,4 @@
-import { PassengerAccount, AuthProviders, FareQuote } from "./types.js";
+import { PassengerAccount, AuthProviders, FareQuote, PassengerViewModel, SessionStatus } from "./types.js";
 
 export interface FetchOptions {
   method?: string;
@@ -22,9 +22,12 @@ export interface PassengerClientOptions {
   fetchFn?: FetchFn;
 }
 
-export class PassengerClient {
+export class PassengerClient implements PassengerViewModel {
   private baseUrl: string;
   private fetchFn: FetchFn;
+
+  // View-model reactive state foundation
+  public sessionStatus: SessionStatus = { isActive: false };
 
   constructor(options: PassengerClientOptions) {
     this.baseUrl = options.baseUrl;
@@ -80,5 +83,22 @@ export class PassengerClient {
     return this.request<void>("/api/passenger-app/auth/logout", {
       method: "POST"
     });
+  }
+
+  async refreshSession(): Promise<void> {
+    await this.request<void>("/api/passenger-app/auth/refresh", {
+      method: "POST"
+    });
+  }
+
+  async getSessionStatus(): Promise<import("./types.js").SessionStatus> {
+    try {
+      const account = await this.getAccount();
+      this.sessionStatus = { isActive: true, account };
+      return this.sessionStatus;
+    } catch {
+      this.sessionStatus = { isActive: false };
+      return this.sessionStatus;
+    }
   }
 }

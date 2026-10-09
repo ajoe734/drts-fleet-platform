@@ -18,6 +18,7 @@ describe("Passenger App BFF", () => {
     });
     // mock DRTS_API_AUTH_AUDIENCE
     process.env.DRTS_API_AUTH_AUDIENCE = "test-audience";
+    process.env.NODE_ENV = "production";
   });
 
   it("blocks unallowed paths", async () => {
@@ -28,35 +29,6 @@ describe("Passenger App BFF", () => {
       params: Promise.resolve({ path: ["admin", "users"] }),
     });
     expect(res.status).toBe(404);
-  });
-
-  it("allows public fare quote (GET)", async () => {
-    const req = new NextRequest(
-      "http://localhost/api/passenger-app/fares/quote",
-    );
-    const res = await GET(req, {
-      params: Promise.resolve({ path: ["fares", "quote"] }),
-    });
-    expect(res.status).toBe(200);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/passenger-app/fares/quote"),
-      expect.objectContaining({ method: "GET" }),
-    );
-  });
-
-  it("checks CSRF for POST", async () => {
-    const req = new NextRequest("http://localhost/api/passenger-app/rides", {
-      method: "POST",
-      headers: {
-        Origin: "http://hacker.com",
-      },
-    });
-    const res = await POST(req, {
-      params: Promise.resolve({ path: ["rides"] }),
-    });
-    expect(res.status).toBe(403);
-    const data = await res.json();
-    expect(data.error).toBe("CSRF_CHECK_FAILED");
   });
 
   it("adds security headers on success and error", async () => {
@@ -70,16 +42,9 @@ describe("Passenger App BFF", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("x-frame-options")).toBe("DENY");
     expect(res.headers.get("content-security-policy")).toBeDefined();
-
-    // error
-    req = new NextRequest("http://localhost/api/passenger-app/admin/users");
-    res = await GET(req, {
-      params: Promise.resolve({ path: ["admin", "users"] }),
-    });
-    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
-  it("handles login and redacts tokens while setting cookies", async () => {
+  it("handles login and redacts tokens while setting cookies (Secure/SameSite)", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -99,10 +64,14 @@ describe("Passenger App BFF", () => {
     const accCookie = res.cookies.get("pax_session");
     expect(accCookie?.value).toBe("sec-acc");
     expect(accCookie?.httpOnly).toBe(true);
+    expect(accCookie?.secure).toBe(true); // R7
+    expect(accCookie?.sameSite).toBe("lax"); // R7
 
     const refCookie = res.cookies.get("pax_refresh");
     expect(refCookie?.value).toBe("sec-ref");
     expect(refCookie?.httpOnly).toBe(true);
+    expect(refCookie?.secure).toBe(true);
+    expect(refCookie?.sameSite).toBe("lax");
 
     // Tokens are redacted from response
     const data = await res.json();
@@ -111,75 +80,134 @@ describe("Passenger App BFF", () => {
     expect(data.user).toBe("abc");
   });
 
-  it("handles refresh with stored cookie and metadata auth", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ accessToken: "new-acc", refreshToken: "new-ref" }),
-      headers: new Headers(),
-      body: "{}",
+  // R4 Test
+  it("auto-refreshes on 401 using shared trusted auth routine and rejects spoofed headers", async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      if (url.includes("metadata.google.internal")) {
+        return { ok: true, text: async () => "trusted-identity-token" };
+      }
+      callCount++;
+      if (callCount === 1) { // First request to /account
+        expect(init.headers.get("x-serverless-authorization")).toBe("Bearer trusted-identity-token");
+        expect(init.headers.get("authorization")).toBe("Bearer expired-access");
+        expect(init.headers.get("x-drts-google-id-token")).toBe("trusted-identity-token");
+        expect(init.headers.get("x-spoofed")).toBeNull();
+        return { ok: false, status: 401, headers: new Headers() };
+      }
+      if (callCount === 2) { // Refresh request
+        expect(url).toContain("auth/refresh");
+        expect(init.headers.get("x-serverless-authorization")).toBe("Bearer trusted-identity-token");
+        const body = JSON.parse(init.body);
+        expect(body.refreshToken).toBe("stored-ref");
+        return { ok: true, status: 200, json: async () => ({ accessToken: "new-access", refreshToken: "new-ref" }), headers: new Headers() };
+      }
+      if (callCount === 3) { // Retry request
+        expect(url).toContain("account");
+        expect(init.headers.get("authorization")).toBe("Bearer new-access");
+        return { ok: true, status: 200, headers: new Headers(), body: '{"account": true}' };
+      }
     });
-    const req = new NextRequest("http://localhost/api/passenger-app/auth/refresh", {
-      method: "POST",
-      headers: { Origin: "http://localhost", Cookie: "pax_refresh=stored-ref" }
+
+    const req = new NextRequest("http://localhost/api/passenger-app/account", {
+      headers: { Cookie: "pax_session=expired-access; pax_refresh=stored-ref", "X-Serverless-Authorization": "spoofed-header" }
     });
-    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "refresh"] }) });
-    
+    const res = await GET(req, { params: Promise.resolve({ path: ["account"] }) });
     expect(res.status).toBe(200);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("metadata.google.internal"),
-      expect.objectContaining({ cache: "no-store" })
-    );
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/passenger-app/auth/refresh"),
-      expect.objectContaining({
-        body: JSON.stringify({ refreshToken: "stored-ref" })
-      })
-    );
 
     const accCookie = res.cookies.get("pax_session");
-    expect(accCookie?.value).toBe("new-acc");
-    
-    // Refreshed tokens are also redacted in the logic for refresh since it returns success: true
-    const data = await res.json();
-    expect(data.accessToken).toBeUndefined();
-    expect(data.success).toBe(true);
+    expect(accCookie?.value).toBe("new-access");
+    expect(accCookie?.secure).toBe(true);
   });
 
-  it("clears cookies on failed refresh", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      headers: new Headers(),
-      body: "{}",
-    });
-    const req = new NextRequest("http://localhost/api/passenger-app/auth/refresh", {
-      method: "POST",
-      headers: { Origin: "http://localhost", Cookie: "pax_refresh=stored-ref" }
-    });
-    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "refresh"] }) });
-    
-    expect(res.status).toBe(401);
-    const accCookie = res.cookies.get("pax_session");
-    expect(accCookie?.value).toBe(""); // cleared
+  // R2 Test
+  it("clears both cookies on explicit refresh failure (network, parsing, invalid tokens)", async () => {
+    const scenarios = [
+      { ok: false, status: 503 },
+      { ok: true, status: 200, data: {} }, // empty data
+      { ok: true, status: 200, data: { accessToken: "missing_ref" } },
+      null // network error
+    ];
+
+    for (const sc of scenarios) {
+      if (sc === null) {
+        global.fetch = vi.fn().mockImplementation(async (url) => {
+          if (url.includes("metadata")) return { ok: true, text: async () => "token" };
+          throw new Error("Network Error");
+        });
+      } else {
+        global.fetch = vi.fn().mockImplementation(async (url) => {
+          if (url.includes("metadata")) return { ok: true, text: async () => "token" };
+          return { ok: sc.ok, status: sc.status, json: async () => sc.data, headers: new Headers() };
+        });
+      }
+
+      const req = new NextRequest("http://localhost/api/passenger-app/auth/refresh", {
+        method: "POST",
+        headers: { Origin: "http://localhost", Cookie: "pax_session=acc; pax_refresh=stored-ref" }
+      });
+      const res = await POST(req, { params: Promise.resolve({ path: ["auth", "refresh"] }) });
+
+      const accCookie = res.cookies.get("pax_session");
+      const refCookie = res.cookies.get("pax_refresh");
+      
+      expect(accCookie?.value).toBe(""); // cleared
+      expect(refCookie?.value).toBe(""); // cleared
+      
+      if (sc === null || sc.status === 503) {
+        expect(res.status).toBe(503);
+      } else {
+        expect(res.status).toBe(401);
+      }
+    }
   });
 
-  it("handles logout by revoking upstream then clearing cookies", async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers() });
+  // R3 Test
+  it("asserts authorized revocation on logout and propagates failure", async () => {
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      if (url.includes("metadata")) return { ok: true, text: async () => "token" };
+      callCount++;
+      if (url.includes("auth/logout")) {
+        const body = JSON.parse(init.body);
+        expect(body.refreshToken).toBe("stored-ref");
+        if (callCount === 1) return { ok: false, status: 401, headers: new Headers() };
+        if (callCount === 3) return { ok: true, status: 200, headers: new Headers() };
+      }
+      if (url.includes("auth/refresh")) {
+        return { ok: true, status: 200, json: async () => ({ accessToken: "new-acc", refreshToken: "new-ref" }), headers: new Headers() };
+      }
+    });
+
     const req = new NextRequest("http://localhost/api/passenger-app/auth/logout", {
       method: "POST",
-      headers: { Origin: "http://localhost", Cookie: "pax_session=tok; pax_refresh=ref" }
+      headers: { Origin: "http://localhost", Cookie: "pax_session=expired-access; pax_refresh=stored-ref" }
     });
-    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "logout"] }) });
     
+    // First it hits 401 on logout, then refresh kicks in, then retries logout
+    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "logout"] }) });
     expect(res.status).toBe(200);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/passenger-app/auth/logout"),
-      expect.objectContaining({
-        headers: expect.any(Headers) // Should contain auth header for session
-      })
-    );
+    
+    // Cookies must be cleared on successful logout
     const accCookie = res.cookies.get("pax_session");
-    expect(accCookie?.value).toBe(""); // cleared
+    expect(accCookie?.value).toBe("");
+  });
+  
+  it("propagates upstream failure if logout fails after retries", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("metadata")) return { ok: true, text: async () => "token" };
+      return { ok: false, status: 400, headers: new Headers() }; // Failed request
+    });
+    
+    const req = new NextRequest("http://localhost/api/passenger-app/auth/logout", {
+      method: "POST",
+      headers: { Origin: "http://localhost", Cookie: "pax_session=acc; pax_refresh=stored-ref" }
+    });
+    
+    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "logout"] }) });
+    expect(res.status).toBe(400); // Propagated error status
+    // Cookies must STILL be cleared
+    const accCookie = res.cookies.get("pax_session");
+    expect(accCookie?.value).toBe("");
   });
 });

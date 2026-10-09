@@ -4,15 +4,15 @@ import { REALM_COLORS, STATUS_TONES } from "@drts/ui-tokens";
 const pTokens = REALM_COLORS.tenant.light;
 
 const P5 = {
-  bg: "#F3F5F8",
+  bg: STATUS_TONES.neutral.light.bg,
   surface: "#FFFFFF",
-  ink: "#16212C",
-  mut: STATUS_TONES.neutral.light.fg, // or '#5A6A7B'
-  dim: STATUS_TONES.neutral.light.border,
-  line: STATUS_TONES.neutral.light.bg,
-  lineSoft: "#EDF1F5",
+  ink: STATUS_TONES.neutral.dark.bg,
+  mut: STATUS_TONES.neutral.light.fg,
+  dim: STATUS_TONES.neutral.dark.fg,
+  line: STATUS_TONES.neutral.light.border,
+  lineSoft: STATUS_TONES.neutral.light.bg,
   brand: pTokens.fg,
-  brandDark: REALM_COLORS.tenant.dark.bg, // deep blue / teal
+  brandDark: REALM_COLORS.tenant.dark.bg,
   brandBg: pTokens.bg,
   ok: STATUS_TONES.success.light.fg,
   okBg: STATUS_TONES.success.light.bg,
@@ -85,7 +85,7 @@ export function P5Phone({
         height: 844,
         background: P5.bg,
         borderRadius: 38,
-        border: "10px solid #10161d",
+        border: `10px solid ${STATUS_TONES.neutral.dark.bg}`,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -97,7 +97,7 @@ export function P5Phone({
         style={{
           height: 40,
           background: P5.brandDark,
-          color: "#fff",
+          color: P5.surface,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "space-between",
@@ -130,7 +130,7 @@ export function P5Phone({
 
 export function P5Header({
   status,
-  order = "ZX-240720-0186",
+  order,
 }: {
   status: string;
   order?: string;
@@ -139,7 +139,7 @@ export function P5Header({
     <div
       style={{
         background: P5.brandDark,
-        color: "#fff",
+        color: P5.surface,
         padding: "10px 18px 14px",
         flexShrink: 0,
       }}
@@ -228,10 +228,12 @@ export function P5Map({
   state = "fresh",
   pickupAddress,
   updateNotice,
+  routeSvgPath,
 }: {
   state?: "fresh" | "stale" | "missing";
   pickupAddress?: string;
   updateNotice?: string;
+  routeSvgPath?: string;
 }) {
   return (
     <div
@@ -248,23 +250,25 @@ export function P5Map({
     >
       {state !== "missing" && (
         <>
-          <svg
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-            }}
-          >
-            <path
-              d="M50 120 C 120 90, 200 100, 310 44"
-              fill="none"
-              stroke={P5.brand}
-              strokeWidth="3"
-              strokeDasharray="1 7"
-              strokeLinecap="round"
-            />
-          </svg>
+          {routeSvgPath && (
+            <svg
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+              }}
+            >
+              <path
+                d={routeSvgPath}
+                fill="none"
+                stroke={P5.brand}
+                strokeWidth="3"
+                strokeDasharray="1 7"
+                strokeLinecap="round"
+              />
+            </svg>
+          )}
           <div
             style={{
               position: "absolute",
@@ -504,36 +508,40 @@ export function P5VehicleCard({
             }}
           >
             <span style={{ fontSize: 14, fontWeight: 700 }}>{driver || "未知"}</span>
-            <span
+            {registration && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  color: P5.ok,
+                  background: P5.okBg,
+                  border: "1px solid " + P5.okBd,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                }}
+              >
+                <P5Icon name="shield" size={10} />
+                執登有效
+              </span>
+            )}
+          </div>
+          {registration && (
+            <div
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                fontSize: 10.5,
-                fontWeight: 700,
-                color: P5.ok,
-                background: P5.okBg,
-                border: "1px solid " + P5.okBd,
-                padding: "2px 8px",
-                borderRadius: 999,
+                fontSize: 11,
+                color: P5.mut,
+                marginTop: 3,
+                fontFamily: P5.mono,
               }}
             >
-              <P5Icon name="shield" size={10} />
-              執登有效
-            </span>
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: P5.mut,
-              marginTop: 3,
-              fontFamily: P5.mono,
-            }}
-          >
-            {registration || ""}
-          </div>
+              {registration}
+            </div>
+          )}
           <div style={{ marginTop: 6 }}>
-            {rating === "rated" ? (
+            {rating === "rated" && ratingScore ? (
               <span
                 style={{
                   display: "inline-flex",
@@ -550,11 +558,11 @@ export function P5VehicleCard({
                   }}
                 >
                   <P5Icon name="star" size={13} style={{ fill: "#C7860B" }} />
-                  <b style={{ fontSize: 15, color: P5.ink }}>{ratingScore || "0.0"}</b>
+                  <b style={{ fontSize: 15, color: P5.ink }}>{ratingScore}</b>
                 </span>
                 <span style={{ fontSize: 11, color: P5.mut }}>{ratingCount || 0} 則評價</span>
               </span>
-            ) : (
+            ) : rating === "new" ? (
               <span
                 style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
               >
@@ -574,7 +582,7 @@ export function P5VehicleCard({
                   尚無乘車評價
                 </span>
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
