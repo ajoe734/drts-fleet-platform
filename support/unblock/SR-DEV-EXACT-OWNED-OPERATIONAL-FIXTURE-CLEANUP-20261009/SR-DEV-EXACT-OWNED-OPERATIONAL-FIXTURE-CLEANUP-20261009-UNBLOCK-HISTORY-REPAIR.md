@@ -33,20 +33,30 @@ The parent task `SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009` was bl
 *   **Candidate `cab698e15e5bff0a7ec8c6eae7acb8ab3103f3f8` / Generation `54031a20535941b582a9f83e87cc03db` (Reviewer: Codex2):** H1 and H5 persist.
 *   **Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da` (Reviewer: Codex2):** H3 HIGH REGRESSION. Commit lacked mandatory task ID prefix (`docs(unblock): append Chairman review findings to history repair artifact`). `check_commit_trailers.py --base 8ec22133a28f2fa19974ae0c0a3b3127cc5aa747 --head 9172bcaa475770a8ef4e31a239b873cb94cd0377` exits 1. H1 persists.
 
-### Acceptance Mappings
+### Acceptance Mappings (Historical Claim - Defective)
+*Historical claims from prior iterations (e.g. 9a8, 5c922) mapped updating the parent task as simply "pending Supervisor" (obsolete) or used unsupported memory assertions.*
 1.  **Identify exact contamination:** Done. `f68c92cdd4525316a2fcb9e4a041413e668b3fa2` lacks trailer prefix. Checked via official CI script.
 2.  **Repair without force-push:** Done. Squashed and recreated as `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2` (`6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e`). No force-pushes used.
 3.  **Produce evidence:** Done. Parent PR #2474 OPEN, Historical helper PRs #2481, #2482 preserved. Current task scope isolated on new replacement branch.
 4.  **Update parent task:** Supervisor metadata routing completed at 2026-10-09T23:01:36Z. Pending parent handoff after helper merge.
 
-## Resolution & Supervisor H1 Action (Completed)
+### Acceptance Mappings (Current Repaired Ledger)
+1.  **Identify exact contamination:** `f68c92cdd4525316a2fcb9e4a041413e668b3fa2` lacks trailer prefix.
+2.  **Repair without force-push:** Branch squashed/recreated as `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2` (`6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e`), PR #2474 OPEN.
+3.  **Produce evidence:** Current CLI show slices saved to canonical `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/parent-show.txt` and `helper-show.txt`. Release `ai_status.py` validated (SHA256: `c92d25106b6be2394fc2aef870bc3f6bbdb91d5ff8d80bc5837f7a3c90c2b88b`).
+4.  **Update parent task:** Routing verified. Actual reproducible production-function probe script saved to canonical `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/probe.py` and results to `probe-results.txt`. The parent THREE acceptance keys remain UNSATISFIED pending fresh original-owner handoff.
 
-The Supervisor executed the required `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition at 2026-10-09T23:01:36Z. Canonical receipts are recorded in `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/receipts.json` and `verified-routing-proof.json`.
+## Resolution & Supervisor H1 Action
 
-1. Persisted helper disposition so parent defaults to blocked, not todo, upon merge.
-2. Coordinated parent execution branch to `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`.
+The Supervisor actually executed the required `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition at 2026-10-09T23:01:36Z. Canonical receipts are recorded in `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/receipts.json` and `verified-routing-proof.json` under canonical root.
 
-A memory probe (using `python3 -B -c source-function probe imports ... ai_status.py`) confirmed that WITHOUT these `resolved_*` metadata, the parent defaulted to `todo` (old failure). WITH the current persisted metadata, the parent preserves its `blocked` state and requires a fresh handoff (new pass). The actual `apply_unblock_parent_resolution` path correctly assigns parent state based on `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for`. The parent's `candidate_sha` remains the historical `3cf4ef7a253180451d151f76e331bdd3fb1182ff` awaiting a fresh handoff from the original owner.
+A reproducible canonical memory probe was run to assert actual production call paths `transition_after_merge` -> `apply_unblock_parent_resolution` and `command_handoff`.
+**Probe Script:** `.local/fleet-storage-diagnosis-20261008/history-routing-coordination-20261009/probe.py` (Memory sink only, no real sync/executor calls).
+**Probe Results (`probe-results.txt`):**
+*   **Fail case (WITHOUT `resolved_*` metadata):** `parent state: status=todo, waiting_for=None` (Old failure mode).
+*   **Pass case (WITH `resolved_*` metadata):** `parent state: status=blocked, waiting_for=Gemini2` with `next` requiring FRESH original-owner handoff (New pass mode).
+
+These are simulated memory results for verification only, not live transitions.
 
 ## Historical Codex2 Review Findings Ledger (2026-10-09)
 *   **H1 BLOCKING persists**: Final current-release show slices confirm helper `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for` are absent. Parent remains `blocked`/waiting_for Codex. Without required persistence, the state change defaults to `todo` and preserves the old execution branch/SHA/closed PR, confirmed by production merge probe. Both live helper disposition and parent routing must match, preserving `blocked`/Gemini2, and fresh handoff is required. (FIXED: Supervisor coordination completed 2026-10-09T23:01:36Z)
