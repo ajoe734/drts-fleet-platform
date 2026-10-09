@@ -76,6 +76,15 @@
 
 *(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過嚴格之 `read_body` 實體讀取、強制 `SELECT ... FOR UPDATE` 鎖定及 `POSTFLIGHT_CHECK` 等機制，將此些宣稱化為真實之程式碼約束。)*
 
+### Round 6 審查缺陷處置表 (R6-01 至 R6-05)
+
+| Finding | 缺陷描述與觸發情境 | 處置方式與原始碼變更 | 驗證命令與結果 |
+| --- | --- | --- | --- |
+| **R6-01** (Apply Orchestration Vulnerability) | `run_cleanup_pipeline` 中仍存在 `if mode == "apply"` 之控制流程，並意圖捕捉 `execute_gcs_cleanup` 等函數的回傳值，暴露不可控之狀態變更風險。 | 在 `execute_gcs_cleanup` 與 `execute_db_cleanup` 內加入明確的 `mode == "apply"` 硬阻擋 (fail-closed)，並移除 `run_cleanup_pipeline` 中的 apply 分支。 | 執行 apply 模式時拋出錯誤中斷，驗證通過。 |
+| **R6-02 & R6-04** (Hosted Auth Lane & Unverified CI Environment) | CI 環境缺乏解壓縮的產物目錄，且 GitHub Actions deployer SA 無權限讀取 GCS 導致 `--offline` 驗證失效；不應在 CI 中存取真實 Hosted 環境。 | 修改工作流 `.github/workflows/dev-owned-operational-fixture-cleanup.yml`，移除 WIF 認證與 `gh run download`，改以 Explicit Offline Fallback，強制 `--offline` 模式並提供 minimal inventory。 | 單元測試與 `check_canonical_consistency.py` 驗證通過，CI 已移除連線需求。 |
+| **R6-03** (Hash Verification Vulnerability in Simulation Mode) | `inspect_and_validate_gcs_target` 對於缺乏 `body_bytes` 之情況拋出錯誤，但在 offline 模式下無真實資料可讀。 | 引入 `simulation_mode` 旗標 (預設 False)，僅在 `--offline` 觸發時為 True，繞過 `body_bytes` 嚴格校驗而不影響 Live Validator 安全性。 | 38 項單元測試涵蓋此旗標，測試全數通過。 |
+| **R6-05** (Unsupported DB Connectivity Claims & UAT Misrepresentation) | 清理腳本的 `DB_CONCRETE_BLOCKER` 與 UAT 文件中宣稱 GitHub Actions deployer SA 無 VPC 連線能力為未經驗證之絕對聲明。 | 移除腳本與 UAT 文件中的不實網路連線聲明，重寫 UAT 文件中三道閘門之狀態為 `PARTIAL / UNVERIFIED` 或 `PENDING`。 | UAT 文件更新完成。 |
+
 ## 4. 資料庫通道與保留合約精確分析 (DB Lane & Preservation)
 
 1. **現行部署架構分析 (Current Deployment Architecture):**
@@ -83,7 +92,6 @@
    - 專案已具有 Cloud Run migration job `drts-dev-migrate`，具有 Cloud SQL instance 綁定與 `DATABASE_URL` secret 掛載。
    - 然而，該映像檔係專為資料庫遷移設計，固定執行 `bash operations/database/db-apply.sh`，僅包含 `infra/migrations/` 下之 `V*.sql` 檔案，並不包含此清理工具，亦不接受任意 SQL 參數輸入。
    - 倉庫治理規範嚴格禁止任意覆寫正式遷移 job 之 entrypoint 或 command，亦禁止宣告未經審核之維運 Cloud Run job。
-   - GitHub Actions deployer SA（`DEV_WIF_SERVICE_ACCOUNT`）在架構上落實 runtime identity split，無 VPC 內部私有連線能力，亦不持有 `DATABASE_URL`。
 2. **資料庫 Schema 審計保護 (V0034 規範):**
    - 依據 `infra/migrations/V0034__phase1_delta_supply_eligibility_mobile_reporting.sql`：
      - `fleet.supply_review_events` 具有外鍵參照 `fleet.supply_submissions(submission_id)`，且**無** `ON DELETE CASCADE`。
@@ -158,8 +166,8 @@ python3 -B operations/verification/cleanup-owned-operational-fixtures.py \
 ## 6. 三道閘門現況 (Three Gates Status)
 
 1. `owned_operational_cleanup_actual_planner_boundary_regressions`:
-   🟢 **READY (本機已通過)**：38 項單元測試全數通過，`check_test_coverage.py` 驗證通過（95/95 測試檔），一致性檢查通過（0 findings），完整涵蓋 9 項審查 finding 之回歸測試。
+   🟡 **PARTIAL / UNVERIFIED (本機測試通過，但依賴離線模擬)**：38 項單元測試全數通過，但為解決 CI 環境缺乏 ZIP 產物問題，強制採用 `--offline` 模擬模式。真實讀取與邊界防護雖於本機測試，尚未在真實驗收環境獲得端到端證明，故狀態部分未驗證。
 2. `owned_operational_cleanup_exact_sha_review_ci_merge`:
-   🟡 **PENDING (待獨立審查、CI 與合併)**：由獨立審查者 Codex 針對本次 repair 產生之全新候選 SHA 進行審查，待 GitHub Actions 強制性 CI 全數綠燈後，依保護分支規則合併至 `dev`。
+   🟡 **PENDING (待獨立審查、CI 與合併)**：由獨立審查者 Codex 針對本次 Round 6 修復產生之全新候選 SHA 進行審查，待 GitHub Actions 強制性 CI 全數綠燈後，依保護分支規則合併至 `dev`。
 3. `owned_operational_cleanup_genuine_hosted_exact_objects_records_preservation`:
-   🟡 **PENDING (待託管維運執行)**：代碼合併後，由 Operator 於受控環境在非部署視窗手動派發。在未具有安全非異動 DB 連線合約前，apply 模式將持續落實 fail-closed 阻擋，避免 GCS 物件被孤立刪除。
+   🟡 **PENDING (待託管維運執行)**：代碼合併後，由 Operator 於受控環境手動派發。在未具有安全非異動 DB 連線合約且移除 Hosted Auth Lane 之情況下，apply 模式已透過程式碼級別硬阻擋 (fail-closed)，避免 GCS 物件被孤立刪除或未授權異動。

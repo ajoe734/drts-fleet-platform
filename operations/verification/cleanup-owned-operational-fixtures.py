@@ -146,8 +146,6 @@ DB_CONCRETE_BLOCKER = (
     "Dockerfile.migrate. That image has a fixed entrypoint (['bash', 'operations/database/db-apply.sh']) "
     "that executes only schema migrations from infra/migrations/ and lacks this new cleanup tool. "
     "The default migration job definition cannot be mutated or overridden under repository governance. "
-    "Furthermore, the GitHub Actions deployer SA operates under a strict runtime identity split and lacks "
-    "direct private VPC connectivity to Cloud SQL or DATABASE_URL secret export. "
     "Additionally, database schema inspection (V0034) confirms fleet.supply_review_events references "
     "fleet.supply_submissions without ON DELETE CASCADE; review events are protected audit records that "
     "must never be deleted, which legally and referentially prevents deletion of reviewed parent submissions. "
@@ -946,6 +944,7 @@ def inspect_and_validate_gcs_target(
     expected_item: Dict[str, Any],
     prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
     runner: Optional[Callable[..., Dict[str, Any]]] = None,
+    simulation_mode: bool = False,
 ) -> Dict[str, Any]:
     """Validate live object identity before delete (bucket, key, generation, metageneration, MIME, size, timestamps, hash)."""
     bucket = expected_item["bucket"]
@@ -1067,10 +1066,12 @@ def inspect_and_validate_gcs_target(
                         f"Media read hash mismatch: expected {expected_sha256}, got {computed}"
                     )
                     live_hash = computed
-                elif "sha256" in body_res:
-                    # Fallback to trust if body_bytes not provided but size matched
+                elif simulation_mode and "sha256" in body_res:
+                    # In simulation mode only, fallback to trust if body_bytes not provided but size matched
                     if read_size == expected_size:
                         live_hash = body_res["sha256"]
+                else:
+                    raise ValueError(f"read_body runner failed to return body_bytes for {bucket}/{key}")
         except Exception as e:
             # Re-raise so failures aren't swallowed
             raise RuntimeError(f"Error reading object body: {e}")
@@ -1100,9 +1101,13 @@ def execute_gcs_cleanup(
     plan: Dict[str, Any],
     gcs_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
+    simulation_mode: bool = False,
 ) -> Dict[str, Any]:
-    runner = gcs_runner or default_gcs_runner
     mode = plan["mode"]
+    if mode == "apply":
+        raise ValueError("Mutation is explicitly disabled: unsupported apply mode is rejected at entrypoint")
+
+    runner = gcs_runner or default_gcs_runner
     targets = plan["gcs_targets"]
 
     # PHASE 1: PREFLIGHT ALL TARGETS BEFORE ANY MUTATION
@@ -1112,7 +1117,7 @@ def execute_gcs_cleanup(
         key = item["key"]
         desc = runner("describe", bucket, key)
         val = inspect_and_validate_gcs_target(
-            desc, item, prior_receipts=prior_receipts, runner=runner
+            desc, item, prior_receipts=prior_receipts, runner=runner, simulation_mode=simulation_mode
         )
         validated_targets.append((item, val))
 
@@ -1189,6 +1194,9 @@ def execute_db_cleanup(
 ) -> Dict[str, Any]:
     """Execute DB cleanup only when an authorized runner is provided; enforce dry-run & guards."""
     mode = plan["mode"]
+    if mode == "apply":
+        raise ValueError("Mutation is explicitly disabled: unsupported apply mode is rejected at entrypoint")
+
     if db_runner is None:
         return {
             "status": "blocked",
@@ -1238,6 +1246,7 @@ def run_cleanup_pipeline(
     source_sha: Optional[str] = None,
     run_id: Optional[int] = None,
     prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
+    simulation_mode: bool = False,
 ) -> Dict[str, Any]:
     """Run all preflights before mutations. In apply mode, fail before mutation if DB blocked."""
     if inventory_data.get("unverified_planning_only"):
@@ -1276,75 +1285,9 @@ def run_cleanup_pipeline(
             "preservation": plan["preservation_plan"],
         }
 
-        # DB runner is present: non-mutating preflights for BOTH GCS and DB before ANY mutation!
-        # First: Preflight GCS targets (zero mutation)
-        gcs_runner_fn = gcs_runner or default_gcs_runner
-        for target in plan["gcs_targets"]:
-            desc = gcs_runner_fn("describe", target["bucket"], target["key"])
-            inspect_and_validate_gcs_target(
-                desc, target, prior_receipts=prior_receipts, runner=gcs_runner_fn
-            )
-
-        # DB runner is present: execute DB preflight
-        db_preflight = preflight_db_cleanup(plan, db_runner=db_runner)
-        if db_preflight.get("status") != "preflight_ok":
-            return {
-                "status": "blocked",
-                "mode": mode,
-                "applied": False,
-                "source_sha": EXPECTED_SOURCE_SHA,
-                "product_run_id": EXPECTED_PRODUCT_RUN_ID,
-                "gcs_cleanup": {
-                    "status": "skipped_due_to_db_blocker",
-                    "total_targets": len(plan["gcs_targets"]),
-                    "receipts": [],
-                },
-                "db_cleanup": db_preflight,
-                "preservation": plan["preservation_plan"],
-            }
-
-        # ALL preflights passed! Now execute mutations:
-        # Phase A: execute DB cleanup within guarded transaction
-        db_result = execute_db_cleanup(plan, db_runner=db_runner)
-        if db_result.get("status") != "applied":
-            return {
-                "status": "blocked",
-                "mode": mode,
-                "applied": False,
-                "source_sha": EXPECTED_SOURCE_SHA,
-                "product_run_id": EXPECTED_PRODUCT_RUN_ID,
-                "gcs_cleanup": {
-                    "status": "skipped_due_to_db_blocker",
-                    "total_targets": len(plan["gcs_targets"]),
-                    "receipts": [],
-                },
-                "db_cleanup": db_result,
-                "preservation": plan["preservation_plan"],
-            }
-
-        # Phase B: execute GCS cleanup
-        try:
-            gcs_result = execute_gcs_cleanup(
-                plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
-            )
-        except Exception as exc:
-            # Preserve DB cleanup receipts if GCS fails
-            exc.db_result = db_result
-            raise
-        return {
-            "status": "success",
-            "mode": mode,
-            "applied": True,
-            "source_sha": EXPECTED_SOURCE_SHA,
-            "product_run_id": EXPECTED_PRODUCT_RUN_ID,
-            "gcs_cleanup": gcs_result,
-            "db_cleanup": db_result,
-            "preservation": plan["preservation_plan"],
-        }
-
     # Mode is dry-run: execute non-mutating inspections
     gcs_result = execute_gcs_cleanup(
-        plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
+        plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts, simulation_mode=simulation_mode
     )
     db_result = execute_db_cleanup(plan, db_runner=db_runner)
 
@@ -1494,6 +1437,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             gcs_runner=gcs_runner,
             source_sha=args.source_sha,
             run_id=args.run_id,
+            simulation_mode=args.offline,
         )
 
         output_str = json.dumps(result, indent=2)
