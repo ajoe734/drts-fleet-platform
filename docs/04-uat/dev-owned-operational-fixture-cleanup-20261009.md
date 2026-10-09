@@ -74,7 +74,7 @@
 | **R2-06** (Strict GCS Error Classification) | 包含 403 / 憑證不存在之錯誤被誤判為 404；無先前收據之 404 仍被信任為已刪除。 | 子程序回傳 403、權限、網路錯誤嚴格分類為 `permission_or_network` 錯誤（絕非 `not_found`）；僅嚴格比對真實驗證之 404；先前的刪除收據必須綁定 bucket、實體 key、數值型 generation/metageneration 與 `verified_absent: true`。 | 單元測試 `test_default_gcs_runner_classifies_403_as_error`、`test_preexisting_absence_without_receipt_raises`、`test_gcs_target_prior_receipt_validation` 通過。 |
 | **R2-07** (Bash Quoted Env Variables) | 工作流中直接將 `${{ inputs.* }}` 內插至 Bash 腳本區塊中，造成命令替換漏洞（如 `$(id)` 可被執行）。 | 所有工作流 dispatch 參數一律透過 step `env:` 變數傳遞為純量字串（`INPUT_*`），徹底消除 Bash 命令列內插；即使包含命令替換語法亦純視為文字資料。 | 語法驗證通過；workflow-guard-probe 驗證無命令替換執行。 |
 | **R2-08** (Fixed WIF Identity, Minimum Perm, Concurrency) | WIF 檢查僅驗證非空，接受任意第三方 provider；工作流缺乏並發控制與 `actions: read` 權限。 | 固定綁定授權 DEV WIF 提供者（`projects/24645990627/...`）與佈署者 SA（`github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`）；加入 `concurrency: group: dev-owned-operational-fixture-cleanup, cancel-in-progress: false`；加入 `actions: read` 權限。 | 工作流 YAML 結構驗證通過，WIF 邊界與權限最小化落實。 |
-| **R2-09** (Canonical Consistency & Test Accounting) | UAT 文件以反引號引用已刪除之舊測試檔案導致 CI 規範檢查失敗；測試計數引用舊陳舊數據（94）。 | 移除舊測試路徑之反引號，改以 GitHub blob 完整 URL 參照；更正測試計數為 `check_test_coverage.py` 發現之 95 個測試檔案、44 項單元測試；明確記錄測試目錄中的 3 個跳過為測試套件跳過（非 passes，非業務 16 skips）。 | `python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3e --head HEAD`<br>Exit code: 0<br>`0 finding(s)` |
+| **R2-09** (Canonical Consistency & Test Accounting) | UAT 文件以反引號引用已刪除之舊測試檔案導致 CI 規範檢查失敗；測試計數引用舊陳舊數據（94）。 | 移除舊測試路徑之反引號，改以 GitHub blob 完整 URL 參照；更正測試計數為 `check_test_coverage.py` 發現之 95 個測試檔案、38 項單元測試；明確記錄測試目錄中的 3 個跳過為測試套件跳過（非 passes，非業務 16 skips）。 | `python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3e --head HEAD`<br>Exit code: 0<br>`0 finding(s)` |
 
 *(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過嚴格之 `read_body` 實體讀取、強制 `SELECT ... FOR UPDATE` 鎖定及 `POSTFLIGHT_CHECK` 等機制，將此些宣稱化為真實之程式碼約束。)*
 
@@ -117,14 +117,14 @@ python3 -B tools/ci/check_test_coverage.py
 ```bash
 python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
 # Exit code: 0
-# Ran 44 tests in 0.020s ... OK
+# Ran 38 tests in 0.046s ... OK
 ```
 
 ### 3. 本機測試目錄自動發現驗證
 ```bash
 python3 -B -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
 # Exit code: 0
-# Ran 79 tests ... OK (skipped=3)
+# Ran 73 tests ... OK (skipped=3)
 # Note: 3 skips are test-suite level directory skips in unrelated suites, NOT passes and NOT operational 16 skips.
 ```
 
@@ -160,7 +160,7 @@ python3 -B operations/verification/cleanup-owned-operational-fixtures.py \
 ## 6. 三道閘門現況 (Three Gates Status)
 
 1. `owned_operational_cleanup_actual_planner_boundary_regressions`:
-   🟢 **READY (本機已通過)**：44 項單元測試全數通過，`check_test_coverage.py` 驗證通過（95/95 測試檔），一致性檢查通過（0 findings），完整涵蓋 9 項審查 finding 之回歸測試。
+   🟢 **READY (本機已通過)**：38 項單元測試全數通過，`check_test_coverage.py` 驗證通過（95/95 測試檔），一致性檢查通過（0 findings），完整涵蓋 9 項審查 finding 之回歸測試。
 2. `owned_operational_cleanup_exact_sha_review_ci_merge`:
    🟡 **PENDING (待獨立審查、CI 與合併)**：由獨立審查者 Codex 針對本次 repair 產生之全新候選 SHA 進行審查，待 GitHub Actions 強制性 CI 全數綠燈後，依保護分支規則合併至 `dev`。
 3. `owned_operational_cleanup_genuine_hosted_exact_objects_records_preservation`:

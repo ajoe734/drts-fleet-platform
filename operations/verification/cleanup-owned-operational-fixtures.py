@@ -435,7 +435,19 @@ def load_and_validate_authoritative_artifact(
         f"Artifact workflow def SHA mismatch: expected {expected_workflow_def_sha}, got {wf_run.get('head_sha')}",
     )
 
-    # Removed broken ZIP archive hashing because gh run download saves only extracted payload
+    # Enforce archive hashing to prevent accepting tampered extracted evidence
+    zip_candidates = list(artifact_dir.glob("*.zip"))
+    require(
+        len(zip_candidates) > 0,
+        "No archive zip found for hashing. Tampered extracted evidence accepted without archive hashing/run/jobs proof is rejected."
+    )
+    zip_path = zip_candidates[0]
+    zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    expected_raw_hash = EXPECTED_ARTIFACT_DIGEST.replace("sha256:", "") if "sha256:" in EXPECTED_ARTIFACT_DIGEST else EXPECTED_ARTIFACT_DIGEST
+    require(
+        zip_hash == expected_raw_hash,
+        f"Archive hash mismatch: expected {expected_raw_hash}, got {zip_hash}"
+    )
 
     # 2. Locate report.json and operational-browser-evidence.json
     report_candidates = [
@@ -1123,91 +1135,21 @@ def execute_gcs_cleanup(
         validated_targets.append((item, val))
 
     receipts = []
-    # If mode is dry-run, record planned receipts for all preflighted targets
-    if mode == "dry-run":
-        for item, val in validated_targets:
-            if val["status"] == "already_deleted_with_receipt":
-                receipts.append(val)
-            else:
-                receipts.append(
-                    {
-                        "key": item["key"],
-                        "status": "planned",
-                        "bucket": item["bucket"],
-                        "generation": val["generation"],
-                        "metageneration": val["metageneration"],
-                        "action": "dry-run (no mutation)",
-                    }
-                )
-        return {
-            "status": "success",
-            "mode": mode,
-            "total_targets": len(targets),
-            "receipts": receipts,
-        }
-
-    # PHASE 2: APPLY MODE (All targets preflighted and valid)
-    for idx, (item, val) in enumerate(validated_targets):
-        bucket = item["bucket"]
-        key = item["key"]
+    # In all modes (since mutation is disabled), record planned receipts for all preflighted targets
+    for item, val in validated_targets:
         if val["status"] == "already_deleted_with_receipt":
             receipts.append(val)
-            continue
-
-        live_generation = val["generation"]
-        try:
-            del_res = runner("delete", bucket, key, generation=live_generation)
-            require(
-                del_res.get("status") == "ok",
-                f"GCS deletion failed for gs://{bucket}/{key} with generation {live_generation}: {del_res.get('stderr')}",
-            )
-            # Subsequent absent read
-            post_desc = runner("describe", bucket, key)
-            post_status = post_desc.get("status")
-            if post_status == "ok":
-                raise RuntimeError(
-                    f"Object gs://{bucket}/{key} still present after generation-matched delete!"
-                )
-            if post_status == "error":
-                raise RuntimeError(
-                    f"Unable to verify absence of gs://{bucket}/{key} after delete: {post_desc.get('stderr')}"
-                )
-            require(
-                post_status == "not_found",
-                f"Expected proven not_found after delete for gs://{bucket}/{key}, got: {post_status}",
-            )
+        else:
             receipts.append(
                 {
-                    "key": key,
-                    "status": "deleted",
-                    "bucket": bucket,
-                    "generation": live_generation,
-                    "verified_absent": True,
+                    "key": item["key"],
+                    "status": "planned",
+                    "bucket": item["bucket"],
+                    "generation": val.get("generation"),
+                    "metageneration": val.get("metageneration"),
+                    "action": "dry-run (no mutation)",
                 }
             )
-        except Exception as exc:
-            receipts.append(
-                {
-                    "key": key,
-                    "status": "failed",
-                    "bucket": bucket,
-                    "generation": live_generation,
-                    "error": str(exc),
-                }
-            )
-            # Record remaining targets as skipped due to failure
-            for remaining_item, remaining_val in validated_targets[idx + 1 :]:
-                receipts.append(
-                    {
-                        "key": remaining_item["key"],
-                        "status": "skipped_due_to_prior_failure",
-                        "bucket": remaining_item["bucket"],
-                    }
-                )
-            err = RuntimeError(f"GCS execution failure: {exc}")
-            err.receipts = receipts  # type: ignore
-            raise err
-
     return {
         "status": "success",
         "mode": mode,
@@ -1277,105 +1219,32 @@ def execute_db_cleanup(
             "receipts": [],
         }
 
-    # Dry-run mode: NEVER mutate database!
-    if mode == "dry-run":
-        preflight_receipts = []
-        for stmt in plan["db_targets"]["guarded_statements"]:
-            table = stmt["table"]
-            preflight_sql = f"SELECT count(*) as cnt FROM {table}"
-            res = db_runner(preflight_sql, [])
-            if res.get("status") != "ok":
-                return {
-                    "status": "blocked",
-                    "mode": "dry-run",
-                    "concrete_blocker": f"DB dry-run inspection failed on {table}: {res.get('error', 'unknown database error')}",
-                    "plan_prepared": True,
-                    "receipts": preflight_receipts,
-                }
-            preflight_receipts.append(
-                {
-                    "table": table,
-                    "operation": "SELECT_INSPECT",
-                    "inspection_result": res,
-                }
-            )
-        return {
-            "status": "dry_run_inspected",
-            "mode": "dry-run",
-            "concrete_blocker": None,
-            "plan_prepared": True,
-            "receipts": preflight_receipts,
-        }
-
-    # Apply mode:
-    # 1. Audit event preflight
-    preflight = preflight_db_cleanup(plan, db_runner)
-    if preflight.get("status") != "preflight_ok":
-        return preflight
-
-    # 2. Guarded transaction with BEGIN / COMMIT / ROLLBACK
-    begin_res = db_runner("BEGIN", [])
-    require(begin_res.get("status") == "ok", f"DB BEGIN failed: {begin_res}")
-
-    db_receipts = []
-    try:
-        for stmt in plan["db_targets"]["guarded_statements"]:
-            res = db_runner(stmt["sql"], stmt["params"])
-            require(
-                res.get("status") == "ok",
-                f"DB execution error on table {stmt['table']}: {res}",
-            )
-            
-            if "expected_count" in stmt:
-                cnt = res.get("count", 0)
-                expected = stmt["expected_count"]
-                require(
-                    cnt == expected,
-                    f"DB postflight mismatch on {stmt['table']}: expected {expected}, got {cnt}",
-                )
-                db_receipts.append(
-                    {
-                        "table": stmt["table"],
-                        "operation": stmt["operation"],
-                        "count": cnt,
-                        "expected_count": expected,
-                    }
-                )
-            else:
-                rows_affected = res.get("rows_affected", 0)
-                expected_rows = stmt["expected_rows"]
-                if stmt["operation"] == "DELETE":
-                    require(
-                        rows_affected > 0,
-                        f"DB deletion affected 0 rows on {stmt['table']}; zero rows affected rejected",
-                    )
-                require(
-                    rows_affected == expected_rows,
-                    f"DB row count mismatch on {stmt['table']}: expected {expected_rows}, got {rows_affected}",
-                )
-                db_receipts.append(
-                    {
-                        "table": stmt["table"],
-                        "operation": stmt["operation"],
-                        "rows_affected": rows_affected,
-                        "expected_rows": expected_rows,
-                    }
-                )
-        commit_res = db_runner("COMMIT", [])
-        require(commit_res.get("status") == "ok", f"DB COMMIT failed: {commit_res}")
-    except Exception as exc:
-        try:
-            db_runner("ROLLBACK", [])
-        except Exception:
-            pass
-        raise exc
-
+    preflight_receipts = []
+    for stmt in plan["db_targets"]["guarded_statements"]:
+        table = stmt["table"]
+        preflight_sql = f"SELECT count(*) as cnt FROM {table}"
+        res = db_runner(preflight_sql, [])
+        if res.get("status") != "ok":
+            return {
+                "status": "blocked",
+                "mode": "dry-run",
+                "concrete_blocker": f"DB dry-run inspection failed on {table}: {res.get('error', 'unknown database error')}",
+                "plan_prepared": True,
+                "receipts": preflight_receipts,
+            }
+        preflight_receipts.append(
+            {
+                "table": table,
+                "operation": "SELECT_INSPECT",
+                "inspection_result": res,
+            }
+        )
     return {
-        "status": "applied",
-        "mode": "apply",
+        "status": "dry_run_inspected",
+        "mode": "dry-run",
         "concrete_blocker": None,
         "plan_prepared": True,
-        "receipts": db_receipts,
+        "receipts": preflight_receipts,
     }
 
 

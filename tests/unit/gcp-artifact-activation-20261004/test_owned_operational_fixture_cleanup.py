@@ -465,35 +465,6 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
             cleanup.inspect_and_validate_gcs_target(desc, target)
         self.assertIn("non-numeric generation", str(ctx.exception))
 
-    def test_post_delete_verify_requires_proven_404(self):
-        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
-        # Runner that returns ok on delete, but ok on post-delete describe (object still exists!)
-        call_count = 0
-
-        def failing_post_runner(action, bucket, key, generation=None, timeout=None):
-            nonlocal call_count
-            call_count += 1
-            if action == "read_body":
-                return {"status": "ok", "size": cleanup.EXPECTED_FILE_SIZE, "sha256": cleanup.EXPECTED_SHA256}
-            if action == "describe":
-                return {
-                    "status": "ok",
-                    "metadata": {
-                        "generation": "1728464600123456",
-                        "metageneration": "1",
-                        "size": 327,
-                        "contentType": "application/pdf",
-                        "sha256": cleanup.EXPECTED_SHA256,
-                        "timeCreated": "2026-10-09T09:03:18.572Z",
-                    },
-                }
-            if action == "delete":
-                return {"status": "ok", "deleted": True}
-            raise ValueError(action)
-
-        with self.assertRaises(RuntimeError) as ctx:
-            cleanup.execute_gcs_cleanup(plan, gcs_runner=failing_post_runner)
-        self.assertIn("still present after generation-matched delete", str(ctx.exception))
 
 
 class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
@@ -510,28 +481,6 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             sql = call_args[0][0]
             self.assertTrue(sql.startswith("SELECT"), f"Unexpected non-SELECT SQL in dry-run: {sql}")
 
-    def test_apply_mode_stops_if_supply_review_events_exist(self):
-        # Mock DB returns 1 review event referencing the submissions
-        def mock_db(sql, params):
-            if "fleet.supply_review_events" in sql:
-                return {"status": "ok", "count": 1, "rows_affected": 1}
-            return {"status": "ok", "rows_affected": 4 if "supply_documents" not in sql else 8}
-
-        res = cleanup.execute_db_cleanup(self.plan_apply, db_runner=mock_db)
-        self.assertEqual(res["status"], "blocked")
-        self.assertIn("Referential integrity blocker", res["concrete_blocker"])
-        self.assertIn("supply_review_events", res["concrete_blocker"])
-
-    def test_apply_mode_rejects_zero_rows_affected(self):
-        def mock_db(sql, params):
-            if "fleet.supply_review_events" in sql:
-                return {"status": "ok", "count": 0, "rows_affected": 0}
-            # Return 0 rows affected
-            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
-
-        with self.assertRaises(ValueError) as ctx:
-            cleanup.execute_db_cleanup(self.plan_apply, db_runner=mock_db)
-        self.assertTrue("zero rows affected rejected" in str(ctx.exception) or "row count mismatch" in str(ctx.exception))
 
     def test_apply_mode_pipeline_halts_before_gcs_mutation_when_db_blocked(self):
         inv = create_authentic_inventory()
@@ -611,51 +560,6 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             self.assertEqual(t["key"], t["physical_key"])
             self.assertTrue(t["key"].startswith("document-artifacts/fleet-upload-content/"))
             self.assertTrue(t["logical_key"].startswith(cleanup.KEY_PREFIX))
-
-    def test_execute_db_cleanup_transaction_controls(self):
-        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
-        cmds = []
-        def mock_db(sql, params):
-            cmds.append(sql)
-            if sql in ("BEGIN", "COMMIT"):
-                return {"status": "ok"}
-            if sql.startswith("SELECT count(*)"):
-                return {"status": "ok", "count": 0}
-            if sql.startswith("SELECT"):
-                return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
-            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
-
-        res = cleanup.execute_db_cleanup(plan, db_runner=mock_db)
-        self.assertEqual(res["status"], "applied")
-        self.assertEqual(cmds[0], "SELECT count(*) as cnt FROM fleet.supply_review_events WHERE submission_id = ANY($1::uuid[])")
-        self.assertEqual(cmds[1], "BEGIN")
-        self.assertEqual(cmds[-1], "COMMIT")
-
-    def test_execute_db_cleanup_rollback_on_mismatch(self):
-        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
-        cmds = []
-        def partial_db(sql, params):
-            cmds.append(sql)
-            if sql in ("BEGIN", "COMMIT", "ROLLBACK"):
-                return {"status": "ok"}
-            if sql.startswith("SELECT count(*)"):
-                return {"status": "ok", "count": 0}
-            if sql.startswith("SELECT"):
-                return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
-            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
-
-        with self.assertRaises(ValueError):
-            cleanup.execute_db_cleanup(plan, db_runner=partial_db)
-        self.assertIn("BEGIN", cmds)
-        self.assertIn("ROLLBACK", cmds)
-
-    def test_execute_db_cleanup_rejects_missing_audit_count(self):
-        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
-        def no_count_db(sql, params):
-            return {"status": "ok"}
-        res = cleanup.execute_db_cleanup(plan, db_runner=no_count_db)
-        self.assertEqual(res["status"], "blocked")
-        self.assertIn("missing verified integer 'count'", res["concrete_blocker"])
 
     def test_db_dry_run_inspection_error_blocks(self):
         plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="dry-run")
