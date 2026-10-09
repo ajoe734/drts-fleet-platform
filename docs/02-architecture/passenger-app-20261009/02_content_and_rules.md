@@ -54,9 +54,14 @@
 ### E-19a 與 E-19b 確認文案 (G201011 v1.0)
 
 - **E-19a 首次使用宣告 (First-use acknowledgement)**：
-  依據 G201011 §3.3 lines132-139 規定：必須呈現 eight-row disclosure (八項費用說明)，加上 first-use opening，以及下方按鈕「我已閱讀並同意」，並附上 footer：「下單前將再次顯示費用摘要供您確認」。
+  依據 G201011 §3.3 line132 規定：首次叫車前必須強制展開閱讀一次 (first-time users must open it once before first order)。必須呈現 eight-row disclosure (八項費用說明)，以及下方按鈕「我已閱讀並同意」，並附上 footer：「下單前將再次顯示費用摘要供您確認」。
 - **E-19b 叫車前確認勾選框 (Checkbox/confirmation)**：
-  依據 G201011 lines150-153 規定：必須包含四行精確的費用摘要 (four exact fee summary lines)，並附帶 checkbox：「我已確認費用與優惠說明」；未勾選前 disabled confirm 按鈕。下方註明：「系統將記錄您的確認時間，作為爭議處理依據」。
+  依據 G201011 §3.3 line150 規定，必須呈現標題「費用規則」、連結「查看完整費用與優惠說明」，並精確包含以下四行費用摘要：
+  「車資依核定運價計費（含延滯計時）」
+  「預約費、取消費（指派前）、等待費：不另收」
+  「國道通行費經您同意行駛後實收」
+  「車內汙損清潔費實支實付」
+  並附帶 checkbox：「我已確認費用與優惠說明」；未勾選前 disabled confirm 按鈕。下方註明：「系統將記錄您的確認時間，作為爭議處理依據」。
 
 ### 費率頁數字 (E-05 公開計費說明)
 
