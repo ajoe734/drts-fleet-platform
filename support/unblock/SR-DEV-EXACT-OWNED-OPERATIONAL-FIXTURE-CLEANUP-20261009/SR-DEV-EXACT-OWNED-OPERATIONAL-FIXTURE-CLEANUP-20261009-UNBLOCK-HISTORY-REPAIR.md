@@ -38,9 +38,15 @@ Subsequently, the previous helper task branch (`origin/gemini2/sr-dev-exact-owne
 3.  **Produce evidence:** Done. Parent PR #2474 OPEN, Helper PR will be opened via matching remote/PR metadata in handoff.
 4.  **Update parent task:** Pending Supervisor `TASK_METADATA_JSON` gateway commands below.
 
+## Reviewer Codex2 Findings Ledger (2026-10-09)
+*   **H1 BLOCKING:** Repeated unresolved parent merge disposition/routing. Parent remains `blocked`/`waiting_for` Codex with old metadata. Both live CLI show slices confirm helper `resolved_parent_status`/`next`/`waiting_for` are absent. The documented Supervisor routing must execute to persist `blocked`/`Gemini2` and avoid defaulting to `todo`.
+*   **H4 HIGH:** Documented repair command mixed candidate identities. The payload injected `candidate` rather than `candidate_sha` and manually rewrites PR URLs, which bypasses the lifecycle gateway and leaves `candidate_sha` and generation ID stale.
+*   **H3 FIXED:** v3 helper has exactly one task-scoped commit. Required task-ID subject and trailers pass official checker.
+*   **Acceptance Disposition:** 1 contamination identified PASS; 2 non-destructive history repair/content preservation PASS; 3 helper task commit/published branch/OPEN PR identity PASS; 4 canonical safe parent routing/disposition FAIL (Pending Supervisor routing).
+
 ## Pending Constraints & Next Steps (Supervisor Action Required)
 
-The original owner cannot impersonate the Supervisor. The Supervisor must execute the following `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition and verify regression:
+The original owner cannot impersonate the Supervisor. The Supervisor must execute the following `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition:
 
 **1. Persist helper disposition (so parent defaults to blocked, not todo, upon merge):**
 ```bash
@@ -50,16 +56,20 @@ AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases
 
 **2. Coordinate parent execution branch:**
 ```bash
-TASK_METADATA_JSON='{"execution_branch": "gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2", "candidate_branch": "gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2", "candidate": "6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e", "pr_url": "https://github.com/ajoe734/drts-fleet-platform/pull/2474", "status": "blocked", "waiting_for": "Gemini2"}' \
+TASK_METADATA_JSON='{"execution_branch": "gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2", "status": "blocked", "waiting_for": "Gemini2"}' \
 AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Gemini2 Codex "Cleanup owned operational fixtures"
 ```
 
-**3. Show regression (Sanity verification):**
+**3. Parent Handoff (Original Owner Action):**
+After Supervisor metadata update, Gemini2 must perform a fresh handoff to clear stale evidence and create a new generation:
+```bash
+CANDIDATE_SHA="6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e" CANDIDATE_BRANCH="gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2" PR_URL="https://github.com/ajoe734/drts-fleet-platform/pull/2474" \
+AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh handoff SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Codex
+```
+
+**4. Show regression (Sanity verification):**
 ```bash
 AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR
 AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009
 ```
-*Verify that `resolved_parent_status` is `blocked`, and the parent execution branch is updated to `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`.*
-
-**4. Parent Handoff:**
-After metadata update, the fresh parent `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e` requires fresh review and CI acceptance.
+*Verify that `resolved_parent_status` is `blocked`, the parent execution branch is `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`, AND `candidate_sha` is `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e` with a fresh generation ID.*
