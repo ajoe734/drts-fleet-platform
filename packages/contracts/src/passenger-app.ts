@@ -53,11 +53,10 @@ export interface VerifyOtpCommand {
   challenge: string;
 }
 
-export interface VerifyOtpResponse {
-  result: "logged_in" | "linked" | "verified_contact_phone";
-  accessToken?: string;
-  refreshToken?: string;
-}
+export type VerifyOtpResponse =
+  | { result: "logged_in"; accessToken: string; refreshToken: string }
+  | { result: "linked" }
+  | { result: "verified_contact_phone" };
 
 export interface OAuthStartCommand {
   provider: "google" | "facebook" | "line";
@@ -80,12 +79,14 @@ export interface OAuthCallbackCommand {
   transactionId: string;
 }
 
-export interface OAuthCallbackResponse {
-  result: "logged_in" | "linked";
-  accessToken?: string;
-  refreshToken?: string;
-  drtsPassengerId: string;
-}
+export type OAuthCallbackResponse =
+  | {
+      result: "logged_in";
+      drtsPassengerId: string;
+      accessToken: string;
+      refreshToken: string;
+    }
+  | { result: "linked" };
 
 export interface FacebookDataDeletionCommand {
   signed_request: string;
@@ -144,7 +145,7 @@ export interface PassengerIdentitiesResponse {
 }
 
 export interface UnlinkPassengerIdentityCommand {
-  provider: AuthProvider;
+  identityId: string;
 }
 
 export interface UnlinkPassengerIdentityResponse {
@@ -301,11 +302,10 @@ export interface BindPaymentMethodCommand {
   providerToken: string;
 }
 
-export interface PaymentMethodResponse {
-  status: "completed" | "action_required" | "pending";
-  method?: PassengerPaymentMethod;
-  nextActionUrl?: string;
-}
+export type PaymentMethodResponse =
+  | { status: "completed"; method: PassengerPaymentMethod }
+  | { status: "action_required"; nextActionUrl: string }
+  | { status: "pending" };
 
 export interface SetDefaultPaymentMethodCommand {
   paymentMethodId: string;
@@ -320,10 +320,11 @@ export interface RemovePaymentMethodResponse {
 }
 
 export interface RegisterPushDeviceCommand {
-  provider: "fcm" | "apns";
+  platform: "ios" | "android";
+  provider: "fcm_v1";
   appId: string;
   appVersion: string;
-  deviceToken: string;
+  token: string;
   notificationConsentVersion: string;
   previousDeviceId?: string;
 }
