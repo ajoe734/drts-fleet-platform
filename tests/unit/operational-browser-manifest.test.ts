@@ -43,8 +43,16 @@ describe("operational browser journeys manifest guard", () => {
           }),
         }),
         expect.objectContaining({
-          path: expect.stringContaining("documents/confirm"),
-          method: "POST",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
         }),
       ]),
     );
@@ -69,6 +77,24 @@ describe("operational browser journeys manifest guard", () => {
     expect(adminJourney.setup[0].body.supportedServiceProductCodes).toEqual([
       "business_dispatch",
     ]);
+    expect(adminJourney.setup).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
+          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+      ]),
+    );
     const approveOp = adminJourney.operations[0];
     expect(approveOp.kind).toBe("request");
     expect(approveOp.responseKind).toBe("json");
@@ -200,9 +226,10 @@ describe("operational browser journeys manifest guard", () => {
     const anchorAttributesFor = (filePath: string, marker: string) => {
       const source = readFileSync(path.join(process.cwd(), filePath), "utf8");
       const markerIndex = source.indexOf(marker);
-      expect(markerIndex, `${marker} must exist in ${filePath}`).toBeGreaterThan(
-        -1,
-      );
+      expect(
+        markerIndex,
+        `${marker} must exist in ${filePath}`,
+      ).toBeGreaterThan(-1);
       const tagStart = source.lastIndexOf("<a", markerIndex);
       const tagEnd = source.indexOf(">", markerIndex);
       expect(tagStart).toBeGreaterThan(-1);
