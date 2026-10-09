@@ -24,6 +24,7 @@ import type {
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService } from "./jwt-auth.service";
+import { PassengerAccountService } from "../../modules/passenger-app/account/passenger-account.service";
 import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
@@ -196,6 +197,7 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly stepUpProofService?: StepUpProofService,
     @Optional()
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
+    @Optional() private readonly passengerAccountService?: PassengerAccountService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -223,6 +225,16 @@ export class BootstrapAuthGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? false;
+
+    const passengerPath = normalizeRoutePath(requestUrl).replace(/^api\/+/, "").replace(/\/+$/, "");
+    if ((passengerPath === "passenger-app" || passengerPath.startsWith("passenger-app/")) &&
+        !passengerPath.startsWith("passenger-app/platform/")) {
+      // No bootstrap/IAP/legacy IAM fallback for first-party passengers, even in dev.
+      if (hasBootstrapAuthSignal(baseHeaders)) {
+        throw new ApiRequestError(401, "unauthorized", "Passenger bootstrap headers are forbidden.");
+      }
+      return this.activatePassenger(request, baseHeaders, isOpenRoute);
+    }
 
     if (isOpenRoute) {
       const resolution = this.populateOpenRouteIdentity(
@@ -298,6 +310,21 @@ export class BootstrapAuthGuard implements CanActivate {
     }
 
     return this.activateNonIap(request, baseHeaders, requestUrl, policy);
+  }
+
+  private async activatePassenger(request: AuthenticatedRequestLike,
+    headers: Record<string, string | string[] | undefined>, open: boolean): Promise<boolean> {
+    // Clear any earlier identity; only the verified session below may populate it.
+    delete request.identity;
+    const token = extractBearerToken(headers);
+    if (token && this.passengerAccountService) {
+      const identity = await this.passengerAccountService.authenticateAccessToken(token);
+      if (identity) { request.identity = identity; return true; }
+    }
+    // Metadata/workload authentication of public BFF calls remains InternalKeyMiddleware's job.
+    // Public link/verify flows must require the populated identity in their purpose-bound transaction.
+    if (open) return true;
+    throw new ApiRequestError(401, "unauthorized", "An active passenger session is required.");
   }
 
   private async resolveIapAssertionAndActivate(
