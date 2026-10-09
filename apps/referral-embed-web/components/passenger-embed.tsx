@@ -2244,31 +2244,29 @@ function ReceiptScreen({
   // API returns whatever the order's current status is, and this screen must
   // not relabel a cancelled/no-supply/dispatch-failed order as completed just
   // because a receipt object came back.
-  const receipt =
-    liveData?.receipt && liveData.receipt.status === "completed"
-      ? {
-          id: liveData.receipt.orderNo,
-          orderId: liveData.receipt.orderId,
-          date: formatShortDateTime(
-            liveData.receipt.completedAt ||
-              liveData.activeTrip?.trip?.createdAt,
-          ),
-          from: liveData.receipt.pickupAddress,
-          to: liveData.receipt.dropoffAddress,
-          vehicle: liveData.receipt.vehicleType,
-          driver: liveData.receipt.driverName || "媒合中",
-          plate: liveData.receipt.plateNumber || "待更新",
-          passenger: liveData.receipt.passengerNameMasked,
-          maskedPhone: liveData.receipt.passengerPhoneMasked,
-          fareBase: formatFare(liveData.receipt.fareBase),
-          fareDistance: formatFare(liveData.receipt.fareDistance),
-          fareTime: formatFare(liveData.receipt.fareTime),
-          total: liveData.receipt.formattedTotal,
-          payment: "社區月結 · 綁定住戶帳號",
-          channel: context.strings.appName,
-          downloadUrl: liveData.receipt.downloadUrl,
-        }
-      : null;
+  const receipt = liveData?.receipt && liveData.receipt.status === "completed"
+    ? {
+        id: liveData.receipt.orderNo,
+        orderId: liveData.receipt.orderId,
+        date: formatShortDateTime(
+          liveData.receipt.completedAt || liveData.activeTrip?.trip?.createdAt,
+        ),
+        from: liveData.receipt.pickupAddress,
+        to: liveData.receipt.dropoffAddress,
+        vehicle: liveData.receipt.vehicleType,
+        driver: liveData.receipt.driverName || "媒合中",
+        plate: liveData.receipt.plateNumber || "待更新",
+        passenger: liveData.receipt.passengerNameMasked,
+        maskedPhone: liveData.receipt.passengerPhoneMasked,
+        fareBase: formatFare(liveData.receipt.fareBase),
+        fareDistance: formatFare(liveData.receipt.fareDistance),
+        fareTime: formatFare(liveData.receipt.fareTime),
+        total: liveData.receipt.formattedTotal,
+        payment: "社區月結 · 綁定住戶帳號",
+        channel: context.strings.appName,
+        downloadUrl: liveData.receipt.downloadUrl,
+      }
+    : null;
   if (!receipt) {
     return <TripsScreen context={context} liveData={liveData} />;
   }

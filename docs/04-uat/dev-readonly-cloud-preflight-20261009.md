@@ -27,13 +27,13 @@ Only sanitized selected source/provider/revision/requested-reference/resolved-di
 
 ## Actually executed repair checks (before handoff)
 
-| Actual command                                                                                                                                                               | Observed result                                                                  |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `python3 -m unittest tools/ci/test_dev_cloud_metadata_preflight.py -v`                                                                                                       | Exit0, **52/52**, zero skips; actual collector, only external subprocess mocked. |
-| `python3 -m unittest tools/ci/test_workflow_timeouts.py tools/ci/test_classify_change_scope.py tools/ci/test_dev_artifact_providers.py tools/ci/test_check_test_coverage.py` | Exit0, **56/56**.                                                                |
-| `python3 tools/ci/check_test_coverage.py`                                                                                                                                    | Exit0, **94** CI-covered test files.                                             |
-| `python3 -m py_compile operations/verification/read-dev-cloud-metadata.py tools/ci/test_dev_cloud_metadata_preflight.py`                                                     | Exit0.                                                                           |
-| `git diff --check`                                                                                                                                                           | Exit0.                                                                           |
+| Actual command | Observed result |
+| --- | --- |
+| `python3 -m unittest tools/ci/test_dev_cloud_metadata_preflight.py -v` | Exit0, **52/52**, zero skips; actual collector, only external subprocess mocked. |
+| `python3 -m unittest tools/ci/test_workflow_timeouts.py tools/ci/test_classify_change_scope.py tools/ci/test_dev_artifact_providers.py tools/ci/test_check_test_coverage.py` | Exit0, **56/56**. |
+| `python3 tools/ci/check_test_coverage.py` | Exit0, **94** CI-covered test files. |
+| `python3 -m py_compile operations/verification/read-dev-cloud-metadata.py tools/ci/test_dev_cloud_metadata_preflight.py` | Exit0. |
+| `git diff --check` | Exit0. |
 
 Committed old-fail/new-pass test imports the **actual immutable merged9c helper via git**, byte-identical to historically reviewed616, not copied logic or an unreachable old PR tree: identical legitimate service-tag/ready-revision fixture → old fails exact image gate after2 service/IAM calls; new completes all27 actual collector calls and returns expected full runtime SHA and revision digest references from mocked external metadata. Regression negatives reach the named revision/linkage/identity/digest/inventory/read stages; retained existing security/redaction/full-CI tests pass. Actual unnamed single-container API and named2-container scanner shapes are covered, including multi-container immutable revision references without the legacy primary status field. A second committed actual-source comparison imports the reachable immutable133471 predecessor (helper blob identical tobd), not copied logic: the same unnamed singleton service/synthesized `api-1` revision shape fails the old actualcollector's inventory gate after3 reads; this actualcollector completes27 with the same digest and stable service-key0. Tests prove explicitly named mismatches, extra revision containers, invalid synthesized names, forged explicit0, wrong actual status-digest name and renamed2-container scanner still reject. These are socket-free source checks, not genuine hosted metadata, runtime bytes, product-role acceptance or full16.
 
