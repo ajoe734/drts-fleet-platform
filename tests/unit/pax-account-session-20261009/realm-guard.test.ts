@@ -16,8 +16,13 @@ import {
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
 } from "../../../apps/api/src/common/auth/auth.constants";
-import type { AuthenticatedRequestLike } from "../../../apps/api/src/common/auth/auth.types";
+import {
+  AUTH_ACTOR_TYPES,
+  type AuthenticatedRequestLike,
+  type AuthRealm,
+} from "../../../apps/api/src/common/auth/auth.types";
 import { PassengerAccountService } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.service";
+import { PassengerAccountController } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.controller";
 import { MemoryPassengerStore } from "./memory-store";
 
 beforeEach(() => {
@@ -28,6 +33,7 @@ beforeEach(() => {
   vi.stubEnv("JWT_ALGORITHM", "HS256");
   vi.stubEnv("JWT_ALGORITHMS", "HS256");
   vi.stubEnv("APP_ENV", "test");
+  vi.stubEnv("DRTS_ENV", undefined);
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("DRTS_INTERNAL_KEY", "");
 });
@@ -35,11 +41,17 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
-function context(request: AuthenticatedRequestLike) {
+function context(
+  request: AuthenticatedRequestLike,
+  handler: keyof PassengerAccountController | null = null,
+) {
   return {
     switchToHttp: () => ({ getRequest: () => request }),
-    getHandler: () => function handler() {},
-    getClass: () => class Target {},
+    getHandler: () =>
+      handler
+        ? PassengerAccountController.prototype[handler]
+        : function target() {},
+    getClass: () => (handler ? PassengerAccountController : class Target {}),
   } as never;
 }
 async function fixture(
@@ -48,6 +60,7 @@ async function fixture(
     realms?: string[];
     scopes?: string[];
     google?: any;
+    controllerMetadata?: boolean;
   } = {},
 ) {
   const tokens = new PassengerJwtService();
@@ -66,8 +79,12 @@ async function fixture(
       return undefined;
     },
   };
+  const requireApi = createRequire(
+    new URL("../../../apps/api/package.json", import.meta.url),
+  );
+  const { Reflector } = requireApi("@nestjs/core");
   const guard = new BootstrapAuthGuard(
-    reflector as never,
+    options.controllerMetadata ? new Reflector() : (reflector as never),
     legacy,
     undefined,
     undefined,
@@ -79,6 +96,125 @@ async function fixture(
   );
   return { guard, legacy, tokens, service, session, a };
 }
+
+const protectedEndpoints = [
+  ["GET", "/api/passenger-app/me", "me"],
+  ["PATCH", "/api/passenger-app/me", "update"],
+  ["DELETE", "/api/passenger-app/me", "remove"],
+  ["GET", "/api/passenger-app/me/identities", "identities"],
+  ["DELETE", "/api/passenger-app/me/identities/id", "unlink"],
+] as const;
+const actorRealm: Record<(typeof AUTH_ACTOR_TYPES)[number], AuthRealm> = {
+  system: "system",
+  platform_admin: "platform",
+  tenant_admin: "tenant",
+  ops_user: "ops",
+  ops_observer: "ops",
+  driver_user: "driver",
+  partner_api_key: "partner",
+  partner_user: "partner",
+  referral_passenger: "partner",
+};
+
+describe.each(["development", "staging", "production"])(
+  "actual passenger controller metadata and guard in %s",
+  (environment) => {
+    it.each(protectedEndpoints)(
+      "accepts passenger Bearer for %s %s (%s) and rejects it after logout",
+      async (method, path, handler) => {
+        const f = await fixture({ controllerMetadata: true });
+        vi.stubEnv("APP_ENV", environment);
+        const request = req(path, f.session.accessToken);
+        request.method = method;
+        expect(resolveRouteAuthPolicy(method, path)?.allowedRealms).toEqual([
+          "passenger",
+        ]);
+        expect(await f.guard.canActivate(context(request, handler))).toBe(true);
+        expect(request.identity?.actorType).toBe("first_party_passenger");
+        await f.service.logout(f.session.refreshToken);
+        await expect(
+          f.guard.canActivate(context(request, handler)),
+        ).rejects.toMatchObject({ code: "unauthorized" });
+        expect(request.identity).toBeUndefined();
+      },
+    );
+    it.each(AUTH_ACTOR_TYPES)(
+      "rejects a signed legacy %s token on every protected passenger endpoint",
+      async (actorType) => {
+        const f = await fixture({ controllerMetadata: true });
+        vi.stubEnv("APP_ENV", environment);
+        const token = f.legacy.sign({
+          authMode: "jwt_bearer",
+          actorType,
+          actorId: f.a.drtsPassengerId,
+          realm: actorRealm[actorType],
+          drtsPassengerId: f.a.drtsPassengerId,
+          tenantId: null,
+          roleFamilies: [],
+          roles: [],
+          scopes: [],
+        });
+        for (const [method, path, handler] of protectedEndpoints) {
+          const request = req(path, token);
+          request.method = method;
+          await expect(
+            f.guard.canActivate(context(request, handler)),
+          ).rejects.toMatchObject({ code: "unauthorized" });
+          expect(request.identity).toBeUndefined();
+        }
+      },
+    );
+    it("rejects passenger JWT at the existing legacy session endpoint", async () => {
+      const f = await fixture();
+      vi.stubEnv("APP_ENV", environment);
+      await expect(
+        f.guard.canActivate(
+          context(req("/api/auth/session", f.session.accessToken)),
+        ),
+      ).rejects.toMatchObject({ code: "JWT_INVALID" });
+    });
+    it.each([
+      ["/api/passenger-app/auth/refresh", "refreshSession"],
+      ["/api/passenger-app/auth/logout", "logout"],
+    ] as const)(
+      "accepts BFF metadata for %s with expired access and real %s OpenRoute metadata",
+      async (path, handler) => {
+        const google = {
+          verifyServicePrincipal: vi
+            .fn()
+            .mockResolvedValue({ principalId: "bff" }),
+        };
+        const f = await fixture({ controllerMetadata: true, google });
+        vi.stubEnv("APP_ENV", environment);
+        vi.useFakeTimers();
+        try {
+          vi.advanceTimersByTime(900000);
+          expect(f.tokens.verify(f.session.accessToken)).toBeNull();
+          const request = req(path, "metadata-stub");
+          request.method = "POST";
+          expect(await f.guard.canActivate(context(request, handler))).toBe(
+            true,
+          );
+          expect(request.identity).toBeUndefined();
+          if (environment !== "development")
+            expect(google.verifyServicePrincipal).toHaveBeenCalledWith(
+              expect.objectContaining({
+                "x-drts-google-id-token": "metadata-stub",
+              }),
+              expect.objectContaining({
+                requestPath: path,
+                requestMethod: "POST",
+              }),
+            );
+          const next = await f.service.refresh(f.session.refreshToken);
+          expect(f.tokens.verify(next.accessToken)).not.toBeNull();
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+  },
+);
 function req(path: string, token?: string): AuthenticatedRequestLike {
   return {
     method: "GET",
