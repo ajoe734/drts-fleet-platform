@@ -239,7 +239,7 @@ describe("SR-QA-FINANCE-001 - C077, C078 & C079: 租戶請款、真實 PDF 下�
       expect(meta.downloadUrl).toContain("sig=");
 
       // Verify stored PDF artifact in documentArtifactStore
-      const stored = (service as any).documentArtifactStore.get(
+      const stored = await (service as any).documentArtifactStore.get(
         "tenant-invoice",
         invoice.invoiceId,
       );

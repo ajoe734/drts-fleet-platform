@@ -357,15 +357,33 @@ export class GoogleWorkloadIdentityAdapter {
       };
       await this.identityRepository.ensureMembershipRecord(membershipRecord);
 
+      // Every re-authentication re-derives `authTime` from the fresh
+      // assertion's `iat`. `validFrom` is a genuine grant-start date, not a
+      // last-seen timestamp: stamping it with `authTime` on every call would
+      // make an unrelated-to-role-content field "change" on every reauth,
+      // which the repository's no-op detection (identity.repository.ts
+      // upsertRoleBinding) treats as a real grant change and invalidates
+      // every other live session for this principal. Preserve the existing
+      // binding's validFrom across ordinary reauthentication; only a true
+      // first grant (no existing binding) gets a fresh validFrom.
+      const existingRoleBindings =
+        await this.identityRepository.findRoleBindingsByMembershipId(
+          membershipRecord.membershipId,
+        );
+
       for (const role of opsRoles) {
+        const roleBindingId = `role_binding_${principal.principalId}_ops_${role}`;
+        const existingRoleBinding = existingRoleBindings.find(
+          (binding) => binding.roleBindingId === roleBindingId,
+        );
         await this.identityRepository.ensureRoleBindingRecord({
-          roleBindingId: `role_binding_${principal.principalId}_ops_${role}`,
+          roleBindingId,
           sourceRef: `google_workload_identity:${principal.principalId}:role_binding:${role}`,
           membershipId: membershipRecord.membershipId,
           roleCode: role,
           grantedByPrincipalId: null,
           approvalId: null,
-          validFrom: authTime,
+          validFrom: existingRoleBinding?.validFrom ?? authTime,
           validTo: null,
           createdAt: authTime,
           updatedAt: authTime,

@@ -925,11 +925,21 @@ jobs:
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          # Dev API only: seed the fixed live-map-observer principal and its
+          # read-only ops_observer membership. Never enable in staging/prod
+          # or shared web env vars; Google proof is still required for issuance.
+          env_vars="${env_vars}@DRTS_E2E_PROVISIONING=true"
           # Enable the durable SMTP outbox only with the complete secret set.
           if [[ "${{ steps.api_secrets.outputs.notification_outbox_type }}" == "postgres" ]]; then
             env_vars="${env_vars}@NOTIFICATION_OUTBOX_TYPE=postgres"
           fi
           # End SMTP outbox selection.
+          # Mail links lead to the authenticated console, never signed artifacts.
+          invoice_mail_portal_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
+          invoice_mail_portal_origin="${invoice_mail_portal_origin:-$tenant_console_cloud_run_origin}"
+          if [[ -n "$invoice_mail_portal_origin" ]]; then
+            env_vars="${env_vars}@INVOICE_MAIL_PORTAL_ORIGIN=${invoice_mail_portal_origin}"
+          fi
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi

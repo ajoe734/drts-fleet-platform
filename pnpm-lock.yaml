@@ -709,6 +709,9 @@ importers:
 
   apps/voice-media-worker:
     dependencies:
+      "@aws-sdk/client-s3":
+        specifier: ^3.1094.0
+        version: 3.1094.0
       "@drts/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts

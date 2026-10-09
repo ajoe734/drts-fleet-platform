@@ -1,4 +1,7 @@
 import type { S3ClientConfig } from "@aws-sdk/client-s3";
+import { GoogleCloudObjectClient } from "../../common/google-cloud/google-cloud-object-client";
+import { GcsRemittanceProofStorageAdapter } from "./gcs-remittance-proof-storage.adapter";
+import { CloudRunRemittanceProofScannerAdapter } from "./cloud-run-remittance-proof-scanner.adapter";
 import { ClamdRemittanceProofScannerAdapter } from "./clamd-remittance-proof-scanner.adapter";
 import { InMemoryRemittanceProofStorageAdapter } from "./remittance-proof-storage.adapter";
 import { UnprovisionedRemittanceProofScannerAdapter } from "./remittance-proof-scanner.adapter";
@@ -42,15 +45,25 @@ export class UnprovisionedRemittanceProofStorageAdapter implements RemittancePro
 export function createRemittanceProofStorage(
   env: Env = process.env,
 ): RemittanceProofStorageProvider {
+  const strict = ["DRTS_ENV", "APP_ENV", "NODE_ENV"].some((key) =>
+    ["prod", "production", "stage", "staging"].includes(
+      value(env, key).toLowerCase(),
+    ),
+  );
   const provider =
     value(env, "REMITTANCE_PROOF_STORAGE_PROVIDER") ||
-    (env.NODE_ENV === "test" ? "memory" : "unprovisioned");
+    (!strict && env.NODE_ENV === "test" ? "memory" : "unprovisioned");
   if (provider === "unprovisioned")
     return new UnprovisionedRemittanceProofStorageAdapter();
-  if (provider === "memory" && env.NODE_ENV === "test")
+  if (provider === "memory" && !strict && env.NODE_ENV === "test")
     return new InMemoryRemittanceProofStorageAdapter();
+  if (provider === "gcs") {
+    return new GcsRemittanceProofStorageAdapter(
+      new GoogleCloudObjectClient(required(env, "REMITTANCE_PROOF_GCS_BUCKET")),
+    );
+  }
   if (provider !== "s3")
-    throw new Error("Proof storage must be s3; memory is test-only.");
+    throw new Error("Proof storage must be s3 or gcs; memory is test-only.");
   const clientConfig: S3ClientConfig = {
     region: required(env, "REMITTANCE_PROOF_S3_REGION"),
     forcePathStyle: bool(env, "REMITTANCE_PROOF_S3_FORCE_PATH_STYLE", false),
@@ -102,9 +115,16 @@ export function createRemittanceProofScanner(
     value(env, "REMITTANCE_PROOF_SCANNER_PROVIDER") || "unprovisioned";
   if (provider === "unprovisioned")
     return new UnprovisionedRemittanceProofScannerAdapter();
+  if (provider === "cloud-run-clamd") {
+    return new CloudRunRemittanceProofScannerAdapter(
+      storage,
+      required(env, "REMITTANCE_PROOF_SCANNER_URL"),
+      Number(value(env, "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS") || "60000"),
+    );
+  }
   if (provider !== "clamd")
     throw new Error(
-      "Proof scanner must be clamd; EICAR-only scanners are not runtime providers.",
+      "Proof scanner must be clamd or cloud-run-clamd; EICAR-only scanners are not runtime providers.",
     );
   const host = required(env, "REMITTANCE_PROOF_CLAMD_HOST");
   if (!/^[a-zA-Z0-9.:-]+$/.test(host)) throw new Error("Invalid clamd host.");

@@ -1,3 +1,4 @@
+import { InvoiceMailPanel } from "./mail-panel";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import type {
@@ -1508,6 +1509,7 @@ export default async function InvoicesPage({
                       </dd>
                     </dl>
 
+                    <InvoiceMailPanel key={selectedInvoice.invoiceId} invoiceId={selectedInvoice.invoiceId} locale={locale} />
                     <div>
                       <div style={fieldLabelStyle}>{t("invoices.selected.availableActions", locale)}</div>
                       <div style={actionRowStyle}>
