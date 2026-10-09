@@ -21,48 +21,59 @@
   - 證明 API revision 為 `drts-dev-api-00065-smj`，image digest 為 `2d60ccea943e124ce6b55bfe0b91cfdff5ac8ff7a2c60dc162451c43899649cb`。
   - 9 個 IAM bindings、provider 參照與 scanner 規格均與先前預設完全相符。
 
-## 2. 候選版本 a6bcfe4ac 拒絕歷史與 CI 狀態
+## 2. 候選版本拒絕歷史與 CI 狀態 (Rejected Candidates History & CI Status)
 
+本任務遵循 AI Collaboration Guide §0.7 與二輪同類缺陷重做規則，完整保留兩輪被拒絕之候選版本歷史：
+
+### 候選版本 1: a6bcfe4ac
 - **拒絕候選 SHA:** `a6bcfe4acdb8412fe1997ff20927e854608562c7`
 - **候選 Generation:** `f1bae1f4416c4ccfa42d2eed9b2770b0`
-- **獨立審查裁決:** Codex 於 2026-10-09T14:41Z 裁決 `REOPEN / not approved`（審查結論檔案 SHA-256: `a23bb9d83954eca3666b0105708834b93e12e3305e4d748a8912491e4b21d1a8`）。
+- **獨立審查裁決:** Codex 於 2026-10-09T14:41:16Z 裁決 `REOPEN / not approved`（審查結論檔案 SHA-256: `a23bb9d83954eca3666b0105708834b93e12e3305e4d748a8912491e4b21d1a8`）。
 - **強制性 CI 狀態:**
   - CI Run `37912160451`：Change scope 與 Smoke acceptance 失敗；
   - CI Integration Run `37912160579`：changes, e2e, ci-integ 失敗；
-  - 根本原因：舊測試檔案 `operations/verification/test_cleanup_owned_operational_fixtures.py` 不在既有 CI 發現路徑內，導致 `tools/ci/check_test_coverage.py` 判定為未執行測試。
-  - 此外，審查確認 10 項真實執行、安全與來源防護缺失。
-- **維運執行狀態:**
-  - `cleanup_not_performed: true`。所有雲端測試夾具與資料庫紀錄均完整保留，未進行任何未授權異動。
+  - 根本原因：舊測試檔案未搬移至既有 CI 發現路徑內，且具備實體與安全邊界缺陷。
 
-## 3. 具體修復範圍與 10 項 Findings 清單
+### 候選版本 2: 3f40da22d
+- **拒絕候選 SHA:** `3f40da22d58431a7b0d41c6738ae6e73cb9ee250`
+- **候選 Generation:** `5cdab5d3641d4636a657b85f5564702a`
+- **獨立審查裁決:** Codex 於 2026-10-09T15:27:43Z 執行規範 Reopen（`codex-20261009T151724Z-cf01b2db`），裁決 `REOPEN / not approved`。
+- **審查發現:** 獨立探針（boundary-probe, physical-key-probe, workflow-guard-probe）推翻先前全數修復之宣稱，確認 9 項實體對映、預檢順序、事務控制與工作流防護缺陷（R2-01 至 R2-09）。
+- **強制性 CI 狀態:**
+  - CI Run `37950233502`：Canonical consistency 檢查失敗（退出碼 1），原因為 UAT 文件以反引號引用已被移除之舊測試檔案路徑。
+  - CI Integration Run `37950233399`：終端 SUCCESS。
 
-Supervisor 核准精確測試重置（四個最終原始碼檔案，五個過渡寫入路徑用於移除舊測試）：
+### 維運執行狀態 (Operational Execution Status)
+- `cleanup_not_performed: true`。所有雲端 GCS 測試夾具與 Cloud SQL 資料庫紀錄均完整保留，未執行任何實際刪除或未授權異動。所有 live keys 保持 BLOCKED / PENDING 狀態。
+
+## 3. 具體修復範圍與 9 項 Round 2 Findings 清單 (Dispositions of All Findings)
+
+任務精確範圍限定為四個最終原始碼檔案（外加舊測試之歷史移除記錄）：
 1. `.github/workflows/dev-owned-operational-fixture-cleanup.yml`
 2. `operations/verification/cleanup-owned-operational-fixtures.py`
-3. `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py`（新增於既有 CI 根目錄）
+3. `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py`
 4. `docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md`
-5. `operations/verification/test_cleanup_owned_operational_fixtures.py`（過渡路徑，已透過 `git rm` 移除）
+5. 歷史移除路徑：[operations/verification/test_cleanup_owned_operational_fixtures.py](https://github.com/ajoe734/drts-fleet-platform/blob/a6bcfe4acdb8412fe1997ff20927e854608562c7/operations/verification/test_cleanup_owned_operational_fixtures.py)（已於候選 a6bcfe4a 移除，以完整 GitHub blob 網址保留歷史記錄，符合規範檢查器規則）。
 
-### AI Collaboration Guide §0.7 Finding 修正對照表
+### Round 2 審查缺陷處置表 (R2-01 至 R2-09)
 
-| Finding | 缺陷描述與觸發情境 | 修正方式與原始碼變更 | 驗證命令與結果 |
+| Finding | 缺陷描述與觸發情境 | 處置方式與原始碼變更 | 驗證命令與結果 |
 | --- | --- | --- | --- |
-| **Finding 1** (Workflow checkout & inventory) | `dev-owned-operational-fixture-cleanup.yml` 檢出產品來源 `inputs.source_ref` (4a16)，但該 commit 中並無清理工具與 `.local` inventory，導致工作流派發直接報錯。 | 區分工具定義檢出（預設檢出本 PR commit）與產品來源 guard；透過 `gh run download` 下載正式產物 11606165993，不依賴本機 `.local`。 | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/dev-owned-operational-fixture-cleanup.yml'))"`<br>Exit code: 0 |
-| **Finding 2** (CI discovery root) | 測試放在 `operations/verification/`，不在任何 CI 發現路徑中，導致 `check_test_coverage.py` 退出碼 1。 | 將測試搬移至 `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py`，並移除舊檔案。 | `python3 tools/ci/check_test_coverage.py`<br>Exit code: 0<br>`all 94 test files yield tests CI runs.` |
-| **Finding 3** (GCS error classification) | `default_gcs_runner` 將所有非零退出碼（包含 403、網路逾時）視為 `not_found`，導致錯誤被誤判為已成功清理。 | 嚴格比對 stderr 中的 404 / NotFound 訊號；其餘一律標記為 `error` 並 fail-closed；無先前 receipt 的 404 亦視為異常而非清理成功。 | `python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -k TestGcsErrorClassificationAndValidation`<br>Exit code: 0 |
-| **Finding 4** (Live GCS object identity) | GCS 刪除前僅檢查 size，忽略 live generation 數字形狀、metageneration、MIME (`application/pdf`) 與 SHA-256 雜湊。 | 實作 `inspect_and_validate_gcs_target`，於刪除前強制驗證 numeric generation、metageneration、MIME、327 bytes 及 SHA-256 雜湊。 | 單元測試 `test_gcs_metadata_bad_content_type_rejected`、`test_gcs_metadata_bad_hash_rejected` 通過。 |
-| **Finding 5** (Preflight before mutation) | apply 模式先刪除 GCS 物件，隨後才回傳 DB blocked，破壞原子性並使管線退出碼為 0。 | 所有 GCS 與 DB 預檢均置於任何異動前；apply 模式下若 DB 阻礙存在，立即停止任何 GCS 異動，且 `main()` 退出碼為非零 (1)。 | `python3 operations/verification/cleanup-owned-operational-fixtures.py --artifact-dir ... --mode apply`<br>Exit code: 1<br>`gcs_cleanup.status: skipped_due_to_db_blocker` |
-| **Finding 6** (DB guards & review events) | DB 忽略 dry-run 仍執行刪除；接受 `rows_affected: 0`；且刪除受外鍵與審計保護之 `fleet.supply_review_events`。 | dry-run 模式絕不執行 DELETE；永久保留 `fleet.supply_review_events`，若有審計事件關聯則阻止刪除父表 submission；拒絕 0 筆異動。 | 單元測試 `test_dry_run_never_executes_delete`、`test_apply_mode_stops_if_supply_review_events_exist`、`test_apply_mode_rejects_zero_rows_affected` 通過。 |
-| **Finding 7** (Authoritative artifact binding) | 腳本仰賴 caller 傳入之本機 inventory，測試以 synthetic fallback 偽造資料。 | 實作 `load_and_validate_authoritative_artifact`，直接解析 GitHub `artifacts.json`、`report.json`（驗證 16 passed）與 `operational-browser-evidence.json`；移除合成 fallback。 | 單元測試 `test_load_and_validate_authoritative_artifact` 通過。 |
-| **Finding 8** (CLI argument enforcement) | CLI 參數 `--source-sha` 與 `--run-id` 解析後未於程式邏輯中強制檢查。 | 於 `main()` 與 `validate_provenance` 中強制驗證 CLI 參數必須精確等於期望常數，否則退出碼 1。 | 單元測試 `test_cli_rejects_mismatched_source_sha`、`test_cli_rejects_mismatched_run_id` 通過。 |
-| **Finding 9** (DEV WIF pre-auth guards) | 工作流環境變數使用 fallback literals 及 generic fallback `secrets.WIF_*`。 | 移除所有 generic fallback；在 WIF 登入前加入 pre-auth guard，強制檢查 DEV 專屬 secrets 與指定專案 `drts-dev-devcc-20260825`、區域 `us-central1`。 | 工作流 YAML 語法驗證通過，符合 DEV-only 限制。 |
-| **Finding 10** (DB lane blocker evidence) | 候選版本宣稱 hosted 環境完全缺乏 Cloud SQL / 機密存取，與部署原始碼不符。 | 依據 `Dockerfile.migrate`、`db-apply.sh`、`deploy-dev.yml` 正確診斷：Cloud Run migration job 具連線與機密，但 ENTRYPOINT 固定為遷移指令，無法執行任意腳本且禁止修改預設 job；GitHub Actions SA 具有身分分離無法直接存取；且 schema 外鍵與審計紀錄保護 reviewed submission。 | 精確記錄具體阻礙於原始碼常數 `DB_CONCRETE_BLOCKER` 與文件。 |
+| **R2-01** (GCS Physical Key Mapping) | 生產環境 `GcsDocumentArtifactStoreAdapter.key` 將邏輯 key 編碼為 `document-artifacts/fleet-upload-content/<encodeURIComponent(logicalKey)>`（帶有 `%2F`）。候選 3f40 清理計畫使用原始 logical key，導致 GCS 物件名稱不符。 | 實作 `logical_to_physical_gcs_key` 嚴格遵循生產 Adapter 規範；保留清單中的原始 `logical_key` 供審計追溯，GCS 操作一律使用實體物理鍵。 | `node physical-key-probe.cjs`<br>單元測試 `test_physical_key_mapping` 通過。 |
+| **R2-02** (Mandatory Metadata & Live Hash) | 缺少 live hash/body/metageneration 時仍授權刪除；未強制數值型 metageneration（預設值為 1）；未檢查 2026 時間戳與物件所有權。 | 強制要求數值型 `generation` 與 `metageneration`（缺少即拒絕，不得預設為 1）；驗證 327 bytes、`application/pdf` MIME；強制透過 `sha256`、`body_bytes` 或 `read_body` 驗證內容雜湊；強制校驗 2026 年時間戳。 | 單元測試 `test_gcs_metadata_bad_hash_rejected`、`test_gcs_target_missing_metageneration_rejected`、`test_gcs_target_stale_timestamp_rejected` 通過。 |
+| **R2-03** (Preflight Separation Before Mutation) | Apply 模式在完成所有預檢前即發起異動（先執行 DB DELETE 再預檢 GCS，或刪除第一個 GCS 物件後才檢查第二個），且失敗時丟失 receipts。 | 分離規劃／預檢與異動階段：所有 8 個 GCS 目標必須全部完成預檢；若 DB 阻礙存在或缺乏 runner，立即中斷於任何 GCS 異動之前；持久化結構化錯誤收據，非零退出。 | 單元測試 `test_all_preflights_before_mutation_halts_db_on_gcs_failure`、`test_apply_mode_pipeline_halts_before_gcs_mutation_when_db_blocked` 通過。 |
+| **R2-04** (DB Transaction & Referential Integrity) | DB 執行無 `BEGIN`/`COMMIT`/`ROLLBACK` 事務邊界；接受缺少審計計數；未防止外鍵完整性破壞；dry-run 忽略查詢錯誤。 | 加入顯式事務控制命令；要求 `supply_review_events` 必須有確切整數計數且為 0（缺少或大於 0 均阻擋）；保留外鍵完整性約束（受審計保護之 submission 拒絕刪除）；dry-run 錯誤標記狀態為 `blocked`。不聲稱模擬 PG 回滾。 | 單元測試 `test_execute_db_cleanup_transaction_controls`、`test_execute_db_cleanup_rejects_missing_audit_count`、`test_db_dry_run_inspection_error_blocks` 通過。 |
+| **R2-05** (Authoritative Artifact Binding) | `artifacts.json`、digest 與完整 stats 曾被視為非必要；欠缺欄位時使用常數合成；接受缺少 `run_id`。 | 強制要求 `run_id`、強制驗證 `artifacts.json`、強制匹配 `EXPECTED_ARTIFACT_DIGEST`（`0968ca2d9ae17bb698d281ef51dbf1a21e4ea5f43db48f4350bc78bb51dcf87f`）；強制檢查 report stats（16 passed / 0 unexpected / 0 skipped / 0 flaky）；嚴格解析真實 58 筆證據，移除合成常數 fallback。 | 單元測試 `test_authentic_provenance_passes`、`test_wrong_artifact_digest_raises`、`test_wrong_run_id_raises` 通過。 |
+| **R2-06** (Strict GCS Error Classification) | 包含 403 / 憑證不存在之錯誤被誤判為 404；無先前收據之 404 仍被信任為已刪除。 | 子程序回傳 403、權限、網路錯誤嚴格分類為 `permission_or_network` 錯誤（絕非 `not_found`）；僅嚴格比對真實驗證之 404；先前的刪除收據必須綁定 bucket、實體 key、數值型 generation/metageneration 與 `verified_absent: true`。 | 單元測試 `test_default_gcs_runner_classifies_403_as_error`、`test_preexisting_absence_without_receipt_raises`、`test_gcs_target_prior_receipt_validation` 通過。 |
+| **R2-07** (Bash Quoted Env Variables) | 工作流中直接將 `${{ inputs.* }}` 內插至 Bash 腳本區塊中，造成命令替換漏洞（如 `$(id)` 可被執行）。 | 所有工作流 dispatch 參數一律透過 step `env:` 變數傳遞為純量字串（`INPUT_*`），徹底消除 Bash 命令列內插；即使包含命令替換語法亦純視為文字資料。 | 語法驗證通過；workflow-guard-probe 驗證無命令替換執行。 |
+| **R2-08** (Fixed WIF Identity, Minimum Perm, Concurrency) | WIF 檢查僅驗證非空，接受任意第三方 provider；工作流缺乏並發控制與 `actions: read` 權限。 | 固定綁定授權 DEV WIF 提供者（`projects/24645990627/...`）與佈署者 SA（`github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`）；加入 `concurrency: group: dev-owned-operational-fixture-cleanup, cancel-in-progress: false`；加入 `actions: read` 權限。 | 工作流 YAML 結構驗證通過，WIF 邊界與權限最小化落實。 |
+| **R2-09** (Canonical Consistency & Test Accounting) | UAT 文件以反引號引用已刪除之舊測試檔案導致 CI 規範檢查失敗；測試計數引用舊陳舊數據（94）。 | 移除舊測試路徑之反引號，改以 GitHub blob 完整 URL 參照；更正測試計數為 `check_test_coverage.py` 發現之 95 個測試檔案、44 項單元測試；明確記錄測試目錄中的 3 個跳過為測試套件跳過（非 passes，非業務 16 skips）。 | `python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3e --head HEAD`<br>Exit code: 0<br>`0 finding(s)` |
 
 ## 4. 資料庫通道與保留合約精確分析 (DB Lane & Preservation)
 
-1. **現行部署架構分析:**
-   - 經靜態檢視 `Dockerfile.migrate`、`operations/database/db-apply.sh`、`infra/gcp/staging/migrate-job.yaml` 與 `.github/workflows/deploy-dev.yml`：
-   - 專案已具有 Cloud Run migration job `drts-migrate`，具有 Cloud SQL instance 綁定與 `DATABASE_URL` secret 掛載。
+1. **現行部署架構分析 (Current Deployment Architecture):**
+   - 經檢視 `Dockerfile.migrate`、`operations/database/db-apply.sh`、`infra/gcp/staging/migrate-job.yaml` 與 `.github/workflows/deploy-dev.yml`：
+   - 專案已具有 Cloud Run migration job `drts-dev-migrate`，具有 Cloud SQL instance 綁定與 `DATABASE_URL` secret 掛載。
    - 然而，該映像檔係專為資料庫遷移設計，固定執行 `bash operations/database/db-apply.sh`，僅包含 `infra/migrations/` 下之 `V*.sql` 檔案，並不包含此清理工具，亦不接受任意 SQL 參數輸入。
    - 倉庫治理規範嚴格禁止任意覆寫正式遷移 job 之 entrypoint 或 command，亦禁止宣告未經審核之維運 Cloud Run job。
    - GitHub Actions deployer SA（`DEV_WIF_SERVICE_ACCOUNT`）在架構上落實 runtime identity split，無 VPC 內部私有連線能力，亦不持有 `DATABASE_URL`。
@@ -77,43 +88,55 @@ Supervisor 核准精確測試重置（四個最終原始碼檔案，五個過渡
    - 業務取消紀錄（Referral `6d571eec-f271-46b8-b01f-b176994fe71e`、Enterprise `booking-2e367210-fc7b-4bf0-9512-8ff7626b5165`）永久保留。
    - 種子夥伴 `fleet-demo-001` 及相關預載實體永久保留。
    - 歷史失敗夾具（8d、03a）永久保留。
+   - 上傳意圖（`fleet-upload-intent`）與掃描記錄（`fleet-scan-record`）由獨立 lifecycle 治理，排除於本次清理計畫之外。
 
-## 5. 本機驗證日誌與退出碼
+## 5. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 
 ### 1. 測試檔案覆蓋率檢查 (`tools/ci/check_test_coverage.py`)
 ```bash
-python3 tools/ci/check_test_coverage.py
+python3 -B tools/ci/check_test_coverage.py
 # Exit code: 0
-# Output: check_test_coverage: all 94 test files yield tests CI runs.
+# Output: check_test_coverage: all 95 test files yield tests CI runs.
 ```
 
-### 2. 重置後之完整單元測試套件
+### 2. 單元測試套件執行 (`test_owned_operational_fixture_cleanup.py`)
 ```bash
-python3 -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
+python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
 # Exit code: 0
-# Ran 33 tests in 0.018s ... OK
+# Ran 44 tests in 0.020s ... OK
 ```
 
 ### 3. 本機測試目錄自動發現驗證
 ```bash
-python3 -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
+python3 -B -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
 # Exit code: 0
-# Ran 68 tests ... OK (skipped=3)
+# Ran 79 tests ... OK (skipped=3)
+# Note: 3 skips are test-suite level directory skips in unrelated suites, NOT passes and NOT operational 16 skips.
 ```
 
-### 4. 實際權威產物離線 dry-run 演練
+### 4. 規範一致性檢查 (`tools/ci/git/check_canonical_consistency.py`)
 ```bash
-python3 operations/verification/cleanup-owned-operational-fixtures.py \
+python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3ed2a7000061acc737ee475ae3c47dca56 --head HEAD
+# Exit code: 0
+# [consistency] l1-edit-authority: 0 finding(s)
+# [consistency] cited-paths: 0 finding(s)
+# [consistency] cited-decisions: 0 finding(s)
+# [consistency] task-claims: 0 finding(s)
+```
+
+### 5. 實際權威產物離線 dry-run 演練
+```bash
+python3 -B operations/verification/cleanup-owned-operational-fixtures.py \
   --artifact-dir .local/fleet-storage-diagnosis-20261008/referral-reviewed-composition-dev-deployment-20261009/artifacts/operational-browser-evidence-4a166f3ed2a7000061acc737ee475ae3c47dca56 \
   --mode dry-run \
   --offline
 # Exit code: 0
-# Status: dry_run_complete, 8 GCS planned receipts, DB concrete blocker recorded.
+# Status: dry_run_complete, 8 GCS planned physical targets, DB concrete blocker recorded.
 ```
 
-### 5. 實際權威產物 apply 模式防護中斷演練
+### 6. 實際權威產物 apply 模式防護中斷演練
 ```bash
-python3 operations/verification/cleanup-owned-operational-fixtures.py \
+python3 -B operations/verification/cleanup-owned-operational-fixtures.py \
   --artifact-dir .local/fleet-storage-diagnosis-20261008/referral-reviewed-composition-dev-deployment-20261009/artifacts/operational-browser-evidence-4a166f3ed2a7000061acc737ee475ae3c47dca56 \
   --mode apply
 # Exit code: 1
@@ -123,7 +146,7 @@ python3 operations/verification/cleanup-owned-operational-fixtures.py \
 ## 6. 三道閘門現況 (Three Gates Status)
 
 1. `owned_operational_cleanup_actual_planner_boundary_regressions`:
-   🟢 **READY (本機已通過)**：33 項單元測試全數通過，`check_test_coverage.py` 驗證通過（94/94 測試檔），完整涵蓋 10 項審查 finding 之回歸測試。
+   🟢 **READY (本機已通過)**：44 項單元測試全數通過，`check_test_coverage.py` 驗證通過（95/95 測試檔），一致性檢查通過（0 findings），完整涵蓋 9 項審查 finding 之回歸測試。
 2. `owned_operational_cleanup_exact_sha_review_ci_merge`:
    🟡 **PENDING (待獨立審查、CI 與合併)**：由獨立審查者 Codex 針對本次 repair 產生之全新候選 SHA 進行審查，待 GitHub Actions 強制性 CI 全數綠燈後，依保護分支規則合併至 `dev`。
 3. `owned_operational_cleanup_genuine_hosted_exact_objects_records_preservation`:

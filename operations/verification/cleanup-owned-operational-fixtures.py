@@ -15,13 +15,17 @@ Safety & Governance Constraints:
   workflow definition 9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c, artifact 11606165993.
 - Authoritative artifact retrieval & verification: binds artifact metadata, digest,
   operational report statistics (16 passed / 0 failed / 0 skipped), and evidence records.
+- Physical key mapping: derives physical GCS object keys under
+  'document-artifacts/fleet-upload-content/<encoded-subject>' per the immutable
+  GcsDocumentArtifactStoreAdapter contract, while preserving exact logical ownership keys.
 - GCS describe errors distinguish proven 404 from 403 / network / timeout errors (fail-closed).
-- GCS deletion requires exact generation match, metageneration, MIME, size, and content hash
-  integrity validation before deletion, plus subsequent proven 404 absent read.
-- Non-mutating preflights occur before any mutation; apply mode halts before any GCS mutation
-  if database cleanup is unavailable, blocked, or has foreign key audit conflicts.
-- Database mutations require narrow guarded transaction; never deletes fleet.supply_review_events
-  audit records. Protected referencing records block deletion of parent submissions.
+- GCS deletion requires exact generation match, metageneration, MIME, size, timestamps,
+  and content hash integrity validation before deletion, plus subsequent proven 404 absent read.
+- Non-mutating preflights occur before any mutation; all required GCS and DB preflights
+  must pass before any GCS or DB mutation is attempted.
+- Database mutations require narrow guarded transaction (BEGIN / COMMIT / ROLLBACK);
+  never deletes fleet.supply_review_events audit records. Protected referencing records
+  block deletion of parent submissions.
 - Zero socket or network calls on VM (stdlib only; external boundary mocked in unit tests).
 """
 from __future__ import annotations
@@ -33,6 +37,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -58,6 +63,23 @@ KEY_PREFIX = "fleet-partner/fleet-demo-001/supply-submissions/"
 EXPECTED_FLEET_PARTNER_ID = "fleet-demo-001"
 OWNED_OBJECT_COUNT = 8
 OWNED_SUBMISSION_COUNT = 4
+
+KIND_FLEET_UPLOAD_CONTENT = "fleet-upload-content"
+DOCUMENT_ARTIFACTS_PREFIX = "document-artifacts"
+
+
+def logical_to_physical_gcs_key(
+    logical_key: str, kind: str = KIND_FLEET_UPLOAD_CONTENT
+) -> str:
+    """Derive physical GCS object key using the immutable GcsDocumentArtifactStoreAdapter contract.
+
+    Contract: document-artifacts/{kind}/{encodeURIComponent(subjectId)}
+    Note: urllib.parse.quote(logical_key, safe="") produces encodeURIComponent behavior,
+    encoding '/' as '%2F' and preserving valid URL characters.
+    """
+    encoded_subject = urllib.parse.quote(logical_key, safe="")
+    return f"{DOCUMENT_ARTIFACTS_PREFIX}/{kind}/{encoded_subject}"
+
 
 CANONICAL_OWNED_OBJECTS: Dict[str, Dict[str, str]] = {
     "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/18f06410-510c-4107-ae21-16ab61383b95-harmless-upload.pdf": {
@@ -120,7 +142,7 @@ PRESERVED_SEEDED_PARTNERS: Tuple[str, ...] = (
 
 DB_CONCRETE_BLOCKER = (
     "Current authorized hosted deployment provides Cloud SQL and DATABASE_URL "
-    "secret injection exclusively via the Cloud Run migration job (drts-migrate) built from "
+    "secret injection exclusively via the Cloud Run migration job (drts-dev-migrate) built from "
     "Dockerfile.migrate. That image has a fixed entrypoint (['bash', 'operations/database/db-apply.sh']) "
     "that executes only schema migrations from infra/migrations/ and lacks this new cleanup tool. "
     "The default migration job definition cannot be mutated or overridden under repository governance. "
@@ -184,28 +206,38 @@ def validate_provenance(
         f"Enforced source SHA mismatch: expected {EXPECTED_SOURCE_SHA}, got {expected_src}",
     )
 
-    actual_source = inventory_or_evidence.get(
-        "source_sha"
-    ) or inventory_or_evidence.get("source_runtime_sha") or inventory_or_evidence.get("candidateSha")
+    actual_source = (
+        inventory_or_evidence.get("source_sha")
+        or inventory_or_evidence.get("source_runtime_sha")
+        or inventory_or_evidence.get("candidateSha")
+    )
+    require(
+        actual_source is not None,
+        f"Missing required source SHA in provenance: expected {expected_src}",
+    )
     require(
         actual_source == expected_src,
         f"Source SHA mismatch: expected {expected_src}, got {actual_source}",
     )
 
-    actual_run = inventory_or_evidence.get(
-        "run_id"
-    ) or inventory_or_evidence.get("product_run_id")
-    if actual_run is not None:
-        require(
-            int(actual_run) == expected_run,
-            f"Product run ID mismatch: expected {expected_run}, got {actual_run}",
-        )
+    actual_run = (
+        inventory_or_evidence.get("run_id")
+        or inventory_or_evidence.get("product_run_id")
+    )
+    require(
+        actual_run is not None,
+        f"Product run ID missing in provenance: expected {expected_run}",
+    )
+    require(
+        int(actual_run) == expected_run,
+        f"Product run ID mismatch: expected {expected_run}, got {actual_run}",
+    )
 
     expected_def = validate_full_sha(
         definition_sha or EXPECTED_WORKFLOW_DEF_SHA, "definition_sha"
     )
     actual_def = inventory_or_evidence.get("workflow_definition_sha")
-    if actual_def:
+    if actual_def is not None:
         require(
             actual_def == expected_def,
             f"Workflow definition SHA mismatch: expected {expected_def}, got {actual_def}",
@@ -349,47 +381,59 @@ def load_and_validate_authoritative_artifact(
 ) -> Dict[str, Any]:
     """Parse and validate authoritative GitHub artifact, report, and evidence files.
 
-    Expects either:
-    - artifact_dir containing artifacts.json, payload/operational-browser/{report.json, operational-browser-evidence.json}
-    - or artifact_dir directly containing report.json and operational-browser-evidence.json
+    Expects:
+    - artifact_dir containing artifacts.json (mandatory metadata)
+    - report.json (mandatory stats: 16 expected, 0 unexpected, 0 skipped, 0 flaky)
+    - operational-browser-evidence.json (mandatory clean 200/201 checks, timestamps, digests)
     """
     require(artifact_dir.is_dir(), f"Artifact directory not found: {artifact_dir}")
 
-    # 1. Validate GitHub API artifact metadata if artifacts.json exists
-    art_meta_path = artifact_dir / "artifacts.json"
-    if art_meta_path.is_file():
-        with open(art_meta_path, "r", encoding="utf-8") as f:
-            art_meta = json.load(f)
-        artifacts_list = art_meta.get("artifacts", [])
-        require(len(artifacts_list) > 0, "No artifacts found in artifacts.json")
-        target_art = None
-        for art in artifacts_list:
-            if art.get("id") == expected_artifact_id:
-                target_art = art
-                break
-        require(
-            target_art is not None,
-            f"Authoritative artifact {expected_artifact_id} not found in artifacts.json",
-        )
-        require(
-            target_art.get("name") == EXPECTED_ARTIFACT_NAME,
-            f"Artifact name mismatch: expected {EXPECTED_ARTIFACT_NAME}, got {target_art.get('name')}",
-        )
-        actual_digest = target_art.get("digest")
-        if actual_digest:
-            require(
-                actual_digest == EXPECTED_ARTIFACT_DIGEST,
-                f"Artifact digest mismatch: expected {EXPECTED_ARTIFACT_DIGEST}, got {actual_digest}",
-            )
-        wf_run = target_art.get("workflow_run", {})
-        require(
-            wf_run.get("id") == expected_run_id,
-            f"Artifact run ID mismatch: expected {expected_run_id}, got {wf_run.get('id')}",
-        )
-        require(
-            wf_run.get("head_sha") == expected_workflow_def_sha,
-            f"Artifact workflow def SHA mismatch: expected {expected_workflow_def_sha}, got {wf_run.get('head_sha')}",
-        )
+    # 1. Validate GitHub API artifact metadata (artifacts.json is MANDATORY)
+    art_meta_candidates = [
+        artifact_dir / "artifacts.json",
+        artifact_dir.parent / "artifacts.json",
+        artifact_dir.parent.parent / "artifacts.json",
+    ]
+    art_meta_path = next((p for p in art_meta_candidates if p.is_file()), None)
+    require(
+        art_meta_path is not None,
+        f"artifacts.json not found under {artifact_dir} (or its parents); authoritative artifact metadata is mandatory",
+    )
+    with open(art_meta_path, "r", encoding="utf-8") as f:
+        art_meta = json.load(f)
+    artifacts_list = art_meta.get("artifacts", [])
+    require(len(artifacts_list) > 0, "No artifacts found in artifacts.json")
+    target_art = None
+    for art in artifacts_list:
+        if art.get("id") == expected_artifact_id:
+            target_art = art
+            break
+    require(
+        target_art is not None,
+        f"Authoritative artifact {expected_artifact_id} not found in artifacts.json",
+    )
+    require(
+        target_art.get("name") == EXPECTED_ARTIFACT_NAME,
+        f"Artifact name mismatch: expected {EXPECTED_ARTIFACT_NAME}, got {target_art.get('name')}",
+    )
+    actual_digest = target_art.get("digest")
+    require(
+        actual_digest is not None,
+        f"Artifact digest missing in artifacts.json for artifact {expected_artifact_id}",
+    )
+    require(
+        actual_digest == EXPECTED_ARTIFACT_DIGEST,
+        f"Artifact digest mismatch: expected {EXPECTED_ARTIFACT_DIGEST}, got {actual_digest}",
+    )
+    wf_run = target_art.get("workflow_run", {})
+    require(
+        wf_run.get("id") == expected_run_id,
+        f"Artifact run ID mismatch: expected {expected_run_id}, got {wf_run.get('id')}",
+    )
+    require(
+        wf_run.get("head_sha") == expected_workflow_def_sha,
+        f"Artifact workflow def SHA mismatch: expected {expected_workflow_def_sha}, got {wf_run.get('head_sha')}",
+    )
 
     # 2. Locate report.json and operational-browser-evidence.json
     report_candidates = [
@@ -399,6 +443,10 @@ def load_and_validate_authoritative_artifact(
         artifact_dir / "payload" / "operational-browser" / "report.json",
     ]
     report_path = next((p for p in report_candidates if p.is_file()), None)
+    if report_path is None:
+        matches = sorted(artifact_dir.glob("**/report.json"))
+        if matches:
+            report_path = matches[0]
     require(report_path is not None, f"report.json not found under {artifact_dir}")
 
     evidence_candidates = [
@@ -408,6 +456,10 @@ def load_and_validate_authoritative_artifact(
         artifact_dir / "payload" / "operational-browser" / "operational-browser-evidence.json",
     ]
     evidence_path = next((p for p in evidence_candidates if p.is_file()), None)
+    if evidence_path is None:
+        matches = sorted(artifact_dir.glob("**/operational-browser-evidence.json"))
+        if matches:
+            evidence_path = matches[0]
     require(evidence_path is not None, f"operational-browser-evidence.json not found under {artifact_dir}")
 
     # 3. Validate report.json
@@ -432,12 +484,16 @@ def load_and_validate_authoritative_artifact(
         f"Report buildHref does not reference run {expected_run_id}",
     )
 
-    stats = report_data.get("stats", {})
-    if stats:
-        require(stats.get("expected", 16) == 16, f"Expected 16 tests in report, got {stats.get('expected')}")
-        require(stats.get("unexpected", 0) == 0, f"Unexpected failures in report: {stats.get('unexpected')}")
-        require(stats.get("skipped", 0) == 0, f"Skipped tests in report: {stats.get('skipped')}")
-        require(stats.get("flaky", 0) == 0, f"Flaky tests in report: {stats.get('flaky')}")
+    # Mandatory statistics check (stats cannot be missing or defaulted)
+    stats = report_data.get("stats")
+    require(
+        isinstance(stats, dict) and len(stats) > 0,
+        f"Report statistics missing in report.json: {stats}",
+    )
+    require(stats.get("expected") == 16, f"Expected 16 tests in report, got {stats.get('expected')}")
+    require(stats.get("unexpected") == 0, f"Unexpected failures in report: {stats.get('unexpected')}")
+    require(stats.get("skipped") == 0, f"Skipped tests in report: {stats.get('skipped')}")
+    require(stats.get("flaky") == 0, f"Flaky tests in report: {stats.get('flaky')}")
 
     # 4. Validate evidence and extract storage documents + mutations
     with open(evidence_path, "r", encoding="utf-8") as f:
@@ -458,16 +514,52 @@ def load_and_validate_authoritative_artifact(
             isinstance(entry.get("objectKey"), str)
             and entry.get("objectKey", "").startswith(KEY_PREFIX)
         ):
-            # Ensure confirmFleetPartnerId / confirmDocumentType are present
-            doc_entry = dict(entry)
-            key = doc_entry["objectKey"]
-            if key in CANONICAL_OWNED_OBJECTS:
-                can = CANONICAL_OWNED_OBJECTS[key]
-                doc_entry.setdefault("confirmSubmissionId", can["submission_id"])
-                doc_entry.setdefault("confirmFleetPartnerId", EXPECTED_FLEET_PARTNER_ID)
-                doc_entry.setdefault("confirmDocumentType", can["document_type"])
-                doc_entry.setdefault("readbackContentType", EXPECTED_MIME)
-            storage_docs.append(doc_entry)
+            # Authoritative evidence MUST contain authentic ownership fields; no default synthesis
+            require(
+                entry.get("confirmSubmissionId") is not None,
+                f"Missing confirmSubmissionId in evidence entry for {entry.get('objectKey')}",
+            )
+            require(
+                entry.get("confirmFleetPartnerId") == EXPECTED_FLEET_PARTNER_ID,
+                f"Invalid or missing confirmFleetPartnerId in evidence: {entry.get('confirmFleetPartnerId')}",
+            )
+            require(
+                entry.get("confirmDocumentType") is not None,
+                f"Missing confirmDocumentType in evidence entry for {entry.get('objectKey')}",
+            )
+            require(
+                entry.get("readbackContentType") == EXPECTED_MIME,
+                f"Invalid or missing readbackContentType: {entry.get('readbackContentType')}",
+            )
+            # Timestamp validity: must not be stale (must be from 2026 run)
+            rec_at = entry.get("recordedAt")
+            require(
+                rec_at is not None and isinstance(rec_at, str) and "2026-" in rec_at,
+                f"Invalid or stale evidence recordedAt timestamp: {rec_at}",
+            )
+            # Must be clean successful status: putStatus 200/201, clean scan, downloadStatus 200, valid readback SHA
+            put_status = entry.get("putStatus")
+            require(
+                put_status in (200, 201),
+                f"Document upload putStatus failed or unverified: {put_status}",
+            )
+            scan_state = entry.get("putScanState")
+            require(
+                scan_state == "clean",
+                f"Document scanState infected or pending: {scan_state}",
+            )
+            download_status = entry.get("downloadStatus")
+            require(
+                download_status == 200,
+                f"Document downloadStatus failed: {download_status}",
+            )
+            readback_sha = entry.get("readbackSha256")
+            require(
+                readback_sha == EXPECTED_SHA256,
+                f"Document readback SHA-256 mismatch: {readback_sha}",
+            )
+
+            storage_docs.append(dict(entry))
 
         if kind == "mutation-readback":
             mutation_records.append(entry)
@@ -489,7 +581,14 @@ def load_and_validate_authoritative_artifact(
         "preserve_failed_8d_03a_and_user_data": True,
     }
 
-    validate_provenance(inventory_data, run_id=expected_run_id, source_sha=expected_source_sha)
+    validate_provenance(
+        inventory_data,
+        run_id=expected_run_id,
+        source_sha=expected_source_sha,
+        definition_sha=expected_workflow_def_sha,
+        artifact_id=expected_artifact_id,
+        artifact_digest=EXPECTED_ARTIFACT_DIGEST,
+    )
     validate_inventory_items(inventory_data)
     return inventory_data
 
@@ -504,12 +603,18 @@ def build_cleanup_plan(
     validate_provenance(inventory_data, run_id=run_id, source_sha=source_sha)
     validated_docs = validate_inventory_items(inventory_data)
 
+    # Derive physical GCS keys using the immutable GcsDocumentArtifactStoreAdapter contract
+    # Physical: document-artifacts/fleet-upload-content/<encodeURIComponent(logicalKey)>
     gcs_targets = []
     for doc in validated_docs:
+        logical_key = doc["object_key"]
+        physical_key = logical_to_physical_gcs_key(logical_key)
         gcs_targets.append(
             {
                 "bucket": BUCKET,
-                "key": doc["object_key"],
+                "key": physical_key,
+                "physical_key": physical_key,
+                "logical_key": logical_key,
                 "expected_size": doc["file_size"],
                 "expected_sha256": doc["sha256"],
                 "expected_content_type": doc["content_type"],
@@ -586,6 +691,8 @@ def build_cleanup_plan(
         "preserve_failed_historical_fixtures": ["8d", "03a"],
         "preserve_audit_logs": True,
         "preserved_audit_tables": ["fleet.supply_review_events", "audit.mutation_logs"],
+        "preserve_intent_and_scan_records": True,
+        "excluded_kinds": ["fleet-upload-intent", "fleet-scan-record"],
     }
 
     return {
@@ -637,13 +744,47 @@ def default_gcs_runner(
                     "error_type": "parse_error",
                 }
 
-        # Classify nonzero returncode: ONLY proved 404/NotFound is classified as not_found!
         stderr_lower = (res.stderr or "").lower()
+        # Strictly classify errors:
+        # 1. Any authentication, credentials, 403 Forbidden, permission, or token error is an ERROR, NEVER a 404!
+        if (
+            "403" in stderr_lower
+            or "forbidden" in stderr_lower
+            or "credentials not found" in stderr_lower
+            or "authentication failed" in stderr_lower
+            or "permission denied" in stderr_lower
+            or "unauthenticated" in stderr_lower
+            or "unauthorized" in stderr_lower
+        ):
+            return {
+                "status": "error",
+                "returncode": res.returncode,
+                "stderr": res.stderr,
+                "error_type": "permission_or_network",
+            }
+
+        # 2. Network, timeout, connection, DNS, or socket errors are ERRORS:
+        if (
+            "timeout" in stderr_lower
+            or "connection refused" in stderr_lower
+            or "network is unreachable" in stderr_lower
+            or "timed out" in stderr_lower
+        ):
+            return {
+                "status": "error",
+                "returncode": res.returncode,
+                "stderr": res.stderr,
+                "error_type": "network_or_timeout",
+            }
+
+        # 3. ONLY proven 404 / NotFound for the specific object is not_found:
         if (
             "no such object" in stderr_lower
-            or "not found" in stderr_lower
+            or "httperror 404" in stderr_lower
             or "httpstatus 404" in stderr_lower
-            or "404" in stderr_lower
+            or "status code 404" in stderr_lower
+            or "notfoundexception: 404" in stderr_lower
+            or (res.returncode == 1 and "not found" in stderr_lower and "bucket" not in stderr_lower)
         ):
             return {
                 "status": "not_found",
@@ -651,12 +792,11 @@ def default_gcs_runner(
                 "stderr": res.stderr,
             }
 
-        # 403 Forbidden, network error, timeout, malformed auth -> fail-closed error!
         return {
             "status": "error",
             "returncode": res.returncode,
             "stderr": res.stderr,
-            "error_type": "permission_or_network",
+            "error_type": "unknown_gcs_error",
         }
 
     elif action == "delete":
@@ -685,6 +825,42 @@ def default_gcs_runner(
             }
         return {"status": "ok", "deleted": True}
 
+    elif action == "read_body":
+        # Generation-pinned bounded read of object body to verify SHA-256
+        require(
+            generation is not None and bool(re.fullmatch(r"\d+", str(generation))),
+            f"read_body requires explicit numeric generation match, got: {generation!r}",
+        )
+        pinned_url = f"gs://{bucket}/{key}#{generation}"
+        cmd = [
+            "gcloud",
+            "storage",
+            "cat",
+            pinned_url,
+            "--project",
+            PROJECT,
+            "--quiet",
+        ]
+        res = subprocess.run(
+            cmd, capture_output=True, text=False, check=False, timeout=timeout
+        )
+        if res.returncode != 0:
+            return {
+                "status": "error",
+                "returncode": res.returncode,
+                "stderr": res.stderr.decode("utf-8", errors="replace") if res.stderr else "cat failed",
+            }
+        body_bytes = res.stdout
+        if len(body_bytes) > 10 * 1024 * 1024:
+            raise ValueError(f"Object {pinned_url} exceeds maximum bounded size for body read")
+        computed_sha = hashlib.sha256(body_bytes).hexdigest()
+        return {
+            "status": "ok",
+            "body_bytes": body_bytes,
+            "size": len(body_bytes),
+            "sha256": computed_sha,
+        }
+
     raise ValueError(f"Unknown GCS runner action: {action}")
 
 
@@ -692,8 +868,9 @@ def inspect_and_validate_gcs_target(
     desc: Dict[str, Any],
     expected_item: Dict[str, Any],
     prior_receipts: Optional[Sequence[Dict[str, Any]]] = None,
+    runner: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Validate live object identity before delete (MIME, size, generation, metageneration, hash)."""
+    """Validate live object identity before delete (bucket, key, generation, metageneration, MIME, size, timestamps, hash)."""
     bucket = expected_item["bucket"]
     key = expected_item["key"]
     expected_size = expected_item["expected_size"]
@@ -708,45 +885,61 @@ def inspect_and_validate_gcs_target(
 
     if status == "not_found":
         # Check if an authoritative prior generation-bound receipt exists for this object
-        has_prior_receipt = False
-        prior_gen = None
+        valid_prior_receipt = None
         if prior_receipts:
-            for r in prior_receipts:
-                if r.get("key") == key and r.get("status") == "deleted" and r.get("generation"):
-                    has_prior_receipt = True
-                    prior_gen = r.get("generation")
+            receipt_list = (
+                prior_receipts.values()
+                if isinstance(prior_receipts, dict)
+                else prior_receipts
+            )
+            for r in receipt_list:
+                if not isinstance(r, dict):
+                    continue
+                # Prior receipt MUST match exact key, exact bucket, deleted status, numeric generation, and verified_absent True!
+                if (
+                    r.get("key") == key
+                    and r.get("bucket") == bucket
+                    and r.get("status") == "deleted"
+                    and r.get("generation") is not None
+                    and bool(re.fullmatch(r"\d+", str(r.get("generation"))))
+                    and r.get("verified_absent") is True
+                ):
+                    valid_prior_receipt = r
                     break
 
-        if has_prior_receipt:
+        if valid_prior_receipt is not None:
             return {
                 "key": key,
                 "bucket": bucket,
                 "status": "already_deleted_with_receipt",
-                "generation": prior_gen,
+                "generation": str(valid_prior_receipt["generation"]),
                 "verified_absent": True,
+                "prior_receipt_verified": True,
             }
 
-        # Pre-existing absence without prior generation-bound receipt is an unverified failure
+        # Pre-existing absence without valid prior generation-bound receipt is an unverified failure
         raise ValueError(
             f"Pre-existing absence for gs://{bucket}/{key} without authoritative prior generation-bound deletion receipt"
         )
 
     require(status == "ok", f"Unexpected GCS describe status: {status}")
     meta = desc.get("metadata", {})
+    require(isinstance(meta, dict), f"Expected metadata dict for gs://{bucket}/{key}")
 
-    # Numeric generation
+    # Mandatory numeric generation
     generation = str(meta.get("generation", ""))
     require(
         bool(re.fullmatch(r"\d+", generation)),
         f"Missing or non-numeric generation for gs://{bucket}/{key}: {generation!r}",
     )
 
-    # Numeric metageneration
-    metageneration = str(meta.get("metageneration", "1"))
+    # Mandatory numeric metageneration (MUST NOT default to 1 if missing!)
+    raw_metagen = meta.get("metageneration")
     require(
-        bool(re.fullmatch(r"\d+", metageneration)),
-        f"Invalid metageneration for gs://{bucket}/{key}: {metageneration!r}",
+        raw_metagen is not None and bool(re.fullmatch(r"\d+", str(raw_metagen))),
+        f"Missing or invalid metageneration for gs://{bucket}/{key}: {raw_metagen!r}",
     )
+    metageneration = str(raw_metagen)
 
     # File size
     live_size = int(meta.get("size", -1))
@@ -762,33 +955,65 @@ def inspect_and_validate_gcs_target(
         f"Object content-type mismatch for gs://{bucket}/{key}: expected {expected_content_type}, got {live_content_type}",
     )
 
-    # Content digest / hash check
+    # Custom metadata dict
+    custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
+
+    # Live hash and body verification:
     live_hash = (
         meta.get("sha256")
         or meta.get("hash")
         or meta.get("checksum_sha256")
-        or (meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}).get("sha256")
+        or custom_meta.get("sha256")
     )
-    if live_hash:
-        require(
-            live_hash == expected_sha256,
-            f"Object SHA-256 mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {live_hash}",
-        )
 
-    # Body bytes check if present
-    if "body_bytes" in meta:
-        body = meta["body_bytes"]
-        if isinstance(body, str):
-            body = body.encode("utf-8")
+    body_bytes = meta.get("body_bytes")
+    if body_bytes is not None:
+        if isinstance(body_bytes, str):
+            body_bytes = body_bytes.encode("utf-8")
         require(
-            len(body) == expected_size,
-            f"Body byte length mismatch for gs://{bucket}/{key}: expected {expected_size}, got {len(body)}",
+            len(body_bytes) == expected_size,
+            f"Body byte length mismatch for gs://{bucket}/{key}: expected {expected_size}, got {len(body_bytes)}",
         )
-        body_digest = hashlib.sha256(body).hexdigest()
+        computed_hash = hashlib.sha256(body_bytes).hexdigest()
         require(
-            body_digest == expected_sha256,
-            f"Body digest mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {body_digest}",
+            computed_hash == expected_sha256,
+            f"Body digest mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {computed_hash}",
         )
+        live_hash = computed_hash
+
+    if not live_hash and runner is not None:
+        try:
+            body_res = runner("read_body", bucket, key, generation=generation)
+            if body_res.get("status") == "ok" and "sha256" in body_res:
+                live_hash = body_res["sha256"]
+        except Exception:
+            pass
+
+    # Mandatory: live_hash MUST be verified! If no hash or body was provided/computed, reject!
+    require(
+        live_hash is not None,
+        f"Missing live hash/body verification for gs://{bucket}/{key}; content hash cannot be proven",
+    )
+    require(
+        live_hash == expected_sha256,
+        f"Object SHA-256 mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {live_hash}",
+    )
+
+    # Creation/update timestamp or stored-at time validation
+    custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
+    time_created = (
+        meta.get("timeCreated")
+        or meta.get("updated")
+        or custom_meta.get("stored-at")
+    )
+    require(
+        time_created is not None and isinstance(time_created, str) and len(time_created) > 0,
+        f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}",
+    )
+    require(
+        "2026-" in time_created,
+        f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}",
+    )
 
     return {
         "key": key,
@@ -797,6 +1022,7 @@ def inspect_and_validate_gcs_target(
         "generation": generation,
         "metageneration": metageneration,
         "metadata": meta,
+        "verified_hash": live_hash,
     }
 
 
@@ -809,66 +1035,102 @@ def execute_gcs_cleanup(
     mode = plan["mode"]
     targets = plan["gcs_targets"]
 
-    receipts = []
+    # PHASE 1: PREFLIGHT ALL TARGETS BEFORE ANY MUTATION
+    validated_targets = []
     for item in targets:
         bucket = item["bucket"]
         key = item["key"]
-
-        # 1. Describe and validate live object identity
         desc = runner("describe", bucket, key)
-        val = inspect_and_validate_gcs_target(desc, item, prior_receipts=prior_receipts)
+        val = inspect_and_validate_gcs_target(
+            desc, item, prior_receipts=prior_receipts, runner=runner
+        )
+        validated_targets.append((item, val))
 
+    receipts = []
+    # If mode is dry-run, record planned receipts for all preflighted targets
+    if mode == "dry-run":
+        for item, val in validated_targets:
+            if val["status"] == "already_deleted_with_receipt":
+                receipts.append(val)
+            else:
+                receipts.append(
+                    {
+                        "key": item["key"],
+                        "status": "planned",
+                        "bucket": item["bucket"],
+                        "generation": val["generation"],
+                        "metageneration": val["metageneration"],
+                        "action": "dry-run (no mutation)",
+                    }
+                )
+        return {
+            "status": "success",
+            "mode": mode,
+            "total_targets": len(targets),
+            "receipts": receipts,
+        }
+
+    # PHASE 2: APPLY MODE (All targets preflighted and valid)
+    for idx, (item, val) in enumerate(validated_targets):
+        bucket = item["bucket"]
+        key = item["key"]
         if val["status"] == "already_deleted_with_receipt":
             receipts.append(val)
             continue
 
         live_generation = val["generation"]
-
-        if mode == "dry-run":
+        try:
+            del_res = runner("delete", bucket, key, generation=live_generation)
+            require(
+                del_res.get("status") == "ok",
+                f"GCS deletion failed for gs://{bucket}/{key} with generation {live_generation}: {del_res.get('stderr')}",
+            )
+            # Subsequent absent read
+            post_desc = runner("describe", bucket, key)
+            post_status = post_desc.get("status")
+            if post_status == "ok":
+                raise RuntimeError(
+                    f"Object gs://{bucket}/{key} still present after generation-matched delete!"
+                )
+            if post_status == "error":
+                raise RuntimeError(
+                    f"Unable to verify absence of gs://{bucket}/{key} after delete: {post_desc.get('stderr')}"
+                )
+            require(
+                post_status == "not_found",
+                f"Expected proven not_found after delete for gs://{bucket}/{key}, got: {post_status}",
+            )
             receipts.append(
                 {
                     "key": key,
-                    "status": "planned",
+                    "status": "deleted",
                     "bucket": bucket,
                     "generation": live_generation,
-                    "metageneration": val["metageneration"],
-                    "action": "dry-run (no mutation)",
+                    "verified_absent": True,
                 }
             )
-            continue
-
-        # 2. Mode is apply: execute generation-matched deletion
-        del_res = runner("delete", bucket, key, generation=live_generation)
-        require(
-            del_res.get("status") == "ok",
-            f"GCS deletion failed for gs://{bucket}/{key} with generation {live_generation}: {del_res.get('stderr')}",
-        )
-
-        # 3. Subsequent absent read verification: MUST be proven 404
-        post_desc = runner("describe", bucket, key)
-        post_status = post_desc.get("status")
-        if post_status == "ok":
-            raise RuntimeError(
-                f"Object gs://{bucket}/{key} still present after generation-matched delete!"
+        except Exception as exc:
+            receipts.append(
+                {
+                    "key": key,
+                    "status": "failed",
+                    "bucket": bucket,
+                    "generation": live_generation,
+                    "error": str(exc),
+                }
             )
-        if post_status == "error":
-            raise RuntimeError(
-                f"Unable to verify absence of gs://{bucket}/{key} after delete: {post_desc.get('stderr')}"
-            )
-        require(
-            post_status == "not_found",
-            f"Expected proven not_found after delete for gs://{bucket}/{key}, got: {post_status}",
-        )
-
-        receipts.append(
-            {
-                "key": key,
-                "status": "deleted",
-                "bucket": bucket,
-                "generation": live_generation,
-                "verified_absent": True,
-            }
-        )
+            # Record remaining targets as skipped due to failure
+            for remaining_item, remaining_val in validated_targets[idx + 1 :]:
+                receipts.append(
+                    {
+                        "key": remaining_item["key"],
+                        "status": "skipped_due_to_prior_failure",
+                        "bucket": remaining_item["bucket"],
+                    }
+                )
+            err = RuntimeError(f"GCS execution failure: {exc}")
+            err.receipts = receipts  # type: ignore
+            raise err
 
     return {
         "status": "success",
@@ -876,6 +1138,49 @@ def execute_gcs_cleanup(
         "total_targets": len(targets),
         "receipts": receipts,
     }
+
+
+def preflight_db_cleanup(
+    plan: Dict[str, Any],
+    db_runner: Callable[[str, List[Any]], Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Preflight DB ownership, audit protection, and row counts before any mutation."""
+    submissions = plan["db_targets"]["submissions"]
+
+    # 1. Audit event preflight check
+    review_check_sql = (
+        "SELECT count(*) as cnt FROM fleet.supply_review_events "
+        "WHERE submission_id = ANY($1::uuid[])"
+    )
+    rev_res = db_runner(review_check_sql, [submissions])
+    if rev_res.get("status") != "ok":
+        raise RuntimeError(f"Database error during review events preflight: {rev_res}")
+
+    if "count" not in rev_res or not isinstance(rev_res["count"], int):
+        return {
+            "status": "blocked",
+            "concrete_blocker": (
+                "Review events preflight missing verified integer 'count'. "
+                "Database audit verification cannot be proven."
+            ),
+            "plan_prepared": True,
+            "receipts": [],
+        }
+
+    rev_count = rev_res["count"]
+    if rev_count > 0:
+        return {
+            "status": "blocked",
+            "concrete_blocker": (
+                f"Referential integrity blocker: {rev_count} protected audit records in "
+                "fleet.supply_review_events reference owned submissions. Because audit records "
+                "must never be deleted, parent submissions cannot be deleted without violating FK constraints."
+            ),
+            "plan_prepared": True,
+            "receipts": [],
+        }
+
+    return {"status": "preflight_ok"}
 
 
 def execute_db_cleanup(
@@ -898,13 +1203,19 @@ def execute_db_cleanup(
 
     # Dry-run mode: NEVER mutate database!
     if mode == "dry-run":
-        # In dry-run, an authorized runner may perform non-mutating SELECT checks
         preflight_receipts = []
         for stmt in plan["db_targets"]["guarded_statements"]:
             table = stmt["table"]
             preflight_sql = f"SELECT count(*) as cnt FROM {table}"
-            # Runner call for read-only inspect
             res = db_runner(preflight_sql, [])
+            if res.get("status") != "ok":
+                return {
+                    "status": "blocked",
+                    "mode": "dry-run",
+                    "concrete_blocker": f"DB dry-run inspection failed on {table}: {res.get('error', 'unknown database error')}",
+                    "plan_prepared": True,
+                    "receipts": preflight_receipts,
+                }
             preflight_receipts.append(
                 {
                     "table": table,
@@ -920,58 +1231,50 @@ def execute_db_cleanup(
             "receipts": preflight_receipts,
         }
 
-    # Apply mode: execute transaction with rowcount and referential guards
-    # 1. Preflight check for protected supply_review_events referencing the submissions
-    submissions = plan["db_targets"]["submissions"]
-    review_check_sql = (
-        "SELECT count(*) as cnt FROM fleet.supply_review_events "
-        "WHERE submission_id = ANY($1::uuid[])"
-    )
-    rev_res = db_runner(review_check_sql, [submissions])
-    if rev_res.get("status") != "ok":
-        raise RuntimeError(f"Database error during review events preflight: {rev_res}")
-    rev_count = rev_res.get("count") or rev_res.get("rows_affected", 0)
-    if rev_count > 0:
-        # Protected review audit records exist and cannot be deleted.
-        # This makes the referencing submissions non-deletable under FK constraints.
-        return {
-            "status": "blocked",
-            "mode": "apply",
-            "concrete_blocker": (
-                f"Referential integrity blocker: {rev_count} protected audit records in "
-                "fleet.supply_review_events reference owned submissions. Because audit records "
-                "must never be deleted, parent submissions cannot be deleted without violating FK constraints."
-            ),
-            "plan_prepared": True,
-            "receipts": [],
-        }
+    # Apply mode:
+    # 1. Audit event preflight
+    preflight = preflight_db_cleanup(plan, db_runner)
+    if preflight.get("status") != "preflight_ok":
+        return preflight
 
-    # 2. Execute deletion statements in transaction with exact rowcount verification
+    # 2. Guarded transaction with BEGIN / COMMIT / ROLLBACK
+    begin_res = db_runner("BEGIN", [])
+    require(begin_res.get("status") == "ok", f"DB BEGIN failed: {begin_res}")
+
     db_receipts = []
-    for stmt in plan["db_targets"]["guarded_statements"]:
-        res = db_runner(stmt["sql"], stmt["params"])
-        require(
-            res.get("status") == "ok",
-            f"DB execution error on table {stmt['table']}: {res}",
-        )
-        rows_affected = res.get("rows_affected", 0)
-        expected_rows = stmt["expected_rows"]
-        require(
-            rows_affected > 0,
-            f"DB deletion affected 0 rows on {stmt['table']}; zero rows affected rejected",
-        )
-        require(
-            rows_affected == expected_rows,
-            f"DB row count mismatch on {stmt['table']}: expected {expected_rows}, got {rows_affected}",
-        )
-        db_receipts.append(
-            {
-                "table": stmt["table"],
-                "operation": stmt["operation"],
-                "rows_affected": rows_affected,
-                "expected_rows": expected_rows,
-            }
-        )
+    try:
+        for stmt in plan["db_targets"]["guarded_statements"]:
+            res = db_runner(stmt["sql"], stmt["params"])
+            require(
+                res.get("status") == "ok",
+                f"DB execution error on table {stmt['table']}: {res}",
+            )
+            rows_affected = res.get("rows_affected", 0)
+            expected_rows = stmt["expected_rows"]
+            require(
+                rows_affected > 0,
+                f"DB deletion affected 0 rows on {stmt['table']}; zero rows affected rejected",
+            )
+            require(
+                rows_affected == expected_rows,
+                f"DB row count mismatch on {stmt['table']}: expected {expected_rows}, got {rows_affected}",
+            )
+            db_receipts.append(
+                {
+                    "table": stmt["table"],
+                    "operation": stmt["operation"],
+                    "rows_affected": rows_affected,
+                    "expected_rows": expected_rows,
+                }
+            )
+        commit_res = db_runner("COMMIT", [])
+        require(commit_res.get("status") == "ok", f"DB COMMIT failed: {commit_res}")
+    except Exception as exc:
+        try:
+            db_runner("ROLLBACK", [])
+        except Exception:
+            pass
+        raise exc
 
     return {
         "status": "applied",
@@ -996,10 +1299,9 @@ def run_cleanup_pipeline(
         inventory_data, mode=mode, source_sha=source_sha, run_id=run_id
     )
 
-    # In apply mode: check DB lane BEFORE any GCS mutation!
     if mode == "apply":
         if db_runner is None:
-            # DB cleanup is blocked/unavailable. Halt before any GCS delete!
+            # DB cleanup is blocked/unavailable. Halt before any GCS call or mutation!
             db_blocked = execute_db_cleanup(plan, db_runner=None)
             return {
                 "status": "blocked",
@@ -1016,7 +1318,35 @@ def run_cleanup_pipeline(
                 "preservation": plan["preservation_plan"],
             }
 
-        # If DB runner is present, execute DB apply first (or preflight)
+        # DB runner is present: non-mutating preflights for BOTH GCS and DB before ANY mutation!
+        # First: Preflight GCS targets (zero mutation)
+        gcs_runner_fn = gcs_runner or default_gcs_runner
+        for target in plan["gcs_targets"]:
+            desc = gcs_runner_fn("describe", target["bucket"], target["key"])
+            inspect_and_validate_gcs_target(
+                desc, target, prior_receipts=prior_receipts, runner=gcs_runner_fn
+            )
+
+        # DB runner is present: execute DB preflight
+        db_preflight = preflight_db_cleanup(plan, db_runner=db_runner)
+        if db_preflight.get("status") != "preflight_ok":
+            return {
+                "status": "blocked",
+                "mode": mode,
+                "applied": False,
+                "source_sha": EXPECTED_SOURCE_SHA,
+                "product_run_id": EXPECTED_PRODUCT_RUN_ID,
+                "gcs_cleanup": {
+                    "status": "skipped_due_to_db_blocker",
+                    "total_targets": len(plan["gcs_targets"]),
+                    "receipts": [],
+                },
+                "db_cleanup": db_preflight,
+                "preservation": plan["preservation_plan"],
+            }
+
+        # ALL preflights passed! Now execute mutations:
+        # Phase A: execute DB cleanup within guarded transaction
         db_result = execute_db_cleanup(plan, db_runner=db_runner)
         if db_result.get("status") != "applied":
             return {
@@ -1034,7 +1364,7 @@ def run_cleanup_pipeline(
                 "preservation": plan["preservation_plan"],
             }
 
-        # DB cleanup succeeded, now execute GCS cleanup
+        # Phase B: execute GCS cleanup
         gcs_result = execute_gcs_cleanup(
             plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
         )
@@ -1081,7 +1411,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--inventory",
         type=str,
         default=None,
-        help="Path to exact-owned-fixture-inventory.json",
+        help="Path to exact-owned-fixture-inventory.json (dry-run only)",
     )
     parser.add_argument(
         "--artifact-dir",
@@ -1129,6 +1459,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 1
 
+    # Offline inventory input NEVER authorizes apply
+    if args.inventory and args.mode == "apply":
+        sys.stderr.write(
+            "Offline inventory input is strictly prohibited in apply mode; apply requires authoritative downloaded GitHub artifact\n"
+        )
+        return 1
+
     try:
         if args.artifact_dir:
             art_dir = Path(args.artifact_dir)
@@ -1171,6 +1508,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                             "size": EXPECTED_FILE_SIZE,
                             "contentType": EXPECTED_MIME,
                             "sha256": EXPECTED_SHA256,
+                            "timeCreated": "2026-10-09T09:03:18.572Z",
+                            "metadata": {
+                                "stored-at": "2026-10-09T09:03:18.572Z",
+                            },
                         },
                     }
                 raise ValueError("Mutation prohibited in offline mode")
@@ -1207,6 +1548,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     except Exception as exc:
         sys.stderr.write(f"Error during fixture cleanup: {exc}\n")
+        # Write partial error receipt if output requested
+        if args.output:
+            out_path = Path(args.output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            receipts = getattr(exc, "receipts", [])
+            error_receipt = {
+                "status": "error",
+                "mode": args.mode,
+                "error": str(exc),
+                "partial_receipts": receipts,
+            }
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(error_receipt, indent=2) + "\n")
         return 2
 
 

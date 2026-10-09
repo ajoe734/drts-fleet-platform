@@ -52,6 +52,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dev-owned-operational-fixture-cleanup
+  cancel-in-progress: false
+
 env:
   DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
   DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
@@ -61,6 +65,8 @@ env:
   EXPECTED_SOURCE_SHA: '4a166f3ed2a7000061acc737ee475ae3c47dca56'
   EXPECTED_WORKFLOW_DEF_SHA: '9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c'
   EXPECTED_ARTIFACT_ID: '11606165993'
+  EXPECTED_WIF_PROVIDER: 'projects/24645990627/locations/global/workloadIdentityPools/github-actions/providers/github'
+  EXPECTED_WIF_SERVICE_ACCOUNT: 'github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com'
 
 jobs:
   unit-tests:
@@ -94,41 +100,64 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - name: Checkout tool definition
         uses: actions/checkout@v4
 
       - name: Enforce immutable product source & run identity guards
+        env:
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_PRODUCT_RUN_ID: ${{ inputs.product_run_id }}
+          INPUT_WORKFLOW_DEF_SHA: ${{ inputs.workflow_def_sha }}
+          INPUT_ARTIFACT_ID: ${{ inputs.artifact_id }}
         run: |
           set -euo pipefail
-          if [ "${{ inputs.source_ref }}" != "$EXPECTED_SOURCE_SHA" ]; then
-            echo "::error::source_ref '${{ inputs.source_ref }}' does not match required product source $EXPECTED_SOURCE_SHA" >&2
+          SRC_REF="${INPUT_SOURCE_REF:-}"
+          PRUN_ID="${INPUT_PRODUCT_RUN_ID:-}"
+          WDEF_SHA="${INPUT_WORKFLOW_DEF_SHA:-}"
+          ART_ID="${INPUT_ARTIFACT_ID:-}"
+          if [ "$SRC_REF" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "::error::source_ref '$SRC_REF' does not match required product source $EXPECTED_SOURCE_SHA" >&2
             exit 1
           fi
-          if [ "${{ inputs.product_run_id }}" != "$EXPECTED_PRODUCT_RUN_ID" ]; then
-            echo "::error::product_run_id '${{ inputs.product_run_id }}' does not match required $EXPECTED_PRODUCT_RUN_ID" >&2
+          if [ "$PRUN_ID" != "$EXPECTED_PRODUCT_RUN_ID" ]; then
+            echo "::error::product_run_id '$PRUN_ID' does not match required $EXPECTED_PRODUCT_RUN_ID" >&2
             exit 1
           fi
-          if [ "${{ inputs.workflow_def_sha }}" != "$EXPECTED_WORKFLOW_DEF_SHA" ]; then
-            echo "::error::workflow_def_sha '${{ inputs.workflow_def_sha }}' does not match required $EXPECTED_WORKFLOW_DEF_SHA" >&2
+          if [ "$WDEF_SHA" != "$EXPECTED_WORKFLOW_DEF_SHA" ]; then
+            echo "::error::workflow_def_sha '$WDEF_SHA' does not match required $EXPECTED_WORKFLOW_DEF_SHA" >&2
             exit 1
           fi
-          if [ "${{ inputs.artifact_id }}" != "$EXPECTED_ARTIFACT_ID" ]; then
-            echo "::error::artifact_id '${{ inputs.artifact_id }}' does not match required $EXPECTED_ARTIFACT_ID" >&2
+          if [ "$ART_ID" != "$EXPECTED_ARTIFACT_ID" ]; then
+            echo "::error::artifact_id '$ART_ID' does not match required $EXPECTED_ARTIFACT_ID" >&2
             exit 1
           fi
           echo "Product source and run provenance guards verified successfully."
 
       - name: Enforce DEV WIF lane pre-auth guards (no generic fallback)
+        env:
+          WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+          WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
-          if [ -z "${{ secrets.DEV_WIF_PROVIDER }}" ]; then
+          WIF_PROV="${WIF_PROVIDER:-${{ secrets.DEV_WIF_PROVIDER }}}"
+          WIF_SA="${WIF_SERVICE_ACCOUNT:-${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}}"
+          if [ -z "$WIF_PROV" ]; then
             echo "::error::DEV_WIF_PROVIDER secret is required and must not be empty. Generic WIF fallback is prohibited." >&2
             exit 1
           fi
-          if [ -z "${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}" ]; then
+          if [ -z "$WIF_SA" ]; then
             echo "::error::DEV_WIF_SERVICE_ACCOUNT secret is required and must not be empty. Generic WIF fallback is prohibited." >&2
+            exit 1
+          fi
+          if [ "$WIF_PROV" != "$EXPECTED_WIF_PROVIDER" ]; then
+            echo "::error::DEV_WIF_PROVIDER ('$WIF_PROV') does not match authorized DEV provider '$EXPECTED_WIF_PROVIDER'" >&2
+            exit 1
+          fi
+          if [ "$WIF_SA" != "$EXPECTED_WIF_SERVICE_ACCOUNT" ]; then
+            echo "::error::DEV_WIF_SERVICE_ACCOUNT ('$WIF_SA') does not match authorized DEV deployer '$EXPECTED_WIF_SERVICE_ACCOUNT'" >&2
             exit 1
           fi
           if [ "${DEV_GCP_PROJECT_ID:-}" != "$EXPECTED_PROJECT_ID" ]; then
@@ -161,23 +190,29 @@ jobs:
       - name: Fetch and validate authoritative GitHub run artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_PRODUCT_RUN_ID: ${{ inputs.product_run_id }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
           mkdir -p authoritative-artifact/payload
-          gh api "repos/${{ github.repository }}/actions/runs/${{ inputs.product_run_id }}/artifacts" > authoritative-artifact/artifacts.json
-          gh run download "${{ inputs.product_run_id }}" \
-            --name "operational-browser-evidence-${{ inputs.source_ref }}" \
+          gh api "repos/${{ github.repository }}/actions/runs/${INPUT_PRODUCT_RUN_ID}/artifacts" > authoritative-artifact/artifacts.json
+          gh run download "$INPUT_PRODUCT_RUN_ID" \
+            --name "operational-browser-evidence-${INPUT_SOURCE_REF}" \
             --dir authoritative-artifact/payload
 
       - name: Execute fixture cleanup planner & executor
+        env:
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_PRODUCT_RUN_ID: ${{ inputs.product_run_id }}
         run: |
           set -euo pipefail
           mkdir -p test-results/cleanup
           python3 operations/verification/cleanup-owned-operational-fixtures.py \
-            --mode "${{ inputs.mode }}" \
+            --mode "$INPUT_MODE" \
             --artifact-dir "authoritative-artifact" \
-            --source-sha "${{ inputs.source_ref }}" \
-            --run-id "${{ inputs.product_run_id }}" \
+            --source-sha "$INPUT_SOURCE_REF" \
+            --run-id "$INPUT_PRODUCT_RUN_ID" \
             --output "test-results/cleanup/cleanup-receipts.json"
 
       - name: Upload cleanup receipts artifact

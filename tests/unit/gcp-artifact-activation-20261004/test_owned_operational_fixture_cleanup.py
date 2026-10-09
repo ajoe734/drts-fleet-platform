@@ -90,6 +90,10 @@ for _key, _meta in cleanup.CANONICAL_OWNED_OBJECTS.items():
     AUTHENTIC_EVIDENCE_JSON["evidence"].append(
         {
             "candidateSha": cleanup.EXPECTED_SOURCE_SHA,
+            "recordedAt": "2026-10-09T09:03:18.572Z",
+            "putStatus": 200,
+            "putScanState": "clean",
+            "downloadStatus": 200,
             "kind": "setup-document-upload",
             "surface": "fleet",
             "actorScope": "fleet partner",
@@ -451,8 +455,11 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
                     "status": "ok",
                     "metadata": {
                         "generation": "1728464600123456",
+                        "metageneration": "1",
                         "size": 327,
                         "contentType": "application/pdf",
+                        "sha256": cleanup.EXPECTED_SHA256,
+                        "timeCreated": "2026-10-09T09:03:18.572Z",
                     },
                 }
             if action == "delete":
@@ -561,6 +568,183 @@ class TestCliEnforcement(unittest.TestCase):
                     "--mode", "apply",
                 ])
             self.assertEqual(code, 1)
+
+
+class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
+    def test_physical_key_mapping(self):
+        logical = "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/18f06410-510c-4107-ae21-16ab61383b95-harmless-upload.pdf"
+        physical = cleanup.logical_to_physical_gcs_key(logical)
+        self.assertTrue(physical.startswith("document-artifacts/fleet-upload-content/"))
+        self.assertIn("fleet-partner%2Ffleet-demo-001", physical)
+        self.assertNotIn("/supply-submissions/", physical[len("document-artifacts/fleet-upload-content/"):])
+
+    def test_plan_gcs_targets_contain_physical_and_logical_keys(self):
+        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="dry-run")
+        targets = plan["gcs_targets"]
+        self.assertEqual(len(targets), 8)
+        for t in targets:
+            self.assertEqual(t["key"], t["physical_key"])
+            self.assertTrue(t["key"].startswith("document-artifacts/fleet-upload-content/"))
+            self.assertTrue(t["logical_key"].startswith(cleanup.KEY_PREFIX))
+
+    def test_execute_db_cleanup_transaction_controls(self):
+        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
+        cmds = []
+        def mock_db(sql, params):
+            cmds.append(sql)
+            if sql in ("BEGIN", "COMMIT"):
+                return {"status": "ok"}
+            if sql.startswith("SELECT"):
+                return {"status": "ok", "count": 0}
+            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
+
+        res = cleanup.execute_db_cleanup(plan, db_runner=mock_db)
+        self.assertEqual(res["status"], "applied")
+        self.assertEqual(cmds[0], "SELECT count(*) as cnt FROM fleet.supply_review_events WHERE submission_id = ANY($1::uuid[])")
+        self.assertEqual(cmds[1], "BEGIN")
+        self.assertEqual(cmds[-1], "COMMIT")
+
+    def test_execute_db_cleanup_rollback_on_mismatch(self):
+        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
+        cmds = []
+        def partial_db(sql, params):
+            cmds.append(sql)
+            if sql in ("BEGIN", "COMMIT", "ROLLBACK"):
+                return {"status": "ok"}
+            if sql.startswith("SELECT"):
+                return {"status": "ok", "count": 0}
+            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
+
+        with self.assertRaises(ValueError):
+            cleanup.execute_db_cleanup(plan, db_runner=partial_db)
+        self.assertIn("BEGIN", cmds)
+        self.assertIn("ROLLBACK", cmds)
+
+    def test_execute_db_cleanup_rejects_missing_audit_count(self):
+        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
+        def no_count_db(sql, params):
+            return {"status": "ok"}
+        res = cleanup.execute_db_cleanup(plan, db_runner=no_count_db)
+        self.assertEqual(res["status"], "blocked")
+        self.assertIn("missing verified integer 'count'", res["concrete_blocker"])
+
+    def test_db_dry_run_inspection_error_blocks(self):
+        plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="dry-run")
+        def err_db(sql, params):
+            return {"status": "error", "error": "permission denied"}
+        res = cleanup.execute_db_cleanup(plan, db_runner=err_db)
+        self.assertEqual(res["status"], "blocked")
+        self.assertIn("permission denied", res["concrete_blocker"])
+
+    def test_gcs_target_missing_metageneration_rejected(self):
+        target = {
+            "bucket": cleanup.BUCKET,
+            "key": "document-artifacts/fleet-upload-content/test.pdf",
+            "expected_size": 327,
+            "expected_content_type": "application/pdf",
+            "expected_sha256": cleanup.EXPECTED_SHA256,
+        }
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "generation": "1728464600123456",
+                "size": 327,
+                "contentType": "application/pdf",
+                "sha256": cleanup.EXPECTED_SHA256,
+                "timeCreated": "2026-10-09T09:03:18.572Z",
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target)
+        self.assertIn("Missing or invalid metageneration", str(ctx.exception))
+
+    def test_gcs_target_missing_hash_and_body_rejected(self):
+        target = {
+            "bucket": cleanup.BUCKET,
+            "key": "document-artifacts/fleet-upload-content/test.pdf",
+            "expected_size": 327,
+            "expected_content_type": "application/pdf",
+            "expected_sha256": cleanup.EXPECTED_SHA256,
+        }
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": "application/pdf",
+                "timeCreated": "2026-10-09T09:03:18.572Z",
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target)
+        self.assertIn("Missing live hash/body verification", str(ctx.exception))
+
+    def test_gcs_target_stale_timestamp_rejected(self):
+        target = {
+            "bucket": cleanup.BUCKET,
+            "key": "document-artifacts/fleet-upload-content/test.pdf",
+            "expected_size": 327,
+            "expected_content_type": "application/pdf",
+            "expected_sha256": cleanup.EXPECTED_SHA256,
+        }
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": "application/pdf",
+                "sha256": cleanup.EXPECTED_SHA256,
+                "timeCreated": "2000-01-01T00:00:00Z",
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target)
+        self.assertIn("Stale or invalid object timestamp", str(ctx.exception))
+
+    def test_gcs_target_prior_receipt_validation(self):
+        target = {
+            "bucket": cleanup.BUCKET,
+            "key": "document-artifacts/fleet-upload-content/test.pdf",
+            "expected_size": 327,
+            "expected_content_type": "application/pdf",
+            "expected_sha256": cleanup.EXPECTED_SHA256,
+        }
+        desc = {"status": "not_found", "returncode": 1, "stderr": "Not found"}
+        foreign_receipt = [{"key": target["key"], "bucket": "wrong-bucket", "status": "deleted", "generation": "123", "verified_absent": True}]
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=foreign_receipt)
+        self.assertIn("Pre-existing absence", str(ctx.exception))
+
+        garbage_gen_receipt = [{"key": target["key"], "bucket": cleanup.BUCKET, "status": "deleted", "generation": "garbage", "verified_absent": True}]
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=garbage_gen_receipt)
+        self.assertIn("Pre-existing absence", str(ctx.exception))
+
+        valid_receipt = [{"key": target["key"], "bucket": cleanup.BUCKET, "status": "deleted", "generation": "1728464600123456", "verified_absent": True}]
+        res = cleanup.inspect_and_validate_gcs_target(desc, target, prior_receipts=valid_receipt)
+        self.assertEqual(res["status"], "already_deleted_with_receipt")
+
+    def test_all_preflights_before_mutation_halts_db_on_gcs_failure(self):
+        trace = []
+        inv = create_authentic_inventory()
+        def good_db(sql, params):
+            trace.append("DB " + sql)
+            if sql in ("BEGIN", "COMMIT"):
+                return {"status": "ok"}
+            if sql.startswith("SELECT"):
+                return {"status": "ok", "count": 0}
+            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
+
+        def bad_first_gcs(action, bucket, key, generation=None):
+            trace.append("GCS " + action)
+            return {"status": "ok", "metadata": {"generation": "123", "metageneration": "1", "size": 327, "contentType": "text/plain", "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.run_cleanup_pipeline(inv, mode="apply", gcs_runner=bad_first_gcs, db_runner=good_db)
+        self.assertIn("content-type mismatch", str(ctx.exception))
+        self.assertEqual(sum(x.startswith("DB DELETE") for x in trace), 0)
 
 
 if __name__ == "__main__":
