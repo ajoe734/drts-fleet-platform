@@ -8,8 +8,13 @@ export type AuthProvider = "phone" | "email" | "google" | "facebook" | "line";
 export interface PassengerAccount {
   drtsPassengerId: string;
   displayName?: string;
+  contactPhone?: string;
+  contactPhoneVerified: boolean;
   verifiedPhone?: string;
   verifiedEmail?: string;
+  termsVersion?: string;
+  privacyVersion?: string;
+  feeAcknowledgementVersion?: string;
   status: "active" | "suspended" | "deleted";
   createdAt: string;
   deletedAt?: string;
@@ -19,6 +24,7 @@ export interface PassengerLoginIdentity {
   drtsPassengerId: string;
   provider: AuthProvider;
   subject: string;
+  identityId: string;
 }
 
 export interface PassengerSession {
@@ -31,7 +37,7 @@ export interface PassengerSession {
 export interface RequestOtpCommand {
   target: string;
   provider: "phone" | "email";
-  purpose: "login" | "link";
+  purpose: "login" | "link" | "verify_contact_phone";
 }
 
 export interface RequestOtpResponse {
@@ -48,7 +54,7 @@ export interface VerifyOtpCommand {
 }
 
 export interface VerifyOtpResponse {
-  result: "logged_in" | "linked";
+  result: "logged_in" | "linked" | "verified_contact_phone";
   accessToken?: string;
   refreshToken?: string;
 }
@@ -61,6 +67,8 @@ export interface OAuthStartCommand {
 
 export interface OAuthStartResponse {
   authUrl: string;
+  transactionId: string;
+  expiresAt: string;
   state: string;
   nonce?: string;
 }
@@ -69,12 +77,23 @@ export interface OAuthCallbackCommand {
   provider: "google" | "facebook" | "line";
   code: string;
   state: string;
+  transactionId: string;
 }
 
 export interface OAuthCallbackResponse {
   result: "logged_in" | "linked";
   accessToken?: string;
   refreshToken?: string;
+  drtsPassengerId: string;
+}
+
+export interface FacebookDataDeletionCommand {
+  signed_request: string;
+}
+
+export interface FacebookDataDeletionResponse {
+  url: string;
+  confirmation_code: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -110,6 +129,10 @@ export interface PassengerMeResponse {
 
 export interface UpdatePassengerMeCommand {
   displayName?: string;
+  contactPhone?: string;
+  termsVersion?: string;
+  privacyVersion?: string;
+  feeAcknowledgementVersion?: string;
   contactConsent?: boolean;
 }
 
@@ -147,7 +170,7 @@ export interface FareVersion {
   delayIncrementSeconds: number;
   nightSurcharge: number;
   nightSurchargeWindowStart: string; // e.g. "23:00"
-  nightSurchargeWindowEnd: string;   // e.g. "06:00"
+  nightSurchargeWindowEnd: string; // e.g. "06:00"
   additionalFees: Record<string, number>;
 }
 
@@ -235,9 +258,21 @@ export interface PassengerReceiptResponse {
   receiptUrl: string;
 }
 
+export interface RefundPassengerRideCommand {
+  rideId: string;
+  reason: string;
+  amount?: number;
+}
+
+export interface RefundPassengerRideResponse {
+  success: boolean;
+  refundId: string;
+}
+
 export interface CreatePassengerComplaintCommand {
-  rideId?: string;
-  category: "driver_behavior" | "vehicle_condition" | "safety" | "payment_issue" | "lost_item" | "other";
+  rideId: string;
+  category: "service" | "fare" | "lost_item" | "other";
+  lostItemDescription?: string;
   content: string;
   contactConsent: boolean;
 }
@@ -267,7 +302,9 @@ export interface BindPaymentMethodCommand {
 }
 
 export interface PaymentMethodResponse {
-  method: PassengerPaymentMethod;
+  status: "completed" | "action_required" | "pending";
+  method?: PassengerPaymentMethod;
+  nextActionUrl?: string;
 }
 
 export interface SetDefaultPaymentMethodCommand {
@@ -283,11 +320,22 @@ export interface RemovePaymentMethodResponse {
 }
 
 export interface RegisterPushDeviceCommand {
+  provider: "fcm" | "apns";
+  appId: string;
+  appVersion: string;
   deviceToken: string;
-  platform: "ios" | "android" | "web";
+  notificationConsentVersion: string;
+  previousDeviceId?: string;
 }
 
 export interface RegisterPushDeviceResponse {
-  success: boolean;
+  deviceId: string;
 }
 
+export interface UnregisterPushDeviceCommand {
+  deviceId: string;
+}
+
+export interface UnregisterPushDeviceResponse {
+  success: boolean;
+}

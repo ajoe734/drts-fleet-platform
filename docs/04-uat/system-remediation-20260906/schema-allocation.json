@@ -487,7 +487,10 @@
       "migration_filename": "V0112__passenger_fare_quote.sql",
       "domain": "passenger_fare_quote",
       "target_schema": "passenger",
-      "primary_tables": ["passenger.fare_versions", "passenger.fare_quote_snapshots"],
+      "primary_tables": [
+        "passenger.fare_versions",
+        "passenger.fare_quote_snapshots"
+      ],
       "referenced_tables": [],
       "description": "運價版本與試算 migration",
       "downstream_tasks": ["PAX-BOOKING-HISTORY-20261009"]
@@ -523,7 +526,10 @@
       "migration_filename": "V0115__passenger_payment_core.sql",
       "domain": "passenger_payment_core",
       "target_schema": "passenger",
-      "primary_tables": ["passenger.psp_tokens"],
+      "primary_tables": [
+        "passenger.psp_tokens",
+        "passenger.payment_idempotency_keys"
+      ],
       "referenced_tables": ["billing.multi_taxi_passenger_payments"],
       "description": "付款 port、綁卡、扣款與狀態 migration",
       "downstream_tasks": ["PAX-PSP-ADAPTER-20261009"]
@@ -535,7 +541,10 @@
       "domain": "passenger_push_device_api",
       "target_schema": "passenger",
       "primary_tables": [],
-      "referenced_tables": ["iam.phase1_passenger_push_devices"],
+      "referenced_tables": [
+        "iam.phase1_passenger_push_devices",
+        "mobility.phase1_order_first_party_notification_routes"
+      ],
       "description": "裝置登錄 API migration",
       "downstream_tasks": ["PAX-NATIVE-APP-20261009"]
     }
