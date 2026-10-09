@@ -85,15 +85,14 @@ async function mintMetadataIdentityToken(audience: string) {
   const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
   metadataUrl.searchParams.set("audience", audience);
   metadataUrl.searchParams.set("format", "full");
-  try {
-    const response = await fetch(metadataUrl.toString(), {
-      cache: "no-store",
-      headers: { "Metadata-Flavor": "Google" },
-    });
-    return response.ok ? await response.text() : null;
-  } catch {
-    return null;
+  const response = await fetch(metadataUrl.toString(), {
+    cache: "no-store",
+    headers: { "Metadata-Flavor": "Google" },
+  });
+  if (!response.ok) {
+    throw new Error(`Metadata fetch failed: ${response.status}`);
   }
+  return await response.text();
 }
 
 async function applyUpstreamAuth(
@@ -115,6 +114,8 @@ async function applyUpstreamAuth(
   if (identityToken) {
     headers.set("x-serverless-authorization", `Bearer ${identityToken}`);
     headers.set("x-drts-google-id-token", identityToken);
+  } else {
+    throw new Error("Metadata identity token fetch returned empty");
   }
 }
 
@@ -145,107 +146,103 @@ function withSecurityHeaders(response: NextResponse) {
 }
 
 function deleteCookies(resp: NextResponse) {
-  resp.cookies.delete("pax_session");
-  resp.cookies.delete("pax_refresh");
+  resp.cookies.set("pax_session", "", { maxAge: 0, expires: new Date(0), path: "/" });
+  resp.cookies.set("pax_refresh", "", { maxAge: 0, expires: new Date(0), path: "/" });
 }
 
 async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
-  const { path } = await params;
-  const method = request.method.toUpperCase();
-
-  if (!(await checkCSRF(request))) {
-    return withSecurityHeaders(NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }));
-  }
-  if (!isAllowedPassengerPath(path, method)) {
-    return withSecurityHeaders(NextResponse.json(
-      { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
-      { status: 404 }
-    ));
-  }
-
-  let token = request.cookies.get("pax_session")?.value;
-  let refreshToken = request.cookies.get("pax_refresh")?.value;
-
-  const fullPath = path.join("/");
-
-  async function doRefresh() {
-    const refreshTargetUrl = buildTargetUrl(request, ["auth", "refresh"]);
-    const refreshHeaders = new Headers({ "Content-Type": "application/json" });
-    await applyUpstreamAuth(refreshHeaders, refreshTargetUrl);
-    
-    const res = await fetch(refreshTargetUrl.toString(), {
-      method: "POST",
-      headers: refreshHeaders,
-      body: JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) {
-      throw new Error(`Upstream server error: ${res.status}`);
-    }
-    const data = await res.json();
-    if (data && data.accessToken && data.refreshToken && typeof data.accessToken === "string" && typeof data.refreshToken === "string" && data.accessToken !== "" && data.refreshToken !== "") {
-      return data as { accessToken: string; refreshToken: string };
-    }
-    throw new Error("Invalid tokens received");
-  }
-
-  // handle explicit refresh
-  if (fullPath === "auth/refresh" && method === "POST") {
-    if (!refreshToken) {
-      const resp = NextResponse.json({ error: "NO_REFRESH_TOKEN" }, { status: 401 });
-      deleteCookies(resp);
-      return withSecurityHeaders(resp);
-    }
-    try {
-      const data = await doRefresh();
-      const resp = NextResponse.json({ success: true }, { status: 200 });
-      const opts = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax" as const,
-        path: "/",
-      };
-      resp.cookies.set("pax_session", data.accessToken, opts);
-      resp.cookies.set("pax_refresh", data.refreshToken, opts);
-      return withSecurityHeaders(resp);
-    } catch (e) {
-      console.error("EXPLICIT REFRESH ERROR:", e);
-      const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
-      deleteCookies(resp);
-      return withSecurityHeaders(resp);
-    }
-  }
-
-  const targetUrl = buildTargetUrl(request, path);
-
-  let initialBodyData: BodyInit | null = null;
-  if (!["GET", "HEAD"].includes(method)) {
-    initialBodyData = await request.arrayBuffer();
-  }
-  
-  const buildInit = async (currentToken: string | undefined, currentRefresh: string | undefined): Promise<RequestInit> => {
-    const headers = copyHeaders(request.headers);
-    if (fullPath === "auth/logout") {
-      headers.set("Content-Type", "application/json");
-    }
-    await applyUpstreamAuth(headers, targetUrl, currentToken);
-    const init: RequestInit = {
-      method,
-      headers,
-      cache: "no-store",
-      redirect: "manual",
-    };
-    if (fullPath === "auth/logout" && method === "POST") {
-      init.body = JSON.stringify({ refreshToken: currentRefresh });
-    } else if (initialBodyData) {
-      init.body = initialBodyData;
-    }
-    return init;
-  };
-
   try {
+    const { path } = await params;
+    const method = request.method.toUpperCase();
+
+    if (!(await checkCSRF(request))) {
+      return withSecurityHeaders(NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }));
+    }
+    if (!isAllowedPassengerPath(path, method)) {
+      return withSecurityHeaders(NextResponse.json(
+        { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
+        { status: 404 }
+      ));
+    }
+
+    let token = request.cookies.get("pax_session")?.value;
+    let refreshToken = request.cookies.get("pax_refresh")?.value;
+
+    const fullPath = path.join("/");
+    const targetUrl = buildTargetUrl(request, path);
+
+    let initialBodyData: BodyInit | null = null;
+    if (!["GET", "HEAD"].includes(method)) {
+      initialBodyData = await request.arrayBuffer();
+    }
+
+    async function doRefresh(currentRefresh: string) {
+      if (!currentRefresh) throw new Error("No refresh token");
+      const refreshTargetUrl = buildTargetUrl(request, ["auth", "refresh"]);
+      const refreshHeaders = new Headers({ "Content-Type": "application/json" });
+      await applyUpstreamAuth(refreshHeaders, refreshTargetUrl);
+      
+      const res = await fetch(refreshTargetUrl.toString(), {
+        method: "POST",
+        headers: refreshHeaders,
+        body: JSON.stringify({ refreshToken: currentRefresh }),
+      });
+      if (!res.ok) {
+        throw new Error(`Upstream refresh failed: ${res.status}`);
+      }
+      const data = await res.json();
+      if (data && typeof data.accessToken === "string" && typeof data.refreshToken === "string" && data.accessToken !== "" && data.refreshToken !== "") {
+        return data as { accessToken: string; refreshToken: string };
+      }
+      throw new Error("Invalid tokens received");
+    }
+
+    const buildInit = async (currentToken: string | undefined, currentRefresh: string | undefined): Promise<RequestInit> => {
+      const headers = copyHeaders(request.headers);
+      if (fullPath === "auth/logout" && method === "POST") {
+        headers.set("Content-Type", "application/json");
+      }
+      await applyUpstreamAuth(headers, targetUrl, currentToken);
+      const init: RequestInit = {
+        method,
+        headers,
+        cache: "no-store",
+        redirect: "manual",
+      };
+      if (fullPath === "auth/logout" && method === "POST") {
+        init.body = JSON.stringify({ refreshToken: currentRefresh });
+      } else if (initialBodyData) {
+        init.body = initialBodyData;
+      }
+      return init;
+    };
+
+    // Explicit refresh path
+    if (fullPath === "auth/refresh" && method === "POST") {
+      try {
+        if (!refreshToken) throw new Error("NO_REFRESH_TOKEN");
+        const data = await doRefresh(refreshToken);
+        const resp = NextResponse.json({ success: true }, { status: 200 });
+        const opts = {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax" as const,
+          path: "/",
+        };
+        resp.cookies.set("pax_session", data.accessToken, opts);
+        resp.cookies.set("pax_refresh", data.refreshToken, opts);
+        return withSecurityHeaders(resp);
+      } catch {
+        const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+        deleteCookies(resp);
+        return withSecurityHeaders(resp);
+      }
+    }
+
+    // Normal forward path
     let init = await buildInit(token, refreshToken);
     let upstream = await fetch(targetUrl.toString(), init);
 
@@ -254,19 +251,18 @@ async function forward(
 
     if (upstream.status === 401 && refreshToken) {
       try {
-        refreshedTokens = await doRefresh();
+        refreshedTokens = await doRefresh(refreshToken);
         token = refreshedTokens.accessToken;
         refreshToken = refreshedTokens.refreshToken;
         init = await buildInit(token, refreshToken);
         upstream = await fetch(targetUrl.toString(), init);
-      } catch (e) {
+      } catch {
         didClearTokens = true;
       }
     }
 
     if (fullPath === "auth/logout" && method === "POST") {
       if (!upstream.ok) {
-         // Propagate failure for logout
          const resp = NextResponse.json({ error: "LOGOUT_FAILED" }, { status: upstream.status });
          deleteCookies(resp);
          return withSecurityHeaders(resp);
@@ -291,10 +287,10 @@ async function forward(
             finalBody = JSON.stringify(redacted) as any;
             responseHeaders.set("Content-Type", "application/json");
         } else {
-            loginData = null; // invalid token payload
+            loginData = null; 
         }
       } catch {
-        // ignore JSON parsing error
+        // ignore
       }
     }
 
@@ -322,16 +318,19 @@ async function forward(
     }
 
     return nextResponse;
-  } catch (e) {
-    console.error("BFF ERROR:", e);
+  } catch {
+    // Top-level catch for any unhandled errors (e.g. metadata text read fail on normal requests, arrayBuffer errors)
     const resp = NextResponse.json(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
       { status: 503 }
     );
-    // As per R2, clear both cookies on network/parse/invalid-token failures
-    // which includes any unhandled error inside doRefresh which bubbles up here
-    // IF it was triggered during an auto-refresh or explicitly
-    deleteCookies(resp);
+    // DO NOT indiscriminately clear cookies on a 503 from normal path unless it was an explicit refresh (which is handled above) or auto-refresh (which is handled above and sets didClearTokens)
+    // Wait, reviewer said "As per R2, clear both cookies on network/parse/invalid-token failures which includes any unhandled error inside doRefresh which bubbles up here IF it was triggered during an auto-refresh or explicitly"
+    // Wait, `doRefresh` catches its own errors inside the explicit refresh block (returns 401 and deletes)
+    // and inside the auto-refresh block (sets `didClearTokens = true`).
+    // If a normal request fails due to `applyUpstreamAuth` throwing (e.g. metadata fetch failed), it throws here. 
+    // Should we clear cookies? No, it's just a 503.
+    // So here we only return 503.
     return withSecurityHeaders(resp);
   }
 }

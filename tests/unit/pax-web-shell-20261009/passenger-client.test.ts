@@ -64,3 +64,28 @@ describe("PassengerClient", () => {
     );
   });
 });
+
+  it("should update and clear sessionStatus properly", async () => {
+    const mockFetch = vi.fn().mockImplementation(async (url) => {
+      if (url.includes("logout")) return { ok: true, status: 200, json: async () => ({}) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: "123", displayName: "Test", verifiedPhone: null, verifiedEmail: null, status: "active" })
+      };
+    });
+    const client = new PassengerClient({ baseUrl: "http://localhost", fetchFn: mockFetch });
+    
+    // Check initial state
+    expect(client.sessionStatus.isActive).toBe(false);
+    
+    // Login or getSessionStatus populates it
+    await client.getSessionStatus();
+    expect(client.sessionStatus.isActive).toBe(true);
+    expect(client.sessionStatus.account?.id).toBe("123");
+    
+    // Logout clears it
+    await client.logout();
+    expect(client.sessionStatus.isActive).toBe(false);
+    expect(client.sessionStatus.account).toBeUndefined();
+  });

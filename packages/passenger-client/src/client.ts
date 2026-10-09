@@ -53,7 +53,7 @@ export class PassengerClient implements PassengerViewModel {
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        this.sessionStatus = { isActive: false };
+        this.sessionStatus.isActive = false; delete this.sessionStatus.account;
       }
       throw new Error(`API error: ${response.status}`);
     }
@@ -81,7 +81,7 @@ export class PassengerClient implements PassengerViewModel {
       body: JSON.stringify(request)
     });
     if (res.account) {
-      this.sessionStatus = { isActive: true, account: res.account };
+      this.sessionStatus.isActive = true; this.sessionStatus.account = res.account;
     }
     return res;
   }
@@ -92,7 +92,7 @@ export class PassengerClient implements PassengerViewModel {
         method: "POST"
       });
     } finally {
-      this.sessionStatus = { isActive: false };
+      this.sessionStatus.isActive = false; delete this.sessionStatus.account;
     }
   }
 
@@ -105,10 +105,10 @@ export class PassengerClient implements PassengerViewModel {
   async getSessionStatus(): Promise<import("./types.js").SessionStatus> {
     try {
       const account = await this.getAccount();
-      this.sessionStatus = { isActive: true, account };
+      this.sessionStatus.isActive = true; this.sessionStatus.account = account;
       return this.sessionStatus;
     } catch {
-      this.sessionStatus = { isActive: false };
+      this.sessionStatus.isActive = false; delete this.sessionStatus.account;
       return this.sessionStatus;
     }
   }

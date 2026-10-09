@@ -297,10 +297,23 @@ jobs:
         run: pnpm run lint
       - name: Reject cross-app relative imports
         run: node tools/ci/check-cross-app-imports.mjs
+
       - name: Verify Passenger Client Portability & Export
         run: |
           pnpm --filter @drts/passenger-client run build
           test -f packages/passenger-client/dist/index.d.ts
+          
+          # Static portability check for DOM/Node/Next
+          echo "Checking passenger-client portability..."
+          if grep -qR -E "from ['\"](next|react|fs|path|os|events|crypto|child_process)" packages/passenger-client/src; then
+            echo "Failed portability check: contains restricted Node/Next imports"
+            exit 1
+          fi
+          if grep -qR -E "(window\.|document\.)" packages/passenger-client/src; then
+            echo "Failed portability check: contains DOM globals"
+            exit 1
+          fi
+
       - name: Typecheck
         run: pnpm run typecheck
       - name: Apply migrations

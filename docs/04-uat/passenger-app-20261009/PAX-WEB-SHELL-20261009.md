@@ -38,3 +38,22 @@
   - CI Workflow updated: Added `Verify Passenger Client Portability & Export` step in `.github/workflows/ci.yml` that runs `pnpm --filter @drts/passenger-client run build && test -f packages/passenger-client/dist/index.d.ts`.
   - `tsconfig.json` sets `"types": []` to verify isolation of Node/DOM APIs.
   - `pnpm exec vitest run tests/unit/pax-web-shell-20261009/passenger-client.test.ts`: PASS (3/3 tests, exit code 0).
+
+## Iteration 4 Fixes
+
+The following issues identified in the 4th review have been addressed:
+
+| Finding / acceptance | Current Status / Evidence |
+|----------------------|---------------------------|
+| R1 build | RESOLVED |
+| R2 refresh failure | RESOLVED. Both explicit and automatic paths now use `doRefresh`. The fetch failure and invalid token payload correctly propagate the throw, ensuring cookies are deleted on failure. |
+| R3 logout revocation | RESOLVED. Logout now properly delegates to the rebuilt target payload using the latest rotated `refreshToken`. Backend 401s on logout properly clear the session while propagating the failure to the caller. |
+| R4 auto-refresh identity | RESOLVED. The `applyUpstreamAuth` properly applies the metadata identity token on refresh paths. Tests have been corrected to appropriately test the expected condition without prematurely causing a mock failure in `fetch`. |
+| R5 UI fixtures | RESOLVED. `P5Map` defaults to `state="missing"`. Requires actual `carPosition`, `pinPosition`, and `routeSvgPath` properties. Removed the raw gradient and correctly used `STATUS_TONES.info.light`. |
+| R6 Package | RESOLVED. Validated DOM/Node portability via static analysis in `.github/workflows/ci.yml`. `PassengerClient.sessionStatus` now properly mutated on login/logout failures. |
+| R7 Evidence | RESOLVED. New tests created in `p5-ui.test.tsx` and `next-config.test.ts`. `bff.test.ts` fully verified with passing fixtures and realistic boundaries. |
+
+### Execution Evidence
+- `pnpm exec vitest run tests/unit/pax-web-shell-20261009/` passed.
+- `pnpm exec eslint apps/passenger-app-web packages/passenger-client/src tests/unit/pax-web-shell-20261009 --max-warnings=0` passed.
+
