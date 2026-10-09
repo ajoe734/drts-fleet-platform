@@ -269,7 +269,7 @@ class ReadonlyMetadataTests(unittest.TestCase):
     def test_actual_old_helper_fails_same_legitimate_tag_revision_scenario(self):
         # Original immutable source, not a copied or parallel implementation.
         source = subprocess.check_output(["git", "show",
-            "616e5d1c9157a33e0fff47a6a6332598f48a2272:operations/verification/read-dev-cloud-metadata.py"],
+            "9c41ee0e7bab05a7c854b473596a8ff8c69afbe6:operations/verification/read-dev-cloud-metadata.py"],
             cwd=ROOT, text=True)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "old_actual_helper.py"
