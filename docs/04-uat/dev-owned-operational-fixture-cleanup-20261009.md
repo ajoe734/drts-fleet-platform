@@ -43,6 +43,13 @@
   - CI Run `37950233502`：Canonical consistency 檢查失敗（退出碼 1），原因為 UAT 文件以反引號引用已被移除之舊測試檔案路徑。
   - CI Integration Run `37950233399`：終端 SUCCESS。
 
+### 候選版本 3: 6d911a7c7
+- **拒絕候選 SHA:** `6d911a7c777122bc013cb5eed2a2826e8063a87f`
+- **候選 Generation:** `f06677f18bb3413387239babe58e2674`
+- **獨立審查裁決:** Codex 裁決 `REOPEN / not approved`。
+- **審查發現:** 確認 R2-02 至 R2-06 等邊界缺陷仍存在（例如接受造假 hash、未驗證 ZIP 檔案 digest、ADC-file-not-found 誤判為 404 等）。此外，UAT 文件中提出之 all9-ready 與 connectivity 等防護宣稱並不正確，且遺漏 Hosted immutable tool review/full-CI/merge、Operator no-overlap 及 runtime/private/scanner 等重要安全防線。
+- **強制性 CI 狀態:** 本機測試通過，但真實安全防護邊界與宣稱仍有缺失。
+
 ### 維運執行狀態 (Operational Execution Status)
 - `cleanup_not_performed: true`。所有雲端 GCS 測試夾具與 Cloud SQL 資料庫紀錄均完整保留，未執行任何實際刪除或未授權異動。所有 live keys 保持 BLOCKED / PENDING 狀態。
 
@@ -69,6 +76,8 @@
 | **R2-08** (Fixed WIF Identity, Minimum Perm, Concurrency) | WIF 檢查僅驗證非空，接受任意第三方 provider；工作流缺乏並發控制與 `actions: read` 權限。 | 固定綁定授權 DEV WIF 提供者（`projects/24645990627/...`）與佈署者 SA（`github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`）；加入 `concurrency: group: dev-owned-operational-fixture-cleanup, cancel-in-progress: false`；加入 `actions: read` 權限。 | 工作流 YAML 結構驗證通過，WIF 邊界與權限最小化落實。 |
 | **R2-09** (Canonical Consistency & Test Accounting) | UAT 文件以反引號引用已刪除之舊測試檔案導致 CI 規範檢查失敗；測試計數引用舊陳舊數據（94）。 | 移除舊測試路徑之反引號，改以 GitHub blob 完整 URL 參照；更正測試計數為 `check_test_coverage.py` 發現之 95 個測試檔案、44 項單元測試；明確記錄測試目錄中的 3 個跳過為測試套件跳過（非 passes，非業務 16 skips）。 | `python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3e --head HEAD`<br>Exit code: 0<br>`0 finding(s)` |
 
+*(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過嚴格之 zip digest 雜湊、`read_body` 實體讀取、強制 `SELECT ... FOR UPDATE` 鎖定及 `POSTFLIGHT_CHECK` 等機制，將此些宣稱化為真實之程式碼約束。)*
+
 ## 4. 資料庫通道與保留合約精確分析 (DB Lane & Preservation)
 
 1. **現行部署架構分析 (Current Deployment Architecture):**
@@ -89,6 +98,11 @@
    - 種子夥伴 `fleet-demo-001` 及相關預載實體永久保留。
    - 歷史失敗夾具（8d、03a）永久保留。
    - 上傳意圖（`fleet-upload-intent`）與掃描記錄（`fleet-scan-record`）由獨立 lifecycle 治理，排除於本次清理計畫之外。
+
+4. **維運防護邊界 (Operational Security Fences):**
+   - **Hosted immutable tool review / full-CI / merge:** 本次清理工具必須經過不可變更的獨立審查、全套 CI 測試，並成功合併入主分支，方具備信任基礎。
+   - **Operator no-overlap:** 工具執行期間必須確保無其他維運或自動化排程同時對相同資源進行操作，避免競態與破壞。
+   - **Runtime / private / scanner fences:** GCS 與 DB 之清理應嚴格遵守 VPC private connectivity 與身分授權邊界，絕不可未經 IAM/WIF 核准直接穿越。
 
 ## 5. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 

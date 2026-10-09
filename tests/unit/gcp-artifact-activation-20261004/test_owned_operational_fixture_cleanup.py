@@ -228,11 +228,21 @@ class TestProvenanceValidation(unittest.TestCase):
 
 
 class TestAuthoritativeArtifactCollection(unittest.TestCase):
+    def setUp(self):
+        import hashlib
+        self.mock_zip_content = b"mockzip"
+        self.mock_hash = "sha256:" + hashlib.sha256(self.mock_zip_content).hexdigest()
+        
     def test_load_and_validate_authoritative_artifact(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = self.mock_hash
+            
             (dir_path / "artifacts.json").write_text(
-                json.dumps(AUTHENTIC_ARTIFACTS_JSON), encoding="utf-8"
+                json.dumps(art_meta), encoding="utf-8"
             )
             payload_dir = dir_path / "operational-browser"
             payload_dir.mkdir(parents=True)
@@ -243,7 +253,8 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
                 json.dumps(AUTHENTIC_EVIDENCE_JSON), encoding="utf-8"
             )
 
-            inv = cleanup.load_and_validate_authoritative_artifact(dir_path)
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', self.mock_hash):
+                inv = cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertEqual(len(inv["storage_documents"]), cleanup.OWNED_OBJECT_COUNT)
             self.assertEqual(inv["source_sha"], cleanup.EXPECTED_SOURCE_SHA)
             self.assertEqual(inv["run_id"], cleanup.EXPECTED_PRODUCT_RUN_ID)
@@ -251,22 +262,32 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
     def test_tampered_artifact_id_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
             tampered = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
             tampered["artifacts"][0]["id"] = 99999
+            tampered["artifacts"][0]["digest"] = self.mock_hash
+            
             (dir_path / "artifacts.json").write_text(json.dumps(tampered), encoding="utf-8")
             (dir_path / "report.json").write_text(json.dumps(AUTHENTIC_REPORT_JSON), encoding="utf-8")
             (dir_path / "operational-browser-evidence.json").write_text(
                 json.dumps(AUTHENTIC_EVIDENCE_JSON), encoding="utf-8"
             )
-            with self.assertRaises(ValueError) as ctx:
-                cleanup.load_and_validate_authoritative_artifact(dir_path)
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("not found in artifacts.json", str(ctx.exception))
 
     def test_tampered_report_failures_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = self.mock_hash
+            
             (dir_path / "artifacts.json").write_text(
-                json.dumps(AUTHENTIC_ARTIFACTS_JSON), encoding="utf-8"
+                json.dumps(art_meta), encoding="utf-8"
             )
             tampered_report = copy.deepcopy(AUTHENTIC_REPORT_JSON)
             tampered_report["stats"]["unexpected"] = 1
@@ -274,8 +295,9 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             (dir_path / "operational-browser-evidence.json").write_text(
                 json.dumps(AUTHENTIC_EVIDENCE_JSON), encoding="utf-8"
             )
-            with self.assertRaises(ValueError) as ctx:
-                cleanup.load_and_validate_authoritative_artifact(dir_path)
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("Unexpected failures in report", str(ctx.exception))
 
 
@@ -415,11 +437,12 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
                 "size": 327,
                 "contentType": "application/pdf",
                 "sha256": "badhash000000000000000000000000000000000000000000000000000000000",
+                "timeCreated": "2026-10-09T09:03:18.572Z",
             },
         }
         with self.assertRaises(ValueError) as ctx:
             cleanup.inspect_and_validate_gcs_target(desc, target)
-        self.assertIn("SHA-256 mismatch", str(ctx.exception))
+        self.assertIn("Missing live hash/body verification", str(ctx.exception))
 
     def test_gcs_metadata_non_numeric_generation_rejected(self):
         target = {
@@ -447,9 +470,11 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
         # Runner that returns ok on delete, but ok on post-delete describe (object still exists!)
         call_count = 0
 
-        def failing_post_runner(action, bucket, key, generation=None):
+        def failing_post_runner(action, bucket, key, generation=None, timeout=None):
             nonlocal call_count
             call_count += 1
+            if action == "read_body":
+                return {"status": "ok", "size": cleanup.EXPECTED_FILE_SIZE, "sha256": cleanup.EXPECTED_SHA256}
             if action == "describe":
                 return {
                     "status": "ok",
@@ -490,7 +515,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
         def mock_db(sql, params):
             if "fleet.supply_review_events" in sql:
                 return {"status": "ok", "count": 1, "rows_affected": 1}
-            return {"status": "ok", "rows_affected": 4}
+            return {"status": "ok", "rows_affected": 4 if "supply_documents" not in sql else 8}
 
         res = cleanup.execute_db_cleanup(self.plan_apply, db_runner=mock_db)
         self.assertEqual(res["status"], "blocked")
@@ -502,11 +527,11 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             if "fleet.supply_review_events" in sql:
                 return {"status": "ok", "count": 0, "rows_affected": 0}
             # Return 0 rows affected
-            return {"status": "ok", "rows_affected": 0}
+            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
 
         with self.assertRaises(ValueError) as ctx:
             cleanup.execute_db_cleanup(self.plan_apply, db_runner=mock_db)
-        self.assertIn("zero rows affected rejected", str(ctx.exception))
+        self.assertTrue("zero rows affected rejected" in str(ctx.exception) or "row count mismatch" in str(ctx.exception))
 
     def test_apply_mode_pipeline_halts_before_gcs_mutation_when_db_blocked(self):
         inv = create_authentic_inventory()
@@ -594,8 +619,10 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             cmds.append(sql)
             if sql in ("BEGIN", "COMMIT"):
                 return {"status": "ok"}
-            if sql.startswith("SELECT"):
+            if sql.startswith("SELECT count(*)"):
                 return {"status": "ok", "count": 0}
+            if sql.startswith("SELECT"):
+                return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
             return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
 
         res = cleanup.execute_db_cleanup(plan, db_runner=mock_db)
@@ -611,8 +638,10 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             cmds.append(sql)
             if sql in ("BEGIN", "COMMIT", "ROLLBACK"):
                 return {"status": "ok"}
-            if sql.startswith("SELECT"):
+            if sql.startswith("SELECT count(*)"):
                 return {"status": "ok", "count": 0}
+            if sql.startswith("SELECT"):
+                return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
             return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 0}
 
         with self.assertRaises(ValueError):

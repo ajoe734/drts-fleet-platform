@@ -435,6 +435,20 @@ def load_and_validate_authoritative_artifact(
         f"Artifact workflow def SHA mismatch: expected {expected_workflow_def_sha}, got {wf_run.get('head_sha')}",
     )
 
+    # Enforce archive hashing to prevent accepting tampered extracted evidence
+    zip_candidates = list(artifact_dir.glob("*.zip"))
+    require(
+        len(zip_candidates) > 0,
+        "No archive zip found for hashing. Tampered extracted evidence accepted without archive hashing/run/jobs proof is rejected."
+    )
+    zip_path = zip_candidates[0]
+    zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    expected_raw_hash = EXPECTED_ARTIFACT_DIGEST.replace("sha256:", "") if "sha256:" in EXPECTED_ARTIFACT_DIGEST else EXPECTED_ARTIFACT_DIGEST
+    require(
+        zip_hash == expected_raw_hash,
+        f"Archive hash mismatch: expected {expected_raw_hash}, got {zip_hash}"
+    )
+
     # 2. Locate report.json and operational-browser-evidence.json
     report_candidates = [
         artifact_dir / "report.json",
@@ -632,6 +646,20 @@ def build_cleanup_plan(
         "guarded_statements": [
             {
                 "table": "fleet.supply_documents",
+                "operation": "SELECT_LOCK",
+                "expected_rows": OWNED_OBJECT_COUNT,
+                "sql": (
+                    "SELECT document_id FROM fleet.supply_documents "
+                    "WHERE document_id = ANY($1::uuid[]) "
+                    "AND fleet_partner_id = $2 FOR UPDATE"
+                ),
+                "params": [
+                    [doc["document_id"] for doc in validated_docs],
+                    EXPECTED_FLEET_PARTNER_ID,
+                ],
+            },
+            {
+                "table": "fleet.supply_documents",
                 "operation": "DELETE",
                 "expected_rows": OWNED_OBJECT_COUNT,
                 "sql": (
@@ -650,11 +678,31 @@ def build_cleanup_plan(
             },
             {
                 "table": "fleet.driver_supply_drafts",
+                "operation": "SELECT_LOCK",
+                "expected_rows": OWNED_SUBMISSION_COUNT,
+                "sql": (
+                    "SELECT draft_id FROM fleet.driver_supply_drafts "
+                    "WHERE submission_id = ANY($1::uuid[]) FOR UPDATE"
+                ),
+                "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
+            },
+            {
+                "table": "fleet.driver_supply_drafts",
                 "operation": "DELETE",
                 "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
                     "DELETE FROM fleet.driver_supply_drafts "
                     "WHERE submission_id = ANY($1::uuid[])"
+                ),
+                "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
+            },
+            {
+                "table": "fleet.vehicle_supply_drafts",
+                "operation": "SELECT_LOCK",
+                "expected_rows": OWNED_SUBMISSION_COUNT,
+                "sql": (
+                    "SELECT draft_id FROM fleet.vehicle_supply_drafts "
+                    "WHERE submission_id = ANY($1::uuid[]) FOR UPDATE"
                 ),
                 "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
             },
@@ -670,6 +718,20 @@ def build_cleanup_plan(
             },
             {
                 "table": "fleet.supply_submissions",
+                "operation": "SELECT_LOCK",
+                "expected_rows": OWNED_SUBMISSION_COUNT,
+                "sql": (
+                    "SELECT submission_id FROM fleet.supply_submissions "
+                    "WHERE submission_id = ANY($1::uuid[]) "
+                    "AND fleet_partner_id = $2 FOR UPDATE"
+                ),
+                "params": [
+                    list(CANONICAL_OWNED_SUBMISSIONS),
+                    EXPECTED_FLEET_PARTNER_ID,
+                ],
+            },
+            {
+                "table": "fleet.supply_submissions",
                 "operation": "DELETE",
                 "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
@@ -682,6 +744,30 @@ def build_cleanup_plan(
                     EXPECTED_FLEET_PARTNER_ID,
                 ],
             },
+            {
+                "table": "fleet.supply_submissions",
+                "operation": "POSTFLIGHT_CHECK",
+                "expected_count": 0,
+                "sql": (
+                    "SELECT count(*) as cnt FROM fleet.supply_submissions "
+                    "WHERE submission_id = ANY($1::uuid[])"
+                ),
+                "params": [
+                    list(CANONICAL_OWNED_SUBMISSIONS),
+                ],
+            },
+            {
+                "table": "fleet.supply_documents",
+                "operation": "POSTFLIGHT_CHECK",
+                "expected_count": 0,
+                "sql": (
+                    "SELECT count(*) as cnt FROM fleet.supply_documents "
+                    "WHERE document_id = ANY($1::uuid[])"
+                ),
+                "params": [
+                    [doc["document_id"] for doc in validated_docs],
+                ],
+            }
         ],
     }
 
@@ -778,6 +864,15 @@ def default_gcs_runner(
             }
 
         # 3. ONLY proven 404 / NotFound for the specific object is not_found:
+        # Prevent ADC "credential file not found" or other local file not found from being classified as 404
+        if "credential" in stderr_lower or "credentials" in stderr_lower or ("file not found" in stderr_lower and "no such object" not in stderr_lower):
+            return {
+                "status": "error",
+                "returncode": res.returncode,
+                "stderr": res.stderr,
+                "error_type": "permission_or_network",
+            }
+        
         if (
             "no such object" in stderr_lower
             or "httperror 404" in stderr_lower
@@ -958,14 +1053,9 @@ def inspect_and_validate_gcs_target(
     # Custom metadata dict
     custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
 
-    # Live hash and body verification:
-    live_hash = (
-        meta.get("sha256")
-        or meta.get("hash")
-        or meta.get("checksum_sha256")
-        or custom_meta.get("sha256")
-    )
-
+    # Live hash and body verification: MUST read body because Google GCS describe does not provide sha256 natively
+    # Rejecting synthetic hash from metadata ensures we actually do media reads
+    live_hash = None
     body_bytes = meta.get("body_bytes")
     if body_bytes is not None:
         if isinstance(body_bytes, str):
@@ -980,24 +1070,13 @@ def inspect_and_validate_gcs_target(
             f"Body digest mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {computed_hash}",
         )
         live_hash = computed_hash
-
-    if not live_hash and runner is not None:
+    elif runner is not None:
         try:
             body_res = runner("read_body", bucket, key, generation=generation)
             if body_res.get("status") == "ok" and "sha256" in body_res:
                 live_hash = body_res["sha256"]
         except Exception:
             pass
-
-    # Mandatory: live_hash MUST be verified! If no hash or body was provided/computed, reject!
-    require(
-        live_hash is not None,
-        f"Missing live hash/body verification for gs://{bucket}/{key}; content hash cannot be proven",
-    )
-    require(
-        live_hash == expected_sha256,
-        f"Object SHA-256 mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {live_hash}",
-    )
 
     # Creation/update timestamp or stored-at time validation
     custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
@@ -1013,6 +1092,16 @@ def inspect_and_validate_gcs_target(
     require(
         "2026-" in time_created,
         f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}",
+    )
+
+    # Mandatory: live_hash MUST be verified! If no hash or body was provided/computed, reject!
+    require(
+        live_hash is not None,
+        f"Missing live hash/body verification for gs://{bucket}/{key}; content hash cannot be proven",
+    )
+    require(
+        live_hash == expected_sha256,
+        f"Object SHA-256 mismatch for gs://{bucket}/{key}: expected {expected_sha256}, got {live_hash}",
     )
 
     return {
@@ -1249,24 +1338,42 @@ def execute_db_cleanup(
                 res.get("status") == "ok",
                 f"DB execution error on table {stmt['table']}: {res}",
             )
-            rows_affected = res.get("rows_affected", 0)
-            expected_rows = stmt["expected_rows"]
-            require(
-                rows_affected > 0,
-                f"DB deletion affected 0 rows on {stmt['table']}; zero rows affected rejected",
-            )
-            require(
-                rows_affected == expected_rows,
-                f"DB row count mismatch on {stmt['table']}: expected {expected_rows}, got {rows_affected}",
-            )
-            db_receipts.append(
-                {
-                    "table": stmt["table"],
-                    "operation": stmt["operation"],
-                    "rows_affected": rows_affected,
-                    "expected_rows": expected_rows,
-                }
-            )
+            
+            if "expected_count" in stmt:
+                cnt = res.get("count", 0)
+                expected = stmt["expected_count"]
+                require(
+                    cnt == expected,
+                    f"DB postflight mismatch on {stmt['table']}: expected {expected}, got {cnt}",
+                )
+                db_receipts.append(
+                    {
+                        "table": stmt["table"],
+                        "operation": stmt["operation"],
+                        "count": cnt,
+                        "expected_count": expected,
+                    }
+                )
+            else:
+                rows_affected = res.get("rows_affected", 0)
+                expected_rows = stmt["expected_rows"]
+                if stmt["operation"] == "DELETE":
+                    require(
+                        rows_affected > 0,
+                        f"DB deletion affected 0 rows on {stmt['table']}; zero rows affected rejected",
+                    )
+                require(
+                    rows_affected == expected_rows,
+                    f"DB row count mismatch on {stmt['table']}: expected {expected_rows}, got {rows_affected}",
+                )
+                db_receipts.append(
+                    {
+                        "table": stmt["table"],
+                        "operation": stmt["operation"],
+                        "rows_affected": rows_affected,
+                        "expected_rows": expected_rows,
+                    }
+                )
         commit_res = db_runner("COMMIT", [])
         require(commit_res.get("status") == "ok", f"DB COMMIT failed: {commit_res}")
     except Exception as exc:
@@ -1365,9 +1472,14 @@ def run_cleanup_pipeline(
             }
 
         # Phase B: execute GCS cleanup
-        gcs_result = execute_gcs_cleanup(
-            plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
-        )
+        try:
+            gcs_result = execute_gcs_cleanup(
+                plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts
+            )
+        except Exception as exc:
+            # Preserve DB cleanup receipts if GCS fails
+            exc.db_result = db_result
+            raise
         return {
             "status": "success",
             "mode": mode,
@@ -1498,7 +1610,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.offline:
             require(args.mode == "dry-run", "Offline mode only supports dry-run")
 
-            def offline_gcs_runner(action: str, bucket: str, key: str, generation=None):
+            def offline_gcs_runner(action: str, bucket: str, key: str, generation=None, timeout=None):
                 if action == "describe":
                     return {
                         "status": "ok",
@@ -1507,12 +1619,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                             "metageneration": "1",
                             "size": EXPECTED_FILE_SIZE,
                             "contentType": EXPECTED_MIME,
-                            "sha256": EXPECTED_SHA256,
                             "timeCreated": "2026-10-09T09:03:18.572Z",
                             "metadata": {
                                 "stored-at": "2026-10-09T09:03:18.572Z",
                             },
                         },
+                    }
+                elif action == "read_body":
+                    return {
+                        "status": "ok",
+                        "size": EXPECTED_FILE_SIZE,
+                        "sha256": EXPECTED_SHA256,
                     }
                 raise ValueError("Mutation prohibited in offline mode")
 
@@ -1553,11 +1670,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             out_path = Path(args.output)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             receipts = getattr(exc, "receipts", [])
+            db_cleanup = getattr(exc, "db_result", None)
             error_receipt = {
                 "status": "error",
                 "mode": args.mode,
                 "error": str(exc),
                 "partial_receipts": receipts,
+                "db_cleanup": db_cleanup,
             }
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(json.dumps(error_receipt, indent=2) + "\n")
