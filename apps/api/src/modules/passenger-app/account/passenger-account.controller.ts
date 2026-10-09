@@ -33,7 +33,9 @@ function command(
     );
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body)) {
-    const canonical = fields[key];
+    const canonical = Object.prototype.hasOwnProperty.call(fields, key)
+      ? fields[key]
+      : undefined;
     if (!canonical || Object.prototype.hasOwnProperty.call(result, canonical))
       throw new ApiRequestError(
         400,

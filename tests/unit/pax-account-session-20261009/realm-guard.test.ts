@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
@@ -210,6 +211,33 @@ describe("passenger realm boundary through the production guard", () => {
         context(req("/api/passenger-app/me", f.session.accessToken)),
       ),
     ).rejects.toMatchObject({ code: "unauthorized" });
+  });
+  it("does not log access/refresh credentials on reuse, logout or legacy realm rejection", async () => {
+    const requireApi = createRequire(
+      new URL("../../../apps/api/package.json", import.meta.url),
+    );
+    const { Logger } = requireApi("@nestjs/common");
+    const spies = ["debug", "log", "warn", "error", "verbose"].map((method) =>
+      vi.spyOn(Logger.prototype, method).mockImplementation(() => undefined),
+    );
+    const f = await fixture();
+    const next = await f.service.refresh(f.session.refreshToken);
+    await expect(
+      f.service.refresh(f.session.refreshToken),
+    ).rejects.toMatchObject({ code: "invalid_grant" });
+    await f.service.logout(next.refreshToken);
+    await expect(
+      f.guard.canActivate(context(req("/api/auth/session", next.accessToken))),
+    ).rejects.toMatchObject({ code: "JWT_INVALID" });
+    const logs = JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
+    for (const value of [
+      f.session.accessToken,
+      f.session.refreshToken,
+      next.accessToken,
+      next.refreshToken,
+    ])
+      expect(logs).not.toContain(value);
+    expect(spies.some((spy) => spy.mock.calls.length > 0)).toBe(true); // Real legacy verifier logs only the reason.
   });
 });
 

@@ -182,6 +182,29 @@ describe("passenger identity linkage and account ownership", () => {
       f.service.linkIdentity(identity, "line", "new"),
     ).rejects.toMatchObject({ code: "unauthorized" });
   });
+  it("serializes concurrent unlink requests so one login always remains", async () => {
+    const f = await signedIn();
+    const linked = await f.service.linkIdentity(
+      f.identity,
+      "email",
+      "remaining@example.test",
+    );
+    const original = [...f.store.logins.values()].find(
+      (i) => i.provider === "google",
+    )!;
+    const results = await Promise.allSettled([
+      f.service.unlinkIdentity(f.identity, original.identityId),
+      f.service.unlinkIdentity(f.identity, linked.identityId),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(
+      (await f.service.listIdentities(f.identity)).identities,
+    ).toHaveLength(1);
+    const rejected = results.find(
+      (r) => r.status === "rejected",
+    ) as PromiseRejectedResult;
+    expect(rejected.reason).toMatchObject({ code: "last_identity_error" });
+  });
   it("does not accept injected account/verification/status fields from proof attributes", async () => {
     const f = fixture();
     await expect(
