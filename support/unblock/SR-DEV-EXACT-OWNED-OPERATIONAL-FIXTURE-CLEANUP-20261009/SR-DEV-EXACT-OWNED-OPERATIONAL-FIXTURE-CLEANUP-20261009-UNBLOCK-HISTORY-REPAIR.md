@@ -31,7 +31,7 @@ The parent task `SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009` was bl
 *   **Candidate `3552c75f6b57b50f3efbe49ee565aba26a344d4d` (Reviewer: Codex2):** Did not persist `resolved_parent_status` disposition via Supervisor metadata.
 *   **Candidate `4ef28dc1a0055329676a897f370d0e81ab6e3d56` / Generation `7940f4c2d1b14d9da2fc2f0e2a82ba37` (Reviewer: Codex2):** H1 persists.
 *   **Candidate `cab698e15e5bff0a7ec8c6eae7acb8ab3103f3f8` / Generation `54031a20535941b582a9f83e87cc03db` (Reviewer: Codex2):** H1 and H5 persist.
-*   **Candidate `18015c19aeb50b280ca9532baa07fc51710ba520` / Generation `cec547a9fba3425585ea6a79e739d746` (Reviewer: Codex2):** H3 HIGH REGRESSION. Commit lacked mandatory task ID prefix (`docs(unblock): repair history artifact per guide 0.7`). `check_commit_trailers.py --base 8ec22133a28f2fa19974ae0c0a3b3127cc5aa747 --head 18015c19aeb50b280ca9532baa07fc51710ba520` exits 1. H1 persists.
+*   **Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da` (Reviewer: Codex2):** H3 HIGH REGRESSION. Commit lacked mandatory task ID prefix (`docs(unblock): repair history artifact per guide 0.7`). `check_commit_trailers.py --base 8ec22133a28f2fa19974ae0c0a3b3127cc5aa747 --head 18015c19aeb50b280ca9532baa07fc51710ba520` exits 1. H1 persists.
 
 ### Acceptance Mappings
 1.  **Identify exact contamination:** Done. `f68c92cdd4525316a2fcb9e4a041413e668b3fa2` lacks trailer prefix. Checked via official CI script.
@@ -76,15 +76,17 @@ AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases
 *   **H4 ORIGINAL PAYLOAD DEFECT FIXED**: parent `TASK_METADATA_JSON` no longer manually substitutes candidate/candidate_branch/pr_url.
 
 ### Historical Verification Results
-*   **Immutable Candidate `a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` (v3) / Generation `e717eb8155fb4e5eb7502f0cc4662894`**: PR #2481. Entire immutable-base-to-current-helper range had TWO valid task-scoped commits; official checker exits 0 for both.
-*   **Immutable Candidate `e56c7c7308e4ffa4832d4d915bf06438133305ab` (v3) / Generation `533489f4368a45459d700178b06d29e3`**: Two commits tested. Exit 0.
+*   **Immutable Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da`**: PR #2481. H3 regression with 3 commits, failed trailer check (subject lacked `<TASK-ID>:`).
+*   **Immutable Candidate `a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` (v4) / Generation `e717eb8155fb4e5eb7502f0cc4662894`**: PR #2482. Entire immutable-base-to-current-helper range had TWO valid task-scoped commits; official checker exits 0 for both.
+*   **Immutable Candidate `e56c7c7308e4ffa4832d4d915bf06438133305ab` (v4) / Generation `533489f4368a45459d700178b06d29e3`**: PR #2482. Two commits tested. Exit 0.
 *   **Immutable Candidate `18015c19aeb50b280ca9532baa07fc51710ba520` (v4) / Generation `cec547a9fba3425585ea6a79e739d746`**: PR #2482. H3 regression with 3 commits, failed trailer check (subject lacked `<TASK-ID>:`).
 
+
 ### Current Replacement Candidate Ledger (2026-10-09)
-*   **Current helper branch is a new isolated v6**. Previous branches preserved.
-*   **H3**: Repaired. The new task-scoped commit has the required task prefix.
-*   **H5**: Fixed. Documented handoff command includes message argument.
-*   **H2**: Repaired. Historical candidate checks and generation IDs accurately isolated. Ancestor findings properly attributed as historical verification tied to immutable SHAs.
-*   **H1**: Pending. Supervisor must persist `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Gemini2`, and `resolved_parent_next` naming the full replacement `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474 AND required fresh Gemini2-to-Codex handoff`. Then a fresh Gemini2-to-Codex handoff must be performed.
+*   **Current helper branch is a new isolated v6** (`gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-unblock-history-repair-v6`). Previous branches preserved. PR #2484.
+*   **H3**: FIXED. Published v6 excludes invalid `18015c` ancestor.
+*   **H4/H5**: FIXED. No manual candidate fields in parent metadata; exact documented handoff has all three positional args.
+*   **H2**: FIXED in current artifact edit. Historical candidate checks and generation IDs accurately isolated. Ancestor findings properly attributed as historical verification tied to immutable SHAs (`v3` and `v4`).
+*   **H1**: PENDING. Supervisor must persist `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Gemini2`, and `resolved_parent_next` naming the full replacement `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474 AND required fresh Gemini2-to-Codex handoff`. Then a fresh Gemini2-to-Codex handoff must be performed.
 
 Original owner Gemini2 continues bounded artifact repair after Supervisor persists required routing/disposition.
