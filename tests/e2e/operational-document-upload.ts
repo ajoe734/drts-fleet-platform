@@ -57,7 +57,7 @@ export async function uploadOperationalDocument(
   const fileSize = pdfBytes.length;
   const contentType = "application/pdf";
 
-  const totalBudget = 30000;
+  const totalBudget = 60000;
   const startTime = Date.now();
   function getRemainingTime(): number {
     return Math.max(1, totalBudget - (Date.now() - startTime));
@@ -204,7 +204,7 @@ export async function uploadOperationalDocument(
   let putStatus = 0;
   let putScanState = "";
   const transientHistory: string[] = [];
-  const maxAttempts = 15;
+  const maxAttempts = 45;
 
   while (!scanReceiptOk && putAttempts < maxAttempts && getRemainingTime() > 0) {
     putAttempts++;

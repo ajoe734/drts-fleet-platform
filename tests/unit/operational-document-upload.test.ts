@@ -78,7 +78,7 @@ function pdfResponse(bytes: Buffer, status = 200, extraHeaders: Record<string, s
   } as any;
 }
 
-class MockServer {
+export class MockServer {
   calls: Array<{
     method: string;
     url: string;
@@ -126,6 +126,7 @@ class MockServer {
     putMissingCandidateSha: false,
     putOversized: false,
     put503Count: 0,
+    put503Delay: 0,
     put503ErrorCode: 'DOCUMENT_SCANNER_UNAVAILABLE',
     putReceiptMissing: false,
     putReceiptUnclean: false,
@@ -243,6 +244,9 @@ class MockServer {
 
         if (this.mutations.put503Count > 0) {
           this.mutations.put503Count--;
+          if (this.mutations.put503Delay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, this.mutations.put503Delay));
+          }
           return jsonResponse(
             { error: { code: this.mutations.put503ErrorCode } },
             503,
@@ -601,18 +605,61 @@ describe("uploadOperationalDocument", () => {
     }
   });
 
-  it("exhausts max 15 pending retries on 503 DOCUMENT_SCANNER_UNAVAILABLE with identical bytes", async () => {
-    server.mutations.put503Count = 15;
+  it("succeeds after cold-start pending observation (>15 attempts, ~400ms overhead + 1s delay) with identical bytes and clean receipt", async () => {
+    server.mutations.put503Count = 20;
+    server.mutations.put503Delay = 400;
     vi.useFakeTimers();
     const promise = uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers);
-    const rejectionPromise = expect(promise).rejects.toThrow(/Received: false/);
-    for (let i = 0; i < 15; i++) {
+    const resolutionPromise = expect(promise).resolves.toBeDefined();
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(400);
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    await resolutionPromise;
+    const result = await promise;
+    expect(result.documentId).toBe("doc-1");
+    expect(result.putScanState).toBe("clean");
+    expect(result.putStatus).toBe(200);
+    expect(result.transientHistory.length).toBe(20);
+    expect(result.putAttempts).toBe(21);
+    expect(result.downloadStatus).toBe(200);
+    expect(result.fileSize).toBe(327);
+    expect(result.sha256).toBe("4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784");
+    expect(result.readbackFileSize).toBe(327);
+    expect(result.readbackSha256).toBe("4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784");
+
+    expect(server.calls.length).toBe(25);
+    const putCalls = server.calls.filter(c => c.method === 'PUT');
+    expect(putCalls.length).toBe(21);
+    for (const call of putCalls) {
+      expect(call.bytes).toBeDefined();
+      expect(call.bytes!.length).toBe(327);
+      expect(createHash('sha256').update(call.bytes!).digest('hex')).toBe('4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784');
+      expect(call.headers['content-type']).toBe('application/octet-stream');
+      expect(call.headers['authorization']).toBe('Bearer fleet-dummy-id-token');
+      expect(call.query['objectKey']).toBe(server.active?.objectKey);
+    }
+    const confirmCall = server.calls.find(c => c.url.includes('/confirm'));
+    expect(confirmCall).toBeDefined();
+    expect(confirmCall!.data.checksumSha256).toBe("4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784");
+    expect(confirmCall!.data.fileSize).toBe(327);
+
+    const downloadCall = server.calls.find(c => c.url.includes('/download'));
+    expect(downloadCall).toBeDefined();
+  });
+
+  it("exhausts max 45 pending retries on 503 DOCUMENT_SCANNER_UNAVAILABLE with identical bytes", async () => {
+    server.mutations.put503Count = 45;
+    vi.useFakeTimers();
+    const promise = uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers);
+    const rejectionPromise = expect(promise).rejects.toThrow(/Scanner must eventually process the bytes and return clean receipt within deadline|Received: false/);
+    for (let i = 0; i < 45; i++) {
       await vi.runAllTimersAsync();
     }
     await rejectionPromise;
-    expect(server.calls.length).toBe(17);
+    expect(server.calls.length).toBe(47);
     const putCalls = server.calls.filter(c => c.method === 'PUT');
-    expect(putCalls.length).toBe(15);
+    expect(putCalls.length).toBe(45);
     for (const call of putCalls) {
       expect(call.bytes).toBeDefined();
       expect(call.bytes!.length).toBe(327);
@@ -632,8 +679,8 @@ describe("uploadOperationalDocument", () => {
     expect(putCalls.length).toBe(1);
   });
 
-  it("rejects when operational document upload lifecycle exceeds total 30s time budget", async () => {
-    server.mutations.advanceTimeAfterPut = 30001;
+  it("rejects when operational document upload lifecycle exceeds total 60s time budget", async () => {
+    server.mutations.advanceTimeAfterPut = 60001;
     vi.useFakeTimers();
     const promise = uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers);
     await expect(promise).rejects.toThrow(/Operational document upload lifecycle exceeded time budget/);
@@ -648,7 +695,7 @@ describe("uploadOperationalDocument", () => {
     vi.useFakeTimers();
     const promise = uploadOperationalDocument(mockRequest, origin, intentPath, intentBody, confirmPath, confirmBody, headers);
     const rejection = expect(promise).rejects.toThrow(/Timeout/);
-    await vi.advanceTimersByTimeAsync(30001);
+    await vi.advanceTimersByTimeAsync(60001);
     await rejection;
 
     expect(server.downloadReaderStarted).toBe(true);
