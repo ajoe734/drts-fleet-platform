@@ -82,8 +82,27 @@ Latest published checkpoint workflows both completed with `failure`:
   `unit` job 113959583488 fails; `ci-integ` aggregate fails. Both runs report
   head `f36049d71d10a59432677a3aaa19cb125d86cca9`.
 
-Detailed failed-job log evidence and its read results are recorded below before
-publishing the final helper head. No overall CI or product acceptance pass is
+Failed-job logs were downloaded through `gh api --allow-escape-sequences
+repos/ajoe734/drts-fleet-platform/actions/jobs/<job>/logs`; both commands finished
+with exit 0 and their failure summaries/test lines were read. Both contain
+exactly one failed test, the F4 assertion `expected 109 to be less than or equal
+to 108`. Integration unit: 6,240 pass / 1 fail / 73 skip; smoke root tests:
+6,264 pass / 1 fail / 49 skip. Account suites total 59 passing tests (28 service,
+27 realm, 4 repository), and the real idempotency scanner's five tests pass in
+both logs. Root-unit commands exit 1. This confirms F3 remains resolved at this
+checkpoint while F4 remains open; it does not prove PG/retention acceptance.
+
+Machine-specific logs are retained under
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/account-session-evidence/history-repair-20261009/`:
+
+| File | SHA-256 |
+| --- | --- |
+| `f36049-unit.log` | `242567f37058fdfdae70fd0148dbaf17a930d670442a8c6fbf31b6cb705a967f` |
+| `f36049-smoke.log` | `84ceeb9c725ad3c079917f99d18542fd3104d4c34a2eb7a80ba751eff6264775` |
+
+Initial downloads used an incomplete API endpoint and returned HTTP 404; those
+error responses were replaced with the successfully downloaded real logs and
+are not counted as evidence. No overall CI or product acceptance pass is
 claimed. Earlier `8663154a7` results remain in the parent ledger.
 
 ## Non-destructive continuation
@@ -127,7 +146,7 @@ commands. The supplied release CLI was actually invoked as `AI_NAME=Codex`:
 | `TASK_METADATA_JSON=... assign <helper> Codex Codex2` with blocked parent disposition | 1, `Dispatched workers must use their assigned task lifecycle commands` |
 
 Authority: active-release `control_plane/usecases/task_board_commands.py`,
-`TaskBoardCommands._guard_worker_command`. `ORCH_DISPATCH_ROLE=owner` and the
+`_guard_worker_command`. `ORCH_DISPATCH_ROLE=owner` and the
 helper task identity remain intact; no guard environment was removed or lane
 impersonated. The parent's scope and next message remain unchanged by this
 helper. These are CLI dispatch restrictions, not an automatic approval rejection.
@@ -156,7 +175,7 @@ this helper and handoff its unchanged published SHA to Codex2 with PR evidence.
 | Finding / acceptance | Authority / verification | Outcome and limits |
 | --- | --- | --- |
 | Identify exact contamination | Full refs, merge-base, seven-commit log/trailers, PR head/base/files, worktree registry | No parent history contamination found; absent parent worktree and dirty canonical root require isolated restoration; actual F4 scope blocker identified |
-| Triage classification | Active release `blocked_task_triage_kind` on exact parent slice | Reproducible keyword routing; `next` includes `push`/`HEAD`, so helper kind alone is not proof of history damage |
+| Triage classification | Active release `blocked_task_triage_kind` on exact parent slice | Exact parent returns `history_repair`; substituting a scope-only next returns `planning_decision` because its existing artifact paths contain `contracts`. The original next contains the history marker `push`; routing is not proof of history damage |
 | Non-destructive repair path | Formal guard, accepted allocation, existing minimal patch, original UAT | Documented; product patch awaits Supervisor scope coordination; no parent history or product edits made |
 | Scoped publication evidence | Helper branch commit, ordinary push, PR and full-range trailer/content checks | Final identities supplied by actual Git/PR evidence and helper status; review/CI/merge not yet claimed |
 | Update parent next step | Release CLI `note` and metadata `assign` attempts above | BLOCKED by dispatch guard; Supervisor must write parent next and explicit helper disposition before handoff |
@@ -164,3 +183,29 @@ this helper and handoff its unchanged published SHA to Codex2 with PR evidence.
 This documentation-only helper needs content/reference checks, not new product
 tests. No product runtime, hosted workflow, deployment or external-provider call
 was started by this dispatch.
+
+Checks completed in this dispatch:
+
+- `python3 tools/ci/git/check_commit_trailers.py --base refs/remotes/origin/dev
+  --head refs/heads/codex/pax-account-session-20261009`: exit 0, seven commits OK.
+- `git diff --check refs/remotes/origin/dev..refs/heads/codex/pax-account-session-20261009`:
+  exit 0.
+- `git apply --check <existing f4-proposed.patch>` in the helper's clean base:
+  exit 0; no formal source file changed. Recomputed patch hash matches above.
+- Read-only Python probe imports the actual active-release
+  `control_plane.usecases.chair_review_policy.blocked_task_triage_kind`, fetches
+  the parent using CLI `show`, and checks exact-parent `history_repair` versus a
+  scope-only next string. First assertion incorrectly expected `manual_unblock`
+  and exited 1; actual result was `planning_decision`. Corrected assertion exits
+  0. No classifier code was edited or copied into a substitute implementation.
+- `git show-ref --verify refs/heads/origin/dev`: exit 128, expected absent ref;
+  not a failed commit/content check.
+- `pnpm exec prettier --write <helper artifact>`: exit 1, missing
+  `node_modules/prettier/bin/prettier.cjs` through the pre-existing shared
+  dependency symlink. Formatting was not executed; Markdown content/table and
+  diff checks were inspected directly. Shared dependencies were not modified.
+
+Publishing record: checkpoint `e73f30f78` was committed and normally pushed on
+the expected helper branch. The final documentation head and PR are recorded
+by CLI progress/blocker, after their live identities are compared. No parent
+commit, branch, PR head or product file was changed by this helper.
