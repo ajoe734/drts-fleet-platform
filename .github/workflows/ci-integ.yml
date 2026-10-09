@@ -19,6 +19,16 @@ on:
         description: "Branch or commit SHA to run against"
         required: false
         default: "dev"
+      readonly_dev_metadata:
+        description: "Also collect fixed-inventory read-only dev cloud metadata; full CI remains mandatory"
+        required: false
+        default: false
+        type: boolean
+      expected_runtime_sha:
+        description: "For read-only metadata: full expected currently deployed API SHA"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -39,6 +49,54 @@ env:
 # hang is capped in minutes rather than hours.
 
 jobs:
+  readonly-dev-metadata:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_dev_metadata == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout before authentication
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only metadata
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Collect fixed-inventory control-plane metadata only
+        run: >-
+          python3 operations/verification/read-dev-cloud-metadata.py
+          --expected-runtime-sha "$EXPECTED_RUNTIME_SHA"
+          --definition-sha "$EXPECTED_DEFINITION_SHA"
+          --output .artifacts/dev-readonly-metadata/snapshot.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-readonly-metadata-${{ github.run_id }}
+          path: .artifacts/dev-readonly-metadata/snapshot.json
+          if-no-files-found: error
+          retention-days: 30
+
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
@@ -84,6 +142,7 @@ jobs:
           python3 -m unittest tools/ci/test_workflow_timeouts.py
           python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_dev_artifact_providers.py
+          python3 -m unittest tools/ci/test_dev_cloud_metadata_preflight.py
           python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py
           python3 -m unittest tools/ci/test_academy_acceptance_workflow.py
           python3 -m unittest tools/ci/test_leave_acceptance_workflow.py
