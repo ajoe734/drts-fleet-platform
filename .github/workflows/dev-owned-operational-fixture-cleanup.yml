@@ -198,8 +198,8 @@ jobs:
             "artifact_digest": "sha256:2fc9ef568f7b37cf709475fd1e1bb470f1b18e55383751254cef179753b539b5",
             "storage_documents": [
               {
-                "document_id": "43e91900-b03d-4319-8bd1-25d438372f4d",
-                "submission_id": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
+                "documentId": "43e91900-b03d-4319-8bd1-25d438372f4d",
+                "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/18f06410-510c-4107-ae21-16ab61383b95-harmless-upload.pdf",
                 "confirmDocumentType": "professional_driver_license",
@@ -208,8 +208,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "dc3aaed4-7f9c-4e61-a532-c6acd49cdf59",
-                "submission_id": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
+                "documentId": "dc3aaed4-7f9c-4e61-a532-c6acd49cdf59",
+                "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/8ad02a30-c584-4deb-b2c8-5883f9a5345a-harmless-upload.pdf",
                 "confirmDocumentType": "taxi_driver_registration",
@@ -218,8 +218,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "f26201ec-7e67-4866-94fc-8a5bfd5ecbca",
-                "submission_id": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
+                "documentId": "f26201ec-7e67-4866-94fc-8a5bfd5ecbca",
+                "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/f88f9320-7c81-4df9-9abd-d7ced9c0c50a-harmless-upload.pdf",
                 "confirmDocumentType": "professional_driver_license",
@@ -228,8 +228,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "9e863fbe-0ba0-4b48-b2ac-a88c8d8e8a47",
-                "submission_id": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
+                "documentId": "9e863fbe-0ba0-4b48-b2ac-a88c8d8e8a47",
+                "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/195565d9-9f64-4a29-8446-f93bb0fe252b-harmless-upload.pdf",
                 "confirmDocumentType": "taxi_driver_registration",
@@ -238,8 +238,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "4f93a852-9031-44e2-ac06-3c808c9e84cb",
-                "submission_id": "f735275c-151d-4f25-a9f0-174f2602f919",
+                "documentId": "4f93a852-9031-44e2-ac06-3c808c9e84cb",
+                "confirmSubmissionId": "f735275c-151d-4f25-a9f0-174f2602f919",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/f735275c-151d-4f25-a9f0-174f2602f919/e6a71c74-a036-4ea9-a025-0386d9ed1861-harmless-upload.pdf",
                 "confirmDocumentType": "professional_driver_license",
@@ -248,8 +248,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "d2c8b8d5-c5ac-4bd5-a5ef-94a413ac5046",
-                "submission_id": "f735275c-151d-4f25-a9f0-174f2602f919",
+                "documentId": "d2c8b8d5-c5ac-4bd5-a5ef-94a413ac5046",
+                "confirmSubmissionId": "f735275c-151d-4f25-a9f0-174f2602f919",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/f735275c-151d-4f25-a9f0-174f2602f919/a627cd09-ebc8-4024-88ba-91a4f5489574-harmless-upload.pdf",
                 "confirmDocumentType": "taxi_driver_registration",
@@ -258,8 +258,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "279550a2-3eac-4c5e-b315-cb86308d9ae7",
-                "submission_id": "93430506-d016-4b07-897f-ab9b4d3530df",
+                "documentId": "279550a2-3eac-4c5e-b315-cb86308d9ae7",
+                "confirmSubmissionId": "93430506-d016-4b07-897f-ab9b4d3530df",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/93430506-d016-4b07-897f-ab9b4d3530df/3bbb4f20-0cd5-4676-9ae1-e428ce26461b-harmless-upload.pdf",
                 "confirmDocumentType": "professional_driver_license",
@@ -268,8 +268,8 @@ jobs:
                 "readbackContentType": "application/pdf"
               },
               {
-                "document_id": "c5e2a567-df7a-42dc-8aa6-481e5eb9e823",
-                "submission_id": "93430506-d016-4b07-897f-ab9b4d3530df",
+                "documentId": "c5e2a567-df7a-42dc-8aa6-481e5eb9e823",
+                "confirmSubmissionId": "93430506-d016-4b07-897f-ab9b4d3530df",
                 "confirmFleetPartnerId": "fleet-demo-001",
                 "objectKey": "fleet-partner/fleet-demo-001/supply-submissions/93430506-d016-4b07-897f-ab9b4d3530df/024c77c7-8d95-4c29-8fd1-51dc0a89f8ba-harmless-upload.pdf",
                 "confirmDocumentType": "taxi_driver_registration",

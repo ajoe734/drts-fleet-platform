@@ -97,11 +97,11 @@ for _key, _meta in cleanup.CANONICAL_OWNED_OBJECTS.items():
             "kind": "setup-document-upload",
             "surface": "fleet",
             "actorScope": "fleet partner",
-            "documentId": _meta["document_id"],
+            "documentId": _meta["documentId"],
             "objectKey": _key,
             "fileSize": cleanup.EXPECTED_FILE_SIZE,
             "sha256": cleanup.EXPECTED_SHA256,
-            "confirmSubmissionId": _meta["submission_id"],
+            "confirmSubmissionId": _meta["confirmSubmissionId"],
             "confirmFleetPartnerId": cleanup.EXPECTED_FLEET_PARTNER_ID,
             "confirmDocumentType": _meta["document_type"],
             "readbackSha256": cleanup.EXPECTED_SHA256,
@@ -123,11 +123,11 @@ def create_authentic_inventory() -> Dict[str, Any]:
                 "journey": "fleet-submit-read-withdraw-resubmit",
                 "surface": "fleet",
                 "actorScope": "fleet partner",
-                "documentId": val["document_id"],
+                "documentId": val["documentId"],
                 "objectKey": key,
                 "fileSize": cleanup.EXPECTED_FILE_SIZE,
                 "sha256": cleanup.EXPECTED_SHA256,
-                "confirmSubmissionId": val["submission_id"],
+                "confirmSubmissionId": val["confirmSubmissionId"],
                 "confirmFleetPartnerId": cleanup.EXPECTED_FLEET_PARTNER_ID,
                 "confirmDocumentType": val["document_type"],
                 "readbackSha256": cleanup.EXPECTED_SHA256,
@@ -230,8 +230,20 @@ class TestProvenanceValidation(unittest.TestCase):
 class TestAuthoritativeArtifactCollection(unittest.TestCase):
     def setUp(self):
         import hashlib
-        self.mock_zip_content = b"mockzip"
-        self.mock_hash = "sha256:" + hashlib.sha256(self.mock_zip_content).hexdigest()
+        import zipfile
+        import io
+        
+        self.run_meta = {"id": cleanup.EXPECTED_PRODUCT_RUN_ID, "head_sha": cleanup.EXPECTED_SOURCE_SHA}
+        self.jobs_meta = {"jobs": [{"status": "completed", "conclusion": "success"}]}
+        
+        # Create a real zip containing report.json and operational-browser-evidence.json
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as zf:
+            zf.writestr("operational-browser/report.json", json.dumps(AUTHENTIC_REPORT_JSON))
+            zf.writestr("operational-browser/operational-browser-evidence.json", json.dumps(AUTHENTIC_EVIDENCE_JSON))
+        
+        self.mock_zip_content = buf.getvalue()
+        self.mock_hash = hashlib.sha256(self.mock_zip_content).hexdigest()
         
     def test_load_and_validate_authoritative_artifact(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -239,25 +251,31 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
             
             art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
-            art_meta["artifacts"][0]["digest"] = self.mock_hash
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
             
-            (dir_path / "artifacts.json").write_text(
-                json.dumps(art_meta), encoding="utf-8"
-            )
-            payload_dir = dir_path / "operational-browser"
-            payload_dir.mkdir(parents=True)
-            (payload_dir / "report.json").write_text(
-                json.dumps(AUTHENTIC_REPORT_JSON), encoding="utf-8"
-            )
-            (payload_dir / "operational-browser-evidence.json").write_text(
-                json.dumps(AUTHENTIC_EVIDENCE_JSON), encoding="utf-8"
-            )
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            (dir_path / "jobs.json").write_text(json.dumps(self.jobs_meta), encoding="utf-8")
 
-            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', self.mock_hash):
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
                 inv = cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertEqual(len(inv["storage_documents"]), cleanup.OWNED_OBJECT_COUNT)
             self.assertEqual(inv["source_sha"], cleanup.EXPECTED_SOURCE_SHA)
             self.assertEqual(inv["run_id"], cleanup.EXPECTED_PRODUCT_RUN_ID)
+            
+    def test_missing_run_json_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dir_path = Path(tmpdir)
+            (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
+            art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            (dir_path / "jobs.json").write_text(json.dumps(self.jobs_meta), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
+                with self.assertRaises(ValueError) as ctx:
+                    cleanup.load_and_validate_authoritative_artifact(dir_path)
+                self.assertIn("run.json not found", str(ctx.exception))
 
     def test_tampered_artifact_id_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -273,7 +291,7 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             (dir_path / "operational-browser-evidence.json").write_text(
                 json.dumps(AUTHENTIC_EVIDENCE_JSON), encoding="utf-8"
             )
-            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', self.mock_hash):
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + self.mock_hash):
                 with self.assertRaises(ValueError) as ctx:
                     cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("not found in artifacts.json", str(ctx.exception))
@@ -284,18 +302,31 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             (dir_path / "evidence.zip").write_bytes(self.mock_zip_content)
             
             art_meta = copy.deepcopy(AUTHENTIC_ARTIFACTS_JSON)
-            art_meta["artifacts"][0]["digest"] = self.mock_hash
+            art_meta["artifacts"][0]["digest"] = "sha256:" + self.mock_hash
             
             (dir_path / "artifacts.json").write_text(
                 json.dumps(art_meta), encoding="utf-8"
             )
+            (dir_path / "run.json").write_text(json.dumps(self.run_meta), encoding="utf-8")
+            (dir_path / "jobs.json").write_text(json.dumps(self.jobs_meta), encoding="utf-8")
             tampered_report = copy.deepcopy(AUTHENTIC_REPORT_JSON)
             tampered_report["stats"]["unexpected"] = 1
-            (dir_path / "report.json").write_text(json.dumps(tampered_report), encoding="utf-8")
-            (dir_path / "operational-browser-evidence.json").write_text(
-                json.dumps(AUTHENTIC_EVIDENCE_JSON), encoding="utf-8"
-            )
-            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', self.mock_hash):
+            import io
+            import zipfile
+            import hashlib
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w') as zf:
+                zf.writestr("report.json", json.dumps(tampered_report))
+                zf.writestr("operational-browser-evidence.json", json.dumps(AUTHENTIC_EVIDENCE_JSON))
+            tampered_zip = buf.getvalue()
+            tampered_hash = hashlib.sha256(tampered_zip).hexdigest()
+            (dir_path / "evidence.zip").write_bytes(tampered_zip)
+            
+            art_meta = json.loads((dir_path / "artifacts.json").read_text(encoding="utf-8"))
+            art_meta["artifacts"][0]["digest"] = "sha256:" + tampered_hash
+            (dir_path / "artifacts.json").write_text(json.dumps(art_meta), encoding="utf-8")
+            
+            with patch.object(cleanup, 'EXPECTED_ARTIFACT_DIGEST', 'sha256:' + tampered_hash):
                 with self.assertRaises(ValueError) as ctx:
                     cleanup.load_and_validate_authoritative_artifact(dir_path)
             self.assertIn("Unexpected failures in report", str(ctx.exception))

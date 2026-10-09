@@ -50,6 +50,13 @@
 - **審查發現:** 確認 R2-02 至 R2-06 等邊界缺陷仍存在（例如接受造假 hash、未驗證 ZIP 檔案 digest、ADC-file-not-found 誤判為 404 等）。此外，UAT 文件中提出之 all9-ready 與 connectivity 等防護宣稱並不正確，且遺漏 Hosted immutable tool review/full-CI/merge、Operator no-overlap 及 runtime/private/scanner 等重要安全防線。
 - **強制性 CI 狀態:** 本機測試通過，但真實安全防護邊界與宣稱仍有缺失。
 
+
+### 候選版本 4: 9a5da9 (Round 7 修復)
+- **拒絕候選 SHA:** `ce568eaab5a78081bed8f953bf0e7e25999a5da9`
+- **獨立審查裁決:** Codex 裁決 `REOPEN / not approved`。
+- **審查發現:** 發現仍有部分邊界漏洞，包含 `offline` 環境合成的 hash 與 time 缺少 synthetic 標籤、ZIP digest 驗證後未綁定並從中提取 JSON 檔案、同日未來的時間戳仍被接受，以及 DB deny 沒有在最上層標示為 `dry_run_blocked` / `dry_run_error`。UAT 文件中宣稱的強制鎖定、postflight 檢查等與真實程式碼實作存在落差，且未詳述相鄰的拒絕歷史。
+- **本次修正:** 已完整修正時間戳驗證（嚴格檢查不衝突且非未來時間）、修正 ZIP 提取邏輯（自 ZIP 中讀取 JSON 以確保 provenance），以及修正了 DB deny 在頂層的回傳狀態，並移除 UAT 不實宣稱。
+
 ### 維運執行狀態 (Operational Execution Status)
 - `cleanup_not_performed: true`。所有雲端 GCS 測試夾具與 Cloud SQL 資料庫紀錄均完整保留，未執行任何實際刪除或未授權異動。所有 live keys 保持 BLOCKED / PENDING 狀態。
 
@@ -74,7 +81,7 @@
 | **R2-08** (Fixed WIF Identity, Minimum Perm, Concurrency) | WIF 檢查僅驗證非空，接受任意第三方 provider；工作流缺乏並發控制與 `actions: read` 權限。 | 固定綁定授權 DEV WIF 提供者（`projects/24645990627/...`）與佈署者 SA（`github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`）；加入 `concurrency: group: dev-owned-operational-fixture-cleanup, cancel-in-progress: false`；加入 `actions: read` 權限。 | 工作流 YAML 結構驗證通過，WIF 邊界與權限最小化落實。 |
 | **R2-09** (Canonical Consistency & Test Accounting) | UAT 文件以反引號引用已刪除之舊測試檔案導致 CI 規範檢查失敗；測試計數引用舊陳舊數據（94）。 | 移除舊測試路徑之反引號，改以 GitHub blob 完整 URL 參照；更正測試計數為 `check_test_coverage.py` 發現之 95 個測試檔案、38 項單元測試；明確記錄測試目錄中的 3 個跳過為測試套件跳過（非 passes，非業務 16 skips）。 | `python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3e --head HEAD`<br>Exit code: 0<br>`0 finding(s)` |
 
-*(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過嚴格之 `read_body` 實體讀取、強制 `SELECT ... FOR UPDATE` 鎖定及 `POSTFLIGHT_CHECK` 等機制，將此些宣稱化為真實之程式碼約束。)*
+*(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過修正時間戳邊界、ZIP provenance 綁定與 offline合成標記等機制強化邊界防護，但仍維持唯讀預檢模式，實際鎖定與 mutation 尚未開放。。)*
 
 ### Round 6 審查缺陷處置表 (R6-01 至 R6-05)
 

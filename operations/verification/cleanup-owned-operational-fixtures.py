@@ -37,6 +37,8 @@ import os
 import re
 import subprocess
 import sys
+import datetime
+import zipfile
 import urllib.parse
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -83,43 +85,43 @@ def logical_to_physical_gcs_key(
 
 CANONICAL_OWNED_OBJECTS: Dict[str, Dict[str, str]] = {
     "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/18f06410-510c-4107-ae21-16ab61383b95-harmless-upload.pdf": {
-        "document_id": "43e91900-b03d-4319-8bd1-25d438372f4d",
-        "submission_id": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
+        "documentId": "43e91900-b03d-4319-8bd1-25d438372f4d",
+        "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
         "document_type": "professional_driver_license",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/8b7b0b8a-bc5a-48f3-b576-af201e6ba074/8ad02a30-c584-4deb-b2c8-5883f9a5345a-harmless-upload.pdf": {
-        "document_id": "dc3aaed4-7f9c-4e61-a532-c6acd49cdf59",
-        "submission_id": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
+        "documentId": "dc3aaed4-7f9c-4e61-a532-c6acd49cdf59",
+        "confirmSubmissionId": "8b7b0b8a-bc5a-48f3-b576-af201e6ba074",
         "document_type": "taxi_driver_registration",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/f88f9320-7c81-4df9-9abd-d7ced9c0c50a-harmless-upload.pdf": {
-        "document_id": "f26201ec-7e67-4866-94fc-8a5bfd5ecbca",
-        "submission_id": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
+        "documentId": "f26201ec-7e67-4866-94fc-8a5bfd5ecbca",
+        "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
         "document_type": "professional_driver_license",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/deeed4cd-ede0-4daf-a70f-4d0e900987b9/195565d9-9f64-4a29-8446-f93bb0fe252b-harmless-upload.pdf": {
-        "document_id": "9e863fbe-0ba0-4b48-b2ac-a88c8d8e8a47",
-        "submission_id": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
+        "documentId": "9e863fbe-0ba0-4b48-b2ac-a88c8d8e8a47",
+        "confirmSubmissionId": "deeed4cd-ede0-4daf-a70f-4d0e900987b9",
         "document_type": "taxi_driver_registration",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/f735275c-151d-4f25-a9f0-174f2602f919/e6a71c74-a036-4ea9-a025-0386d9ed1861-harmless-upload.pdf": {
-        "document_id": "4f93a852-9031-44e2-ac06-3c808c9e84cb",
-        "submission_id": "f735275c-151d-4f25-a9f0-174f2602f919",
+        "documentId": "4f93a852-9031-44e2-ac06-3c808c9e84cb",
+        "confirmSubmissionId": "f735275c-151d-4f25-a9f0-174f2602f919",
         "document_type": "professional_driver_license",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/f735275c-151d-4f25-a9f0-174f2602f919/a627cd09-ebc8-4024-88ba-91a4f5489574-harmless-upload.pdf": {
-        "document_id": "d2c8b8d5-c5ac-4bd5-a5ef-94a413ac5046",
-        "submission_id": "f735275c-151d-4f25-a9f0-174f2602f919",
+        "documentId": "d2c8b8d5-c5ac-4bd5-a5ef-94a413ac5046",
+        "confirmSubmissionId": "f735275c-151d-4f25-a9f0-174f2602f919",
         "document_type": "taxi_driver_registration",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/93430506-d016-4b07-897f-ab9b4d3530df/3bbb4f20-0cd5-4676-9ae1-e428ce26461b-harmless-upload.pdf": {
-        "document_id": "279550a2-3eac-4c5e-b315-cb86308d9ae7",
-        "submission_id": "93430506-d016-4b07-897f-ab9b4d3530df",
+        "documentId": "279550a2-3eac-4c5e-b315-cb86308d9ae7",
+        "confirmSubmissionId": "93430506-d016-4b07-897f-ab9b4d3530df",
         "document_type": "professional_driver_license",
     },
     "fleet-partner/fleet-demo-001/supply-submissions/93430506-d016-4b07-897f-ab9b4d3530df/024c77c7-8d95-4c29-8fd1-51dc0a89f8ba-harmless-upload.pdf": {
-        "document_id": "c5e2a567-df7a-42dc-8aa6-481e5eb9e823",
-        "submission_id": "93430506-d016-4b07-897f-ab9b4d3530df",
+        "documentId": "c5e2a567-df7a-42dc-8aa6-481e5eb9e823",
+        "confirmSubmissionId": "93430506-d016-4b07-897f-ab9b4d3530df",
         "document_type": "taxi_driver_registration",
     },
 }
@@ -309,12 +311,12 @@ def validate_inventory_items(
 
         canonical = CANONICAL_OWNED_OBJECTS[key]
         require(
-            canonical["document_id"] == doc_id,
-            f"Document ID mismatch for key {key}: expected {canonical['document_id']}, got {doc_id}",
+            canonical["documentId"] == doc_id,
+            f"Document ID mismatch for key {key}: expected {canonical['documentId']}, got {doc_id}",
         )
         require(
-            canonical["submission_id"] == sub_id,
-            f"Submission ID mismatch for key {key}: expected {canonical['submission_id']}, got {sub_id}",
+            canonical["confirmSubmissionId"] == sub_id,
+            f"Submission ID mismatch for key {key}: expected {canonical['confirmSubmissionId']}, got {sub_id}",
         )
         require(
             item.get("confirmDocumentType") == canonical["document_type"],
@@ -335,8 +337,8 @@ def validate_inventory_items(
 
         validated_docs.append(
             {
-                "document_id": doc_id,
-                "submission_id": sub_id,
+                "documentId": doc_id,
+                "confirmSubmissionId": sub_id,
                 "fleet_partner_id": fleet_id,
                 "object_key": key,
                 "document_type": canonical["document_type"],
@@ -453,60 +455,42 @@ def load_and_validate_authoritative_artifact(
         f"Archive hash mismatch: expected {expected_raw_hash}, got {zip_hash}"
     )
 
-    # 2. Locate report.json and operational-browser-evidence.json
-    report_candidates = [
-        artifact_dir / "report.json",
-        artifact_dir / "operational-browser" / "report.json",
-        artifact_dir / "payload" / "report.json",
-        artifact_dir / "payload" / "operational-browser" / "report.json",
-    ]
-    report_path = next((p for p in report_candidates if p.is_file()), None)
-    if report_path is None:
-        matches = sorted(artifact_dir.glob("**/report.json"))
-        if matches:
-            report_path = matches[0]
-    require(report_path is not None, f"report.json not found under {artifact_dir}")
+    # 1.5 Validate run.json and jobs.json
+    run_meta_path = artifact_dir / "run.json"
+    if not run_meta_path.is_file():
+        run_meta_path = artifact_dir.parent / "run.json"
+    require(run_meta_path.is_file(), f"run.json not found under {artifact_dir}")
+    with open(run_meta_path, "r", encoding="utf-8") as f:
+        run_meta = json.load(f)
+    require(run_meta.get("id") == expected_run_id, f"run.json ID mismatch: expected {expected_run_id}, got {run_meta.get('id')}")
+    require(run_meta.get("head_sha") == expected_source_sha, f"run.json head_sha mismatch: expected {expected_source_sha}, got {run_meta.get('head_sha')}")
 
-    evidence_candidates = [
-        artifact_dir / "operational-browser-evidence.json",
-        artifact_dir / "operational-browser" / "operational-browser-evidence.json",
-        artifact_dir / "payload" / "operational-browser-evidence.json",
-        artifact_dir / "payload" / "operational-browser" / "operational-browser-evidence.json",
-    ]
-    evidence_path = next((p for p in evidence_candidates if p.is_file()), None)
-    if evidence_path is None:
-        matches = sorted(artifact_dir.glob("**/operational-browser-evidence.json"))
-        if matches:
-            evidence_path = matches[0]
-    require(evidence_path is not None, f"operational-browser-evidence.json not found under {artifact_dir}")
+    jobs_meta_path = artifact_dir / "jobs.json"
+    if not jobs_meta_path.is_file():
+        jobs_meta_path = artifact_dir.parent / "jobs.json"
+    require(jobs_meta_path.is_file(), f"jobs.json not found under {artifact_dir}")
+    with open(jobs_meta_path, "r", encoding="utf-8") as f:
+        jobs_meta = json.load(f)
+    require(isinstance(jobs_meta.get("jobs"), list), "Invalid jobs.json: missing jobs list")
+    
+    # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
+    report_data = None
+    evidence_data = None
+    with zipfile.ZipFile(zip_path, 'r') as zf:
+        for name in zf.namelist():
+            if name.endswith("report.json"):
+                report_data = json.loads(zf.read(name).decode("utf-8"))
+            elif name.endswith("operational-browser-evidence.json"):
+                evidence_data = json.loads(zf.read(name).decode("utf-8"))
+    
+    require(report_data is not None, f"report.json not found inside zip {zip_path}")
+    require(evidence_data is not None, f"operational-browser-evidence.json not found inside zip {zip_path}")
 
-    # 3. Validate report.json
-    with open(report_path, "r", encoding="utf-8") as f:
-        report_data = json.load(f)
-
-    cfg = report_data.get("config", {})
-    cfg_meta = cfg.get("metadata", {})
-    ci_meta = cfg_meta.get("ci", {})
-    git_meta = cfg_meta.get("gitCommit", {})
-
+    # 3. Validate report stats
+    stats = report_data.get("stats", {})
     require(
-        ci_meta.get("commitHash") == expected_workflow_def_sha,
-        f"Report workflow definition SHA mismatch: {ci_meta.get('commitHash')}",
-    )
-    require(
-        git_meta.get("hash") == expected_source_sha,
-        f"Report git commit SHA mismatch: {git_meta.get('hash')}",
-    )
-    require(
-        str(expected_run_id) in str(ci_meta.get("buildHref", "")),
-        f"Report buildHref does not reference run {expected_run_id}",
-    )
-
-    # Mandatory statistics check (stats cannot be missing or defaulted)
-    stats = report_data.get("stats")
-    require(
-        isinstance(stats, dict) and len(stats) > 0,
-        f"Report statistics missing in report.json: {stats}",
+        isinstance(stats, dict),
+        f"Missing or invalid stats object in report.json: {stats}",
     )
     require(stats.get("expected") == 16, f"Expected 16 tests in report, got {stats.get('expected')}")
     require(stats.get("unexpected") == 0, f"Unexpected failures in report: {stats.get('unexpected')}")
@@ -514,8 +498,6 @@ def load_and_validate_authoritative_artifact(
     require(stats.get("flaky") == 0, f"Flaky tests in report: {stats.get('flaky')}")
 
     # 4. Validate evidence and extract storage documents + mutations
-    with open(evidence_path, "r", encoding="utf-8") as f:
-        evidence_data = json.load(f)
 
     require(
         evidence_data.get("candidateSha") == expected_source_sha,
@@ -636,15 +618,15 @@ def build_cleanup_plan(
                 "expected_size": doc["file_size"],
                 "expected_sha256": doc["sha256"],
                 "expected_content_type": doc["content_type"],
-                "document_id": doc["document_id"],
-                "submission_id": doc["submission_id"],
+                "documentId": doc["documentId"],
+                "confirmSubmissionId": doc["confirmSubmissionId"],
             }
         )
 
     # Note: fleet.supply_review_events is NEVER deleted.
     # It is an audit record table referenced by foreign key constraints.
     db_targets = {
-        "documents": [doc["document_id"] for doc in validated_docs],
+        "documents": [doc["documentId"] for doc in validated_docs],
         "submissions": list(CANONICAL_OWNED_SUBMISSIONS),
         "fleet_partner_id": EXPECTED_FLEET_PARTNER_ID,
         "guarded_statements": [
@@ -658,7 +640,7 @@ def build_cleanup_plan(
                     "AND fleet_partner_id = $2 FOR UPDATE"
                 ),
                 "params": [
-                    [doc["document_id"] for doc in validated_docs],
+                    [doc["documentId"] for doc in validated_docs],
                     EXPECTED_FLEET_PARTNER_ID,
                 ],
             },
@@ -674,7 +656,7 @@ def build_cleanup_plan(
                     "AND checksum_sha256 = $4"
                 ),
                 "params": [
-                    [doc["document_id"] for doc in validated_docs],
+                    [doc["documentId"] for doc in validated_docs],
                     EXPECTED_FLEET_PARTNER_ID,
                     EXPECTED_FILE_SIZE,
                     EXPECTED_SHA256,
@@ -769,7 +751,7 @@ def build_cleanup_plan(
                     "WHERE document_id = ANY($1::uuid[])"
                 ),
                 "params": [
-                    [doc["document_id"] for doc in validated_docs],
+                    [doc["documentId"] for doc in validated_docs],
                 ],
             }
         ],
@@ -1013,25 +995,32 @@ def inspect_and_validate_gcs_target(
 
     # Creation/update timestamp or stored-at time validation
     custom_meta = meta.get("metadata", {}) if isinstance(meta.get("metadata"), dict) else {}
-    time_created = (
-        meta.get("timeCreated")
-        or meta.get("updated")
-        or custom_meta.get("stored-at")
-    )
-    require(
-        time_created is not None and isinstance(time_created, str) and len(time_created) > 0,
-        f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}",
-    )
-    # The run happened on Oct 9 2026. Reject future or stale times.
-    require(
-        time_created.startswith("2026-10-09T"),
-        f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}",
-    )
+    present_times = []
+    if meta.get("timeCreated"): present_times.append(meta.get("timeCreated"))
+    if meta.get("updated"): present_times.append(meta.get("updated"))
+    if custom_meta.get("stored-at"): present_times.append(custom_meta.get("stored-at"))
+
+    require(len(present_times) > 0, f"Missing timestamp (timeCreated/updated/stored-at) for gs://{bucket}/{key}")
+    first_time = present_times[0]
+    for pt in present_times:
+        require(pt == first_time, f"Conflicting timestamps for gs://{bucket}/{key}")
+    
+    time_created = first_time
+    require(isinstance(time_created, str) and time_created.startswith("2026-10-09T"), f"Stale or invalid object timestamp for gs://{bucket}/{key}: {time_created}")
+    try:
+        dt_str = time_created.replace("Z", "+00:00")
+        dt = datetime.datetime.fromisoformat(dt_str)
+        run_start = datetime.datetime.fromisoformat("2026-10-09T00:00:00+00:00")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        require(run_start <= dt <= now, f"Stale or future timestamp for gs://{bucket}/{key}: {time_created}")
+    except ValueError:
+        raise ValueError(f"Malformed timestamp for gs://{bucket}/{key}: {time_created}")
 
     # Live hash and body verification: MUST read body because Google GCS describe does not provide sha256 natively
     # Rejecting synthetic hash from metadata ensures we actually do media reads
     live_hash = None
     body_bytes = meta.get("body_bytes")
+    is_synthetic = desc.get("synthetic", False)
     if body_bytes is not None:
         if isinstance(body_bytes, str):
             body_bytes = body_bytes.encode("utf-8")
@@ -1094,6 +1083,7 @@ def inspect_and_validate_gcs_target(
         "metageneration": metageneration,
         "metadata": meta,
         "verified_hash": live_hash,
+        "synthetic": is_synthetic,
     }
 
 
@@ -1114,6 +1104,7 @@ def execute_gcs_cleanup(
     validated_targets = []
     for item in targets:
         bucket = item["bucket"]
+        require(bucket == BUCKET, f"Target specifies foreign bucket: {bucket} (expected {BUCKET})")
         key = item["key"]
         desc = runner("describe", bucket, key)
         val = inspect_and_validate_gcs_target(
@@ -1127,16 +1118,17 @@ def execute_gcs_cleanup(
         if val["status"] == "already_deleted_with_receipt":
             receipts.append(val)
         else:
-            receipts.append(
-                {
-                    "key": item["key"],
-                    "status": "planned",
-                    "bucket": item["bucket"],
-                    "generation": val.get("generation"),
-                    "metageneration": val.get("metageneration"),
-                    "action": "dry-run (no mutation)",
-                }
-            )
+            rec = {
+                "key": item["key"],
+                "status": "planned",
+                "bucket": item["bucket"],
+                "generation": val.get("generation"),
+                "metageneration": val.get("metageneration"),
+                "action": "dry-run (no mutation)",
+            }
+            if val.get("synthetic"):
+                rec["synthetic"] = True
+            receipts.append(rec)
     return {
         "status": "success",
         "mode": mode,
@@ -1291,8 +1283,14 @@ def run_cleanup_pipeline(
     )
     db_result = execute_db_cleanup(plan, db_runner=db_runner)
 
+    top_status = "dry_run_complete"
+    if db_result.get("status") == "blocked":
+        top_status = "dry_run_blocked"
+    elif db_result.get("status") == "error":
+        top_status = "dry_run_error"
+
     return {
-        "status": "dry_run_complete",
+        "status": top_status,
         "mode": mode,
         "applied": False,
         "source_sha": EXPECTED_SOURCE_SHA,
@@ -1408,6 +1406,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if action == "describe":
                     return {
                         "status": "ok",
+                        "synthetic": True,
                         "metadata": {
                             "bucket": bucket,
                             "name": key,
@@ -1424,6 +1423,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 elif action == "read_body":
                     return {
                         "status": "ok",
+                        "synthetic": True,
                         "size": EXPECTED_FILE_SIZE,
                         "sha256": EXPECTED_SHA256,
                     }
