@@ -17,6 +17,7 @@ const APPS = [
   "apps/fleet-partner-portal-web",
   "apps/channel-partner-portal-web",
   "apps/bank-console-web",
+  "apps/passenger-app-web",
 ];
 const TARGET_DIRS = ["app", "components", "lib"];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
