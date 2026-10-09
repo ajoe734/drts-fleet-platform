@@ -30,45 +30,66 @@ describe("Passenger BFF Route", () => {
   });
 
   it("rejects path traversal, encoded delimiters, and unauthorized routes", async () => {
+    // Original POST traversal with actual Next-decoded params
+    const traversalReq = new NextRequest("http://localhost/api/passenger-app/auth/otp/%252e%252e/%252e%252e/%252e%252e/admin", { method: "POST", headers: { Origin: "http://localhost" } });
+    const traversalRes = await POST(traversalReq, { params: Promise.resolve({ path: ["auth", "otp", "%2e%2e", "%2e%2e", "%2e%2e", "admin"] }) }); // Next.js decoding gives %2e%2e for double encoded in params
+    expect(traversalRes.status).toBe(404);
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    // Allowed-shaped GET oauth encoded dot
+    const oauthReq = new NextRequest("http://localhost/api/passenger-app/auth/oauth/%252e%252e");
+    const oauthRes = await GET(oauthReq, { params: Promise.resolve({ path: ["auth", "oauth", "%2e%2e"] }) });
+    expect(oauthRes.status).toBe(404);
+    expect(global.fetch).not.toHaveBeenCalled();
+
     const maliciousPaths = [
-      ["auth", "..", "admin"],
-      ["auth", "%2e%2e", "admin"],
-      ["auth", "%252e%252e", "admin"], // double encoded
-      ["auth", "otp", "..%2f..%2fadmin"],
-      ["auth", "otp%2f..%2fadmin"],
-      ["auth", "otp%5c..%5cadmin"],
-      ["admin", "users"],
-      ["auth", "otp-extra", "something"], // prefix collision
-      ["auth", "oauth", "google", "extra"], // extra segments
+      { method: "GET", path: ["auth", "..", "admin"] },
+      { method: "POST", path: ["auth", "%2e%2e", "admin"] },
+      { method: "POST", path: ["auth", "otp", "..%2f..%2fadmin"] },
+      { method: "POST", path: ["auth", "otp%2f..%2fadmin"] },
+      { method: "POST", path: ["auth", "otp%5c..%5cadmin"] },
+      { method: "GET", path: ["admin", "users"] },
+      { method: "POST", path: ["auth", "otp-extra", "something"] }, // prefix collision
+      { method: "GET", path: ["auth", "oauth", "google", "extra"] }, // extra segments
     ];
 
-    for (const p of maliciousPaths) {
-      const req = new NextRequest(`http://localhost/api/passenger-app/${p.join("/")}`);
-      const res = await GET(req, { params: Promise.resolve({ path: p }) });
+    for (const { method, path } of maliciousPaths) {
+      const req = new NextRequest(`http://localhost/api/passenger-app/${path.join("/")}`, { method, headers: { Origin: "http://localhost" } });
+      const handler = method === "POST" ? POST : GET;
+      const res = await handler(req, { params: Promise.resolve({ path }) });
       expect(res.status).toBe(404);
+      expect(global.fetch).not.toHaveBeenCalled();
     }
   });
 
-  it("allows legitimate explicit paths", async () => {
+  it("allows legitimate explicit paths and asserts forwarding", async () => {
     const valid = [
-      { method: "GET", path: ["auth", "providers"] },
-      { method: "POST", path: ["auth", "login"] },
-      { method: "POST", path: ["auth", "otp", "request"] },
-      { method: "POST", path: ["auth", "otp", "verify"] },
-      { method: "GET", path: ["auth", "oauth", "google"] },
-      { method: "POST", path: ["auth", "mfa", "verify"] },
-      { method: "GET", path: ["fares", "quote"] },
-      { method: "POST", path: ["auth", "refresh"] },
-      { method: "POST", path: ["auth", "logout"] },
-      { method: "GET", path: ["account"] },
-      { method: "POST", path: ["rides"] },
+      { method: "GET", path: ["auth", "providers"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
+      { method: "POST", path: ["auth", "login"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) }, // partial tokens -> 503
+      { method: "POST", path: ["auth", "otp", "request"], expectedStatus: 200, mockResponse: new Response(JSON.stringify({ challengeId: "123" }), { status: 200, headers: { "Content-Type": "application/json" } }) },
+      { method: "POST", path: ["auth", "otp", "verify"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) }, // partial tokens -> 503
+      { method: "GET", path: ["auth", "oauth", "google"], expectedStatus: 200, mockResponse: new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }) },
+      { method: "POST", path: ["auth", "mfa", "verify"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) }, // partial tokens -> 503
+      { method: "GET", path: ["fares", "quote"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
+      { method: "POST", path: ["auth", "refresh"], expectedStatus: 401, mockResponse: new Response("ok", { status: 200 }) }, // fails because no refresh token in cookie
+      { method: "POST", path: ["auth", "logout"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
+      { method: "GET", path: ["account"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
+      { method: "POST", path: ["rides"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
     ];
-    global.fetch = vi.fn().mockImplementation(async () => new Response("ok", { status: 200 }));
     for (const v of valid) {
+      global.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("metadata")) return new Response("trusted-identity", { status: 200 });
+        return v.mockResponse;
+      });
       const req = new NextRequest(`http://localhost/api/passenger-app/${v.path.join("/")}`, { method: v.method, headers: { Origin: "http://localhost" } });
       const handler = v.method === "POST" ? POST : GET;
       const res = await handler(req, { params: Promise.resolve({ path: v.path }) });
-      expect(res.status).not.toBe(404); // Should be processed (might be 200 or 403 CSRF if POST missing origin, but we pass Origin)
+      expect(res.status).toBe(v.expectedStatus);
+      expect(res.status).not.toBe(404);
+      // We expect fetch to be called (unless it fails early due to no refresh token)
+      if (v.path.join("/") !== "auth/refresh") {
+        expect(global.fetch).toHaveBeenCalled();
+      }
     }
   });
 
@@ -121,20 +142,29 @@ describe("Passenger BFF Route", () => {
   });
 
   it("fails closed on partial/invalid tokens during login", async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes("metadata")) return new Response("trusted-identity");
-      return Response.json({ accessToken: "sec-acc" }, { status: 200 });
-    });
-    const req = new NextRequest("http://localhost/api/passenger-app/auth/login", {
-      method: "POST",
-      headers: { Origin: "http://localhost" },
-      body: JSON.stringify({})
-    });
-    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "login"] }) });
-    expect(res.status).toBe(503);
-    const data = await res.json();
-    expect(data.error).toBe("INVALID_TOKEN_PAYLOAD");
-    expect(res.cookies.get("pax_session")).toBeUndefined();
+    const invalidPayloads = [
+      { accessToken: "sec-acc" }, // access-only
+      { refreshToken: "sec-ref" }, // refresh-only
+      { accessToken: 123, refreshToken: "sec-ref" }, // non-string (number)
+      { accessToken: "", refreshToken: "" }, // empty string pair
+    ];
+
+    for (const payload of invalidPayloads) {
+      global.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("metadata")) return new Response("trusted-identity");
+        return Response.json(payload, { status: 200 });
+      });
+      const req = new NextRequest("http://localhost/api/passenger-app/auth/login", {
+        method: "POST",
+        headers: { Origin: "http://localhost" },
+        body: JSON.stringify({})
+      });
+      const res = await POST(req, { params: Promise.resolve({ path: ["auth", "login"] }) });
+      expect(res.status).toBe(503);
+      const data = await res.json();
+      expect(data.error).toBe("INVALID_TOKEN_PAYLOAD");
+      expect(res.cookies.get("pax_session")).toBeUndefined();
+    }
   });
 
   it("handles OTP/OAuth initiation response correctly (R10 regression)", async () => {
@@ -194,33 +224,47 @@ describe("Passenger BFF Route", () => {
   });
 
   it("clears both cookies on automatic failed-retry network/401", async () => {
-    let callCount = 0;
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes("metadata.google.internal")) {
-        return new Response("trusted", { status: 200 });
-      }
-      callCount++;
-      if (callCount === 1) { // Normal request -> 401
-        return new Response("Unauthorized", { status: 401 });
-      }
-      if (callCount === 2) { // Refresh request -> success
-        return Response.json({ accessToken: "rotated-acc", refreshToken: "rotated-ref" }, { status: 200 });
-      }
-      if (callCount === 3) { // Retry request -> 401
-        return new Response("Unauthorized", { status: 401 });
-      }
-    });
+    const scenarios = [
+      { networkError: false, status: 401 },
+      { networkError: true, status: 401 } // status 401 will be from the original call before retry
+    ];
+    for (const sc of scenarios) {
+      let callCount = 0;
+      global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+        if (url.includes("metadata.google.internal")) {
+          return new Response("trusted", { status: 200 });
+        }
+        callCount++;
+        if (callCount === 1) { // Normal request -> 401
+          return new Response("Unauthorized", { status: 401 });
+        }
+        if (callCount === 2) { // Refresh request -> success
+          let body: any = {};
+          if (init && init.body) {
+            body = typeof init.body === "string" ? JSON.parse(init.body) : JSON.parse(new TextDecoder().decode(init.body));
+          }
+          expect(body.refreshToken).toBe("stored-ref");
+          expect(init.headers.get("x-serverless-authorization")).toBe("Bearer trusted");
+          return Response.json({ accessToken: "rotated-acc", refreshToken: "rotated-ref" }, { status: 200 });
+        }
+        if (callCount === 3) { // Retry request
+          if (sc.networkError) throw new Error("Network exception");
+          return new Response("Unauthorized", { status: 401 });
+        }
+      });
 
-    const req = new NextRequest("http://localhost/api/passenger-app/account", {
-      headers: { Cookie: "pax_session=expired-access; pax_refresh=stored-ref" }
-    });
-    const res = await GET(req, { params: Promise.resolve({ path: ["account"] }) });
-    
-    expect(res.status).toBe(401);
-    expect(res.cookies.get("pax_session")?.value).toBe("");
-    expect(res.cookies.get("pax_session")?.maxAge).toBe(0);
-    expect(res.cookies.get("pax_refresh")?.value).toBe("");
-    expect(res.cookies.get("pax_refresh")?.maxAge).toBe(0);
+      const req = new NextRequest("http://localhost/api/passenger-app/account", {
+        headers: { Cookie: "pax_session=expired-access; pax_refresh=stored-ref" }
+      });
+      const res = await GET(req, { params: Promise.resolve({ path: ["account"] }) });
+      
+      expect(callCount).toBe(3);
+      expect(res.status).toBe(sc.status);
+      expect(res.cookies.get("pax_session")?.value).toBe("");
+      expect(res.cookies.get("pax_session")?.maxAge).toBe(0);
+      expect(res.cookies.get("pax_refresh")?.value).toBe("");
+      expect(res.cookies.get("pax_refresh")?.maxAge).toBe(0);
+    }
   });
 
   it("handles explicit refresh success and sets cookies (Secure/SameSite)", async () => {
@@ -357,6 +401,28 @@ describe("Passenger BFF Route", () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("metadata")) return new Response("token", { status: 200 });
       throw new Error("Network disconnect");
+    });
+    
+    const req = new NextRequest("http://localhost/api/passenger-app/auth/logout", {
+      method: "POST",
+      headers: { Origin: "http://localhost", Cookie: "pax_session=acc; pax_refresh=stored-ref" },
+      body: "{}"
+    });
+    
+    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "logout"] }) });
+    expect(res.status).toBe(503);
+    const accCookie = res.cookies.get("pax_session");
+    expect(accCookie?.value).toBe("");
+    expect(accCookie?.maxAge).toBe(0);
+    const refCookie = res.cookies.get("pax_refresh");
+    expect(refCookie?.value).toBe("");
+    expect(refCookie?.maxAge).toBe(0);
+  });
+
+  it("clears cookies on logout even if metadata minting fails", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("metadata")) throw new Error("Metadata failure");
+      return new Response("ok", { status: 200 });
     });
     
     const req = new NextRequest("http://localhost/api/passenger-app/auth/logout", {
