@@ -14,7 +14,7 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
 } from "@drts/contracts";
-import type { EmbedContext } from "@/lib/embed-context";
+import type { EmbedContext } from "../lib/embed-context";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
@@ -24,8 +24,8 @@ import {
   embedTripFallbackStates,
   embedVehicles,
   type EmbedTripFallbackScreen,
-} from "@/lib/embed-fixtures";
-import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
+} from "../lib/embed-fixtures";
+import { buildEmbedTheme, getEntryHost } from "../lib/embed-presentation";
 
 export type PassengerEmbedLiveData = {
   activeTrip: ReferralPassengerActiveTripResult | null;
@@ -581,6 +581,7 @@ function EditableField({
   name,
   value,
   onChange,
+  disabled = false,
   type = "text",
   inputMode,
   autoComplete,
@@ -591,6 +592,7 @@ function EditableField({
   name: keyof BookingFormState;
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  disabled?: boolean;
   type?: "text" | "tel";
   inputMode?:
     | "text"
@@ -627,6 +629,7 @@ function EditableField({
           name={name}
           value={value}
           onChange={onChange}
+          disabled={disabled}
           type={type}
           inputMode={inputMode}
           autoComplete={autoComplete}
@@ -1379,7 +1382,7 @@ async function bootstrapDemoSession(context: EmbedContext) {
   }
 }
 
-function BookScreen({ context }: { context: EmbedContext }) {
+export function BookScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
   const [form, setForm] = useState<BookingFormState>(createInitialBookingForm);
   const [error, setError] = useState<string | null>(null);
@@ -1389,6 +1392,11 @@ function BookScreen({ context }: { context: EmbedContext }) {
     createIdempotencyKey("referral-booking"),
   );
   const [isPending, startTransition] = useTransition();
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
     if (context.session || bootstrapped) {
@@ -1423,6 +1431,10 @@ function BookScreen({ context }: { context: EmbedContext }) {
   }
 
   function handleSubmit() {
+    if (!isMounted) {
+      return;
+    }
+
     startTransition(async () => {
       try {
         setError(null);
@@ -1468,6 +1480,8 @@ function BookScreen({ context }: { context: EmbedContext }) {
     });
   }
 
+  const bookingControlsDisabled = !isMounted || isPending;
+
   return (
     <AppShell
       context={context}
@@ -1500,7 +1514,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
             variant="primary"
             iconRight="arrow"
             onClick={handleSubmit}
-            disabled={isPending}
+            disabled={bookingControlsDisabled}
             dataDrtOperation="referral-create"
           />
         </>
@@ -1555,6 +1569,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
             name="pickupAddress"
             value={form.pickupAddress}
             onChange={updateField}
+            disabled={bookingControlsDisabled}
           />
           <EditableField
             theme={theme}
@@ -1563,6 +1578,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
             name="dropoffAddress"
             value={form.dropoffAddress}
             onChange={updateField}
+            disabled={bookingControlsDisabled}
           />
           <div
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
@@ -1574,6 +1590,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
               name="scheduledAt"
               value={form.scheduledAt}
               onChange={updateField}
+              disabled={bookingControlsDisabled}
             />
             <EditableField
               theme={theme}
@@ -1585,6 +1602,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
               type="tel"
               inputMode="tel"
               autoComplete="tel"
+              disabled={bookingControlsDisabled}
             />
           </div>
         </div>
@@ -1632,6 +1650,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
                   name="vehicleType"
                   aria-label={vehicle.name}
                   checked={selected}
+                  disabled={bookingControlsDisabled}
                   onChange={() =>
                     setForm((current) => ({
                       ...current,
@@ -2225,29 +2244,31 @@ function ReceiptScreen({
   // API returns whatever the order's current status is, and this screen must
   // not relabel a cancelled/no-supply/dispatch-failed order as completed just
   // because a receipt object came back.
-  const receipt = liveData?.receipt && liveData.receipt.status === "completed"
-    ? {
-        id: liveData.receipt.orderNo,
-        orderId: liveData.receipt.orderId,
-        date: formatShortDateTime(
-          liveData.receipt.completedAt || liveData.activeTrip?.trip?.createdAt,
-        ),
-        from: liveData.receipt.pickupAddress,
-        to: liveData.receipt.dropoffAddress,
-        vehicle: liveData.receipt.vehicleType,
-        driver: liveData.receipt.driverName || "媒合中",
-        plate: liveData.receipt.plateNumber || "待更新",
-        passenger: liveData.receipt.passengerNameMasked,
-        maskedPhone: liveData.receipt.passengerPhoneMasked,
-        fareBase: formatFare(liveData.receipt.fareBase),
-        fareDistance: formatFare(liveData.receipt.fareDistance),
-        fareTime: formatFare(liveData.receipt.fareTime),
-        total: liveData.receipt.formattedTotal,
-        payment: "社區月結 · 綁定住戶帳號",
-        channel: context.strings.appName,
-        downloadUrl: liveData.receipt.downloadUrl,
-      }
-    : null;
+  const receipt =
+    liveData?.receipt && liveData.receipt.status === "completed"
+      ? {
+          id: liveData.receipt.orderNo,
+          orderId: liveData.receipt.orderId,
+          date: formatShortDateTime(
+            liveData.receipt.completedAt ||
+              liveData.activeTrip?.trip?.createdAt,
+          ),
+          from: liveData.receipt.pickupAddress,
+          to: liveData.receipt.dropoffAddress,
+          vehicle: liveData.receipt.vehicleType,
+          driver: liveData.receipt.driverName || "媒合中",
+          plate: liveData.receipt.plateNumber || "待更新",
+          passenger: liveData.receipt.passengerNameMasked,
+          maskedPhone: liveData.receipt.passengerPhoneMasked,
+          fareBase: formatFare(liveData.receipt.fareBase),
+          fareDistance: formatFare(liveData.receipt.fareDistance),
+          fareTime: formatFare(liveData.receipt.fareTime),
+          total: liveData.receipt.formattedTotal,
+          payment: "社區月結 · 綁定住戶帳號",
+          channel: context.strings.appName,
+          downloadUrl: liveData.receipt.downloadUrl,
+        }
+      : null;
   if (!receipt) {
     return <TripsScreen context={context} liveData={liveData} />;
   }

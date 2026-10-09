@@ -375,6 +375,67 @@ class ReadonlyMetadataTests(unittest.TestCase):
         result = self.run_collector()
         self.assertEqual(set(result["services"]["drts-dev-api"]["images"]), {"0"})
 
+    def implicit_singleton_fixture(self):
+        self.documents["drts-dev-api"]["spec"]["template"]["spec"]["containers"][0].pop("name")
+        self.api_revision()["spec"]["containers"][0]["name"] = "api-1"
+
+    def test_actual_previous_helper_rejects_implicit_service_synthesized_revision_name(self):
+        self.implicit_singleton_fixture()
+        source = subprocess.check_output(["git", "show",
+            "133471e55c9fec78d0dcfb80df9925dd4e8f8c47:operations/verification/read-dev-cloud-metadata.py"],
+            cwd=ROOT, text=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "previous_actual_helper.py"
+            path.write_text(source)
+            spec = importlib.util.spec_from_file_location("previous_actual_helper", path)
+            old = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(old)
+            with patch.object(old.subprocess, "run", self.external_run):
+                with self.assertRaisesRegex(ValueError, "Revision container inventory mismatch"):
+                    old.collect(SHA, DEFINITION)
+        self.assertEqual(len(self.calls), 3)
+        self.calls.clear()
+        result = self.run_collector()
+        self.assertEqual(len(self.calls), 27)
+        api = result["services"]["drts-dev-api"]
+        self.assertTrue(api["implicit_single_container"])
+        self.assertEqual(set(api["images"]), {"0"})
+        self.assertEqual(api["images"]["0"], self.api_revision()["status"]["imageDigest"])
+
+    def test_implicit_singleton_status_digest_uses_actual_revision_name(self):
+        self.implicit_singleton_fixture()
+        self.api_revision()["status"]["containerStatuses"] = [{"name": "api-1",
+            "imageDigest": self.api_revision()["status"]["imageDigest"]}]
+        result = self.run_collector()
+        self.assertEqual(set(result["services"]["drts-dev-api"]["images"]), {"0"})
+        self.api_revision()["status"]["containerStatuses"][0]["name"] = "wrong"
+        self.rejection("Partial revision container digest inventory")
+
+    def test_explicit_singleton_name_cannot_use_implicit_mapping(self):
+        self.api_revision()["spec"]["containers"][0]["name"] = "api-1"
+        self.rejection("Revision container inventory mismatch")
+
+    def test_implicit_singleton_cannot_accept_second_revision_container(self):
+        self.implicit_singleton_fixture()
+        extra = copy.deepcopy(self.api_revision()["spec"]["containers"][0])
+        extra["name"] = "api-2"
+        self.api_revision()["spec"]["containers"].append(extra)
+        self.rejection("Revision container inventory mismatch")
+
+    def test_explicit_numeric_service_name_cannot_forge_implicit_index(self):
+        self.documents["drts-dev-api"]["spec"]["template"]["spec"]["containers"][0]["name"] = "0"
+        self.rejection("Service container inventory mismatch")
+
+    def test_invalid_synthesized_revision_name_is_not_an_alias(self):
+        self.implicit_singleton_fixture()
+        self.api_revision()["spec"]["containers"][0]["name"] = SECRET + ";command"
+        self.rejection("Revision container inventory mismatch")
+
+    def test_named_two_container_scanner_remains_exact(self):
+        revision = self.revisions[self.documents["drts-dev-scanner"]["status"]["latestReadyRevisionName"]]
+        revision["spec"]["containers"][0]["name"] = "gateway-1"
+        self.rejection("Revision container inventory mismatch")
+
     def test_multi_scanner_immutable_revision_refs_without_legacy_primary_status(self):
         revision = self.revisions[self.documents["drts-dev-scanner"]["status"]["latestReadyRevisionName"]]
         revision["status"].pop("imageDigest")

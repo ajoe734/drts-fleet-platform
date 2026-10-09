@@ -100,12 +100,16 @@ def service_view(name, value):
     containers = spec.get("containers", [])
     names = [c.get("name", str(i)) for i, c in enumerate(containers)]
     require(len(containers) == (2 if name == "drts-dev-scanner" else 1) and
-            len(set(names)) == len(names), "Service container inventory mismatch")
+            len(set(names)) == len(names) and
+            all("name" not in c or isinstance(c["name"], str) and
+                re.fullmatch(r"[a-z][a-z0-9-]{0,62}", c["name"]) for c in containers),
+            "Service container inventory mismatch")
     require(containers and all(isinstance(c.get("image"), str) and
             re.fullmatch(r"us-central1-docker\.pkg\.dev/" + PROJECT +
                          r"/drts/[a-z0-9-]+(?:@sha256:[0-9a-f]{64}|:[a-zA-Z0-9_.-]+)", c["image"])
             for c in containers), "Requested image is outside current project")
     return {"service": name, "ready_revision": revision, "identity": expected_identity,
+            "implicit_single_container": len(containers) == 1 and "name" not in containers[0],
             "requested_images": {c.get("name", str(i)): c["image"] for i, c in enumerate(containers)}}
 
 
@@ -121,8 +125,17 @@ def revision_images(view, value):
     require(spec.get("serviceAccountName") == view["identity"], "Revision identity mismatch")
     containers = spec.get("containers", [])
     names = [c.get("name", str(i)) for i, c in enumerate(containers)]
-    require(len(names) == len(set(names)) and set(names) == set(view["requested_images"]),
+    implicit = view["implicit_single_container"]
+    require(len(names) == len(set(names)) and
+            all("name" not in c or isinstance(c["name"], str) and
+                re.fullmatch(r"[a-z][a-z0-9-]{0,62}", c["name"]) for c in containers) and
+            ((implicit and len(names) == 1 and set(view["requested_images"]) == {"0"}) or
+             (not implicit and set(names) == set(view["requested_images"]))),
             "Revision container inventory mismatch")
+    # Cloud Run synthesizes a revision name for an unnamed singleton service.
+    # Only that unambiguous positional case maps to service index0; named/multi
+    # inventories and status digest names remain exact, never fuzzy aliases.
+    service_names = ["0"] if implicit else names
     statuses = status.get("containerStatuses")
     resolved = {}
     if statuses is not None:
@@ -132,7 +145,7 @@ def revision_images(view, value):
         resolved = {c["name"]: c.get("imageDigest") for c in statuses}
     images = {}
     for i, container in enumerate(containers):
-        name = names[i]
+        name = service_names[i]
         requested = view["requested_images"][name]
         repository = re.split(r"[@:]", requested, maxsplit=1)[0]
         revision_reference = container.get("image")
@@ -146,7 +159,7 @@ def revision_images(view, value):
         fallback = status.get("imageDigest") if i == 0 else revision_reference
         if i == 0 and fallback is None and len(containers) > 1:
             fallback = revision_reference
-        digest = resolved.get(name, fallback)
+        digest = resolved.get(names[i], fallback)
         if i == 0 and resolved and status.get("imageDigest") is not None:
             require(digest == status["imageDigest"], "Conflicting revision digests")
         require(isinstance(digest, str) and
