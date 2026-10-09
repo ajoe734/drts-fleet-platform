@@ -20,23 +20,21 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 | U3 P2 design-source gap | `realms.ts` newly adds passenger `light.border=#D0E1F5`, `dark.fg=#60A5FA` and `dark.border=#1E3A8A` | These values were absent from P5 canvas. | Preserved verified P5 `brand=#0B5CAB`, `brandBg=#EAF2FB`, `surface=#FFFFFF`. Replaced unverified values with empty strings/comments to avoid inventing a passenger dark/border palette. |
 
 ### Parent Task Findings (from Review of Parent Task)
-- **R1**: Original stylesheet defect RESOLVED.
-- **R2 (P1)**: PARTIALLY RESOLVED refresh failure boundary. Needs complete shared refresh/retry boundary handling mint/body-read/fetch/parse/HTTP/invalid-token failures.
-- **R3 (P1)**: REJECTED LOGOUT STILL REPORTED SUCCESS. Need to revoke actual ACCOUNT session with current credentials, support documented refresh-only logout semantics, propagate rejected revocation.
-- **R4 (P1)**: ORIGINAL AUTO-REFRESH TRUSTED-IDENTITY DEFECT RESOLVED.
-- **R5 (P1)**: PARTIALLY RESOLVED UI FIXTURE/DESIGN. Need actual marker/location input, represent authoritative registration validity separately. Preserve canvas structure and token requirement. Use tokens from this unblock helper.
-- **R6 (P2)**: PARTIALLY RESOLVED PACKAGE ACCEPTANCE. Add executable portability/export check to CI. Clear/update view-model on logout.
-- **R7 (P2)**: INCOMPLETE/FAILING TESTS AND EVIDENCE. Need to repair tests against production contracts, decode bodies correctly. Add meaningful specified coverage.
+Latest parent reviewer worker_outcomes at 2026-10-09T18:26:23Z reviewed `730a5444bb5194eedf25def23eb55e8c13f0bc9c` against `41af9c5847d860659f110f1a4b96b308f5aee2dd`.
+- **R1, R2, R3, R4, R5, R6**: Verified FIXED in parent. Session/refresh/logout/traversal/white-token/portability fixes are verified and must be preserved.
+- **R7 (P2)**: UNRESOLVED. Exact test/provenance cases remain. Parent must add: retry-call3 network/401 parameterization asserting rotated JWT/trusted body/both deletion cookies; refresh-only/empty/non-string pairs; logout metadata-mint failure; actual Next-decoded POST traversal and allowed-shaped GET oauth encoded-dot rejection with no metadata/API calls; real successful OTP/OAuth/refresh positives and truthful CI/provenance.
+- **R8 (P1)**: UNRESOLVED in parent. Shared-file scope coordination for `packages/ui-tokens/src/realms.ts` and `packages/ui-tokens/src/colors.ts`. This unblock helper task delivers the required authorized tokens, providing the exact shared-file scope coordination. Parent will use the tokens merged by this helper to resolve R8 without rewriting out-of-scope files.
 
 ## Local Checks & Evidence
+- **Helper Identity**: Current helper candidate SHA (`9b6f1a24917d1618b1b7a62d95930d8113407861`, PR #2486) replaces previous adjacent helper candidate (`f2af9693ec7ff438a71d5370fca2a57a6fae8105`, PR #2473) to repair missing commit trailers (U4).
 - Git status: `nothing to commit, working tree clean`
-- `git diff --check HEAD^ HEAD`: exit 0
+- `git diff --check origin/dev...HEAD`: exit 0
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
-- Target PR #2473 verified pointing to `dev` branch.
+- Target PR #2486 opened against `dev` branch with correct LLM-Agent and Task-ID trailers.
 
 ## Unblocked Next Step
 The parent task `PAX-WEB-SHELL-20261009` should now resume and:
-1. Integrate the merged helper branch with a normal merge (`git merge origin/dev`) only if synchronization is necessary after its candidate is reopened. **Do not rebase.**
-2. Retain the correct existing token imports (R5 already fixed in parent using `ui-tokens`), and ensure UI fixtures/design map to authorized tokens as coordinated by Supervisor gateway without inventing new palettes.
-3. Handle failure cleanup/token validation (R2) and revocation semantics (R3).
-4. Implement client portability/view-model (R6) and truthful evidence/tests (R7).
+1. Integrate the merged helper tokens via a normal merge (`git merge origin/dev`) only if synchronization is necessary after its candidate is reopened. **Do not rebase; preserve published history.**
+2. Retain the verified R1-R6 product fixes, including the correct existing token imports (R5 already fixed).
+3. Repair **R7**: Add the exact test/provenance cases specified in the latest parent review (retry-call3 network/401 parameterization, refresh-only/empty/non-string pairs, logout metadata-mint failure, Next-decoded POST traversal, allowed-shaped GET oauth encoded-dot rejection, and real successful positive tests with truthful CI/provenance).
+4. Resolve **R8**: The shared-file conflict is coordinated by Supervisor gateway. The parent task must use the authorized tokens delivered by this helper without rewriting `ui-tokens` files.
