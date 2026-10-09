@@ -1,11 +1,11 @@
 import React, { ReactNode, CSSProperties } from "react";
-import { REALM_COLORS, STATUS_TONES } from "@drts/ui-tokens";
+import { REALM_COLORS, STATUS_TONES, CORE_SURFACES, CORE_FOREGROUNDS } from "@drts/ui-tokens";
 
 const pTokens = REALM_COLORS.passenger.light;
 
 const P5 = {
   bg: STATUS_TONES.neutral.light.bg,
-  surface: "#FFFFFF",
+  surface: CORE_SURFACES.surface,
   ink: STATUS_TONES.neutral.dark.bg,
   mut: STATUS_TONES.neutral.light.fg,
   dim: STATUS_TONES.neutral.dark.fg,
@@ -766,7 +766,7 @@ export function P5Btn({
   };
   const v =
     kind === "primary"
-      ? { ...s, background: danger ? P5.danger : P5.brand, color: "#fff" }
+      ? { ...s, background: danger ? P5.danger : P5.brand, color: CORE_FOREGROUNDS.foregroundInvert }
       : kind === "ghost"
         ? {
             ...s,

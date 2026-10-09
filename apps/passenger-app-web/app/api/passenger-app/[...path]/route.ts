@@ -31,14 +31,28 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function hasUnsafePathSegment(path: string[]) {
-  return path.some(
-    (segment) =>
-      segment.length === 0 ||
-      segment === "." ||
-      segment === ".." ||
-      segment.includes("/") ||
-      segment.includes("\\"),
-  );
+  return path.some((segment) => {
+    if (segment.length === 0) return true;
+    let current = segment;
+    let prev = "";
+    let iter = 0;
+    while (current !== prev && iter < 10) {
+      prev = current;
+      try {
+        current = decodeURIComponent(current);
+      } catch {
+        return true;
+      }
+      iter++;
+    }
+    return (
+      current === "." ||
+      current === ".." ||
+      current.includes("/") ||
+      current.includes("\\") ||
+      current.includes("\0")
+    );
+  });
 }
 
 function isAllowedPassengerPath(path: string[], method: string) {
@@ -46,9 +60,8 @@ function isAllowedPassengerPath(path: string[], method: string) {
   const fullPath = path.join("/");
   if (method === "GET" && fullPath === "auth/providers") return true;
   if (method === "POST" && fullPath === "auth/login") return true;
-  if (method === "POST" && fullPath.startsWith("auth/otp")) return true;
-  if (method === "POST" && fullPath.startsWith("auth/oauth")) return true;
-  if (method === "GET" && fullPath.startsWith("auth/oauth")) return true;
+  if (method === "POST" && path.length === 3 && path[0] === "auth" && path[1] === "otp") return true;
+  if ((method === "POST" || method === "GET") && path.length === 3 && path[0] === "auth" && path[1] === "oauth") return true;
   if (method === "POST" && fullPath === "auth/mfa/verify") return true;
   if (method === "GET" && fullPath === "fares/quote") return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
@@ -175,6 +188,12 @@ async function forward(
     let refreshToken = request.cookies.get("pax_refresh")?.value;
 
     const targetUrl = buildTargetUrl(request, path);
+    if (!targetUrl.pathname.startsWith("/api/passenger-app/")) {
+      return withSecurityHeaders(NextResponse.json(
+        { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
+        { status: 404 }
+      ));
+    }
 
     let initialBodyData: BodyInit | null = null;
     if (!["GET", "HEAD"].includes(method)) {

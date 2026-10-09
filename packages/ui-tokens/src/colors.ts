@@ -14,6 +14,14 @@ export interface ToneRamp {
   readonly border: string;
 }
 
+export const CORE_SURFACES = {
+  surface: "#FFFFFF",
+} as const;
+
+export const CORE_FOREGROUNDS = {
+  foregroundInvert: "#FFFFFF",
+} as const;
+
 export interface AccentRamp extends ToneRamp {
   readonly hi: string;
 }
