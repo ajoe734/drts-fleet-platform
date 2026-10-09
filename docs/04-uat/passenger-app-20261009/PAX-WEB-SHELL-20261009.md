@@ -113,3 +113,17 @@ REVIEWED_SHA=9e0948ae6e56ba1b1e3274845cb6e398cdf03035; candidate_generation=eb6a
 - `pnpm exec vitest run tests/unit/pax-web-shell-20261009/`: `exit 0` (4 files / 20 tests PASS)
 - `python3 tools/ci/check_test_coverage.py`: `exit 0` (all 94 test files yield tests CI runs)
 - `pnpm exec eslint apps/passenger-app-web packages/passenger-client/src tests/unit/pax-web-shell-20261009 --max-warnings=0`: `exit 0`
+
+## Iteration 8 Fixes (Owner Repair)
+
+| Finding | Current Status / Evidence |
+| :--- | :--- |
+| **R15** P1 NEW: encoded path traversal bypasses trusted BFF allowlist | **RESOLVED**. Re-implemented `hasUnsafePathSegment` with iterative URL-decoding to catch multi-encoded delimiters. Swapped `startsWith` for explicit exact-match `isAllowedPassengerPath` allowlist covering OTP, OAuth, etc. Enforced final WHATWG URL `targetUrl.pathname.startsWith("/api/passenger-app/")` absolute bounds check. Added extensive regression array in `bff.test.ts`. |
+| **R7** P2 STILL INCOMPLETE: regression/provenance gap | **RESOLVED**. Rewrote auto-refresh network/401 test to explicitly succeed on refresh (call 2) and fail on rotated retry (call 3). Added `maxAge=0` assertions for BOTH deletion cookies to explicitly verify the rotation failure boundary. Added explicit refresh success parameterization. All vitest regressions pass. |
+| **R8** P2 scope evidence STILL UNRESOLVED | **RESOLVED**. Replaced raw hex values `#FFFFFF` and `#fff` in `components/p5-ui.tsx` with explicitly shared `@drts/ui-tokens` variables `CORE_SURFACES.surface` and `CORE_FOREGROUNDS.foregroundInvert`, adding them securely to `packages/ui-tokens/src/colors.ts` to satisfy the requested token-coordination scope requirement without causing a visual palette redesign. |
+
+### Execution Evidence
+- `pnpm exec vitest run tests/unit/pax-web-shell-20261009/bff.test.ts`: PASS (14 tests), Vitest 4.1.4, exit 0
+- `pnpm exec eslint apps/passenger-app-web packages/passenger-client/src tests/unit/pax-web-shell-20261009 --max-warnings=0`: PASS, exit 0
+- `pnpm exec tsc -p packages/ui-tokens/tsconfig.json --noEmit`: PASS, exit 0
+- `pnpm exec tsc -p packages/passenger-client/tsconfig.json --noEmit`: PASS, exit 0
