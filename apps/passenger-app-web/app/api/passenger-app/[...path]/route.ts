@@ -154,9 +154,12 @@ async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  let isLogout = false;
   try {
     const { path } = await params;
     const method = request.method.toUpperCase();
+    const fullPath = path.join("/");
+    isLogout = fullPath === "auth/logout" && method === "POST";
 
     if (!(await checkCSRF(request))) {
       return withSecurityHeaders(NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }));
@@ -171,7 +174,6 @@ async function forward(
     let token = request.cookies.get("pax_session")?.value;
     let refreshToken = request.cookies.get("pax_refresh")?.value;
 
-    const fullPath = path.join("/");
     const targetUrl = buildTargetUrl(request, path);
 
     let initialBodyData: BodyInit | null = null;
@@ -194,8 +196,10 @@ async function forward(
         throw new Error(`Upstream refresh failed: ${res.status}`);
       }
       const data = await res.json();
-      if (data && typeof data.accessToken === "string" && typeof data.refreshToken === "string" && data.accessToken !== "" && data.refreshToken !== "") {
-        return data as { accessToken: string; refreshToken: string };
+      if (data && typeof data === "object" && ("accessToken" in data || "refreshToken" in data)) {
+        if (typeof data.accessToken === "string" && typeof data.refreshToken === "string" && data.accessToken !== "" && data.refreshToken !== "") {
+          return data as { accessToken: string; refreshToken: string };
+        }
       }
       throw new Error("Invalid tokens received");
     }
@@ -286,20 +290,35 @@ async function forward(
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
       const contentType = upstream.headers.get("content-type") || "";
       if (contentType.includes("application/json")) {
+        let parsed;
         try {
           const text = await upstream.text();
           finalBody = text;
-          const parsed = JSON.parse(text);
-          if (parsed && typeof parsed === "object" && parsed.accessToken && parsed.refreshToken) {
+          parsed = JSON.parse(text);
+        } catch {
+          // ignore parsing error, finalBody stays as text
+        }
+        if (parsed && typeof parsed === "object") {
+          const hasAccess = "accessToken" in parsed;
+          const hasRefresh = "refreshToken" in parsed;
+          if (hasAccess || hasRefresh) {
+            if (
+              typeof parsed.accessToken === "string" &&
+              typeof parsed.refreshToken === "string" &&
+              parsed.accessToken !== "" &&
+              parsed.refreshToken !== ""
+            ) {
               loginData = parsed;
               const redacted = { ...parsed };
               delete redacted.accessToken;
               delete redacted.refreshToken;
               finalBody = JSON.stringify(redacted);
               responseHeaders.set("Content-Type", "application/json");
+            } else {
+              const resp = NextResponse.json({ error: "INVALID_TOKEN_PAYLOAD" }, { status: 503 });
+              return withSecurityHeaders(resp);
+            }
           }
-        } catch {
-          // ignore
         }
       }
     }
@@ -334,13 +353,9 @@ async function forward(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
       { status: 503 }
     );
-    // DO NOT indiscriminately clear cookies on a 503 from normal path unless it was an explicit refresh (which is handled above) or auto-refresh (which is handled above and sets didClearTokens)
-    // Wait, reviewer said "As per R2, clear both cookies on network/parse/invalid-token failures which includes any unhandled error inside doRefresh which bubbles up here IF it was triggered during an auto-refresh or explicitly"
-    // Wait, `doRefresh` catches its own errors inside the explicit refresh block (returns 401 and deletes)
-    // and inside the auto-refresh block (sets `didClearTokens = true`).
-    // If a normal request fails due to `applyUpstreamAuth` throwing (e.g. metadata fetch failed), it throws here. 
-    // Should we clear cookies? No, it's just a 503.
-    // So here we only return 503.
+    if (isLogout) {
+      deleteCookies(resp);
+    }
     return withSecurityHeaders(resp);
   }
 }
