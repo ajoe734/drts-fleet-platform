@@ -65,6 +65,8 @@ DRTS 責任：選對 entry／住戶、生成必要且最小事件、簽章、可
 共同責任：至少一次原生裝置整合驗收，以及故障聯絡／處置。
 
 首版不新增第一方乘客 App，不重建 retired passenger-web，不讓 DRTS 持有夥伴 APNs/FCM 憑證與 device token，不加入 SMS／CTI 或行銷推播。外部叫車平台原生負責通知的 forwarded 訂單不轉送這條通知鏈。
+**[2026-10-09 附註]** 本節「首版不新增第一方乘客 App」之限制已被 `SD-DP-20261009-001` 推翻，但「不重建 retired passenger-web」的禁令仍保留（將建立新的 `apps/passenger-app-web`）。
+
 
 前景行程頁仍用既有即時讀取／SSE；背景通知不能取代頁面的正式資料。通知回執也不等於 P-5 揭露頁已顯示。
 
