@@ -7,6 +7,7 @@
 - `owner`: `Human / system-design via accepted 2026-04-22 review`
 - `date`: `2026-04-22`
 - `status`: `accepted`
+- **附註 (2026-10-09)**：本文件關於「不做第一方乘客 App」及「不提供乘客登入/叫車/收據中心」的限制，已由新決策 [SD-DP-20261009-001-first-party-passenger-app.md](./SD-DP-20261009-001-first-party-passenger-app.md) 取代。其餘針對 Phase 1 B2B2C 的 topology 限制維持歷史紀錄。
 - `affected_docs`:
   - `ROADMAP.md`
   - `PHASE1_OPEN_QUESTIONS.md`
