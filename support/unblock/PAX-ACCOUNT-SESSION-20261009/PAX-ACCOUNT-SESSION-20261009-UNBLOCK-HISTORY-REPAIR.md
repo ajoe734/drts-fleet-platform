@@ -7,7 +7,7 @@ Parent: `PAX-ACCOUNT-SESSION-20261009`.
 ## Initial audit diagnosis (18:48 UTC)
 
 The initial audit and coordination gate below preserve the original findings.
-The 22:58 UTC continuation at the end records their subsequent resolution and
+The 22:54 UTC continuation at the end records their subsequent resolution and
 the helper's CI repair; the initial blocked disposition is historical.
 
 No parent branch divergence, foreign PR commits, missing commit trailers or
@@ -214,7 +214,7 @@ the expected helper branch. The final documentation head and PR are recorded
 by CLI progress/blocker, after their live identities are compared. No parent
 commit, branch, PR head or product file was changed by this helper.
 
-## Dispatch continuation: coordination resolved and helper CI repair (22:58 UTC)
+## Dispatch continuation: coordination resolved and helper CI repair (22:54 UTC)
 
 The active-release CLI now records the Supervisor's explicit helper disposition
 as `resolved_parent_status=in_progress`, `resolved_parent_waiting_for=Codex`,
@@ -245,7 +245,7 @@ failed its Canonical consistency job. The downloaded full failed-job log and
 the actual local checker both identify exactly one `cited-paths` finding: the
 parent ledger was cited as a local file although it exists only on the parent
 branch. A Git object existing on another branch does not satisfy the helper's
-checked-out-file contract. The release's `cmd_reconcile_candidate` failure path
+checked-out-file contract. The release's `command_reconcile_candidate` failure path
 returns the helper to `in_progress` and completes its handoff, so this dispatch
 repairs the failed candidate instead of resubmitting it unchanged.
 
