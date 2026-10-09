@@ -1195,7 +1195,12 @@ def preflight_db_cleanup(
     )
     rev_res = db_runner(review_check_sql, [submissions])
     if rev_res.get("status") != "ok":
-        raise RuntimeError(f"Database error during review events preflight: {rev_res}")
+        return {
+            "status": "blocked",
+            "concrete_blocker": f"Database error during review events preflight: {rev_res.get('error', 'unknown error')}",
+            "plan_prepared": True,
+            "receipts": [],
+        }
 
     if "count" not in rev_res or not isinstance(rev_res["count"], int):
         return {

@@ -516,7 +516,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
         self.plan_apply = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
 
     def test_dry_run_never_executes_delete(self):
-        mock_db = MagicMock(return_value={"status": "ok", "rows_affected": 0})
+        mock_db = MagicMock(return_value={"status": "ok", "rows_affected": 0, "count": 0})
         res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
         self.assertEqual(res["status"], "dry_run_inspected")
         # Verify mock_db was only called with SELECT statements, NEVER DELETE
