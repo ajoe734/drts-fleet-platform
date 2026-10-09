@@ -15,11 +15,22 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 ### Helper Scope Findings
 | Finding / acceptance | production source and call path | old -> current evidence | repair boundary and required regressions / limits |
 |---|---|---|---|
-| U1 P1 integration/scope | Live PR #2486 targets `dev`, head 1cbef7c matched exactly twice. | PR #2473 targeted main, 1247 commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
-| U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Current helper candidate is PR #2486 with authoritative head `1cbef7c` (which replaces historical anchor `9b6f1a`). | Old artifact missed R7, R8 and used mixed current/historical identities. | Appended retained prior reviews (below). Corrected active/historical identities. Explicitly linked final identity through immutable handoff and exact remote PR head `1cbef7c`. Parent next updated to normal merge only. |
+| U1 P1 integration/scope | Live PR #2486 targets `dev`, head bff72315a11991513a351857563e7159c23ec852 matched exactly twice. | PR #2473 targeted main, 1247 commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
+| U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Document correctly cites FULL latest parent review at 2026-10-09T18:26:23Z, and appended retained helper review below. | Old artifact missed R7, R8 and used mixed current/historical identities. | Both parent concrete next and helper resolved_parent_next updated via CLI/canonical metadata. Parent next code unit remains R7. Rebase instruction updated to normal merge only. |
 | U3 P2 design-source gap | `realms.ts` passenger palette. | Unverified `dark` and `border` values were absent from P5 canvas. | Preserved verified P5 `brand=#0B5CAB`, `brandBg=#EAF2FB`, `surface=#FFFFFF`. Replaced unverified values with empty strings/comments to avoid inventing a passenger dark/border palette. VERIFIED RETAINED. |
-| U4 P1 required trailers | Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22` exits 0. | Previous invalid ancestry missing `Reviewer` trailer. | Verified 2 commits OK on PR #2486 branch. Both commits have LLM-Agent, Task-ID, and Reviewer. Same-SHA hosted Commit trailers job 114064036045 SUCCESS. VERIFIED FIXED. |
-| U5 P2 NEW consumer composition gap | `passenger.dark.bg` was historically `#07437E` (consumed by parent light-screen header), but is now `""`. | Parent candidate relied on invented dark-mode palette for its light-screen header. | Explicitly documented this remaining integration/design-contract blocker. Parent must coordinate concrete parent-next/disposition through current-release Supervisor gateway and address this unresolved consumer requirement. |
+| U4 P1 required trailers | Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head bff72315a11991513a351857563e7159c23ec852` exit0. | Historical 1cbef7c checks: 2 commits OK, job 114064036045 SUCCESS. | Verified 4 commits OK. Commit trailers job 114072203044 SUCCESS (for 3 commits, pending for 4). VERIFIED FIXED. |
+| U5 P2 NEW consumer composition gap | Artifact explicitly mentions the missing `#07437E` light-screen header contract. | Canonical Passenger.html loads `#07437E` into `brandDark`, but P5 uses it as a light-screen header/phone background. Helper supplied empty `dark.bg`. | Left product sources unchanged. Coordinated U5 consumer blocker. Parent next updated via canonical metadata to include consuming a properly named canvas-backed light-header token. |
+
+### Appended Retained Helper Reviews
+
+#### Codex Independent Review REOPEN (2026-10-09T23:38:41Z, generation 2e88bf4ee8f8453fb33ffbc848ece594)
+- Current helper candidate / exact remote PR head = `bff72315a11991513a351857563e7159c23ec852`.
+- Adjacent independently reviewed helper: `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`, generation `7130fdb84afc4ae9b4b462d0acc61cbc`.
+- **U1 scoped delivery RETAINED:** PR2486 OPEN targets dev, 3 commits, exact candidate head, exactly the 3 authorized files (+60/-1). Historical PR2473 is explicitly historical.
+- **U3 unauthorized palette removal RETAINED:** Token sources unchanged from previous candidate. Unsupported passenger border/dark entries remain explicit empty placeholders.
+- **U4 required trailers VERIFIED:** `check_commit_trailers.py` against `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit 0, 3 commits OK. Hosted CI job 114072203044 SUCCESS.
+- **U2 parent R7 next/normal-merge correction RETAINED:** Parent next and helper resolved_parent_next match R7 cases and verified product fixes.
+- **U5 artifact disclosure subfinding FIXED:** Artifact now explicitly mentions the missing `#07437E` light-screen header contract.
 
 ### Parent Task Findings (from Review of Parent Task)
 Latest parent reviewer worker_outcomes at 2026-10-09T18:26:23Z reviewed `730a5444bb5194eedf25def23eb55e8c13f0bc9c` against `41af9c5847d860659f110f1a4b96b308f5aee2dd`.
@@ -28,12 +39,13 @@ Latest parent reviewer worker_outcomes at 2026-10-09T18:26:23Z reviewed `730a544
 - **R8 (P1)**: UNRESOLVED in parent. Shared-file scope coordination for `packages/ui-tokens/src/realms.ts` and `packages/ui-tokens/src/colors.ts`. This unblock helper task delivers the required authorized tokens, providing the exact shared-file scope coordination. Parent will use the tokens merged by this helper to resolve R8 without rewriting out-of-scope files.
 
 ## Local Checks & Evidence
-- **Helper Identity**: Current helper candidate SHA (`1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`, PR #2486) replaces the historical PR #2473. The earlier v2 anchor `9b6f1a24917d1618b1b7a62d95930d8113407861` is historical.
+- **Helper Identity**: Current helper candidate SHA (`bff72315a11991513a351857563e7159c23ec852`, PR #2486) replaces the historical PR #2473. The earlier v2 anchor `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22` is historical.
 - Git status: `nothing to commit, working tree clean`
-- `git diff --check HEAD^ HEAD`: exit 0
+- `git diff --check origin/dev...HEAD`: exit 0; `git diff --check HEAD^ HEAD`: exit 0
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
-- Target PR #2486 opened against `dev` branch with correct LLM-Agent and Task-ID trailers.
-- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22` exit 0. Commit trailers job 114064036045 SUCCESS.
+- Target PR #2486 verified pointing to `dev` branch.
+- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head bff72315a11991513a351857563e7159c23ec852` exit 0 (4 commits OK).
+- Commit trailers job 114072203044 SUCCESS (for 3 commits, pending for 4).
 
 ## Unblocked Next Step
 The parent task `PAX-WEB-SHELL-20261009` should now resume and:
