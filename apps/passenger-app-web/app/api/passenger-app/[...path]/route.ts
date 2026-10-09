@@ -45,6 +45,11 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (hasUnsafePathSegment(path)) return false;
   const fullPath = path.join("/");
   if (method === "GET" && fullPath === "auth/providers") return true;
+  if (method === "POST" && fullPath === "auth/login") return true;
+  if (method === "POST" && fullPath.startsWith("auth/otp")) return true;
+  if (method === "POST" && fullPath.startsWith("auth/oauth")) return true;
+  if (method === "GET" && fullPath.startsWith("auth/oauth")) return true;
+  if (method === "POST" && fullPath === "auth/mfa/verify") return true;
   if (method === "GET" && fullPath === "fares/quote") return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
@@ -81,7 +86,7 @@ async function mintMetadataIdentityToken(audience: string) {
   metadataUrl.searchParams.set("audience", audience);
   metadataUrl.searchParams.set("format", "full");
   try {
-    const response = await fetch(metadataUrl, {
+    const response = await fetch(metadataUrl.toString(), {
       cache: "no-store",
       headers: { "Metadata-Flavor": "Google" },
     });
@@ -126,6 +131,20 @@ async function checkCSRF(request: NextRequest) {
   }
 }
 
+function withSecurityHeaders(response: NextResponse) {
+  response.headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+  );
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains"
+  );
+  return response;
+}
+
 async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
@@ -134,26 +153,74 @@ async function forward(
   const method = request.method.toUpperCase();
 
   if (!(await checkCSRF(request))) {
-    return NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 });
+    return withSecurityHeaders(NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }));
   }
   if (!isAllowedPassengerPath(path, method)) {
-    return NextResponse.json(
+    return withSecurityHeaders(NextResponse.json(
       { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
-      { status: 404 },
-    );
+      { status: 404 }
+    ));
   }
 
   let token = request.cookies.get("pax_session")?.value;
   const refreshToken = request.cookies.get("pax_refresh")?.value;
 
+  const fullPath = path.join("/");
+
   // handle logout
-  if (path.join("/") === "auth/logout" && method === "POST") {
-    const resp = new NextResponse(JSON.stringify({ success: true }), {
-      status: 200,
-    });
+  if (fullPath === "auth/logout" && method === "POST") {
+    const targetUrl = buildTargetUrl(request, path);
+    const headers = new Headers();
+    await applyUpstreamAuth(headers, targetUrl, token);
+    try {
+      await fetch(targetUrl.toString(), { method: "POST", headers });
+    } catch {
+      // ignore
+    }
+    const resp = NextResponse.json({ success: true }, { status: 200 });
     resp.cookies.delete("pax_session");
     resp.cookies.delete("pax_refresh");
-    return resp;
+    return withSecurityHeaders(resp);
+  }
+
+  // handle refresh
+  if (fullPath === "auth/refresh" && method === "POST") {
+    if (!refreshToken) {
+      const resp = NextResponse.json({ error: "NO_REFRESH_TOKEN" }, { status: 401 });
+      resp.cookies.delete("pax_session");
+      resp.cookies.delete("pax_refresh");
+      return withSecurityHeaders(resp);
+    }
+    const targetUrl = buildTargetUrl(request, path);
+    const headers = new Headers({ "Content-Type": "application/json" });
+    await applyUpstreamAuth(headers, targetUrl);
+    try {
+      const upstream = await fetch(targetUrl.toString(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ refreshToken })
+      });
+      if (upstream.ok) {
+        const data = await upstream.json();
+        const resp = NextResponse.json({ success: true }, { status: 200 });
+        const opts = {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax" as const,
+          path: "/",
+        };
+        resp.cookies.set("pax_session", data.accessToken, opts);
+        resp.cookies.set("pax_refresh", data.refreshToken, opts);
+        return withSecurityHeaders(resp);
+      } else {
+        const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+        resp.cookies.delete("pax_session");
+        resp.cookies.delete("pax_refresh");
+        return withSecurityHeaders(resp);
+      }
+    } catch {
+      return withSecurityHeaders(NextResponse.json({ error: "PASSENGER_AUTHORITY_UNAVAILABLE" }, { status: 503 }));
+    }
   }
 
   const targetUrl = buildTargetUrl(request, path);
@@ -216,23 +283,39 @@ async function forward(
     }
 
     const responseHeaders = copyHeaders(upstream.headers);
-    responseHeaders.set(
-      "Content-Security-Policy",
-      "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
-    );
-    responseHeaders.set("X-Content-Type-Options", "nosniff");
-    responseHeaders.set("X-Frame-Options", "DENY");
-    responseHeaders.set(
-      "Strict-Transport-Security",
-      "max-age=31536000; includeSubDomains",
-    );
+    let finalBody = upstream.body;
+    const isLogin = fullPath === "auth/login" || fullPath.startsWith("auth/otp") || fullPath === "auth/mfa/verify" || fullPath.startsWith("auth/oauth");
+    
+    let loginData = null;
+    if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
+      try {
+        loginData = await upstream.json();
+        const redacted = { ...loginData };
+        delete redacted.accessToken;
+        delete redacted.refreshToken;
+        finalBody = JSON.stringify(redacted) as any;
+        responseHeaders.set("Content-Type", "application/json");
+      } catch {
+        // ignore JSON parsing error
+      }
+    }
 
-    const nextResponse = new NextResponse(upstream.body, {
+    const nextResponse = new NextResponse(finalBody, {
       status: upstream.status,
       headers: responseHeaders,
     });
+    withSecurityHeaders(nextResponse);
 
-    if (refreshedTokens) {
+    if (loginData && loginData.accessToken && loginData.refreshToken) {
+      const opts = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax" as const,
+        path: "/",
+      };
+      nextResponse.cookies.set("pax_session", loginData.accessToken, opts);
+      nextResponse.cookies.set("pax_refresh", loginData.refreshToken, opts);
+    } else if (refreshedTokens) {
       const opts = {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -256,10 +339,10 @@ async function forward(
 
     return nextResponse;
   } catch {
-    return NextResponse.json(
+    return withSecurityHeaders(NextResponse.json(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
-      { status: 503 },
-    );
+      { status: 503 }
+    ));
   }
 }
 

@@ -72,7 +72,7 @@
     },
     {
       "id": "app-build-and-deploy-config",
-      "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|platform-admin-web|referral-embed-web|tenant-console-web)/(?:Dockerfile|next\\.config\\.[^/]+|tsconfig(?:\\.[^/]+)?\\.json|eas\\.json|app(?:\\.config\\.ts|\\.json))$",
+      "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|passenger-app-web|platform-admin-web|referral-embed-web|tenant-console-web)/(?:Dockerfile|next\\.config\\.[^/]+|tsconfig(?:\\.[^/]+)?\\.json|eas\\.json|app(?:\\.config\\.ts|\\.json))$",
       "classification": "product_operations",
       "status": "active"
     },

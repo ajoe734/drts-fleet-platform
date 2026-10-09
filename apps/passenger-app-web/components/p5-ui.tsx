@@ -1,7 +1,7 @@
 import React, { ReactNode, CSSProperties } from "react";
 import { REALM_COLORS, STATUS_TONES } from "@drts/ui-tokens";
 
-const pTokens = REALM_COLORS.passenger.light;
+const pTokens = REALM_COLORS.tenant.light;
 
 const P5 = {
   bg: "#F3F5F8",
@@ -12,7 +12,7 @@ const P5 = {
   line: STATUS_TONES.neutral.light.bg,
   lineSoft: "#EDF1F5",
   brand: pTokens.fg,
-  brandDark: REALM_COLORS.passenger.dark.bg, // deep blue
+  brandDark: REALM_COLORS.tenant.dark.bg, // deep blue / teal
   brandBg: pTokens.bg,
   ok: STATUS_TONES.success.light.fg,
   okBg: STATUS_TONES.success.light.bg,
@@ -226,8 +226,12 @@ export function P5Card({
 
 export function P5Map({
   state = "fresh",
+  pickupAddress,
+  updateNotice,
 }: {
   state?: "fresh" | "stale" | "missing";
+  pickupAddress?: string;
+  updateNotice?: string;
 }) {
   return (
     <div
@@ -322,7 +326,7 @@ export function P5Map({
           color: P5.mut,
         }}
       >
-        上車：臺北市信義區松仁路 100 號
+        上車：{pickupAddress || "載入中..."}
       </div>
       {state === "fresh" && (
         <div
@@ -338,7 +342,7 @@ export function P5Map({
             fontWeight: 600,
           }}
         >
-          位置更新於 5 秒前
+          {updateNotice || "位置已更新"}
         </div>
       )}
       {state === "stale" && (
@@ -388,18 +392,28 @@ export function P5Eta({
 }
 
 export function P5VehicleCard({
-  rating = "rated",
+  rating,
+  ratingScore,
+  ratingCount,
   dimmed,
   plateChanged,
-  plate = "BKR-2208",
-  driver = "吳明翰",
+  plate,
+  driver,
+  carModel,
+  carDetails,
+  registration,
   tag,
 }: {
   rating?: "rated" | "new";
+  ratingScore?: string;
+  ratingCount?: number;
   dimmed?: boolean;
   plateChanged?: boolean;
   plate?: string;
   driver?: string;
+  carModel?: string;
+  carDetails?: string;
+  registration?: string;
   tag?: ReactNode;
 }) {
   return (
@@ -414,10 +428,10 @@ export function P5VehicleCard({
       >
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>
-            Toyota Corolla Altis
+            {carModel || "載入中..."}
           </div>
           <div style={{ fontSize: 11.5, color: P5.mut, marginTop: 2 }}>
-            2024 年出廠 · 4 門 · 珍珠白
+            {carDetails || ""}
           </div>
         </div>
         <div style={{ textAlign: "center" }}>
@@ -434,7 +448,7 @@ export function P5VehicleCard({
               background: P5.bg,
             }}
           >
-            {plate}
+            {plate || "---"}
           </div>
           {plateChanged ? (
             <div
@@ -478,7 +492,7 @@ export function P5VehicleCard({
             flexShrink: 0,
           }}
         >
-          {driver.slice(0, 1)}
+          {driver ? driver.slice(0, 1) : "-"}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -489,7 +503,7 @@ export function P5VehicleCard({
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 14, fontWeight: 700 }}>{driver}</span>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>{driver || "未知"}</span>
             <span
               style={{
                 display: "inline-flex",
@@ -516,7 +530,7 @@ export function P5VehicleCard({
               fontFamily: P5.mono,
             }}
           >
-            北市計字第12***67號 · 有效至 2027/12/31
+            {registration || ""}
           </div>
           <div style={{ marginTop: 6 }}>
             {rating === "rated" ? (
@@ -536,9 +550,9 @@ export function P5VehicleCard({
                   }}
                 >
                   <P5Icon name="star" size={13} style={{ fill: "#C7860B" }} />
-                  <b style={{ fontSize: 15, color: P5.ink }}>4.9</b>
+                  <b style={{ fontSize: 15, color: P5.ink }}>{ratingScore || "0.0"}</b>
                 </span>
-                <span style={{ fontSize: 11, color: P5.mut }}>328 則評價</span>
+                <span style={{ fontSize: 11, color: P5.mut }}>{ratingCount || 0} 則評價</span>
               </span>
             ) : (
               <span
@@ -570,8 +584,20 @@ export function P5VehicleCard({
 
 export function P5RouteFare({
   mode = "range",
+  pickup,
+  dropoff,
+  distance,
+  duration,
+  fareRange,
+  fareFixed,
 }: {
   mode?: "range" | "fixed" | "anomaly";
+  pickup?: string;
+  dropoff?: string;
+  distance?: string;
+  duration?: string;
+  fareRange?: string;
+  fareFixed?: string;
 }) {
   return (
     <P5Card title="預估路線與車資">
@@ -612,20 +638,20 @@ export function P5RouteFare({
         </div>
         <div style={{ flex: 1, fontSize: 12.5 }}>
           <div style={{ fontWeight: 600, marginBottom: 12 }}>
-            信義區松仁路 100 號
+            {pickup || "-"}
           </div>
-          <div style={{ fontWeight: 600 }}>中山區南京東路二段 100 號</div>
+          <div style={{ fontWeight: 600 }}>{dropoff || "-"}</div>
         </div>
         <div style={{ fontSize: 11, color: P5.mut, textAlign: "right" }}>
-          約 6.2 公里
-          <br />約 18 分鐘
+          {distance || ""}
+          <br />{duration || ""}
         </div>
       </div>
       <div style={{ borderTop: "1px solid " + P5.lineSoft, paddingTop: 10 }}>
         {mode === "range" && (
           <>
             <div style={{ fontSize: 16.5, fontWeight: 800 }}>
-              預估車資 NT$ 320–380
+              {fareRange || "預估車資計算中"}
             </div>
             <div style={{ fontSize: 11, color: P5.mut, marginTop: 2 }}>
               依計費表實際金額收費
@@ -635,7 +661,7 @@ export function P5RouteFare({
         {mode === "fixed" && (
           <>
             <div style={{ fontSize: 16.5, fontWeight: 800 }}>
-              本趟應付 NT$ 850
+              {fareFixed || "本趟應付計算中"}
             </div>
             <div style={{ fontSize: 11, color: P5.mut, marginTop: 2 }}>
               固定報價 · 已確認
@@ -681,11 +707,13 @@ export function P5Btn({
   icon,
   children,
   danger,
+  onClick,
 }: {
   kind?: "primary" | "secondary" | "ghost";
   icon?: string;
   children: ReactNode;
   danger?: boolean;
+  onClick?: (() => void) | undefined;
 }) {
   const s: CSSProperties = {
     display: "flex",
@@ -717,7 +745,7 @@ export function P5Btn({
             borderColor: danger ? P5.dangerBd : P5.line,
           };
   return (
-    <button style={v}>
+    <button style={v} onClick={onClick}>
       {icon && <P5Icon name={icon} size={15} />}
       {children}
     </button>
@@ -725,11 +753,15 @@ export function P5Btn({
 }
 
 export function P5Actions({
-  cancelNote = "2:15 內取消不收費",
+  cancelNote,
   contact = "ready",
+  onContact,
+  onCancel,
 }: {
   cancelNote?: string;
   contact?: "ready" | "loading" | "hidden";
+  onContact?: () => void;
+  onCancel?: () => void;
 }) {
   return (
     <div
@@ -742,16 +774,16 @@ export function P5Actions({
       }}
     >
       {contact === "ready" && (
-        <P5Btn kind="primary" icon="phone">
+        <P5Btn kind="primary" icon="phone" onClick={onContact}>
           聯絡司機
         </P5Btn>
       )}
       {contact === "loading" && (
-        <P5Btn kind="primary" icon="phone">
+        <P5Btn kind="primary" icon="phone" onClick={onContact}>
           正在建立安全通話…
         </P5Btn>
       )}
-      <P5Btn icon="x" danger>
+      <P5Btn icon="x" danger onClick={onCancel}>
         取消行程
       </P5Btn>
       {cancelNote && (

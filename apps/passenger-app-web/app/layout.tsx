@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import "@drts/ui-tokens/globals.css";
+import "./globals.css";
 
 export const metadata = {
   title: "智行叫車",

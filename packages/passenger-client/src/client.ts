@@ -68,4 +68,17 @@ export class PassengerClient {
       `/api/passenger-app/fares/quote?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`,
     );
   }
+
+  async login(request: import("./types.js").LoginRequest): Promise<import("./types.js").LoginResponse> {
+    return this.request<import("./types.js").LoginResponse>("/api/passenger-app/auth/login", {
+      method: "POST",
+      body: JSON.stringify(request)
+    });
+  }
+
+  async logout(): Promise<void> {
+    return this.request<void>("/api/passenger-app/auth/logout", {
+      method: "POST"
+    });
+  }
 }

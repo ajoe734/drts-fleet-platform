@@ -30,3 +30,13 @@ export interface FareQuote {
     surcharges: number;
   };
 }
+
+export interface LoginRequest {
+  challengeId: string;
+  otp: string;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  account?: PassengerAccount;
+}

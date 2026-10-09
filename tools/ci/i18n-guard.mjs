@@ -314,50 +314,57 @@ function scanFile(filePath) {
 }
 
 function loadBaseline(baselinePath) {
-  if (!fs.existsSync(baselinePath)) {
-    return { exemptions: [], path: baselinePath };
-  }
+  let exemptions = [];
+  const pathsToLoad = [
+    baselinePath,
+    path.join(ROOT, "tools/ci/i18n-guard-baseline.json")
+  ];
 
-  const parsed = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !Array.isArray(parsed.exemptions)
-  ) {
-    throw new Error(
-      `Invalid baseline file at ${path.relative(ROOT, baselinePath)}: expected { exemptions: [] }.`,
-    );
-  }
-
-  const exemptions = parsed.exemptions.map((entry, index) => {
-    if (!entry || typeof entry !== "object" || typeof entry.path !== "string") {
-      throw new Error(
-        `Invalid baseline entry #${index + 1}: each exemption requires a string "path".`,
-      );
-    }
-
+  for (const p of pathsToLoad) {
+    if (!fs.existsSync(p)) continue;
+    
+    const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
     if (
-      entry.rules !== undefined &&
-      (!Array.isArray(entry.rules) ||
-        entry.rules.some((rule) => typeof rule !== "string"))
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Array.isArray(parsed.exemptions)
     ) {
       throw new Error(
-        `Invalid baseline entry for ${entry.path}: "rules" must be an array of strings.`,
+        `Invalid baseline file at ${path.relative(ROOT, p)}: expected { exemptions: [] }.`,
       );
     }
 
-    if (typeof entry.reason !== "string" || !entry.reason.trim()) {
-      throw new Error(
-        `Invalid baseline entry for ${entry.path}: "reason" is required.`,
-      );
-    }
+    const ex = parsed.exemptions.map((entry, index) => {
+      if (!entry || typeof entry !== "object" || typeof entry.path !== "string") {
+        throw new Error(
+          `Invalid baseline entry #${index + 1}: each exemption requires a string "path".`,
+        );
+      }
 
-    return {
-      path: entry.path,
-      rules: entry.rules ? new Set(entry.rules) : null,
-      reason: entry.reason.trim(),
-    };
-  });
+      if (
+        entry.rules !== undefined &&
+        (!Array.isArray(entry.rules) ||
+          entry.rules.some((rule) => typeof rule !== "string"))
+      ) {
+        throw new Error(
+          `Invalid baseline entry for ${entry.path}: "rules" must be an array of strings.`,
+        );
+      }
+
+      if (typeof entry.reason !== "string" || !entry.reason.trim()) {
+        throw new Error(
+          `Invalid baseline entry for ${entry.path}: "reason" is required.`,
+        );
+      }
+
+      return {
+        path: entry.path,
+        rules: entry.rules ? new Set(entry.rules) : null,
+        reason: entry.reason.trim(),
+      };
+    });
+    exemptions.push(...ex);
+  }
 
   return { exemptions, path: baselinePath };
 }
