@@ -11,6 +11,11 @@ describe("P5 UI Components", () => {
     expect(html).not.toContain("司機位置更新稍有延遲");
     expect(html).not.toContain("M50 120 C 120 90, 200 100, 310 44"); // Should not have fake route SVG
 
+    // Missing position but explicit fresh
+    const htmlFreshNoPos = renderToStaticMarkup(<P5Map state="fresh" />);
+    expect(htmlFreshNoPos).not.toContain("位置已更新");
+    expect(htmlFreshNoPos).toContain("正在取得司機位置");
+
     // Valid inputs
     html = renderToStaticMarkup(<P5Map state="fresh" carPosition={{ left: "40px", top: "100px" }} pinPosition={{ left: "10px", top: "10px" }} routeSvgPath="M0" />);
     expect(html).toContain("位置已更新");

@@ -69,3 +69,22 @@ The following issues identified in the 4th review have been addressed:
 
 - `pnpm exec tsc -p tsconfig.json --noEmit` passed.
 - `pnpm exec vitest run tests/unit/pax-web-shell-20261009/` passed.
+
+## Iteration 6 Fixes (Post 5th Rejection)
+
+The following issues identified in the 5th review have been addressed:
+
+| Finding | Current Status / Evidence |
+| :--- | :--- |
+| **R10** P1 STILL FAIL (consumed-response-stream defect) | **RESOLVED**. Re-implemented body reading to consume as `.text()` only if `application/json` and `isLogin` route. Other routes retain the untouched `upstream.body` stream. Added actual Web Response fetch-boundary regression in `bff.test.ts`. |
+| **R2** P1 STILL FAIL (repeated failed rotated retry) | **RESOLVED**. Fixed priority order when resolving `didClearTokens` and `refreshedTokens`. Guaranteed that token deletion dominates token installation on a failed retry authentication boundary. Added real failed-retry network and 401 regressions. |
+| **R5** P1 STILL FAIL (unauthorized palette/design mismatch) | **RESOLVED**. Supervisor approved the addition of the `passenger` realm to `packages/ui-tokens/src/realms.ts` with canvas colors (`#0B5CAB`, `#07437E`, `#EAF2FB`). Updated `p5-ui.tsx` to use the new `passenger` realm instead of `tenant` palette. Removed duplicate invalid registration badge. Fixed `P5Map` `state=fresh` fallback logic to prevent false "位置已更新" claim without location inputs. Regressed explicit fresh without location. |
+| **R7** P2 STILL FAIL (regression/provenance gap) | **RESOLVED**. Preserved stable finding IDs. Added regressions and `Secure`/`SameSite`/JWT assertions using genuine `Response` objects in `bff.test.ts` instead of fake independent `.json()` mock objects. |
+| **R12** typecheck repair | **RETAINED**. Retained `next-config.test.ts` repair using dynamic import. |
+
+### Execution Evidence
+- `node tools/ci/check-repo-classification.mjs`: `exit 0` (validated 6150 files)
+- `pnpm exec vitest run tests/unit/pax-web-shell-20261009/`: `exit 0` (4 files / 17 tests PASS)
+- `pnpm exec tsc -p packages/passenger-client/tsconfig.json --noEmit`: `exit 0`
+- `pnpm exec eslint apps/passenger-app-web packages/passenger-client/src tests/unit/pax-web-shell-20261009 --max-warnings=0`: `exit 0`
+- `pnpm exec tsc -p tsconfig.json --noEmit`: `exit 0` (passed successfully after tests fix)

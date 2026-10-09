@@ -1,7 +1,7 @@
 import React, { ReactNode, CSSProperties } from "react";
 import { REALM_COLORS, STATUS_TONES } from "@drts/ui-tokens";
 
-const pTokens = REALM_COLORS.tenant.light;
+const pTokens = REALM_COLORS.passenger.light;
 
 const P5 = {
   bg: STATUS_TONES.neutral.light.bg,
@@ -12,7 +12,7 @@ const P5 = {
   line: STATUS_TONES.neutral.light.border,
   lineSoft: STATUS_TONES.neutral.light.bg,
   brand: pTokens.fg,
-  brandDark: REALM_COLORS.tenant.dark.bg,
+  brandDark: REALM_COLORS.passenger.dark.bg,
   brandBg: pTokens.bg,
   ok: STATUS_TONES.success.light.fg,
   okBg: STATUS_TONES.success.light.bg,
@@ -306,7 +306,7 @@ export function P5Map({
           )}
         </>
       )}
-      {state === "missing" && (
+      {(state === "missing" || (!routeSvgPath && !carPosition && !pinPosition)) && (
         <div
           style={{
             position: "absolute",
@@ -338,7 +338,7 @@ export function P5Map({
       >
         上車：{pickupAddress || "載入中..."}
       </div>
-      {state === "fresh" && (
+      {state === "fresh" && (routeSvgPath || carPosition || pinPosition) && (
         <div
           style={{
             position: "absolute",
@@ -552,25 +552,6 @@ export function P5VehicleCard({
               >
                 <P5Icon name="shield" size={10} />
                 執登無效
-              </span>
-            )}
-            {registrationValid === false && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  color: P5.danger,
-                  background: P5.dangerBg,
-                  border: "1px solid " + P5.dangerBd,
-                  padding: "2px 8px",
-                  borderRadius: 999,
-                }}
-              >
-                <P5Icon name="warn" size={10} />
-                執登已失效
               </span>
             )}
           </div>

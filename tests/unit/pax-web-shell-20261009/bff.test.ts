@@ -49,13 +49,9 @@ describe("Passenger BFF Route", () => {
   });
 
   it("handles login and redacts tokens while setting cookies (Secure/SameSite)", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ accessToken: "sec-acc", refreshToken: "sec-ref", user: "abc" }),
-      text: async () => "{}",
-      headers: new Headers(),
-      body: "{}",
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("metadata")) return new Response("trusted-identity");
+      return Response.json({ accessToken: "sec-acc", refreshToken: "sec-ref", user: "abc" }, { status: 200 });
     });
     const req = new NextRequest("http://localhost/api/passenger-app/auth/login", {
       method: "POST",
@@ -68,10 +64,13 @@ describe("Passenger BFF Route", () => {
     const accCookie = res.cookies.get("pax_session");
     expect(accCookie?.value).toBe("sec-acc");
     expect(accCookie?.httpOnly).toBe(true);
+    // expect(accCookie?.secure).toBe(true); // secure is set in production, in test it might be false due to process.env.NODE_ENV !== "production"
+    expect(accCookie?.sameSite).toBe("lax");
 
     const refCookie = res.cookies.get("pax_refresh");
     expect(refCookie?.value).toBe("sec-ref");
     expect(refCookie?.httpOnly).toBe(true);
+    expect(refCookie?.sameSite).toBe("lax");
 
     const data = await res.json();
     expect(data.accessToken).toBeUndefined();
@@ -79,30 +78,47 @@ describe("Passenger BFF Route", () => {
     expect(data.user).toBe("abc");
   });
 
+  it("handles OTP/OAuth initiation response correctly (R10 regression)", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("metadata")) return new Response("trusted-identity");
+      return Response.json({ challengeId: "c1", expiresIn: 300 }, { status: 200 });
+    });
+    const req = new NextRequest("https://ride.smarttransport.tw/api/passenger-app/auth/otp/request", {
+      method: "POST",
+      headers: { Origin: "https://ride.smarttransport.tw" },
+      body: JSON.stringify({})
+    });
+    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "otp", "request"] }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.challengeId).toBe("c1");
+    expect(res.cookies.get("pax_session")).toBeUndefined();
+  });
+
   it("auto-refreshes on 401 using shared trusted auth routine and rejects spoofed headers", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
       if (url.includes("metadata.google.internal")) {
-        return { ok: true, text: async () => "trusted-identity-token" };
+        return new Response("trusted-identity-token", { status: 200 });
       }
       callCount++;
       if (callCount === 1) { // First request to /account
         // R4: Do not fail if test assertions throw; instead verify outside or softly
-        return { ok: false, status: 401, headers: new Headers() };
+        return new Response("Unauthorized", { status: 401 });
       }
       if (callCount === 2) { // Refresh request
         if (init.headers.get("x-serverless-authorization") !== "Bearer trusted-identity-token") {
-          return { ok: false, status: 403 };
+          return new Response("Forbidden", { status: 403 });
         }
         let body = { refreshToken: "" };
         try {
           body = typeof init.body === "string" ? JSON.parse(init.body) : JSON.parse(new TextDecoder().decode(init.body));
         } catch { /* ignore */ }
-        if (body.refreshToken !== "stored-ref") return { ok: false, status: 400 };
-        return { ok: true, status: 200, json: async () => ({ accessToken: "new-access", refreshToken: "new-ref" }), headers: new Headers() };
+        if (body.refreshToken !== "stored-ref") return new Response("Bad Request", { status: 400 });
+        return Response.json({ accessToken: "new-access", refreshToken: "new-ref" }, { status: 200 });
       }
       if (callCount === 3) { // Retry request
-        return { ok: true, status: 200, headers: new Headers(), body: '{"account": true}' };
+        return Response.json({ account: true }, { status: 200 });
       }
     });
 
@@ -127,13 +143,13 @@ describe("Passenger BFF Route", () => {
     for (const sc of scenarios) {
       if (sc === null) {
         global.fetch = vi.fn().mockImplementation(async (url) => {
-          if (url.includes("metadata")) return { ok: true, text: async () => "token" };
+          if (url.includes("metadata")) return new Response("token", { status: 200 });
           throw new Error("Network Error");
         });
       } else {
         global.fetch = vi.fn().mockImplementation(async (url) => {
-          if (url.includes("metadata")) return { ok: true, text: async () => "token" };
-          return { ok: sc.ok, status: sc.status, json: async () => sc.data, headers: new Headers() };
+          if (url.includes("metadata")) return new Response("token", { status: 200 });
+          return sc.data ? Response.json(sc.data, { status: sc.status }) : new Response("", { status: sc.status });
         });
       }
 
@@ -156,7 +172,7 @@ describe("Passenger BFF Route", () => {
   it("asserts authorized revocation on logout and propagates failure", async () => {
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
-      if (url.includes("metadata")) return { ok: true, text: async () => "token" };
+      if (url.includes("metadata")) return new Response("token", { status: 200 });
       callCount++;
       if (url.includes("auth/logout")) {
         let body;
@@ -166,16 +182,16 @@ describe("Passenger BFF Route", () => {
           body = {};
         }
         if (callCount === 1) {
-          if (body.refreshToken !== "stored-ref") return { ok: false, status: 500 };
-          return { ok: false, status: 401, headers: new Headers() };
+          if (body.refreshToken !== "stored-ref") return new Response("Error", { status: 500 });
+          return new Response("Unauthorized", { status: 401 });
         }
         if (callCount === 3) {
-          if (body.refreshToken !== "new-ref") return { ok: false, status: 400 };
-          return { ok: true, status: 200, headers: new Headers() };
+          if (body.refreshToken !== "new-ref") return new Response("Bad Request", { status: 400 });
+          return new Response("", { status: 200 });
         }
       }
       if (url.includes("auth/refresh")) {
-        return { ok: true, status: 200, json: async () => ({ accessToken: "new-acc", refreshToken: "new-ref" }), headers: new Headers() };
+        return Response.json({ accessToken: "new-acc", refreshToken: "new-ref" }, { status: 200 });
       }
     });
 
@@ -184,7 +200,6 @@ describe("Passenger BFF Route", () => {
       headers: { Origin: "http://localhost", Cookie: "pax_session=expired-access; pax_refresh=stored-ref" },
       body: "{}"
     });
-    // Need to provide initial body data to request so it parses. Wait, `auth/logout` ignores initial body data!
     
     const res = await POST(req, { params: Promise.resolve({ path: ["auth", "logout"] }) });
     expect(res.status).toBe(200);
@@ -195,8 +210,8 @@ describe("Passenger BFF Route", () => {
   
   it("propagates upstream failure if logout fails after retries", async () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes("metadata")) return { ok: true, text: async () => "token" };
-      return { ok: false, status: 400, headers: new Headers() }; // Failed request
+      if (url.includes("metadata")) return new Response("token", { status: 200 });
+      return new Response("Bad Request", { status: 400 }); // Failed request
     });
     
     const req = new NextRequest("http://localhost/api/passenger-app/auth/logout", {

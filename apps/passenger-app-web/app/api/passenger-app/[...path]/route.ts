@@ -251,11 +251,17 @@ async function forward(
 
     if (upstream.status === 401 && refreshToken) {
       try {
-        refreshedTokens = await doRefresh(refreshToken);
-        token = refreshedTokens.accessToken;
-        refreshToken = refreshedTokens.refreshToken;
+        const newTokens = await doRefresh(refreshToken);
+        token = newTokens.accessToken;
+        refreshToken = newTokens.refreshToken;
         init = await buildInit(token, refreshToken);
         upstream = await fetch(targetUrl.toString(), init);
+        
+        if (upstream.status === 401) {
+          didClearTokens = true;
+        } else {
+          refreshedTokens = newTokens;
+        }
       } catch {
         didClearTokens = true;
       }
@@ -273,24 +279,28 @@ async function forward(
     }
 
     const responseHeaders = copyHeaders(upstream.headers);
-    let finalBody = upstream.body;
+    let finalBody: BodyInit | null = upstream.body;
     const isLogin = fullPath === "auth/login" || fullPath.startsWith("auth/otp") || fullPath === "auth/mfa/verify" || fullPath.startsWith("auth/oauth");
     
     let loginData = null;
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
-      try {
-        loginData = await upstream.json();
-        if (loginData.accessToken && loginData.refreshToken) {
-            const redacted = { ...loginData };
-            delete redacted.accessToken;
-            delete redacted.refreshToken;
-            finalBody = JSON.stringify(redacted) as any;
-            responseHeaders.set("Content-Type", "application/json");
-        } else {
-            loginData = null; 
+      const contentType = upstream.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        try {
+          const text = await upstream.text();
+          finalBody = text;
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === "object" && parsed.accessToken && parsed.refreshToken) {
+              loginData = parsed;
+              const redacted = { ...parsed };
+              delete redacted.accessToken;
+              delete redacted.refreshToken;
+              finalBody = JSON.stringify(redacted);
+              responseHeaders.set("Content-Type", "application/json");
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
     }
 
@@ -307,14 +317,14 @@ async function forward(
       path: "/",
     };
 
-    if (loginData && loginData.accessToken && loginData.refreshToken) {
+    if (didClearTokens) {
+      deleteCookies(nextResponse);
+    } else if (loginData && loginData.accessToken && loginData.refreshToken) {
       nextResponse.cookies.set("pax_session", loginData.accessToken, opts);
       nextResponse.cookies.set("pax_refresh", loginData.refreshToken, opts);
     } else if (refreshedTokens) {
       nextResponse.cookies.set("pax_session", refreshedTokens.accessToken, opts);
       nextResponse.cookies.set("pax_refresh", refreshedTokens.refreshToken, opts);
-    } else if (didClearTokens) {
-      deleteCookies(nextResponse);
     }
 
     return nextResponse;
