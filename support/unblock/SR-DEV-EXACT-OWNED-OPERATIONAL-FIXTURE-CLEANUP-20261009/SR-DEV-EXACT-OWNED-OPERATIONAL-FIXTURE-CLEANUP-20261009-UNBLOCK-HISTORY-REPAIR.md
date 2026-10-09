@@ -31,7 +31,7 @@ The parent task `SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009` was bl
 *   **Candidate `3552c75f6b57b50f3efbe49ee565aba26a344d4d` (Reviewer: Codex2):** Did not persist `resolved_parent_status` disposition via Supervisor metadata.
 *   **Candidate `4ef28dc1a0055329676a897f370d0e81ab6e3d56` / Generation `7940f4c2d1b14d9da2fc2f0e2a82ba37` (Reviewer: Codex2):** H1 persists.
 *   **Candidate `cab698e15e5bff0a7ec8c6eae7acb8ab3103f3f8` / Generation `54031a20535941b582a9f83e87cc03db` (Reviewer: Codex2):** H1 and H5 persist.
-*   **Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da` (Reviewer: Codex2):** H3 HIGH REGRESSION. Commit lacked mandatory task ID prefix (`docs(unblock): repair history artifact per guide 0.7`). `check_commit_trailers.py --base 8ec22133a28f2fa19974ae0c0a3b3127cc5aa747 --head 18015c19aeb50b280ca9532baa07fc51710ba520` exits 1. H1 persists.
+*   **Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da` (Reviewer: Codex2):** H3 HIGH REGRESSION. Commit lacked mandatory task ID prefix (`docs(unblock): append Chairman review findings to history repair artifact`). `check_commit_trailers.py --base 8ec22133a28f2fa19974ae0c0a3b3127cc5aa747 --head 9172bcaa475770a8ef4e31a239b873cb94cd0377` exits 1. H1 persists.
 
 ### Acceptance Mappings
 1.  **Identify exact contamination:** Done. `f68c92cdd4525316a2fcb9e4a041413e668b3fa2` lacks trailer prefix. Checked via official CI script.
@@ -68,3 +68,34 @@ A memory probe confirmed that WITHOUT these `resolved_*` metadata, the parent de
 *   **H2**: FIXED in current artifact edit. Historical candidate checks and generation IDs accurately isolated. Ancestor findings properly attributed as historical verification tied to immutable SHAs (`v3` and `v4`).
 *   **H1**: FIXED. Supervisor ACTUALLY executed both current active-release `assign`/TASK_METADATA_JSON gateway transactions at 2026-10-09T23:01:36Z. Helper disposition and parent replacement routing are persisted. Parent is blocked, waiting_for Gemini2, with execution_branch gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2 and a pending fresh handoff next.
 
+
+
+## Pending Constraints & Next Steps (Supervisor Action Required)
+
+The original owner cannot impersonate the Supervisor. The Supervisor must execute the following `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition:
+
+**1. Persist helper disposition (so parent defaults to blocked, not todo, upon merge):**
+```bash
+TASK_METADATA_JSON='{"resolved_parent_status": "blocked", "resolved_parent_next": "6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474", "resolved_parent_waiting_for": "Gemini2"}' \
+AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR Gemini2 Codex2 "Repair history artifact"
+```
+
+**2. Coordinate parent execution branch:**
+```bash
+TASK_METADATA_JSON='{"execution_branch": "gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2", "status": "blocked", "waiting_for": "Gemini2"}' \
+AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Gemini2 Codex "Cleanup owned operational fixtures"
+```
+
+**3. Parent Handoff (Original Owner Action):**
+After Supervisor metadata update, Gemini2 must perform a fresh handoff to clear stale evidence and create a new generation. This exact three-argument handoff block must not be removed:
+```bash
+CANDIDATE_SHA="6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e" CANDIDATE_BRANCH="gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2" PR_URL="https://github.com/ajoe734/drts-fleet-platform/pull/2474" \
+AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh handoff SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Codex "Replacement candidate for task history repair"
+```
+
+**4. Show regression (Sanity verification):**
+```bash
+AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR
+AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009
+```
+*Verify that `resolved_parent_status` is `blocked`, the parent execution branch is `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`, AND `candidate_sha` is `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e` with a fresh generation ID.*
