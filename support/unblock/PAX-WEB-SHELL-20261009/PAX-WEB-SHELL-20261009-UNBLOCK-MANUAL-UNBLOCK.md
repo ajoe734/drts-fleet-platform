@@ -4,7 +4,7 @@
 The parent task `PAX-WEB-SHELL-20261009` was blocked because it required shared-file scope coordination for `packages/ui-tokens/src/realms.ts` and `packages/ui-tokens/src/colors.ts`. The passenger app UI (`p5-ui.tsx`) uses specific brand colors (`#0B5CAB`) and surfaces that need to be authorized and present in the `@drts/ui-tokens` package. However, modifying these files was outside the `write_scopes` of the parent task, leading to a rejection in the review phase (R8 in the 2nd and 3rd reviews, and R5 in the 4th review).
 
 ## Task-Scoped Changes
-To clear the blocker, the following canonical changes were made within this unblock task (via live PR #2487 targeting `dev`):
+To clear the blocker, the following canonical changes were made within this unblock task (via live PR #2488 targeting `dev`, superseding historical PR #2487):
 - **`packages/ui-tokens/src/realms.ts`**: Added `passenger` to `RealmName`, `REALM_NAMES`, `REALM_DISPLAY_STRINGS`, and defined its colors in `REALM_COLORS` using the authorized brand colors from the P5 canvas (`#0B5CAB`, `#EAF2FB`). Missing palette entries (dark mode, border) were left intentionally empty as `""` with a `FIXME` comment to avoid inventing unauthorized designs.
 - **`packages/ui-tokens/src/colors.ts`**: Added `CORE_SURFACES` and `CORE_FOREGROUNDS` exports to authorize the base surface colors required by the passenger app.
 
@@ -15,7 +15,7 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 ### Helper Scope Findings
 | Finding / acceptance | production source and call path | old -> current evidence | repair boundary and required regressions / limits |
 |---|---|---|---|
-| U1 P1 integration/scope | Live PR #2487 targets `dev` | PR #2487 exact candidate head, four commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
+| U1 P1 integration/scope | Live PR #2488 (v3 branch) targets `dev` | PR #2487 was a historical candidate with four commits | Confirmed complete diff is exactly `colors.ts`, `realms.ts`, and this artifact document (3 commits). VERIFIED FIXED. |
 | U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Document correctly cites FULL latest parent review at 2026-10-09T18:26:23Z. Parent next now truthfully reflects R7 boundary; helper resolved_parent_next corrected. | Old artifact had canonical state and document contradictions. | Both parent concrete next and helper resolved_parent_next updated via CLI/canonical metadata. Parent next code unit remains R7. Rebase instruction updated to normal merge only. |
 | U3 P2 design-source gap | `realms.ts` newly adds passenger `light.border=#D0E1F5`, `dark.fg=#60A5FA` and `dark.border=#1E3A8A` | These values were absent from P5 canvas. | Preserved verified P5 `brand=#0B5CAB`, `brandBg=#EAF2FB`, `surface=#FFFFFF`. Replaced unverified values with empty strings/comments to avoid inventing a passenger dark/border palette. |
 | U4 required trailers | Whole PR range formal gate `check_commit_trailers.py --base origin/dev --head HEAD` exit0. | df0ca58 missing trailers in PR ancestry. | Replaced broken candidate branch with a new trailer-valid recovery branch based on previous valid v2 delivery `1cbef7c`. VERIFIED FIXED. |
@@ -27,11 +27,11 @@ Latest parent reviewer worker_outcomes at 2026-10-09T18:26:23Z reviewed `730a544
 - **R8 (P1)**: UNRESOLVED in parent. Shared-file scope coordination for `packages/ui-tokens/src/realms.ts` and `packages/ui-tokens/src/colors.ts`. This unblock helper task delivers the required authorized tokens, providing the exact shared-file scope coordination. Parent will use the tokens merged by this helper to resolve R8 without rewriting out-of-scope files.
 
 ## Local Checks & Evidence
-- **Helper Identity**: Current helper candidate recovers from previous adjacent helper candidate `df0ca58ca7e61ac4c157232645db75ef6ce10753` (which failed trailer gate) by branching from the previous valid v2 delivery `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`.
+- **Helper Identity**: Current helper candidate PR #2488 (v3 branch) recovers from historical candidate `df0ca58` (PR #2487) by branching from the previous valid v2 delivery `1cbef7c`, resulting in a clean three-commit ancestry.
 - Git status: `nothing to commit, working tree clean`
 - `git diff --check origin/dev...HEAD`: exit 0
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
-- Target PR #2487 (or new PR) opened against `dev` branch with correct LLM-Agent and Task-ID trailers.
+- Target PR #2488 (v3 branch) opened against `dev` branch with correct LLM-Agent and Task-ID trailers.
 - Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` exit0.
 
 ## Unblocked Next Step
@@ -76,3 +76,39 @@ Completed checks:
 No reviewer checks remain running. No browser/PG/deploy/full product regression pass claimed.
 
 Acceptance: actual task-scoped delivery scope and token correction verified; canonical concrete-parent-next correction verified. Diagnosis/evidence accuracy NOT MET (U2); mandatory whole-range integration gate FAIL (U4). Reopen exact candidate to original Gemini for bounded delivery-history/artifact repair.
+
+## Review: PAX-WEB-SHELL-20261009-UNBLOCK-MANUAL-UNBLOCK (Codex Independent Review REOPEN 2)
+
+Codex independent review REOPEN.
+REVIEWED_SHA=9de3fd1703b17e97a4b8873623180dccbea91188; candidate_generation=557354de6e7745418d9786417056c6b0; adjacent reviewed helper=df0ca58ca7e61ac4c157232645db75ef6ce10753 (generation e8b530fd89f749e7bcc40b85d91a7e92); previous valid v2=1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22 (generation 4ba91528f5be4d91809026fad8bec400).
+Detached HEAD and live PR https://github.com/ajoe734/drts-fleet-platform/pull/2488 head match exactly, checked twice. Clean working tree throughout. Read AI_COLLABORATION_GUIDE0.7, latest full parent review, adjacent helper review and previous v2 review, original artifact, source tokens/exports/callers, P5 canvas and published-history rule. No candidate edits, commits, pushes, branch switches, dependency installs or product/browser/Docker servers. Every reviewer-started check completed and its result was read.
+
+This status transaction is the read-only reviewer evidence. Dispatch forbids editing the locked original artifact. Original Gemini owner must append this review and bounded repair evidence to support/unblock/PAX-WEB-SHELL-20261009/PAX-WEB-SHELL-20261009-UNBLOCK-MANUAL-UNBLOCK.md, preserving historical findings and identities under Guide0.7.
+
+Verified fixes:
+U1 actual integration/scope RETAINED: current PR2488 targets dev, v3 branch gemini/pax-web-shell-20261009-unblock-manual-unblock-v3, exact locked head, THREE commits, exactly colors.ts,realms.ts and original artifact (+94/-1). Valid v2 ancestry preserved. No history rewrite requested.
+U4 trailer regression VERIFIED FIXED: actual whole-range check python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 9de3fd1703b17e97a4b8873623180dccbea91188 exit0,3 commits OK. Adjacent df0ca58 same command exit1,missing Reviewer in f2af9693ec7ff438a71d5370fca2a57a6fae8105 and4a22421deef0c772fb4b8fe891a6c28865631bfb. Same-SHA hosted run38003687923 Commit trailers job114067471866 SUCCESS; actual job log read, confirms checkout9de3fd1703b17e97a4b8873623180dccbea91188 and3 commits OK. https://github.com/ajoe734/drts-fleet-platform/actions/runs/38003687923/job/114067471866
+U3 token correction RETAINED: zero token-file diff versus adjacent df0ca58 and valid v2. P5.brand/#0B5CAB,brandBg/#EAF2FB,surface/#FFFFFF and inverse-white source confirmed in canonical p5-ui.jsx3-4,18,25,124. Empty dark/border remain documented missing-design placeholders; no usable dark/border palette or browser acceptance claimed.
+U2 parent-review content regression VERIFIED FIXED: artifact24-27 restores parent reviewed730a5444bb5194eedf25def23eb55e8c13f0bc9c against41af9c5847d860659f110f1a4b96b308f5aee2dd, verified fixes and exact unresolved R7/R8 boundary. Parent concrete next and helper resolved_parent_next read twice, agree on bounded R7, preserve verified code, normal merge only when needed after reopening, no parent ui-tokens writes. Parent remains blocked/waiting_forCodex; helper disposition in_progress/waiting_forGemini. No helper merge/resume claimed. Do not repeat resolved canonical-next or trailer defects.
+
+U2 P2 STILL INCOMPLETE: current delivery evidence identifies a different PR than authoritative handoff/remote head.
+Exact static reproduction:
+- nl -ba original artifact: line7 says "via live PR #2487"; line18 says "Live PR #2487", "exact candidate head, four commits"; line34 says "Target PR #2487 (or new PR)".
+- Current-release show helper | jq '{candidate_sha,candidate_generation,candidate_branch,pr_url}': locked9de3fd1703b17e97a4b8873623180dccbea91188/generation557354de6e7745418d9786417056c6b0/v3/PR2488.
+- gh pr view 2488 --json headRefOid,headRefName,baseRefName,files,commits: exact locked head,dev,THREE commits9b6f1a24917d1618b1b7a62d95930d8113407861,1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22,9de3fd1703b17e97a4b8873623180dccbea91188; exactly three scoped files.
+Expected: current delivery evidence names PR2488/v3 and identifies historical PR2487/df0ca58 separately, with reproducible current whole-range checks and truthful pending hosted results. Actual: active diagnosis/finding/evidence sections identify the previous broken-ancestry PR2487, its four-commit shape, and an unresolved "or new PR" placeholder. The historical review section44 onward is correctly tied to df0ca58 and must remain historical; it does not correct the current-delivery claims above. line30 now retains adjacent-SHA provenance correctly, but no explicit handoff identity linkage resolves the conflicting active PR assertions.
+
+Actual authority/call path: owner artifact7/18/30-35 -> handoff evidence for acceptance "Produce task-scoped commit/push/PR evidence" -> reviewer reconciliation against canonical candidate_sha/pr_url and GitHub exact PR head. This is the same U2 truthful-delivery-identity defect identified in adjacent df0ca58 and previous1cbef7c independent reviews. Guide0.7 repeated-rework localization is provided above; Supervisor should verify this bounded mismatch before original Gemini owner continues, rather than accepting another unchanged evidence resubmission.
+Repair boundary: ONLY original artifact current-delivery identity/evidence. Name the existing current PR2488/v3 explicitly, label PR2487 and prior candidates/checks historical, replace four-commit/current-head claims with the correct evidence or an explicit immutable CLI handoff/remote-head linkage. The final commit SHA need not be self-referential inside its own committed file; resolve it through immutable fresh handoff/PR head. Preserve U1/U3/U4 fixes, parent R7/R8 provenance, canonical concrete-next/resolution metadata and all published refs. No token changes, parent product-code edits, PR recreation, ancestry reconstruction, rebase/amend/force-push or extra user authorization requested. Append this review to the original artifact, normal task-scoped commit/push, run/read whole new PR-range gate and applicable content checks, verify local/pushed/PR exact identity, then fresh handoff.
+Required content regression: compare artifact current PR/branch/identity against the helper slice and live PR head, compare parent findings/next against latest full parent review and parent slice; distinguish historical evidence from current pass/pending. Preserve original history.
+
+Completed reviewer checks:
+- git diff --check origin/dev...HEAD exit0; git diff --check HEAD^ HEAD exit0.
+- Current trailer gate exit0; adjacent actual gate exit1 as above.
+- node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false exit0, TypeScript5.9.3/Node22.23.2.
+- Actual token diff/canvas/import/export/caller content inspected; unchanged token files versus adjacent candidate.
+- Live PR metadata and exact heads read twice; current-release parent/helper slices read twice; latest full parent/adjacent/v2 reviews read.
+- Same-SHA hosted Commit trailers SUCCESS log read. First log request required --allow-escape-sequences (CLI output restriction,not a test failure); corrected read completed. Current owner-push runs38003687923 and38003687875 headSha exact reviewed SHA, still IN_PROGRESS at result read; full smoke/integration/unit/build/runtime acceptance PENDING. No hosted jobs started by reviewer. Canonical helper ci_status/ci_sha presently absent; no bus CI/merge evidence claimed. Live dev advanced to858fff51fa1445302baf781d72a7b892258a7f21 while local origin/dev remains8ec22133a28f2fa19974ae0c0a3b3127cc5aa747; same-SHA hosted trailer log and actual live PR scope independently corroborate the current gate/scope. No candidate synchronization needed merely for trunk movement.
+No reviewer checks remain running. No VM hosting/deploy/browser/PG/full product regression pass claimed.
+
+Acceptance: scoped token delivery/source/scope and actual trailer recovery VERIFIED; latest parent diagnosis/next correction VERIFIED; current committed delivery evidence accuracy NOT MET (remaining U2). Reopen exact candidate to original Gemini for artifact-only correction; preserve verified implementation.
