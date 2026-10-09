@@ -7,7 +7,7 @@ import type { LocalizedDisplayString } from "./status";
  * realm an actor belongs to in cross-actor audit timelines and identity chips,
  * and are shared across the ops / admin / tenant / partner / fleet consoles.
  */
-export type RealmName = "tenant" | "ops" | "platform" | "system" | "driver";
+export type RealmName = "tenant" | "ops" | "platform" | "system" | "driver" | "passenger";
 
 export const REALM_COLORS = {
   tenant: {
@@ -30,6 +30,11 @@ export const REALM_COLORS = {
     light: { fg: "#A8590B", bg: "#FCEED6", border: "#F0CC95" },
     dark: { fg: "#FCD34D", bg: "#3A2A0A", border: "#5C4218" },
   },
+  passenger: {
+    // Preserve verified P5 brand=#0B5CAB, brandBg=#EAF2FB. Other values are missing in P5 canvas design.
+    light: { fg: "#0B5CAB", bg: "#EAF2FB", border: "" /* FIXME: Missing border design */ },
+    dark: { fg: "" /* FIXME: Missing dark mode design */, bg: "" /* #07437E is a light-screen header bg, not a dark mode bg */, border: "" },
+  },
 } as const satisfies Record<RealmName, Record<TokenMode, ToneRamp>>;
 
 export const REALM_NAMES = [
@@ -38,6 +43,7 @@ export const REALM_NAMES = [
   "platform",
   "system",
   "driver",
+  "passenger",
 ] as const satisfies readonly RealmName[];
 
 export const REALM_DISPLAY_STRINGS = {
@@ -46,6 +52,7 @@ export const REALM_DISPLAY_STRINGS = {
   platform: { en: "Platform", zhTW: "平台" },
   system: { en: "System", zhTW: "系統" },
   driver: { en: "Driver", zhTW: "司機" },
+  passenger: { en: "Passenger", zhTW: "乘客" },
 } as const satisfies Record<RealmName, LocalizedDisplayString>;
 
 export function isRealmName(value: string): value is RealmName {
