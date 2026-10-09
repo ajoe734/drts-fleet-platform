@@ -104,7 +104,7 @@ export class PassengerAccountController {
   }
   @Post("auth/refresh")
   @OpenRoute()
-  async refresh(@Body() body: unknown) {
+  async refreshSession(@Body() body: unknown) {
     return toApiSuccessEnvelope(
       await this.accounts.refresh(command(body, TOKEN_FIELDS).refreshToken),
     );

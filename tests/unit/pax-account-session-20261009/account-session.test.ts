@@ -469,7 +469,7 @@ describe("profile, deletion and API boundary", () => {
   });
   it("accepts snake-case refresh/logout credentials and never echoes them in profile/identity/error responses", async () => {
     const f = await signedIn();
-    const next = await f.controller.refresh({
+    const next = await f.controller.refreshSession({
       refresh_token: f.session.refreshToken,
     });
     const profile = await f.controller.me(f.identity);
@@ -483,7 +483,9 @@ describe("profile, deletion and API boundary", () => {
         .data,
     ).toEqual({ success: true });
     try {
-      await f.controller.refresh({ refresh_token: next.data.refreshToken });
+      await f.controller.refreshSession({
+        refresh_token: next.data.refreshToken,
+      });
     } catch (e) {
       expect(JSON.stringify(e)).not.toContain(next.data.refreshToken);
     }
