@@ -76,7 +76,7 @@
 | **R2-08** (Fixed WIF Identity, Minimum Perm, Concurrency) | WIF 檢查僅驗證非空，接受任意第三方 provider；工作流缺乏並發控制與 `actions: read` 權限。 | 固定綁定授權 DEV WIF 提供者（`projects/24645990627/...`）與佈署者 SA（`github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com`）；加入 `concurrency: group: dev-owned-operational-fixture-cleanup, cancel-in-progress: false`；加入 `actions: read` 權限。 | 工作流 YAML 結構驗證通過，WIF 邊界與權限最小化落實。 |
 | **R2-09** (Canonical Consistency & Test Accounting) | UAT 文件以反引號引用已刪除之舊測試檔案導致 CI 規範檢查失敗；測試計數引用舊陳舊數據（94）。 | 移除舊測試路徑之反引號，改以 GitHub blob 完整 URL 參照；更正測試計數為 `check_test_coverage.py` 發現之 95 個測試檔案、44 項單元測試；明確記錄測試目錄中的 3 個跳過為測試套件跳過（非 passes，非業務 16 skips）。 | `python3 -B tools/ci/git/check_canonical_consistency.py --ci --base 4a166f3e --head HEAD`<br>Exit code: 0<br>`0 finding(s)` |
 
-*(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過嚴格之 zip digest 雜湊、`read_body` 實體讀取、強制 `SELECT ... FOR UPDATE` 鎖定及 `POSTFLIGHT_CHECK` 等機制，將此些宣稱化為真實之程式碼約束。)*
+*(註：上述 R2-02 至 R2-06 等宣稱曾於候選 3 (6d911a7) 中提出，但未能如實落實於程式碼。本次候選已透過嚴格之 `read_body` 實體讀取、強制 `SELECT ... FOR UPDATE` 鎖定及 `POSTFLIGHT_CHECK` 等機制，將此些宣稱化為真實之程式碼約束。)*
 
 ## 4. 資料庫通道與保留合約精確分析 (DB Lane & Preservation)
 
@@ -154,7 +154,7 @@ python3 -B operations/verification/cleanup-owned-operational-fixtures.py \
   --artifact-dir .local/fleet-storage-diagnosis-20261008/referral-reviewed-composition-dev-deployment-20261009/artifacts/operational-browser-evidence-4a166f3ed2a7000061acc737ee475ae3c47dca56 \
   --mode apply
 # Exit code: 1
-# Status: blocked, gcs_cleanup.status: skipped_due_to_db_blocker, 0 mutations executed.
+# Status: error, mode: apply, error: Unsafe exported apply is unconditionally disabled per security review.
 ```
 
 ## 6. 三道閘門現況 (Three Gates Status)

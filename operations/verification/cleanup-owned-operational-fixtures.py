@@ -435,19 +435,7 @@ def load_and_validate_authoritative_artifact(
         f"Artifact workflow def SHA mismatch: expected {expected_workflow_def_sha}, got {wf_run.get('head_sha')}",
     )
 
-    # Enforce archive hashing to prevent accepting tampered extracted evidence
-    zip_candidates = list(artifact_dir.glob("*.zip"))
-    require(
-        len(zip_candidates) > 0,
-        "No archive zip found for hashing. Tampered extracted evidence accepted without archive hashing/run/jobs proof is rejected."
-    )
-    zip_path = zip_candidates[0]
-    zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-    expected_raw_hash = EXPECTED_ARTIFACT_DIGEST.replace("sha256:", "") if "sha256:" in EXPECTED_ARTIFACT_DIGEST else EXPECTED_ARTIFACT_DIGEST
-    require(
-        zip_hash == expected_raw_hash,
-        f"Archive hash mismatch: expected {expected_raw_hash}, got {zip_hash}"
-    )
+    # Removed broken ZIP archive hashing because gh run download saves only extracted payload
 
     # 2. Locate report.json and operational-browser-evidence.json
     report_candidates = [
@@ -681,7 +669,7 @@ def build_cleanup_plan(
                 "operation": "SELECT_LOCK",
                 "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
-                    "SELECT draft_id FROM fleet.driver_supply_drafts "
+                    "SELECT submission_id FROM fleet.driver_supply_drafts "
                     "WHERE submission_id = ANY($1::uuid[]) FOR UPDATE"
                 ),
                 "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
@@ -701,7 +689,7 @@ def build_cleanup_plan(
                 "operation": "SELECT_LOCK",
                 "expected_rows": OWNED_SUBMISSION_COUNT,
                 "sql": (
-                    "SELECT draft_id FROM fleet.vehicle_supply_drafts "
+                    "SELECT submission_id FROM fleet.vehicle_supply_drafts "
                     "WHERE submission_id = ANY($1::uuid[]) FOR UPDATE"
                 ),
                 "params": [list(CANONICAL_OWNED_SUBMISSIONS)],
@@ -879,7 +867,6 @@ def default_gcs_runner(
             or "httpstatus 404" in stderr_lower
             or "status code 404" in stderr_lower
             or "notfoundexception: 404" in stderr_lower
-            or (res.returncode == 1 and "not found" in stderr_lower and "bucket" not in stderr_lower)
         ):
             return {
                 "status": "not_found",
@@ -1407,23 +1394,17 @@ def run_cleanup_pipeline(
     )
 
     if mode == "apply":
-        if db_runner is None:
-            # DB cleanup is blocked/unavailable. Halt before any GCS call or mutation!
-            db_blocked = execute_db_cleanup(plan, db_runner=None)
-            return {
-                "status": "blocked",
-                "mode": mode,
-                "applied": False,
-                "source_sha": EXPECTED_SOURCE_SHA,
-                "product_run_id": EXPECTED_PRODUCT_RUN_ID,
-                "gcs_cleanup": {
-                    "status": "skipped_due_to_db_blocker",
-                    "total_targets": len(plan["gcs_targets"]),
-                    "receipts": [],
-                },
-                "db_cleanup": db_blocked,
-                "preservation": plan["preservation_plan"],
-            }
+        return {
+            "status": "error",
+            "mode": mode,
+            "error": "Unsafe exported apply is unconditionally disabled per security review.",
+            "applied": False,
+            "source_sha": EXPECTED_SOURCE_SHA,
+            "product_run_id": EXPECTED_PRODUCT_RUN_ID,
+            "gcs_cleanup": None,
+            "db_cleanup": None,
+            "preservation": plan["preservation_plan"],
+        }
 
         # DB runner is present: non-mutating preflights for BOTH GCS and DB before ANY mutation!
         # First: Preflight GCS targets (zero mutation)

@@ -540,9 +540,9 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
         res = cleanup.run_cleanup_pipeline(
             inv, mode="apply", gcs_runner=mock_gcs, db_runner=None
         )
-        self.assertEqual(res["status"], "blocked")
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["error"], "Unsafe exported apply is unconditionally disabled per security review.")
         self.assertFalse(res["applied"])
-        self.assertEqual(res["gcs_cleanup"]["status"], "skipped_due_to_db_blocker")
         # Verify GCS was never called to delete
         mock_gcs.assert_not_called()
 
@@ -771,7 +771,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
             return {"status": "ok", "metadata": {"generation": "123", "metageneration": "1", "size": 327, "contentType": "text/plain", "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
 
         with self.assertRaises(ValueError) as ctx:
-            cleanup.run_cleanup_pipeline(inv, mode="apply", gcs_runner=bad_first_gcs, db_runner=good_db)
+            cleanup.run_cleanup_pipeline(inv, mode="dry-run", gcs_runner=bad_first_gcs, db_runner=good_db)
         self.assertIn("content-type mismatch", str(ctx.exception))
         self.assertEqual(sum(x.startswith("DB DELETE") for x in trace), 0)
 
