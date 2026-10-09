@@ -190,14 +190,18 @@ export interface FareQuoteCommand {
   scheduledAt: string;
 }
 
-export interface FareQuoteResponse {
-  serviceAreaResult: "serviceable" | "not_serviceable";
-  estimatedMin?: number;
-  estimatedMax?: number;
-  fareVersion?: string;
-  fareSnapshotId?: string;
-  expiresAt?: string;
-}
+export type FareQuoteResponse =
+  | {
+      serviceAreaResult: "serviceable";
+      estimatedMin: number;
+      estimatedMax: number;
+      fareVersion: string;
+      fareSnapshotId: string;
+      expiresAt: string;
+    }
+  | {
+      serviceAreaResult: "not_serviceable";
+    };
 
 export interface CreatePassengerRideCommand {
   scheduledAt: string;
