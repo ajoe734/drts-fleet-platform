@@ -576,7 +576,8 @@
       "target_schema": "passenger",
       "primary_tables": [
         "passenger.psp_tokens",
-        "passenger.payment_idempotency_keys"
+        "passenger.payment_idempotency_keys",
+        "passenger.payment_charge_records"
       ],
       "referenced_tables": [
         "billing.multi_taxi_passenger_payments"
@@ -591,13 +592,13 @@
       "version": "V0116",
       "migration_filename": "V0116__passenger_push_device_api.sql",
       "domain": "passenger_push_device_api",
-      "target_schema": "passenger",
+      "target_schema": "iam + mobility",
       "primary_tables": [],
       "referenced_tables": [
         "iam.phase1_passenger_push_devices",
         "mobility.phase1_order_first_party_notification_routes"
       ],
-      "description": "裝置登錄 API migration",
+      "description": "裝置登錄與現有裝置表 reuse，並對 mobility.phase1_order_first_party_notification_routes 執行 forward ALTER tenant_id DROP NOT NULL",
       "downstream_tasks": [
         "PAX-NATIVE-APP-20261009"
       ]
