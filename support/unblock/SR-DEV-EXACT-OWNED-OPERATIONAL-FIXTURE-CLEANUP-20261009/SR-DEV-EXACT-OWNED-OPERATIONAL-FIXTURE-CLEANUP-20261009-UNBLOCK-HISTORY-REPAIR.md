@@ -43,7 +43,7 @@ Subsequently, the previous helper task branch (`origin/gemini2/sr-dev-exact-owne
 ## Reviewer Codex2 Findings Ledger (2026-10-09)
 *   **H1 BLOCKING:** Repeated unresolved parent merge disposition/routing. Parent remains `blocked`/`waiting_for` Codex with old metadata. Both live CLI show slices confirm helper `resolved_parent_status`/`next`/`waiting_for` are absent. The documented Supervisor routing must execute to persist `blocked`/`Gemini2` and avoid defaulting to `todo`.
 *   **H4 HIGH:** Documented repair command mixed candidate identities. The payload injected `candidate` rather than `candidate_sha` and manually rewrites PR URLs, which bypasses the lifecycle gateway and leaves `candidate_sha` and generation ID stale.
-*   **H3 FIXED:** Historical v3 helper (PR #2481) had two commits. Current v4 helper (PR #2482) has exactly ONE valid task-scoped commit. Required task-ID subject and trailers pass official checker.
+*   **H3 FIXED:** Current v4 helper (PR #2482) has exactly TWO valid task-scoped commits (`a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` plus `e56c7c7308e4ffa4832d4d915bf06438133305ab`). Required task-ID subject and trailers pass official checker. `git diff --check` with immutable base exits 0.
 *   **Acceptance Disposition:** 1 contamination identified PASS; 2 non-destructive history repair/content preservation PASS; 3 helper task commit/published branch/OPEN PR identity PASS; 4 canonical safe parent routing/disposition FAIL (Pending Supervisor routing).
 
 ## Pending Constraints & Next Steps (Supervisor Action Required)
@@ -81,16 +81,20 @@ AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases
 *   **H1 BLOCKING persists**: Final current-release show slices confirm helper `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for` are absent. Parent remains `blocked`/waiting_for Codex. Without required persistence, the state change defaults to `todo` and preserves the old execution branch/SHA/closed PR, confirmed by production merge probe. Both live helper disposition and parent routing must match, preserving `blocked`/Gemini2, and fresh handoff is required.
 *   **H5 HIGH NEW**: newly documented original-owner handoff is not executable because it omits required `<message>`. `command_handoff` rejects fewer than 3 positional args. Add a quoted task artifact/evidence summary as third argument, retain full replacement `CANDIDATE_SHA`/`CANDIDATE_BRANCH`/`PR_URL` and original owner/reviewer identities, then perform that fresh parent handoff only after Supervisor coordination.
 *   **H4 ORIGINAL PAYLOAD DEFECT FIXED**: parent `TASK_METADATA_JSON` no longer manually substitutes candidate/candidate_branch/pr_url.
-### Historical v3 Results (Candidate a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c / Generation e717eb8155fb4e5eb7502f0cc4662894)
-*   **H3**: Entire immutable-base-to-current-helper range had TWO valid task-scoped commits; official checker exits 0 for both, remote and PR head match.
-*   **H2**: Helper PR URL is confirmed as https://github.com/ajoe734/drts-fleet-platform/pull/2481.
-*   **Completed local verification**: `check_commit_trailers.py` confirmed exit 1 for contaminated helper subject and exit 0 for replacement (`6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e`) and current helper (`cab698e15e5bff0a7ec8c6eae7acb8ab3103f3f8`).
-*   **Acceptance disposition**: Exact contamination PASS; non-destructive replacement/content preservation PASS; helper task commit/push/OPEN PR identity PASS; canonical safe parent routing/disposition FAIL.
+
+### Historical v3 Results (Contaminated Candidate 9172bcaa475770a8ef4e31a239b873cb94cd0377)
+*   **H3**: Helper PR #2481. Official checker `check_commit_trailers.py` exits 1 solely for `docs(unblock)` subject without task ID prefix.
+
+### Prior v4 Results (Candidate a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c / Generation e717eb8155fb4e5eb7502f0cc4662894)
+*   **H3**: Helper PR #2482. Immutable-base-to-helper range had exactly ONE valid task-scoped commit. Official checker exits 0.
 
 ### Current v4 Results Ledger (2026-10-09)
 *   **Current helper branch is v4, PR #2482**.
-*   **H3**: Repaired. Immutable-base range has exactly ONE valid commit.
+*   **Current helper Head SHA**: `e56c7c7308e4ffa4832d4d915bf06438133305ab` (Generation `533489f4368a45459d700178b06d29e3`).
+*   **H3**: Repaired. Immutable-base range has exactly TWO valid commits (`a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` plus `e56c7c7308e4ffa4832d4d915bf06438133305ab`). Official current checker exits 0. `git diff --check` with immutable base exits 0 (prior whitespace fixed).
+*   **H2**: Partially disposed. Provenance and SHAs corrected, true historical SHA/generation/PR pairs preserved and distinguished from current evidence.
 *   **H5**: Fixed. Documented handoff command is corrected.
-*   **H1**: Pending. Supervisor must persist `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Gemini2`, and `resolved_parent_next` naming the full replacement `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474`. Then a fresh Gemini2-to-Codex handoff must be performed.
+*   **H4**: Fixed. Original payload defect corrected.
+*   **H1**: Pending. Supervisor must persist `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Gemini2`, and `resolved_parent_next` naming the full replacement `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474`. Then a fresh Gemini2-to-Codex handoff must be performed. Hosted CI and merge constraints remain independently required.
 
 Original owner Gemini2 continues bounded artifact repair after Supervisor persists required routing/disposition.
