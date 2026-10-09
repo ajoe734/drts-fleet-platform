@@ -207,7 +207,11 @@
         "Persistence-failure handling is an application-transaction concern, not a schema constraint: the service records provider ack results by first executing the fence-checked UPDATE/INSERT inside a transaction; if that transaction itself fails to commit, the caller's return value must be the outcome 'persistence_unknown' (see packages/contracts/src/passenger-push-delivery.ts), never a fabricated 'recorded' outcome — this table design supplies the idempotent target for a retry, it does not itself prevent a caller from mis-reporting a failed commit."
       ],
       "description": "被動推播送達 claim/lease/fence 與冪等收據 migration；provider 回執與真實裝置送達分離記錄",
-      "downstream_tasks": ["SR-PUSH-001", "SR-LIVE-PUSH-001", "SR-QA-NEWFEATURES-001"]
+      "downstream_tasks": [
+        "SR-PUSH-001",
+        "SR-LIVE-PUSH-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     },
     {
       "task_id": "SR-RECOVERY-CONTRACTS-20260911",
@@ -242,9 +246,7 @@
         "voice.phase1_work_item_repair_audits",
         "voice.phase1_work_item_attempt_audits"
       ],
-      "referenced_tables": [
-        "voice.work_item"
-      ],
+      "referenced_tables": ["voice.work_item"],
       "table_invariants": [
         "voice.phase1_work_item_repair_audits: repair_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), request_id varchar(255) NOT NULL, actor_id varchar(100) NOT NULL, reason text NOT NULL, expected_lease_epoch integer NOT NULL, previous_status varchar(20) NOT NULL, previous_attempt_count integer NOT NULL, previous_last_error text NULL, allocated_max_attempts integer NOT NULL DEFAULT 5, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (work_id, request_id) — captures durable ops repair authorization with request-level deduplication; never creates a parallel queue.",
         "Repair transaction invariants: repair execution must verify in the same transaction that target work_item is currently status='failed' with lease_epoch=expected_lease_epoch; resets status to 'pending' with a fresh maxAttempts budget, preserving original work_id, payload_ref, dedupe_key, command_id and ordinary-call nullable voice_session_id.",
@@ -253,10 +255,7 @@
         "Historical data invariant: existing historical work only preserves recorded attempt count and last_error; repair records do not fabricate non-existent historical attempt timestamps."
       ],
       "description": "Voice work_item 補跑稽核、嘗試紀錄與 lease-fenced 修復資料表 migration",
-      "downstream_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-QA-BOOKING-001"
-      ]
+      "downstream_tasks": ["SR-QA-WEBHOOK-001", "SR-QA-BOOKING-001"]
     },
     {
       "task_id": "SR-LAUNCH-SCHEMA-20260913",
@@ -282,10 +281,7 @@
         "Idempotency key format: derived deterministically as ['credential-alert/v1', scope, eventId, recipientEmail] to prevent duplicate alert fan-out."
       ],
       "description": "Registry 證照與保險到期掃描處理、來源指紋去重、租約保護與不可變告警交付意圖 migration",
-      "downstream_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-LIVE-OPS-001"
-      ]
+      "downstream_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-OPS-001"]
     },
     {
       "task_id": "SR-LAUNCH-SCHEMA-20260913",
@@ -306,10 +302,7 @@
         "Separation of provider acknowledgement and inbox arrival: provider acknowledgement is recorded as transport acceptance evidence, never converted to a false assertion of end-user inbox receipt. Late acknowledgements remain associated with their original attempt."
       ],
       "description": "PostgreSQL 版 Notification MailOutbox 持久儲存、租約重試、冪等交付與嘗試稽核 migration",
-      "downstream_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-LIVE-MAIL-001"
-      ]
+      "downstream_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-MAIL-001"]
     }
   ],
   "partner_notification_allocations": [
@@ -448,6 +441,103 @@
         "PUSH-FIRST-PARTY-FCM-20261006",
         "PUSH-CHANNEL-PG-QA-20261006"
       ]
+    }
+  ],
+  "passenger_app_allocations": [
+    {
+      "task_id": "PAX-ACCOUNT-SESSION-20261009",
+      "version": "V0109",
+      "migration_filename": "V0109__passenger_account_session.sql",
+      "domain": "passenger_account_session",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.accounts",
+        "passenger.logins",
+        "passenger.sessions"
+      ],
+      "referenced_tables": [],
+      "description": "乘客 realm、帳號、登入身分與 session migration",
+      "downstream_tasks": ["PAX-OTP-20261009", "PAX-OIDC-LOGIN-20261009"]
+    },
+    {
+      "task_id": "PAX-OTP-20261009",
+      "version": "V0110",
+      "migration_filename": "V0110__passenger_otp.sql",
+      "domain": "passenger_otp",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.otps"],
+      "referenced_tables": [],
+      "description": "手機與 Email OTP migration",
+      "downstream_tasks": ["PAX-SMS-PROVIDER-20261009"]
+    },
+    {
+      "task_id": "PAX-OIDC-LOGIN-20261009",
+      "version": "V0111",
+      "migration_filename": "V0111__passenger_oidc_login.sql",
+      "domain": "passenger_oidc_login",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.oauth_transactions"],
+      "referenced_tables": [],
+      "description": "OAuth transaction migration",
+      "downstream_tasks": ["PAX-FACEBOOK-LOGIN-20261009"]
+    },
+    {
+      "task_id": "PAX-FARE-QUOTE-20261009",
+      "version": "V0112",
+      "migration_filename": "V0112__passenger_fare_quote.sql",
+      "domain": "passenger_fare_quote",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.fare_versions"],
+      "referenced_tables": [],
+      "description": "運價版本與試算 migration",
+      "downstream_tasks": ["PAX-BOOKING-HISTORY-20261009"]
+    },
+    {
+      "task_id": "PAX-BOOKING-HISTORY-20261009",
+      "version": "V0113",
+      "migration_filename": "V0113__passenger_booking_history.sql",
+      "domain": "passenger_booking_history",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.booking_histories"],
+      "referenced_tables": [],
+      "description": "帳號行程歸屬 migration",
+      "downstream_tasks": [
+        "PAX-RECEIPT-COMPLAINT-20261009",
+        "PAX-PAYMENT-CORE-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-RECEIPT-COMPLAINT-20261009",
+      "version": "V0114",
+      "migration_filename": "V0114__passenger_receipt_complaint.sql",
+      "domain": "passenger_receipt_complaint",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.complaints"],
+      "referenced_tables": [],
+      "description": "客訴與遺失物入口 migration",
+      "downstream_tasks": []
+    },
+    {
+      "task_id": "PAX-PAYMENT-CORE-20261009",
+      "version": "V0115",
+      "migration_filename": "V0115__passenger_payment_core.sql",
+      "domain": "passenger_payment_core",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.psp_tokens", "passenger.payment_states"],
+      "referenced_tables": [],
+      "description": "付款 port、綁卡、扣款與狀態 migration",
+      "downstream_tasks": ["PAX-PSP-ADAPTER-20261009"]
+    },
+    {
+      "task_id": "PAX-PUSH-DEVICE-API-20261009",
+      "version": "V0116",
+      "migration_filename": "V0116__passenger_push_device_api.sql",
+      "domain": "passenger_push_device_api",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.push_devices"],
+      "referenced_tables": [],
+      "description": "裝置登錄 API migration",
+      "downstream_tasks": ["PAX-NATIVE-APP-20261009"]
     }
   ]
 }
