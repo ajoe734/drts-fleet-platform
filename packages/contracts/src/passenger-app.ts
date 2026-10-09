@@ -1,4 +1,4 @@
-import { PassengerRideAuthorityView, PassengerRideSseEventEnvelope, PassengerPaymentStatus } from "./phase1-p5-s3-multi-taxi";
+import { PassengerRideAuthorityView } from "./phase1-p5-s3-multi-taxi";
 
 export const PASSENGER_REALM = "passenger";
 export const FIRST_PARTY_PASSENGER_ACTOR_TYPE = "first_party_passenger";
@@ -77,6 +77,7 @@ export interface OAuthCallbackResponse {
   refreshToken?: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetAuthProvidersQuery {}
 
 export interface AuthProvidersResponse {
@@ -100,6 +101,7 @@ export interface LogoutResponse {
   success: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetPassengerMeQuery {}
 
 export interface PassengerMeResponse {
@@ -111,6 +113,7 @@ export interface UpdatePassengerMeCommand {
   contactConsent?: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetPassengerIdentitiesQuery {}
 
 export interface PassengerIdentitiesResponse {
@@ -148,6 +151,7 @@ export interface FareVersion {
   additionalFees: Record<string, number>;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetFaresQuery {}
 
 export interface FaresResponse {
@@ -195,6 +199,7 @@ export interface PassengerRideListResponse {
   nextCursor?: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetActivePassengerRidesQuery {}
 
 export interface GetPassengerRideQuery {
@@ -250,6 +255,7 @@ export interface PassengerPaymentMethod {
   isDefault: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface GetPaymentMethodsQuery {}
 
 export interface PaymentMethodsResponse {
@@ -285,4 +291,3 @@ export interface RegisterPushDeviceResponse {
   success: boolean;
 }
 
-export type { PassengerRideAuthorityView, PassengerRideSseEventEnvelope, PassengerPaymentStatus };
