@@ -10,12 +10,12 @@ import {
 } from "@nestjs/common";
 import { PassengerAccountService } from "./passenger-account.service";
 import { CurrentIdentity } from "../../../common/auth/auth.decorators";
-import { BootstrapRequestIdentity } from "../../../common/auth/auth.types";
-import {
+import type { BootstrapRequestIdentity } from "../../../common/auth/auth.types";
+import type {
   UpdatePassengerMeCommand,
   RefreshSessionCommand,
   LogoutCommand,
-} from "@drts/contracts/src/passenger-app";
+} from "@drts/contracts";
 
 @Controller("passenger-app")
 export class PassengerAccountController {

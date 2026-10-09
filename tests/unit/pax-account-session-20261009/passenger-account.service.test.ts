@@ -70,7 +70,7 @@ describe("PassengerAccountService", () => {
     expect(mockClient.query).toHaveBeenCalledWith("ROLLBACK");
 
     // Expect family revocation update
-    const updateCalls = mockDb.query.mock.calls.filter((c) =>
+    const updateCalls = mockDb.query.mock.calls.filter((c: any) =>
       c[0].includes(
         "UPDATE passenger.passenger_sessions SET is_revoked = true WHERE family_id",
       ),

@@ -59,7 +59,7 @@ export class PassengerAccountService {
       } else {
         // Create new account
         const accountRes = await tx.query(
-          `INSERT INTO passenger.passenger_accounts (contact_phone, contact_phone_verified, contact_email, contact_email_verified) 
+          `INSERT INTO passenger.passenger_accounts (contact_phone, contact_phone_verified, contact_email, contact_email_verified)
            VALUES ($1, $2, $3, $4) RETURNING drts_passenger_id`,
           [
             verifiedAttributes?.phone || null,
@@ -71,7 +71,7 @@ export class PassengerAccountService {
         drtsPassengerId = accountRes.rows[0].drts_passenger_id;
 
         await tx.query(
-          `INSERT INTO passenger.passenger_identities (drts_passenger_id, provider, subject) 
+          `INSERT INTO passenger.passenger_identities (drts_passenger_id, provider, subject)
            VALUES ($1, $2, $3)`,
           [drtsPassengerId, provider, subject],
         );
@@ -109,7 +109,7 @@ export class PassengerAccountService {
       }
 
       await tx.query(
-        `INSERT INTO passenger.passenger_identities (drts_passenger_id, provider, subject) 
+        `INSERT INTO passenger.passenger_identities (drts_passenger_id, provider, subject)
          VALUES ($1, $2, $3)`,
         [drtsPassengerId, provider, subject],
       );
@@ -184,7 +184,7 @@ export class PassengerAccountService {
     try {
       await client.query("BEGIN");
       const session = await client.query(
-        `SELECT id, drts_passenger_id, family_id, is_revoked, expires_at, purpose, iam_session_id 
+        `SELECT id, drts_passenger_id, family_id, is_revoked, expires_at, purpose, iam_session_id
          FROM passenger.passenger_sessions WHERE refresh_token_hash = $1 FOR UPDATE`,
         [hash],
       );
@@ -304,8 +304,8 @@ export class PassengerAccountService {
   async deleteAccount(drtsPassengerId: string) {
     return this.transaction(async (tx) => {
       await tx.query(
-        `UPDATE passenger.passenger_accounts 
-         SET is_deleted = true, 
+        `UPDATE passenger.passenger_accounts
+         SET is_deleted = true,
              deleted_at = now(),
              display_name = 'Deleted User',
              contact_phone = null,
@@ -429,7 +429,7 @@ export class PassengerAccountService {
 
   async getIdentities(drtsPassengerId: string) {
     const res = await this.db.query(
-      `SELECT id as "identityId", provider, subject, drts_passenger_id as "drtsPassengerId" 
+      `SELECT id as "identityId", provider, subject, drts_passenger_id as "drtsPassengerId"
        FROM passenger.passenger_identities WHERE drts_passenger_id = $1`,
       [drtsPassengerId],
     );
