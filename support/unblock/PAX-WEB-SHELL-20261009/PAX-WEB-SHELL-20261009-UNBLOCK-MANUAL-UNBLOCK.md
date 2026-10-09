@@ -15,10 +15,23 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 ### Helper Scope Findings
 | Finding / acceptance | production source and call path | old -> current evidence | repair boundary and required regressions / limits |
 |---|---|---|---|
-| U1 P1 integration/scope | Live PR #2486 targets `dev`, head 1cbef7c matched exactly twice. | PR #2473 targeted main, 1247 commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
-| U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Document correctly cites FULL latest parent review at 2026-10-09T18:26:23Z. Parent next now truthfully reflects R7 boundary; helper resolved_parent_next corrected. | Old artifact had canonical state and document contradictions. | Both parent concrete next and helper resolved_parent_next updated via CLI/canonical metadata. Parent next code unit remains R7. Rebase instruction updated to normal merge only. |
+| U1 P1 integration/scope | Live PR #2486 targets `dev`, head d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373 matched exactly twice. | PR #2473 targeted main, 1247 commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
+| U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Document correctly cites FULL latest parent review at 2026-10-09T18:26:23Z, and appended retained helper review below. | Old artifact had canonical state and document contradictions. | Both parent concrete next and helper resolved_parent_next updated via CLI/canonical metadata. Parent next code unit remains R7. Rebase instruction updated to normal merge only. |
 | U3 P2 design-source gap | `realms.ts` newly adds passenger `light.border=#D0E1F5`, `dark.fg=#60A5FA` and `dark.border=#1E3A8A` | These values were absent from P5 canvas. | Preserved verified P5 `brand=#0B5CAB`, `brandBg=#EAF2FB`, `surface=#FFFFFF`. Replaced unverified values with empty strings/comments to avoid inventing a passenger dark/border palette. |
-| U4 required trailers | Whole PR range formal gate `check_commit_trailers.py --base origin/dev --head 1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22` exit0. | Previously missing trailer checks. | Verified 2 commits OK. Commit trailers job 114064036045 SUCCESS. VERIFIED FIXED. |
+| U4 required trailers | Whole PR range formal gate `check_commit_trailers.py --base origin/dev --head d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit0. | Historical 1cbef7c checks: 2 commits OK, job 114064036045 SUCCESS. | Verified 3 commits OK. Commit trailers job 114072203044 SUCCESS. VERIFIED FIXED. |
+
+| U5 remaining consumer blocker | Artifact explicitly mentions the missing `#07437E` light-screen header contract. | Canonical Passenger.html loads `#07437E` into `brandDark`, but P5 uses it as a light-screen header/phone background. Helper supplied empty `dark.bg`. | Left product sources unchanged. Coordinated U5 consumer blocker. Parent next updated via canonical metadata to include consuming a properly named canvas-backed light-header token. |
+
+### Appended Retained Helper Reviews
+
+#### Codex Independent Review REOPEN (2026-10-09T23:38:41Z, generation 2e88bf4ee8f8453fb33ffbc848ece594)
+- Current helper candidate / exact remote PR head = `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373`.
+- Adjacent independently reviewed helper: `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`, generation `7130fdb84afc4ae9b4b462d0acc61cbc`.
+- **U1 scoped delivery RETAINED:** PR2486 OPEN targets dev, 3 commits, exact candidate head, exactly the 3 authorized files (+60/-1). Historical PR2473 is explicitly historical.
+- **U3 unauthorized palette removal RETAINED:** Token sources unchanged from previous candidate. Unsupported passenger border/dark entries remain explicit empty placeholders.
+- **U4 required trailers VERIFIED:** `check_commit_trailers.py` against `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit 0, 3 commits OK. Hosted CI job 114072203044 SUCCESS.
+- **U2 parent R7 next/normal-merge correction RETAINED:** Parent next and helper resolved_parent_next match R7 cases and verified product fixes.
+- **U5 artifact disclosure subfinding FIXED:** Artifact now explicitly mentions the missing `#07437E` light-screen header contract.
 
 ### Parent Task Findings (from Review of Parent Task)
 - **R1**: Original stylesheet defect RESOLVED.
@@ -31,11 +44,11 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 
 ## Local Checks & Evidence
 - Git status: `nothing to commit, working tree clean`
-- `git diff --check HEAD^ HEAD`: exit 0
+- `git diff --check origin/dev...HEAD`: exit 0; `git diff --check HEAD^ HEAD`: exit 0
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
 - Target PR #2486 verified pointing to `dev` branch.
-- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22` exit0.
-- Commit trailers job 114064036045 SUCCESS.
+- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit 0 (3 commits OK).
+- Commit trailers job 114072203044 SUCCESS.
 
 ## Unblocked Next Step
 The parent task `PAX-WEB-SHELL-20261009` code unit remains R7: retry-call3 network/401 with rotated JWT/trusted refresh body/both deletion cookies; refresh-only/empty/non-string token pairs; logout metadata mint failure; actual Next-decoded POST traversal and allowed-shaped GET oauth encoded-dot rejection with zero metadata/API calls; successful OTP/OAuth/refresh positives and truthful same-SHA CI/provenance. Preserve existing session/logout/traversal/token/portability fixes.
