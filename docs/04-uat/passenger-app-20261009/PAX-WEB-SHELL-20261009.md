@@ -127,3 +127,13 @@ REVIEWED_SHA=9e0948ae6e56ba1b1e3274845cb6e398cdf03035; candidate_generation=eb6a
 - `pnpm exec eslint apps/passenger-app-web packages/passenger-client/src tests/unit/pax-web-shell-20261009 --max-warnings=0`: PASS, exit 0
 - `pnpm exec tsc -p packages/ui-tokens/tsconfig.json --noEmit`: PASS, exit 0
 - `pnpm exec tsc -p packages/passenger-client/tsconfig.json --noEmit`: PASS, exit 0
+
+## Iteration 9 Fixes (Owner Repair)
+
+| Finding | Current Status / Evidence |
+| :--- | :--- |
+| **R7** P2 STILL INCOMPLETE, repeated regression/provenance gap | **RESOLVED**. Parameterized call3 retry NETWORK exception and 401, asserting three calls, rotated JWT, trusted refresh body, and BOTH deletion cookies. Added refresh-only, empty, and non-string token pairs validation failures. Added logout metadata failure test. Pinned original POST traversal with actual Next-decoded params and allowed-shaped GET oauth encoded dot, verifying 404 and no metadata/API calls. Valid OTP/OAuth positives assert actual forwarding now. Retained R15/R13/R14/R2/R4/R5/R10 fixes. |
+| **R8** P2 STILL UNRESOLVED, repeated authoritative scope coordination gap | **PENDING SUPERVISOR COORDINATION**. Reporting blocker to the Supervisor via gateway to record shared-file scope coordination for `packages/ui-tokens/src/realms.ts` and `packages/ui-tokens/src/colors.ts` before creating another candidate. |
+
+### Execution Evidence
+- `pnpm exec vitest run tests/unit/pax-web-shell-20261009/bff.test.ts`: PASS (15 tests, exit code 0)
