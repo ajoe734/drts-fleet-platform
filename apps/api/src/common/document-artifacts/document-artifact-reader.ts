@@ -45,15 +45,15 @@ export type DocumentArtifactResolution =
  * tampered with), and a caller re-requesting a fresh link is the correct next
  * step, not indistinguishable "never produced" language.
  */
-export function resolveDocumentArtifact(
+export async function resolveDocumentArtifact(
   store: DocumentArtifactStore,
   input: ResolveDocumentArtifactInput,
-): DocumentArtifactResolution {
+): Promise<DocumentArtifactResolution> {
   if (!isDocumentArtifactKind(input.kind)) {
     return { status: "not_found" };
   }
 
-  const entry = store.get(input.kind, input.subjectId);
+  const entry = await store.get(input.kind, input.subjectId);
   if (!entry) {
     return { status: "not_found" };
   }

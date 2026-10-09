@@ -24,7 +24,7 @@ import { isPlacardSourceSelectionBlocked } from "../../../../apps/platform-admin
  */
 describe("SR-QA-UX-001 — C125: Document Artifacts, Bytes Integrity, Virus Scan & Download Lifecycle", () => {
   describe("1. N04 Traceability: DocumentArtifactStore Materialized Real Bytes Storage", () => {
-    it("stores real binary PDF bytes and calculates verifiable SHA-256 digest", () => {
+    it("stores real binary PDF bytes and calculates verifiable SHA-256 digest", async () => {
       const store = new InMemoryDocumentArtifactStore();
       const invoicePdfBytes = Buffer.from(
         "%PDF-1.4 ... Fake Invoice Document Content for Tenant QA ... %%EOF",
@@ -33,7 +33,7 @@ describe("SR-QA-UX-001 — C125: Document Artifacts, Bytes Integrity, Virus Scan
         .update(invoicePdfBytes)
         .digest("hex");
 
-      const record = store.put({
+      const record = await store.put({
         kind: "tenant-invoice",
         subjectId: "inv-2026-09-001",
         mimeType: "application/pdf",
@@ -48,17 +48,17 @@ describe("SR-QA-UX-001 — C125: Document Artifacts, Bytes Integrity, Virus Scan
       expect(record.storedAt).toBeDefined();
 
       // Retrieve from store
-      const entry = store.get("tenant-invoice", "inv-2026-09-001");
+      const entry = await store.get("tenant-invoice", "inv-2026-09-001");
       expect(entry).not.toBeNull();
       expect(entry?.record.sha256).toBe(expectedSha256);
       expect(entry?.bytes.equals(invoicePdfBytes)).toBe(true);
     });
 
-    it("returns defensive copies of stored buffers so external mutation cannot corrupt storage", () => {
+    it("returns defensive copies of stored buffers so external mutation cannot corrupt storage", async () => {
       const store = new InMemoryDocumentArtifactStore();
       const originalBytes = Buffer.from("Uncorrupted bytes");
 
-      store.put({
+      await store.put({
         kind: "report",
         subjectId: "rep-001",
         mimeType: "text/plain",
@@ -68,26 +68,29 @@ describe("SR-QA-UX-001 — C125: Document Artifacts, Bytes Integrity, Virus Scan
       // Mutate the caller buffer
       originalBytes[0] = 0x58; // 'X'
 
-      const entry = store.get("report", "rep-001");
+      const entry = await store.get("report", "rep-001");
       expect(entry?.bytes.toString()).toBe("Uncorrupted bytes");
     });
 
-    it("rejects unsupported document kinds with descriptive error", () => {
+    it("rejects unsupported document kinds with descriptive error", async () => {
       const store = new InMemoryDocumentArtifactStore();
 
-      expect(() =>
+      await expect(
         store.put({
           kind: "unsupported-accident-video" as never,
           subjectId: "acc-001",
           mimeType: "video/mp4",
           bytes: Buffer.from("fake video data"),
         }),
-      ).toThrowError(/DocumentArtifactStore does not accept kind/);
+      ).rejects.toThrowError(/DocumentArtifactStore does not accept kind/);
     });
 
-    it("returns null for non-existent documents instead of fabricating empty data", () => {
+    it("returns null for non-existent documents instead of fabricating empty data", async () => {
       const store = new InMemoryDocumentArtifactStore();
-      const missing = store.get("tenant-invoice", "non-existent-invoice-id");
+      const missing = await store.get(
+        "tenant-invoice",
+        "non-existent-invoice-id",
+      );
       expect(missing).toBeNull();
     });
   });

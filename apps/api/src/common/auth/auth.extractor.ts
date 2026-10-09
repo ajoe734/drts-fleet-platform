@@ -21,6 +21,17 @@ interface ExtractIdentityOptions {
   allowAnonymous: boolean;
   method?: string | undefined;
   requestUrl?: string | undefined;
+  // Callers that mint a durable session record (POST /api/auth/token) must
+  // not fall back to the deterministic `bootstrap:<actorId>` session id: two
+  // independent exchanges for the same actor (e.g. mail bootstrap and a
+  // running deploy acceptance session) would then collide on the same
+  // iam.identity_sessions row and the newer exchange would overwrite the
+  // older one's currentTokenId, invalidating a still-valid session. Guard-only
+  // callers that never create a session row (bootstrap-auth.guard,
+  // @CurrentIdentity) keep the deterministic default so repeat header-only
+  // requests from the same actor can still correlate step-up proofs without
+  // an explicit x-session-id header.
+  requireExplicitSessionId?: boolean;
 }
 
 // x-tenant-id is a tenant *resource selector*, not proof of identity: a
@@ -204,7 +215,7 @@ export function extractBootstrapRequestIdentity(
           : ["tenant_bootstrap_fixture"],
     sessionId:
       normalizeHeaderValue(headers["x-session-id"]) ||
-      (isStrictAuthEnvironment()
+      (isStrictAuthEnvironment() || options.requireExplicitSessionId
         ? null
         : actorTypeHeader
           ? `bootstrap:${normalizeHeaderValue(headers["x-actor-id"]) || "anon"}`
