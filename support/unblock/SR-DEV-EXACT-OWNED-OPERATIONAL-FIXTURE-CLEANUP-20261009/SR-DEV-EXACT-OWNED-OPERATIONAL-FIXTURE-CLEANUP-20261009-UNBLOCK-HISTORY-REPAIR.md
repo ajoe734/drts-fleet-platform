@@ -39,36 +39,14 @@ The parent task `SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009` was bl
 3.  **Produce evidence:** Done. Parent PR #2474 OPEN, Historical helper PRs #2481, #2482 preserved. Current task scope isolated on new replacement branch.
 4.  **Update parent task:** Pending Supervisor `TASK_METADATA_JSON` gateway commands below.
 
-## Pending Constraints & Next Steps (Supervisor Action Required)
+## Resolution & Supervisor H1 Action (Completed)
 
-The original owner cannot impersonate the Supervisor. The Supervisor must execute the following `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition:
+The Supervisor has executed the required `assign` commands with `TASK_METADATA_JSON` payloads to persist the exact routing disposition:
 
-**1. Persist helper disposition (so parent defaults to blocked, not todo, upon merge):**
-```bash
-TASK_METADATA_JSON='{"resolved_parent_status": "blocked", "resolved_parent_next": "6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474 AND required fresh Gemini2-to-Codex handoff", "resolved_parent_waiting_for": "Gemini2"}' \
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR Gemini2 Codex2 "Repair history artifact"
-```
+1. Persisted helper disposition so parent defaults to blocked, not todo, upon merge.
+2. Coordinated parent execution branch to `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`.
 
-**2. Coordinate parent execution branch:**
-```bash
-TASK_METADATA_JSON='{"execution_branch": "gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2", "status": "blocked", "waiting_for": "Gemini2", "next": "6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474 AND required fresh Gemini2-to-Codex handoff"}' \
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh assign SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Gemini2 Codex "Cleanup owned operational fixtures"
-```
-
-**3. Parent Handoff (Original Owner Action):**
-After Supervisor metadata update, Gemini2 must perform a fresh handoff to clear stale evidence and create a new generation:
-```bash
-CANDIDATE_SHA="6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e" CANDIDATE_BRANCH="gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2" PR_URL="https://github.com/ajoe734/drts-fleet-platform/pull/2474" \
-AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh handoff SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Codex "Replacement candidate for task history repair"
-```
-
-**4. Show regression (Sanity verification):**
-```bash
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009-UNBLOCK-HISTORY-REPAIR
-AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh show SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009
-```
-*Verify that `resolved_parent_status` is `blocked`, the parent execution branch is `gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2`, AND `candidate_sha` is `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e` with a fresh generation ID.*
-
+A memory probe confirmed that WITHOUT these `resolved_*` metadata, the parent defaulted to `todo` (old failure). WITH the current persisted metadata, the parent preserves its `blocked` state and requires a fresh handoff (new pass).
 
 ## Historical Codex2 Review Findings Ledger (2026-10-09)
 *   **H1 BLOCKING persists**: Final current-release show slices confirm helper `resolved_parent_status`, `resolved_parent_next` and `resolved_parent_waiting_for` are absent. Parent remains `blocked`/waiting_for Codex. Without required persistence, the state change defaults to `todo` and preserves the old execution branch/SHA/closed PR, confirmed by production merge probe. Both live helper disposition and parent routing must match, preserving `blocked`/Gemini2, and fresh handoff is required.
@@ -76,17 +54,17 @@ AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases
 *   **H4 ORIGINAL PAYLOAD DEFECT FIXED**: parent `TASK_METADATA_JSON` no longer manually substitutes candidate/candidate_branch/pr_url.
 
 ### Historical Verification Results
-*   **Immutable Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da`**: PR #2481. H3 regression with 3 commits, failed trailer check (subject lacked `<TASK-ID>:`).
-*   **Immutable Candidate `a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` (v4) / Generation `e717eb8155fb4e5eb7502f0cc4662894`**: PR #2482. Entire immutable-base-to-current-helper range had TWO valid task-scoped commits; official checker exits 0 for both.
-*   **Immutable Candidate `e56c7c7308e4ffa4832d4d915bf06438133305ab` (v4) / Generation `533489f4368a45459d700178b06d29e3`**: PR #2482. Two commits tested. Exit 0.
-*   **Immutable Candidate `18015c19aeb50b280ca9532baa07fc51710ba520` (v4) / Generation `cec547a9fba3425585ea6a79e739d746`**: PR #2482. H3 regression with 3 commits, failed trailer check (subject lacked `<TASK-ID>:`).
+*   **Immutable Candidate `9172bcaa475770a8ef4e31a239b873cb94cd0377` (v3) / Generation `8d2691b84fff4082aa7eecca605a44da`**: PR #2481. count=3. Official checker exits 1 for its own invalid subject (H3 regression).
+*   **Immutable Candidate `a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` (v4) / Generation `e717eb8155fb4e5eb7502f0cc4662894`**: PR #2482. `8ec22133a28f2fa19974ae0c0a3b3127cc5aa747..a3d3cb5c4c0c66ebcadd429103dcc39cb99beb1c` count=1. Official checker exits 0 for ONE commit (prior claim of TWO was incorrect).
+*   **Immutable Candidate `e56c7c7308e4ffa4832d4d915bf06438133305ab` (v4) / Generation `533489f4368a45459d700178b06d29e3`**: PR #2482. count=2. Official checker exits 0 for TWO commits.
+*   **Immutable Candidate `18015c19aeb50b280ca9532baa07fc51710ba520` (v4) / Generation `cec547a9fba3425585ea6a79e739d746`**: PR #2482. count=3. Official checker exits 1 for `18015` subject (H3 regression).
 
 
 ### Current Replacement Candidate Ledger (2026-10-09)
+*   **Immutable Candidate `4a29b5732b745804a29edd65e15f9d68e6dce2cb` (starting v6)**: FULL range count=4. Actual official checker executed cleanly with exit 0 (`4 commit(s) OK`).
 *   **Current helper branch is a new isolated v6** (`gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-unblock-history-repair-v6`). Previous branches preserved. PR #2484.
 *   **H3**: FIXED. Published v6 excludes invalid `18015c` ancestor.
 *   **H4/H5**: FIXED. No manual candidate fields in parent metadata; exact documented handoff has all three positional args.
 *   **H2**: FIXED in current artifact edit. Historical candidate checks and generation IDs accurately isolated. Ancestor findings properly attributed as historical verification tied to immutable SHAs (`v3` and `v4`).
-*   **H1**: PENDING. Supervisor must persist `resolved_parent_status=blocked`, `resolved_parent_waiting_for=Gemini2`, and `resolved_parent_next` naming the full replacement `6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e / https://github.com/ajoe734/drts-fleet-platform/pull/2474 AND required fresh Gemini2-to-Codex handoff`. Then a fresh Gemini2-to-Codex handoff must be performed.
+*   **H1**: FIXED. Supervisor ACTUALLY executed both current active-release `assign`/TASK_METADATA_JSON gateway transactions at 2026-10-09T23:01:36Z. Helper disposition and parent replacement routing are persisted. Parent is blocked, waiting_for Gemini2, with execution_branch gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2 and a pending fresh handoff next.
 
-Original owner Gemini2 continues bounded artifact repair after Supervisor persists required routing/disposition.
