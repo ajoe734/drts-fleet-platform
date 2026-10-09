@@ -102,7 +102,8 @@ Once this helper branch is merged, the parent task will inherit the unblocked di
 
 The original owner of the parent task (Gemini2) MUST perform a fresh handoff to clear the stale historical evidence (candidate `3cf4ef7a253180451d151f76e331bdd3fb1182ff`) and create a new generation for the replacement branch.
 
-This exact three-argument handoff block must be executed:
+When performing the handoff, the three arguments (`CANDIDATE_SHA`, `CANDIDATE_BRANCH`, `PR_URL`) must exactly match the verified actual future head. Use the historical `6b7` example below ONLY if all three verified heads still equal `6b7`. If the parent source has advanced, substitute the new verified full SHA, branch, and OPEN PR URL.
+
 ```bash
 CANDIDATE_SHA="6b7b2f42e28ca60339fd281a5d8d44bcc9ed992e" CANDIDATE_BRANCH="gemini2/sr-dev-exact-owned-operational-fixture-cleanup-20261009-v2" PR_URL="https://github.com/ajoe734/drts-fleet-platform/pull/2474" \
 AI_NAME=Gemini2 /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-0fb44e9576d3/tools/development-orchestrator/bin/ai-status.sh handoff SR-DEV-EXACT-OWNED-OPERATIONAL-FIXTURE-CLEANUP-20261009 Codex "Replacement candidate for task history repair"
