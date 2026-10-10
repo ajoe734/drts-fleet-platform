@@ -118,9 +118,15 @@ step and the following helper metadata before this helper can be handed off:
 {
   "resolved_parent_status": "blocked",
   "resolved_parent_waiting_for": "Codex",
-  "resolved_parent_next": "No divergent auth history remains. Preserve Codex2 head c1f92a346b3993ea60e8f66f61b1e06049a87edc and draft PR #2514, and former-owner PR #2509. F7 remains open: Codex coordinates Supervisor for committed canonical auth/account screen paths, artboard IDs and version per planning helper #2516. After source delivery and resume gate, restore the isolated Codex2 parent checkout from its published head, match UI to canvas, append original UAT evidence and revalidate both acceptance keys with new same-SHA review/CI. Legal content/configuration and hosted acceptance remain pending. History audit does not authorize visuals."
+  "resolved_parent_next": "F7 canonical Passenger auth/account screens are missing. Codex coordinates Supervisor to supply source paths, artboard IDs and version per planning PR #2516. Keep parent blocked and preserve draft PR #2514 at c1f92a346b3993ea60e8f66f61b1e06049a87edc and former PR #2509. After visual source delivery and Supervisor resume gate, restore the isolated Codex2 checkout from that published head, align UI to the canvas, update the original UAT and revalidate both pax-web-auth_login_methods_ui and pax-web-auth_account_management_ui with fresh same-SHA review/CI. Legal content/configuration and hosted acceptance remain pending. Audited delivery evidence is in helper PR #2518."
 }
 ```
+
+Keep the parent next focused on F7. The successful publication/ref audit belongs
+in this artifact and helper evidence: including history, commit, push or worktree
+in parent next would trigger the same broad history classifier again. The exact
+proposed next above is checked against the formal release policy and yields
+planning_decision; this wording changes no acceptance or visual authority.
 
 Without explicit disposition, `apply_unblock_parent_resolution` defaults to
 todo when a helper completes. That would incorrectly resume the unresolved F7
