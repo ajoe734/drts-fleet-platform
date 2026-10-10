@@ -50,7 +50,7 @@ function context(
     getClass: () => controller,
   } as never;
 }
-async function fixture() {
+async function fixture(google?: unknown) {
   const accounts = new PassengerAccountService(
     new MemoryPassengerStore(),
     new PassengerJwtService(),
@@ -69,7 +69,7 @@ async function fixture() {
     undefined,
     undefined,
     undefined,
-    undefined,
+    google as never,
     accounts,
   );
   return { accounts, account, session, legacy, guard };
@@ -132,7 +132,7 @@ describe.each(["development", "staging", "production"])(
         driver: "driver_user",
         partner: "partner_user",
       } as const;
-      const token = f.legacy.sign({
+      const { token } = await f.legacy.issueSessionToken({
         authMode: "jwt_bearer",
         actorType: actors[realm],
         actorId: `unit-${realm}`,
@@ -190,5 +190,41 @@ describe.each(["development", "staging", "production"])(
         ),
       ).rejects.toMatchObject({ code: "unauthorized" });
     });
+    it("serves the public fare controller via the BFF metadata boundary", async () => {
+      const google = {
+        verifyServicePrincipal: vi
+          .fn()
+          .mockResolvedValue({ principalId: "unit-bff" }),
+      };
+      const f = await fixture(google);
+      vi.stubEnv("APP_ENV", environment);
+      const r = request(
+        "GET",
+        "/api/passenger-app/fares",
+        "metadata-unit-stub",
+      );
+      expect(
+        await f.guard.canActivate(context(r, "fares", PassengerFareController)),
+      ).toBe(true);
+      expect(r.identity).toBeUndefined();
+      if (environment !== "development")
+        expect(google.verifyServicePrincipal).toHaveBeenCalled();
+    });
+    it.skipIf(environment === "development")(
+      "rejects arbitrary Bearer on the public fare controller in strict environments",
+      async () => {
+        const f = await fixture();
+        vi.stubEnv("APP_ENV", environment);
+        await expect(
+          f.guard.canActivate(
+            context(
+              request("GET", "/api/passenger-app/fares", "arbitrary-invalid"),
+              "fares",
+              PassengerFareController,
+            ),
+          ),
+        ).rejects.toThrow();
+      },
+    );
   },
 );

@@ -137,7 +137,7 @@ export class PassengerFareService {
       lat: command.destinationLat,
       lng: command.destinationLng,
     };
-    const evaluation = this.areas.evaluate(
+    let evaluation = this.areas.evaluate(
       {
         serviceProductType: "taxi_reservation",
         pickup: origin,
@@ -146,6 +146,24 @@ export class PassengerFareService {
       },
       requestId,
     );
+    // The shared evaluator allows an empty active-area catalogue for older callers.
+    // Passenger booking requires affirmative coverage for both stops.
+    if (evaluation.stops.some((stop) => stop.serviceAreaCodes.length === 0)) {
+      evaluation = {
+        ...evaluation,
+        decision: "not_serviceable",
+        reasonCodes: [
+          ...new Set([
+            ...evaluation.reasonCodes,
+            "SERVICE_AREA_COVERAGE_REQUIRED",
+          ]),
+        ],
+        reasonMessages: [
+          ...evaluation.reasonMessages,
+          "Both stops require an effective service area.",
+        ],
+      };
+    }
     if (evaluation.decision !== "serviceable") {
       // The SD contract is binary. Manual review cannot become an automatically serviceable quote.
       return {

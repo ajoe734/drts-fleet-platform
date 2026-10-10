@@ -37,9 +37,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function fixture() {
+async function fixture(areas = new ServiceAreaService()) {
+  const accountStore = new MemoryPassengerStore();
   const accounts = new PassengerAccountService(
-    new MemoryPassengerStore(),
+    accountStore,
     new PassengerJwtService(),
   );
   const account = await accounts.findOrCreateByIdentity(
@@ -71,10 +72,12 @@ async function fixture() {
     store,
     accounts,
     new GeoService(provider as never),
-    new ServiceAreaService(),
+    areas,
   );
   return {
     accounts,
+    accountStore,
+    areas,
     account,
     session,
     identity,
@@ -198,6 +201,37 @@ describe("production quote and public fares flow (external/storage boundaries st
     await expect(f.service.quote(f.identity, body)).rejects.toMatchObject({
       code: "unauthorized",
     });
+    expect(f.store.insertSnapshot).not.toHaveBeenCalled();
+  });
+  it("rejects suspended accounts using the live account authority", async () => {
+    const f = await fixture();
+    f.accountStore.accounts.get(f.account.drtsPassengerId)!.status =
+      "suspended";
+    await expect(f.service.quote(f.identity, body)).rejects.toMatchObject({
+      code: "unauthorized",
+    });
+    expect(f.provider.route).not.toHaveBeenCalled();
+  });
+  it("requires affirmative coverage even when the shared evaluator has no active reservation areas", async () => {
+    // Stub only persisted catalogue loading, then run the real evaluator. Avoid
+    // retiring shared seed objects, which would contaminate subsequent tests.
+    const persisted = new ServiceAreaService()
+      .listServiceAreas()
+      .map((area) => ({ ...area, status: "retired", effectiveUntil: now }));
+    const areas = new ServiceAreaService({
+      loadState: async () => ({ serviceAreas: persisted, stopPolicies: [] }),
+    } as never);
+    await areas.onModuleInit();
+    const f = await fixture(areas);
+    const result = await f.service.quote(f.identity, body);
+    expect(result).toMatchObject({
+      serviceAreaResult: "not_serviceable",
+      serviceAreaEvaluation: {
+        decision: "not_serviceable",
+        reasonCodes: expect.arrayContaining(["SERVICE_AREA_COVERAGE_REQUIRED"]),
+      },
+    });
+    expect(f.provider.route).not.toHaveBeenCalled();
     expect(f.store.insertSnapshot).not.toHaveBeenCalled();
   });
   it("returns only the public effective version contract, as a percentage fraction", async () => {
