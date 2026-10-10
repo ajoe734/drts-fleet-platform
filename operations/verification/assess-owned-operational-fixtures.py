@@ -923,7 +923,8 @@ def verify_authority(args):
             status_fetched_runs += len(page_runs)
             for r in page_runs:
                 if str(r.get("id")) != args.current_run_id:
-                    path = r.get("path", "")
+                    path = r.get("path")
+                    require(path, "Active workflow run missing path")
                     if regex_mod.search(r"deploy|restore|provision|provider|scanner", path, regex_mod.IGNORECASE):
                         active_restricted_runs.append(r)
             if len(page_runs) < 100:
@@ -966,16 +967,14 @@ def verify_authority(args):
     require(res_approvals.returncode == 0, "Failed to fetch current run approvals")
     approvals_data = json.loads(res_approvals.stdout)
     
-    has_operator_approval = False
+    operator_approvals = []
     for approval in approvals_data:
-        if approval.get("state") == "approved":
-            for env in approval.get("environments", []):
-                if env.get("name") == "operator":
-                    has_operator_approval = True
-                    break
+        for env in approval.get("environments", []):
+            if env.get("name") == "operator":
+                operator_approvals.append(approval)
     
-    if not has_operator_approval:
-        require(False, "Blocked disposition: genuine shared exclusion is unsupported")
+    require(operator_approvals, "Blocked disposition: genuine shared exclusion is unsupported")
+    require(operator_approvals[-1].get("state") == "approved", "Latest operator disposition is not approved")
 
 def run_bounded(cmd, input_str=None, timeout_sec=30, max_stdout=1024*1024*5, max_stderr=128*1024, env=None, binary_out=False, out_path=None):
     import time, select, subprocess, os
@@ -1118,12 +1117,29 @@ def main():
                 require(res.returncode == 0, f"Failed to describe {s_name}")
                 val = json.loads(res.stdout)
 
+                require(val.get("metadata", {}).get("name") == s_name, f"Service metadata name mismatch for {s_name}")
+                
+                conditions = val.get("status", {}).get("conditions", [])
+                ready_cond = next((c for c in conditions if c.get("type") == "Ready"), None)
+                require(ready_cond and ready_cond.get("status") == "True", f"Service {s_name} is not Ready")
+
                 ready_revision = val.get("status", {}).get("latestReadyRevisionName")
                 require(ready_revision is not None, f"No ready revision for {s_name}")
+                
+                traffic = val.get("status", {}).get("traffic", [])
+                traffic_rev = next((t for t in traffic if t.get("revisionName") == ready_revision), None)
+                require(traffic_rev is not None, f"Traffic not routed to ready revision for {s_name}")
 
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"])
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
                 rev_val = json.loads(res_rev.stdout)
+
+                require(rev_val.get("metadata", {}).get("name") == ready_revision, f"Revision name mismatch for {ready_revision}")
+                require(rev_val.get("metadata", {}).get("labels", {}).get("serving.knative.dev/service") == s_name, f"Revision does not belong to service {s_name}")
+                
+                rev_conditions = rev_val.get("status", {}).get("conditions", [])
+                rev_ready = next((c for c in rev_conditions if c.get("type") == "Ready"), None)
+                require(rev_ready and rev_ready.get("status") == "True", f"Revision {ready_revision} is not Ready")
 
                 containers = rev_val.get("spec", {}).get("containers", [])
                 images = {}
@@ -1146,11 +1162,14 @@ def main():
                 iam_val = json.loads(iam_res.stdout)
                 safe_bindings = []
                 for b in iam_val.get("bindings", []):
+                    require("condition" not in b, f"Unsupported IAM condition on {s_name}")
                     safe_bindings.append({"role": b.get("role"), "members": b.get("members", [])})
                 service_meta["bindings"] = safe_bindings
                 
                 if s_name == "drts-dev-api":
                     service_meta["runtime_sha"] = env.get("DRTS_CANDIDATE_SHA")
+                    if args.current_runtime_sha:
+                        require(service_meta["runtime_sha"] == args.current_runtime_sha, "Runtime SHA mismatch in drts-dev-api")
                     service_meta["scanner_url"] = env.get("REMITTANCE_PROOF_SCANNER_URL")
                     service_meta["providers"] = {
                         "DOCUMENT_ARTIFACT_GCS_BUCKET": env.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
@@ -1226,6 +1245,10 @@ def main():
                     bindings = s.get("bindings")
                     require(bindings is not None, f"Service {name} bindings missing/bypass")
                     require(isinstance(bindings, list), f"Service {name} bindings malformed")
+                    
+                    if name == "drts-dev-api":
+                        require(len(bindings) == 1, "API bindings must be exactly a singleton")
+                        
                     validated_bindings = []
                     for b in bindings:
                         require(isinstance(b, dict), f"Service {name} binding malformed")
