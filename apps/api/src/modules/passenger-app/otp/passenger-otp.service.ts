@@ -115,7 +115,7 @@ export class PassengerOtpService {
     if (this.options.pepper.length < 32) return { providers: [] };
     return {
       providers: [
-        ...(this.delivery?.availability() === "available" &&
+        ...(this.delivery?.platformAvailability() === "available" &&
         this.options.fromEmail
           ? ["email" as const]
           : []),

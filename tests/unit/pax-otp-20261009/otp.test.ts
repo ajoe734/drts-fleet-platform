@@ -6,7 +6,7 @@ import type { RequestIdentity } from "../../../apps/api/src/common/auth/auth.typ
 import { PassengerJwtService } from "../../../apps/api/src/common/auth/passenger-jwt.service";
 import { PassengerAccountService } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.service";
 import { NotificationDeliveryService } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
-import type { TransportMessage } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
+import type { OutgoingMailMessage } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
 import {
   PassengerOtpService,
   canonicalOtpTarget,
@@ -56,7 +56,7 @@ function fixture(
   const accountStore = new MemoryPassengerStore();
   const jwt = new PassengerJwtService();
   const accounts = new PassengerAccountService(accountStore, jwt);
-  const messages: TransportMessage[] = [];
+  const messages: OutgoingMailMessage[] = [];
   const outbox = {
     transaction: vi.fn(async () => {
       throw new Error("platform must not persist codes");
@@ -64,7 +64,7 @@ function fixture(
   };
   const transport = {
     provider: "unit-smtp",
-    send: vi.fn(async (message: TransportMessage) => {
+    send: vi.fn(async (message: OutgoingMailMessage) => {
       messages.push(message);
       return {
         provider: "unit-smtp",
@@ -76,7 +76,7 @@ function fixture(
   };
   const delivery = new NotificationDeliveryService(
     outbox,
-    mailEnabled ? transport : null,
+    mailEnabled ? { ...transport, sendPlatform: transport.send } : null,
   );
   const smsCodes: string[] = [];
   const sms = phoneEnabled

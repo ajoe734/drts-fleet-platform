@@ -47,6 +47,10 @@ export class NotificationDeliveryService {
     return this.transport ? "available" : "unavailable";
   }
 
+  platformAvailability(): "available" | "unavailable" {
+    return this.transport?.sendPlatform ? "available" : "unavailable";
+  }
+
   /** Short-lived platform secrets are sent immediately, never retained in the outbox.
    * Caller retries need a new OTP challenge; tenant enqueue/dispatch remain unchanged.
    * Provider replies/errors may echo the secret, so only a bounded status escapes.
@@ -54,11 +58,11 @@ export class NotificationDeliveryService {
   async sendPlatformMail(
     request: PlatformMail,
   ): Promise<{ status: "sent" | "unavailable" | "failed" }> {
-    if (!this.transport) return { status: "unavailable" };
+    if (!this.transport?.sendPlatform) return { status: "unavailable" };
     try {
       this.validateContent(request);
       const deliveryId = randomUUID();
-      const acknowledgement = await this.transport.send({
+      const acknowledgement = await this.transport.sendPlatform({
         tenantId: null,
         idempotencyKey: deliveryId,
         deliveryId,

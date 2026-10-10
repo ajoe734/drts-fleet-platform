@@ -4,7 +4,7 @@ import type {
   OutboxState,
   PlatformMail,
   ProviderAcknowledgement,
-  TransportMessage,
+  OutgoingMailMessage,
 } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
 
 const mail: PlatformMail = {
@@ -16,14 +16,16 @@ const mail: PlatformMail = {
 function fixture() {
   const state: OutboxState = { version: 1, deliveries: {} };
   const outbox = {
-    transaction: vi.fn(async <T>(operation: (s: OutboxState) => T) =>
+    transaction: async <T>(operation: (s: OutboxState) => T): Promise<T> =>
       operation(state),
-    ),
   };
+  vi.spyOn(outbox, "transaction");
   const transport = {
     provider: "stub",
     send: vi.fn(
-      async (message: TransportMessage): Promise<ProviderAcknowledgement> => {
+      async (
+        message: OutgoingMailMessage,
+      ): Promise<ProviderAcknowledgement> => {
         void message;
         return {
           provider: "stub",
@@ -38,10 +40,23 @@ function fixture() {
     state,
     outbox,
     transport,
-    service: new NotificationDeliveryService(outbox, transport),
+    service: new NotificationDeliveryService(outbox, {
+      ...transport,
+      sendPlatform: transport.send,
+    }),
   };
 }
 describe("platform mail addition through existing notification service", () => {
+  it("keeps legacy tenant-only adapters available without enabling platform mail", async () => {
+    const f = fixture();
+    const tenantOnly = new NotificationDeliveryService(f.outbox, f.transport);
+    expect(tenantOnly.availability()).toBe("available");
+    expect(tenantOnly.platformAvailability()).toBe("unavailable");
+    expect(await tenantOnly.sendPlatformMail(mail)).toEqual({
+      status: "unavailable",
+    });
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
   it("uses a null tenant on the existing transport, accepts provider acknowledgement and retains no secret", async () => {
     const f = fixture();
     const response = await f.service.sendPlatformMail(mail);
