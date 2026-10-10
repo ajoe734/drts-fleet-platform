@@ -171,15 +171,8 @@ describe("Passenger Booking History API - Spec requirements", () => {
 
     const mockNow = Date.now();
     const scheduledAtStr = new Date(mockNow + 2 * 60 * 60 * 1000).toISOString();
-    const expiresAtStr = new Date(mockNow + 10 * 60 * 1000).toISOString();
 
-    fareMock.findOwnedSnapshot.mockResolvedValue({
-      scheduledAt: scheduledAtStr,
-      expiresAt: expiresAtStr,
-      origin: { lat: 25.04, lng: 121.51 },
-      destination: { lat: 25.06, lng: 121.55 },
-      passengerSubjectRef: "drts_passenger:pax-other", // FOREIGN QUOTE
-    });
+    fareMock.findOwnedSnapshot.mockResolvedValue(null); // FOREIGN QUOTE NOT FOUND BY OWNER
 
     const command = {
       scheduledAt: scheduledAtStr,
@@ -196,7 +189,9 @@ describe("Passenger Booking History API - Spec requirements", () => {
     } catch (e) {
       err = e;
     }
-    expect(err.response.error.message).toMatch(/belongs to another passenger/);
+    expect(err.response.error.message).toMatch(
+      /Quote not found or does not belong to the passenger/,
+    );
   });
 
   it("pax-booking_history_and_ride_actions: prevents cross-account viewing, paginates properly", async () => {
