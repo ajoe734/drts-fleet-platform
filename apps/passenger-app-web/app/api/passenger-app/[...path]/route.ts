@@ -61,10 +61,20 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "GET" && fullPath === "auth/providers") return true;
   if (method === "POST" && fullPath === "auth/otp/request") return true;
   if (method === "POST" && fullPath === "auth/otp/verify") return true;
-  if (method === "POST" && path.length === 4 && path[0] === "auth" && path[1] === "oauth") {
+  if (
+    method === "POST" &&
+    path.length === 4 &&
+    path[0] === "auth" &&
+    path[1] === "oauth"
+  ) {
     const provider = path[2];
     const action = path[3];
-    if (["google", "facebook", "line"].includes(provider) && ["start", "callback"].includes(action)) {
+    if (
+      provider &&
+      action &&
+      ["google", "facebook", "line"].includes(provider) &&
+      ["start", "callback"].includes(action)
+    ) {
       return true;
     }
   }
@@ -154,20 +164,28 @@ async function checkCSRF(request: NextRequest) {
 function withSecurityHeaders(response: NextResponse) {
   response.headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+    "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
   );
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set(
     "Strict-Transport-Security",
-    "max-age=31536000; includeSubDomains"
+    "max-age=31536000; includeSubDomains",
   );
   return response;
 }
 
 function deleteCookies(resp: NextResponse) {
-  resp.cookies.set("pax_session", "", { maxAge: 0, expires: new Date(0), path: "/" });
-  resp.cookies.set("pax_refresh", "", { maxAge: 0, expires: new Date(0), path: "/" });
+  resp.cookies.set("pax_session", "", {
+    maxAge: 0,
+    expires: new Date(0),
+    path: "/",
+  });
+  resp.cookies.set("pax_refresh", "", {
+    maxAge: 0,
+    expires: new Date(0),
+    path: "/",
+  });
 }
 
 async function forward(
@@ -182,13 +200,17 @@ async function forward(
     isLogout = fullPath === "auth/logout" && method === "POST";
 
     if (!(await checkCSRF(request))) {
-      return withSecurityHeaders(NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }));
+      return withSecurityHeaders(
+        NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }),
+      );
     }
     if (!isAllowedPassengerPath(path, method)) {
-      return withSecurityHeaders(NextResponse.json(
-        { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
-        { status: 404 }
-      ));
+      return withSecurityHeaders(
+        NextResponse.json(
+          { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
+          { status: 404 },
+        ),
+      );
     }
 
     let token = request.cookies.get("pax_session")?.value;
@@ -196,10 +218,12 @@ async function forward(
 
     const targetUrl = buildTargetUrl(request, path);
     if (!targetUrl.pathname.startsWith("/api/passenger-app/")) {
-      return withSecurityHeaders(NextResponse.json(
-        { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
-        { status: 404 }
-      ));
+      return withSecurityHeaders(
+        NextResponse.json(
+          { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
+          { status: 404 },
+        ),
+      );
     }
 
     let initialBodyData: BodyInit | null = null;
@@ -207,14 +231,21 @@ async function forward(
       initialBodyData = await request.arrayBuffer();
     }
 
-    function extractTokens(parsed: any): { accessToken: string; refreshToken: string; redacted: any } | null {
+    function extractTokens(
+      parsed: any,
+    ): { accessToken: string; refreshToken: string; redacted: any } | null {
       if (!parsed || typeof parsed !== "object") return null;
-      
+
       // Check snake_case in envelope
       if (parsed.data && typeof parsed.data === "object") {
         const acc = parsed.data.access_token;
         const ref = parsed.data.refresh_token;
-        if (typeof acc === "string" && typeof ref === "string" && acc !== "" && ref !== "") {
+        if (
+          typeof acc === "string" &&
+          typeof ref === "string" &&
+          acc !== "" &&
+          ref !== ""
+        ) {
           const redacted = { ...parsed, data: { ...parsed.data } };
           delete redacted.data.access_token;
           delete redacted.data.refresh_token;
@@ -228,25 +259,32 @@ async function forward(
       // Check flat camelCase (for tests/legacy)
       const accCamel = parsed.accessToken;
       const refCamel = parsed.refreshToken;
-      if (typeof accCamel === "string" && typeof refCamel === "string" && accCamel !== "" && refCamel !== "") {
+      if (
+        typeof accCamel === "string" &&
+        typeof refCamel === "string" &&
+        accCamel !== "" &&
+        refCamel !== ""
+      ) {
         const redacted = { ...parsed };
         delete redacted.accessToken;
         delete redacted.refreshToken;
         return { accessToken: accCamel, refreshToken: refCamel, redacted };
       }
       if (accCamel !== undefined || refCamel !== undefined) {
-         return { accessToken: "", refreshToken: "", redacted: parsed };
+        return { accessToken: "", refreshToken: "", redacted: parsed };
       }
-      
+
       return null;
     }
 
     async function doRefresh(currentRefresh: string) {
       if (!currentRefresh) throw new Error("No refresh token");
       const refreshTargetUrl = buildTargetUrl(request, ["auth", "refresh"]);
-      const refreshHeaders = new Headers({ "Content-Type": "application/json" });
+      const refreshHeaders = new Headers({
+        "Content-Type": "application/json",
+      });
       await applyUpstreamAuth(refreshHeaders, refreshTargetUrl);
-      
+
       const res = await fetch(refreshTargetUrl.toString(), {
         method: "POST",
         headers: refreshHeaders,
@@ -258,12 +296,19 @@ async function forward(
       const data = await res.json();
       const tokens = extractTokens(data);
       if (tokens && tokens.accessToken && tokens.refreshToken) {
-        return { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, redacted: tokens.redacted };
+        return {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          redacted: tokens.redacted,
+        };
       }
       throw new Error("Invalid tokens received");
     }
 
-    const buildInit = async (currentToken: string | undefined, currentRefresh: string | undefined): Promise<RequestInit> => {
+    const buildInit = async (
+      currentToken: string | undefined,
+      currentRefresh: string | undefined,
+    ): Promise<RequestInit> => {
       const headers = copyHeaders(request.headers);
       if (fullPath === "auth/logout" && method === "POST") {
         headers.set("Content-Type", "application/json");
@@ -299,7 +344,10 @@ async function forward(
         resp.cookies.set("pax_refresh", data.refreshToken, opts);
         return withSecurityHeaders(resp);
       } catch {
-        const resp = NextResponse.json({ error: "REFRESH_FAILED" }, { status: 401 });
+        const resp = NextResponse.json(
+          { error: "REFRESH_FAILED" },
+          { status: 401 },
+        );
         deleteCookies(resp);
         return withSecurityHeaders(resp);
       }
@@ -309,7 +357,8 @@ async function forward(
     let init = await buildInit(token, refreshToken);
     let upstream = await fetch(targetUrl.toString(), init);
 
-    let refreshedTokens: { accessToken: string; refreshToken: string } | null = null;
+    let refreshedTokens: { accessToken: string; refreshToken: string } | null =
+      null;
     let didClearTokens = false;
 
     if (upstream.status === 401 && refreshToken) {
@@ -319,7 +368,7 @@ async function forward(
         refreshToken = newTokens.refreshToken;
         init = await buildInit(token, refreshToken);
         upstream = await fetch(targetUrl.toString(), init);
-        
+
         if (upstream.status === 401) {
           didClearTokens = true;
         } else {
@@ -332,9 +381,12 @@ async function forward(
 
     if (fullPath === "auth/logout" && method === "POST") {
       if (!upstream.ok) {
-         const resp = NextResponse.json({ error: "LOGOUT_FAILED" }, { status: upstream.status });
-         deleteCookies(resp);
-         return withSecurityHeaders(resp);
+        const resp = NextResponse.json(
+          { error: "LOGOUT_FAILED" },
+          { status: upstream.status },
+        );
+        deleteCookies(resp);
+        return withSecurityHeaders(resp);
       }
       const resp = NextResponse.json({ success: true }, { status: 200 });
       deleteCookies(resp);
@@ -343,8 +395,11 @@ async function forward(
 
     const responseHeaders = copyHeaders(upstream.headers);
     let finalBody: BodyInit | null = upstream.body;
-    const isLogin = fullPath.startsWith("auth/otp") || fullPath === "auth/mfa/verify" || fullPath.startsWith("auth/oauth");
-    
+    const isLogin =
+      fullPath.startsWith("auth/otp") ||
+      fullPath === "auth/mfa/verify" ||
+      fullPath.startsWith("auth/oauth");
+
     let loginData = null;
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
       const contentType = upstream.headers.get("content-type") || "";
@@ -365,7 +420,10 @@ async function forward(
               finalBody = JSON.stringify(tokens.redacted);
               responseHeaders.set("Content-Type", "application/json");
             } else {
-              const resp = NextResponse.json({ error: "INVALID_TOKEN_PAYLOAD" }, { status: 503 });
+              const resp = NextResponse.json(
+                { error: "INVALID_TOKEN_PAYLOAD" },
+                { status: 503 },
+              );
               return withSecurityHeaders(resp);
             }
           }
@@ -392,8 +450,16 @@ async function forward(
       nextResponse.cookies.set("pax_session", loginData.accessToken, opts);
       nextResponse.cookies.set("pax_refresh", loginData.refreshToken, opts);
     } else if (refreshedTokens) {
-      nextResponse.cookies.set("pax_session", refreshedTokens.accessToken, opts);
-      nextResponse.cookies.set("pax_refresh", refreshedTokens.refreshToken, opts);
+      nextResponse.cookies.set(
+        "pax_session",
+        refreshedTokens.accessToken,
+        opts,
+      );
+      nextResponse.cookies.set(
+        "pax_refresh",
+        refreshedTokens.refreshToken,
+        opts,
+      );
     }
 
     return nextResponse;
@@ -401,7 +467,7 @@ async function forward(
     // Top-level catch for any unhandled errors (e.g. metadata text read fail on normal requests, arrayBuffer errors)
     const resp = NextResponse.json(
       { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
-      { status: 503 }
+      { status: 503 },
     );
     if (isLogout) {
       deleteCookies(resp);
