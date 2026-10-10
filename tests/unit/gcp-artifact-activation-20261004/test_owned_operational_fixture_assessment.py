@@ -128,6 +128,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
+                'cpairs': 0,
+                'cexcl': 0,
+                'audits': 0,
                 'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c", "confupdtype": "a"}],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
@@ -141,6 +144,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'pres_ccont': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'pres_ddrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'pres_vdrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cpairs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cexcl': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_audits': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -166,6 +172,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
+                'cpairs': 0,
+                'cexcl': 0,
+                'audits': 0,
                 'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c", "confupdtype": "a"}],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
@@ -179,6 +188,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'pres_ccont': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'pres_ddrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'pres_vdrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cpairs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cexcl': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_audits': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -203,6 +215,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
+                'cpairs': 0,
+                'cexcl': 0,
+                'audits': 0,
                 'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c", "confupdtype": "a"}],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
@@ -216,6 +231,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'pres_ccont': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'pres_ddrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'pres_vdrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cpairs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cexcl': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_audits': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
