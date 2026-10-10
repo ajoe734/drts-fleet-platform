@@ -20,6 +20,10 @@ export default defineConfig({
         __dirname,
         "packages/api-client/src/index.ts",
       ),
+      "@drts/passenger-client": path.resolve(
+        __dirname,
+        "packages/passenger-client/src/index.ts",
+      ),
       "@/lib/admin-client": path.resolve(
         __dirname,
         "apps/platform-admin-web/lib/admin-client.ts",
