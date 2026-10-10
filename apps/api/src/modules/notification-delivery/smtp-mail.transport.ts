@@ -5,7 +5,9 @@ import {
   DeliveryTransportError,
   type MailTransport,
   type ProviderAcknowledgement,
+  type OutgoingMailMessage,
   type TransportMessage,
+  type PlatformTransportMessage,
 } from "./notification-delivery.types";
 
 export interface MailpitSmtpOptions {
@@ -33,7 +35,7 @@ function encodeSubject(subject: string): string {
   return words.join("\r\n ");
 }
 
-function serializeMessage(message: TransportMessage): string {
+function serializeMessage(message: OutgoingMailMessage): string {
   if (
     !MAILBOX.test(message.fromEmail) ||
     message.fromEmail.length > 254 ||
@@ -83,7 +85,17 @@ export class MailpitSmtpTransport implements MailTransport {
     }
   }
 
-  async send(message: TransportMessage): Promise<ProviderAcknowledgement> {
+  send(message: TransportMessage): Promise<ProviderAcknowledgement> {
+    return this.sendMessage(message);
+  }
+  sendPlatform(
+    message: PlatformTransportMessage,
+  ): Promise<ProviderAcknowledgement> {
+    return this.sendMessage(message);
+  }
+  private async sendMessage(
+    message: OutgoingMailMessage,
+  ): Promise<ProviderAcknowledgement> {
     const payload = serializeMessage(message);
     return new Promise((resolve, reject) => {
       const socket = createConnection({

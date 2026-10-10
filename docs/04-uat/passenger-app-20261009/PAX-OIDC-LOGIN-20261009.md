@@ -8,6 +8,40 @@ head branch `claude/pax-oidc-login-20261009`.
 The exact final candidate SHA / PR are recorded by canonical `handoff`; nothing
 in this document is a reviewer approval, merge, or passenger PostgreSQL acceptance claim.
 
+## Current integration blocker after dev advanced (2026-10-10 03:03 UTC)
+
+The checks below passed on published `130e7846346fbc736fd1d355e1f3554fef5932ff`.
+Both remote branches and PR #2501 matched it. Before handoff, live PR
+mergeability was checked and found conflicting: `dev` had advanced from
+`814d92d91` to `9e0162ff4` by merging PAX-OTP PR #2497. No same-SHA CI runs
+were available on the conflicting head, and **no handoff was performed**.
+The owner normally merged `origin/dev`, preserving all OTP changes and
+both OTP/OAuth registrations; this is a checkpoint, not a new candidate.
+
+Reading the new actual callers found both `PassengerOtpController.providers`
+and `PassengerOAuthController.providers` register the same GET route under
+`@Controller("passenger-app/auth")`. The production module now registers
+OTP first; route shadowing is the expected framework consequence, not a
+claimed local HTTP run. Their provider lists also disagree: OTP uses real
+pepper/mail/SMS availability, while the original OAuth discovery helper
+always lists email and infers phone from environment variables.
+
+| Finding                                                               | Actual source / required repair boundary                                                                                            | Reproduction                                                                                                                                                                                                                               | Evidence / limitation                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Post-merge duplicate provider discovery route and inconsistent gating | `PassengerAppModule.controllers`; both controller `providers` handlers; OAuth config listing versus `PassengerOtpService.providers` | New `apps/api/tests/unit/passenger-auth-provider-routing.test.ts` scans production module controllers with Nest `MetadataScanner` and actual method/path metadata. Expected 1 handler; actual 2. No application listener or metadata mock. | `node node_modules/vitest/vitest.mjs run --root apps/api tests/unit/passenger-auth-provider-routing.test.ts --reporter=verbose`, exit 1 (1 actual regression failure); `.local/pax-oidc-login-20261009/provider-route-collision.log`. Runtime request routing not run under VM restriction. |
+
+Canonical task note requests Supervisor scope coordination: add exactly
+`apps/api/src/modules/passenger-app/otp/passenger-otp.controller.ts` after
+checking parallel ownership. Proposed next repair: keep the OAuth discovery
+route, inject `PassengerOtpService` to aggregate its actual configured
+providers with Google/LINE, and remove only the OTP helper's `@Get("providers")`
+decorator while retaining that helper and `@OpenRoute` for existing unit
+callers. Current write scopes do not include that controller; it was not
+edited. The route regression must pass, with valid OTP and OAuth availability
+and negative provider gating cases, before full regression/new SHA CI and
+handoff. This scope blocker supersedes all prospective CI/handoff wording
+below; neither required acceptance key is claimed complete.
+
 ## Codex2 continuation: repeated findings and current verification
 
 Reviewed predecessors: `9701679ffcaa12afd90dc01698317e79def43483` (first REOPEN)
