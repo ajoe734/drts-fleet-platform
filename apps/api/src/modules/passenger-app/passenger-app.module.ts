@@ -26,10 +26,11 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
 import { PassengerBookingController } from "./booking/passenger-booking.controller";
 import { PassengerBookingService } from "./booking/passenger-booking.service";
 import { PassengerBookingRepository } from "./booking/passenger-booking.repository";
+import { MultiTaxiModule } from "../multi-taxi/multi-taxi.module";
 
 @Global()
 @Module({
-  imports: [DatabaseModule, GeoModule, ServiceAreaModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, MultiTaxiModule],
   controllers: [
     PassengerAccountController,
     PassengerOtpController,

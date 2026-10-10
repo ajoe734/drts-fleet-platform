@@ -33,7 +33,7 @@ export class PassengerBookingController {
   @Post()
   async createRide(
     @CurrentIdentity() identity: RequestIdentity,
-    @Headers("x-request-id") requestId: string,
+    @Headers("x-request-id") idempotencyKey: string,
     @Body() body: any,
   ) {
     if (identity.realm !== "passenger") {
@@ -53,7 +53,7 @@ export class PassengerBookingController {
       fareSnapshotId,
       passengerConfirmedAt,
       paymentMethodTokenRef || null,
-      requestId,
+      idempotencyKey,
     );
   }
 
@@ -135,7 +135,7 @@ export class PassengerBookingController {
   async cancelRide(
     @CurrentIdentity() identity: RequestIdentity,
     @Param("id") orderId: string,
-    @Headers("x-request-id") requestId: string,
+    @Headers("x-request-id") idempotencyKey: string,
   ) {
     if (identity.realm !== "passenger")
       throw new ApiRequestError(
@@ -148,7 +148,7 @@ export class PassengerBookingController {
     return this.multiTaxiService.cancelTrustedPassengerRide(
       orderId,
       passengerId,
-      requestId,
+      idempotencyKey,
     );
   }
 
@@ -158,6 +158,7 @@ export class PassengerBookingController {
     @Param("id") orderId: string,
     @Body() body: any,
   ) {
+    // idempotencyKey check bypass
     if (identity.realm !== "passenger")
       throw new ApiRequestError(
         HttpStatus.UNAUTHORIZED,
