@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, it, expect, vi } from "vitest";
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -21,17 +23,19 @@ describe("P5E19b Component", () => {
         quoteMin={100}
         quoteMax={150}
         paymentMethod="Cash"
-      />
+      />,
     );
 
     const button = screen.getByTestId("e19b-confirm-btn");
-    expect(button).toBeDisabled();
+    expect((button as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(button);
     expect(onConfirm).not.toHaveBeenCalled();
-    
+
     // Warning text should be visible
-    expect(screen.getByText("請先勾選「我已確認費用與優惠說明」")).toBeInTheDocument();
+    expect(
+      screen.getByText("請先勾選「我已確認費用與優惠說明」"),
+    ).not.toBeNull();
   });
 
   it("calls onCheckedChange when checkbox is clicked", () => {
@@ -48,7 +52,7 @@ describe("P5E19b Component", () => {
         quoteMin={100}
         quoteMax={150}
         paymentMethod="Cash"
-      />
+      />,
     );
 
     const checkbox = screen.getByTestId("e19b-checkbox");
@@ -58,7 +62,7 @@ describe("P5E19b Component", () => {
 
   it("enables button and allows submit when checked", () => {
     const onConfirm = vi.fn();
-    
+
     render(
       <P5E19b
         checked={true}
@@ -71,14 +75,14 @@ describe("P5E19b Component", () => {
         quoteMin={100}
         quoteMax={150}
         paymentMethod="Cash"
-      />
+      />,
     );
 
     const button = screen.getByTestId("e19b-confirm-btn");
-    expect(button).not.toBeDisabled();
-    
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+
     // Warning text should NOT be visible
-    expect(screen.queryByText("請先勾選「我已確認費用與優惠說明」")).not.toBeInTheDocument();
+    expect(screen.queryByText("請先勾選「我已確認費用與優惠說明」")).toBeNull();
 
     fireEvent.click(button);
     expect(onConfirm).toHaveBeenCalled();

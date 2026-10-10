@@ -6,6 +6,7 @@ import { PassengerClient } from "@drts/passenger-client";
 import { P5Phone, P5Header, P5Card, P5 } from "../../components/p5-ui";
 import { P5E19a } from "../../components/booking/e19a";
 import { P5E19b } from "../../components/booking/e19b";
+import { bookingTranslations as t } from "../../lib/booking/translations";
 import { BookingForm } from "../../components/booking/BookingForm";
 import type { FareQuoteResponse, FaresResponse } from "@drts/contracts";
 import type { AddressPayload } from "@drts/ui-web";
@@ -170,9 +171,9 @@ export default function BookingPage() {
           {error ? (
             <div style={{ color: P5.danger }}>{error}</div>
           ) : (
-            <P5Card title="系統初始化">
+            <P5Card title={t.systemInit.title}>
               <div style={{ color: P5.mut, fontSize: 12 }}>
-                Loading session...
+                {t.systemInit.loadingSession}
               </div>
             </P5Card>
           )}

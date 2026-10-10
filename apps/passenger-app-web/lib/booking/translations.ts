@@ -1,4 +1,11 @@
 export const bookingTranslations = {
+  systemInit: {
+    title: "系統初始化",
+    loadingSession: "Loading session...",
+  },
+  common: {
+    version: "版本 ",
+  },
   form: {
     back: "返回",
     selectOriginTitle: "選擇上車地點",
@@ -9,6 +16,7 @@ export const bookingTranslations = {
     selectDestinationPlaceholder: "請選擇下車地點",
     scheduledAtLabel: "預約時間",
     quoteButton: "試算車資",
+    tripInfo: "行程資訊",
   },
   e19a: {
     headerTitle: "費用與優惠說明",
@@ -30,14 +38,15 @@ export const bookingTranslations = {
       waitingFeeTitle: "等待費",
       waitingFeeDesc: "不另收取（車資依核定運價含延滯計時計收）",
       lostItemFeeTitle: "遺失物返還補償金",
-      lostItemFeeDesc: "不收取；如要求專程送還，所生車資由乘客負擔並於送還前確認",
+      lostItemFeeDesc:
+        "不收取；如要求專程送還，所生車資由乘客負擔並於送還前確認",
       cleaningFeeTitle: "車內汙損清潔費",
       cleaningFeeDesc: "由可歸責之乘客負擔實際清潔費用，實支實付、憑單據計收",
       tollFeeTitle: "國道通行費",
       tollFeeDesc: "經乘客同意行駛後實收",
       promoTitle: "優惠活動",
-      promoDesc: "目前無；如有，依規定備查後於本頁公告"
-    }
+      promoDesc: "目前無；如有，依規定備查後於本頁公告",
+    },
   },
   e19b: {
     title: "確認叫車",
@@ -79,8 +88,9 @@ export const bookingTranslations = {
     loadingFailed: "載入失敗",
     loading: "載入中...",
     rulesCardTitle: "車資變更規則",
-    rulesDesc: "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
-    footerText: "本頁依主管機關備查之現行版本公告"
+    rulesDesc:
+      "若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。",
+    footerText: "本頁依主管機關備查之現行版本公告",
   },
   error: {
     notServiceable: "很抱歉，該地點超出目前服務範圍。",
@@ -89,5 +99,5 @@ export const bookingTranslations = {
     quoteFailedGeneric: "取得報價失敗：",
     orderFailed: "建立訂單失敗：",
     updateFeeFailed: "無法更新費用確認紀錄：",
-  }
+  },
 };

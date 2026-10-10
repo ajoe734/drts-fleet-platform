@@ -107,13 +107,20 @@ export function P5E19b({
               marginBottom: 10,
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 6,
+              }}
+            >
               <div style={{ fontSize: 13, fontWeight: 700 }}>
                 {t.e19b.feeRulesTitle}
               </div>
               {fareVersion && (
                 <div style={{ fontSize: 11, color: P5.mut }}>
-                  版本 {fareVersion}
+                  {t.common.version}
+                  {fareVersion}
                 </div>
               )}
             </div>

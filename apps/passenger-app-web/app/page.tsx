@@ -114,9 +114,9 @@ export default function BookingPage() {
           setStatus("form");
         }, expiresMs);
       } else {
-         // handle expired immediately
-         setError(t.error.quoteExpired);
-         setStatus("form");
+        // handle expired immediately
+        setError(t.error.quoteExpired);
+        setStatus("form");
       }
     } catch (err: any) {
       // Handle P5-A04 case (Quote failed)
@@ -131,7 +131,7 @@ export default function BookingPage() {
   const handleConfirmOrder = async () => {
     if (!quoteData) return;
     if (quoteData.quote.serviceAreaResult === "not_serviceable") return;
-    
+
     // Check expiration on submit (R6 fix part 1)
     if (new Date(quoteData.quote.expiresAt).getTime() <= Date.now()) {
       setError(t.error.quoteExpired);
@@ -183,9 +183,9 @@ export default function BookingPage() {
           {error ? (
             <div style={{ color: P5.danger }}>{error}</div>
           ) : (
-            <P5Card title="系統初始化">
+            <P5Card title={t.systemInit.title}>
               <div style={{ color: P5.mut, fontSize: 12 }}>
-                Loading session...
+                {t.systemInit.loadingSession}
               </div>
             </P5Card>
           )}

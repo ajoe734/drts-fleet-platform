@@ -118,7 +118,7 @@ export function BookingForm({
             {error}
           </div>
         )}
-        <P5Card title="行程資訊">
+        <P5Card title={t.form.tripInfo}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div
               onClick={() => setPickerMode("origin")}
