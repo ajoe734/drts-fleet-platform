@@ -124,3 +124,36 @@ retry `ai-status.sh progress`/`handoff` for
 `PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR` once the broker recovers,
 or read this artifact directly to confirm PR #2529 is green and relay the
 `CANDIDATE_SHA`/`CANDIDATE_BRANCH`/`PR_URL` above to the parent task.
+
+## 5. Second broker-outage confirmation (2026-10-10, resumed session)
+
+Resumed this task again and re-verified before attempting any write:
+
+- `gh pr view 2529` shows every check in `statusCheckRollup` as `SUCCESS`
+  (lint, typecheck, unit, integration, build, e2e, ci-integ, Commit trailers,
+  Product/Smoke acceptance, i18n guards, iam-negative-matrix, etc.) and
+  `mergeable: MERGEABLE`. No pending checks remain. This re-confirms the
+  2026-10-10T~11:45Z finding in §2.
+- This task's own branch (`claude/pax-web-ride-ui-20261009-unblock-history-repair`,
+  tip `5bf1f1dc495a685431862dce350420abf47ecd4d`) is already pushed and
+  identical to `origin/<branch>` — nothing further to commit/push for this
+  task's own artifact trail.
+- Read-only `ai-status.sh show <task-id>` succeeded, but every mutating
+  invocation attempted this session — `note PAX-WEB-RIDE-UI-20261009 "..."`
+  (to relay the unblocked next step without touching its `blocked` status,
+  since only Supervisor can `resume-blocked`) and a bare retry-probe `note`
+  on this task — was classified `defer` by the sandbox's approval hook, with
+  no change after a 5s retry. This matches the `orchestrator_approval_broker`
+  MCP `CONNECT_TIMEOUT` reported for this session and confirms the outage in
+  §4 is still live, not a one-off.
+- No destructive or state-mutating action was substituted for the deferred
+  `ai-status.sh` calls (per `docs/ops/branch-strategy.md` §11, local git
+  ref-mutation and direct `ai-status.json`/`current-work.md` edits remain
+  off-limits regardless of broker state).
+
+**Action still needed once the broker recovers** (unchanged from §4):
+run `AI_NAME=Claude ai-status.sh note PAX-WEB-RIDE-UI-20261009 "<relay message with CANDIDATE_SHA=1ad9f340583c137322f5ec5f246d06622fb0e8df CANDIDATE_BRANCH=gemini/pax-web-ride-ui-20261009-v2 PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2529>"`
+to update the parent without changing its status, and separately
+`CANDIDATE_SHA=5bf1f1dc495a685431862dce350420abf47ecd4d CANDIDATE_BRANCH=claude/pax-web-ride-ui-20261009-unblock-history-repair AI_NAME=Claude ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2 "History repair confirmed green on PR #2529; parent unblock evidence recorded in this artifact."`
+so this unblock task's own candidate enters review/CI/merge and
+`apply_unblock_parent_resolution` can auto-resume the parent on merge.
