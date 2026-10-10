@@ -27,7 +27,10 @@ function configure(environment: string) {
   vi.stubEnv("DRTS_INTERNAL_KEY_ENFORCED", "true");
   vi.stubEnv("FACEBOOK_APP_ID", "123456");
   vi.stubEnv("FACEBOOK_APP_SECRET", SECRET);
-  vi.stubEnv("FACEBOOK_DATA_DELETION_STATUS_ORIGIN", "https://api.example.test");
+  vi.stubEnv(
+    "FACEBOOK_DATA_DELETION_STATUS_ORIGIN",
+    "https://api.example.test",
+  );
 }
 
 function context(
@@ -81,17 +84,26 @@ describe.each(["staging", "production", "development"])(
       configure(environment);
       const guard = new BootstrapAuthGuard(new Reflector());
       for (const [method, path] of [
-        ["GET", PATH], ["PUT", PATH], ["OPTIONS", PATH],
-        ["POST", `${PATH}/status/${CODE}`], ["DELETE", `${PATH}/status/${CODE}`],
-        ["POST", `${PATH}/child`], ["POST", `${PATH}/`],
-        ["GET", `${PATH}/status/${CODE}/child`], ["GET", `${PATH}/status/${CODE}/`],
-        ["GET", `${PATH}/status/${"a".repeat(111)}`], ["GET", `${PATH}/status/${"g".repeat(112)}`],
-        ["POST", PATH.replace("/api/", "/")], ["POST", `/api/${PATH}`],
+        ["GET", PATH],
+        ["PUT", PATH],
+        ["OPTIONS", PATH],
+        ["POST", `${PATH}/status/${CODE}`],
+        ["DELETE", `${PATH}/status/${CODE}`],
+        ["POST", `${PATH}/child`],
+        ["POST", `${PATH}/`],
+        ["GET", `${PATH}/status/${CODE}/child`],
+        ["GET", `${PATH}/status/${CODE}/`],
+        ["GET", `${PATH}/status/${"a".repeat(111)}`],
+        ["GET", `${PATH}/status/${"g".repeat(112)}`],
+        ["POST", PATH.replace("/api/", "/")],
         ["POST", "/api/passenger-app/auth/oauth/facebook/start"],
         ["POST", "/api/passenger-app/auth/oauth/facebook/callback"],
-        ["POST", "/api/passenger-app/auth/otp/start"], ["GET", "/api/passenger-app/me"],
+        ["POST", "/api/passenger-app/auth/otp/start"],
+        ["GET", "/api/passenger-app/me"],
       ]) {
-        await expect(guard.canActivate(context(method!, path!).execution)).rejects.toThrow();
+        await expect(
+          guard.canActivate(context(method!, path!).execution),
+        ).rejects.toThrow();
       }
     });
 
@@ -99,8 +111,14 @@ describe.each(["staging", "production", "development"])(
       configure(environment);
       const guard = new BootstrapAuthGuard(new Reflector());
       for (const header of ["authorization", "x-drts-authorization"]) {
-        for (const path of [`${PATH}/child`, "/api/passenger-app/auth/oauth/facebook/start", "/api/passenger-app/me"]) {
-          const { request, execution } = context("POST", path, "delete", { [header]: "Bearer forged" });
+        for (const path of [
+          `${PATH}/child`,
+          "/api/passenger-app/auth/oauth/facebook/start",
+          "/api/passenger-app/me",
+        ]) {
+          const { request, execution } = context("POST", path, "delete", {
+            [header]: "Bearer forged",
+          });
           await validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
           await expect(guard.canActivate(execution)).rejects.toThrow();
         }
@@ -110,7 +128,9 @@ describe.each(["staging", "production", "development"])(
     it("rejects bootstrap identity headers on the exact public endpoint", async () => {
       configure(environment);
       const guard = new BootstrapAuthGuard(new Reflector());
-      const { execution } = context("POST", PATH, "delete", { "x-actor-id": "forged-passenger" });
+      const { execution } = context("POST", PATH, "delete", {
+        "x-actor-id": "forged-passenger",
+      });
       expect(() => guard.canActivate(execution)).toThrow();
     });
 
@@ -119,25 +139,40 @@ describe.each(["staging", "production", "development"])(
       const guard = new BootstrapAuthGuard(new Reflector());
       const store = new MemoryPassengerStore();
       const transactions = vi.spyOn(store, "transaction");
-      const controller = new FacebookDataDeletionController(new FacebookDataDeletionService(store));
-      const { request, execution } = context("POST", PATH, "delete", { authorization: "Bearer forged" });
+      const controller = new FacebookDataDeletionController(
+        new FacebookDataDeletionService(store),
+      );
+      const { request, execution } = context("POST", PATH, "delete", {
+        authorization: "Bearer forged",
+      });
       Object.assign(request, { identity: { actorId: "stale-identity" } });
       await validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
       await expect(guard.canActivate(execution)).resolves.toBe(true);
       expect(request).not.toHaveProperty("identity");
       for (const body of [undefined, {}, { signed_request: "forged" }]) {
-        await expect(controller.delete(body)).rejects.toMatchObject({ code: "invalid_signed_request" });
+        await expect(controller.delete(body)).rejects.toMatchObject({
+          code: "invalid_signed_request",
+        });
       }
       expect(transactions).not.toHaveBeenCalled();
-      const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "998877" })).toString("base64url");
+      const payload = Buffer.from(
+        JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "998877" }),
+      ).toString("base64url");
       const signed = `${createHmac("sha256", SECRET).update(payload).digest("base64url")}.${payload}`;
       const result = await controller.delete({ signed_request: signed });
       expect(Object.keys(result).sort()).toEqual(["confirmation_code", "url"]);
       const status = context("GET", new URL(result.url).pathname, "status");
       await validateInternalKey(status.request, process.env.DRTS_INTERNAL_KEY);
       await expect(guard.canActivate(status.execution)).resolves.toBe(true);
-      expect(controller.status(result.confirmation_code)).toEqual({ confirmation_code: result.confirmation_code, status: "completed" });
-      await expect(guard.canActivate(context("GET", `${PATH}/status/${CODE}`, "status").execution)).resolves.toBe(true);
+      expect(controller.status(result.confirmation_code)).toEqual({
+        confirmation_code: result.confirmation_code,
+        status: "completed",
+      });
+      await expect(
+        guard.canActivate(
+          context("GET", `${PATH}/status/${CODE}`, "status").execution,
+        ),
+      ).resolves.toBe(true);
       expect(() => controller.status(CODE)).toThrow();
       expect(transactions).toHaveBeenCalledOnce();
     });
