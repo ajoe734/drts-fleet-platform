@@ -68,3 +68,7 @@
 ## 設定佔位符 (Configuration Placeholders)
 - `{{CONFIG_TERMS_URL}}`: 服務條款連結，待實作時從設定注入。
 - `{{CONFIG_PRIVACY_URL}}`: 隱私權政策連結，待實作時從設定注入。
+
+## 視覺共用說明 (Shared Visual States)
+- **第三方登入與綁定 (A-07/A-08 系列)**: Google、Facebook、LINE 的授權過渡、成功、取消與錯誤狀態 (包含登入與帳號綁定情境)，均共用相同的視覺排版與元件，僅替換對應的 Provider 名稱與圖示。
+- **OTP 驗證 (A-03/A-04/A-05 系列)**: `login` (登入)、`link` (綁定帳號)、`verify_contact_phone` (驗證聯絡手機) 等不同 purpose 的 OTP 流程，均共用相同的輸入與錯誤畫板，僅依據情境調整標題文字 (如「手機號碼登入」、「驗證聯絡手機」等)。

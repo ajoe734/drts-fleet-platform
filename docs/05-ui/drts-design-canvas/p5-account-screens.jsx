@@ -165,15 +165,38 @@ const P5A_S05c = () => (
 );
 
 const P5A_S05d = () => (
-  <P5APhone>
-    <P5Header status="輸入驗證碼" order="" />
-    <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <P5AAlert kind="danger">驗證碼嘗試次數達上限，請稍後再試</P5AAlert>
-      <div style={{ marginTop: 16 }}>
-        <P5Btn kind="secondary">返回</P5Btn>
+  <div style={{ display: 'flex', gap: 20, overflowX: 'auto', paddingBottom: 16 }}>
+    <P5APhone>
+      <P5Header status="輸入驗證碼" order="" />
+      <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <P5AAlert kind="danger">驗證碼錯誤，剩餘 3 次機會</P5AAlert>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.dangerBd, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono, color: P5.danger }}>8</div>)}
+        </div>
+        <div style={{ fontSize: 13, color: P5.mut, textAlign: 'center' }}>重新發送 (45s)</div>
+        <P5Btn kind="primary">驗證</P5Btn>
       </div>
-    </div>
-  </P5APhone>
+    </P5APhone>
+    <P5APhone>
+      <P5Header status="輸入驗證碼" order="" />
+      <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <P5AAlert kind="warn">驗證碼已過期，請重新發送</P5AAlert>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[1,2,3,4,5,6].map(i => <div key={i} style={{ flex: 1, height: 50, background: P5.surface, border: '1px solid '+P5.warnBd, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontFamily: P5.mono, color: P5.warn }}>-</div>)}
+        </div>
+        <P5Btn kind="primary">重新發送驗證碼</P5Btn>
+      </div>
+    </P5APhone>
+    <P5APhone>
+      <P5Header status="輸入驗證碼" order="" />
+      <div style={{ padding: '24px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <P5AAlert kind="danger">驗證碼嘗試次數達上限，請稍後再試</P5AAlert>
+        <div style={{ marginTop: 16 }}>
+          <P5Btn kind="secondary">返回</P5Btn>
+        </div>
+      </div>
+    </P5APhone>
+  </div>
 );
 
 const P5A_S06 = () => (
@@ -580,10 +603,9 @@ const P5A_S23 = () => (
       <P5AAlert kind="danger">您有一筆行程扣款失敗，請結清後再繼續叫車。</P5AAlert>
       <P5Card title="2026-10-10 12:00">
         <div style={{ fontSize: 16, fontWeight: 700, margin: '8px 0' }}>車資 NT$ 180</div>
-        <div style={{ fontSize: 13, color: P5.mut }}>原卡片扣款失敗，請選擇其他卡片重試。</div>
+        <div style={{ fontSize: 13, color: P5.mut }}>原卡片扣款失敗，請聯絡客服處理。</div>
       </P5Card>
-      <P5Btn kind="primary">選擇卡片並結清</P5Btn>
-      <P5Btn kind="secondary" icon="phone">聯絡客服 (02-2944-0985)</P5Btn>
+      <P5Btn kind="primary" icon="phone">聯絡客服 (02-2944-0985)</P5Btn>
     </div>
   </P5APhone>
 );
