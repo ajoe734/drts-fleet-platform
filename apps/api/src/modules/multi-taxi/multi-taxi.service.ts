@@ -12,6 +12,8 @@ import {
 import { notificationExpiresAt } from "./partner-notification.transport";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { DatabaseService } from "../../common/db/database.service";
+import type { OwnedMobilityQueryExecutor } from "../owned-mobility/owned-mobility.repository";
 
 import {
   HttpStatus,
@@ -504,17 +506,63 @@ export class MultiTaxiService implements OnModuleInit {
     command: CreateMultiTaxiRideCommand,
     passengerSubjectRef: string,
     requestId?: string,
+    commitBooking?: (
+      orderId: string,
+      persistRide: (executor: OwnedMobilityQueryExecutor) => Promise<void>,
+    ) => Promise<void>,
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = await this.ownedMobilityService.createMultiTaxiRide(
-      command,
-      authorization,
-      null, // Identity is null for trusted internal calls
-      requestId,
-    );
-    // writeOrderPartnerNotificationRouteIfApplicable is skipped for first party passenger app
-    return this.createRideAccessResult(order, requestId);
+    if (
+      !commitBooking ||
+      command.passenger.passengerId !== passengerSubjectRef
+    ) {
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_BOOKING_COMMIT_REQUIRED",
+        "Account bookings require an ownership commit.",
+      );
+    }
+    let passengerAccess: PassengerRideAccessGrant | undefined;
+    try {
+      const order = await this.ownedMobilityService.createMultiTaxiRide(
+        command,
+        authorization,
+        null,
+        requestId,
+        undefined,
+        async (preparedOrder, persistOrder) => {
+          passengerAccess = this.issueRideAccessGrant(preparedOrder);
+          const { accessToken, ...tokenRecord } = passengerAccess;
+          const digest = this.digestAccessToken(accessToken);
+          await commitBooking(preparedOrder.orderId, async (executor) => {
+            await persistOrder(executor);
+            // Transaction-bound, stateless adapter: reuse production token SQL
+            // without mutating the injected repository or duplicating its SQL.
+            const tokenRepository = new MultiTaxiRepository({
+              isEnabled: () => true,
+              query: executor.query.bind(executor),
+            } as DatabaseService);
+            try {
+              await tokenRepository.persistRideAccessToken(tokenRecord, digest);
+            } catch {
+              throw new ApiRequestError(
+                503,
+                "PASSENGER_ACCESS_TOKEN_PERSISTENCE_FAILED",
+                "Failed to save passenger access.",
+              );
+            }
+          });
+        },
+      );
+      return { ride: order, passengerAccess: passengerAccess! };
+    } catch (error) {
+      if (passengerAccess)
+        this.accessTokensByDigest.delete(
+          this.digestAccessToken(passengerAccess.accessToken),
+        );
+      throw error;
+    }
   }
 
   async getPassengerRideById(
@@ -569,10 +617,18 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ) {
     const order = this.requireMultiTaxiOrder(orderId);
+    if (!this.isPassengerCancelable(order)) {
+      throw new ApiRequestError(
+        409,
+        "ORDER_NOT_CANCELABLE",
+        "The order can no longer be cancelled.",
+      );
+    }
     return this.ownedMobilityService.cancelOwnedOrder(
       order.orderId,
       { reason: "passenger_requested" },
       requestId,
+      { systemBypassCancelableCheck: true },
     );
   }
 

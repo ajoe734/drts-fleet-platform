@@ -105,7 +105,8 @@ export class PassengerBookingService {
 
     if (
       !req.scheduledAt ||
-      new Date(req.scheduledAt).getTime() !== new Date(snapshot.scheduledAt).getTime() ||
+      new Date(req.scheduledAt).getTime() !==
+        new Date(snapshot.scheduledAt).getTime() ||
       req.origin.lat !== snapshot.origin.lat ||
       req.origin.lng !== snapshot.origin.lng ||
       req.destination.lat !== snapshot.destination.lat ||
@@ -143,31 +144,15 @@ export class PassengerBookingService {
       command,
       passengerId,
       requestId,
+      (orderId, persistRide) =>
+        this.repository.commitBooking(
+          passengerId,
+          orderId,
+          req.fareSnapshotId,
+          new Date(req.passengerConfirmedAt).toISOString(),
+          persistRide,
+        ),
     );
-
-    try {
-      await this.repository.createBookingHistory(
-        passengerId,
-        result.ride.orderId,
-        req.fareSnapshotId,
-        new Date(req.passengerConfirmedAt).toISOString(),
-      );
-    } catch {
-      try {
-        await this.multiTaxiService.compensateFailedTrustedPassengerRide(
-          result.ride.orderId,
-          "passenger_booking_history_failed",
-          requestId,
-        );
-      } catch {
-        // The persistence failure remains the authoritative error.
-      }
-      throw new ApiRequestError(
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        "PASSENGER_BOOKING_HISTORY_FAILED",
-        "Failed to save booking history",
-      );
-    }
 
     const view = await this.multiTaxiService.getPassengerRideById(
       result.ride.orderId,
@@ -190,13 +175,20 @@ export class PassengerBookingService {
         const decoded = JSON.parse(
           Buffer.from(cursor, "base64").toString("utf-8"),
         );
-        if (!decoded || typeof decoded !== 'object') {
+        if (!decoded || typeof decoded !== "object") {
           throw new Error("Missing fields");
         }
-        if (typeof decoded.createdAt !== 'string' || typeof decoded.orderId !== 'string') {
+        if (
+          typeof decoded.createdAt !== "string" ||
+          typeof decoded.orderId !== "string"
+        ) {
           throw new Error("Invalid types");
         }
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.orderId)) {
+        if (
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            decoded.orderId,
+          )
+        ) {
           throw new Error("Invalid UUID");
         }
         if (isNaN(new Date(decoded.createdAt).getTime())) {
