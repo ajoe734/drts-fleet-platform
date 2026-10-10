@@ -209,3 +209,58 @@ handoff Codex2；交接觸發的 hosted checks 可列 pending，由 GitHub bus�
 收錄並讀取同 SHA 結果，不以舊綠燈、skip 或本機 scoped pass 代替。
 
 本轮無背景本機檢查、未啟 VM runtime、未部署、未呼叫真實 Meta。
+
+## 2026-10-10：FB-SESSION-RACE-1 最小回歸與 scope 協調 checkpoint
+
+本次續修讀過 Codex2 的完整退修
+`/home/lupin/workspace/drts-fleet-platform/.local/review-pax-facebook-c98fee7702e7/review.md`
+及其正式 service/JWT probe（SHA256
+`11ce146694b84009538f23305a516c194a561e233a394665a0877f7666e675e9`）。
+退修 candidate 是 `c98fee7702e738e4fec2ea43279705cf84f0dbb4`，generation
+`383dbe9b67be465db0ab3eb4721cc249`，PR #2503。fetch 後 local、remote task
+branch 和 PR head 一致；沒有 rebase/reset/amend/force push 或 merge 新 trunk。
+
+精確呼叫鏈：`PassengerOAuthService.callback` 的
+`findOrCreateByIdentity(provider, claims.sub)` 已 commit，接著
+`PassengerAccountService.issueSession(account.drtsPassengerId)` 尚未開始。
+`FacebookDataDeletionService.delete` 此時能移除 Facebook identity 並
+`revokeAll`；若帳號仍有 Email/Google identity，帳號維持 active。
+後續 `issueSession` 僅檢查 active，因而在刪除 commit 後寫入新的有效 session。
+
+本 checkpoint **只新增測試與本文件，尚未修產品碼，也不是交審候選**。
+`facebook.test.ts` 新增四個案例，以 instance wrapper 暫停後再呼叫原始
+`issueSession`，控制 transaction 的先後順序。Graph transport 與既有
+MemoryPassengerStore 是 stub；OAuth/state、account/session、JWT 驗證、
+signed_request、刪除與 receipt 都執行正式函式。兩個失敗案例明確驗證：
+receipt completed、Facebook identity 不存在、舊 session 無效，但新 callback
+session 的 `authenticateAccessToken` 仍回傳 passenger identity。
+這是正式 service 的 transaction 順序重現，不是 live PG concurrency 驗收。
+
+| Finding／驗收項                                  | 原始碼依據與修改位置                                                                         | 舊版重現 → 本 checkpoint 結果                                                                                                     | 命令、退出碼、版本與證據位置                                                                      | 未驗項與具體限制                                                                                                             |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| FB-SESSION-RACE-1：delete 先 commit              | OAuth `callback` → account `findOrCreateByIdentity`／`issueSession`；新增 `facebook.test.ts` | 原產品碼 c98fee7702e7＋新增回歸：Email／Google 保留帳號的 2 cases FAIL（新 access 可用）；唯一 Facebook case PASS；修正版尚未建立 | 下方命令 exit 1：64 pass／2 fail；`.local/facebook-session-race-20261010/before-final.{json,log}` | account service 不在原 task write_scopes，等待 Supervisor 核對平行修改並擴充 scope；PG 待 hosted 正式 schema/repository 驗證 |
+| FB-SESSION-RACE-1：issue 先 commit               | 原始 `issueSession` commit 後 gate callback return，正式 deletion `revokeAll`                | 新 case PASS：新／舊 access 失效，新 refresh invalid_grant；包含於上述 64 pass                                                    | 同一命令／JSON／log，沒有 mock issuance 或 revocation                                             | 不是修復 delete-first race 的證据                                                                                            |
+| FB-INGRESS-1／既有 Facebook 正負向               | 原 guard/middleware 修復保留；本輪 Facebook service suite 62 個既有 cases                    | 既有 Facebook service cases PASS；guard/middleware 本輪未重跑，前候選 Codex2 已確認消除                                           | 前節 UAT 與上述 reviewer artifact，未冒充本輪完整回歸                                             | 待原子化產品修復後重跑 Google/LINE/link/logout、account/OTP/auth/ingress 完整受影響回歸                                      |
+| pax-facebook_flow_verification_and_data_deletion | 上述 findings、獨立 review、同 SHA CI／merge／acceptance                                     | **仍未滿足**：FB-SESSION-RACE-1 未修；此 checkpoint 不 handoff                                                                    | 用 active release CLI progress 記錄 scope 協調，checkpoint 普通 push 只供恢復及定位               | 真實 Meta、PG、HTTP parser、公開 Cloud Run、同候選 CI/review/merge/acceptance 仍待驗，不降原要求                             |
+
+```bash
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009/facebook.test.ts --reporter=default --reporter=json --outputFile.json=.local/facebook-session-race-20261010/before-final.json
+# exit 1：64 pass／2 fail，已結束並讀取結果；Node 22.23.2、pnpm 10.33.0、Vitest 4.1.4
+```
+
+最終 regression 檔案 SHA256：
+`5470e67974a2570648561fe1be3c7435b2e8ef12cd097645e197acb57bd652fd`。
+初版 `before.{json,log}` 同樣 64 pass／2 fail；最終版增加實際 access 驗證，
+沒有改產品碼、fixture provider proof 或 transaction 的實際工作。
+
+修正邊界已用 task progress 向 Supervisor 記錄：加入
+`apps/api/src/modules/passenger-app/account/passenger-account.service.ts`
+至原 task write_scopes。由原 owner 增加 `issueSession` 的 optional verified
+identity binding，與 session 寫入在**同一 transaction**依 identity → account
+鎖定並驗證 provider/subject/account ownership；OAuth callback 帶入 binding。
+不以另一個 transaction 的 precheck 代替，不改 repository/schema，不修改
+既有 OTP callers 的契約。所有共用 callers 已搜尋；原子化修復後還需兩種
+commit 順序、唯一 Facebook 刪除、保留 Email/Google 新登入及 Google/LINE/link/logout
+完整回歸。scope 更新前不修改越界檔案，不另造 OAuth 的 session/JWT 邏輯。
+
+本輪未啟動 VM 產品服務、PG、HTTP/browser server、Docker 或部署，未呼叫真實 Meta。

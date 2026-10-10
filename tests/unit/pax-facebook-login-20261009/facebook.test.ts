@@ -408,6 +408,130 @@ describe("Facebook OAuth through production transaction and account services", (
 });
 
 describe("Facebook signed_request deletion and completion receipt", () => {
+  it.each(["email", "google", "sole-facebook"] as const)(
+    "rejects an in-flight Facebook callback when deletion commits before issuance (%s)",
+    async (remainingProvider) => {
+      const f = fixture();
+      const a =
+        remainingProvider === "sole-facebook"
+          ? await f.accounts.findOrCreateByIdentity("facebook", USER_ID)
+          : await f.accounts.findOrCreateByIdentity(
+              remainingProvider,
+              remainingProvider === "email"
+                ? "owner@example.test"
+                : "google-owner",
+            );
+      const oldSession = await f.accounts.issueSession(a.drtsPassengerId);
+      if (remainingProvider !== "sole-facebook")
+        await f.accounts.linkIdentity(
+          f.jwt.verify(oldSession.accessToken),
+          "facebook",
+          USER_ID,
+        );
+      let reached!: () => void;
+      const atIssuance = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      let resume!: () => void;
+      const afterDeletion = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const realIssue = f.accounts.issueSession.bind(f.accounts);
+      // Scheduling only: account, JWT, deletion and session logic remain real.
+      const gate = vi
+        .spyOn(f.accounts, "issueSession")
+        .mockImplementation(async (...args) => {
+          reached();
+          await afterDeletion;
+          return realIssue(...args);
+        });
+      const pending = callback(f, await start(f)).then(
+        (result) => ({ result, error: null }),
+        (error: unknown) => ({ result: null, error }),
+      );
+      await atIssuance; // Lookup has committed; issuance has not started.
+      try {
+        const receipt = await f.controller.delete({
+          signed_request: signedRequest(),
+        });
+        expect(f.controller.status(receipt.confirmation_code).status).toBe(
+          "completed",
+        );
+        expect(await f.store.findIdentity("facebook", USER_ID)).toBeNull();
+        expect(
+          await f.accounts.authenticateAccessToken(oldSession.accessToken),
+        ).toBeNull();
+      } finally {
+        resume();
+      }
+      const outcome = await pending;
+      gate.mockRestore();
+      if (outcome.result?.result === "logged_in")
+        expect(
+          await f.accounts.authenticateAccessToken(outcome.result.accessToken),
+        ).toBeNull();
+      expect(outcome.error).toMatchObject({ code: "unauthorized" });
+      expect(outcome.result).toBeNull();
+      expect([...f.store.sessions.values()].every((s) => s.revokedAt)).toBe(
+        true,
+      );
+      if (remainingProvider !== "sole-facebook") {
+        // A new proof through the retained identity still resolves the original account.
+        const remaining = await f.accounts.findOrCreateByIdentity(
+          remainingProvider,
+          remainingProvider === "email" ? "owner@example.test" : "google-owner",
+        );
+        expect(remaining.drtsPassengerId).toBe(a.drtsPassengerId);
+        const fresh = await f.accounts.issueSession(remaining.drtsPassengerId);
+        expect(
+          await f.accounts.authenticateAccessToken(fresh.accessToken),
+        ).not.toBeNull();
+      } else {
+        expect(f.store.accounts.get(a.drtsPassengerId)!.status).toBe("deleted");
+      }
+    },
+  );
+  it("revokes a Facebook session when issuance commits before deletion, even before callback returns", async () => {
+    const f = fixture();
+    const a = await owner(f);
+    await f.accounts.linkIdentity(a.identity, "facebook", USER_ID);
+    let reached!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let resume!: () => void;
+    const afterDeletion = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const realIssue = f.accounts.issueSession.bind(f.accounts);
+    vi.spyOn(f.accounts, "issueSession").mockImplementation(async (...args) => {
+      const session = await realIssue(...args);
+      reached();
+      await afterDeletion;
+      return session;
+    });
+    const pending = callback(f, await start(f));
+    await committed;
+    try {
+      await f.controller.delete({ signed_request: signedRequest() });
+    } finally {
+      resume();
+    }
+    const result = await pending;
+    expect(result.result).toBe("logged_in");
+    if (result.result !== "logged_in") throw new Error("Expected login result");
+    expect(result.drtsPassengerId).toBe(a.account.drtsPassengerId);
+    expect(
+      await f.accounts.authenticateAccessToken(result.accessToken),
+    ).toBeNull();
+    await expect(f.accounts.refresh(result.refreshToken)).rejects.toMatchObject(
+      { code: "invalid_grant" },
+    );
+    expect(
+      await f.accounts.authenticateAccessToken(a.session.accessToken),
+    ).toBeNull();
+    expect(await f.store.findIdentity("facebook", USER_ID)).toBeNull();
+  });
   it.each([
     undefined,
     "",
