@@ -1,523 +1,457 @@
 "use client";
-
-import { useEffect, useState } from "react";
-import { PassengerClient } from "@drts/passenger-client";
-import { PassengerAccount } from "@drts/contracts";
-import { PassengerAuthClient } from "../../lib/auth/client";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import type {
+  AuthProvider,
+  PassengerAccount,
+  PassengerLoginIdentity,
+} from "@drts/contracts";
+import { client, PassengerAuthError } from "../../lib/auth/client";
+import { useOtp, clearOtpState } from "../../lib/auth/use-otp";
+import { consentPolicy } from "../../lib/auth/policy";
+import { navigateToProvider } from "../../lib/auth/navigation";
+import { AUTH_COPY as C } from "../../../../packages/passenger-client/src/auth/copy";
+import {
+  authErrorCopy,
+  consentDecision,
+} from "../../../../packages/passenger-client/src/auth/state";
 import { P5Card, P5Btn, P5 } from "../../components/auth/ui";
-
-const baseClient = new PassengerClient({
-  baseUrl: "",
-  fetchFn: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
-});
-const client = new PassengerAuthClient(baseClient);
+import { OtpPanel, inputStyle } from "../../components/auth/otp";
+import { ConsentGate } from "../../components/auth/consent";
 
 export default function AccountPage() {
+  const router = useRouter();
   const [account, setAccount] = useState<PassengerAccount | null>(null);
-  const [identities, setIdentities] = useState<any[]>([]);
-  const [providers, setProviders] = useState<string[]>([]);
+  const [identities, setIdentities] = useState<PassengerLoginIdentity[]>([]);
+  const [providers, setProviders] = useState<AuthProvider[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [displayName, setDisplayName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
-
-  // OTP State
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpProvider, setOtpProvider] = useState<"phone" | "email" | null>(
-    null,
-  );
-  const [otpPurpose, setOtpPurpose] = useState<
-    "link" | "verify_contact_phone" | null
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [targets, setTargets] = useState({ phone: "", email: "" });
+  const [editing, setEditing] = useState(false);
+  const [confirmation, setConfirmation] = useState<
+    "delete" | "logout" | PassengerLoginIdentity | null
   >(null);
-  const [otpTarget, setOtpTarget] = useState("");
-  const [challenge, setChallenge] = useState("");
-  const [code, setCode] = useState("");
-  const [countdown, setCountdown] = useState(0);
-  const [otpError, setOtpError] = useState("");
-  const [otpLoading, setOtpLoading] = useState(false);
-
-  const fetchData = async () => {
+  const busy = useRef(false);
+  const generation = useRef(0);
+  const otp = useOtp(
+    account ? `account:${account.drtsPassengerId}` : "account:pending",
+    account ? providers : [],
+  );
+  const load = async () => {
+    const current = ++generation.current;
+    setLoading(true);
+    setError("");
     try {
       const acc = await client.getAccount();
+      const [ids, configured] = await Promise.all([
+        client.getIdentities(),
+        client.getProviders(),
+      ]);
+      if (current !== generation.current) return;
       setAccount(acc);
-      setDisplayName(acc.displayName || "");
-      setContactPhone(acc.contactPhone || "");
-
-      const idsRes = await client.getIdentities();
-      setIdentities(idsRes.identities || []);
-
-      const provsRes = await client.getProviders();
-      setProviders(provsRes.providers || []);
+      setIdentities(ids.identities);
+      setProviders(configured.providers);
+      setName(acc.displayName ?? "");
+      setPhone(acc.contactPhone ?? "");
     } catch (err) {
-      console.error(err);
-      window.location.href = "/login";
+      if (current !== generation.current) return;
+      setError(authErrorCopy(err));
+      if (err instanceof PassengerAuthError && err.status === 401) {
+        clearOtpState();
+        setAccount(null);
+        router.replace("/login");
+      }
     } finally {
-      setLoading(false);
+      if (current === generation.current) setLoading(false);
     }
   };
-
   useEffect(() => {
-    fetchData();
-
-    const saved = sessionStorage.getItem("otp_account_state");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        const elapsed = Math.floor((Date.now() - parsed.timestamp) / 1000);
-        if (elapsed < 60) {
-          setOtpSent(true);
-          setChallenge(parsed.challenge);
-          setOtpProvider(parsed.provider);
-          setOtpPurpose(parsed.purpose);
-          setOtpTarget(parsed.target);
-          setCountdown(60 - elapsed);
-        } else {
-          sessionStorage.removeItem("otp_account_state");
-        }
-      } catch {
-        /* ignore */
-      }
-    }
+    void load();
+    return () => {
+      generation.current++;
+    };
   }, []);
-
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(timer);
+  const action = async (
+    operation: () => Promise<unknown>,
+    onSuccess: () => Promise<void> | void,
+  ) => {
+    if (busy.current || otp.pending || !account) return;
+    busy.current = true;
+    setPending(true);
+    setError("");
+    setNotice("");
+    try {
+      await operation();
+      await onSuccess();
+    } catch (err) {
+      setError(authErrorCopy(err));
+    } finally {
+      busy.current = false;
+      setPending(false);
     }
-  }, [countdown]);
-
-  const handleLogout = async () => {
+  };
+  const oauth = (provider: "google" | "facebook" | "line") => {
+    if (
+      !providers.includes(provider) ||
+      identities.some((id) => id.provider === provider)
+    )
+      return;
+    void action(
+      async () => {
+        const res = await client.oauthStart({
+          provider,
+          purpose: "link",
+          redirectUri: `${window.location.origin}/auth/callback/${provider}`,
+        });
+        navigateToProvider(res.authUrl);
+      },
+      () => {},
+    );
+  };
+  const logout = async () => {
+    if (busy.current || otp.pending) return;
+    busy.current = true;
+    setPending(true);
+    setError("");
     try {
       await client.logout();
-      window.location.href = "/login";
+      router.replace("/login");
     } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleUpdateProfile = async () => {
-    try {
-      await client.updateAccount({ displayName, contactPhone });
-      setIsEditing(false);
-      fetchData();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleUnlink = async (identityId: string) => {
-    if (identities.length <= 1) {
-      alert("必須至少保留一種登入方式");
-      return;
-    }
-    try {
-      await client.unlinkIdentity({ identityId });
-      fetchData();
-    } catch (err) {
-      console.error(err);
-      alert("解除綁定失敗");
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    try {
-      await client.deleteAccount();
-      window.location.href = "/login";
-    } catch (err) {
-      console.error(err);
-      alert("刪除帳號失敗");
-    }
-  };
-
-  const handleOAuthBind = async (provider: "google" | "facebook" | "line") => {
-    try {
-      const res = await client.oauthStart({
-        provider,
-        redirectUri: window.location.origin + `/auth/callback/${provider}`,
-        purpose: "link",
-      });
-      window.location.href = res.authUrl;
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleRequestOtp = async (
-    provider: "phone" | "email",
-    purpose: "link" | "verify_contact_phone",
-    target: string,
-  ) => {
-    if (!target) return;
-    if (countdown > 0) return;
-    setOtpLoading(true);
-    setOtpError("");
-    try {
-      const res = await client.requestOtp({
-        target,
-        provider,
-        purpose,
-      });
-      if (res.success) {
-        setOtpSent(true);
-        setChallenge(res.challenge);
-        setOtpProvider(provider);
-        setOtpPurpose(purpose);
-        setOtpTarget(target);
-        setCountdown(60);
-        sessionStorage.setItem(
-          "otp_account_state",
-          JSON.stringify({
-            challenge: res.challenge,
-            provider,
-            purpose,
-            target,
-            timestamp: Date.now(),
-          }),
-        );
-      } else {
-        setOtpError(res.message || "發送失敗");
-      }
-    } catch (err: any) {
-      setOtpError(err.message || "發生錯誤");
+      setError(authErrorCopy(err));
     } finally {
-      setOtpLoading(false);
+      clearOtpState();
+      setAccount(null);
+      setConfirmation(null);
+      setPending(false);
+      busy.current = false;
     }
   };
-
-  const handleVerifyOtp = async () => {
-    setOtpLoading(true);
-    setOtpError("");
+  const leaveConsent = async () => {
     try {
-      await client.login({
-        target: otpTarget,
-        provider: otpProvider!,
-        challenge,
-        code,
-      });
-      // linked or verified_contact_phone
-      setOtpSent(false);
-      setCode("");
-      sessionStorage.removeItem("otp_account_state");
-      fetchData();
-    } catch {
-      setOtpError("驗證碼錯誤或已過期");
+      await client.logout();
     } finally {
-      setOtpLoading(false);
+      clearOtpState();
+      router.replace("/login");
     }
   };
-
-  const inputStyle = {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: `1px solid ${P5.line}`,
-    fontSize: 15,
-    outline: "none",
-    boxSizing: "border-box" as const,
-    marginBottom: 8,
-  };
-
-  if (loading) return <div style={{ padding: 14 }}>載入中...</div>;
-  if (!account) return null;
-
-  if (otpSent) {
+  if (loading)
+    return (
+      <div style={{ padding: 14 }} role="status">
+        {C.loadingAccount}
+      </div>
+    );
+  if (!account)
     return (
       <div style={{ padding: 14 }}>
-        <P5Card title="輸入驗證碼">
-          <div style={{ marginBottom: 14, fontSize: 13, color: P5.ink }}>
-            已發送驗證碼至 {otpTarget}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <input
-              type="text"
-              placeholder="6位數驗證碼"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              maxLength={6}
-              style={inputStyle}
-            />
-            {otpError && (
-              <div style={{ color: P5.danger, fontSize: 13 }}>{otpError}</div>
-            )}
-            <P5Btn
-              kind="primary"
-              disabled={otpLoading || code.length !== 6}
-              onClick={handleVerifyOtp}
-            >
-              {otpLoading ? "驗證中..." : "驗證"}
-            </P5Btn>
-            <P5Btn
-              kind="ghost"
-              disabled={otpLoading || countdown > 0}
-              onClick={() =>
-                handleRequestOtp(otpProvider!, otpPurpose!, otpTarget)
-              }
-            >
-              {countdown > 0 ? `重送驗證碼 (${countdown}s)` : "重新發送"}
-            </P5Btn>
-            <P5Btn
-              kind="ghost"
-              onClick={() => {
-                setOtpSent(false);
-                setCode("");
-                setOtpError("");
-                sessionStorage.removeItem("otp_account_state");
-              }}
-            >
-              取消
-            </P5Btn>
-          </div>
+        <P5Card title={C.accountTitle}>
+          <p role="alert">{error || C.accountFailed}</p>
+          <P5Btn onClick={() => void load()}>{C.retry}</P5Btn>
+          <P5Btn kind="ghost" onClick={() => router.replace("/login")}>
+            {C.backLogin}
+          </P5Btn>
         </P5Card>
       </div>
     );
-  }
-
-  const identityProviders = identities.map((i) => i.provider);
-  const availableProviders = providers.filter(
-    (p) => !identityProviders.includes(p),
-  );
-
+  if (consentDecision(account, consentPolicy()) !== "accepted")
+    return (
+      <div style={{ padding: 14 }}>
+        <ConsentGate
+          onComplete={() => void load()}
+          onExit={() => void leaveConsent()}
+        />
+      </div>
+    );
+  if (otp.active)
+    return (
+      <div style={{ padding: 14 }}>
+        <OtpPanel otp={otp} onSuccess={load} />
+      </div>
+    );
+  const disabled = pending || otp.pending;
   return (
     <div
       style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}
     >
-      <P5Card title="個人資料">
-        {isEditing ? (
-          <div>
-            <input
-              style={inputStyle}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="姓名"
-            />
-            <input
-              style={inputStyle}
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              placeholder="聯絡手機"
-            />
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <div style={{ flex: 1 }}>
-                <P5Btn kind="primary" onClick={handleUpdateProfile}>
-                  儲存
-                </P5Btn>
-              </div>
-              <div style={{ flex: 1 }}>
-                <P5Btn onClick={() => setIsEditing(false)}>取消</P5Btn>
-              </div>
-            </div>
-          </div>
+      <P5Card title={C.profile}>
+        {editing ? (
+          <>
+            <label>
+              {C.name}
+              <input
+                aria-label={C.name}
+                value={name}
+                disabled={disabled}
+                onChange={(e) => setName(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label>
+              {C.contactPhone}
+              <input
+                aria-label={C.contactPhone}
+                type="tel"
+                value={phone}
+                disabled={disabled}
+                onChange={(e) => setPhone(e.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <P5Btn
+              kind="primary"
+              disabled={disabled}
+              onClick={() =>
+                void action(
+                  () =>
+                    client.updateAccount({
+                      displayName: name,
+                      ...(phone !== (account.contactPhone ?? "")
+                        ? { contactPhone: phone }
+                        : {}),
+                    }),
+                  async () => {
+                    setEditing(false);
+                    await load();
+                    setNotice(C.saved);
+                  },
+                )
+              }
+            >
+              {C.save}
+            </P5Btn>
+            <P5Btn
+              kind="ghost"
+              disabled={disabled}
+              onClick={() => {
+                setName(account.displayName ?? "");
+                setPhone(account.contactPhone ?? "");
+                setEditing(false);
+              }}
+            >
+              {C.cancel}
+            </P5Btn>
+          </>
         ) : (
-          <div>
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 12, color: P5.mut }}>姓名</div>
-              <div>{account.displayName || "未設定"}</div>
+          <>
+            <div
+              style={{
+                padding: "8px 0",
+                borderBottom: `1px solid ${P5.lineSoft}`,
+              }}
+            >
+              {C.name}: {account.displayName}
             </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: P5.mut }}>聯絡手機</div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div>
-                  {account.contactPhone || "未設定"}
-                  {account.contactPhone && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        marginLeft: 8,
-                        color: account.contactPhoneVerified
-                          ? P5.brand
-                          : P5.danger,
-                      }}
-                    >
-                      {account.contactPhoneVerified ? "(已驗證)" : "(未驗證)"}
-                    </span>
-                  )}
-                </div>
-                {providers.includes("phone") &&
-                  account.contactPhone &&
-                  !account.contactPhoneVerified && (
-                    <button
-                      disabled={otpLoading}
-                      onClick={() =>
-                        handleRequestOtp(
-                          "phone",
-                          "verify_contact_phone",
-                          account.contactPhone!,
-                        )
-                      }
-                      style={{
-                        color: P5.brand,
-                        background: "none",
-                        border: "none",
-                        cursor: otpLoading ? "not-allowed" : "pointer",
-                        fontSize: 13,
-                        opacity: otpLoading ? 0.5 : 1,
-                      }}
-                    >
-                      {otpLoading ? "處理中..." : "去驗證"}
-                    </button>
-                  )}
-              </div>
+            <div
+              style={{
+                padding: "8px 0",
+                borderBottom: `1px solid ${P5.lineSoft}`,
+              }}
+            >
+              {C.contactPhone}: {account.contactPhone} (
+              {account.contactPhoneVerified ? C.verified : C.unverified})
             </div>
-            <P5Btn onClick={() => setIsEditing(true)}>編輯資料</P5Btn>
-          </div>
+            <P5Btn
+              kind="ghost"
+              disabled={disabled}
+              onClick={() => setEditing(true)}
+            >
+              {C.edit}
+            </P5Btn>
+            {providers.includes("phone") &&
+              !account.contactPhoneVerified &&
+              account.contactPhone && (
+                <P5Btn
+                  disabled={
+                    disabled ||
+                    otp.countdownFor({
+                      provider: "phone",
+                      purpose: "verify_contact_phone",
+                      target: account.contactPhone,
+                    }) > 0
+                  }
+                  onClick={() =>
+                    void otp.request({
+                      provider: "phone",
+                      purpose: "verify_contact_phone",
+                      target: account.contactPhone!,
+                    })
+                  }
+                >
+                  {C.verifyContact}
+                </P5Btn>
+              )}
+          </>
         )}
       </P5Card>
-
-      <P5Card title="登入方式管理">
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {identities.map((id) => (
+      <P5Card title={C.identities}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {identities.map((identity) => (
             <div
-              key={id.identityId}
+              key={identity.identityId}
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
                 borderBottom: `1px solid ${P5.lineSoft}`,
                 paddingBottom: 8,
               }}
             >
-              <div>
-                <div style={{ fontWeight: 600 }}>{id.provider}</div>
-                <div style={{ fontSize: 12, color: P5.mut }}>{id.subject}</div>
-              </div>
-              <button
-                onClick={() => handleUnlink(id.identityId)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: identities.length > 1 ? P5.danger : P5.dim,
-                  cursor: identities.length > 1 ? "pointer" : "not-allowed",
-                }}
-                disabled={identities.length <= 1}
+              <span>
+                {identity.provider}: {identity.subject}
+              </span>
+              <P5Btn
+                kind="ghost"
+                danger
+                disabled={disabled || identities.length <= 1}
+                onClick={() => setConfirmation(identity)}
               >
-                解除綁定
-              </button>
+                {C.unlink}
+              </P5Btn>
             </div>
           ))}
-
-          {availableProviders.length > 0 && (
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 13, marginBottom: 8, fontWeight: 600 }}>
-                新增綁定
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {availableProviders.includes("google") && (
-                  <P5Btn onClick={() => handleOAuthBind("google")}>
-                    綁定 Google
-                  </P5Btn>
-                )}
-                {availableProviders.includes("facebook") && (
-                  <P5Btn onClick={() => handleOAuthBind("facebook")}>
-                    綁定 Facebook
-                  </P5Btn>
-                )}
-                {availableProviders.includes("line") && (
-                  <P5Btn onClick={() => handleOAuthBind("line")}>
-                    綁定 LINE
-                  </P5Btn>
-                )}
-
-                {availableProviders.includes("phone") && (
-                  <div style={{ display: "flex", gap: 8 }}>
+          {identities.length <= 1 && <p>{C.lastIdentity}</p>}
+          {(["phone", "email"] as const)
+            .filter(
+              (provider) =>
+                providers.includes(provider) &&
+                !identities.some((id) => id.provider === provider),
+            )
+            .map((provider) => {
+              const command = {
+                provider,
+                purpose: "link" as const,
+                target: targets[provider],
+              };
+              const countdown = otp.countdownFor(command);
+              return (
+                <div key={provider}>
+                  <label>
+                    {C.link[provider]}
                     <input
-                      id="link-phone"
-                      type="tel"
-                      placeholder="綁定手機"
-                      style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+                      aria-label={C.link[provider]}
+                      type={provider === "phone" ? "tel" : "email"}
+                      value={targets[provider]}
+                      disabled={disabled}
+                      onChange={(e) =>
+                        setTargets({ ...targets, [provider]: e.target.value })
+                      }
+                      style={inputStyle}
                     />
-                    <div style={{ flex: 1 }}>
-                      <P5Btn
-                        onClick={() => {
-                          const v = (
-                            document.getElementById(
-                              "link-phone",
-                            ) as HTMLInputElement
-                          ).value;
-                          if (v) handleRequestOtp("phone", "link", v);
-                        }}
-                      >
-                        綁定手機
-                      </P5Btn>
-                    </div>
-                  </div>
-                )}
-                {availableProviders.includes("email") && (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      id="link-email"
-                      type="email"
-                      placeholder="綁定 Email"
-                      style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <P5Btn
-                        onClick={() => {
-                          const v = (
-                            document.getElementById(
-                              "link-email",
-                            ) as HTMLInputElement
-                          ).value;
-                          if (v) handleRequestOtp("email", "link", v);
-                        }}
-                      >
-                        綁定 Email
-                      </P5Btn>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+                  </label>
+                  <P5Btn
+                    disabled={
+                      disabled || !targets[provider].trim() || countdown > 0
+                    }
+                    onClick={() => void otp.request(command)}
+                  >
+                    {C.link[provider]}
+                  </P5Btn>
+                  {countdown > 0 && (
+                    <p role="status">{C.cooldown(countdown)}</p>
+                  )}
+                </div>
+              );
+            })}
+          {(["google", "facebook", "line"] as const)
+            .filter(
+              (provider) =>
+                providers.includes(provider) &&
+                !identities.some((id) => id.provider === provider),
+            )
+            .map((provider) => (
+              <P5Btn
+                key={provider}
+                disabled={disabled}
+                onClick={() => oauth(provider)}
+              >
+                {C.link[provider]}
+              </P5Btn>
+            ))}
         </div>
       </P5Card>
-
-      <P5Card title="帳號操作">
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <P5Btn onClick={handleLogout}>登出</P5Btn>
-
-          {showDeleteConfirm ? (
-            <div
-              style={{
-                background: P5.warnBg,
-                padding: 14,
-                borderRadius: 12,
-                border: `1px solid ${P5.warnBd}`,
+      {(error || otp.error) && (
+        <p role="alert" style={{ color: P5.danger }}>
+          {error || otp.error}
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+      {confirmation && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            confirmation === "delete"
+              ? C.deleteConfirm
+              : confirmation === "logout"
+                ? C.logoutConfirm
+                : C.unlinkConfirm
+          }
+        >
+          <P5Card
+            title={
+              confirmation === "delete"
+                ? C.deleteConfirm
+                : confirmation === "logout"
+                  ? C.logoutConfirm
+                  : C.unlinkConfirm
+            }
+          >
+            {confirmation === "delete" && <p>{C.retention}</p>}
+            <P5Btn
+              kind="primary"
+              danger={confirmation !== "logout"}
+              disabled={disabled}
+              onClick={() => {
+                if (confirmation === "logout") void logout();
+                else if (confirmation === "delete")
+                  void action(
+                    () => client.deleteAccount(),
+                    () => {
+                      clearOtpState();
+                      setAccount(null);
+                      router.replace("/login");
+                    },
+                  );
+                else if (identities.length > 1)
+                  void action(
+                    () =>
+                      client.unlinkIdentity({
+                        identityId: confirmation.identityId,
+                      }),
+                    async () => {
+                      setConfirmation(null);
+                      await load();
+                    },
+                  );
               }}
             >
-              <div style={{ color: P5.warn, fontWeight: 600, marginBottom: 8 }}>
-                確定要刪除帳號嗎？
-              </div>
-              <div style={{ fontSize: 13, color: P5.ink, marginBottom: 14 }}>
-                刪除後將無法恢復。您的個人資料將被匿名化處理，但為符合法規要求，歷史行程與財務紀錄將會保留。
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <P5Btn kind="primary" danger onClick={handleDeleteAccount}>
-                    確認刪除
-                  </P5Btn>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <P5Btn onClick={() => setShowDeleteConfirm(false)}>
-                    取消
-                  </P5Btn>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <P5Btn danger onClick={() => setShowDeleteConfirm(true)}>
-              刪除帳號
+              {confirmation === "delete"
+                ? C.confirmDelete
+                : confirmation === "logout"
+                  ? C.confirmLogout
+                  : C.confirmUnlink}
             </P5Btn>
-          )}
+            <P5Btn
+              disabled={disabled}
+              kind="ghost"
+              onClick={() => setConfirmation(null)}
+            >
+              {C.cancel}
+            </P5Btn>
+          </P5Card>
         </div>
-      </P5Card>
+      )}
+      <P5Btn disabled={disabled} onClick={() => setConfirmation("logout")}>
+        {C.logout}
+      </P5Btn>
+      <P5Btn
+        disabled={disabled}
+        danger
+        kind="ghost"
+        onClick={() => setConfirmation("delete")}
+      >
+        {C.delete}
+      </P5Btn>
     </div>
   );
 }
