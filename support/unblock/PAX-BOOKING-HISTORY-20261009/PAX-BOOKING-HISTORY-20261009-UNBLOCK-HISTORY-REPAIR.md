@@ -2,15 +2,16 @@
 
 ## 1. Contamination identified
 
-The parent task's candidate branch is `gemini/pax-booking-history-20261009`
+The parent task's historical candidate branch is `gemini/pax-booking-history-20261009`
 (PR [#2506](https://github.com/ajoe734/drts-fleet-platform/pull/2506),
 base `dev`). At the time this unblock task was dispatched, the canonical
-root's local branch ref `gemini/pax-booking-history-20261009` had diverged
-ahead of `origin/gemini/pax-booking-history-20261009`:
+shared local ref `refs/heads/gemini/pax-booking-history-20261009` was one
+commit ahead of the then-observed remote tip. This was unpublished local
+progress, not divergent ancestry:
 
 - `origin/gemini/pax-booking-history-20261009` (PR #2506 head at dispatch
   time): `159c1783edce144523bffefa3c6b9407b6c5866f`
-- local canonical-root ref: `be3f5983a33c42e5eabd16b7710778b6fe9139b5`
+- shared local named ref: `be3f5983a33c42e5eabd16b7710778b6fe9139b5`
 
 `git log --oneline be3f5983a33c42e5eabd16b7710778b6fe9139b5 -2` showed the
 local commit's sole parent was exactly `159c1783e` (origin's tip), i.e. a
@@ -27,27 +28,35 @@ task's own UAT/evidence doc, present on `gemini/pax-booking-history-20261009`
 but not on this doc-only unblock branch), updating it to record that R8 was fixed and
 R2 was blocked pending a `write_scopes` grant — matching the owner's
 `progress`/`system-block` machine-truth entries at `2026-10-10T08:27:59Z`
-and `2026-10-10T08:32:32Z`.
+and `2026-10-10T08:32:32Z`. The exact parent document is available in this
+[immutable parent blob](https://github.com/ajoe734/drts-fleet-platform/blob/be3f5983a33c42e5eabd16b7710778b6fe9139b5/docs/04-uat/passenger-app-20261009/PAX-BOOKING-HISTORY-20261009.md).
 
 This is an anchor commit (per `docs/ops/branch-strategy.md` §11 /
 `tools/development-orchestrator/skills/worker-anchor-commit.md`) that the
-owner (Gemini, git author `Gemini2`) made in its task worktree before that
-worktree was reaped by routine supervisor worktree cleanup
-([[project-supervisor-worktree-cleanup-removes-any-worktree]]), leaving the
-commit only reachable via the canonical root's stale local branch ref. It
-was never pushed to `origin`, so:
+owner (Gemini, git author `Gemini2`) made. The earlier report attributed
+its unpublished state to supervisor worktree cleanup, but supplied no
+historical worktree path, cleanup event/timestamp, checked-out root ref or
+ref-deletion evidence. That cleanup cause and the historical root attachment
+are **unverified**. Worktrees share named refs; a missing worktree does not
+establish that its commits or refs were deleted. At the observed pre-repair
+remote tip, the anchor was not yet published, so:
 
 - PR #2506 did not show the updated UAT evidence (reviewer Codex2's most
   recent `reopen` at `07:26:07Z` could not see it).
-- The commit was one `git reset --hard origin/dev` on the canonical root
-  away from being silently destroyed
-  ([[project-canonical-root-hard-reset]]), which would have erased the
-  owner's only record of "R8 fixed, R2 blocked on write_scopes" and forced
-  re-derivation of that status from scratch.
+- The named local Gemini ref retained the anchor independently of another
+  branch's HEAD. Resetting a checked-out `dev` branch would not delete that
+  Gemini ref. Losing that ref's retention would require moving/deleting
+  the retaining ref; even then object loss would also depend on other refs,
+  reflogs and eventual garbage collection. Guaranteed loss of the only
+  record was not demonstrated. Read-only checks on 2026-10-10 confirmed
+  canonical root HEAD attached to `refs/heads/dev` and the named Gemini
+  ref still at `be3f5983a`; these current facts do not prove historical attachment.
 
 No corruption of PR #2506's already-reviewed commits (`4bc4dc2b2`..`abeb4445d`..`159c1783e`)
 was found; the branch itself is linear and matches its own PR head history.
-The contamination was strictly the one unpushed local anchor commit.
+The verified delivery gap was that one unpublished local anchor. Its
+historical worktree/cleanup cause remains unverified; it did not explain
+the parent's independent implementation or CI blockers.
 
 ## 2. Non-destructive repair applied
 
@@ -63,18 +72,23 @@ git push origin be3f5983a33c42e5eabd16b7710778b6fe9139b5:refs/heads/gemini/pax-b
 Result: `159c1783e..be3f5983a  be3f5983a33c42e5eabd16b7710778b6fe9139b5 -> gemini/pax-booking-history-20261009`
 (plain update, not forced).
 
-Verified after push: `gh pr view 2506 --json headRefOid` returns
+The historical post-push check `gh pr view 2506 --json headRefOid` returned
 `be3f5983a33c42e5eabd16b7710778b6fe9139b5`, matching the canonical-root ref
-exactly. `mergeStateStatus` remains `BLOCKED`, which is expected — see §3,
-the branch is not blocked by history/CI, it is blocked on a task
-`write_scopes` grant.
+exactly. GitHub `mergeStateStatus=BLOCKED` was separately observed; its
+complete branch-protection cause was not diagnosed by that check. It
+cannot be attributed to the orchestrator's `write_scopes` gate. The exact
+parent anchor also had a failed hosted integration job (see §3); helper
+CI success cannot establish parent CI success. By the 2026-10-10 13:19 UTC
+read-only check, PR #2506 had advanced normally to
+`6f3eae5fd718d1468bd51200f4d02d1cfbabd1c9`, retaining the anchor as an
+ancestor. Do not repeat the historical parent push.
 
 No source files were changed by this repair; the pushed commit is
 documentation-only (the owner's own UAT evidence update).
 
-## 3. Parent task's actual remaining blocker (unaffected by this repair)
+## 3. Historical parent machine blocker and independent GitHub CI gate
 
-`PAX-BOOKING-HISTORY-20261009` is `status: blocked` in machine truth
+`PAX-BOOKING-HISTORY-20261009` was `status: blocked` at the historical dispatch
 independent of the history contamination above. Per the owner's own
 `system-block` entry (`2026-10-10T08:32:32Z`) and the task's `next` field:
 
@@ -87,39 +101,50 @@ confirmed R2's remaining defect (dispatch released before order/history/token
 persistence is durably confirmed; failed compensation can leave a
 dispatchable, unowned order) requires a fix inside
 `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`, which the
-task's current `write_scopes` does not include
+task's then-current `write_scopes` did not include
 ([[project-reassignment-must-check-eligible-agents-list]] — the analogous
 write-scope/eligibility gate class of blocker). This is a governance/scope
-gate, not a git or CI problem, and only the Supervisor can expand
-`write_scopes` on the live task record.
+gate in machine truth. GitHub CI and branch protection are independent
+authorities; neither candidate CI workflow accepts `write_scopes` as an
+input. Only Supervisor can expand the live task's scope.
 
-## 4. Concrete unblocked next step
+Same-SHA parent CI evidence, re-read on 2026-10-10:
+[integration run 38039420638, job 114176700246](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38039420638/job/114176700246)
+reports `head_sha=be3f5983a33c42e5eabd16b7710778b6fe9139b5`,
+`conclusion=failure`, `completed_at=2026-10-10T08:56:20Z`.
+The logs identify UV-EXEC-006 cancellation drains delayed workflow
+persistence: `token_failure`; the assertion expected
+`loadOrderCancellationForUpdate` not to be called but observed one call
+(integration test line 2546; integration exited 1). This is observed
+parent CI failure, not a helper failure or proof of every GitHub BLOCKED
+condition. No parent product acceptance or later parent CI pass is claimed.
 
-1. **Supervisor**: add `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
-   (and its paired test file(s) under `apps/api/tests/unit/` if touched) to
-   `PAX-BOOKING-HISTORY-20261009`'s `write_scopes`, per the owner's
-   already-recorded request — no further history/branch repair is needed
-   first.
-2. **Owner (Gemini)**: once scope is granted, resume on the now-pushed tip
-   `be3f5983a33c42e5eabd16b7710778b6fe9139b5` (PR #2506) and implement the
-   R2 fix identified across the `058f12f25` / `60f432dcf` / `abeb4445d`
-   review rounds: do not release an order to `ready_for_dispatch` (durable
-   row + in-memory `owned.orders`) until order/history/token persistence is
-   confirmed, and ensure compensation on failure cannot be silently
-   swallowed; required regressions are listed in the `abeb4445d` reopen
-   (success, 15–30min/2h history+token failure combinations, initial-create
-   failure, completed/cancelled terminal fence).
-3. **Reviewer (Codex2)**: re-review against the next candidate SHA once
-   handed off; R1/R3/R4/R5/R6/R7 are already confirmed fixed as of
-   `abeb4445d` and should not need re-litigating unless the R2 fix touches
-   their code paths.
+## 4. Concrete current parent next step (2026-10-10 13:19 UTC)
+
+Official CLI parent slice now records `in_progress`, owner **Codex2**,
+reviewer **Codex**. Supervisor already granted the owned-mobility/contracts
+scopes. The parent's recorded progress includes normally pushed R2 anchor
+`6f3eae5fd718d1468bd51200f4d02d1cfbabd1c9` on PR #2506. Preserve that live
+parent and its implementation; do not replay the old Gemini scope request.
+
+1. **Codex2** continues the recorded atomic-transaction regressions,
+   booking repository TS2322/probe lint fixes, public settings API and
+   permissions across all entry points.
+2. **Supervisor** coordinates the still-recorded integration-test scope
+   for UV-EXEC-006 readSpy timing while preserving durable cancellation
+   assertions, and cleanup of the inherited seven next-env.d.ts changes
+   and fleets-closeout-004-ops-visibility-proof.json unrelated diff.
+3. **Codex** reviews the parent's next separately locked candidate;
+   parent CI/product acceptance remains its own delivery gate.
 
 This unblock task made no change to `write_scopes`, `eligible_agents`, or
-any product/test source file — only the orphaned anchor commit was pushed.
+any product/test source file — it preserved the unpublished anchor and
+repairs this report. Helper metadata preserves a later blocked parent,
+and the production merge path leaves an in-progress parent unchanged (§6).
 
 ## 5. Repair of Codex2 reopen findings (REVIEWED_SHA `e413848411b54f31a3754cd38159ce916e7c99a1`, candidate_generation `4ca3eca996ab45ac8464902d90fdc700`)
 
-### HR2 (resolved, commit `f45474550a975f2cae7e7d871cfb4bc4cdfda0cf`)
+### HR2 (first-round path gate fixed; causal wording remained unresolved)
 
 The backtick-fenced repo-path citation at the old §1 (the parent task's UAT
 evidence doc under docs/04-uat/passenger-app-20261009/) only exists on
@@ -139,13 +164,20 @@ Exit 0, all four rules 0 findings (`l1-edit-authority`, `cited-paths`,
 `origin/claude/pax-booking-history-20261009-unblock-history-repair` and is
 PR #2521's current head (`gh pr view 2521 --json headRefOid` ==
 `f45474550a975f2cae7e7d871cfb4bc4cdfda0cf`, confirmed at write time).
-§3's `mergeStateStatus=BLOCKED` line and §4's cleanup/reset wording above
-were already conditional/evidence-qualified (see §1's explicit
-`git reset --hard` framing and §3's explicit "governance/scope gate, not a
-git or CI problem" framing); re-read against HR2's text, no further wording
-change was needed there.
+The previous §5 also asserted that the CI/scope and cleanup/reset wording
+needed no repair. That assertion was incorrect: formatting a hypothetical
+reset command did not qualify the historical causal claim. A green path
+checker only established resolvable citations, not factual accuracy. The
+second review reopened HR2 A (CI/scope conflation) and HR2 B (unsupported
+cleanup/ref loss), repaired in §1–§4 and itemized in §6 below.
 
-### HR1 (blocked on Supervisor — cannot be completed by this dispatched owner session)
+### HR1 (historical worker command blocked; Supervisor metadata repair now verified)
+
+The following preserves the prior session's finding, attempted command
+and rejected result. Its Gemini/Claude routing and requested Supervisor
+command are historical evidence, **not current execution instructions**.
+Supervisor has since stored the three required fields, with current
+Codex2 ownership and granted scope recognized; §6 verifies that repair.
 
 The reviewer is correct that this task had no `resolved_parent_status`,
 `resolved_parent_next`, or `resolved_parent_waiting_for` in canonical
@@ -208,9 +240,9 @@ to grant `write_scopes`) is named in `resolved_parent_next`'s message body
 instead, consistent with how this task's own parent blocker is already
 routed.
 
-This is now a real blocker on this helper task (recorded via `ai-status.sh
+This was a real blocker on this helper task (recorded via `ai-status.sh
 blocker`, waiting_for `Codex2`, same reasoning as above): this owner cannot
 hand off a mergeable candidate that is safe under
 `apply_unblock_parent_resolution`'s current default until Supervisor runs
-the command above. Handing off now, without that metadata, would reproduce
+the command above. Handing off then, without that metadata, would reproduce
 exactly the defect HR1 identified on the next merge.
