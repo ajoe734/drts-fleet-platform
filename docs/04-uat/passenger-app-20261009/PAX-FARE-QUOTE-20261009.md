@@ -2,8 +2,10 @@
 
 Owner: Codex2；Reviewer: Claude。2026-10-10。
 
-本輪為 **implementation checkpoint，尚非 candidate**。乘客 geo 授權仍待
-Supervisor 增補寫入範圍，不能交審、合併或宣稱 acceptance 完成。
+Supervisor 2026-10-10 已增補 guard 寫入範圍；F-GEO-01 已修復並完成本機
+四路由 × 三環境的正向／拒絕回歸。本次候選與同 SHA CI 的最終結果記在下方
+「2026-10-10 dispatch 修復」引用的 evidence manifest。review、merge、PG 與正式
+運價發布仍須沿既有 lifecycle 驗收；下列前輪 checkpoint 記錄保留供追溯。
 
 ## 依據與未定稿項目
 
@@ -59,7 +61,7 @@ Supervisor 增補寫入範圍，不能交審、合併或宣稱 acceptance 完成
   policy。正式 guard 將原 geo class decorator realms 與 policy union，保留原 realm。
   不加 geo health/admin/service-area 管理路由的乘客權限。
 
-## F-GEO-01：乘客 JWT 仍不能使用 geo（尚未修復）
+## F-GEO-01：乘客 JWT 仍不能使用 geo（前輪未修復；本輪結果見後節）
 
 觸發：實際 `GeoController` metadata + live passenger JWT，呼叫 GET geo/search 或
 POST geo/resolve/reverse/route。development／staging／production 均回 `JWT_INVALID`。
@@ -126,7 +128,7 @@ Snapshot INSERT 與 owned SELECT → `fare_quote_snapshots`（同一組 16 欄�
 不另造 PG schema、不以 mock SQL 通過冒充正式 PG constraint／時段查詢驗收。
 發布重疊版本會 `unavailable`，不任選最新一筆。兩表沒有公開 mutation API。
 
-## §0.7 逐項證據
+## §0.7 逐項證據（前輪 checkpoint，非本次候選結果）
 
 Code checkpoint：`932fbc39b2b8f13da87b903ae913b7e389a9bb1a`。
 前一 checkpoint：`403f95dbd4bceece77a58a240d4574a0c6facfa7`；皆非候選。
@@ -154,7 +156,7 @@ Machine-specific evidence root：
 **不是產品缺陷證據**，已改用正式 issueSessionToken，僅 geo-scope-blocked.json 的
 12 個 live passenger failures 用於 F-GEO-01。不得引用前者當 acceptance 結果。
 
-## 後續同一 task 修正單元
+## 前輪留下的同一 task 修正單元
 
 Supervisor 核對 parallel shared-file 衝突並增補 guard scope 後，由原 owner：
 
@@ -169,3 +171,56 @@ Supervisor 核對 parallel shared-file 衝突並增補 guard scope 後，由原 
 工作樹失效的 dependency symlink 只在指定 worktree unlink，改為
 `CI=true pnpm install --frozen-lockfile --ignore-scripts` 隔離依賴，exit 0。
 首個 recoverability anchor 因失效 hooks 使用 HUSKY=0；後續 anchors 均正常 commit。
+
+## 2026-10-10 dispatch 修復
+
+本次讀取原始碼、正式 SD 與前輪 artifact，依 Supervisor 已增補的 scope 接續
+`fb089e8d2240a03c3ce2df0f5c8c7cccbca1e5cb`。不是重送未修候選，也不是 reviewer
+代寫。原 finding 沒有被刪除；先以原來的測試重現，再修 guard，最後補拒絕矩陣。
+
+- 修正 `BootstrapAuthGuard.activateNonIap`：只有 legacy JWT 未通過，而且 resolved
+  policy 明確包含 passenger 時，才呼叫正式
+  `PassengerAccountService.authenticateAccessToken`。此函式驗獨立 issuer/audience、
+  claims、到期、active account 與 live refresh family。成功後執行原有
+  `assertRealmAllowed`／`assertScopesAllowed`，才設定 request identity。
+  這兩個檢查只擴充 TypeScript 參數為既有 `RequestIdentity` union；拒絕邏輯未改。
+  驗證失敗、缺少 authority 都回原 `JWT_INVALID`；DB availability failure 繼續向上傳遞。
+- legacy IAM 與 system workload fallback 未改。公開 fares 的 strict BFF metadata
+  邊界未改；health、錯誤 HTTP method、service-area definitions/evaluate/admin
+  都不授 passenger 權限。服務範圍預檢仍在正式 quote service 內部使用 evaluator。
+- geo 測試改用真正 `ServiceAreaController` metadata 驗拒絕；四個 geo 仍使用真正
+  `GeoController` metadata。增加 inner Bearer、缺失／任意／過期／無 live family token、
+  刪帳號、缺 authority、storage failure、scope 拒絕與 strict bootstrap-header 回歸。
+  added-scope 案例只在 test subclass 加 metadata，用來驗合併授權，不宣称現有 geo
+  有此 scope。JWT、guard、account/session 都呼叫正式函式；只 stub storage 與外部
+  Google metadata adapter，不呼叫真實 OAuth／Google routing。
+- 運價仍不 seed。生效日／版本 ID、距離與延滯跳數計收、加成後進位、跨夜間時段
+  規則仍待使用者／SD 定稿；本輪不以 synthetic fixture 發布運價。
+
+本機修正程式與擴充矩陣的已推送 checkpoint：
+`9c17304241097baee2fcc9eab418e9a27307d9c2`（guard 修復 anchor 為
+`088873673`）。其後只更新本 artifact；完整候選 SHA、遠端 branch、PR head 與
+hosted CI 由同一候選的 handoff／PR 及下列 manifest 記錄，避免文件自引用 SHA。
+
+本次 machine evidence root：
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/PAX-FARE-QUOTE-20261009/dispatch-20261010/`。
+最終 candidate／PR／CI manifest：該目錄的 `candidate-evidence.json`；CI logs／jobs
+與本機 exit codes 同樣保存在該目錄。Node v22.23.2、pnpm 10.33.0、Vitest 4.1.4、
+TypeScript 5.9.3。交接時 manifest 與 machine truth 的完整 SHA 必須一致。
+
+| Finding／驗收項                      | 原始碼依據與修改位置                                                                                            | 舊版重現 → 修正版結果                                                                                                  | 命令、退出碼、版本與證據                                                                                                                                                                                                   | 未驗项／限制                                                                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| F-GEO-01                             | BootstrapAuthGuard.activateNonIap；auth.policy 四路由；正式 account/session authority                           | fb089e8d2 的相同測試 12 fail、29 pass、1 skip → guard 修正版 41 pass、0 fail、1 skip；擴充矩陣 88 pass、0 fail、2 skip | `pnpm exec vitest run tests/unit/pax-fare-quote-20261009/geo-realm.test.ts --reporter=json --outputFile=...`：舊 exit 1、修正版 exit 0；geo-before.json／geo-minimal-after.json／geo-after.json；程式 checkpoint 9c1730424 | development 沒有 strict metadata/bootstrap 禁令，兩個 strict-only 案例明確 skip；不是執行失敗；hosted BFF/runtime 另由 CI／PAX-QA 核對    |
+| pax-fare_tariff_and_engine           | V0112、estimateFare、SD 費率頁；本輪不改運價                                                                    | 同前輪 31 個引擎 boundary cases 通過；未以未定稿規則 seed                                                              | 本次 root-regression.json 包含 engine/service/repository/geo 全 task suites；exit 0                                                                                                                                        | 正式運價仍待定稿；PG schema constraints 尚未實測；不能宣稱完整 acceptance                                                                 |
+| pax-fare_quote_and_public_fares      | PassengerFareController/Service/Repository；F-GEO-01；正式 ServiceAreaService                                   | fare service 30、repository 6 與 geo 88 cases pass；公開 BFF strict 拒絕、超出範圍及 no coverage 仍保留                | 本次 root-regression.json；exit 0；SQL 逐欄 owner 核對表仍見上節                                                                                                                                                           | reviewer 必須逐欄比對正式 migration／SQL；正式 PG repository 實測由 PAX-QA；真實 Google route 未呼叫                                      |
+| 其他 realm／account／共享 guard 邊界 | 六個既有 geo realm；step-up IAP、break-glass、scheduler、tenant selector、driver provisioning、proof、IAM/admin | 本次 root 回歸 481 pass、0 fail、2 skip；API 回歸 214 pass、0 fail、0 skip（合計 695 pass）                            | root-regression.json／api-regression.json，兩命令 exit 0；root 命令覆蓋 account/fare、strict guard 及全部不需 server 的直接 guard 測試；API 命令覆蓋 geo/area、sandbox、ops-driver、billing、mail、auth-bootstrap          | `apps/api/tests/unit/assistant.http.test.ts` 會 listen API，未在此 VM 執行；留給 hosted CI；本機 unit 不冒充 PG／browser／外部 acceptance |
+
+本次首次測試啟動因 worktree 的共用 dependency symlink 解析失敗，未執行測試，
+不列產品重現。只 unlink 指定 worktree 的 symlinks，使用
+`CI=true pnpm install --frozen-lockfile --ignore-scripts` 安裝隔離依賴，exit 0（install.log）。
+擴充矩陣第一次錯把 Nest error 的 status 寫成 statusCode，屬 assertion 錯誤，
+修正為正式 AUTH_REQUIRED 後重跑；不把该次失敗當產品缺陷證據。
+
+没有啟動本機產品 server、DB、Docker Compose、preview 或 browser/E2E。交接前需
+讀完本次 lint/prettier/typecheck 與 hosted CI；其 exit codes／同 SHA jobs 寫入上述 manifest。
+review、merge、named acceptance 由既有 lifecycle 收錄，不由 owner 呼叫 done。
