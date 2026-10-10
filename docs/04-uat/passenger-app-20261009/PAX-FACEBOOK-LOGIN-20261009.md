@@ -291,3 +291,42 @@ scope 協調仍待 Supervisor：本輪 task slice 的 write_scopes 未包含 acc
 service。依協作規範 §0.7，先由 Supervisor 核對並更新原 task scope，再由
 原 owner 實修；保留 in_progress 與此可重跑回歸，不將品質退修當成 quota
 問題，不 handoff 未修的候選、不要求使用者再次授權。
+
+## 2026-10-10 04:38 UTC：scope 續查與 dependency 隔離驗證
+
+本 dispatch 已讀完整原 review、正式 SD、OAuth callback／account issuance／
+deletion 及正式 repository 鎖定路徑。fetch 後 local／remote／PR #2503 head
+均為 `60b9ccf8721a6a2d24fd648ae80d15fed2dfa015`；PR OPEN，無 merge。
+未同步新 dev、未改產品碼／測試，以下檢查均在此 SHA 執行。
+
+本 worker 的 active-release CLI 沒有 scope mutation 命令；已透過正式
+`progress` 記錄請 Supervisor 核對平行 account/payment 修改，擴充原 task 的
+`apps/api/src/modules/passenger-app/account/passenger-account.service.ts`
+write scope。04:37 UTC 的 task slice 仍未包含該檔。依 §0.7，owner 不代替
+Supervisor 改 machine truth 或越界改 account service；修復單元與必要回歸
+保留前節定位，非新增使用者授權需求。
+
+為排除前輪 root typecheck 的共享依賴解析問題，只移除本 worktree 的 22 個
+node_modules symlinks，保留所有 target，再 offline frozen-lockfile install。
+canonical dependencies、source、DB、lockfile 均未修改。安裝 exit 0，證據
+`.local/facebook-session-scope-20261010/{dependency-links.txt,install.log}`。
+
+| Finding／驗收項                                  | 本輪原始碼／檢查依據                                                                                               | 結果                                                                                                   | 命令、版本與證據                                                                   | 尚待條件                                                                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 前輪 root typecheck failure                      | 同 SHA 原始碼，改用 worktree 隔離 dependencies                                                                     | **PASS exit 0**，共享 ApiClient private property 解析錯誤消除                                          | `pnpm typecheck:root`；`root-typecheck.log`，下方命令；Node 22.23.2、pnpm 10.33.0  | 未修 Facebook 競態，typecheck 不代替行為驗收                                                                     |
+| FB-SESSION-RACE-1                                | 相同正式 service/JWT regression，測試 hash 仍為 `5470e67974a2570648561fe1be3c7435b2e8ef12cd097645e197acb57bd652fd` | **FAIL exit 1**：Email／Google delete-first 2 fail，sole-FB／issue-first 2 pass；62 個非篩選案例未執行 | `race.{json,log}`，下方命令；Vitest 4.1.4                                          | 修正版尚未建立；account service scope 待 Supervisor 更新；PG concurrency 仍待 hosted 正式 schema/repository 驗證 |
+| pax-facebook_flow_verification_and_data_deletion | 原 findings 與原 acceptance                                                                                        | **仍未滿足**；本輪僅定位／工具驗證 checkpoint，不 handoff                                              | active-release `progress` 記錄 scope request；本 UAT 沿用原 review SHA／generation | 原子化修復、新 candidate 同 SHA CI/review/merge/acceptance、真實 Meta／HTTP parser／公開 Cloud Run 待驗          |
+
+```bash
+pnpm install --offline --frozen-lockfile --ignore-scripts
+# exit 0；14.6 秒，install.log
+pnpm typecheck:root
+# exit 0；.local/facebook-session-scope-20261010/root-typecheck.log
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009/facebook.test.ts -t 'in-flight Facebook callback|issuance commits before deletion' --reporter=default --reporter=json --outputFile.json=.local/facebook-session-scope-20261010/race.json
+# exit 1；2 pass／2 fail／62 filtered-out，race.log
+```
+
+以上本機 checks 均已結束並讀結果。已讀 checkpoint hosted run
+`38024487484` metadata：head 同 `60b9ccf8721a6a2d24fd648ae80d15fed2dfa015`，
+仍 in_progress，未宣稱 CI 通過；該 run 非新候選 acceptance，且本 worker 未啟動。
+無 VM runtime、PG、HTTP/browser server、Docker、deployment 或真實 Meta 呼叫。
