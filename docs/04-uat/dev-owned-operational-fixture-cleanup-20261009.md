@@ -54,7 +54,7 @@
   python3 -B /home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-26-fde3e74b9d58/paired-candidate-tests.py
   ```
   - 環境: Python 3.12.3
-  - 預期歷史腳本退出碼: `1` (BEFORE any test)
+  - 預期歷史配對腳本總退出碼：`1`（六組來源版本的測試全部完成後，因舊版 assertion FAIL 而退出；不是測試開始前失敗）。533d 為59PASS/4FAIL/0ERROR；fde 為63PASS/0FAIL/0ERROR。
 - 本次不再提供假想的 self SHA 或執行新源碼來驗證舊版本，而是直接參照不可變的 R26 review 證據目錄 `/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-26-fde3e74b9d58/` 下的：
   - `paired-candidate-tests-summary.json`
   - `paired-candidate-tests.log`
