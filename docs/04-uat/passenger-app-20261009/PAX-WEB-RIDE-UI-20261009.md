@@ -73,10 +73,10 @@ Candidate HEAD subject "fix(passenger): ..." and empty body lacks required Task-
 
 | Finding / 驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
 | --- | --- | --- | --- | --- |
-| R1 P1 事件 freshness | | | | |
-| R3 P1 評價 | | | | |
-| R5 P1 PDF / E04 | | | | |
-| R6 P1 終態 UI | | | | |
-| R8 P2 主題設定 | | | | |
-| R9 P1 測試覆蓋 | | | | |
-| R10 P1 | | | | |
+| R1 P1 事件 freshness | `lib/ride/passenger-live.ts`, `components/ride/passenger-ride-page.tsx` | 舊版時間比對錯誤或覆蓋；新版嚴格比較 `lastVersion` 且根據 `eta.calculatedAt` 判斷 | `pnpm vitest run tests/unit/pax-web-ride-ui-20261009/`, Exit 0 | 無真實瀏覽器與後端重連測試 |
+| R3 P1 評價 | `components/ride/RatingCard.tsx`, `lib/ride/translations.ts` | 舊版 3 星會送出聯絡；新版修正為 1/2 星顯示聯絡選項，並修正「很差」翻譯 | `pnpm vitest run tests/unit/pax-web-ride-ui-20261009/`, Exit 0 | API 欄位如 contactRequested 未被 token service 儲存 |
+| R5 P1 PDF / E04 | `lib/ride/passenger-live.ts` | 舊版透過字串替換自造 pdfUrl；新版直接依賴後端真實回傳網址 | `pnpm vitest run tests/unit/pax-web-ride-ui-20261009/`, Exit 0 | 待 `PAX-RECEIPT-COMPLAINT` 補足欄位 |
+| R6 P1 終態 UI | `lib/ride/passenger-live.ts` | 舊版取消狀態轉至無對應的 A04；新版回傳 `"CANCELLED_TODO"` 不自造 UI | `pnpm vitest run tests/unit/pax-web-ride-ui-20261009/`, Exit 0 | 需要 Supervisor 提供正式終態設計 |
+| R8 P2 主題設定 | `lib/ride/passenger-presentation.ts` | 舊版用預設 Canvas 顏色；新版採用正確的 P5 canonical (`#16212C`, `#5A6A7B`, `#E3E8EE`) | 檢視原始碼 | 無自動化視覺快照比對 |
+| R9 P1 測試覆蓋 | `tests/unit/pax-web-ride-ui-20261009/` 相關測試 | 舊版缺少某些情況；新版所有 21 個單元測試全數通過 | `pnpm vitest run tests/unit/pax-web-ride-ui-20261009/`, Exit 0 |  |
+| R10 P1 | commit SHA `7a92e5e05ca9` | 舊版缺 trailers 且未推；新版加入 Task-ID/LLM-Agent/Reviewer | `git log -1`, HEAD 包含正確 git trailers | 待後續 push 與手動驗證 CI |
