@@ -10,20 +10,20 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 
 ## Evidence Source Identity
 - **Task ID**: SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010
-- **Candidate Generation**: `7c4b1e54d4bc4ae68d4dae56290d9edb`
-- **Candidate SHA**: `PENDING`
+- **Candidate Generation**: `5179dc4b159a4b5fa3c90a9f7067b751`
+- **Candidate SHA**: `340797001822872611083257bd4583ef0c24bad4`
 - **Reviewer**: Codex
-- **Workspace**: Isolated review worktree
+- **Workspace**: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-dev-owned-operational-fixture-assessment-20261010`
 
 ## Matrix of repairs and unverified claims
 
 | Finding | Historical / Current Evidence | Remaining Condition / Actual limit |
 |---------|-----------------------|--------|
 | **F1/F3/F4/F5 core** | Genuine archive/PDF/identity positives and existing denials PASS BOTH. F4/F5 optional fields are now strict requirements. | Actual current owned resources/PG not measured |
-| **F2 actual authority / inventory** | Authority now verifies the latest approval is strictly `approved` (preventing superseded claims), validates active workflow path, and explicitly rejects genuine shared exclusion. | Full environment and live authority unmeasured |
-| **F3 upstream capture & bounds** | Collector validates `metadata.name`, service `Ready` condition, traffic routing to `latestReadyRevisionName`, revision labels matching service, and revision `Ready` condition. IAM policy exactly singleton bindings enforced (e.g. `roles/run.invoker` for `allUsers` on `drts-dev-api`) and condition drops explicitly rejected. | Actual live cloud metadata acquisition unmeasured; no live GCS reads |
-| **F6/F7 report/UAT** | UAT updated to truthfully reflect the generation and accurate reservation/API singleton requirements. Partial claims and stale identity removed. | True live matrix unavailable locally. |
-| **F8 scope/publication** | Anchor commit strictly applies the prefix. Original 4 old commits exist; trailing SHA to be addressed in exact review boundaries. | Supervisor must reconcile preserved-history/prospective publication disposition. |
+| **F2 actual authority / inventory** | Authority now verifies the latest approval is strictly `approved` (preventing superseded claims), validates active workflow path. | Full environment and live authority unmeasured |
+| **F3 upstream capture & bounds** | Collector validates `metadata.name`, service `Ready` condition, traffic routing 100% to `latestReadyRevisionName`, revision matching `latestCreatedRevisionName`, labels matching service, and revision `Ready` condition. IAM policy explicitly rejects conditional bindings. | Actual live cloud metadata acquisition unmeasured; no live GCS reads |
+| **F6/F7 report/UAT** | UAT updated to truthfully reflect the generation and accurate reservation/API singleton requirements. Added 4 regression tests for F3 bounds: not_ready, traffic_not_100, latest_created_mismatch, revision_not_ready. Total 17 unit tests PASS. | True live matrix unavailable locally. |
+| **F8 scope/publication** | 4 original commits lack task-prefix; the blocker has been reported. New anchor commits will be added with proper prefix, but history rewrite is forbidden. | Supervisor must reconcile preserved-history/prospective publication disposition. |
 
 ## Execution Bounds and Reporting
 
@@ -37,7 +37,7 @@ The workflow restricts secrets, body, and non-fixture rows. It produces a bounde
 ## Acceptance Criteria Verified
 
 1. **`owned_fixture_assessment_actual_producer_and_boundary_regressions`**:
-   - **NOT MET**. Source authority/inventory/typed-report gates are implemented and passed locally (13 unit tests PASS), but live environment was not executed locally. Formal PG limits disclosed.
+   - **NOT MET**. Source authority/inventory/typed-report gates are implemented and passed locally (17 unit tests PASS), but live environment was not executed locally. Formal PG limits disclosed.
 
 2. **`owned_fixture_assessment_exact_sha_review_ci_protected_merge`**:
    - **NOT MET**. Independent approval and strict CI validation logic is implemented in script, but live protected merge is absent until CI completes.

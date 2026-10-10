@@ -1125,10 +1125,12 @@ def main():
 
                 ready_revision = val.get("status", {}).get("latestReadyRevisionName")
                 require(ready_revision is not None, f"No ready revision for {s_name}")
+                require(val.get("status", {}).get("latestCreatedRevisionName") == ready_revision, f"latestCreatedRevisionName differs from ready_revision for {s_name}")
                 
                 traffic = val.get("status", {}).get("traffic", [])
                 traffic_rev = next((t for t in traffic if t.get("revisionName") == ready_revision), None)
                 require(traffic_rev is not None, f"Traffic not routed to ready revision for {s_name}")
+                require(traffic_rev.get("percent") == 100, f"Traffic not 100% routed to ready revision for {s_name}")
 
                 res_rev = run_bounded(["gcloud", "run", "revisions", "describe", ready_revision, "--project", PROJECT, "--region", REGION, "--format=json"])
                 require(res_rev.returncode == 0, f"Failed to describe revision {ready_revision}")
@@ -1153,9 +1155,9 @@ def main():
                 service_meta = {
                     "ready_revision": ready_revision,
                     "images": images,
-                    "identity": val.get("spec", {}).get("template", {}).get("spec", {}).get("serviceAccountName")
+                    "identity": rev_val.get("spec", {}).get("serviceAccountName")
                 }
-                env = {e["name"]: e.get("value") for e in val.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0].get("env", [])}
+                env = {e["name"]: e.get("value") for e in rev_val.get("spec", {}).get("containers", [{}])[0].get("env", [])}
 
                 iam_res = run_bounded(["gcloud", "run", "services", "get-iam-policy", s_name, "--project", PROJECT, "--region", REGION, "--format=json"])
                 require(iam_res.returncode == 0, f"Failed to get IAM policy for {s_name}")

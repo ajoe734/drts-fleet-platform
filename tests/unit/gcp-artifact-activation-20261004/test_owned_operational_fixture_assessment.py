@@ -445,21 +445,21 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             if "services describe" in cmd_str:
                 if "drts-dev-api" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-api"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "bkt"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "bkt2"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}}}, "status": {"latestReadyRevisionName": "drts-dev-api-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-api-rev1"}]}}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-api"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "drts-dev-devcc-20260825-document-artifacts"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "drts-dev-devcc-20260825-remittance-proofs"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}}}, "status": {"latestCreatedRevisionName": "drts-dev-api-rev1", "latestReadyRevisionName": "drts-dev-api-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 100}]}}))
                 elif "drts-dev-scanner" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-scanner"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "scanner", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}]}}}, "status": {"latestReadyRevisionName": "drts-dev-scanner-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-scanner-rev1"}]}}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-scanner"}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "scanner", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}]}}}, "status": {"latestCreatedRevisionName": "drts-dev-scanner-rev1", "latestReadyRevisionName": "drts-dev-scanner-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-scanner-rev1", "percent": 100}]}}))
                 else:
                     s_name = cmd[4]
-                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": s_name}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "env": []}]}}}, "status": {"latestReadyRevisionName": f"{s_name}-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": f"{s_name}-rev1"}]}}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": s_name}, "spec": {"template": {"spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "env": []}]}}}, "status": {"latestCreatedRevisionName": f"{s_name}-rev1", "latestReadyRevisionName": f"{s_name}-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": f"{s_name}-rev1", "percent": 100}]}}))
             if "revisions describe" in cmd_str:
                 if "drts-dev-api-rev1" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-api-rev1", "labels": {"serving.knative.dev/service": "drts-dev-api"}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "image": "img", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "bkt"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "bkt2"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}, "status": {"imageDigest": "sha256:123", "conditions": [{"type": "Ready", "status": "True"}]}}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-api-rev1", "labels": {"serving.knative.dev/service": "drts-dev-api"}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "api", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "DRTS_CANDIDATE_SHA", "value": "xyz"}, {"name": "REMITTANCE_PROOF_SCANNER_URL", "value": "https://drts-dev-scanner-xyz.a.run.app"}, {"name": "DOCUMENT_ARTIFACT_GCS_BUCKET", "value": "drts-dev-devcc-20260825-document-artifacts"}, {"name": "DOCUMENT_ARTIFACT_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_STORAGE_PROVIDER", "value": "gcs"}, {"name": "REMITTANCE_PROOF_GCS_BUCKET", "value": "drts-dev-devcc-20260825-remittance-proofs"}, {"name": "REMITTANCE_PROOF_SCANNER_PROVIDER", "value": "cloud-run-clamd"}, {"name": "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS", "value": "60000"}]}]}, "status": {"imageDigest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "conditions": [{"type": "Ready", "status": "True"}]}}))
                 elif "drts-dev-scanner-rev1" in cmd_str:
-                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-scanner-rev1", "labels": {"serving.knative.dev/service": "drts-dev-scanner"}}, "spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "scanner", "image": "img", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}]}, "status": {"imageDigest": "sha256:456", "conditions": [{"type": "Ready", "status": "True"}]}}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "drts-dev-scanner-rev1", "labels": {"serving.knative.dev/service": "drts-dev-scanner"}}, "spec": {"serviceAccountName": "drts-dev-artifact-scanner@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "scanner", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": [{"name": "CLAMD_HOST", "value": "127.0.0.1"}, {"name": "CLAMD_PORT", "value": "3310"}, {"name": "CLAMAV_READY_MARKER", "value": "/var/run/clamav-ready/ready"}]}]}, "status": {"imageDigest": "sha256:4564564564564564564564564564564564564564564564564564564564564564", "conditions": [{"type": "Ready", "status": "True"}]}}))
                 else:
                     rev_name = cmd[4]
                     s_name = rev_name.replace("-rev1", "")
-                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": s_name}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "image": "img", "env": []}]}, "status": {"imageDigest": "sha256:789", "conditions": [{"type": "Ready", "status": "True"}]}}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": rev_name, "labels": {"serving.knative.dev/service": s_name}}, "spec": {"serviceAccountName": "drts-dev-runtime@drts-dev-devcc-20260825.iam.gserviceaccount.com", "containers": [{"name": "web", "image": "us-central1-docker.pkg.dev/drts-dev-devcc-20260825/drts/api@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", "env": []}]}, "status": {"imageDigest": "sha256:7897897897897897897897897897897897897897897897897897897897897897", "conditions": [{"type": "Ready", "status": "True"}]}}))
             if "get-iam-policy" in cmd_str:
                 s_name = cmd[4]
                 if s_name == "drts-dev-api":
@@ -484,7 +484,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             with open(meta_file, "r") as f:
                 data = json.load(f)
             self.assertEqual(len(data["services"]), 9)
-            self.assertEqual(data["services"]["drts-dev-api"]["providers"]["DOCUMENT_ARTIFACT_GCS_BUCKET"], "bkt")
+            self.assertEqual(data["services"]["drts-dev-api"]["providers"]["DOCUMENT_ARTIFACT_GCS_BUCKET"], "drts-dev-devcc-20260825-document-artifacts")
         finally:
             os.remove(meta_file)
 
@@ -521,8 +521,123 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             out = mock_stdout.getvalue()
             self.assertIn("Overlapping restricted workflows detected", out)
 
+
+    @patch('operations.verification.assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_not_ready(self, mock_run):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({
+                    "metadata": {"name": "drts-dev-api"},
+                    "status": {
+                        "latestCreatedRevisionName": "drts-dev-api-rev1",
+                        "latestReadyRevisionName": "drts-dev-api-rev1",
+                        "conditions": [{"type": "Ready", "status": "False"}],
+                        "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 100}]
+                    }
+                }))
+            return MagicMock(returncode=0, stdout="{}")
+        mock_run.side_effect = side_effect
+
+        with self.assertRaises(SystemExit) as cm:
+            assess_owned_operational_fixtures.acquire_cloud_metadata("dummy-sha")
+        self.assertNotEqual(cm.exception.code, 0)
+
+    @patch('operations.verification.assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_traffic_not_100(self, mock_run):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({
+                    "metadata": {"name": "drts-dev-api"},
+                    "status": {
+                        "latestCreatedRevisionName": "drts-dev-api-rev1",
+                        "latestReadyRevisionName": "drts-dev-api-rev1",
+                        "conditions": [{"type": "Ready", "status": "True"}],
+                        "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 50}]
+                    }
+                }))
+            return MagicMock(returncode=0, stdout="{}")
+        mock_run.side_effect = side_effect
+
+        with self.assertRaises(SystemExit) as cm:
+            assess_owned_operational_fixtures.acquire_cloud_metadata("dummy-sha")
+        self.assertNotEqual(cm.exception.code, 0)
+
+    @patch('operations.verification.assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_latest_created_mismatch(self, mock_run):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({
+                    "metadata": {"name": "drts-dev-api"},
+                    "status": {
+                        "latestCreatedRevisionName": "drts-dev-api-rev2",
+                        "latestReadyRevisionName": "drts-dev-api-rev1",
+                        "conditions": [{"type": "Ready", "status": "True"}],
+                        "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 100}]
+                    }
+                }))
+            return MagicMock(returncode=0, stdout="{}")
+        mock_run.side_effect = side_effect
+
+        with self.assertRaises(SystemExit) as cm:
+            assess_owned_operational_fixtures.acquire_cloud_metadata("dummy-sha")
+        self.assertNotEqual(cm.exception.code, 0)
+
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_not_ready(self, mock_run_bounded):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout='{"metadata": {"name": "drts-dev-api"}, "status": {"latestCreatedRevisionName": "drts-dev-api-rev1", "latestReadyRevisionName": "drts-dev-api-rev1", "conditions": [{"type": "Ready", "status": "False"}], "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 100}]}}')
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = side_effect
+        with patch("sys.argv", ["script.py", "--acquire-cloud-metadata-to", "/tmp/out.json", "--current-runtime-sha", "xyz"]):
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertNotEqual(cm.exception.code, 0)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_traffic_not_100(self, mock_run_bounded):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout='{"metadata": {"name": "drts-dev-api"}, "status": {"latestCreatedRevisionName": "drts-dev-api-rev1", "latestReadyRevisionName": "drts-dev-api-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 50}]}}')
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = side_effect
+        with patch("sys.argv", ["script.py", "--acquire-cloud-metadata-to", "/tmp/out.json", "--current-runtime-sha", "xyz"]):
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertNotEqual(cm.exception.code, 0)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_latest_created_mismatch(self, mock_run_bounded):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout='{"metadata": {"name": "drts-dev-api"}, "status": {"latestCreatedRevisionName": "drts-dev-api-rev2", "latestReadyRevisionName": "drts-dev-api-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 100}]}}')
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = side_effect
+        with patch("sys.argv", ["script.py", "--acquire-cloud-metadata-to", "/tmp/out.json", "--current-runtime-sha", "xyz"]):
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertNotEqual(cm.exception.code, 0)
+
+    @patch('assess_owned_operational_fixtures.run_bounded')
+    def test_acquire_cloud_metadata_failure_revision_not_ready(self, mock_run_bounded):
+        def side_effect(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "services describe" in cmd_str:
+                return MagicMock(returncode=0, stdout='{"metadata": {"name": "drts-dev-api"}, "status": {"latestCreatedRevisionName": "drts-dev-api-rev1", "latestReadyRevisionName": "drts-dev-api-rev1", "conditions": [{"type": "Ready", "status": "True"}], "traffic": [{"revisionName": "drts-dev-api-rev1", "percent": 100}]}}')
+            if "revisions describe" in cmd_str:
+                return MagicMock(returncode=0, stdout='{"metadata": {"name": "drts-dev-api-rev1", "labels": {"serving.knative.dev/service": "drts-dev-api"}}, "spec": {"serviceAccountName": "drts-dev-runtime@test.iam.gserviceaccount.com", "containers": [{"name": "api", "image": "img", "env": []}]}, "status": {"imageDigest": "sha256:123", "conditions": [{"type": "Ready", "status": "False"}]}}')
+            return MagicMock(returncode=1, stdout="", stderr="Unknown command")
+        mock_run_bounded.side_effect = side_effect
+        with patch("sys.argv", ["script.py", "--acquire-cloud-metadata-to", "/tmp/out.json", "--current-runtime-sha", "xyz"]):
+            with self.assertRaises(SystemExit) as cm:
+                assess.main()
+            self.assertNotEqual(cm.exception.code, 0)
 if __name__ == '__main__':
     unittest.main()
-
-
-    
