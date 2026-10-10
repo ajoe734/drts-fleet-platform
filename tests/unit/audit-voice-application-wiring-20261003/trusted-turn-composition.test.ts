@@ -28,6 +28,34 @@ import type { WebSocketServerChannel } from "../../../apps/voice-media-worker/sr
  * run unmodified.
  */
 
+/**
+ * TEST-VOICE-R4-BOUNDEDNESS-FLAKY-20261010 owner evidence (2026-10-10).
+ * Baseline: 5b11155d33fd4d6c345e01cb9730012d3b3d08d1.
+ * Verified code anchor: 8a634ff192ce6a53a6161cef105ec1d332246aa3.
+ * Candidate identity is recorded by ai-status handoff and the PR head; the
+ * closeout only adds this evidence comment to the verified code anchor.
+ * Machine-specific logs/scripts: .local/test-voice-r4-boundedness-flaky-20261010/.
+ * Runtime: Node 22.23.2, pnpm 10.33.0, Vitest 4.1.4. No local services/Docker.
+ *
+ * | Finding / acceptance | Source / repair | Before -> after | Command / exit / evidence | Pending / limits |
+ * | --- | --- | --- | --- | --- |
+ * | R4 fixed flush races playback | waitForAudio, hung-write test | Same 60ms TTS-double delay: old sentBinary assertion fails -> fixed passes | make-probes.py; vitest --config probe.config.ts before/after.probe.test.ts -t 'R4-control boundedness'; exits 1/0; probe-before/after.log | Probe filters 18 unrelated tests; all 19 run in stability checks |
+ * | Conditions bounded, original assertions retained | waitOptions (1000ms), all waits in this file | 65/65 original assertion expressions preserved | node verify-assertions.cjs; exit 0; assertions.log | No product code, threshold changes, test retries or skipped task tests |
+ * | Other fixed flush sites | observeQueuedWork; capability/GET/error predicates | Restoration, no-output, retained-failure and R6 cases use real work boundaries | vitest run tests/unit/audit-voice-application-wiring-20261003 --sequence.shuffle --sequence.seed=20261010; exit 0; regression.log: 19 files, 269 tests passed | Queue observer only reads private promises; it does not mock logic; detached positive audio awaited separately |
+ * | Repeat stability | Entire unchanged 19-test file | 30 shuffled runs, seeds 1..30: 570/570 passed | bash repeat.sh; exit 0; repeat-summary.log and repeat-1..30.log | No runner retries |
+ * | Static verification | Test file / root TS graph | ESLint pass; raw root tsc fails from shared cross-worktree ApiClient identity; isolated root tsc passes | eslint --max-warnings=0; exit 0; eslint.log. tsc -p tsconfig.json: exit 2, typecheck.log. tsc -p typecheck.config.json: exit 0, typecheck-isolated.log | Local config adds only current-worktree @drts/api-client path; hosted clean-install typecheck still required |
+ * | Same-candidate CI and independent review | Final pushed SHA / Codex2 | Pending at owner closeout | PR and ai-status candidate lifecycle | Owner must not close task; reviewer/CI/merge evidence must match candidate |
+ *
+ * Probe copies the original test at each listed SHA, changes only its existing
+ * TTS double to await 60ms before returning audio, and adjusts imports for its
+ * .local location. Coordinator, composer, engine and API client run unchanged.
+ * The real 150ms write timeout and 150ms retained retry both finish before the
+ * next final: waiting only for the first error would race that final's deadline.
+ * Gap/ambiguous-final cases await the failed control delivery while their turn
+ * intentionally remains unresolved; cancellation/recovery is observed next.
+ * Prettier applied the repository's existing whole-file style at anchor commit.
+ */
+
 function makeChannel(): {
   channel: WebSocketServerChannel;
   sentText: string[];
