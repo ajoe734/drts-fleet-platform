@@ -404,17 +404,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             if "actions/runs?status=" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
-            
-        original_require = assess.require
-        def custom_require(cond, msg):
-            if msg == "Blocked disposition: genuine shared exclusion is unsupported":
-                return
-            original_require(cond, msg)
-            
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
             with patch.object(assess, "run_bounded", side_effect=mock_run):
-                with patch.object(assess, "require", side_effect=custom_require):
-                    assess.main()
+                assess.main()
                 mock_exit.assert_called_with(1) # Exits 1 due to mock_db
                 output = mock_print.call_args[0][0]
                 parsed = json.loads(output)
