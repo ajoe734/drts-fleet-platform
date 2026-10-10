@@ -354,6 +354,20 @@ async function forward(
     }
 
     // Normal forward path
+    
+    if (fullPath === "auth/oauth/callback" && method === "POST") {
+      if (initialBodyData) {
+        try {
+          const parsed = JSON.parse(initialBodyData);
+          const txn = request.cookies.get("pax_oauth_txn")?.value;
+          if (txn) {
+            parsed.transaction_id = txn;
+            initialBodyData = JSON.stringify(parsed);
+          }
+        } catch(e) {}
+      }
+    }
+
     let init = await buildInit(token, refreshToken);
     let upstream = await fetch(targetUrl.toString(), init);
 
@@ -400,6 +414,18 @@ async function forward(
       fullPath === "auth/mfa/verify" ||
       fullPath.startsWith("auth/oauth");
 
+    
+    let oauthTxn = null;
+    if (fullPath === "auth/oauth/start" && method === "POST" && upstream.ok) {
+       try {
+         const text = await upstream.clone().text();
+         const parsed = JSON.parse(text);
+         if (parsed.data?.transaction_id || parsed.transaction_id || parsed.data?.transactionId || parsed.transactionId) {
+            oauthTxn = parsed.data?.transaction_id || parsed.transaction_id || parsed.data?.transactionId || parsed.transactionId;
+         }
+       } catch(e) {}
+    }
+
     let loginData = null;
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
       const contentType = upstream.headers.get("content-type") || "";
@@ -443,6 +469,11 @@ async function forward(
       sameSite: "lax" as const,
       path: "/",
     };
+
+    
+    if (oauthTxn) {
+      nextResponse.cookies.set("pax_oauth_txn", oauthTxn, { ...opts, maxAge: 600 });
+    }
 
     if (didClearTokens) {
       deleteCookies(nextResponse);
@@ -496,3 +527,11 @@ export async function DELETE(
 ) {
   return forward(request, context);
 }
+
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+

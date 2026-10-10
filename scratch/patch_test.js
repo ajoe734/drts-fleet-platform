@@ -1,4 +1,6 @@
-// @vitest-environment jsdom
+const fs = require('fs');
+const p = 'tests/unit/pax-web-auth-ui-20261009/auth-ui.test.tsx';
+const newCode = `// @vitest-environment jsdom
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import React from "react";
@@ -170,3 +172,7 @@ describe("Auth UI - Extended", () => {
     });
   });
 });
+`;
+
+fs.writeFileSync(p, newCode);
+console.log("Replaced test file.");

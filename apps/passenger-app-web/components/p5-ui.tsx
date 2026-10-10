@@ -767,12 +767,14 @@ export function P5Btn({
   icon,
   children,
   danger,
+  disabled,
   onClick,
 }: {
   kind?: "primary" | "secondary" | "ghost";
   icon?: string;
   children: ReactNode;
   danger?: boolean;
+  disabled?: boolean;
   onClick?: (() => void) | undefined;
 }) {
   const s: CSSProperties = {
@@ -788,6 +790,8 @@ export function P5Btn({
     cursor: "pointer",
     fontFamily: "inherit",
     border: "1px solid transparent",
+    opacity: disabled ? 0.6 : 1,
+    pointerEvents: disabled ? "none" : "auto",
   };
   const v =
     kind === "primary"
@@ -809,7 +813,7 @@ export function P5Btn({
             borderColor: danger ? P5.dangerBd : P5.line,
           };
   return (
-    <button style={v} onClick={onClick}>
+    <button style={v} onClick={onClick} disabled={disabled}>
       {icon && <P5Icon name={icon} size={15} />}
       {children}
     </button>

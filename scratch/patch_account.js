@@ -1,4 +1,9 @@
-"use client";
+const fs = require('fs');
+const p = 'apps/passenger-app-web/app/account/page.tsx';
+let content = fs.readFileSync(p, 'utf8');
+
+// I will just rewrite the whole file for simplicity and to ensure no missing parts
+const newCode = `"use client";
 
 import { useEffect, useState } from "react";
 import { PassengerClient } from "@drts/passenger-client";
@@ -109,7 +114,7 @@ export default function AccountPage() {
     try {
       const res = await client.oauthStart({
         provider,
-        redirectUri: window.location.origin + `/auth/callback/${provider}`,
+        redirectUri: window.location.origin + \`/auth/callback/\${provider}\`,
         purpose: "link",
       });
       window.location.href = res.authUrl;
@@ -170,7 +175,7 @@ export default function AccountPage() {
     width: "100%",
     padding: "12px 14px",
     borderRadius: 12,
-    border: `1px solid ${P5.line}`,
+    border: \`1px solid \${P5.line}\`,
     fontSize: 15,
     outline: "none",
     boxSizing: "border-box" as const,
@@ -203,7 +208,7 @@ export default function AccountPage() {
               {otpLoading ? "驗證中..." : "驗證"}
             </P5Btn>
             <P5Btn kind="ghost" disabled={otpLoading || countdown > 0} onClick={() => handleRequestOtp(otpProvider!, otpPurpose!, otpTarget)}>
-              {countdown > 0 ? `重送驗證碼 (${countdown}s)` : "重新發送"}
+              {countdown > 0 ? \`重送驗證碼 (\${countdown}s)\` : "重新發送"}
             </P5Btn>
             <P5Btn
               kind="ghost"
@@ -300,7 +305,7 @@ export default function AccountPage() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                borderBottom: `1px solid ${P5.lineSoft}`,
+                borderBottom: \`1px solid \${P5.lineSoft}\`,
                 paddingBottom: 8,
               }}
             >
@@ -367,7 +372,7 @@ export default function AccountPage() {
                 background: P5.warnBg,
                 padding: 14,
                 borderRadius: 12,
-                border: `1px solid ${P5.warnBd}`,
+                border: \`1px solid \${P5.warnBd}\`,
               }}
             >
               <div style={{ color: P5.warn, fontWeight: 600, marginBottom: 8 }}>
@@ -399,3 +404,7 @@ export default function AccountPage() {
     </div>
   );
 }
+`;
+
+fs.writeFileSync(p, newCode);
+console.log("Replaced AccountPage.");
