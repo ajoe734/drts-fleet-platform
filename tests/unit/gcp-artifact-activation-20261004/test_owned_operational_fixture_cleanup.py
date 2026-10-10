@@ -732,7 +732,9 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
 class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
     def setUp(self):
         self.plan_dry = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="dry-run")
+        self.plan_dry["authority_established"] = cleanup._VALID_PROOF
         self.plan_apply = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="apply")
+        self.plan_apply["authority_established"] = cleanup._VALID_PROOF
 
     def test_dry_run_never_executes_delete(self):
         # A typed positive returns a valid integer count > 0 (e.g., 4 or 8)
@@ -742,7 +744,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             return {"status": "ok", "rows_affected": 0, "count": 8 if "supply_documents" in sql else 4}
             
         mock_db = MagicMock(side_effect=typed_positive_db)
-        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db, simulation_mode=True)
         self.assertEqual(res["status"], "blocked")
         # Verify mock_db was only called with SELECT statements, NEVER DELETE
         for call_args in mock_db.call_args_list:
@@ -756,7 +758,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             return {"status": "ok", "rows_affected": 0} # no count
             
         mock_db = MagicMock(side_effect=missing_count_db)
-        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db, simulation_mode=True)
         self.assertEqual(res["status"], "blocked")
         self.assertIn("missing or invalid nonnegative integer", res["concrete_blocker"])
 
@@ -767,7 +769,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             return {"status": "ok", "rows_affected": 0, "count": -1}
             
         mock_db = MagicMock(side_effect=negative_count_db)
-        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db, simulation_mode=True)
         self.assertEqual(res["status"], "blocked")
         self.assertIn("missing or invalid nonnegative integer", res["concrete_blocker"])
 
@@ -776,7 +778,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             return {"status": "ok", "rows_affected": 0, "count": 0}
             
         mock_db = MagicMock(side_effect=zero_count_db)
-        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
+        res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db, simulation_mode=True)
         self.assertEqual(res["status"], "blocked")
         self.assertIn("Zero count returned", res["concrete_blocker"])
 
@@ -862,9 +864,10 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
 
     def test_db_dry_run_inspection_error_blocks(self):
         plan = cleanup.build_cleanup_plan(create_authentic_inventory(), mode="dry-run")
+        plan["authority_established"] = cleanup._VALID_PROOF
         def err_db(sql, params):
             return {"status": "error", "error": "permission denied"}
-        res = cleanup.execute_db_cleanup(plan, db_runner=err_db)
+        res = cleanup.execute_db_cleanup(plan, db_runner=err_db, simulation_mode=True)
         self.assertEqual(res["status"], "error")
         self.assertIn("permission denied", res["error"])
 
@@ -1025,18 +1028,24 @@ class TestR18Regressions(unittest.TestCase):
     def test_legitimate_synthetic_route(self):
         inv_valid = copy.deepcopy(self.inv)
         inv_valid["authority_established"] = cleanup._VALID_PROOF
+        # Inject authority into the plan just like run_cleanup_pipeline does for preflight
         plan = cleanup.build_cleanup_plan(inv_valid, mode="dry-run")
+        plan["authority_established"] = cleanup._VALID_PROOF
+        for target in plan.get("gcs_targets", []):
+            target["authority_established"] = cleanup._VALID_PROOF
+            
         def mock_gcs(action, bucket, key, generation=None):
             if action == "describe":
-                return {"status": "ok", "metadata": {"bucket": cleanup.BUCKET, "name": key, "generation": "123", "metageneration": "1", "size": 327, "contentType": cleanup.EXPECTED_MIME, "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
-            elif action == "read":
-                return {"status": "ok", "body": b"A" * 327}
+                return {"status": "ok", "synthetic": True, "metadata": {"bucket": cleanup.BUCKET, "name": key, "generation": "123", "metageneration": "1", "size": 327, "contentType": cleanup.EXPECTED_MIME, "sha256": cleanup.EXPECTED_SHA256, "timeCreated": "2026-10-09T09:03:18.572Z"}}
+            elif action == "read_body":
+                return {"status": "ok", "synthetic": True, "size": 327, "sha256": cleanup.EXPECTED_SHA256}
             return {"status": "error"}
         
         mock_gcs_mock = MagicMock(side_effect=mock_gcs)
-        try:
-            cleanup.execute_gcs_cleanup(plan, gcs_runner=mock_gcs_mock, simulation_mode=True)
-        except Exception:
-            pass # We just want to see it was called
+        result = cleanup.execute_gcs_cleanup(plan, gcs_runner=mock_gcs_mock, simulation_mode=True)
         
         self.assertTrue(mock_gcs_mock.called)
+        self.assertEqual(result["status"], "success")
+        for rec in result["receipts"]:
+            self.assertEqual(rec["status"], "planned")
+            self.assertTrue(rec.get("synthetic"))

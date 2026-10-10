@@ -744,7 +744,6 @@ def build_cleanup_plan(
     # Derive physical GCS keys using the immutable GcsDocumentArtifactStoreAdapter contract
     # Physical: document-artifacts/fleet-upload-content/<encodeURIComponent(logicalKey)>
     run_bounds = inventory_data.get("run_bounds")
-    auth_valid = inventory_data.get("authority_established") is _VALID_PROOF
     gcs_targets = []
     for doc in validated_docs:
         logical_key = doc["object_key"]
@@ -759,7 +758,7 @@ def build_cleanup_plan(
             "expected_content_type": doc["content_type"],
             "documentId": doc["documentId"],
             "confirmSubmissionId": doc["confirmSubmissionId"],
-            "authority_established": _VALID_PROOF if auth_valid else False,
+            "authority_established": False,
         }
         if run_bounds:
             target_dict["run_bounds"] = run_bounds
@@ -919,7 +918,7 @@ def build_cleanup_plan(
         "db_targets": db_targets,
         "preservation_plan": preservation_plan,
         "db_blocker": DB_CONCRETE_BLOCKER,
-        "authority_established": _VALID_PROOF if auth_valid else False,
+        "authority_established": False,
     }
 
 
@@ -1425,9 +1424,29 @@ def preflight_db_cleanup(
 def execute_db_cleanup(
     plan: Dict[str, Any],
     db_runner: Optional[Callable[[str, List[Any]], Dict[str, Any]]] = None,
+    simulation_mode: bool = False,
 ) -> Dict[str, Any]:
     """Execute DB cleanup only when an authorized runner is provided; enforce dry-run & guards."""
     mode = plan["mode"]
+    
+    if plan.get("authority_established") is not _VALID_PROOF:
+        return {
+            "status": "blocked",
+            "mode": mode,
+            "concrete_blocker": "explicitunverified/blocked: truly established archive/runtime authority required",
+            "plan_prepared": True,
+            "receipts": []
+        }
+        
+    if not simulation_mode:
+        return {
+            "status": "blocked",
+            "mode": mode,
+            "concrete_blocker": "explicitunverified/blocked: truly established archive/runtime authority required",
+            "plan_prepared": True,
+            "receipts": []
+        }
+
     if mode == "apply":
         raise ValueError("Mutation is explicitly disabled: unsupported apply mode is rejected at entrypoint")
 
@@ -1557,6 +1576,12 @@ def run_cleanup_pipeline(
         inventory_data, mode=mode, source_sha=source_sha, run_id=run_id
     )
 
+    # R19-01: Inject authority post-preflight
+    if inventory_data.get("authority_established") is _VALID_PROOF:
+        plan["authority_established"] = _VALID_PROOF
+        for target in plan.get("gcs_targets", []):
+            target["authority_established"] = _VALID_PROOF
+
     if mode == "apply":
         return {
             "status": "error",
@@ -1574,7 +1599,17 @@ def run_cleanup_pipeline(
     gcs_result = execute_gcs_cleanup(
         plan, gcs_runner=gcs_runner, prior_receipts=prior_receipts, simulation_mode=simulation_mode
     )
-    db_result = execute_db_cleanup(plan, db_runner=db_runner)
+    
+    if gcs_result.get("status") not in ("success", "valid"):
+        db_result = {
+            "status": "blocked",
+            "mode": mode,
+            "concrete_blocker": "GCS preflight blocked or failed; DB fallback is strictly prohibited.",
+            "plan_prepared": True,
+            "receipts": []
+        }
+    else:
+        db_result = execute_db_cleanup(plan, db_runner=db_runner, simulation_mode=simulation_mode)
 
     top_status = "dry_run_complete"
     if db_result.get("status") == "blocked":
