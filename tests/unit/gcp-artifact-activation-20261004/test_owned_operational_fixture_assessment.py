@@ -298,9 +298,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             elif "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=run_data)
             elif "artifacts/11606165993/zip" in cmd_str:
-                if "out_path" in kwargs and kwargs["out_path"]:
-                    with open(kwargs["out_path"], "wb") as f:
-                        f.write(zip_bytes)
+                if "stdout" in kwargs and hasattr(kwargs["stdout"], "write"):
+                    kwargs["stdout"].write(zip_bytes)
+                    kwargs["stdout"].flush()
                 return MagicMock(returncode=0, stdout=zip_bytes)
             return MagicMock(returncode=1)
             
@@ -327,7 +327,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return m
             return MagicMock(returncode=1)
 
-        with patch.object(assess, "run_bounded", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
+        with patch("subprocess.run", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
     @patch("sys.exit")
@@ -410,7 +410,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
-            with patch.object(assess, "run_bounded", side_effect=mock_run):
+            with patch("subprocess.run", side_effect=mock_run):
                 assess.main()
                 mock_exit.assert_called_with(1) # Exits 1 due to mock_db
                 output = mock_print.call_args[0][0]
@@ -463,8 +463,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
 
         try:
             sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", meta_file, "--current-runtime-sha", "xyz"]
-            with self.assertRaises(SystemExit) as cm:
-                assess.main()
+            with patch("subprocess.run", side_effect=mock_run):
+                with self.assertRaises(SystemExit) as cm:
+                    assess.main()
             self.assertEqual(cm.exception.code, 0)
             
             with open(meta_file, "r") as f:
@@ -500,8 +501,9 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         sys.argv = ["assess-owned-operational-fixtures.py", "--current-run-id", "12345", "--tooling-run-sha", "abc", "--acquire-cloud-metadata-to", "/tmp/out.json"]
         
         with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
-            with self.assertRaises(SystemExit) as cm:
-                assess.main()
+            with patch("subprocess.run", side_effect=mock_run):
+                with self.assertRaises(SystemExit) as cm:
+                    assess.main()
             self.assertEqual(cm.exception.code, 1)
             out = mock_stdout.getvalue()
             self.assertIn("Overlapping restricted workflows detected", out)
