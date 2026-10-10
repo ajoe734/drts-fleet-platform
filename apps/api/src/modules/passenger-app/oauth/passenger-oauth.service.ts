@@ -17,6 +17,7 @@ import type {
   OAuthTransactionStore,
 } from "./oauth-transaction.port";
 import { PassengerOAuthTransactionRepository } from "./oauth-transaction.repository";
+import { exchangeFacebookCode } from "./facebook-oauth";
 
 // Matches the tenant/partner OIDC state TTL (oidc-pkce.service.ts).
 const TRANSACTION_TTL_MS = 10 * 60 * 1000;
@@ -183,10 +184,10 @@ export class PassengerOAuthService {
     const authUrl = new URL(config.authorizationEndpoint);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("client_id", config.clientId);
-    authUrl.searchParams.set("scope", "openid profile email");
+    authUrl.searchParams.set("scope", provider === "facebook" ? "public_profile,email" : "openid profile email");
     authUrl.searchParams.set("redirect_uri", command.redirectUri);
     authUrl.searchParams.set("state", state);
-    authUrl.searchParams.set("nonce", nonce);
+    if (provider !== "facebook") authUrl.searchParams.set("nonce", nonce);
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
 
@@ -263,6 +264,7 @@ export class PassengerOAuthService {
     code: string,
     transaction: OAuthTransactionRecord,
   ): Promise<{ sub: string; name?: unknown; email?: unknown; email_verified?: unknown }> {
+    if (config.provider === "facebook") return exchangeFacebookCode(config, code, transaction);
     const params = new URLSearchParams();
     params.set("grant_type", "authorization_code");
     params.set("code", code);
