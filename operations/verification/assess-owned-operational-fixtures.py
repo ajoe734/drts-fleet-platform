@@ -94,7 +94,7 @@ def fetch_and_validate_provenance(args) -> None:
     require(args.workflow_def_sha == AUTHORIZED_PROVENANCE["workflow_sha"], "Unauthorized workflow_def_sha")
     
     # Check run
-    res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"], capture_output=True, text=True, check=False, timeout=30)
+    res_run = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}"], timeout_sec=30)
     require(res_run.returncode == 0, "Failed to fetch run from GitHub API")
     run_data = json.loads(res_run.stdout)
     require(str(run_data.get("id")) == args.product_run_id, "Run ID mismatch")
@@ -119,7 +119,7 @@ def fetch_and_validate_provenance(args) -> None:
     page = 1
     total_count = -1
     while True:
-        res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/jobs?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
+        res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
         require(res_jobs.returncode == 0, "Failed to fetch jobs from GitHub API")
         jobs_data = json.loads(res_jobs.stdout)
         total_count = jobs_data.get("total_count", -1)
@@ -166,7 +166,7 @@ def fetch_and_validate_provenance(args) -> None:
     page = 1
     total_count_arts = -1
     while True:
-        res_arts = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
+        res_arts = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.product_run_id}/artifacts?per_page=100&page={page}"], timeout_sec=30)
         require(res_arts.returncode == 0, "Failed to fetch artifacts from GitHub API")
         arts_data = json.loads(res_arts.stdout)
         total_count_arts = arts_data.get("total_count", -1)
@@ -414,6 +414,7 @@ def assess_gcs_objects(runner: Callable[[str, str, str], Dict[str, Any]]) -> Dic
             "contentType": meta["contentType"],
             "timeCreated": meta["timeCreated"],
             "updated": meta["updated"],
+            "stored-at": meta.get("metadata", {}).get("stored-at"),
             "hash": EXPECTED_SHA256,
             "documentId": CANONICAL_OWNED_OBJECTS[logical_key]["documentId"],
             "confirmSubmissionId": CANONICAL_OWNED_OBJECTS[logical_key]["confirmSubmissionId"]
@@ -521,7 +522,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     if counts.get('tx_ro') != 'on' or counts.get('tx_iso') != 'repeatable read':
         return {"status": "rejected", "reason": "Transaction mode not verified"}
         
-    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts']:
+    for k in ['revs', 'affs', 'discs', 'creds', 'cdriv', 'cveh', 'cpol', 'ccont', 'ddrafts', 'vdrafts', 'cpairs', 'cexcl', 'audits']:
         if counts.get(k) is None:
             return {"status": "error", "error": f"Missing count for {k}"}
         if type(counts.get(k)) is not int:
@@ -547,11 +548,11 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         return {"status": "rejected", "reason": "No incoming foreign keys detected"}
     
     expected_fks = {
-        ('fleet.supply_documents', 'fleet.supply_submissions'): 'c',
-        ('fleet.supply_review_events', 'fleet.supply_submissions'): 'a',
-        ('fleet.vehicle_fleet_affiliations', 'fleet.supply_submissions'): 'a',
-        ('fleet.driver_supply_drafts', 'fleet.supply_submissions'): 'c',
-        ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): 'c',
+        ('fleet.supply_documents', 'fleet.supply_submissions'): ('supply_documents_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
+        ('fleet.supply_review_events', 'fleet.supply_submissions'): ('supply_review_events_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id)', 'a'),
+        ('fleet.vehicle_fleet_affiliations', 'fleet.supply_submissions'): ('vehicle_fleet_affiliations_source_submission_id_fkey', 'FOREIGN KEY (source_submission_id) REFERENCES fleet.supply_submissions(submission_id)', 'a'),
+        ('fleet.driver_supply_drafts', 'fleet.supply_submissions'): ('driver_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
+        ('fleet.vehicle_supply_drafts', 'fleet.supply_submissions'): ('vehicle_supply_drafts_submission_id_fkey', 'FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE', 'c'),
     }
     
     seen_fks = set()
@@ -563,7 +564,12 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         deltype = fk.get('confdeltype')
         updtype = fk.get('confupdtype')
         if (rel, confrel) in expected_fks:
-            if deltype != expected_fks[(rel, confrel)]:
+            expected_name, expected_def, expected_deltype = expected_fks[(rel, confrel)]
+            if fk.get('name') != expected_name:
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong name, expected {expected_name}"}
+            if fk.get('def') != expected_def:
+                return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} wrong def"}
+            if deltype != expected_deltype:
                 return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confdeltype"}
             if updtype != 'a':
                 return {"status": "rejected", "reason": f"Foreign key {fk.get('name')} has wrong confupdtype"}
@@ -697,7 +703,7 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
         "disclosure_count": counts.get('discs', 0),
         "credential_count": counts.get('creds', 0),
         "preservation_inventory": {
-            "incoming_fks": [{"name": f.get("name"), "rel": f.get("rel"), "confrel": f.get("confrel"), "contype": f.get("contype"), "confdeltype": f.get("confdeltype"), "confupdtype": f.get("confupdtype")} for f in fks_meta],
+            "incoming_fks": [{"name": f.get("name"), "rel": f.get("rel"), "confrel": f.get("confrel"), "contype": f.get("contype"), "confdeltype": f.get("confdeltype"), "confupdtype": f.get("confupdtype"), "def": f.get("def")} for f in fks_meta],
             "submissions": {"c": counts.get('pres_subs', {}).get('c'), "digest": counts.get('pres_subs', {}).get('digest')},
             "documents": {"c": counts.get('pres_docs', {}).get('c'), "digest": counts.get('pres_docs', {}).get('digest')},
             "review_events": {"c": counts.get('pres_revs', {}).get('c'), "digest": counts.get('pres_revs', {}).get('digest')},
@@ -1028,7 +1034,8 @@ def main():
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
                         # Private consoles should have no bindings or no allUsers/allAuthenticatedUsers
-                        bindings = s.get("bindings", [])
+                        bindings = s.get("bindings")
+                        require(bindings is not None, f"Console {name} bindings missing/bypass")
                         for b in bindings:
                             members = b.get("members", [])
                             require("allUsers" not in members and "allAuthenticatedUsers" not in members, f"Console {name} is not private")
@@ -1042,7 +1049,7 @@ def main():
                 }
                 
                 require(args.current_run_id, "Missing current_run_id")
-                res_run = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"], capture_output=True, text=True, check=False, timeout=30)
+                res_run = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"], timeout_sec=30)
                 require(res_run.returncode == 0, "Failed to fetch current run from GitHub API")
                 curr_run_data = json.loads(res_run.stdout)
                 require(curr_run_data.get("head_branch") == "dev", "Current run not on protected dev branch")
@@ -1050,10 +1057,25 @@ def main():
                 require(str(curr_run_data.get("id")) == args.current_run_id, "Current run ID mismatch")
                 require(curr_run_data.get("head_sha") == args.tooling_run_sha, "Current run SHA mismatch")
                 
+                # CI status check
+                res_ci = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/check-suites"], timeout_sec=30)
+                require(res_ci.returncode == 0, "Failed to fetch check-suites")
+                ci_data = json.loads(res_ci.stdout)
+                suites = ci_data.get("check_suites", [])
+                require(any(s.get("status") == "completed" and s.get("conclusion") == "success" for s in suites), "tooling_run_sha must have passing CI")
+                
+                # No overlap check
+                res_overlap = run_bounded(["gh", "api", "/repos/ajoe734/drts-fleet-platform/actions/runs?status=in_progress&per_page=100"], timeout_sec=30)
+                require(res_overlap.returncode == 0, "Failed to fetch active runs")
+                overlap_data = json.loads(res_overlap.stdout)
+                import re as regex_mod
+                active_runs = [r for r in overlap_data.get("workflow_runs", []) if str(r.get("id")) != args.current_run_id and regex_mod.search(r"deploy|restore|provision|provider|scanner", r.get("name", ""), regex_mod.IGNORECASE)]
+                require(len(active_runs) == 0, "Overlapping restricted workflows detected")
+                
                 curr_jobs = []
                 page = 1
                 while True:
-                    res_jobs = subprocess.run(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], capture_output=True, text=True, check=False, timeout=30)
+                    res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
                     require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
                     page_jobs = json.loads(res_jobs.stdout).get("jobs", [])
                     if not page_jobs:

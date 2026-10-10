@@ -131,7 +131,13 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'cpairs': 0,
                 'cexcl': 0,
                 'audits': 0,
-                'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c", "confupdtype": "a"}],
+                'fks_meta': [
+                    {"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "supply_documents_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"},
+                    {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "supply_review_events_submission_id_fkey", "contype": "f", "confdeltype": "a", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id)"},
+                    {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "vehicle_fleet_affiliations_source_submission_id_fkey", "contype": "f", "confdeltype": "a", "confupdtype": "a", "def": "FOREIGN KEY (source_submission_id) REFERENCES fleet.supply_submissions(submission_id)"},
+                    {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "driver_supply_drafts_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"},
+                    {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "vehicle_supply_drafts_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"}
+                ],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
                 'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
@@ -175,7 +181,13 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'cpairs': 0,
                 'cexcl': 0,
                 'audits': 0,
-                'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c", "confupdtype": "a"}],
+                'fks_meta': [
+                    {"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "supply_documents_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"},
+                    {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "supply_review_events_submission_id_fkey", "contype": "f", "confdeltype": "a", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id)"},
+                    {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "vehicle_fleet_affiliations_source_submission_id_fkey", "contype": "f", "confdeltype": "a", "confupdtype": "a", "def": "FOREIGN KEY (source_submission_id) REFERENCES fleet.supply_submissions(submission_id)"},
+                    {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "driver_supply_drafts_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"},
+                    {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "vehicle_supply_drafts_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"}
+                ],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
                 'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
@@ -218,7 +230,13 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'cpairs': 0,
                 'cexcl': 0,
                 'audits': 0,
-                'fks_meta': [{"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "c1", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "c2", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "c3", "contype": "f", "confdeltype": "a", "confupdtype": "a"}, {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c4", "contype": "f", "confdeltype": "c", "confupdtype": "a"}, {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "c5", "contype": "f", "confdeltype": "c", "confupdtype": "a"}],
+                'fks_meta': [
+                    {"rel": "fleet.supply_documents", "confrel": "fleet.supply_submissions", "name": "supply_documents_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"},
+                    {"rel": "fleet.supply_review_events", "confrel": "fleet.supply_submissions", "name": "supply_review_events_submission_id_fkey", "contype": "f", "confdeltype": "a", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id)"},
+                    {"rel": "fleet.vehicle_fleet_affiliations", "confrel": "fleet.supply_submissions", "name": "vehicle_fleet_affiliations_source_submission_id_fkey", "contype": "f", "confdeltype": "a", "confupdtype": "a", "def": "FOREIGN KEY (source_submission_id) REFERENCES fleet.supply_submissions(submission_id)"},
+                    {"rel": "fleet.driver_supply_drafts", "confrel": "fleet.supply_submissions", "name": "driver_supply_drafts_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"},
+                    {"rel": "fleet.vehicle_supply_drafts", "confrel": "fleet.supply_submissions", "name": "vehicle_supply_drafts_submission_id_fkey", "contype": "f", "confdeltype": "c", "confupdtype": "a", "def": "FOREIGN KEY (submission_id) REFERENCES fleet.supply_submissions(submission_id) ON DELETE CASCADE"}
+                ],
                 'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
                 'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
                 'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
@@ -306,7 +324,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return m
             return MagicMock(returncode=1)
 
-        with patch("subprocess.run", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
+        with patch.object(assess, "run_bounded", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
 if __name__ == '__main__':
