@@ -68,7 +68,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       ride: { orderId },
     });
     multiTaxiMock.getPassengerRideById.mockResolvedValue({
-      order: { orderId }
+      order: { orderId },
     });
 
     const command = {
@@ -79,7 +79,11 @@ describe("Passenger Booking History API - Spec requirements", () => {
       fareSnapshotId: "fs-1",
       passengerConfirmedAt: new Date().toISOString(),
       // Forged body data
-      passenger: { name: "Fake Name", phone: "0999999999", passengerId: "hacker-1" },
+      passenger: {
+        name: "Fake Name",
+        phone: "0999999999",
+        passengerId: "hacker-1",
+      },
     };
 
     const result = await service.createRide("pax-1", command as any, "req-1");
@@ -94,7 +98,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
         },
       }),
       "pax-1",
-      "req-1"
+      "req-1",
     );
   });
 
@@ -128,7 +132,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       ride: { orderId },
     });
     multiTaxiMock.getPassengerRideById.mockResolvedValue({
-      order: { orderId }
+      order: { orderId },
     });
 
     const command = {
@@ -140,7 +144,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       passengerConfirmedAt: new Date().toISOString(),
     };
 
-    const result = await service.createRide("pax-1", command as any, "req-1");
+    await service.createRide("pax-1", command as any, "req-1");
     expect(multiTaxiMock.createTrustedPassengerRide).toHaveBeenCalledWith(
       expect.objectContaining({
         passenger: {
@@ -150,10 +154,10 @@ describe("Passenger Booking History API - Spec requirements", () => {
         },
       }),
       "pax-1",
-      "req-1"
+      "req-1",
     );
   });
-  
+
   it("pax-booking_trusted_create_and_ownership: rejects foreign quotes", async () => {
     accountMock.transaction = vi.fn(async (cb) => {
       return cb({
@@ -187,67 +191,90 @@ describe("Passenger Booking History API - Spec requirements", () => {
     };
 
     let err: any;
-    try { await service.createRide("pax-1", command as any, "req-1"); } catch (e) { err = e; }
+    try {
+      await service.createRide("pax-1", command as any, "req-1");
+    } catch (e) {
+      err = e;
+    }
     expect(err.response.error.message).toMatch(/belongs to another passenger/);
   });
 
   it("pax-booking_history_and_ride_actions: prevents cross-account viewing, paginates properly", async () => {
     repoMock.getBookingHistoryOwner.mockResolvedValue("pax-1");
     let err4: any;
-    try { await service.getRide("pax-2", randomUUID()); } catch (e) { err4 = e; }
+    try {
+      await service.getRide("pax-2", randomUUID());
+    } catch (e) {
+      err4 = e;
+    }
     expect(err4.response.error.message).toMatch(/Ride not found/);
-    
+
     const id1 = randomUUID();
     const id2 = randomUUID();
     const id3 = randomUUID();
 
-    repoMock.listBookingHistories.mockImplementation(async (_paxId: any, limit: any, cursorCreatedAt: any, cursorOrderId: any) => {
-      if (!cursorCreatedAt) {
-        return [
-          { orderId: id1, createdAt: "2026-10-10T05:00:00.123456Z" },
-          { orderId: id2, createdAt: "2026-10-10T04:00:00.654321Z" }
-        ];
-      }
-      if (cursorCreatedAt === "2026-10-10T04:00:00.654321Z" && cursorOrderId === id2) {
-        return [
-          { orderId: id3, createdAt: "2026-10-10T03:00:00.000000Z" }
-        ];
-      }
-      return [];
-    });
-    
-    multiTaxiMock.getPassengerRideById.mockImplementation(async (orderId: string) => {
-      return { order: { orderId, status: "completed" } };
-    });
-    
+    repoMock.listBookingHistories.mockImplementation(
+      async (
+        _paxId: any,
+        limit: any,
+        cursorCreatedAt: any,
+        cursorOrderId: any,
+      ) => {
+        if (!cursorCreatedAt) {
+          return [
+            { orderId: id1, createdAt: "2026-10-10T05:00:00.123456Z" },
+            { orderId: id2, createdAt: "2026-10-10T04:00:00.654321Z" },
+          ];
+        }
+        if (
+          cursorCreatedAt === "2026-10-10T04:00:00.654321Z" &&
+          cursorOrderId === id2
+        ) {
+          return [{ orderId: id3, createdAt: "2026-10-10T03:00:00.000000Z" }];
+        }
+        return [];
+      },
+    );
+
+    multiTaxiMock.getPassengerRideById.mockImplementation(
+      async (orderId: string) => {
+        return { order: { orderId, status: "completed" } };
+      },
+    );
+
     const res = await service.getRideList("pax-1", 2);
     expect(res.rides.length).toBe(2);
     expect(res.rides[0]?.order.orderId).toBe(id1);
     expect(res.nextCursor).toBeDefined();
-    
+
     // consume next cursor
-    const [cursorCreatedAt, cursorOrderId] = res.nextCursor!.split(",");
     const res2 = await service.getRideList("pax-1", 2, res.nextCursor);
     expect(res2.rides.length).toBe(1);
     expect(res2.rides[0]?.order.orderId).toBe(id3);
-    
+
     // Check getActiveRides traversing multiple pages
-    repoMock.listBookingHistories.mockImplementation(async (_paxId: any, limit: any, cursorCreatedAt: any) => {
-      if (!cursorCreatedAt) {
-        return Array.from({ length: 50 }).map((_, i) => ({ orderId: `completed-${i}`, createdAt: "2026-10-10T05:00:00Z" }));
-      }
-      if (cursorCreatedAt === "2026-10-10T05:00:00Z") {
-        return [
-          { orderId: "active-1", createdAt: "2026-10-10T04:00:00Z" }
-        ];
-      }
-      return [];
-    });
-    multiTaxiMock.getPassengerRideById.mockImplementation(async (orderId: string) => {
-      if (orderId.startsWith("completed-")) return { order: { orderId, status: "completed" } };
-      return { order: { orderId, status: "on_trip" } };
-    });
-    
+    repoMock.listBookingHistories.mockImplementation(
+      async (_paxId: any, limit: any, cursorCreatedAt: any) => {
+        if (!cursorCreatedAt) {
+          return Array.from({ length: 50 }).map((_, i) => ({
+            orderId: `completed-${i}`,
+            createdAt: "2026-10-10T05:00:00Z",
+          }));
+        }
+        if (cursorCreatedAt === "2026-10-10T05:00:00Z") {
+          return [{ orderId: "active-1", createdAt: "2026-10-10T04:00:00Z" }];
+        }
+        return [];
+      },
+    );
+    multiTaxiMock.getPassengerRideById.mockImplementation(
+      async (orderId: string) => {
+        if (orderId.startsWith("completed-"))
+          return { order: { orderId, status: "completed" } };
+        return { order: { orderId, status: "on_trip" } };
+      },
+    );
+
     const activeRes = await service.getActiveRides("pax-1");
     expect(activeRes.rides.length).toBe(1);
     expect(activeRes.rides[0]?.order.orderId).toBe("active-1");
