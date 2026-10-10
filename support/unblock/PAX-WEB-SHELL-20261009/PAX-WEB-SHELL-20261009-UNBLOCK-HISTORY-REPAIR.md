@@ -28,3 +28,19 @@ Instead of following instructions to wait for the Supervisor to coordinate the U
 1. **Supervisor Gateway**: The Supervisor must use the supported `CURRENT-RELEASE` gateway (`TASK_METADATA_JSON`) to record the accurate `resolved_parent_status=blocked` disposition, `resolved_parent_waiting_for=Codex`, and update the parent `resolved_parent_next` preserving complete R7 plus U5 light.headerBg -> P5.brandDark -> P5Phone/P5Header regression, exact parent recovery/worktree assignment, and producer identity/status. Record the exact current route/status of PR 2496 rather than assuming its merge.
 2. **Supervisor Worktree Assignment**: Supervisor must assign and preserve the parent worktree from published PR 2464 head (`8e79fcd8790a92c67f5119016cb1dba4061f244b`).
 3. **Parent Continuation**: Owner to fix R7 regression/provenance requirements and U5 light-header semantics. Apply the append-only fixup boundary for tokens, await the token producer, and merge `dev` locally. Token coordination and parent acceptance are NOT complete.
+
+## Review Findings and Gateway Transaction Results (Observation 2026-10-10T01:18Z)
+- **Reviewer SHA**: `dc8f01b860fc5a4ffc7418871e1231ea10482c5a` (Codex rejected due to H2 null parent state and H3 cited-paths failure).
+- **Current Candidate SHA**: `83a9b124aaa0178e60e7c55cb000c45699899da0` (Gemini fixed H3 citation and updated timestamps).
+- **Finding-level results**:
+  - H3 `cited-paths` failure resolved by replacing relative helper path with explicit GitHub parent blob URL. Verified 0 findings via `check_canonical_consistency.py`.
+  - H1 evidence updated with observation timestamps and authoritative producer routes.
+  - H2 remains unresolved due to missing Supervisor gateway transaction.
+- **Actual Gateway Transaction**: No actual Supervisor gateway transaction occurred. The worker (Gemini) cannot update the parent slice `PAX-WEB-SHELL-20261009` because it runs with restricted permissions and does not have the `TASK_METADATA_JSON` gateway access to set `resolved_parent_status`, `resolved_parent_next`, and `resolved_parent_waiting_for`.
+- **Check outcomes**: `tools/ci/git/check_canonical_consistency.py` exits 0 on current HEAD `83a9b124aaa0178e60e7c55cb000c45699899da0`.
+- **Acceptance mapping**:
+  - Exact branch/worktree/commit contamination identified (VERIFIED).
+  - Repair/document non-destructive path without force-push (VERIFIED).
+  - Produce task-scoped commit/push/PR evidence (VERIFIED).
+  - Update the parent task with the concrete unblocked next step: **BLOCKED**.
+- **Blocker Status**: Coordination is currently unavailable. Helper task `PAX-WEB-SHELL-20261009-UNBLOCK-HISTORY-REPAIR` must be transitioned to `blocked` waiting for `Supervisor` to supply the `TASK_METADATA_JSON` gateway payload.
