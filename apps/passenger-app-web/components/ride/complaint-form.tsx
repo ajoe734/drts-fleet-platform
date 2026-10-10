@@ -40,7 +40,7 @@ export function ComplaintForm({
             cursor: "pointer",
           }}
         >
-          客訴與遺失物表單
+          {t.ComplaintAndLostFound}
         </button>
       </div>
     );
@@ -64,7 +64,7 @@ export function ComplaintForm({
             color: passengerChrome.text,
           }}
         >
-          客訴與遺失物表單
+          {t.ComplaintAndLostFound}
         </div>
         <div
           style={{
@@ -133,10 +133,10 @@ export function ComplaintForm({
             border: `1px solid ${passengerChrome.border}`,
           }}
         >
-          <option value="service">服務問題</option>
-          <option value="fare">車資問題</option>
-          <option value="lost_item">遺失物</option>
-          <option value="other">其他</option>
+          <option value="service">{t.ComplaintServiceIssue}</option>
+          <option value="fare">{t.ComplaintFareIssue}</option>
+          <option value="lost_item">{t.ComplaintLostItem}</option>
+          <option value="other">{t.ComplaintOther}</option>
         </select>
       </div>
       <textarea
@@ -159,7 +159,7 @@ export function ComplaintForm({
           type="text"
           value={lostItemDescription}
           onChange={(e) => setLostItemDescription(e.target.value)}
-          placeholder="遺失物描述"
+          placeholder={t.LostItemPlaceholder}
           style={{
             width: "100%",
             padding: 8,
@@ -186,7 +186,7 @@ export function ComplaintForm({
           id="contactConsent"
         />
         <label htmlFor="contactConsent" style={{ color: passengerChrome.text }}>
-          同意客服與我聯繫
+          {t.AgreeToContact}
         </label>
       </div>
       <div style={{ display: "flex", gap: 8 }}>

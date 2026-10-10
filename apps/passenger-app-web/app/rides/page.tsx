@@ -76,7 +76,7 @@ export default function RidesListPage() {
       <div style={{ padding: 20, color: passengerChrome.text }}>
         <p>{error}</p>
         <button onClick={loadInitial} style={{ padding: "8px 16px" }}>
-          重試
+          {t.Retry}
         </button>
       </div>
     );
@@ -191,7 +191,7 @@ export default function RidesListPage() {
                       fontWeight: "bold",
                     }}
                   >
-                    ⭐ 填寫評價
+                    {t.WriteReview}
                   </div>
                 )}
               </Link>

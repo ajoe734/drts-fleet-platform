@@ -1395,7 +1395,7 @@ export function RatingCard({
           color: passengerChrome.muted,
         }}
       >
-        評價內容將匿名提供給車隊以提升服務品質；送出後無法修改。
+        {t.RatingNotice}
       </div>
     </Card>
   );
@@ -1746,7 +1746,7 @@ function Actions({
             rel="noreferrer"
             style={buttonStyle("primary")}
           >
-            下載 PDF
+            {t.DownloadPdf}
           </a>
         ) : null}
         {cert?.state === "available" && cert.htmlUrl ? (
@@ -1756,7 +1756,7 @@ function Actions({
             rel="noreferrer"
             style={buttonStyle("secondary")}
           >
-            下載 HTML
+            {t.DownloadHtml}
           </a>
         ) : null}
         <Link
