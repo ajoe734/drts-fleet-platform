@@ -217,3 +217,56 @@ No further value in repeating this check again without a state change on
 the broker side. If this task wakes again with the broker still down,
 skip straight to re-reading this artifact's §5 action list rather than
 re-running the same confirmation a fifth time.
+
+## 8. Root cause refined: dispatch guard, not just broker outage (2026-10-10, resumed fifth time)
+
+Resumed a fifth time and tested more precisely instead of re-confirming CI
+green again:
+
+- Calling `ai_status.py` **directly** (bypassing the `ai-status.sh` wrapper,
+  exporting `ORCH_STATUS_ROOT`/`AI_STATUS_ROOT` by hand) does **not** defer —
+  it returns immediately. `show` and `progress
+  PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR ...` (this task's own id)
+  both succeeded instantly this way. So the broker outage explains why the
+  `ai-status.sh` *wrapper* hung in §4-§7, but it is not the only obstacle.
+- `assign PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Claude Codex2` with
+  `TASK_METADATA_JSON` (to durably set
+  `resolved_parent_status`/`resolved_parent_next` on this task, per
+  `apply_unblock_parent_resolution` in `bin/ai_status.py`) and
+  `note PAX-WEB-RIDE-UI-20261009 "..."` (a direct relay write to the parent)
+  both fail immediately, even via the direct `ai_status.py` call, with:
+  - `assign`: `Dispatched workers must use their assigned task lifecycle commands`
+  - `note <parent-id>`: `Dispatched worker cannot mutate a different task`
+  Confirmed via `echo "$ORCH_DISPATCH_ROLE"` / `echo "$ORCH_RUN_ID"` that this
+  session has `ORCH_DISPATCH_ROLE=owner` and a populated `ORCH_RUN_ID` — i.e.
+  this is `TaskBoardCommandExecutor._guard_worker_command` rejecting a
+  dispatched worker's cross-task/non-lifecycle write, exactly as documented
+  for other unblock helpers. **This guard applies regardless of broker
+  health** — it is a structural rule, not a connectivity symptom. No dispatched
+  worker session (owner or reviewer role) can write this task's
+  `resolved_parent_*` metadata or note the parent directly; only a
+  Supervisor-privileged session (no `ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID`) can.
+- Also re-confirmed: `gh pr view 2529` still fully green/`MERGEABLE`
+  (unchanged, 5th confirmation — see §2/§5/§6/§7). This task's own PR
+  [#2530](https://github.com/ajoe734/drts-fleet-platform/pull/2530)
+  (branch `claude/pax-web-ride-ui-20261009-unblock-history-repair`, this
+  artifact's own commit trail) is `MERGEABLE` but `mergeStateStatus: BLOCKED`
+  with `unit`/`build`/`Product smoke acceptance`/`ui-route-e2e` still
+  `IN_PROGRESS` as of this check.
+
+**Action needed from a Supervisor-privileged session** (interactive, no
+`ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID`), exactly per
+`project-unblock-helper-dispatch-guard-parent-writes`:
+
+```
+TASK_METADATA_JSON='{"resolved_parent_status":"todo","resolved_parent_next":"History repair complete: PR #2529 (branch gemini/pax-web-ride-ui-20261009-v2) is the replacement candidate for PAX-WEB-RIDE-UI-20261009, byte-identical tree to the old candidate tip 96102377a with a compliant Reviewer trailer, confirmed fully green 5x. Gemini: handoff PAX-WEB-RIDE-UI-20261009 to Codex2 with CANDIDATE_SHA=1ad9f340583c137322f5ec5f246d06622fb0e8df CANDIDATE_BRANCH=gemini/pax-web-ride-ui-20261009-v2 PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2529 . After #2529 merges, close (do not merge) the original contaminated PR #2526."}' \
+  AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py assign PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Claude Codex2
+AI_NAME=Supervisor ORCH_STATUS_ROOT=$PWD python3 tools/development-orchestrator/bin/ai_status.py note PAX-WEB-RIDE-UI-20261009 "History repair complete: PR #2529 (branch gemini/pax-web-ride-ui-20261009-v2) is the replacement candidate; handoff with CANDIDATE_SHA=1ad9f340583c137322f5ec5f246d06622fb0e8df CANDIDATE_BRANCH=gemini/pax-web-ride-ui-20261009-v2 PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2529 to Codex2. After merge, close PR #2526 (do not merge it)."
+```
+
+This task cannot complete acceptance criterion 4 ("update the parent task
+with the concrete unblocked next step") from inside its own dispatch — the
+write path is machine-gated to Supervisor, not merely broker-flaky. Recorded
+as a `blocker` on this task's own id (routed to Codex2) rather than declared
+done, per `docs/ops/branch-strategy.md` §11 and this repo's standing
+guardrails against working around orchestrator write guards.
