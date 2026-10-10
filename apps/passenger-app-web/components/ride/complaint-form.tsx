@@ -1,3 +1,4 @@
+import { t } from "./translations";
 import { useState } from "react";
 import { passengerChrome } from "@/lib/passenger-presentation";
 import { requestPassengerRideAction } from "@/lib/ride/passenger-live";
@@ -29,7 +30,7 @@ export function ComplaintForm({
         }}
         onClick={() => setOpen(true)}
       >
-        客訴與遺失物表單
+        {t.ComplaintAndLostFound}
       </button>
     );
   }
@@ -45,7 +46,7 @@ export function ComplaintForm({
         }}
       >
         <div style={{ fontWeight: 600, marginBottom: 12 }}>
-          客訴與遺失物表單
+          {t.ComplaintAndLostFound}
         </div>
         <div
           style={{
@@ -54,7 +55,7 @@ export function ComplaintForm({
             padding: "12px 0",
           }}
         >
-          表單已送出，客服將盡速與您聯繫。
+          {t.FormSubmitted}
         </div>
       </div>
     );
@@ -87,11 +88,13 @@ export function ComplaintForm({
         padding: 16,
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 12 }}>客訴與遺失物表單</div>
+      <div style={{ fontWeight: 600, marginBottom: 12 }}>
+        {t.ComplaintAndLostFound}
+      </div>
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        placeholder="請描述您的問題或遺失物品..."
+        placeholder={t.ComplaintPlaceholder}
         style={{
           width: "100%",
           height: 100,
@@ -117,7 +120,7 @@ export function ComplaintForm({
           onClick={() => setOpen(false)}
           disabled={submitting}
         >
-          取消
+          {t.Cancel}
         </button>
         <button
           type="button"

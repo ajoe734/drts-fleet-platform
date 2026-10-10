@@ -1,4 +1,5 @@
 "use client";
+import { t } from "../../components/ride/translations";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -29,13 +30,13 @@ export default function RidesListPage() {
   }, []);
 
   if (loading) {
-    return <div style={{ padding: 20 }}>載入中...</div>;
+    return <div style={{ padding: 20 }}>{t.Loading}</div>;
   }
 
   return (
     <main style={{ padding: "16px", fontFamily: "sans-serif" }}>
       <h1 style={{ fontSize: 24, fontWeight: "bold", marginBottom: 16 }}>
-        我的行程
+        {t.MyRides}
       </h1>
 
       {active.length > 0 && (
@@ -48,7 +49,7 @@ export default function RidesListPage() {
               color: "#1F5DB8",
             }}
           >
-            進行中
+            {t.InProgress}
           </h2>
           {active.map((ride) => (
             <Link
@@ -77,10 +78,10 @@ export default function RidesListPage() {
 
       <section>
         <h2 style={{ fontSize: 18, fontWeight: "bold", marginBottom: 8 }}>
-          歷史紀錄
+          {t.History}
         </h2>
         {history.length === 0 ? (
-          <div style={{ color: "#475569" }}>尚無行程紀錄</div>
+          <div style={{ color: "#475569" }}>{t.NoRideHistory}</div>
         ) : (
           history.map((ride) => {
             const isRecent =
@@ -123,7 +124,7 @@ export default function RidesListPage() {
                       ? "完成"
                       : ride.order.status === "cancelled"
                         ? "已取消"
-                        : "進行中"}
+                        : t.InProgress}
                   </span>
                 </div>
                 <div style={{ fontSize: 14, color: "#475569", marginTop: 4 }}>
@@ -138,7 +139,7 @@ export default function RidesListPage() {
                       fontWeight: "bold",
                     }}
                   >
-                    ⭐ 填寫評價
+                    {t.WriteReview}
                   </div>
                 )}
               </Link>

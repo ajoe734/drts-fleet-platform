@@ -1,5 +1,6 @@
 "use client";
 
+import { t } from "./translations";
 import Link from "next/link";
 import {
   startTransition,
@@ -155,9 +156,9 @@ function TopChrome({
               flexShrink: 0,
             }}
           >
-            車
+            {t.Vehicle}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>智行叫車</span>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>{t.AppTitle}</span>
           <span style={{ flex: 1 }} />
           <span style={{ fontFamily: monoFont, fontSize: 10.5, opacity: 0.78 }}>
             {order}
@@ -409,7 +410,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
               fontWeight: 700,
             }}
           >
-            車
+            {t.Vehicle}
           </div>
           <div
             aria-hidden="true"
@@ -441,7 +442,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           <span aria-hidden="true" style={{ fontSize: 18 }}>
             ⌖
           </span>
-          正在取得司機位置
+          {t.GettingDriverLocation}
         </div>
       )}
       <div
@@ -456,7 +457,8 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           color: passengerChrome.muted,
         }}
       >
-        上車：{fixture.pickupLabel}
+        {t.PickupPrefix}
+        {fixture.pickupLabel}
       </div>
       {fixture.mapState === "fresh" ? (
         <div
@@ -472,7 +474,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             fontWeight: 700,
           }}
         >
-          位置更新於 5 秒前
+          {t.LocationUpdated5sAgo}
         </div>
       ) : null}
       {fixture.mapState === "stale" ? (
@@ -490,7 +492,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             fontWeight: 700,
           }}
         >
-          司機位置更新稍有延遲
+          {t.DriverLocationDelayed}
         </div>
       ) : null}
     </div>
@@ -574,7 +576,7 @@ function VehicleCard({
   ].filter((value): value is string => Boolean(value));
 
   return (
-    <Card title="您的車輛與駕駛" dimmed={dimmed} tag={tag}>
+    <Card title={t.YourVehicleAndDriver} dimmed={dimmed} tag={tag}>
       <div
         style={{
           display: "flex",
@@ -679,7 +681,7 @@ function VehicleCard({
                 borderRadius: 999,
               }}
             >
-              執登有效
+              {t.LicenseValid}
             </span>
           </div>
           <div
@@ -690,7 +692,7 @@ function VehicleCard({
               fontFamily: monoFont,
             }}
           >
-            {assignment.driver.registrationMaskedDisplay} · 有效至{" "}
+            {assignment.driver.registrationMaskedDisplay} {t.ValidUntilDot}{" "}
             {assignment.driver.registrationEffectiveUntil}
           </div>
           <div style={{ marginTop: 6 }}>
@@ -718,7 +720,7 @@ function VehicleCard({
                   </b>
                 </span>
                 <span style={{ fontSize: 11, color: passengerChrome.muted }}>
-                  {assignment.rating.ratingCount} 則評價
+                  {assignment.rating.ratingCount} {t.ReviewsCountSuf}
                 </span>
               </span>
             ) : (
@@ -739,10 +741,10 @@ function VehicleCard({
                     borderRadius: 999,
                   }}
                 >
-                  新進駕駛
+                  {t.NewDriver}
                 </span>
                 <span style={{ fontSize: 11, color: passengerChrome.muted }}>
-                  尚無乘車評價
+                  {t.NoReviewsYet}
                 </span>
               </span>
             )}
@@ -764,7 +766,7 @@ function FareCard({
     return (
       <>
         <Card
-          title="現行計費表"
+          title={t.CurrentFareTable}
           tag={
             <span
               style={{
@@ -777,7 +779,7 @@ function FareCard({
                 borderRadius: 999,
               }}
             >
-              已生效
+              {t.AlreadyEffective}
             </span>
           }
         >
@@ -788,8 +790,7 @@ function FareCard({
               marginBottom: 6,
             }}
           >
-            版本 F-2026-03 · 生效日 2026/07/01 · 備查{" "}
-            {fixture.fareVersion.authorityFilingRef}
+            {t.VersionDetails} {fixture.fareVersion.authorityFilingRef}
           </div>
           {[
             ["起程運價（1.25 公里）", "NT$ 85"],
@@ -813,7 +814,7 @@ function FareCard({
             </div>
           ))}
         </Card>
-        <Card title="車資變更規則">
+        <Card title={t.FareChangeRuleTitle}>
           <div
             style={{
               fontSize: 12,
@@ -821,7 +822,7 @@ function FareCard({
               lineHeight: 1.65,
             }}
           >
-            若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。
+            {t.FareChangeRule}
           </div>
         </Card>
       </>
@@ -830,7 +831,7 @@ function FareCard({
 
   const isAnomaly = fixture.routeFareMode === "anomaly";
   return (
-    <Card title="預估路線與車資">
+    <Card title={t.EstRouteAndFare}>
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
         <div
           style={{
@@ -915,7 +916,7 @@ function FareCard({
                 marginTop: 2,
               }}
             >
-              請稍後重試或聯絡客服
+              {t.RetryOrContactSupport}
             </div>
           </div>
         ) : (
@@ -943,7 +944,7 @@ function FareCard({
               lineHeight: 1.55,
             }}
           >
-            若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。
+            {t.FareChangeRuleShort}
           </div>
         ) : null}
       </div>
@@ -955,7 +956,7 @@ function PaymentCard({ fixture }: { fixture: PassengerRideFixture }) {
   if (!fixture.payment) return null;
   const tone = getToneRamp(fixture.payment.tone);
   return (
-    <Card title="付款狀態">
+    <Card title={t.PaymentStatus}>
       <div
         style={{
           display: "flex",
@@ -1036,8 +1037,10 @@ function CertificateCard({
 
   if (certificate.state === "pending") {
     return (
-      <Card title="電子乘車證明">
-        <div style={{ fontSize: 13.5, fontWeight: 800 }}>乘車證明準備中</div>
+      <Card title={t.EReceipt}>
+        <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+          {t.ReceiptPreparing}
+        </div>
         <div
           style={{
             color: passengerChrome.muted,
@@ -1046,7 +1049,7 @@ function CertificateCard({
             marginTop: 4,
           }}
         >
-          證明尚未產生。可重新讀取，但此頁不會要求後端重新開立。
+          {t.ReceiptNotGenerated}
         </div>
         {fixture.canReadReceipt === true ? (
           <button
@@ -1064,7 +1067,7 @@ function CertificateCard({
 
   if (certificate.state === "error") {
     return (
-      <Card title="電子乘車證明">
+      <Card title={t.EReceipt}>
         <div
           style={{
             border: `1px solid ${passengerChrome.danger.border}`,
@@ -1075,10 +1078,10 @@ function CertificateCard({
           }}
         >
           <div style={{ fontSize: 13.5, fontWeight: 800 }}>
-            無法讀取完整乘車證明
+            {t.CannotReadReceipt}
           </div>
           <div style={{ fontSize: 11.5, lineHeight: 1.55, marginTop: 4 }}>
-            系統不會以展示資料補齊缺少欄位。錯誤代碼：
+            {t.NoMockData}
             <span style={{ fontFamily: monoFont }}>
               {certificate.errorCode || "PASSENGER_RECEIPT_REQUEST_FAILED"}
             </span>
@@ -1100,7 +1103,7 @@ function CertificateCard({
 
   const rows = certificate.rows ?? [];
   return (
-    <Card title="電子乘車證明">
+    <Card title={t.EReceipt}>
       {rows.map((row, index) => (
         <div
           key={`${row.label}-${index}`}
@@ -1201,7 +1204,7 @@ function RatingCard({
               fontWeight: 800,
             }}
           >
-            評價已送出
+            {t.RatingSubmitted}
           </div>
           <div
             style={{
@@ -1210,7 +1213,7 @@ function RatingCard({
               marginTop: 4,
             }}
           >
-            本趟評價為 {submittedScore} 星；重整後仍以伺服器已評價狀態為準。
+            {t.RatingPrefix2} {submittedScore} {t.RatingSuffix2}
           </div>
         </div>
       </Card>
@@ -1265,7 +1268,7 @@ function RatingCard({
   return (
     <Card>
       <div style={{ textAlign: "center", padding: "6px 0 2px" }}>
-        <div style={{ fontSize: 17, fontWeight: 800 }}>這趟服務如何？</div>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>{t.HowWasService}</div>
         <div
           style={{ fontSize: 11.5, color: passengerChrome.muted, marginTop: 3 }}
         >
@@ -1286,7 +1289,7 @@ function RatingCard({
             marginTop: 4,
           }}
         >
-          {selectedScore} 星
+          {selectedScore} {t.Star}
         </div>
       </div>
       <div
@@ -1319,7 +1322,7 @@ function RatingCard({
       {selectedScore <= 3 && (
         <div style={{ marginTop: 16 }}>
           <textarea
-            placeholder="給我們一些建議吧"
+            placeholder={t.LeaveComment}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             style={{
@@ -1348,7 +1351,7 @@ function RatingCard({
               onChange={(e) => setContactRequested(e.target.checked)}
               style={{ width: 16, height: 16 }}
             />
-            需要客服與您聯繫嗎？
+            {t.NeedSupportContact}
           </label>
         </div>
       )}
@@ -1399,9 +1402,9 @@ function CompletedThanks() {
       >
         ✓
       </span>
-      <div style={{ fontSize: 18, fontWeight: 800 }}>感謝您的評價</div>
+      <div style={{ fontSize: 18, fontWeight: 800 }}>{t.ThanksForRating}</div>
       <div style={{ fontSize: 12.5, color: passengerChrome.muted }}>
-        您的意見會協助我們維持服務品質。
+        {t.RatingHelps}
       </div>
     </div>
   );
@@ -1436,7 +1439,7 @@ function ContactUnavailableCard({
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>
-            目前無法直接聯絡司機
+            {t.CannotContactDriver}
           </div>
           <div
             style={{
@@ -1445,13 +1448,13 @@ function ContactUnavailableCard({
               marginTop: 2,
             }}
           >
-            請改聯絡客服，我們會協助轉達。
+            {t.ContactSupportInstead}
           </div>
         </div>
       </div>
       <div style={{ marginTop: 10 }}>
         <button type="button" style={buttonStyle("primary")}>
-          聯絡客服 0800-090-000
+          {t.ContactSupportPhone}
         </button>
       </div>
     </div>
@@ -1485,12 +1488,12 @@ function SeatbeltNotice() {
       </span>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>
-          上車後請全程繫妥安全帶
+          {t.SeatbeltReminder}
         </div>
         <div
           style={{ fontSize: 11.5, color: passengerChrome.muted, marginTop: 2 }}
         >
-          前後座乘客都需要繫安全帶。
+          {t.SeatbeltBoth}
         </div>
       </div>
       <span aria-hidden="true" style={{ color: passengerChrome.dim }}>
@@ -1512,9 +1515,9 @@ function FooterNotice() {
         flexShrink: 0,
       }}
     >
-      本服務僅提供預約叫車
+      {t.ReservationOnly}
       <br />
-      聯絡與申訴資訊以本趟權威資料為準
+      {t.AuthoritativeContact}
     </div>
   );
 }
@@ -1633,7 +1636,7 @@ function Actions({
           onClick={cancel}
           disabled={fixture.canCancel === false || actionPending}
         >
-          取消行程
+          {t.CancelRide}
         </button>
         <div
           style={{
@@ -1642,7 +1645,7 @@ function Actions({
             color: passengerChrome.muted,
           }}
         >
-          指派前取消不收費
+          {t.CancelFreeBeforeAssign}
         </div>
       </ActionGroup>
     );
@@ -1657,7 +1660,7 @@ function Actions({
           onClick={cancel}
           disabled={fixture.canCancel === false || actionPending}
         >
-          取消行程
+          {t.CancelRide}
         </button>
         <div
           style={{
@@ -1666,7 +1669,7 @@ function Actions({
             color: passengerChrome.muted,
           }}
         >
-          改派期間取消不收費
+          {t.CancelFreeDuringReassign}
         </div>
       </ActionGroup>
     );
@@ -1678,10 +1681,10 @@ function Actions({
     return (
       <ActionGroup>
         <Link href={`/ride/${token}/receipt`} style={buttonStyle("secondary")}>
-          查看電子乘車證明
+          {t.ViewReceipt}
         </Link>
         <Link href="/" style={buttonStyle("ghost")}>
-          回到首頁
+          {t.BackToHome}
         </Link>
       </ActionGroup>
     );
@@ -1691,7 +1694,7 @@ function Actions({
     return (
       <ActionGroup>
         <Link href={`/ride/${token}`} style={buttonStyle("ghost")}>
-          返回行程
+          {t.BackToRide}
         </Link>
       </ActionGroup>
     );
@@ -1701,10 +1704,10 @@ function Actions({
     return (
       <ActionGroup>
         <button type="button" style={buttonStyle("primary")}>
-          重新整理
+          {t.Refresh}
         </button>
         <button type="button" style={buttonStyle("secondary")}>
-          聯絡客服
+          {t.ContactSupport}
         </button>
       </ActionGroup>
     );
@@ -1719,7 +1722,7 @@ function Actions({
           onClick={cancel}
           disabled={fixture.canCancel === false || actionPending}
         >
-          取消行程
+          {t.CancelRide}
         </button>
       </div>
     );
@@ -1730,10 +1733,10 @@ function Actions({
       <>
         <ActionGroup>
           <button type="button" style={buttonStyle("primary")}>
-            重新取得報價
+            {t.Requote}
           </button>
           <button type="button" style={buttonStyle("secondary")}>
-            聯絡客服
+            {t.ContactSupport}
           </button>
         </ActionGroup>
         <div
@@ -1744,14 +1747,14 @@ function Actions({
             textAlign: "center",
           }}
         >
-          正式報價完成前不會為您確認訂單
+          {t.NoConfirmBeforeQuote}
         </div>
       </>
     );
   }
 
   const contactLabel =
-    fixture.actionMode === "support_only" ? "聯絡客服" : "聯絡司機";
+    fixture.actionMode === "support_only" ? t.ContactSupport : "聯絡司機";
 
   return (
     <ActionGroup>
@@ -1769,7 +1772,7 @@ function Actions({
         onClick={cancel}
         disabled={fixture.canCancel === false || actionPending}
       >
-        {fixture.actionLabel || "取消行程"}
+        {fixture.actionLabel || t.CancelRide}
       </button>
       {fixture.cancelNote ? (
         <div
@@ -1800,7 +1803,7 @@ function RideContent({
       <>
         <EmptyState
           tone={passengerChrome.warning}
-          title="派車資訊尚未完整"
+          title={t.DispatchIncomplete}
           detail="系統正在重新確認車輛與駕駛資料，尚未完成指派。完成後會立即通知您。"
         />
         <Actions fixture={fixture} token={token} authMode={authMode} />
@@ -1843,7 +1846,7 @@ function RideContent({
             textAlign: "center",
           }}
         >
-          本頁依主管機關備查之現行版本公告
+          {t.CurrentRegulation}
         </div>
       </>
     );
@@ -1854,7 +1857,7 @@ function RideContent({
       <>
         <MapCard fixture={fixture} />
         <ProgressCard
-          title="正在為您安排合適的車輛"
+          title={t.ArrangingVehicle}
           detail="預約時間 今日 14:45 · 通常 1–3 分鐘完成指派"
         />
         <FareCard fixture={fixture} />
@@ -1868,7 +1871,7 @@ function RideContent({
       <>
         <MapCard fixture={fixture} />
         <ProgressCard
-          title="正在為您安排另一輛車"
+          title={t.ArrangingAnother}
           detail="原車輛無法完成本趟服務，車資與行程不受影響"
         />
         <VehicleCard
@@ -1886,7 +1889,7 @@ function RideContent({
                 borderRadius: 999,
               }}
             >
-              已取消指派
+              {t.Unassigned}
             </span>
           }
         />
@@ -1917,7 +1920,9 @@ function RideContent({
               fontSize: 13,
             }}
           >
-            <span style={{ color: passengerChrome.muted }}>本趟車資</span>
+            <span style={{ color: passengerChrome.muted }}>
+              {t.ThisRideFare}
+            </span>
             <b>
               {fixture.payment?.amountText ||
                 fixture.routeFareText ||
