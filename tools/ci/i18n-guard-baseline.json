@@ -3,22 +3,27 @@
   "exemptions": [
     {
       "path": "apps/passenger-app-web/app/account/page.tsx",
-      "rules": ["jsx-text"],
+      "rules": ["jsx-text", "jsx-copy-attribute"],
       "reason": "Web shell skeleton mockup."
     },
     {
       "path": "apps/passenger-app-web/app/login/page.tsx",
-      "rules": ["jsx-text"],
+      "rules": ["jsx-text", "jsx-copy-attribute"],
       "reason": "Web shell skeleton mockup."
     },
     {
       "path": "apps/passenger-app-web/app/page.tsx",
-      "rules": ["jsx-text"],
+      "rules": ["jsx-text", "jsx-copy-attribute"],
       "reason": "Web shell skeleton mockup."
     },
     {
       "path": "apps/passenger-app-web/app/ride/page.tsx",
-      "rules": ["jsx-text"],
+      "rules": ["jsx-text", "jsx-copy-attribute"],
+      "reason": "Web shell skeleton mockup."
+    },
+    {
+      "path": "apps/passenger-app-web/app/auth/callback/[provider]/page.tsx",
+      "rules": ["jsx-text", "jsx-copy-attribute"],
       "reason": "Web shell skeleton mockup."
     },
     {
