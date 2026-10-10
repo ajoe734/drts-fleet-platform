@@ -137,7 +137,9 @@ jobs:
           INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 operations/verification/read-dev-cloud-metadata.py \
+          echo "::error::Unsupported hosted path: frozen collector lacks bounded stream capture."
+          exit 1
+          # python3 operations/verification/read-dev-cloud-metadata.py \
             --expected-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" \
             --definition-sha "$INPUT_WORKFLOW_DEF_SHA" \
             --output .local-cloud-metadata.json
@@ -176,7 +178,7 @@ jobs:
                 echo "::error::Failed to fetch workflow_runs (API error): $RES"
                 exit 1
               fi
-              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("deploy|restore|provision|provider|scanner"; "i")) | .id')
+              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.path | test("deploy|restore|provision|provider|scanner"; "i")) | .id')
               if [ -n "$MATCHES" ]; then
                 ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
               fi

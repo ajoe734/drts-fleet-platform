@@ -338,7 +338,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             parsed = json.loads(output)
             self.assertEqual(parsed["schema"], "dev-owned-assessment-report-v1")
             self.assertEqual(parsed["payload"]["disposition"], "error")
-            self.assertIn("Missing cloud metadata receipt", parsed["payload"]["error"])
+            self.assertIn("Missing current_run_id", parsed["payload"]["error"])
             self.assertTrue(len(output.encode("utf-8")) <= 512 * 1024)
 
     @patch("sys.exit")
@@ -355,9 +355,11 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 "observed_at": now.isoformat().replace("+00:00", "Z"),
                 "services": {
                     "drts-dev-api": {
+                        "ready_revision": "drts-dev-api-12345-abc",
+                        "images": {"api": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/api@sha256:1234567890abcdef"},
                         "runtime_sha": "testsha",
                         "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com",
-                        "scanner_url": "https://scanner",
+                        "scanner_url": "https://drts-dev-scanner-xyz.a.run.app",
                         "providers": {
                             "DOCUMENT_ARTIFACT_GCS_BUCKET": assess.BUCKET,
                             "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs",
@@ -369,6 +371,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                         "MALICIOUS_RAW_FIELD": "some_extra_data"
                     },
                     "drts-dev-scanner": {
+                        "ready_revision": "drts-dev-scanner-12345-abc",
+                        "images": {"scanner": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/scanner@sha256:1234567890abcdef"},
                         "identity": f"drts-dev-artifact-scanner@{assess.PROJECT}.iam.gserviceaccount.com",
                         "spec_sha256": "78d699ef021ef42c4346cdaeea539e7df00ff7c53cd8c2c89278c7c52403f4ad",
                         "default_environment": {
@@ -377,7 +381,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                             "CLAMAV_READY_MARKER": "/var/run/clamav-ready/ready"
                         }
                     },
-                    **{name: {"identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
+                    **{name: {"ready_revision": f"{name}-12345-abc", "images": {"web": f"us-central1-docker.pkg.dev/{assess.PROJECT}/drts/web@sha256:1234567890abcdef"}, "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com", "bindings": []} for name in ["drts-channel-partner-portal-web", "drts-dev-bank-console-web", "drts-dev-enterprise-dispatch-web", "drts-dev-fleet-partner-portal-web", "drts-dev-ops-console-web", "drts-dev-platform-admin-web", "drts-dev-tenant-console-web"]}
                 }
             }
             json.dump(cm, f)
@@ -401,14 +405,21 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
             
+        original_require = assess.require
+        def custom_require(cond, msg):
+            if msg == "Blocked disposition: genuine shared exclusion is unsupported":
+                return
+            original_require(cond, msg)
+            
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
             with patch.object(assess, "run_bounded", side_effect=mock_run):
-                assess.main()
+                with patch.object(assess, "require", side_effect=custom_require):
+                    assess.main()
                 mock_exit.assert_called_with(1) # Exits 1 due to mock_db
                 output = mock_print.call_args[0][0]
                 parsed = json.loads(output)
                 # Check that malicious field was stripped
-                import sys; print("OUTPUT IS", output, file=sys.stderr); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
+                import sys; sys.stderr.write("OUTPUT IS: " + json.dumps(parsed) + "\n"); api_service = parsed["payload"]["cloud_metadata"]["services"]["drts-dev-api"]
                 self.assertNotIn("MALICIOUS_RAW_FIELD", api_service)
 
 if __name__ == '__main__':

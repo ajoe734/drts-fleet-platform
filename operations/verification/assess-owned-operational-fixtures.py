@@ -86,8 +86,6 @@ def require(cond: bool, msg: str):
         raise ValueError(msg)
 
 def fetch_and_validate_provenance(args) -> None:
-    if args.mock_db:
-        return
     require(args.product_run_id == AUTHORIZED_PROVENANCE["run_id"], "Unauthorized product_run_id")
     require(args.artifact_id == AUTHORIZED_PROVENANCE["artifact_id"], "Unauthorized artifact_id")
     require(args.source_sha == AUTHORIZED_PROVENANCE["source_sha"], "Unauthorized source_sha")
@@ -998,6 +996,167 @@ def main():
     }
     
     try:
+        require(args.current_run_id, "Missing current_run_id")
+        res_run = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"], timeout_sec=30)
+        require(res_run.returncode == 0, "Failed to fetch current run from GitHub API")
+        curr_run_data = json.loads(res_run.stdout)
+        require(curr_run_data.get("head_branch") == "dev", "Current run not on protected dev branch")
+        require(curr_run_data.get("event") == "workflow_dispatch", "Current run not authorized trigger")
+        require(str(curr_run_data.get("id")) == args.current_run_id, "Current run ID mismatch")
+        require(curr_run_data.get("head_sha") == args.tooling_run_sha, "Current run SHA mismatch")
+        
+        # CI check-runs check
+        runs = []
+        page = 1
+        total_runs = -1
+        while True:
+            res_ci = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/check-runs?per_page=100&page={page}"], timeout_sec=30)
+            require(res_ci.returncode == 0, "Failed to fetch check-runs")
+            ci_data = json.loads(res_ci.stdout)
+            if total_runs == -1:
+                total_runs = ci_data.get("total_count", -1)
+            page_runs = ci_data.get("check_runs", [])
+            if not page_runs:
+                break
+            runs.extend(page_runs)
+            if len(page_runs) < 100:
+                break
+            page += 1
+        require(total_runs == len(runs), "Check runs total_count mismatch")
+        require(len(runs) > 0, "tooling_run_sha must have CI runs")
+        
+        required_checks = ["Commit trailers", "Runtime mirror guard", "Smoke acceptance", "ci-integ"]
+        found_required = set()
+        
+        for r in runs:
+            name = r.get("name")
+            head = r.get("head_sha")
+            require(head == args.tooling_run_sha, f"Check run {name} head_sha mismatch")
+            
+            if name in required_checks:
+                require(r.get("status") == "completed", f"Required check {name} not completed")
+                require(r.get("conclusion") == "success", f"Required check {name} failed or skipped")
+                found_required.add(name)
+            else:
+                require(r.get("status") == "completed", f"Check {name} not completed")
+                require(r.get("conclusion") in ("success", "neutral", "skipped"), f"Check {name} failed")
+        
+        for req in required_checks:
+            require(req in found_required, f"Missing required check {req}")
+        
+        # Independent review check
+        res_pr = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/pulls"], timeout_sec=30)
+        require(res_pr.returncode == 0, "Failed to fetch pull requests for tooling commit")
+        pulls_data = json.loads(res_pr.stdout)
+        require(isinstance(pulls_data, list) and len(pulls_data) > 0, "Tooling commit lacks associated pull request")
+        pr = pulls_data[0]
+        require(pr.get("merged_at") is not None, "Tooling pull request must be merged")
+        require(pr.get("merge_commit_sha") == args.tooling_run_sha, "PR merge_commit_sha mismatch")
+        require(pr.get("base", {}).get("ref") == "dev", "PR base must be dev")
+        head_sha = pr.get("head", {}).get("sha")
+        require(head_sha, "PR missing head sha")
+        pr_owner = pr.get("user", {}).get("login")
+        
+        reviews = []
+        page = 1
+        while True:
+            res_reviews = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/pulls/{pr.get('number')}/reviews?per_page=100&page={page}"], timeout_sec=30)
+            require(res_reviews.returncode == 0, "Failed to fetch PR reviews")
+            page_reviews = json.loads(res_reviews.stdout)
+            if not isinstance(page_reviews, list) or not page_reviews:
+                break
+            reviews.extend(page_reviews)
+            if len(page_reviews) < 100:
+                break
+            page += 1
+        
+        latest_reviews = {}
+        for r in reviews:
+            user = r.get("user", {}).get("login")
+            if user:
+                latest_reviews[user] = r
+        
+        approved = False
+        for user, r in latest_reviews.items():
+            if user != pr_owner and r.get("state") == "APPROVED":
+                if r.get("commit_id") == head_sha:
+                    approved = True
+                    break
+        require(approved, "Tooling pull request lacks independent latest approval on head commit")
+        
+        # Operator approval check
+        res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout_sec=30)
+        require(res_approvals.returncode == 0, "Failed to fetch run approvals")
+        approvals_data = json.loads(res_approvals.stdout)
+        approvals = approvals_data if isinstance(approvals_data, list) else [approvals_data]
+        
+        operator_approved = False
+        for a in approvals:
+            if isinstance(a, dict) and a.get("state") == "approved":
+                envs = a.get("environments", [])
+                if isinstance(envs, list) and any(e.get("name") == "operator" for e in envs if isinstance(e, dict)):
+                    operator_approved = True
+                    break
+        require(operator_approved, "Actual Operator approval missing for 'operator' environment")
+        
+        # No overlap check
+        active_restricted_runs = []
+        import re as regex_mod
+        for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
+            page = 1
+            status_fetched_runs = 0
+            status_total_runs = -1
+            while True:
+                res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
+                require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
+                overlap_data = json.loads(res_overlap.stdout)
+                if status_total_runs == -1:
+                    status_total_runs = overlap_data.get("total_count", -1)
+                page_runs = overlap_data.get("workflow_runs", [])
+                if not page_runs:
+                    break
+                status_fetched_runs += len(page_runs)
+                for r in page_runs:
+                    if str(r.get("id")) != args.current_run_id:
+                        path = r.get("path", "")
+                        if regex_mod.search(r"deploy|restore|provision|provider|scanner", path, regex_mod.IGNORECASE):
+                            active_restricted_runs.append(r)
+                if len(page_runs) < 100:
+                    break
+                page += 1
+            require(status_total_runs >= 0, f"Failed to determine total {status} runs")
+            require(status_fetched_runs == status_total_runs, f"Incomplete pagination for {status} runs: {status_fetched_runs} != {status_total_runs}")
+        
+        require(len(active_restricted_runs) == 0, "Overlapping restricted workflows detected")
+        
+        curr_jobs = []
+        page = 1
+        curr_total_jobs = -1
+        while True:
+            res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
+            require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
+            jobs_data = json.loads(res_jobs.stdout)
+            if curr_total_jobs == -1:
+                curr_total_jobs = jobs_data.get("total_count", -1)
+            page_jobs = jobs_data.get("jobs", [])
+            if not page_jobs:
+                break
+            curr_jobs.extend(page_jobs)
+            if len(page_jobs) < 100:
+                break
+            page += 1
+        require(curr_total_jobs >= 0, "Failed to determine total current jobs")
+        require(len(curr_jobs) == curr_total_jobs, "Incomplete pagination for current jobs")
+        unique_jobs = {j.get("id") for j in curr_jobs}
+        require(len(unique_jobs) == len(curr_jobs), "Duplicate jobs in inventory")
+        require(all(str(j.get("run_id")) == args.current_run_id for j in curr_jobs), "Foreign job in inventory")
+        
+        # Check for operator environment binding (reservation) by confirming the specific job name that has the environment
+        op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
+        require(len(op_envs) > 0, "No Owned fixture assessment job found in current jobs")
+        require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path mismatch")
+        require(False, "Blocked disposition: genuine shared exclusion is unsupported")
+
         if args.cloud_metadata and os.path.exists(args.cloud_metadata):
             size = os.path.getsize(args.cloud_metadata)
             require(size <= 512 * 1024, "Cloud metadata file too large")
@@ -1029,7 +1188,19 @@ def main():
                 require(set(services.keys()) == set(expected_services), "Service names mismatch")
                 
                 validated_services = {}
+                import re as regex_mod
                 for name, s in services.items():
+                    ready_revision = s.get("ready_revision")
+                    require(isinstance(ready_revision, str) and regex_mod.fullmatch(regex_mod.escape(name) + r"-[0-9]{5}-[a-z0-9]{3}", ready_revision), f"Invalid ready_revision for {name}")
+                    images = s.get("images")
+                    require(isinstance(images, dict), f"Images missing or malformed for {name}")
+                    validated_images = {}
+                    for c_name, digest in images.items():
+                        require(isinstance(c_name, str) and isinstance(digest, str), f"Invalid image entry for {name}")
+                        require(digest.startswith(f"us-central1-docker.pkg.dev/{PROJECT}/drts/"), f"Image not in project for {name}")
+                        require("@sha256:" in digest, f"Image is not a digest for {name}")
+                        validated_images[c_name] = digest
+
                     if name == "drts-dev-api":
                         require(s.get("runtime_sha") == args.current_runtime_sha, f"Runtime SHA mismatch for {name}")
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
@@ -1040,11 +1211,16 @@ def main():
                         require(prov.get("REMITTANCE_PROOF_GCS_BUCKET") == PROJECT + "-remittance-proofs", "API remittance bucket mismatch")
                         require(prov.get("REMITTANCE_PROOF_SCANNER_PROVIDER") == "cloud-run-clamd", "API scanner provider mismatch")
                         require(prov.get("REMITTANCE_PROOF_SCANNER_TIMEOUT_MS") == "60000", "API scanner timeout mismatch")
-                        require(s.get("scanner_url"), "Missing scanner_url for scanner")
+                        
+                        scanner_url = s.get("scanner_url")
+                        require(isinstance(scanner_url, str) and regex_mod.fullmatch(r"https://drts-dev-scanner-[a-z0-9-]+\.a\.run\.app", scanner_url), "Invalid scanner URL")
+                        
                         validated_services[name] = {
+                            "ready_revision": ready_revision,
+                            "images": validated_images,
                             "runtime_sha": s.get("runtime_sha"),
                             "identity": s.get("identity"),
-                            "scanner_url": s.get("scanner_url"),
+                            "scanner_url": scanner_url,
                             "providers": {
                                 "DOCUMENT_ARTIFACT_GCS_BUCKET": prov.get("DOCUMENT_ARTIFACT_GCS_BUCKET"),
                                 "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": prov.get("DOCUMENT_ARTIFACT_STORAGE_PROVIDER"),
@@ -1065,6 +1241,8 @@ def main():
                         require(env.get("CLAMAV_READY_MARKER") == "/var/run/clamav-ready/ready", "Scanner environment mismatch")
                         
                         validated_services[name] = {
+                            "ready_revision": ready_revision,
+                            "images": validated_images,
                             "identity": s.get("identity"),
                             "spec_sha256": s.get("spec_sha256"),
                             "default_environment": {
@@ -1075,7 +1253,6 @@ def main():
                         }
                     else:
                         require(s.get("identity") == f"drts-dev-runtime@{PROJECT}.iam.gserviceaccount.com", f"Identity mismatch for {name}")
-                        # Private consoles should have no bindings or no allUsers/allAuthenticatedUsers
                         bindings = s.get("bindings")
                         require(bindings is not None, f"Console {name} bindings missing/bypass")
                         require(isinstance(bindings, list), f"Console {name} bindings malformed")
@@ -1091,6 +1268,8 @@ def main():
                             require(set(b.keys()) <= {"role", "members"}, f"Console {name} binding contains unknown fields")
                             validated_bindings.append({"role": role, "members": members})
                         validated_services[name] = {
+                            "ready_revision": ready_revision,
+                            "images": validated_images,
                             "identity": s.get("identity"),
                             "bindings": validated_bindings
                         }
@@ -1104,165 +1283,7 @@ def main():
                     "services": validated_services
                 }
                 
-                require(args.current_run_id, "Missing current_run_id")
-                res_run = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}"], timeout_sec=30)
-                require(res_run.returncode == 0, "Failed to fetch current run from GitHub API")
-                curr_run_data = json.loads(res_run.stdout)
-                require(curr_run_data.get("head_branch") == "dev", "Current run not on protected dev branch")
-                require(curr_run_data.get("event") == "workflow_dispatch", "Current run not authorized trigger")
-                require(str(curr_run_data.get("id")) == args.current_run_id, "Current run ID mismatch")
-                require(curr_run_data.get("head_sha") == args.tooling_run_sha, "Current run SHA mismatch")
-                
-                # CI check-runs check
-                runs = []
-                page = 1
-                total_runs = -1
-                while True:
-                    res_ci = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/check-runs?per_page=100&page={page}"], timeout_sec=30)
-                    require(res_ci.returncode == 0, "Failed to fetch check-runs")
-                    ci_data = json.loads(res_ci.stdout)
-                    if total_runs == -1:
-                        total_runs = ci_data.get("total_count", -1)
-                    page_runs = ci_data.get("check_runs", [])
-                    if not page_runs:
-                        break
-                    runs.extend(page_runs)
-                    if len(page_runs) < 100:
-                        break
-                    page += 1
-                require(total_runs == len(runs), "Check runs total_count mismatch")
-                require(len(runs) > 0, "tooling_run_sha must have CI runs")
-                
-                required_checks = ["Commit trailers", "Runtime mirror guard", "Smoke acceptance", "ci-integ"]
-                found_required = set()
-                
-                for r in runs:
-                    name = r.get("name")
-                    head = r.get("head_sha")
-                    require(head == args.tooling_run_sha, f"Check run {name} head_sha mismatch")
-                    
-                    if name in required_checks:
-                        require(r.get("status") == "completed", f"Required check {name} not completed")
-                        require(r.get("conclusion") == "success", f"Required check {name} failed or skipped")
-                        found_required.add(name)
-                    else:
-                        require(r.get("status") == "completed", f"Check {name} not completed")
-                        require(r.get("conclusion") in ("success", "neutral", "skipped"), f"Check {name} failed")
-                
-                for req in required_checks:
-                    require(req in found_required, f"Missing required check {req}")
-                
-                # Independent review check
-                res_pr = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/commits/{args.tooling_run_sha}/pulls"], timeout_sec=30)
-                require(res_pr.returncode == 0, "Failed to fetch pull requests for tooling commit")
-                pulls_data = json.loads(res_pr.stdout)
-                require(isinstance(pulls_data, list) and len(pulls_data) > 0, "Tooling commit lacks associated pull request")
-                pr = pulls_data[0]
-                require(pr.get("merged_at") is not None, "Tooling pull request must be merged")
-                require(pr.get("merge_commit_sha") == args.tooling_run_sha, "PR merge_commit_sha mismatch")
-                require(pr.get("base", {}).get("ref") == "dev", "PR base must be dev")
-                head_sha = pr.get("head", {}).get("sha")
-                require(head_sha, "PR missing head sha")
-                pr_owner = pr.get("user", {}).get("login")
-                
-                reviews = []
-                page = 1
-                while True:
-                    res_reviews = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/pulls/{pr.get('number')}/reviews?per_page=100&page={page}"], timeout_sec=30)
-                    require(res_reviews.returncode == 0, "Failed to fetch PR reviews")
-                    page_reviews = json.loads(res_reviews.stdout)
-                    if not isinstance(page_reviews, list) or not page_reviews:
-                        break
-                    reviews.extend(page_reviews)
-                    if len(page_reviews) < 100:
-                        break
-                    page += 1
-                
-                latest_reviews = {}
-                for r in reviews:
-                    user = r.get("user", {}).get("login")
-                    if user:
-                        latest_reviews[user] = r
-                
-                approved = False
-                for user, r in latest_reviews.items():
-                    if user != pr_owner and r.get("state") == "APPROVED":
-                        if r.get("commit_id") == head_sha:
-                            approved = True
-                            break
-                require(approved, "Tooling pull request lacks independent latest approval on head commit")
-                
-                # Operator approval check
-                res_approvals = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/approvals"], timeout_sec=30)
-                require(res_approvals.returncode == 0, "Failed to fetch run approvals")
-                approvals_data = json.loads(res_approvals.stdout)
-                approvals = approvals_data if isinstance(approvals_data, list) else [approvals_data]
-                
-                operator_approved = False
-                for a in approvals:
-                    if isinstance(a, dict) and a.get("state") == "approved":
-                        envs = a.get("environments", [])
-                        if isinstance(envs, list) and any(e.get("name") == "operator" for e in envs if isinstance(e, dict)):
-                            operator_approved = True
-                            break
-                require(operator_approved, "Actual Operator approval missing for 'operator' environment")
-                
-                # No overlap check
-                active_restricted_runs = []
-                import re as regex_mod
-                for status in ["in_progress", "queued", "waiting", "pending", "requested"]:
-                    page = 1
-                    status_fetched_runs = 0
-                    status_total_runs = -1
-                    while True:
-                        res_overlap = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs?status={status}&per_page=100&page={page}"], timeout_sec=30)
-                        require(res_overlap.returncode == 0, f"Failed to fetch {status} runs")
-                        overlap_data = json.loads(res_overlap.stdout)
-                        if status_total_runs == -1:
-                            status_total_runs = overlap_data.get("total_count", -1)
-                        page_runs = overlap_data.get("workflow_runs", [])
-                        if not page_runs:
-                            break
-                        status_fetched_runs += len(page_runs)
-                        for r in page_runs:
-                            if str(r.get("id")) != args.current_run_id:
-                                path = r.get("path", "")
-                                if regex_mod.search(r"deploy|restore|provision|provider|scanner", path, regex_mod.IGNORECASE):
-                                    active_restricted_runs.append(r)
-                        if len(page_runs) < 100:
-                            break
-                        page += 1
-                    require(status_total_runs >= 0, f"Failed to determine total {status} runs")
-                    require(status_fetched_runs == status_total_runs, f"Incomplete pagination for {status} runs: {status_fetched_runs} != {status_total_runs}")
-                
-                require(len(active_restricted_runs) == 0, "Overlapping restricted workflows detected")
-                
-                curr_jobs = []
-                page = 1
-                curr_total_jobs = -1
-                while True:
-                    res_jobs = run_bounded(["gh", "api", f"/repos/ajoe734/drts-fleet-platform/actions/runs/{args.current_run_id}/jobs?per_page=100&page={page}"], timeout_sec=30)
-                    require(res_jobs.returncode == 0, "Failed to fetch current run jobs")
-                    jobs_data = json.loads(res_jobs.stdout)
-                    if curr_total_jobs == -1:
-                        curr_total_jobs = jobs_data.get("total_count", -1)
-                    page_jobs = jobs_data.get("jobs", [])
-                    if not page_jobs:
-                        break
-                    curr_jobs.extend(page_jobs)
-                    if len(page_jobs) < 100:
-                        break
-                    page += 1
-                require(curr_total_jobs >= 0, "Failed to determine total current jobs")
-                require(len(curr_jobs) == curr_total_jobs, "Incomplete pagination for current jobs")
-                unique_jobs = {j.get("id") for j in curr_jobs}
-                require(len(unique_jobs) == len(curr_jobs), "Duplicate jobs in inventory")
-                require(all(str(j.get("run_id")) == args.current_run_id for j in curr_jobs), "Foreign job in inventory")
-                
-                # Check for operator environment binding (reservation) by confirming the specific job name that has the environment
-                op_envs = [j for j in curr_jobs if j.get("name") == "Owned fixture assessment (Read-only GCS / DB)"]
-                require(len(op_envs) > 0, "No Owned fixture assessment job found in current jobs")
-                require(curr_run_data.get("path") == ".github/workflows/dev-owned-operational-fixture-assessment.yml", "Current run path mismatch")
+
 
                     
         else:
