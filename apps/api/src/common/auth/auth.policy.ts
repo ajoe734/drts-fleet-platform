@@ -1,9 +1,9 @@
-import type { AuthRealm } from "./auth.types";
+import type { AuthRealm, RequestAuthRealm } from "./auth.types";
 import { AUTH_ROUTE_READ_METHODS } from "./auth.constants";
 
 export interface RouteAuthPolicy {
   requiredScopes: string[];
-  allowedRealms: AuthRealm[];
+  allowedRealms: RequestAuthRealm[];
   description: string;
 }
 
@@ -35,6 +35,23 @@ export function resolveRouteAuthPolicy(
 ): ResolvedRouteAuthPolicy | null {
   const routePath = normalizeRoutePath(url);
   const upperMethod = method.toUpperCase();
+
+  if (routePath === "passenger-app" || routePath.startsWith("passenger-app/")) {
+    if (routePath.startsWith("passenger-app/platform/")) {
+      return {
+        routeKey: "passenger-app:platform",
+        requiredScopes: [],
+        allowedRealms: ["platform"],
+        description: "Passenger platform administration",
+      };
+    }
+    return {
+      routeKey: "passenger-app:self",
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description: "First-party passenger account and owned resources",
+    };
+  }
 
   if (routePath === "audit" && upperMethod === "GET") {
     return {
@@ -876,7 +893,8 @@ export function resolveRouteAuthPolicy(
       routeKey: "billing:driver:proof:create",
       requiredScopes: ["driver:write"],
       allowedRealms: ["driver"],
-      description: "Driver proof staging and upload; batch ownership enforced by service",
+      description:
+        "Driver proof staging and upload; batch ownership enforced by service",
     };
   }
 

@@ -24,6 +24,8 @@ import type {
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
 import { JwtAuthService } from "./jwt-auth.service";
+import { PassengerAccountService } from "../../modules/passenger-app/account/passenger-account.service";
+import { verifyGoogleAssertionOrInternalKey } from "./internal-key.middleware";
 import { StepUpProofService } from "./step-up-proof.service";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { SecurityEventsService } from "../../modules/security-events/security-events.service";
@@ -196,6 +198,8 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly stepUpProofService?: StepUpProofService,
     @Optional()
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
+    @Optional()
+    private readonly passengerAccountService?: PassengerAccountService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -223,6 +227,37 @@ export class BootstrapAuthGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? false;
+
+    const passengerPath = normalizeRoutePath(requestUrl)
+      .replace(/^api\/+/, "")
+      .replace(/\/+$/, "");
+    if (
+      (passengerPath === "passenger-app" ||
+        passengerPath.startsWith("passenger-app/")) &&
+      !passengerPath.startsWith("passenger-app/platform/")
+    ) {
+      // No bootstrap/IAP/legacy IAM fallback for first-party passengers, even in dev.
+      if (hasBootstrapAuthSignal(baseHeaders)) {
+        throw new ApiRequestError(
+          401,
+          "unauthorized",
+          "Passenger bootstrap headers are forbidden.",
+        );
+      }
+      return this.activatePassenger(
+        request,
+        baseHeaders,
+        isOpenRoute,
+        this.reflector.getAllAndOverride<string[]>(AUTH_ALLOWED_REALMS_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]) ?? [],
+        this.reflector.getAllAndOverride<string[]>(AUTH_REQUIRED_SCOPES_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]) ?? [],
+      );
+    }
 
     if (isOpenRoute) {
       const resolution = this.populateOpenRouteIdentity(
@@ -298,6 +333,75 @@ export class BootstrapAuthGuard implements CanActivate {
     }
 
     return this.activateNonIap(request, baseHeaders, requestUrl, policy);
+  }
+
+  private async activatePassenger(
+    request: AuthenticatedRequestLike,
+    headers: Record<string, string | string[] | undefined>,
+    open: boolean,
+    decoratedRealms: string[],
+    requiredScopes: string[],
+  ): Promise<boolean> {
+    // Clear any earlier identity; only the verified session below may populate it.
+    delete request.identity;
+    const token = extractBearerToken(headers);
+    if (token && this.passengerAccountService) {
+      const identity =
+        await this.passengerAccountService.authenticateAccessToken(token);
+      if (identity) {
+        if (
+          !open &&
+          decoratedRealms.length &&
+          !decoratedRealms.includes("passenger")
+        ) {
+          throw new ApiRequestError(
+            403,
+            "AUTH_REALM_DENIED",
+            "Passenger realm is not allowed for this route.",
+          );
+        }
+        if (!open && requiredScopes.length) {
+          throw new ApiRequestError(
+            403,
+            "AUTH_SCOPE_DENIED",
+            "Passenger session has no IAM scopes.",
+          );
+        }
+        request.identity = identity;
+        return true;
+      }
+    }
+    if (open) {
+      // Middleware permits Bearer requests because the guard is responsible for verification.
+      // Revalidate the BFF credential without that bypass: arbitrary Bearer must not open a strict route.
+      await verifyGoogleAssertionOrInternalKey(
+        {
+          ...request,
+          headers: {
+            ...headers,
+            ...(token && !headers[GOOGLE_WORKLOAD_IDENTITY_HEADER]
+              ? { [GOOGLE_WORKLOAD_IDENTITY_HEADER]: token }
+              : {}),
+          },
+        },
+        process.env.DRTS_INTERNAL_KEY,
+        {
+          ...(this.googleWorkloadIdentityAdapter
+            ? {
+                googleWorkloadIdentityAdapter:
+                  this.googleWorkloadIdentityAdapter,
+              }
+            : {}),
+        },
+      );
+      // Link/verify flows must still require an active identity in their purpose-bound transaction.
+      return true;
+    }
+    throw new ApiRequestError(
+      401,
+      "unauthorized",
+      "An active passenger session is required.",
+    );
   }
 
   private async resolveIapAssertionAndActivate(
@@ -738,14 +842,31 @@ export class BootstrapAuthGuard implements CanActivate {
     }
   }
 
-  private assertDriverProvisioningRoute(identity: BootstrapRequestIdentity, request: AuthenticatedRequestLike) {
+  private assertDriverProvisioningRoute(
+    identity: BootstrapRequestIdentity,
+    request: AuthenticatedRequestLike,
+  ) {
     if (identity.driverProvisioningDriverId === undefined) return;
-    const path = normalizeRoutePath(request.originalUrl ?? request.url ?? "").replace(/^api\/+/, "");
+    const path = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    ).replace(/^api\/+/, "");
     const route = `${(request.method ?? "GET").toUpperCase()} ${path}`;
-    const allowed = ["GET auth/session", "POST auth/driver/device/invite", "POST auth/driver/device/invite/revoke"];
-    if (identity.actorType !== "system" || identity.realm !== "system" ||
-        !identity.driverProvisioningDriverId || !allowed.includes(route)) {
-      throw new ApiRequestError(403, "AUTH_SCOPE_DENIED", "Driver provisioning sessions cannot access this route.");
+    const allowed = [
+      "GET auth/session",
+      "POST auth/driver/device/invite",
+      "POST auth/driver/device/invite/revoke",
+    ];
+    if (
+      identity.actorType !== "system" ||
+      identity.realm !== "system" ||
+      !identity.driverProvisioningDriverId ||
+      !allowed.includes(route)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_SCOPE_DENIED",
+        "Driver provisioning sessions cannot access this route.",
+      );
     }
   }
 
