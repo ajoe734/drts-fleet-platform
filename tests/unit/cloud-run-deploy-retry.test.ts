@@ -160,7 +160,9 @@ describe("Cloud Run deploy quota retry", () => {
       "utf8",
     );
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
-    expect(domainWorkflow).toContain("map-domain-service.sh ride.smarttransport.tw");
+    expect(domainWorkflow).toContain(
+      "map-domain-service.sh ride.smarttransport.tw",
+    );
     expect(domainWorkflow).toContain("uses: actions/checkout@v4");
     expect(domainWorkflow).toContain(
       "./operations/deployment/map-domain-service.sh",

@@ -179,7 +179,9 @@ describe("passenger dev workflow executable contracts", () => {
         }
         expect(
           result.outputs[
-            group === "google" ? "line_mounts_complete" : "google_mounts_complete"
+            group === "google"
+              ? "line_mounts_complete"
+              : "google_mounts_complete"
           ],
         ).toBe("true");
         expect(result.outputs.web).toBeUndefined();
@@ -194,49 +196,63 @@ describe("passenger dev workflow executable contracts", () => {
     expect(result.outputs.web).toBeUndefined();
     expect(result.outputs.api).not.toContain("COOKIE_SECRET");
     expect(result.commands.join("\n")).not.toContain("cookie-secret");
-    expect(Object.keys(result.outputs).some((key) => key.endsWith("_configured"))).toBe(false);
+    expect(
+      Object.keys(result.outputs).some((key) => key.endsWith("_configured")),
+    ).toBe(false);
   });
 
   it.each([
     ["absent", []],
     ["partial", ["GOOGLE_OAUTH_CLIENT_ID", "PSP_MERCHANT_ID"]],
     ["complete", Object.values(groups).flat()],
-  ] as const)("passes only resolved %s references to the real API deploy wrapper", (_label, settings) => {
-    const resolved = resolveSecrets(settings);
-    expect(resolved.status, resolved.stderr).toBe(0);
-    const dir = directory();
-    const log = path.join(dir, "arguments");
-    executable(dir, "gcloud", `
+  ] as const)(
+    "passes only resolved %s references to the real API deploy wrapper",
+    (_label, settings) => {
+      const resolved = resolveSecrets(settings);
+      expect(resolved.status, resolved.stderr).toBe(0);
+      const dir = directory();
+      const log = path.join(dir, "arguments");
+      executable(
+        dir,
+        "gcloud",
+        `
 [[ "$1 $2" == 'run deploy' ]] || exit 90
 printf '%s\\n' "$@" > "$COMMAND_LOG"
-`);
-    const base = "JWT_SECRET=core-jwt:latest,DATABASE_URL=core-db:latest";
-    const expressions: Record<string, string> = {
-      "needs.prepare.outputs.registry": "registry.test/drts",
-      "needs.build-push.outputs.image_tag": sha,
-      "steps.api_secrets.outputs.api": base,
-      "steps.passenger_secrets.outputs.api": resolved.outputs.api!,
-      "needs.prepare.outputs.api_service": "drts-dev-api",
-      "needs.prepare.outputs.region": "us-central1",
-      "needs.prepare.outputs.cloudsql": "test-project:us-central1:db",
-      "needs.prepare.outputs.runtime_service_account": "runtime@test-project.iam.gserviceaccount.com",
-      "steps.api_env.outputs.vars": `DRTS_CANDIDATE_SHA=${sha}`,
-      "needs.prepare.outputs.api_exposure_flag": "--no-allow-unauthenticated",
-      "needs.prepare.outputs.project_id": "test-project",
-    };
-    const script = step(deploy, "Deploy — api").replace(/\$\{\{([^}]+)\}\}/g, (_match, expression: string) => {
-      const value = expressions[expression.trim()];
-      if (value === undefined) throw new Error(`Unexpected deploy expression: ${expression}`);
-      return value;
-    });
-    const result = run(script, { COMMAND_LOG: log }, dir);
-    expect(result.status, result.stderr).toBe(0);
-    const args = readFileSync(log, "utf8").trim().split("\n");
-    expect(args.slice(0, 3)).toEqual(["run", "deploy", "drts-dev-api"]);
-    expect(args[args.indexOf("--set-secrets") + 1]).toBe(
-      base + (resolved.outputs.api ? `,${resolved.outputs.api}` : ""),
-    );
-  });
+`,
+      );
+      const base = "JWT_SECRET=core-jwt:latest,DATABASE_URL=core-db:latest";
+      const expressions: Record<string, string> = {
+        "needs.prepare.outputs.registry": "registry.test/drts",
+        "needs.build-push.outputs.image_tag": sha,
+        "steps.api_secrets.outputs.api": base,
+        "steps.passenger_secrets.outputs.api": resolved.outputs.api!,
+        "needs.prepare.outputs.api_service": "drts-dev-api",
+        "needs.prepare.outputs.region": "us-central1",
+        "needs.prepare.outputs.cloudsql": "test-project:us-central1:db",
+        "needs.prepare.outputs.runtime_service_account":
+          "runtime@test-project.iam.gserviceaccount.com",
+        "steps.api_env.outputs.vars": `DRTS_CANDIDATE_SHA=${sha}`,
+        "needs.prepare.outputs.api_exposure_flag": "--no-allow-unauthenticated",
+        "needs.prepare.outputs.project_id": "test-project",
+      };
+      const script = step(deploy, "Deploy — api").replace(
+        /\$\{\{([^}]+)\}\}/g,
+        (_match, expression: string) => {
+          const value = expressions[expression.trim()];
+          if (value === undefined)
+            throw new Error(`Unexpected deploy expression: ${expression}`);
+          return value;
+        },
+      );
+      const result = run(script, { COMMAND_LOG: log }, dir);
+      expect(result.status, result.stderr).toBe(0);
+      const args = readFileSync(log, "utf8").trim().split("\n");
+      expect(args.slice(0, 3)).toEqual(["run", "deploy", "drts-dev-api"]);
+      expect(args[args.indexOf("--set-secrets") + 1]).toBe(
+        base + (resolved.outputs.api ? `,${resolved.outputs.api}` : ""),
+      );
+    },
+  );
 
   it.each([
     ["https://new-passenger.a.run.app", 0],
