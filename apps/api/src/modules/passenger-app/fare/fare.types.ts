@@ -1,6 +1,7 @@
 import type {
   FareQuoteResponse,
   FareVersion,
+  FaresResponse,
   GeoPoint,
   GeoRouteResponse,
   ServiceAreaEvaluationResult,
@@ -9,7 +10,8 @@ import type {
 /** No implicit meter rules: publication requires an approved rule set. Amounts are whole TWD. */
 export interface FareTariff extends Omit<FareVersion, "nightSurcharge"> {
   effectiveUntil: string | null;
-  nightSurchargeBps: number;
+  /** Fixed whole TWD per trip, added only when the night window applies. */
+  nightSurchargeAmount: number;
   distanceRounding: "ceil" | "floor";
   delayRounding: "ceil" | "floor";
   totalRounding: "ceil" | "floor" | "nearest";
@@ -25,11 +27,20 @@ export interface FareBreakdown {
   delayUnits: { min: number; max: number };
   delayFare: { min: number; max: number };
   nightApplies: boolean;
-  nightSurchargeBps: number;
+  /** Actual whole TWD charged in this estimate: zero during the day. */
+  nightSurchargeAmount: number;
   additionalFees: Record<string, number>;
   totalIncrement: number;
   totalRounding: FareTariff["totalRounding"];
   rangeBasis: "zero_to_full_route_duration_delay";
+}
+
+/** Explicit units on the public wire; never encode a fixed fee as a ratio. */
+export interface PassengerFaresResponse extends FaresResponse {
+  currentVersion: FareVersion & {
+    nightSurchargeUnit: "TWD_per_trip";
+    nightApplication: FareTariff["nightApplication"];
+  };
 }
 
 export interface FareEstimate {

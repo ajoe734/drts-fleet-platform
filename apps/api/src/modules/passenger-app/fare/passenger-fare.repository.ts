@@ -29,7 +29,7 @@ function tariff(row: QueryResultRow): FareTariff {
     distanceIncrementMeters: row.distance_increment_meters,
     delayRate: row.delay_rate,
     delayIncrementSeconds: row.delay_increment_seconds,
-    nightSurchargeBps: row.night_surcharge_bps,
+    nightSurchargeAmount: row.night_surcharge_amount,
     nightSurchargeWindowStart: row.night_window_start,
     nightSurchargeWindowEnd: row.night_window_end,
     additionalFees: row.additional_fees,
@@ -68,7 +68,7 @@ export class PassengerFareRepository implements PassengerFareStore {
       const result = await this.database.query(
         `SELECT version, effective_at, effective_until, base_fare, base_distance_meters,
                 distance_rate, distance_increment_meters, delay_rate, delay_increment_seconds,
-                night_surcharge_bps, night_window_start, night_window_end, additional_fees,
+                night_surcharge_amount, night_window_start, night_window_end, additional_fees,
                 distance_rounding, delay_rounding, total_rounding, total_increment,
                 night_application, source_reference
          FROM passenger.fare_versions

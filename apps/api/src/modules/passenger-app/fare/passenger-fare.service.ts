@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
-import type { FareQuoteCommand, FaresResponse } from "@drts/contracts";
+import type { FareQuoteCommand } from "@drts/contracts";
 import { ApiRequestError } from "../../../common/api-envelope";
 import type { RequestIdentity } from "../../../common/auth/auth.types";
 import { GeoService } from "../../geo/geo.service";
@@ -11,7 +11,10 @@ import {
   PassengerFareRepository,
   type PassengerFareStore,
 } from "./passenger-fare.repository";
-import type { PassengerFareQuoteResponse } from "./fare.types";
+import type {
+  PassengerFareQuoteResponse,
+  PassengerFaresResponse,
+} from "./fare.types";
 
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const FIELDS: Record<string, keyof FareQuoteCommand> = {
@@ -96,7 +99,7 @@ export class PassengerFareService {
     private readonly areas: ServiceAreaService,
   ) {}
 
-  async fares(): Promise<FaresResponse> {
+  async fares(): Promise<PassengerFaresResponse> {
     const t = await this.store.publishedTariff(new Date().toISOString());
     if (!t)
       throw new ApiRequestError(
@@ -117,7 +120,9 @@ export class PassengerFareService {
         distanceIncrementMeters: t.distanceIncrementMeters,
         delayRate: t.delayRate,
         delayIncrementSeconds: t.delayIncrementSeconds,
-        nightSurcharge: t.nightSurchargeBps / 10000,
+        nightSurcharge: t.nightSurchargeAmount,
+        nightSurchargeUnit: "TWD_per_trip",
+        nightApplication: t.nightApplication,
         nightSurchargeWindowStart: t.nightSurchargeWindowStart,
         nightSurchargeWindowEnd: t.nightSurchargeWindowEnd,
         additionalFees: { ...t.additionalFees },

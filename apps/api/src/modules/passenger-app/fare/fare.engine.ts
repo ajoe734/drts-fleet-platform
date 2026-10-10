@@ -31,11 +31,9 @@ export function validateFareTariff(t: FareTariff): void {
     baseFare: t.baseFare,
     distanceRate: t.distanceRate,
     delayRate: t.delayRate,
-    nightSurchargeBps: t.nightSurchargeBps,
+    nightSurchargeAmount: t.nightSurchargeAmount,
   }))
     integer(value, key);
-  if (t.nightSurchargeBps > 10000)
-    throw new RangeError("Night surcharge exceeds 100%.");
   for (const [key, value] of Object.entries({
     baseDistanceMeters: t.baseDistanceMeters,
     distanceIncrementMeters: t.distanceIncrementMeters,
@@ -84,9 +82,9 @@ function safeNumber(value: bigint): number {
   return Number(value);
 }
 function total(amount: bigint, t: FareTariff, night: boolean): number {
-  // Integer arithmetic preserves percentage and rounding boundaries without floating-point drift.
-  const numerator = amount * BigInt(10000 + (night ? t.nightSurchargeBps : 0));
-  const denominator = 10000n * BigInt(t.totalIncrement);
+  // The night fee is fixed per trip, independent of distance, delay and other fees.
+  const numerator = amount + BigInt(night ? t.nightSurchargeAmount : 0);
+  const denominator = BigInt(t.totalIncrement);
   let units = numerator / denominator;
   const remainder = numerator % denominator;
   if (
@@ -143,7 +141,7 @@ export function estimateFare(
       delayUnits: { min: 0, max: delayUnits },
       delayFare: { min: 0, max: safeNumber(delayFare) },
       nightApplies: night,
-      nightSurchargeBps: t.nightSurchargeBps,
+      nightSurchargeAmount: night ? t.nightSurchargeAmount : 0,
       additionalFees: { ...t.additionalFees },
       totalIncrement: t.totalIncrement,
       totalRounding: t.totalRounding,
