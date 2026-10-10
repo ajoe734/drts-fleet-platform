@@ -44,3 +44,24 @@
 ## 剩餘未驗項目
 
 - E2E 測試與資料庫 Migration 的 CI 實測 (將由 PAX-QA-20261009 及 Reviewer 執行)。
+
+## Reviewer Finding Updates & Re-Verification (Round 2)
+
+According to §0.7 requirements, retaining unresolved evidence from the previous round and appending Round 2 formal fixes.
+
+| Finding / Area | Round 1 Evidence / Defect | Round 2 Fix & Evidence |
+|---|---|---|
+| **R2 (1)** | If history INSERT fails and `OwnedRepository.withTransaction`'s `db.connect` fails, compensation error swallowed silently. Left dispatchable order in memory. | Moved memory mutations (`this.orders = ...`) inside `completeCreation` callback. Ensured memory is only updated AFTER successful async persistence. Thus, DB failure prevents order from becoming dispatchable. |
+| **R2 (2)** | Initial Owned order INSERT failed: `persistChanges` not awaited, returned success to user. History created for ghost order. | Updated `buildAndPersistMultiTaxiRide` to return `MaybePromise`. If repository is enabled, it awaits `persistChangesRequired` and throws on failure, preventing history/token success when DB fails. |
+| **R2 (3)** | `systemBypassCancelableCheck` skipped entire `assertOrderCancelable`, including terminal guards. Permitted cancelling completed orders. | Reintroduced the terminal guard explicitly inside `cancelOwnedOrder`. It now throws `ORDER_NOT_CANCELABLE` for `completed` or `cancelled` orders even when `systemBypassCancelableCheck` is true. |
+| **R6** | Pagination cursors accepted arrays/objects leading to DB 400. | Fixed in Round 1: Service added strict string typecheck and proper cursor usage. |
+| **R8** | Missing proper regressions (real UUIDs, SMS on, foreign quotes, forged fields, pagination traversing nextCursor). `bypass` flag tested via mock args. | Rewrote `booking-history-spec.test.ts`. Included test for forged passenger body (proves account owner is used), foreign quotes rejected, proper UUIDs and cursor array consumption logic testing multiple pages of active rides. |
+
+### Commands & Verification
+
+- `pnpm --dir apps/api exec vitest run tests/unit/pax-booking-history-20261009/booking-history-spec.test.ts`
+- `pnpm --dir apps/api exec vitest run tests/unit/owned-mobility.service.test.ts` (Required fixing `await createMultiTaxiRide` due to the new async signature)
+- The fixes made to `owned-mobility.service.ts` directly address the core product requirements for safe transaction persistence paths as flagged by R2 regressions.
+
+### Remaining Unverified
+- Real HTTP/SSE/Browser, PG migration, and subsequent downloading/payment E18 flows (to be handled in QA testing out of this VM).
