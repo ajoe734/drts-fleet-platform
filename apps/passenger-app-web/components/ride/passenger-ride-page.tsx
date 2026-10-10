@@ -709,13 +709,13 @@ function VehicleCard({
                 >
                   <span aria-hidden="true">★</span>
                   <b style={{ fontSize: 15, color: passengerChrome.text }}>
-                    {assignment.rating.averageRating === null
+                    {assignment.rating?.averageRating == null
                       ? "評價資料未提供"
                       : assignment.rating.averageRating.toFixed(1)}
                   </b>
                 </span>
                 <span style={{ fontSize: 11, color: passengerChrome.muted }}>
-                  {assignment.rating.ratingCount} {t.ReviewsCount}
+                  {assignment.rating?.ratingCount ?? 0} {t.ReviewsCount}
                 </span>
               </span>
             ) : (
@@ -2263,11 +2263,11 @@ export function PassengerRidePage({
         startTransition(() => {
           setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
           setAuthorityError(null);
-          setLastEventTime(
-            view.assignment?.eta?.calculatedAt
-              ? new Date(view.assignment.eta.calculatedAt).getTime()
-              : Date.now(),
-          );
+          if (view.assignment?.eta?.calculatedAt) {
+            setLastEventTime(new Date(view.assignment.eta.calculatedAt).getTime());
+          } else {
+            setLastEventTime(0); // Make it stale if missing
+          }
         });
         unsubscribe = subscribePassengerRideAuthority(
           token,
@@ -2277,13 +2277,14 @@ export function PassengerRidePage({
               setLiveFixture(
                 mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
               );
-              setLastEventTime(
+              if (
+                nextView.eventType === "driver_location_updated" &&
                 nextView.data.assignment?.eta?.calculatedAt
-                  ? new Date(
-                      nextView.data.assignment.eta.calculatedAt,
-                    ).getTime()
-                  : Date.now(),
-              );
+              ) {
+                setLastEventTime(
+                  new Date(nextView.data.assignment.eta.calculatedAt).getTime()
+                );
+              }
             });
           },
           authMode === "token",

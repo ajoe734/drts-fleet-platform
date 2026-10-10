@@ -156,7 +156,7 @@ describe("Passenger Ride UI Acceptance", () => {
     // Test E-18 payload
     const fixture = {
       canRate: true,
-      ratingSummary: { countText: "Test", chips: ["車內整潔"] },
+      ratingSummary: { countText: "Test", chips: ["車內異味"] },
     } as any;
     fetchResponse = { success: true };
     const { unmount } = render(
@@ -164,7 +164,7 @@ describe("Passenger Ride UI Acceptance", () => {
     );
 
     fireEvent.click(screen.getByLabelText("2 星"));
-    fireEvent.click(screen.getByText("車內整潔"));
+    fireEvent.click(screen.getByText("車內異味"));
     fireEvent.click(screen.getByText("送出評價"));
 
     await waitFor(() => {
@@ -174,7 +174,7 @@ describe("Passenger Ride UI Acceptance", () => {
     expect(fetchCalls[0].body).toMatchObject({
       rideId: "order-uuid",
       rating: 2,
-      tags: ["車內整潔"],
+      tags: ["車內異味"],
       contactRequested: true,
     });
     unmount();

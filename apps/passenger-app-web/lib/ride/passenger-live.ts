@@ -545,7 +545,8 @@ function resolveScreenId(
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
     // R6: Supervisor note: Missing cancelled terminal screen in canvas. Needs screen requirements.
-    return "P5-12"; // Using P5-12 as a fallback until formal design is provided.
+    // STOP: Cannot use P5-12 as it implies an active assignment.
+    return "A04";
   }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
