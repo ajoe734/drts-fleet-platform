@@ -126,17 +126,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'cveh': 0,
                 'cpol': 0,
                 'ccont': 0,
-                'fks': 1,
-                'pres_subs': 4,
-                'pres_docs': 8,
-                'pres_revs': 0,
-                'pres_affs': 0,
-                'pres_discs': 0,
-                'pres_creds': 0,
-                'pres_cdriv': 0,
-                'pres_cveh': 0,
-                'pres_cpol': 0,
-                'pres_ccont': 0,
+                'ddrafts': 0,
+                'vdrafts': 0,
+                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c"}],
+                'pres_subs': {"c": 4, "digest": "hash"},
+                'pres_docs': {"c": 8, "digest": "hash"},
+                'pres_revs': {"c": 0, "digest": "hash"},
+                'pres_affs': {"c": 0, "digest": "hash"},
+                'pres_discs': {"c": 0, "digest": "hash"},
+                'pres_creds': {"c": 0, "digest": "hash"},
+                'pres_cdriv': {"c": 0, "digest": "hash"},
+                'pres_cveh': {"c": 0, "digest": "hash"},
+                'pres_cpol': {"c": 0, "digest": "hash"},
+                'pres_ccont': {"c": 0, "digest": "hash"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -160,17 +162,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'cveh': 0,
                 'cpol': 0,
                 'ccont': 0,
-                'fks': 1,
-                'pres_subs': 4,
-                'pres_docs': 8,
-                'pres_revs': 0,
-                'pres_affs': 0,
-                'pres_discs': 0,
-                'pres_creds': 0,
-                'pres_cdriv': 0,
-                'pres_cveh': 0,
-                'pres_cpol': 0,
-                'pres_ccont': 0,
+                'ddrafts': 0,
+                'vdrafts': 0,
+                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c"}],
+                'pres_subs': {"c": 4, "digest": "hash"},
+                'pres_docs': {"c": 8, "digest": "hash"},
+                'pres_revs': {"c": 0, "digest": "hash"},
+                'pres_affs': {"c": 0, "digest": "hash"},
+                'pres_discs': {"c": 0, "digest": "hash"},
+                'pres_creds': {"c": 0, "digest": "hash"},
+                'pres_cdriv': {"c": 0, "digest": "hash"},
+                'pres_cveh': {"c": 0, "digest": "hash"},
+                'pres_cpol': {"c": 0, "digest": "hash"},
+                'pres_ccont': {"c": 0, "digest": "hash"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -193,17 +197,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'cveh': 0,
                 'cpol': 0,
                 'ccont': 0,
-                'fks': 1,
-                'pres_subs': 4,
-                'pres_docs': 8,
-                'pres_revs': 0,
-                'pres_affs': 0,
-                'pres_discs': 0,
-                'pres_creds': 0,
-                'pres_cdriv': 0,
-                'pres_cveh': 0,
-                'pres_cpol': 0,
-                'pres_ccont': 0,
+                'ddrafts': 0,
+                'vdrafts': 0,
+                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c"}],
+                'pres_subs': {"c": 4, "digest": "hash"},
+                'pres_docs': {"c": 8, "digest": "hash"},
+                'pres_revs': {"c": 0, "digest": "hash"},
+                'pres_affs': {"c": 0, "digest": "hash"},
+                'pres_discs': {"c": 0, "digest": "hash"},
+                'pres_creds': {"c": 0, "digest": "hash"},
+                'pres_cdriv': {"c": 0, "digest": "hash"},
+                'pres_cveh': {"c": 0, "digest": "hash"},
+                'pres_cpol': {"c": 0, "digest": "hash"},
+                'pres_ccont': {"c": 0, "digest": "hash"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -213,13 +219,46 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertEqual(res["status"], "rejected")
         self.assertIn("2 review_events exist", res["concrete_blocker"])
         
-    @unittest.skip("Cannot mock genuine archive hash without mutating trust policy")
     def test_provenance_validation(self):
+        # Placeholder for negative tests
         pass
 
-    @unittest.skip("Cannot mock genuine archive hash without mutating trust policy")
     def test_provenance_validation_success(self):
-        pass
+        # Use genuine local fixture for transport-only mocks
+        local_fixture_dir = Path("/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/original-37906298090-authoritative-archive-20261009")
+        if not local_fixture_dir.exists():
+            self.skipTest("Local test fixture not found")
+            
+        args = MagicMock()
+        args.mock_db = False
+        args.product_run_id = assess.AUTHORIZED_PROVENANCE["run_id"]
+        args.artifact_id = assess.AUTHORIZED_PROVENANCE["artifact_id"]
+        args.source_sha = assess.AUTHORIZED_PROVENANCE["source_sha"]
+        args.workflow_def_sha = assess.AUTHORIZED_PROVENANCE["workflow_sha"]
+        
+        with open(local_fixture_dir / "run.json", "r") as f:
+            run_data = f.read()
+        with open(local_fixture_dir / "jobs.json", "r") as f:
+            jobs_data = f.read()
+        with open(local_fixture_dir / "artifact.json", "r") as f:
+            art_data = f.read()
+        with open(local_fixture_dir / "artifact-11606165993.zip", "rb") as f:
+            zip_bytes = f.read()
+            
+        def mock_run(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "/runs/37906298090/jobs" in cmd_str:
+                return MagicMock(returncode=0, stdout=jobs_data)
+            elif "/runs/37906298090/artifacts" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [json.loads(art_data)]}))
+            elif "/runs/37906298090" in cmd_str:
+                return MagicMock(returncode=0, stdout=run_data)
+            elif "artifacts/11606165993/zip" in cmd_str:
+                return MagicMock(returncode=0, stdout=zip_bytes)
+            return MagicMock(returncode=1)
+            
+        with patch("subprocess.run", side_effect=mock_run):
+            assess.fetch_and_validate_provenance(args)
 
 if __name__ == '__main__':
     unittest.main()
