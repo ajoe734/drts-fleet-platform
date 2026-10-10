@@ -30,37 +30,38 @@
 - Round 18 SHA: `88f16159642427be634b0a4b0606ba1ff4fd6a8f` (Gen: `026c93237ee44be29f92c93421bd0861`) - 審查裁決: REOPEN / not approved
 - Round 19 SHA: `8986f2b5244d4129c0b558852ddc513d1e5d9ede` (Gen: `173837aa8ec04250b761da4f8beb3130`) - 審查裁決: REOPEN / not approved
 
-### 候選版本 20, 21, 22, 23, 24 (Rounds 20-24)
+### 候選版本 20, 21, 22, 23, 24, 25 (Rounds 20-25)
 - Round 20 SHA: `1f78ef37fb064f85e119ce6afec72fed24e38616` (Gen: `77814c61167b4ca18e6907434e83ca58`)
 - Round 21 SHA: `533d90855593dc6b13f42f715f17f5fc328ab4c2` (Gen: `4bf56dcd2beb4f37a2db3366cd9839cf`)
 - Round 22 SHA: `5d3c6126af2662935c8396a03aa85585bc782cb3` (Gen: `d74bbb26eb684facb1be3caddfb8b860`) - Verdict SHA256: `b05a55f6bdc21eff40a30d31c962cd7ff45f466f612b160f6a2f61199c750ac7`
 - Round 23 SHA: `d39b0dee6c77e2ab717586e7a97ebfb14dbb87c0` (Gen: `1b68a4872caf4144bae709f1db942e9b`) - Verdict SHA256: `add562dbc7694b78b67c52076c06d0b2e5e2269be9afc9dc8f304604e529b7ae`
 - Round 24 SHA: `ba884ddc2e87395b9d7b9a002754acfb49ae64f6` (Gen: `3565c6102dd04c339b05650020e78e2a`) - Verdict SHA256: `0d3a91261e4425e915da3fed69aa985baef18a01707e30946cf2a512f3485c3d` located at `/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-24-ba884ddc2e87/review-verdict.md` (completed command/exit/log manifest in `check-results.json` in that directory).
+- Round 25 SHA: `9ffb015ed6aa47ec8e18aea84e3013de8d9a7fa7` (Gen: `90505c23a3d94e958779bedc2ceabf4a`) - Verdict SHA256: `22b40c8a44117cfded174807e4e653b0b6e2b9fe2b864933ad87ca73ca78e3c8` located at `/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-25-9ffb015ed6aa/review-verdict.md`.
 - 獨立審查裁決: `REOPEN / not approved` (Codex) for all rounds.
-- 審查證據清單：`/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/complete-cleanup-and-system-acceptance-20261010/authentic-R14-through-R23-review-identities-and-evidence-index.json` 且本文件新增 R24 的資訊。
+- 審查證據清單：`/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/complete-cleanup-and-system-acceptance-20261010/authentic-R14-through-R23-review-identities-and-evidence-index.json` 且本文件新增 R24 與 R25 的資訊。
 - 審查發現 (R23-01): v4 PR 來源錯誤 (e07base)，導致發布完整範圍測試失敗，需基於乾淨歷史。
 - 審查發現 (R23-02 / R24-02 / R25-01): 舊版 default transport fixture 會觸發 ERROR 而非 FAIL。
 - 審查發現 (R24-01 / R22-01): `d39` 已修復 `genuine-loader/327PDF` 的 3PASS/0ERROR，但 R24 regression 再度破壞 inline guard 導致 `2FAIL/1PASS`。此回歸現已修正。
-- 審查發現 (R24-03 / R25-02): UAT 缺乏正確的 R24 SHA 與 generation 連結、每個觸發點的指令/退出碼/日誌；舊版與新版的 assertion failure 與 errors 需要明確對照。
+- 審查發現 (R24-03 / R25-02 / R26-01): UAT 缺乏正確的 R24/R25 SHA 與 generation 連結、每個觸發點的指令/退出碼/日誌；舊版與新版的 assertion failure 與 errors 需要明確對照。
 
-### 本次修復對應 (R25)
-本分支 (v3) 在 R24 基礎上，針對測試 fixture 與 UAT 證據完整度進行修復。
+### 本次修復對應 (R26)
+本分支 (v3) 在 R25 基礎上，修正了 UAT 證據中的測試紀錄版本對應，正確引用 R26 的探測命令與日誌。
 
-- 執行 paired 測試驗證指令: `python3 -B /home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-25-9ffb015ed6aa/paired-candidate-tests.py`
-- 舊源代碼 (533d) 測試結果: 59 PASS / 3 FAIL / 0 ERROR (在 fixture 修正後，舊源碼正確產生 FAIL 而非 fixture ERROR)
-  - 舊版本 durable log: `533d90855593-candidate-tests.log`
+- 執行 paired 測試驗證指令 (R26 probe): `python3 -B /home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-26-fde3e74b9d58/paired-candidate-tests.py`
+  - 預期舊版本失敗之退出碼: `1` (AssertionError)
+- 舊源代碼 (533d) 測試結果: 59 PASS / 4 FAIL / 0 ERROR (在 fixture 修正後，舊源碼正確產生 `assertion FAIL` 而非 `fixture ERROR`，失敗的測試為 `test_direct_inspector_loader_token_cannot_authorize_live_read`, `test_inline_body_assertions`, `test_simulation_receipts_always_synthetic`, `test_simulation_without_runner_blocks_default_cloud_transport`)
 - 舊源代碼 (5d3) 測試結果: 62 PASS / 1 FAIL / 0 ERROR
-  - 舊版本 durable log: `5d3c6126af26-candidate-tests.log`
 - 舊源代碼 (d39) 測試結果: 63 PASS / 0 FAIL / 0 ERROR
 - 舊源代碼 (ba884) 測試結果: 62 PASS / 1 FAIL / 0 ERROR
+- 舊源代碼 (9ffb015) 測試結果: 63 PASS / 0 FAIL / 0 ERROR
 - 目前修復後之版本測試結果: 63 PASS / 0 FAIL / 0 ERROR，退出碼: 0
-  - 目前修復後 durable log: `paired-candidate-tests.log` 與 `check-results.json` 於 R25 審查目錄中。
+  - R26 的 durable log 與詳細退出碼紀錄位於: `/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/review-owned-cleanup-a6bcfe4acdb8-20261009T144116Z/round-26-fde3e74b9d58/check-results.json` 與 `paired-candidate-tests-summary.json`。
 
-### 本次修復狀態對應表 (Per-finding Evidence Mapping for R25):
+### 本次修復狀態對應表 (Per-finding Evidence Mapping for R26):
 | 發現編號 | 先前狀態 / 舊結果 | 修復邊界 / 證據 (新結果) | 未驗項與具體限制 |
 | --- | --- | --- | --- |
 | R25-01 | 測試 fixture 在模擬 default transport 時使用 `"ls" in cmd` 匹配，導致 533d 發生 `fixture ERROR` 而無法驗證預期的 `assertion FAIL`。 | 修正 `mock_subprocess_run` 使其精確匹配 `objects describe` 與 `cat` 命令格式，正確提供 JSON 與 bytes 響應。<br/>證據: 533d 如今會觸發真正的 assertion FAIL (OLD assertion FAIL -> NEW PASS, 0 fixture ERROR)。 | 僅限測試 fixture 邊界，保留所有修復好的生產代碼。無真實網路呼叫。 |
-| R25-02 | UAT 紀錄缺少對相鄰 R24 版本之完整 SHA/Gen/Verdict 映射，也只列出單一 current pass 片段，未分清 OLD assertion FAIL 和 fixture ERROR。 | 更新 UAT 文件加入 R24 完整憑證，新增各源碼版本 paired-candidate-tests 測試結果，並區分 FAIL 與 ERROR。<br/>證據: 本 UAT 文件的修復歷史與測試日誌映射。 | 需保留完整的歷史與不滿組的 CI 狀態。 |
+| R26-01 | UAT 紀錄引用了舊版 R25 的腳本與日誌，未正確記錄 533d 的 `4 FAIL` 與實際觸發退出碼 `1`。缺少 R25 完整 SHA 連結。 | 更新 UAT 文件，加入 R25 完整憑證，使用 R26 script，正確記錄 533d `59 PASS / 4 FAIL / 0 ERROR` 與預期腳本退出碼 `1`。<br/>證據: 依照 R26 `check-results.json` 與 `paired-candidate-tests-summary.json` 更新。 | 需保留完整的歷史與不滿組的 CI 狀態。 |
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 
