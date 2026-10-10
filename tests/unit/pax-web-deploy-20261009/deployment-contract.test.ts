@@ -270,6 +270,8 @@ printf '%s\\n' "$@" > "$COMMAND_LOG"
           if (name.includes("candidate_sha")) return sha;
           if (name.includes("oidc_enabled")) return "false";
           if (name.includes("map_provider_mode")) return "mock";
+          if (name.endsWith("passenger_app_service"))
+            return "drts-dev-passenger-app-web";
           if (name.endsWith("_origin") || name.endsWith("_url")) return "";
           return "test-value";
         },
@@ -278,7 +280,6 @@ printf '%s\\n' "$@" > "$COMMAND_LOG"
         script,
         {
           MOCK_ORIGIN: origin,
-          PASSENGER_APP_SERVICE: "drts-dev-passenger-app-web",
           DEV_WORKLOAD_IDENTITY_ISSUER: "issuer",
           DEV_WORKLOAD_IDENTITY_AUDIENCE: "audience",
           ARTIFACT_PROVIDER_ENV_SUFFIX: "",
