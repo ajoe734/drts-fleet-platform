@@ -4,6 +4,43 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-PAX-WEB-BOOKING-UI-20261009 — reservation settings contract and booking canvas routing
+
+The parent remains blocked; this is a planning route, with no acceptance scope
+cut. SA/SD §7 requires the configured reservation lead time, but §3 and the
+passenger contracts/module do not define the UI's
+`GET /api/passenger-app/settings`. Supervisor must coordinate an API/contract
+owner and reviewer, the shared client/BFF scopes, and a typed configuration
+response backed by `OwnedMobilityService.getMinLeadTimeMinutes()` (the existing
+server reservation authority). The suggested settings endpoint/response in the
+helper is a proposal awaiting that contract decision, not an implemented API.
+Do not introduce a separate UI default or interpret the SD's example of 30
+minutes as a fixed policy. Preserve both parent acceptance keys.
+
+Supervisor must also route an approved Passenger address/time booking canvas
+response. Existing P5 E-19/A03/A04 artboards and realm tokens remain binding;
+the shared picker requirements do not supply the missing app-specific artboard.
+The helper includes screen requirements only; UI composition work stops until
+the design response exists. There is no new human product-choice gate for
+existing scope coordination.
+
+Parent owner/reviewer remain Gemini/Codex2. The latest independent review is
+`b79c3715c69f02c1bf5d23fd54fb2e1e0be39f2d`; PR #2508 subsequently advanced to
+unreviewed `869cd21fc3eba8ef513af9bc3f031aaf61bc5638`. Original owner must reconcile
+R1–R11/Design and both acceptance keys in the original UAT, retaining prior
+evidence and verifying newer changes rather than declaring them accepted.
+API wiring and configuration tests precede booking UI resumption; final visual
+completion additionally requires the approved canvas.
+
+The dispatched helper cannot write parent notes or disposition metadata:
+both current-release CLI attempts were rejected by the worker guard.
+Supervisor must record `resolved_parent_status: blocked`,
+`resolved_parent_waiting_for: Supervisor`, and the explicit next step below
+before helper handoff/merge, and update the parent's next step without resuming
+it. This prevents a planning-only merge from making the parent runnable.
+See the [source evidence, proposed contract, screen requirements, exact state
+writes and resume conditions](support/unblock/PAX-WEB-BOOKING-UI-20261009/PAX-WEB-BOOKING-UI-20261009-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-SR-GCP-ARTIFACT-ACTIVATION-20261004 — planning resolved; hosted activation pending
 
 No new product choice or acceptance scope cut is needed. PRD §9.8.3 and service
