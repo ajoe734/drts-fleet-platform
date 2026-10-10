@@ -1,6 +1,11 @@
 # PAX-FARE-QUOTE-20261009 實作與驗證紀錄
 
-Owner: Codex2；Reviewer: Claude。2026-10-10。
+Owner: Codex2；Reviewer: Codex（本次 dispatch）。2026-10-10。
+
+**最新修復見末節「F-TARIFF-01：2026-10-10 使用者定案」**：固定夜間每趟
+NT$20、延滯每 60 秒與正式一般日運價 seed 已實作。以下前輪來源、未 seed、
+比例 wire 及 pending 敘述為歷史候選證據，已由末節的新定案取代，不代表現況。
+保留 F-GEO-01／F-CI-01 的原始定位、結果與 evidence，不覆蓋前輪紀錄。
 
 Supervisor 2026-10-10 已增補 guard 寫入範圍；F-GEO-01 已修復並完成本機
 四路由 × 三環境的正向／拒絕回歸。本次候選與同 SHA CI 的最終結果記在下方
@@ -252,3 +257,101 @@ integration、IAM negative、build 與 hosted E2E 均 pass；unit/smoke 與 aggr
 本輪增加 inventory gate 到交接前檢查。上面的 695 pass 是首輪完整本機回歸；
 F-CI-01 修正版重新驗整個受影響 fare 路徑與 inventory，並重跑 API/root typecheck。
 最終 candidate、PR head、同 SHA CI 全部 jobs 的結果以本次 manifest 與 handoff 為準。
+
+## F-TARIFF-01：2026-10-10 使用者定案
+
+退修來源：Codex 對 PR #2499、candidate
+`847eba3846f7bbd5c776dad8f104756a3f0bcf39`／generation
+`e7e643a93ad04be99a41980d547d114e` 的唯讀審查。這是該候選的新定案差異，
+不把同一 SHA 的先前 dispatch 算成兩個相鄰候選。
+
+官方與使用者依據：canonical root
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/common.md:234-242`
+明定採 G201011 補件版／臺北市政府 112/04/01 運價，作廢 80 秒／+20% 並要求
+更新 SD／seed。修正 `02_content_and_rules.md` 保留舊 ZIP hash 與作廢來源，
+加入[臺北市公共運輸處費率說明](https://pto.gov.taipei/News_Content.aspx?n=6B4D38874E971F4B&s=63C0CCF302898D25)
+（日期、85/1250m、5/200m、5/60s、23:00–06:00每趟20元及上車時間判定）。
+[計費表功能規範二(三)](https://laws.gov.taipei/Law/File/0000199457)
+PDF 印頁 6–7 提供距離 ceil、累計延滯 floor 公式；本版本無比例加成，各金額皆
+5 元倍數，總額 floor-to-5 為恆等操作。不是把 synthetic ceil-delay fixture seed。
+官方 PDF 保存在本輪 evidence root，SHA256
+`adf4a28440c427c5cb0f7210313d76fea51c963a94a0480c189ab5bd9c517ac5`。
+
+最小重現先呼叫舊版正式 `estimateFare` 與原 fixture，不 mock 引擎；
+夜間 0m/0s 預期 105、實際 102，3250m/0s 預期 155、實際 162，白天
+0m/60.01s 採既有明示 ceil-delay 規則預期 [85,95]、實際 [85,90]。
+原重現命令結果 exit 1（`repro-before.log`）。新增的同三案例
+`tariff-regression.test.ts` 在修改引擎前 3 fail／exit 1，修後 3 pass／exit 0。
+第三案例只驗 interval 改為 60 秒；正式 published rules 的 floor-delay 另有回歸。
+
+### 實際修正與 scope
+
+- `V0112__passenger_fare_quote.sql`：`night_surcharge_bps` 改成非負 integer
+  `night_surcharge_amount`，以完整具名欄位 INSERT 發布 `taipei-20230401`。
+  生效時間 `2023-04-01T00:00:00+08:00`，85/1250m、5/200m、5/60s、固定20元，
+  distance ceil／delay floor／total floor-to-5／night pickup，additional_fees 空物件。
+  此 migration 尚未 merge 到 dev；不重寫已部署 schema，不部署本 VM。
+- `FareTariff`／`PassengerFareRepository.publishedTariff` 讀取固定 TWD 金額；
+  `estimateFare.total` 在 total rounding 前只加一次固定夜間金額，沒有百分比乘法。
+  `FareBreakdown.nightSurchargeAmount` 記錄實際套用金額（白天0、夜間20）；
+  snapshot 的 tariffSnapshot 保留版本固定金額20。夜间金额不放入 additionalFees。
+- `PassengerFareService.fares` 的公開 wire 是
+  `nightSurcharge: 20, nightSurchargeUnit: "TWD_per_trip", nightApplication: "pickup"`。
+  `PassengerFaresResponse` 在已授權 API scope 內將 unit 宣告為 required literal，
+  相容既有 `FaresResponse` 的 number 欄位；比例0.2已作廢，不把20隱藏成比例。
+  `rg nightSurcharge/FareVersion` 已核對本分支與 origin/dev 的正式 caller；
+  只有 fare producer/tests 使用此 passenger 欄位，platform-admin 的示例 preview
+  屬另一模型。無乘客下游 caller 需同步，因此沒有修改 scope 外的 contracts／UI。
+  已透過指定 release `note` 告知 Supervisor 公開單位與可選的 central type scope 協調。
+- 保留缺版本／歧義／壞規則／DB outage fail-closed、snapshot owner/expiry、服務範圍、
+  四 geo 路由、六舊 realm 與 logout/expiry/deleted/strict 拒絕矩陣。
+
+### SQL 逐欄核對（owner；新候選 reviewer 仍須核對）
+
+`publishedTariff` 的 19 欄 SELECT 與 V0112 對照：version varchar(100) PK；
+effective_at/effective_until timestamptz→ISO；base_fare/base_distance_meters/
+distance_rate/distance_increment_meters/delay_rate/delay_increment_seconds 各 integer；
+**night_surcharge_amount integer≥0→nightSurchargeAmount**；night_window_start/end
+varchar(5) HH:mm；additional_fees jsonb object；distance_rounding/delay_rounding
+ceil/floor；total_rounding ceil/floor/nearest、total_increment 正 integer；
+night_application pickup/any_overlap；source_reference 非空 text。
+status 仍只 published，effective_at inclusive／effective_until exclusive，LIMIT 2
+仍在歧義時 unavailable。新 seed 的全部 20 欄（含 status）與具名 INSERT 一一對應。
+
+snapshot INSERT／owned SELECT 的16欄、$1..$16顺序未改：UUID、account/version FK、
+4份座標 double、scheduled_at timestamptz、route/tariff_snapshot/breakdown/
+service_area_evaluation 各 jsonb、estimated_min/max bigint 安全範圍、created_at/
+expires_at timestamptz、最長15分鐘效期；仍按 ID+owner 篩選。JSON 固定金額欄位
+已由正式 engine/service/repository pool-boundary 回歸核對，不宣稱 PG 實測。
+
+### §0.7 修復與驗證證據
+
+本輪 machine evidence root：
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/PAX-FARE-QUOTE-20261009/tariff-20261010/`。
+Node v22.23.2、pnpm 10.33.0、Vitest 4.1.4、TypeScript 5.9.3。
+code checkpoint `bf56e95b5`；擴充回歸 checkpoint `a511d7860`。
+最終完整 candidate SHA／remote branch／PR head／同 SHA CI run/jobs/logs 與退出碼
+記入此目錄的 `candidate-evidence.json`，由 handoff 引用，避免文件自引用 SHA。
+
+| Finding／驗收項                 | 原始碼依據與修改位置                                                   | 舊版重現 → 修正版結果                                                                        | 命令、退出碼與證據                                                                                                                                                                                                                               | 未驗項／限制                                                                                            |
+| ------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| F-TARIFF-01                     | SD、V0112、FareTariff、estimateFare、repository、public wire、snapshot | 847eba3 正式引擎三個業務差異；3 fail → 3 pass                                                | `pnpm exec vitest run tests/unit/pax-fare-quote-20261009/tariff-regression.test.ts --reporter=json --outputFile=...`；before exit1／after exit0；regression-before.json／regression-after.json；repro-before.log                                 | seed 的 PG 行為由 hosted CI／PAX-QA 查驗，不拿 pool stub 冒充                                           |
+| pax-fare_tariff_and_engine      | 一般日正式 seed 與官方 distance/delay/pickup；engine boundary tests    | 正式 floor-delay、60秒邊界、0/1250/3250/100000m、開始/結束/跨時段、固定20及overflow 回歸通過 | 下列 root 命令 exit0；root-after.json                                                                                                                                                                                                            | 春節各年度起迄／機場特殊費率未納入此一般日版本；日期與普通日數字已定案，不再列 pending                  |
+| pax-fare_quote_and_public_fares | 正式 controller/service/engine；unit明示公開費率；owned snapshot       | 公開版本、day/night quotes、固定金額snapshot、服務範圍與 fail-closed 通過                    | 同下 exit0；root-after.json；API geo/area命令 exit0、41 pass；api-after.json                                                                                                                                                                     | 正式 PG repository/constraints 及 BFF/runtime 由既有 PAX-QA hosted gate 驗，不能直接宣稱完整 acceptance |
+| F-GEO-01／F-CI-01 回歸          | 正式 guard/account/session＋GeoController metadata；既有 inventory     | 本次 root 合計298 pass、0 fail、2 dev strict-only skip                                       | `pnpm exec vitest run tests/unit/pax-fare-quote-20261009 tests/security/idempotency-regression-guard.test.ts tests/unit/pax-account-session-20261009 tests/unit/bootstrap-auth-guard-strict-env.test.ts --reporter=json --outputFile=...`，exit0 | 两個 development strict-only 案例明確 skip；不改classifier／授權邊界                                    |
+| 既有 geo/area                   | 正式 GeoService/ServiceAreaService                                     | 41 pass、0 fail／skip                                                                        | `pnpm --filter @drts/api exec vitest run tests/unit/geo.service.test.ts tests/unit/service-area.service.test.ts --reporter=json --outputFile=...`，exit0                                                                                         | provider/storage外部邊界stub                                                                            |
+| lint／format／typecheck／CI     | 正式 API/root 型別與本 task TS；新 SHA CI                              | 最終結果記本輪manifest及handoff                                                              | eslint／prettier／diff／API與root typecheck；精確命令、exit codes及hosted run/jobs同manifest                                                                                                                                                     | 已啟動的必要檢查須全部等結束並讀；skipped不稱pass；merge/review/acceptance由lifecycle記錄               |
+
+最初 ts-node 啟動因 node_modules symlink 指向已失效的其他 worktree 而未執行；
+只 unlink 指定 worktree 的 dependency symlinks，再
+`CI=true pnpm install --frozen-lockfile --ignore-scripts`（exit0，install.log），
+沒有修改 canonical root 依賴。修復後才取得上列正式失敗重現。
+擴充 service test 首次 86 pass／1 fail 是 assertion 預期未含 `.000Z`，已改為正式
+normalized ISO；不算產品缺陷（fare-after.json 保留，最終 root-after.json 全通過）。
+
+舊 candidate 847eba3 的 hosted CI runs 38014330671／38014330674 已由 reviewer
+讀取成功，但不消除 F-TARIFF-01，也不代替新 SHA CI。所有新候選 CI 結果將保存在
+本輪 manifest／logs；不覆蓋 `dispatch-20261010/candidate-evidence.json` 的舊證據。
+沒有啟動本 VM 產品、PG、Docker Compose、preview、browser/E2E 服務。
+handoff 後 review、merge、兩個 required_acceptance 仍由原 candidate lifecycle 處理；
+owner 不直接 done。
