@@ -235,6 +235,7 @@ describe("Passenger BFF Route", () => {
     ];
     for (const sc of scenarios) {
       let callCount = 0;
+      let retryAuthHeader: string | null = null;
       global.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
         if (url.includes("metadata.google.internal")) {
           return new Response("trusted", { status: 200 });
@@ -253,7 +254,7 @@ describe("Passenger BFF Route", () => {
           return Response.json({ accessToken: "rotated-acc", refreshToken: "rotated-ref" }, { status: 200 });
         }
         if (callCount === 3) { // Retry request
-          expect(init.headers.get("authorization")).toBe("Bearer rotated-acc");
+          retryAuthHeader = init.headers.get("authorization") || null;
           if (sc.networkError) throw new Error("Network exception");
           return new Response("Unauthorized", { status: 401 });
         }
@@ -265,6 +266,7 @@ describe("Passenger BFF Route", () => {
       const res = await GET(req, { params: Promise.resolve({ path: ["me"] }) });
       
       expect(callCount).toBe(3);
+      expect(retryAuthHeader).toBe("Bearer rotated-acc");
       expect(res.status).toBe(sc.status);
       expect(res.cookies.get("pax_session")?.value).toBe("");
       expect(res.cookies.get("pax_session")?.maxAge).toBe(0);

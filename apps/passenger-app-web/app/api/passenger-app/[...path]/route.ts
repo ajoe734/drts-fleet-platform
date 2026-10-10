@@ -59,13 +59,21 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (hasUnsafePathSegment(path)) return false;
   const fullPath = path.join("/");
   if (method === "GET" && fullPath === "auth/providers") return true;
-  if (method === "POST" && path.length >= 3 && path[0] === "auth" && path[1] === "otp") return true;
-  if (method === "POST" && path.length >= 4 && path[0] === "auth" && path[1] === "oauth") return true;
+  if (method === "POST" && fullPath === "auth/otp/request") return true;
+  if (method === "POST" && fullPath === "auth/otp/verify") return true;
+  if (method === "POST" && path.length === 4 && path[0] === "auth" && path[1] === "oauth") {
+    const provider = path[2];
+    const action = path[3];
+    if (["google", "facebook", "line"].includes(provider) && ["start", "callback"].includes(action)) {
+      return true;
+    }
+  }
   if (method === "POST" && fullPath === "auth/mfa/verify") return true;
   if (method === "POST" && fullPath === "quotes") return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;
+  if (method === "GET" && fullPath === "fares") return true;
   if (method === "POST" && fullPath === "rides") return true;
   return false;
 }

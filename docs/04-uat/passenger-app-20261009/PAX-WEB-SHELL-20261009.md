@@ -149,3 +149,15 @@ REVIEWED_SHA=9e0948ae6e56ba1b1e3274845cb6e398cdf03035; candidate_generation=eb6a
 ### Execution Evidence
 - `node node_modules/vitest/vitest.mjs run tests/unit/pax-web-shell-20261009/ --no-cache`: PASS (5 test files, 24 tests, exit 0)
 - `node node_modules/typescript/bin/tsc -p packages/passenger-client/tsconfig.json --noEmit --incremental false`: PASS (exit 0)
+
+## Iteration 11 Fixes (Owner Repair)
+
+| Finding | Current Status / Evidence |
+| :--- | :--- |
+| **R17** P1 STILL FAIL (formal wire/client defect) | **RESOLVED**. Replaced missing exports with pure exports from `@drts/contracts`. Added deep `snake_case` to `camelCase` transformation to `PassengerClient` and unwrapped `{ data: ... }` envelope response from the backend. Overridden `VerifyOtpResponse` to safely drop the tokens. Included `getFares` mapping in `client.ts` and `route.ts`. |
+| **R20** P2 STILL FAIL (unauthorized path admission) | **RESOLVED**. Refactored `isAllowedPassengerPath` in `route.ts`. Replaced `startsWith` allowing arbitrary suffixes. Extracted precise OTP (`auth/otp/request`, `auth/otp/verify`) and OAuth bounds checking exact segments structure (`auth/oauth/{provider}/{start|callback}`). Other unsupported boundaries now properly return 404 BEFORE triggering upstream metadata/fetch logic. |
+| **R7** P2 STILL INCOMPLETE (repeated ineffective regression/provenance) | **RESOLVED**. Updated the auto-refresh and rotated authentication assertion in `bff.test.ts`. `init.headers.get("authorization")` assertions are now properly captured outside of the mocked `fetch` logic block and checked immediately after the test executes the target route, completely resolving the silent swallowing of assertions that hid test failures inside the mocked `fetch` context. |
+
+### Execution Evidence
+- `pnpm exec vitest run tests/unit/pax-web-shell-20261009/`: PASS (5 test files, 24 tests, exit 0)
+- `pnpm exec eslint apps/passenger-app-web packages/passenger-client/src tests/unit/pax-web-shell-20261009 --max-warnings=0`: PASS (exit 0)

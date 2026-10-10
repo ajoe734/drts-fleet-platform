@@ -22,6 +22,27 @@ export interface PassengerClientOptions {
   fetchFn?: FetchFn;
 }
 
+function toCamelCase(str: string): string {
+  return str.replace(/([-_][a-z])/g, group =>
+    group.toUpperCase().replace('-', '').replace('_', '')
+  );
+}
+
+function deepToCamelCase(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(v => deepToCamelCase(v));
+  }
+  if (typeof obj === 'object') {
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+      result[toCamelCase(key)] = deepToCamelCase(obj[key]);
+    }
+    return result;
+  }
+  return obj;
+}
+
 export class PassengerClient implements PassengerViewModel {
   private baseUrl: string;
   private fetchFn: FetchFn;
@@ -58,7 +79,14 @@ export class PassengerClient implements PassengerViewModel {
       throw new Error(`API error: ${response.status}`);
     }
 
-    return response.json();
+    const payload = await response.json();
+    const camelCased = deepToCamelCase(payload);
+    
+    // Unwrap the `{ data: ... }` envelope if it exists
+    if (camelCased && typeof camelCased === 'object' && 'data' in camelCased) {
+      return camelCased.data as T;
+    }
+    return camelCased as T;
   }
 
   async getAccount(): Promise<PassengerAccount> {
@@ -70,25 +98,43 @@ export class PassengerClient implements PassengerViewModel {
     return this.request<import("./types.js").AuthProvidersResponse>("/api/passenger-app/auth/providers");
   }
 
+  async getFares(): Promise<import("./types.js").FaresResponse> {
+    return this.request<import("./types.js").FaresResponse>("/api/passenger-app/fares");
+  }
+
   async getFareQuote(command: import("./types.js").FareQuoteCommand): Promise<import("./types.js").FareQuoteResponse> {
+    // Convert to snake_case for the payload to backend
+    const snakeCommand: any = {};
+    for (const [key, value] of Object.entries(command)) {
+      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      snakeCommand[snakeKey] = value;
+    }
     return this.request<import("./types.js").FareQuoteResponse>("/api/passenger-app/quotes", {
       method: "POST",
-      body: JSON.stringify(command)
+      body: JSON.stringify(snakeCommand)
     });
   }
 
   async login(request: import("./types.js").VerifyOtpCommand): Promise<import("./types.js").VerifyOtpResponse> {
+    const snakeCommand: any = {};
+    for (const [key, value] of Object.entries(request)) {
+      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      snakeCommand[snakeKey] = value;
+    }
     const res = await this.request<import("./types.js").VerifyOtpResponse>("/api/passenger-app/auth/otp/verify", {
       method: "POST",
-      body: JSON.stringify(request)
+      body: JSON.stringify(snakeCommand)
     });
     if (res.result === "logged_in") {
-      this.sessionStatus.isActive = true;
-      // Note: We'll fetch account after logging in to populate the view model
       try {
-         this.sessionStatus.account = await this.getAccount();
+         const account = await this.getAccount();
+         if (account) {
+           this.sessionStatus.isActive = true;
+           this.sessionStatus.account = account;
+         }
       } catch {
-         // Silently catch account fetch errors
+         this.sessionStatus.isActive = false;
+         delete this.sessionStatus.account;
       }
     }
     return res;
@@ -113,7 +159,11 @@ export class PassengerClient implements PassengerViewModel {
   async getSessionStatus(): Promise<import("./types.js").SessionStatus> {
     try {
       const account = await this.getAccount();
-      this.sessionStatus.isActive = true; this.sessionStatus.account = account;
+      if (account) {
+        this.sessionStatus.isActive = true; this.sessionStatus.account = account;
+      } else {
+        this.sessionStatus.isActive = false; delete this.sessionStatus.account;
+      }
       return this.sessionStatus;
     } catch {
       this.sessionStatus.isActive = false; delete this.sessionStatus.account;
