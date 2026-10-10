@@ -6,6 +6,7 @@ Owner: Codex2；Reviewer: Codex（本次 dispatch）。2026-10-10。
 NT$20、延滯每 60 秒與正式一般日運價 seed 已實作。以下前輪來源、未 seed、
 比例 wire 及 pending 敘述為歷史候選證據，已由末節的新定案取代，不代表現況。
 保留 F-GEO-01／F-CI-01 的原始定位、結果與 evidence，不覆蓋前輪紀錄。
+最新整合修復與新候選證據見末節「2026-10-10 OAuth 合併衝突續修」。
 
 Supervisor 2026-10-10 已增補 guard 寫入範圍；F-GEO-01 已修復並完成本機
 四路由 × 三環境的正向／拒絕回歸。本次候選與同 SHA CI 的最終結果記在下方
@@ -375,3 +376,73 @@ SMS/mail providers 與 fare controller/providers、Geo/ServiceArea imports/expor
 合併後 API/root typecheck、shared policy/module/fare 的 scoped eslint、format、
 test coverage／trailers／canonical consistency／diff 重新驗證，其結果同本輪 manifest。
 最終 head 只追加本段證據；同 SHA CI 全部結束並讀取後才 handoff Codex。
+
+## 2026-10-10 OAuth 合併衝突續修
+
+前候選 `a455c0707a52fcb0d28e52a9b53492de057e1def`／generation
+`722035cfe7a2485ba16c3bd422bc3c69` 已由 Codex 於 03:25 UTC approve；其
+CI runs 38019330723／38019330741 的成功結果保留在前節 manifest。
+本次 dispatch 的 machine truth 已回到 `in_progress`、`ci_status=merge_conflict`。
+live PR #2499 仍為相同 head，GitHub 回報 `CONFLICTING/DIRTY`；不是以 trunk
+前進為由改寫仍在審查的候選。fetch 後確認新 dev 為
+`2bb31e7fd60074773932caa00a1c56711bb9b6ac`（PAX-OIDC PR #2501）。
+
+### 修正邊界與既有呼叫端
+
+唯一衝突為 `PassengerAppModule` 的 import/controller/provider 清單。普通 merge
+checkpoint `796982bdb0aa0d34c6455bde567370176177deee` 保留兩側歷史，合併：
+
+- Fare controller/repository/service、GeoModule／ServiceAreaModule imports，
+  及 fare repository/service exports。
+- 上游 OAuth controller/service/transaction repository 與既有 account、OTP、
+  SMS/mail providers。保留 `PassengerOAuthController` 注入正式 OTP service 的
+  provider discovery，及上游已移除 OTP helper GET decorator 的修復。
+- `auth.policy.ts` 自動合併上游 OAuth policy，保留本 task 四個 geo route policy。
+
+沒有修改 OAuth／OTP 業務碼；scope 外檔案僅沿正式 dev merge 引入。
+已讀正式 OAuth controller/service constructor、OTP provider helper、module metadata
+回歸與 route policy；不新增鏡像註冊清單測試。原 `passenger-auth-provider-routing`
+測試透過 Nest MetadataScanner 檢查正式 module/controllers，五個登入路由各
+只有一個正確 open handler，OTP helper 不再註冊另一個 GET handler。
+
+fare 目錄、V0112、bootstrap guard 與定案內容文件相對已 approve 的 a455c0707
+沒有 diff；19 欄 tariff SELECT、20 欄 seed 及 16 欄 snapshot SQL 未變。
+新 candidate 仍須由 reviewer 重新確認，前 SHA 的 approve/CI 不代替本次結果。
+
+### §0.7 逐項證據與限制
+
+本輪 evidence root：
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-app-20261009/PAX-FARE-QUOTE-20261009/oidc-merge-20261010/`。
+執行版本 Node v22.23.2、pnpm 10.33.0、Vitest 4.1.4、TypeScript 5.9.3。
+`*.result.json` 留精確 argv、cwd、起始時間、退出碼與完整 log；本機產品 checks
+執行於 merge checkpoint 796982bdb，最終候選只追加本段交付證據。
+`candidate-evidence.json` 記完整 final SHA、remote/PR head、UAT hash、全部本機
+結果，以及同 SHA hosted CI run/jobs/logs。它不覆蓋前兩輪 manifest。
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼與證據 | 未驗項／限制 |
+| --- | --- | --- | --- | --- |
+| OAuth 整合衝突 | 正式 PassengerAppModule 的 imports/controllers/providers；PR #2501 | a455c0707 對 2bb31e7fd 的 merge-tree exit1，唯一 module 衝突 → 796982bdb 對同一 dev exit0；live PR 改為 MERGEABLE | `git merge-tree --write-tree <head> 2bb31e7fd60074773932caa00a1c56711bb9b6ac`；merge-before/merge-after.log 及 result.json | merge-tree 只驗整合；不冒充產品 runtime |
+| pax-fare_tariff_and_engine | 未變的正式 V0112 seed、FareTariff、estimateFare；前節 F-TARIFF-01 定案來源 | 本次 root 包含全部 fare/官方數字/boundary 回歸；root 合計 504 pass、0 fail、2 skip | 下列 root 命令 exit0；root.json／root.log | 春節年度／機場特殊規則仍未納入一般日 seed；正式 PG 仍走 PAX-QA hosted gate |
+| pax-fare_quote_and_public_fares | 正式 FareController/Service/Repository、live session/geo guard、GeoService/ServiceAreaService | quote/public fare/owner/expiry/服務範圍與四路由三環境正向及拒絕回歸通過；API 合計 228 pass、0 fail/skip | root/API 命令均 exit0；root.json／api.json | storage/routing/provider 外部邊界 stub；BFF/runtime 與正式 PG repository/constraints 未在 VM 執行 |
+| F-GEO-01／F-CI-01／F-TARIFF-01 及 OTP/OAuth 回歸 | 正式 guard/account/session、固定每趟20元/60秒/官方進位、既有 inventory、OAuth controller/service 與真 Nest metadata | 舊缺陷回歸保留；root 504 pass/2 development strict-only skip、API 228 pass；五個登入路由唯一 handler | root/API exit0；inventory exit0（94 test files）；inventory.log | 不把兩個明確 skip 列 pass；OAuth/mail/SMS 無真實外部請求 |
+| lint／format／typecheck／metadata | 合併後 module/policy、正式 API/root tsconfig、trailers/canonical/diff | scoped lint/format、API typecheck、inventory、trailers、canonical 均 exit0；標準 root typecheck exit2（下列共享依賴限制），worktree 來源解析與最終文件 checks 結果見 manifest | 每項獨立 result.json/log；最終同 SHA CI 必須全部完成並讀結果再 handoff | checkpoint CI 不當 final candidate 綠燈；review/merge/兩個 named acceptance 留原 lifecycle |
+
+本次已結束的正式回歸命令（JSON reporter 的輸出路徑位於上述 evidence root）：
+
+```bash
+pnpm exec vitest run tests/unit/pax-fare-quote-20261009 tests/security/idempotency-regression-guard.test.ts tests/unit/pax-account-session-20261009 tests/unit/bootstrap-auth-guard-strict-env.test.ts tests/unit/pax-otp-20261009 tests/unit/pax-oidc-login-20261009 tests/unit/auth-oidc-pkce.test.ts tests/unit/tenant-google-bff.test.ts tests/unit/tenant-google-invitation.test.ts tests/unit/tenant-oidc-replay-store.test.ts --reporter=json --outputFile=<evidence-root>/root.json
+pnpm --filter @drts/api exec vitest run tests/unit/geo.service.test.ts tests/unit/service-area.service.test.ts tests/unit/passenger-auth-provider-routing.test.ts tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/auth-bootstrap.test.ts tests/unit/tenant-partner.service.test.ts --reporter=json --outputFile=<evidence-root>/api.json
+```
+
+標準 `pnpm typecheck:root` 已結束 exit2：共享 node_modules 把部分
+`@drts/api-client` import 解析到 `gemini-pax-web-shell-20261009`，而相對 import
+解析到本 worktree，TypeScript 拒絕兩份含 private `requestEnvelope` 的 ApiClient。
+完整錯誤保留在 root-typecheck.log；不是本次 fare/module 業務缺陷。
+本輪不更改共享依賴或正式 tsconfig。evidence root 的 `tsconfig.root.json` extends
+原 root config，保留全部 include/options 與 contracts/control-plane aliases，
+只增加 `@drts/api-client` 指向本 worktree 原始碼；完整 root 檢查的實際結果
+保留於 root-typecheck-worktree.result.json/log。不將原 exit2 改寫成 pass。
+
+沒有 rebase/amend/force push/reset 活躍工作樹；沒有啟動 VM 產品、PG、preview、
+browser/E2E 或 Docker Compose。普通 push 後以 final CANDIDATE_SHA/BRANCH
+handoff Codex，不直接 done；由原 lifecycle 收錄新 review、CI、merge 與 acceptance。
