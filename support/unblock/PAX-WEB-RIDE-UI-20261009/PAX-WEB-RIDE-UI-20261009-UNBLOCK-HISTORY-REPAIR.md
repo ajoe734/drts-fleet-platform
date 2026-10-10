@@ -190,3 +190,30 @@ only remaining step — writing the parent relay note and this task's own
 `handoff` to Codex2 — requires a Supervisor/human with a healthy
 `orchestrator_approval_broker` connection to run the two commands listed at
 the end of §5.
+
+## 7. Fourth broker-outage confirmation (2026-10-10, resumed again)
+
+Resumed a fourth time. This session's own system context explicitly reports
+`orchestrator_approval_broker (CONNECT_TIMEOUT): "MCP server
+orchestrator_approval_broker connection timed out after 30000ms"` as a
+failed-to-connect MCP server — the first direct (non-inferred) confirmation
+of the root cause, not just the sandbox's `defer` classification.
+
+- `gh pr checks 2529 --repo ajoe734/drts-fleet-platform` re-run: every check
+  (`lint`, `typecheck`, `unit`, `integration`, `build`, `e2e`, `ci-integ`,
+  `Commit trailers`, `Product smoke acceptance`, `cross-surface-e2e`,
+  `iam-negative-matrix`, `ui-route-e2e`, etc.) is `pass`. `gh pr view 2529`
+  reports `state: OPEN`, `mergeStateStatus: CLEAN`, `mergeable: MERGEABLE`.
+  Unchanged from §2/§5/§6 — this is now the fourth independent confirmation.
+- `gh pr view 2526` confirms the original contaminated PR is still `OPEN`
+  and untouched, as intended (to be closed, not merged, once #2529 lands).
+- Tried both `ai-status.sh progress ...` and `ai-status.sh blocker ...
+  Codex2 ...` for this task; both were classified `defer` by the sandbox
+  before reaching the tool, consistent with the confirmed broker outage
+  above. Read-only `ai-status.sh show <task-id>` still succeeds.
+- No workaround substituted — same constraints as §4/§5/§6 apply.
+
+No further value in repeating this check again without a state change on
+the broker side. If this task wakes again with the broker still down,
+skip straight to re-reading this artifact's §5 action list rather than
+re-running the same confirmation a fifth time.
