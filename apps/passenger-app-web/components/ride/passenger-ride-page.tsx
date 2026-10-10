@@ -457,7 +457,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           color: passengerChrome.muted,
         }}
       >
-        {t.PickupPrefix}
+        {t.PickupLabel}
         {fixture.pickupLabel}
       </div>
       {fixture.mapState === "fresh" ? (
@@ -692,7 +692,7 @@ function VehicleCard({
               fontFamily: monoFont,
             }}
           >
-            {assignment.driver.registrationMaskedDisplay} {t.ValidUntilDot}{" "}
+            {assignment.driver.registrationMaskedDisplay} {t.ValidUntil}{" "}
             {assignment.driver.registrationEffectiveUntil}
           </div>
           <div style={{ marginTop: 6 }}>
@@ -720,7 +720,7 @@ function VehicleCard({
                   </b>
                 </span>
                 <span style={{ fontSize: 11, color: passengerChrome.muted }}>
-                  {assignment.rating.ratingCount} {t.ReviewsCountSuf}
+                  {assignment.rating.ratingCount} {t.ReviewsCount}
                 </span>
               </span>
             ) : (
@@ -790,7 +790,7 @@ function FareCard({
               marginBottom: 6,
             }}
           >
-            {t.VersionDetails} {fixture.fareVersion.authorityFilingRef}
+            {t.VersionInfo} {fixture.fareVersion.authorityFilingRef}
           </div>
           {[
             ["起程運價（1.25 公里）", "NT$ 85"],
@@ -1213,7 +1213,7 @@ function RatingCard({
               marginTop: 4,
             }}
           >
-            {t.RatingPrefix2} {submittedScore} {t.RatingSuffix2}
+            {t.RatingPrefix} {submittedScore} {t.RatingSuffix}
           </div>
         </div>
       </Card>
