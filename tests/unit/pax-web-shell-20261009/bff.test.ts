@@ -18,6 +18,8 @@ import { PassengerClient } from "../../../packages/passenger-client/src/client.j
 import {
   GET,
   POST,
+  DELETE,
+  PATCH,
 } from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
 import { apiWireResponse, fares, me } from "./api-wire-fixtures";
 
@@ -81,6 +83,14 @@ describe("Passenger BFF Route", () => {
       { method: "GET", path: ["admin", "users"] },
       { method: "POST", path: ["auth", "otp-extra", "something"] }, // prefix collision
       { method: "GET", path: ["auth", "oauth", "google", "extra"] }, // extra segments
+      
+      // new rejections for PAX-WEB-BOOKING-UI-20261009 additions
+      { method: "POST", path: ["geo", "search"] }, // wrong method
+      { method: "PUT", path: ["me"] }, // wrong method
+      { method: "POST", path: ["settings"] }, // wrong method
+      { method: "GET", path: ["geo", "search", "extra"] }, // extra segments
+      { method: "GET", path: ["settings", "extra"] }, // extra segments
+      { method: "PATCH", path: ["me", "extra"] }, // extra segments
     ];
 
     for (const { method, path } of maliciousPaths) {
@@ -88,7 +98,7 @@ describe("Passenger BFF Route", () => {
         `http://localhost/api/passenger-app/${path.join("/")}`,
         { method, headers: { Origin: "http://localhost" } },
       );
-      const handler = method === "POST" ? POST : GET;
+      const handler = method === "POST" ? POST : method === "PATCH" ? PATCH : method === "DELETE" ? DELETE : GET;
       const res = await handler(req, { params: Promise.resolve({ path }) });
       expect(res.status).toBe(404);
       expect(global.fetch).not.toHaveBeenCalled();
@@ -164,8 +174,44 @@ describe("Passenger BFF Route", () => {
         mockResponse: new Response("ok", { status: 200 }),
       },
       {
+        method: "PATCH",
+        path: ["me"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
         method: "POST",
         path: ["rides"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["geo", "search"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["geo", "resolve"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["geo", "reverse"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["geo", "route"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["settings"],
         expectedStatus: 200,
         mockResponse: new Response("ok", { status: 200 }),
       },
@@ -180,7 +226,7 @@ describe("Passenger BFF Route", () => {
         `http://localhost/api/passenger-app/${v.path.join("/")}`,
         { method: v.method, headers: { Origin: "http://localhost" } },
       );
-      const handler = v.method === "POST" ? POST : GET;
+      const handler = v.method === "POST" ? POST : v.method === "PATCH" ? PATCH : v.method === "DELETE" ? DELETE : GET;
       const res = await handler(req, {
         params: Promise.resolve({ path: v.path }),
       });
@@ -494,7 +540,7 @@ describe("Passenger BFF Route", () => {
         const path = new URL(url).pathname
           .slice("/api/passenger-app/".length)
           .split("/");
-        const handler = req.method === "POST" ? POST : GET;
+        const handler = req.method === "POST" ? POST : req.method === "PATCH" ? PATCH : req.method === "DELETE" ? DELETE : GET;
         const response = await handler(req, {
           params: Promise.resolve({ path }),
         });

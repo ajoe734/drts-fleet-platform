@@ -85,6 +85,14 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "GET" && fullPath === "me") return true;
   if (method === "GET" && fullPath === "fares") return true;
   if (method === "POST" && fullPath === "rides") return true;
+  
+  if (method === "GET" && fullPath === "geo/search") return true;
+  if (method === "GET" && fullPath === "geo/resolve") return true;
+  if (method === "GET" && fullPath === "geo/reverse") return true;
+  if (method === "GET" && fullPath === "geo/route") return true;
+  if (method === "GET" && fullPath === "settings") return true;
+  if (method === "PATCH" && fullPath === "me") return true;
+
   return false;
 }
 
@@ -491,6 +499,13 @@ export async function POST(
 }
 
 export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
