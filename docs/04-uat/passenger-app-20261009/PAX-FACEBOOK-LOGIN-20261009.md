@@ -2,8 +2,9 @@
 
 Owner: Codex · Reviewer: Codex2
 
-最新狀態（2026-10-10 guard 修復輪）：FB-INGRESS-1 的 middleware 與 guard
-兩層均已完成本機正式函式回歸；下方前輪「未解」及 expected-denial 記錄保留作歷史。
+最新狀態（2026-10-10 session 修復輪）：FB-SESSION-RACE-1 已完成身分綁定的
+原子簽發與舊／新版本回歸；FB-INGRESS-1 兩層回歸仍通過。
+下方前輪「未解」及 expected-denial 記錄保留作歷史。
 最新證據見本文末段。整項 acceptance 尚待同 candidate hosted CI、Codex2 review、
 merge 與指定 acceptance evidence；本機 pass 不等於 PG／HTTP／真實 Meta 通過。
 
@@ -393,3 +394,77 @@ identity → account 鎖定、重新核對 identity 的 account ownership、原 
 OAuth session/JWT 實作。原 owner 不代替 Supervisor 改 scope 或越界修改。
 待協調後沿原 finding 完成修復與既列必要回歸；本輪只有測試／證據 checkpoint，
 不 handoff 未修的候選、不降驗收要求，無 VM runtime 或部署。
+
+## 2026-10-10：FB-SESSION-RACE-1 身分綁定的原子簽發修復
+
+Supervisor 12:51 UTC 已將 `account/passenger-account.service.ts` 加入原任務
+write_scopes，核對 PAX-PAYMENT-CORE 尚未開工；授權僅 `issueSession`。
+已完整閱讀原 Codex2 review（上方 `c98fee7702e738e4fec2ea43279705cf84f0dbb4`、
+generation `383dbe9b67be465db0ab3eb4721cc249`）與正式 SD、OAuth／OTP callers、
+account／deletion service、repository 及 V0109 migration。
+
+`PassengerAccountService.issueSession` 新增 optional verified provider／subject
+binding，沿用既有兩參數與 `issue`／JWT／session repository。綁定簽發在同一
+transaction 依 identity → account 鎖定，**取得 account lock 後**讀取正式 identity
+並驗證 `drtsPassengerId` 歸屬，再簽 JWT／插入 session。刪除或 unlink 已移除身分、
+以及 subject 已在另一帳號重建，均在簽發前拒絕。`PassengerOAuthService.callback`
+為 Facebook／Google／LINE 登入傳入剛驗證的 provider／subject；explicit link 仍走
+原 `linkIdentity` 的 live-session 檢查。OTP 兩參數呼叫與 `deleteAccount` 保持原契約。
+未更改 schema、repository、付款 slice 或另造 session 實作。
+
+舊版本為已發布 checkpoint `4eb7c996153a8dc290747ea3cbf7a0a950935840`，其相關
+產品碼與原退修 SHA 一致；以 `git archive` 在本 worktree `.local` 隔離重跑，未
+reset/rebase 活躍 worktree。舊／新 `facebook.test.ts` 完全相同，SHA256 均為
+`08599ef90d2d68306745d6d05046dd0eb41297d12eb4867f176c288aeffca920`。
+修復產品碼 anchor 為 `cb8c8ed77`；完整修復 source/test checkpoint 為
+`4d41096d8ec55f2137617e9bd638a8e5da8ca3e8`。最終 candidate 是含本節證據的
+後續 closeout commit，以 handoff 的完整 SHA／PR #2503 head 為準；checkpoint
+與舊 CI 結果均不作新 candidate 的 CI／review 證據。
+
+| Finding／驗收項                                                          | 正式依據與修改位置                                                                                                   | 舊版重現 → 修正版結果                                                                                                                                                         | 命令、退出碼、版本與證據位置                                                                                             | 未驗項與限制                                                                                                                                             |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FB-SESSION-RACE-1：Email／Google 留存帳號，刪除先完成                    | `callback` → `findOrCreateByIdentity` → 綁定的 `issueSession`；正式 deletion／JWT authentication                     | 舊版 2 fail（新 session 可用）→ 修正版 2 pass；拒絕簽發，舊 session 撤銷，剩餘身分的新 proof 可登入原帳號                                                                     | `before-race-final.{json,log}` exit 1；`after-race.{json,log}` exit 0；下方同一 race 命令                                | Graph／memory persistence stub；不宣稱 live PG concurrency                                                                                               |
+| FB-SESSION-RACE-1：subject 刪除後於另一帳號重建                          | 相同正式 service/JWT scheduling seam；簽發重验 exact account ownership                                               | 舊版 1 fail → 修正版 1 pass；舊 callback 拒絕、新 callback 只登入新帳號                                                                                                       | 同上；舊 3 fail／2 pass → 新 5 pass，兩輪各 62 filtered-out                                                              | 未測真實 Meta transport                                                                                                                                  |
+| FB-SESSION-RACE-1：sole-Facebook／issue-first                            | 正式刪除匿名化、`revokeAll`、`refresh`／access authentication                                                        | 舊／新各 2 pass；唯一身分帳號 deleted；先簽發者的 access／refresh 均遭撤銷                                                                                                    | 同上 race 命令；非修復前已通過的案例亦保留                                                                               | Memory store 序列化 transaction，不模擬 PG lock engine                                                                                                   |
+| 簽發 transaction／等待 account lock 時 unlink／ownership 變更            | 新 `passenger-identity-session.repository.test.ts` 呼叫正式 account service、repository、JWT；fixture 逐欄核對 V0109 | 新 7 pass：FB／Google／LINE 同一 BEGIN→identity lock→account lock→identity read→insert→COMMIT；身分消失／另一 owner 不簽 JWT／不插入；insert failure ROLLBACK；OTP 两參數可用 | API 最終回歸 exit 0，7 cases 包含於 127 pass；`api-regression-final.{json,log}`                                          | 只 stub PoolClient，不建立表或複製業務 SQL；不等於 live PG                                                                                               |
+| FB-INGRESS-1 及 OAuth/link/logout/state/PKCE/token/HMAC/receipt 前輪回歸 | 原 middleware／guard、Facebook、OIDC、account/session、OTP、fare realm、proof auth tests                             | root 17 files：481 pass／2 既有 development skip；API 5 files：127 pass／0 skip                                                                                               | 下方 root/API 命令 exit 0；`root-regression.{json,log}`、`api-regression-final.{json,log}`                               | 本輪受影響回歸，非全 repo/browser/HTTP acceptance；兩個 geo-realm development skip 分列                                                                  |
+| 靜態契約與 schema                                                        | `issueSession` 全 callers；正式 V0109 repository；只有既有 SQL 增加呼叫                                              | eslint、root/API typecheck、正式 contracts/control-plane-auth builds、diff-check 均 exit 0                                                                                    | `lint-final.log`、`root-typecheck.log`、`api-typecheck-final.log`、`contracts-build.log`、`control-plane-auth-build.log` | SQL 未變；API tests 不在 API source typecheck include，另由 Vitest/eslint 檢查                                                                           |
+| pax-facebook_flow_verification_and_data_deletion                         | 上述正式流程、原 review 與全部前輪 findings                                                                          | 本機修復／回歸已通過；**整項仍待 acceptance**                                                                                                                                 | 本節與 candidate handoff；同 SHA hosted CI pending，供原 GitHub bus 收錄                                                 | 待 Codex2 同 SHA review、CI／merge／具名 acceptance；PG 正式 schema/repository hosted QA、HTTP form parser、公開 Cloud Run ingress、真實 Meta App 尚未驗 |
+
+證據目錄：本 worker `.local/facebook-session-binding-20261010/`；交接時複製 logs、
+JSON、依賴隔離清單及 source hashes 到 canonical root 同名 `.local` 目錄。
+版本：Node 22.23.2／pnpm 10.33.0／Vitest 4.1.4。
+
+```bash
+# 舊 SHA git archive snapshot 工作目錄內；同檔案、同篩選；exit 1，3 fail／2 pass／62 filtered-out
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009/facebook.test.ts -t 'in-flight Facebook callback|after deletion and recreation|issuance commits before deletion' --reporter=default --reporter=json --outputFile.json=../before-race-final.json
+# 修復 worktree 同一篩選；exit 0，5 pass／62 filtered-out
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009/facebook.test.ts -t 'in-flight Facebook callback|after deletion and recreation|issuance commits before deletion' --reporter=default --reporter=json --outputFile.json=.local/facebook-session-binding-20261010/after-race.json
+
+pnpm exec vitest run tests/unit/pax-facebook-login-20261009 tests/unit/pax-oidc-login-20261009 tests/unit/pax-account-session-20261009 tests/unit/pax-otp-20261009 tests/unit/pax-fare-quote-20261009/geo-realm.test.ts tests/unit/internal-key.middleware.test.ts tests/unit/bootstrap-auth-guard-strict-env.test.ts tests/unit/system-remediation/sr-proof-001/proof-download-auth.test.ts --reporter=default --reporter=json --outputFile.json=.local/facebook-session-binding-20261010/root-regression.json
+# exit 0，481 pass／2 skip
+pnpm --filter @drts/api exec vitest run tests/unit/passenger-identity-session.repository.test.ts tests/unit/facebook-data-deletion.repository.test.ts tests/unit/passenger-oauth-transaction.repository.test.ts tests/unit/passenger-auth-provider-routing.test.ts tests/unit/auth-bootstrap.test.ts --reporter=default --reporter=json --outputFile.json=../../.local/facebook-session-binding-20261010/api-regression-final.json
+# exit 0，127 pass／0 skip
+pnpm exec eslint apps/api/src/modules/passenger-app/account/passenger-account.service.ts apps/api/src/modules/passenger-app/oauth/passenger-oauth.service.ts apps/api/tests/unit/passenger-identity-session.repository.test.ts --max-warnings=0
+pnpm typecheck:root
+pnpm --filter @drts/contracts build
+pnpm --filter @drts/control-plane-auth build
+pnpm --filter @drts/api typecheck
+git diff --check
+# 以上最終命令均 exit 0，全部等待結束並讀取結果
+```
+
+工具／fixture 初始失敗單列，均不作產品缺陷重現：dispatch 的 22 個 dependency
+symlinks 指向已失效的其他 worker，只解除本 task worktree 的連結，offline
+frozen-lockfile install exit 0，canonical dependencies 未動。首個 baseline Vitest／
+prettier 缺套件 exit 1；snapshot 缺 contracts 的 zod link exit 1／0 tests，補上
+本 task 離線依賴連結；一次 `--root` 相對 config 重複路徑 exit 1／0 tests，改回
+snapshot cwd 後才取得上述 3 fail 的有效重現。新 repository fixture 首次未填
+`deleted_at=null` 導致 Invalid time value、7 fail，補齊 V0109 row 後 7 pass；API
+首次 typecheck 缺 control-plane-auth dist declarations exit 2，正式依賴 build 後
+exit 0。初次 API JSON 輸出用了多一層 `../`，最終輸出已改為本 worktree `.local`。
+初次錯誤 logs 保留，不算驗收通過。
+
+本輪未啟動 product server、browser/E2E server、DB 或 Docker；未部署、未呼叫真實
+OAuth/SMS/PSP。只普通 non-force push，無 rebase/amend/reset。最終交審後保留
+candidate SHA，後续 CI／review／merge／acceptance 由既有 lifecycle 收錄。
