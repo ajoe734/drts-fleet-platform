@@ -481,9 +481,16 @@ def load_and_validate_authoritative_artifact(
     require(acceptance_job.get("status") == "completed", "Acceptance job is not completed")
     require(acceptance_job.get("conclusion") == "success", "Acceptance job was not successful")
     require(acceptance_job.get("run_id") == expected_run_id, f"Acceptance job run_id mismatch: expected {expected_run_id}")
-    if acceptance_job.get("head_sha"):
-        require(acceptance_job.get("head_sha") == expected_workflow_def_sha, f"Acceptance job head_sha mismatch: expected {expected_workflow_def_sha}")
     
+    # Require unique identity binding and no missing fields
+    require(acceptance_job.get("head_sha") == expected_workflow_def_sha, f"Acceptance job head_sha mismatch: expected {expected_workflow_def_sha}")
+    html_url = acceptance_job.get("html_url", "")
+    require("ajoe734/drts-fleet-platform" in html_url, f"Acceptance job foreign repository/URL: {html_url}")
+
+    # Check terminal status for all jobs
+    for job in jobs_list:
+        require(job.get("status") == "completed", f"Required job {job.get('name')} is not completed")
+
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
     evidence_data = None
@@ -520,14 +527,21 @@ def load_and_validate_authoritative_artifact(
         f"Evidence candidateSha mismatch: {evidence_data.get('candidateSha')}",
     )
 
-    run_start_str = run_meta.get("run_started_at") or run_meta.get("created_at")
-    require(run_start_str is not None, "run.json missing run_started_at or created_at")
-    job_completed_str = acceptance_job.get("completed_at") or run_meta.get("updated_at")
+    # Establish the actual captured run/job interval
+    run_start_str = run_meta.get("run_started_at")
+    require(run_start_str is not None, "run.json missing run_started_at")
+    
+    job_started_str = acceptance_job.get("started_at")
+    require(job_started_str is not None, "acceptance job missing started_at")
+    
+    job_completed_str = acceptance_job.get("completed_at")
     require(job_completed_str is not None, "acceptance job missing completed_at")
 
     try:
         r_start = datetime.datetime.fromisoformat(run_start_str.replace("Z", "+00:00"))
-        r_end = datetime.datetime.fromisoformat(job_completed_str.replace("Z", "+00:00"))
+        j_start = datetime.datetime.fromisoformat(job_started_str.replace("Z", "+00:00"))
+        j_end = datetime.datetime.fromisoformat(job_completed_str.replace("Z", "+00:00"))
+        require(r_start <= j_start <= j_end, "Invalid run/job temporal interval bounds")
     except ValueError as e:
         require(False, f"Malformed run bounds: {e}")
 
@@ -567,7 +581,7 @@ def load_and_validate_authoritative_artifact(
             require(rec_at_str is not None and isinstance(rec_at_str, str), "Missing or invalid recordedAt timestamp")
             try:
                 rec_at = datetime.datetime.fromisoformat(rec_at_str.replace("Z", "+00:00"))
-                require(r_start <= rec_at <= r_end, f"Evidence timestamp {rec_at_str} out of bounds")
+                require(j_start <= rec_at <= j_end, f"Evidence timestamp {rec_at_str} out of bounds")
             except ValueError as e:
                 require(False, f"Invalid evidence timestamp: {e}")
             # Must be clean successful status: putStatus 200/201, clean scan, downloadStatus 200, valid readback SHA
@@ -610,7 +624,7 @@ def load_and_validate_authoritative_artifact(
         "artifact_digest": EXPECTED_ARTIFACT_DIGEST,
         "storage_documents": storage_docs,
         "mutation_records": mutation_records,
-        "run_bounds": {"start": run_start_str, "end": job_completed_str},
+        "run_bounds": {"start": job_started_str, "end": job_completed_str},
         "cleanup_not_performed": True,
         "preserve_failed_8d_03a_and_user_data": True,
     }
@@ -1058,9 +1072,9 @@ def inspect_and_validate_gcs_target(
     if tc and up:
         require(tc == up, f"Conflicting timeCreated and updated for gs://{bucket}/{key}: {tc_str} vs {up_str}")
     if sa and tc:
-        require(sa <= tc + datetime.timedelta(seconds=5), f"stored-at must be before or near timeCreated for gs://{bucket}/{key}")
+        require(sa <= tc, f"stored-at must not be after timeCreated for gs://{bucket}/{key}")
         
-    primary_time = tc or up or sa
+    require(tc or up or sa, f"Missing timestamp for gs://{bucket}/{key}")
     
     run_bounds = expected_item.get("run_bounds")
     require(run_bounds is not None, "Missing trusted run_bounds in target; cannot verify timestamp limits.")
@@ -1072,7 +1086,12 @@ def inspect_and_validate_gcs_target(
     run_start = parse_time(run_start_str)
     run_end = parse_time(run_end_str)
 
-    require(run_start <= primary_time <= run_end, f"Stale, future, or out-of-run timestamp for gs://{bucket}/{key}: {primary_time}")
+    if tc:
+        require(run_start <= tc <= run_end, f"timeCreated out of bounds for gs://{bucket}/{key}: {tc}")
+    if up:
+        require(run_start <= up <= run_end, f"updated out of bounds for gs://{bucket}/{key}: {up}")
+    if sa:
+        require(run_start <= sa <= run_end, f"stored-at out of bounds for gs://{bucket}/{key}: {sa}")
 
     # Live hash and body verification: MUST read body because Google GCS describe does not provide sha256 natively
     # Rejecting synthetic hash from metadata ensures we actually do media reads
@@ -1211,20 +1230,29 @@ def preflight_db_cleanup(
         "SELECT count(*) as cnt FROM fleet.supply_review_events "
         "WHERE submission_id = ANY($1::uuid[])"
     )
-    rev_res = db_runner(review_check_sql, [submissions])
+    try:
+        rev_res = db_runner(review_check_sql, [submissions])
+    except Exception as e:
+        return {
+            "status": "error",
+            "concrete_blocker": f"DB transport error during review events preflight: {str(e)}",
+            "plan_prepared": True,
+            "receipts": [],
+        }
+
     if rev_res.get("status") != "ok":
         return {
-            "status": "blocked",
+            "status": "error",
             "concrete_blocker": f"Database error during review events preflight: {rev_res.get('error', 'unknown error')}",
             "plan_prepared": True,
             "receipts": [],
         }
 
-    if "count" not in rev_res or not isinstance(rev_res["count"], int):
+    if "count" not in rev_res or not isinstance(rev_res["count"], int) or rev_res["count"] < 0:
         return {
             "status": "blocked",
             "concrete_blocker": (
-                "Review events preflight missing verified integer 'count'. "
+                "Review events preflight missing verified nonnegative integer 'count'. "
                 "Database audit verification cannot be proven."
             ),
             "plan_prepared": True,
@@ -1272,14 +1300,17 @@ def execute_db_cleanup(
     
     # 1. Run strict DB preflight using the actual runner
     preflight_res = preflight_db_cleanup(plan, db_runner)
-    if preflight_res.get("status") == "blocked":
-        return {
-            "status": "blocked",
+    if preflight_res.get("status") in ("blocked", "error"):
+        res_dict = {
+            "status": preflight_res.get("status"),
             "mode": "dry-run",
             "concrete_blocker": preflight_res.get("concrete_blocker"),
             "plan_prepared": True,
             "receipts": preflight_receipts,
         }
+        if preflight_res.get("status") == "error":
+            res_dict["error"] = preflight_res.get("concrete_blocker")
+        return res_dict
         
     preflight_receipts.append({"operation": "PREFLIGHT", "status": "ok"})
     
@@ -1287,12 +1318,25 @@ def execute_db_cleanup(
     for stmt in plan["db_targets"]["guarded_statements"]:
         table = stmt["table"]
         preflight_sql = f"SELECT count(*) as cnt FROM {table}"
-        res = db_runner(preflight_sql, [])
+        
+        try:
+            res = db_runner(preflight_sql, [])
+        except Exception as e:
+            return {
+                "status": "error",
+                "mode": "dry-run",
+                "error": f"DB transport error on {table}: {str(e)}",
+                "concrete_blocker": plan["db_blocker"],
+                "plan_prepared": True,
+                "receipts": preflight_receipts,
+            }
+
         if res.get("status") != "ok":
             return {
-                "status": "blocked",
+                "status": "error",
                 "mode": "dry-run",
-                "concrete_blocker": f"DB dry-run inspection failed on {table}: {res.get('error', 'unknown database error')}",
+                "error": f"DB dry-run inspection failed on {table}: {res.get('error', 'unknown database error')}",
+                "concrete_blocker": plan["db_blocker"],
                 "plan_prepared": True,
                 "receipts": preflight_receipts,
             }
@@ -1324,9 +1368,9 @@ def execute_db_cleanup(
         )
         
     return {
-        "status": "dry_run_inspected",
+        "status": "blocked",
         "mode": "dry-run",
-        "concrete_blocker": plan["db_blocker"],
+        "concrete_blocker": f"Generic cardinality inspection completes without authorized ownership proof. {plan.get('db_blocker', '')}",
         "plan_prepared": True,
         "receipts": preflight_receipts,
     }
@@ -1490,6 +1534,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 1
             with open(inventory_path, "r", encoding="utf-8") as f:
                 inventory_data = json.load(f)
+            
+            inventory_data["unverified_planning_only"] = True
+            inventory_data["error_reason"] = "Offline caller inventory lacks authoritative artifact/ZIP proof and trustworthy bounds."
+
             validate_provenance(
                 inventory_data,
                 run_id=args.run_id,

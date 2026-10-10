@@ -245,7 +245,7 @@ class TestAuthoritativeArtifactCollection(unittest.TestCase):
             "run_started_at": "2026-10-09T08:00:00Z",
             "repository": {"full_name": "ajoe734/drts-fleet-platform"}
         }
-        self.jobs_meta = {"jobs": [{"name": "acceptance tests", "status": "completed", "conclusion": "success", "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID, "completed_at": "2026-10-09T10:05:00Z"}]}
+        self.jobs_meta = {"jobs": [{"name": "acceptance tests", "status": "completed", "conclusion": "success", "run_id": cleanup.EXPECTED_PRODUCT_RUN_ID, "completed_at": "2026-10-09T10:05:00Z", "started_at": "2026-10-09T08:05:00Z", "head_sha": cleanup.EXPECTED_WORKFLOW_DEF_SHA, "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/1"}]}
         
         # Create a real zip containing report.json and operational-browser-evidence.json
         buf = io.BytesIO()
@@ -533,7 +533,7 @@ class TestDbCleanupGuardsAndPreflight(unittest.TestCase):
             
         mock_db = MagicMock(side_effect=typed_positive_db)
         res = cleanup.execute_db_cleanup(self.plan_dry, db_runner=mock_db)
-        self.assertEqual(res["status"], "dry_run_inspected")
+        self.assertEqual(res["status"], "blocked")
         # Verify mock_db was only called with SELECT statements, NEVER DELETE
         for call_args in mock_db.call_args_list:
             sql = call_args[0][0]
@@ -655,8 +655,8 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         def err_db(sql, params):
             return {"status": "error", "error": "permission denied"}
         res = cleanup.execute_db_cleanup(plan, db_runner=err_db)
-        self.assertEqual(res["status"], "blocked")
-        self.assertIn("permission denied", res["concrete_blocker"])
+        self.assertEqual(res["status"], "error")
+        self.assertIn("permission denied", res["error"])
 
     def test_gcs_target_missing_metageneration_rejected(self):
         target = {
@@ -732,7 +732,7 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
         }
         with self.assertRaises(ValueError) as ctx:
             cleanup.inspect_and_validate_gcs_target(desc, target)
-        self.assertIn("Stale, future, or out-of-run timestamp", str(ctx.exception))
+        self.assertIn("out of bounds", str(ctx.exception))
 
     def test_gcs_target_prior_receipt_validation(self):
         target = {

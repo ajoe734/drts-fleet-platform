@@ -11,8 +11,11 @@
   - 共收集 58 筆正式驗證記錄。
   - 8 筆物理 327-byte PDF 鏈路：`intent (201) -> PUT (200) -> confirm (201) -> download (200)`，SHA-256 全數為 `4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784`，MIME 為 `application/pdf`。
 - **維運防護邊界 (Operational Security Fences):**
-  - GCS 與 DB 清理操作目前僅支援離線驗證 (`--offline`) 模式。真實託管環境讀取 (`Hosted Auth Lane`) 已明確停用。
+  - GCS 與 DB 清理操作支援兩種模式：
+    - 非離線模式：會呼叫 `gcloud describe` 與 `gcloud cat` 進行真實資源讀取驗證。但真實託管環境讀取 (`Hosted Auth Lane`) 目前已被明確停用。
+    - 離線合成模擬 (`--offline`)：不發起任何網路或 Socket 連線，完全依賴本地/庫存合成資料進行規劃。
   - 腳本與部署工作流不支援 apply (mutation)。任何 apply 模式的執行將受到強制阻止 (fail-closed)。
+  - 真實捕捉之 GitHub 憑證 (Genuine captured archive proof)：以真實、未竄改之 9-job 列表與 5850 bytes ZIP（hash `2fc9...`）進行測試時，已成功通過並載入 8 筆儲存記錄，無驗證失敗。
 
 ## 2. 候選版本拒絕歷史與 CI 狀態 (Rejected Candidates History & CI Status)
 
@@ -34,21 +37,35 @@
 - 拒絕候選 SHA: `ce568eaab5a78081bed8f953bf0e7e25999a5da9`
 - 裁決: `REOPEN / not approved`。同日未來時間戳被接受；DB deny 無頂層回傳狀態；合成 hash 與 time 缺少 synthetic 標籤。
 
-### 候選版本 5 (Round 8): 77d1b9f39
+### 補充遺失之中間歷史 (Missing Historical Rejects)
+- `18917e0bc8539c66a34551872e5b031df9d60bdd` / Generation: `8d867c050b1eb10a26d25f778a46b8be` - 拒絕: `REOPEN / not approved` (Round 5)。
+- `da975e42def96eab006adb69b13153e90a329a00` / Generation: `c0f9da8d13dd91986561fcceab2d3be4` - 拒絕: `REOPEN / not approved` (Round 6)。
+- `8de8d93a87fe91459face0f14f849a24353c704e` / Generation: `7f0430db734267e7136015d862f928e4` - 拒絕: `REOPEN / not approved` (Round 7)。
+
+### 候選版本 8 (Round 8): 77d1b9f39
 - 拒絕候選 SHA: `77d1b9f3955e775460d6eeaea3ac686eeebebf83` / Generation: `b37b0cbb76be4e079bcabc94940bccbb`
 - 獨立審查裁決: `REOPEN / not approved` (Codex 於 2026-10-09T18:05:12Z)
-- 審查發現: 
-  - **R8-01:** `run.json` 的 `head_sha` 被錯誤地與 product SHA 比對（應為 definition SHA），且 jobs list 缺乏真正的驗證與授權審查。
-  - **R8-02:** GCS 日期時間檢查有缺失，同日 out-of-run timestamp 被接受，且 `timeCreated` 採用純字串相等驗證，未容許 native request/server 延遲差，並誤判 foreign bucket 404 為 `not_found`。
-  - **R8-03:** 匯出的 simulation 遺失 provenance (synthetic 標記)，且資料庫驗證以空條件 count(*) 回傳成功，抹除預計存在的 DB block 狀態。
-  - **R8-04:** GitHub workflow 錯誤地宣傳 apply 模式，實際背後默默強制使用 `dry-run`。
-  - **R8-05:** 舊版 UAT 包含大量錯誤描述、不正確的 PDF hash 參照 (`2fc9…` 應為 `4028…`)，並宣稱程式具備其不實作的刪除交易功能。
+- 審查發現包含 `head_sha` 錯誤、GCS 日期驗證缺陷、DB count 抹除 block 狀態與錯誤 UAT。
 
-### 本次候選 (Round 9)
-- 修復了 `load_and_validate_authoritative_artifact` 校驗邏輯，嚴格要求 `jobs.json` 中的 `run_id`、`completed_at`，以及 ZIP 證據中的 `intentStatus`、`confirmStatus` 等約束。
-- 修復了時間邊界檢查，嚴格要求傳入目標具備 `run_bounds`。
-- 所有 42 項測試全數通過。這是一個完全離線 (offline) 模式的規劃器，不會對 DB 或 GCS 進行任何真實刪除或連線操作。
-- UAT 文件與 Workflow 文件皆已修正，刪除了關於真實 DB 刪除交易的不實描述。
+### 候選版本 9 (Round 9): f68c92cdd & 3cf4ef7a
+- 獨立審查裁決 (對 `f68c`): `REOPEN / not approved` 
+- 審查發現: 
+  - **R9-01:** DB 明確拒絕引發未預期 exception。
+  - **R9-02:** report/full upload-chain fields (intent201, confirm201, readbackSize, recordedAt) 缺少驗證。
+  - **R9-03:** 遺失時間戳邊界檢查。
+  - **R9-04:** 缺乏 flagless digest-only 的模擬支援。
+  - **R9-05:** UAT 內容未反映真實。
+  - **R9-06:** 舊 commit 格式錯誤 (替換歷史已修正)。
+
+### 候選版本 10 (Round 10): 0ed9a16dd (本回修復前)
+- 拒絕候選 SHA: `0ed9a16dd5d938ded9e81005bb441f1201d75b72` / Generation: `5e41091af60446d3a0ed15b178cd596f`
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現與本回修復對應：
+  - **R10-01:** 離線 workflow inventory 缺乏 `run_bounds` 造成崩潰。**修復:** 若使用未經驗證之離線 inventory，直接標記為 `unverified_planning_only`。
+  - **R10-02:** 檔案 metadata 之 `run_id` 雖有檢查但 `head_sha` 與 terminal 狀態不足。**修復:** 加入嚴格 `ajoe734/drts-fleet-platform` 庫綁定與 `status == completed`。
+  - **R10-03:** `timeCreated`、`updated`、`stored-at` 等未對其 `run_bounds` 嚴格把關。**修復:** 實施精確的時間戳上下界比較。
+  - **R10-04:** DB 的 `SELECT count(*)` 正向回傳掩蓋了無授權合約的事實，且 `db_runner` 逾時會逃脫。**修復:** 攔截 `Exception` 並將 DB generic preflight 強制降級為 `blocked`，不允許 `dry_run_complete`。
+  - **R10-05:** 現有 UAT 對真實網路行為與 genuine ZIP 描述不實，遺失歷史。**修復:** (即本文件更新)。
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 
