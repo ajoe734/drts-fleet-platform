@@ -1,32 +1,43 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-const DEFAULT_API_BASE_URL = "http://localhost:3001";
+const DEFAULT_API_BASE_URL = "http://localhost:8080";
+const RUN_APP_HOST_SUFFIX = ".run.app";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
-const RUN_APP_HOST_SUFFIX = ".a.run.app";
 const REQUEST_HEADER_BLOCKLIST = new Set([
-  "connection",
-  "content-length",
-  "cookie",
   "host",
-  "transfer-encoding",
-  "x-drts-internal-key",
-  "x-drts-google-id-token",
-  "x-actor-id",
-  "x-actor-type",
-  "x-auth-mode",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-port",
+  "content-length",
+  "authorization",
 ]);
 
-function isAllowedPassengerPath(path: string[], method: string) {
-  if (path.length === 0) return false;
-  if (method === "GET" && path.length === 1) return true;
-  if (method === "GET" && path.length === 2 && path[1] === "events") return true;
-  if (method === "GET" && path.length === 2 && path[1] === "receipt") return true;
-  if (method === "POST" && path.length === 2 && path[1] === "cancel") return true;
-  if (method === "POST" && path.length === 2 && path[1] === "ratings") return true;
+function isAllowedPath(method: string, path: string[]) {
+  // Token endpoints allowed:
+  // GET /passenger-rides/:token
+  // GET /passenger-rides/:token/events
+  // POST /passenger-rides/:token/cancel
+  // POST /passenger-rides/:token/ratings
+  // POST /passenger-rides/:token/contact
+  // GET /passenger-rides/:token/receipt
+  // POST /passenger-rides/:token/push-subscriptions
+
+  if (method === "GET" && path.length === 1) return true; // GET :token
+  if (method === "GET" && path.length === 2 && path[1] === "events")
+    return true; // GET :token/events
+  if (method === "POST" && path.length === 2 && path[1] === "cancel")
+    return true; // POST :token/cancel
+  if (method === "POST" && path.length === 2 && path[1] === "ratings")
+    return true; // POST :token/ratings
+  if (method === "POST" && path.length === 2 && path[1] === "contact")
+    return true; // POST :token/contact
+  if (method === "GET" && path.length === 2 && path[1] === "receipt")
+    return true; // GET :token/receipt
+  if (
+    method === "POST" &&
+    path.length === 2 &&
+    path[1] === "push-subscriptions"
+  )
+    return true; // POST :token/push-subscriptions
+
   return false;
 }
 
@@ -67,14 +78,7 @@ async function mintMetadataIdentityToken(audience: string) {
   return await response.text();
 }
 
-async function applyUpstreamAuth(
-  headers: Headers,
-  targetUrl: URL,
-  token?: string,
-) {
-  if (token) {
-    headers.set("authorization", `Bearer ${token}`);
-  }
+async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
   const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   const audience =
     configuredAudience ||
@@ -94,327 +98,87 @@ async function applyUpstreamAuth(
 async function checkCSRF(request: NextRequest) {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
   const origin = request.headers.get("origin");
-  if (!origin) return false;
+  const host = request.headers.get("host");
+  if (!origin || !host) return false;
   try {
-    const expectedOrigin = new URL(request.url).origin;
-    return origin === expectedOrigin;
+    const originUrl = new URL(origin);
+    const expectedOrigin = `https://${host}`;
+    if (originUrl.origin === expectedOrigin) return true;
+    if (host.startsWith("localhost:") || host.startsWith("127.0.0.1:")) {
+      return (
+        originUrl.hostname === "localhost" || originUrl.hostname === "127.0.0.1"
+      );
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
 function withSecurityHeaders(response: NextResponse) {
-  response.headers.set(
-    "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
-  );
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set(
-    "Strict-Transport-Security",
-    "max-age=31536000; includeSubDomains",
-  );
   return response;
-}
-
-function deleteCookies(resp: NextResponse) {
-  resp.cookies.set("pax_session", "", {
-    maxAge: 0,
-    expires: new Date(0),
-    path: "/",
-  });
-  resp.cookies.set("pax_refresh", "", {
-    maxAge: 0,
-    expires: new Date(0),
-    path: "/",
-  });
 }
 
 async function forward(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
+  context: { params: Promise<{ path: string[] }> },
 ) {
-  let isLogout = false;
   try {
-    const { path } = await params;
-    const method = request.method.toUpperCase();
-    const fullPath = path.join("/");
-    isLogout = fullPath === "auth/logout" && method === "POST";
-
-    if (!(await checkCSRF(request))) {
+    const { path } = await context.params;
+    const method = request.method;
+    if (!isAllowedPath(method, path)) {
+      return withSecurityHeaders(
+        NextResponse.json({ error: "BFF_PATH_NOT_ALLOWED" }, { status: 403 }),
+      );
+    }
+    const isCsrfSafe = await checkCSRF(request);
+    if (!isCsrfSafe) {
       return withSecurityHeaders(
         NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }),
       );
     }
-    if (!isAllowedPassengerPath(path, method)) {
-      return withSecurityHeaders(
-        NextResponse.json(
-          { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
-          { status: 404 },
-        ),
-      );
-    }
-
-    let token = request.cookies.get("pax_session")?.value;
-    let refreshToken = request.cookies.get("pax_refresh")?.value;
 
     const targetUrl = buildTargetUrl(request, path);
-    if (!targetUrl.pathname.startsWith("/api/passenger-app/")) {
-      return withSecurityHeaders(
-        NextResponse.json(
-          { error: "PASSENGER_PROXY_PATH_NOT_ALLOWED" },
-          { status: 404 },
-        ),
-      );
+    const headers = copyHeaders(request.headers);
+    await applyUpstreamAuth(headers, targetUrl);
+
+    let initialBodyData: string | null = null;
+    if (["POST", "PUT", "PATCH"].includes(method)) {
+      try {
+        initialBodyData = await request.text();
+      } catch {
+        // empty body
+      }
     }
 
-    let initialBodyData: BodyInit | null = null;
-    if (!["GET", "HEAD"].includes(method)) {
-      initialBodyData = await request.arrayBuffer();
-    }
-
-    function extractTokens(
-      parsed: any,
-    ): { accessToken: string; refreshToken: string; redacted: any } | null {
-      if (!parsed || typeof parsed !== "object") return null;
-
-      // Check snake_case in envelope
-      if (parsed.data && typeof parsed.data === "object") {
-        const acc = parsed.data.access_token;
-        const ref = parsed.data.refresh_token;
-        if (
-          typeof acc === "string" &&
-          typeof ref === "string" &&
-          acc !== "" &&
-          ref !== ""
-        ) {
-          const redacted = { ...parsed, data: { ...parsed.data } };
-          delete redacted.data.access_token;
-          delete redacted.data.refresh_token;
-          return { accessToken: acc, refreshToken: ref, redacted };
-        }
-        if (acc !== undefined || ref !== undefined) {
-          return { accessToken: "", refreshToken: "", redacted: parsed };
-        }
-      }
-
-      // Check flat camelCase (for tests/legacy)
-      const accCamel = parsed.accessToken;
-      const refCamel = parsed.refreshToken;
-      if (
-        typeof accCamel === "string" &&
-        typeof refCamel === "string" &&
-        accCamel !== "" &&
-        refCamel !== ""
-      ) {
-        const redacted = { ...parsed };
-        delete redacted.accessToken;
-        delete redacted.refreshToken;
-        return { accessToken: accCamel, refreshToken: refCamel, redacted };
-      }
-      if (accCamel !== undefined || refCamel !== undefined) {
-        return { accessToken: "", refreshToken: "", redacted: parsed };
-      }
-
-      return null;
-    }
-
-    async function doRefresh(currentRefresh: string) {
-      if (!currentRefresh) throw new Error("No refresh token");
-      const refreshTargetUrl = buildTargetUrl(request, ["auth", "refresh"]);
-      const refreshHeaders = new Headers({
-        "Content-Type": "application/json",
-      });
-      await applyUpstreamAuth(refreshHeaders, refreshTargetUrl);
-
-      const res = await fetch(refreshTargetUrl.toString(), {
-        method: "POST",
-        headers: refreshHeaders,
-        body: JSON.stringify({ refreshToken: currentRefresh }),
-      });
-      if (!res.ok) {
-        throw new Error(`Upstream refresh failed: ${res.status}`);
-      }
-      const data = await res.json();
-      const tokens = extractTokens(data);
-      if (tokens && tokens.accessToken && tokens.refreshToken) {
-        return {
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          redacted: tokens.redacted,
-        };
-      }
-      throw new Error("Invalid tokens received");
-    }
-
-    const buildInit = async (
-      currentToken: string | undefined,
-      currentRefresh: string | undefined,
-    ): Promise<RequestInit> => {
-      const headers = copyHeaders(request.headers);
-      if (fullPath === "auth/logout" && method === "POST") {
-        headers.set("Content-Type", "application/json");
-      }
-      await applyUpstreamAuth(headers, targetUrl, currentToken);
-      const init: RequestInit = {
-        method,
-        headers,
-        cache: "no-store",
-        redirect: "manual",
-      };
-      if (fullPath === "auth/logout" && method === "POST") {
-        init.body = JSON.stringify({ refreshToken: currentRefresh });
-      } else if (initialBodyData) {
-        init.body = initialBodyData;
-      }
-      return init;
+    const init: RequestInit = {
+      method,
+      headers,
+      cache: "no-store",
+      redirect: "manual",
     };
-
-    // Explicit refresh path
-    if (fullPath === "auth/refresh" && method === "POST") {
-      try {
-        if (!refreshToken) throw new Error("NO_REFRESH_TOKEN");
-        const data = await doRefresh(refreshToken);
-        const resp = NextResponse.json(data.redacted, { status: 200 });
-        const opts = {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax" as const,
-          path: "/",
-        };
-        resp.cookies.set("pax_session", data.accessToken, opts);
-        resp.cookies.set("pax_refresh", data.refreshToken, opts);
-        return withSecurityHeaders(resp);
-      } catch {
-        const resp = NextResponse.json(
-          { error: "REFRESH_FAILED" },
-          { status: 401 },
-        );
-        deleteCookies(resp);
-        return withSecurityHeaders(resp);
-      }
+    if (initialBodyData) {
+      init.body = initialBodyData;
     }
 
-    // Normal forward path
-    let init = await buildInit(token, refreshToken);
-    let upstream = await fetch(targetUrl.toString(), init);
-
-    let refreshedTokens: { accessToken: string; refreshToken: string } | null =
-      null;
-    let didClearTokens = false;
-
-    if (upstream.status === 401 && refreshToken) {
-      try {
-        const newTokens = await doRefresh(refreshToken);
-        token = newTokens.accessToken;
-        refreshToken = newTokens.refreshToken;
-        init = await buildInit(token, refreshToken);
-        upstream = await fetch(targetUrl.toString(), init);
-
-        if (upstream.status === 401) {
-          didClearTokens = true;
-        } else {
-          refreshedTokens = newTokens;
-        }
-      } catch {
-        didClearTokens = true;
-      }
-    }
-
-    if (fullPath === "auth/logout" && method === "POST") {
-      if (!upstream.ok) {
-        const resp = NextResponse.json(
-          { error: "LOGOUT_FAILED" },
-          { status: upstream.status },
-        );
-        deleteCookies(resp);
-        return withSecurityHeaders(resp);
-      }
-      const resp = NextResponse.json({ success: true }, { status: 200 });
-      deleteCookies(resp);
-      return withSecurityHeaders(resp);
-    }
-
+    const upstream = await fetch(targetUrl.toString(), init);
     const responseHeaders = copyHeaders(upstream.headers);
-    let finalBody: BodyInit | null = upstream.body;
-    const isLogin =
-      fullPath.startsWith("auth/otp") ||
-      fullPath === "auth/mfa/verify" ||
-      fullPath.startsWith("auth/oauth");
-
-    let loginData = null;
-    if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
-      const contentType = upstream.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        let parsed;
-        try {
-          const text = await upstream.text();
-          finalBody = text;
-          parsed = JSON.parse(text);
-        } catch {
-          // ignore parsing error, finalBody stays as text
-        }
-        if (parsed && typeof parsed === "object") {
-          const tokens = extractTokens(parsed);
-          if (tokens) {
-            if (tokens.accessToken && tokens.refreshToken) {
-              loginData = tokens;
-              finalBody = JSON.stringify(tokens.redacted);
-              responseHeaders.set("Content-Type", "application/json");
-            } else {
-              const resp = NextResponse.json(
-                { error: "INVALID_TOKEN_PAYLOAD" },
-                { status: 503 },
-              );
-              return withSecurityHeaders(resp);
-            }
-          }
-        }
-      }
-    }
+    const finalBody: BodyInit | null = upstream.body;
 
     const nextResponse = new NextResponse(finalBody, {
       status: upstream.status,
       headers: responseHeaders,
     });
-    withSecurityHeaders(nextResponse);
-
-    const opts = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax" as const,
-      path: "/",
-    };
-
-    if (didClearTokens) {
-      deleteCookies(nextResponse);
-    } else if (loginData && loginData.accessToken && loginData.refreshToken) {
-      nextResponse.cookies.set("pax_session", loginData.accessToken, opts);
-      nextResponse.cookies.set("pax_refresh", loginData.refreshToken, opts);
-    } else if (refreshedTokens) {
-      nextResponse.cookies.set(
-        "pax_session",
-        refreshedTokens.accessToken,
-        opts,
-      );
-      nextResponse.cookies.set(
-        "pax_refresh",
-        refreshedTokens.refreshToken,
-        opts,
-      );
-    }
-
-    return nextResponse;
+    return withSecurityHeaders(nextResponse);
   } catch {
-    // Top-level catch for any unhandled errors (e.g. metadata text read fail on normal requests, arrayBuffer errors)
-    const resp = NextResponse.json(
-      { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
-      { status: 503 },
+    return withSecurityHeaders(
+      NextResponse.json(
+        { error: "PASSENGER_AUTHORITY_UNAVAILABLE" },
+        { status: 503 },
+      ),
     );
-    if (isLogout) {
-      deleteCookies(resp);
-    }
-    return withSecurityHeaders(resp);
   }
 }
 
@@ -424,14 +188,12 @@ export async function GET(
 ) {
   return forward(request, context);
 }
-
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
   return forward(request, context);
 }
-
 export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },

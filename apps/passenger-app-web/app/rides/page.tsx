@@ -23,10 +23,12 @@ export default function RidesListPage() {
         passengerClient.getRides({ limit: 20 }),
       ]);
       const activeRides = activeRes.rides || [];
-      const activeIds = new Set(activeRides.map(r => r.order.orderId));
-      
+      const activeIds = new Set(activeRides.map((r) => r.order.orderId));
+
       setActive(activeRides);
-      setHistory((historyRes.rides || []).filter(r => !activeIds.has(r.order.orderId)));
+      setHistory(
+        (historyRes.rides || []).filter((r) => !activeIds.has(r.order.orderId)),
+      );
       setNextCursor(historyRes.nextCursor || null);
     } catch (err) {
       console.error(err);
@@ -44,9 +46,15 @@ export default function RidesListPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await passengerClient.getRides({ limit: 20, cursor: nextCursor });
-      const activeIds = new Set(active.map(r => r.order.orderId));
-      setHistory(prev => [...prev, ...(res.rides || []).filter(r => !activeIds.has(r.order.orderId))]);
+      const res = await passengerClient.getRides({
+        limit: 20,
+        cursor: nextCursor,
+      });
+      const activeIds = new Set(active.map((r) => r.order.orderId));
+      setHistory((prev) => [
+        ...prev,
+        ...(res.rides || []).filter((r) => !activeIds.has(r.order.orderId)),
+      ]);
       setNextCursor(res.nextCursor || null);
     } catch (err) {
       console.error("載入更多失敗", err);
@@ -56,20 +64,26 @@ export default function RidesListPage() {
   };
 
   if (loading) {
-    return <div style={{ padding: 20, color: passengerChrome.text }}>{t.Loading}</div>;
+    return (
+      <div style={{ padding: 20, color: passengerChrome.text }}>
+        {t.Loading}
+      </div>
+    );
   }
-  
+
   if (error) {
     return (
       <div style={{ padding: 20, color: passengerChrome.text }}>
         <p>{error}</p>
-        <button onClick={loadInitial} style={{ padding: "8px 16px" }}>重試</button>
+        <button onClick={loadInitial} style={{ padding: "8px 16px" }}>
+          重試
+        </button>
       </div>
     );
   }
 
   return (
-    <main style={{ padding: "16px", fontFamily: "sans-serif", color: passengerChrome.text }}>
+    <main style={{ padding: "16px", color: passengerChrome.text }}>
       <h1 style={{ fontSize: 24, fontWeight: "bold", marginBottom: 16 }}>
         {t.MyRides}
       </h1>
@@ -159,7 +173,13 @@ export default function RidesListPage() {
                         : t.InProgress}
                   </span>
                 </div>
-                <div style={{ fontSize: 14, color: passengerChrome.muted, marginTop: 4 }}>
+                <div
+                  style={{
+                    fontSize: 14,
+                    color: passengerChrome.muted,
+                    marginTop: 4,
+                  }}
+                >
                   {ride.order.pickup.address}
                 </div>
                 {needsRating && (
@@ -179,7 +199,19 @@ export default function RidesListPage() {
           })
         )}
         {nextCursor && (
-          <button onClick={loadMore} disabled={loadingMore} style={{ marginTop: 12, padding: "8px 16px", borderRadius: 4, background: passengerChrome.background, border: `1px solid ${passengerChrome.border}`, color: passengerChrome.text, cursor: "pointer" }}>
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            style={{
+              marginTop: 12,
+              padding: "8px 16px",
+              borderRadius: 4,
+              background: passengerChrome.background,
+              border: `1px solid ${passengerChrome.border}`,
+              color: passengerChrome.text,
+              cursor: "pointer",
+            }}
+          >
             {loadingMore ? "載入中..." : "載入更多"}
           </button>
         )}

@@ -9,14 +9,15 @@ import {
 export { resolvePassengerScreenId };
 
 export const passengerTheme = buildCanvasTheme({
-  surface: "enterprise",
+  surface: "tenant",
   density: "compact",
 });
 
 export const passengerChrome = {
   shell: REALM_COLORS.passenger.light.fg,
-  shellDark: REALM_COLORS.passenger.dark.fg,
-  background: passengerTheme.bg,
+  shellDark: REALM_COLORS.passenger.light.fg, // fallback
+  background: REALM_COLORS.passenger.light.bg,
+  headerBg: REALM_COLORS.passenger.light.headerBg,
   card: passengerTheme.surface,
   border: passengerTheme.border,
   borderStrong: passengerTheme.borderStrong,

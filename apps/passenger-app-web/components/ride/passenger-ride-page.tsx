@@ -10,13 +10,13 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import {
-  getToneRamp,
-  passengerChrome,
-} from "@/lib/passenger-presentation";
+import { getToneRamp, passengerChrome } from "@/lib/passenger-presentation";
 import { loadPassengerRideFixture } from "@/lib/passenger-fixture-loader";
 import { resolvePassengerDataMode } from "@/lib/runtime-config";
-import type { PassengerRideFixture, PassengerCertificatePresentation } from "@drts/passenger-client";
+import type {
+  PassengerRideFixture,
+  PassengerCertificatePresentation,
+} from "@drts/passenger-client";
 import {
   fetchPassengerRideAuthority,
   fetchPassengerReceipt,
@@ -28,8 +28,10 @@ import {
 } from "@/lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
 
-
-const ConnectionContext = React.createContext<{ connectionState: "connecting" | "connected" | "disconnected", lastEventTime: number }>({ connectionState: "connected", lastEventTime: Date.now() });
+const ConnectionContext = React.createContext<{
+  connectionState: "connecting" | "connected" | "disconnected";
+  lastEventTime: number;
+}>({ connectionState: "connected", lastEventTime: Date.now() });
 
 function readQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -39,11 +41,7 @@ const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
 const shellInset = 14;
 const starTone = passengerChrome.driverRealm.fg;
 
-function Shell({
-  children,
-}: {
-  children: ReactNode;
-}) {
+function Shell({ children }: { children: ReactNode }) {
   return (
     <main
       style={{
@@ -337,7 +335,8 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
-  const { lastEventTime } = React.useContext(ConnectionContext);
+  const { lastEventTime, connectionState } =
+    React.useContext(ConnectionContext);
   const [now, setNow] = React.useState(Date.now());
 
   React.useEffect(() => {
@@ -347,6 +346,12 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
   }, [fixture.mapState]);
 
   const elapsedSeconds = Math.max(0, Math.floor((now - lastEventTime) / 1000));
+  const _isFresh =
+    fixture.mapState === "fresh" &&
+    elapsedSeconds < 60 &&
+    connectionState === "connected";
+  const _isStale =
+    fixture.mapState === "stale" || (fixture.mapState === "fresh" && !_isFresh);
 
   return (
     <div
@@ -448,7 +453,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
         {t.PickupLabel}
         {fixture.pickupLabel}
       </div>
-      {fixture.mapState === "fresh" ? (
+      {_isFresh ? (
         <div
           style={{
             position: "absolute",
@@ -465,7 +470,7 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           {`位置更新於 ${elapsedSeconds} 秒前`}
         </div>
       ) : null}
-      {fixture.mapState === "stale" ? (
+      {_isStale ? (
         <div
           style={{
             position: "absolute",
@@ -480,7 +485,9 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             fontWeight: 700,
           }}
         >
-          {t.DriverLocationDelayed}
+          {connectionState !== "connected"
+            ? "連線中斷"
+            : t.DriverLocationDelayed}
         </div>
       ) : null}
     </div>
@@ -987,7 +994,9 @@ function CertificateCard({
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
-  onCertificateUpdate?: ((cert: PassengerCertificatePresentation) => void) | undefined;
+  onCertificateUpdate?:
+    | ((cert: PassengerCertificatePresentation) => void)
+    | undefined;
 }) {
   const [certificate, setCertificate] = useState(fixture.certificate);
   const [retrying, setRetrying] = useState(false);
@@ -1168,7 +1177,7 @@ function RatingStars({
   );
 }
 
-function RatingCard({
+export function RatingCard({
   fixture,
   token,
   authMode,
@@ -1228,19 +1237,21 @@ function RatingCard({
       return;
     }
     setSubmitting(true);
-    const payload = authMode === "token"
-      ? {
-          score: selectedScore,
-          tags: selectedTags.length > 0 ? selectedTags : undefined,
-          comment: comment || undefined,
-        }
-      : {
-          rideId: token,
-          rating: selectedScore,
-          tags: selectedTags,
-          comments: comment,
-          contactRequested: selectedScore <= 2 ? Boolean(contactRequested) : false,
-        };
+    const payload =
+      authMode === "token"
+        ? {
+            score: selectedScore,
+            tags: selectedTags.length > 0 ? selectedTags : undefined,
+            comment: comment || undefined,
+          }
+        : {
+            rideId: token,
+            rating: selectedScore,
+            tags: selectedTags,
+            comments: comment,
+            contactRequested:
+              selectedScore <= 2 ? Boolean(contactRequested) : false,
+          };
 
     requestPassengerRideAction<{ score: number }>(
       token,
@@ -1304,7 +1315,9 @@ function RatingCard({
               type="button"
               onClick={() => {
                 setSelectedTags((prev) =>
-                  prev.includes(chip) ? prev.filter((t) => t !== chip) : [...prev, chip],
+                  prev.includes(chip)
+                    ? prev.filter((t) => t !== chip)
+                    : [...prev, chip],
                 );
               }}
               style={{
@@ -1314,7 +1327,9 @@ function RatingCard({
                 borderRadius: 999,
                 border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
                 color: selected ? passengerChrome.shell : passengerChrome.muted,
-                background: selected ? passengerChrome.info.bg : passengerChrome.card,
+                background: selected
+                  ? passengerChrome.info.bg
+                  : passengerChrome.card,
                 cursor: "pointer",
               }}
             >
@@ -1468,7 +1483,15 @@ function ContactUnavailableCard({
         </div>
       </div>
       <div style={{ marginTop: 10 }}>
-        <a href="tel:02-2944-0985" style={{ ...buttonStyle("primary"), display: "block", textAlign: "center", textDecoration: "none" }}>
+        <a
+          href="tel:02-2944-0985"
+          style={{
+            ...buttonStyle("primary"),
+            display: "block",
+            textAlign: "center",
+            textDecoration: "none",
+          }}
+        >
           {t.ContactSupportPhone}
         </a>
       </div>
@@ -1695,7 +1718,14 @@ function Actions({
   if (fixture.screenId === "P5-09") {
     return (
       <ActionGroup>
-        <Link href={authMode === "token" ? `/r/${token}/receipt` : `/rides/${token}/receipt`} style={buttonStyle("secondary")}>
+        <Link
+          href={
+            authMode === "token"
+              ? `/r/${token}/receipt`
+              : `/rides/${token}/receipt`
+          }
+          style={buttonStyle("secondary")}
+        >
           {t.ViewReceipt}
         </Link>
         <Link href="/" style={buttonStyle("ghost")}>
@@ -1729,7 +1759,10 @@ function Actions({
             下載 HTML
           </a>
         ) : null}
-        <Link href={authMode === "token" ? `/r/${token}` : `/rides/${token}`} style={buttonStyle("ghost")}>
+        <Link
+          href={authMode === "token" ? `/r/${token}` : `/rides/${token}`}
+          style={buttonStyle("ghost")}
+        >
           {t.BackToRide}
         </Link>
       </ActionGroup>
@@ -1739,10 +1772,22 @@ function Actions({
   if (fixture.screenId === "P5-11") {
     return (
       <ActionGroup>
-        <button type="button" style={buttonStyle("primary")}>
+        <button
+          type="button"
+          style={buttonStyle("primary")}
+          onClick={() => window.location.reload()}
+        >
           {t.Refresh}
         </button>
-        <a href="tel:02-2944-0985" style={{ ...buttonStyle("secondary"), display: "block", textAlign: "center", textDecoration: "none" }}>
+        <a
+          href="tel:02-2944-0985"
+          style={{
+            ...buttonStyle("secondary"),
+            display: "block",
+            textAlign: "center",
+            textDecoration: "none",
+          }}
+        >
           {t.ContactSupport}
         </a>
       </ActionGroup>
@@ -1768,10 +1813,22 @@ function Actions({
     return (
       <>
         <ActionGroup>
-          <button type="button" style={buttonStyle("primary")}>
+          <button
+            type="button"
+            style={buttonStyle("primary")}
+            onClick={() => window.location.reload()}
+          >
             {t.Requote}
           </button>
-          <a href="tel:02-2944-0985" style={{ ...buttonStyle("secondary"), display: "block", textAlign: "center", textDecoration: "none" }}>
+          <a
+            href="tel:02-2944-0985"
+            style={{
+              ...buttonStyle("secondary"),
+              display: "block",
+              textAlign: "center",
+              textDecoration: "none",
+            }}
+          >
             {t.ContactSupport}
           </a>
         </ActionGroup>
@@ -1834,7 +1891,9 @@ function RideContent({
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
-  onCertificateUpdate?: ((cert: PassengerCertificatePresentation) => void) | undefined;
+  onCertificateUpdate?:
+    | ((cert: PassengerCertificatePresentation) => void)
+    | undefined;
 }) {
   if (fixture.screenId === "P5-11") {
     return (
@@ -1854,7 +1913,12 @@ function RideContent({
       <>
         <CompletedThanks />
         <PaymentCard fixture={fixture} />
-        <CertificateCard fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
+        <CertificateCard
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onCertificateUpdate={onCertificateUpdate}
+        />
         <ComplaintForm token={token} authMode={authMode} />
         <Actions fixture={fixture} token={token} authMode={authMode} />
       </>
@@ -1865,7 +1929,12 @@ function RideContent({
     return (
       <>
         <PaymentCard fixture={fixture} />
-        <CertificateCard fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
+        <CertificateCard
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onCertificateUpdate={onCertificateUpdate}
+        />
         <ComplaintForm token={token} authMode={authMode} />
         <Actions fixture={fixture} token={token} authMode={authMode} />
       </>
@@ -1896,7 +1965,11 @@ function RideContent({
         <MapCard fixture={fixture} />
         <ProgressCard
           title={t.ArrangingVehicle}
-          detail={fixture.requestedPickupText ? `${fixture.requestedPickupText} · 通常 1–3 分鐘完成指派` : "通常 1–3 分鐘完成指派"}
+          detail={
+            fixture.requestedPickupText
+              ? `${fixture.requestedPickupText} · 通常 1–3 分鐘完成指派`
+              : "通常 1–3 分鐘完成指派"
+          }
         />
         <FareCard fixture={fixture} />
         <Actions fixture={fixture} token={token} authMode={authMode} />
@@ -1969,7 +2042,12 @@ function RideContent({
           </div>
         </Card>
         <PaymentCard fixture={fixture} />
-        <CertificateCard fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
+        <CertificateCard
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onCertificateUpdate={onCertificateUpdate}
+        />
       </>
     );
   }
@@ -2047,7 +2125,9 @@ function PassengerScreen({
   fixture: PassengerRideFixture;
   token: string;
   authMode?: "id" | "token" | undefined;
-  onCertificateUpdate?: ((cert: PassengerCertificatePresentation) => void) | undefined;
+  onCertificateUpdate?:
+    | ((cert: PassengerCertificatePresentation) => void)
+    | undefined;
 }) {
   return (
     <>
@@ -2070,7 +2150,12 @@ function PassengerScreen({
           flexDirection: "column",
         }}
       >
-        <RideContent fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={onCertificateUpdate} />
+        <RideContent
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onCertificateUpdate={onCertificateUpdate}
+        />
         <FooterNotice />
       </div>
     </>
@@ -2118,7 +2203,9 @@ export function PassengerRidePage({
     };
   }, [kind, searchParams.screen, sourceMode, token]);
 
-  const [connectionState, setConnectionState] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [connectionState, setConnectionState] = useState<
+    "connecting" | "connected" | "disconnected"
+  >("connecting");
   const [lastEventTime, setLastEventTime] = useState<number>(Date.now());
 
   useEffect(() => {
@@ -2142,11 +2229,7 @@ export function PassengerRidePage({
             if (!active) return;
             startTransition(() => {
               setLiveFixture(
-                mapPassengerRideAuthorityToFixture(
-                  nextView.data,
-                  token,
-                  kind,
-                ),
+                mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
               );
               setLastEventTime(Date.now());
             });
@@ -2154,7 +2237,7 @@ export function PassengerRidePage({
           authMode === "token",
           (state) => {
             if (active) setConnectionState(state);
-          }
+          },
         );
       })
       .catch((error: unknown) => {
@@ -2196,16 +2279,23 @@ export function PassengerRidePage({
 
   const handleCertificateUpdate = (cert: PassengerCertificatePresentation) => {
     if (sourceMode === "fixture") {
-      setPreviewFixture((prev) => prev ? { ...prev, certificate: cert } : null);
+      setPreviewFixture((prev) =>
+        prev ? { ...prev, certificate: cert } : null,
+      );
     } else {
-      setLiveFixture((prev) => prev ? { ...prev, certificate: cert } : null);
+      setLiveFixture((prev) => (prev ? { ...prev, certificate: cert } : null));
     }
   };
 
   return (
     <Shell>
       <ConnectionContext.Provider value={{ connectionState, lastEventTime }}>
-        <PassengerScreen fixture={fixture} token={token} authMode={authMode} onCertificateUpdate={handleCertificateUpdate} />
+        <PassengerScreen
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onCertificateUpdate={handleCertificateUpdate}
+        />
       </ConnectionContext.Provider>
     </Shell>
   );
