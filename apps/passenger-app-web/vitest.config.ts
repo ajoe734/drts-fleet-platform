@@ -21,19 +21,11 @@ export default defineConfig({
         __dirname,
         "../../packages/ui-web/src/index.tsx",
       ),
-      "@drts/passenger-client": path.resolve(
-        __dirname,
-        "../../packages/passenger-client/src/index.ts",
-      ),
     },
   },
-  oxc: false,
-  esbuild: {
-    jsx: "automatic",
-  },
   test: {
-    environment: "jsdom",
+    environment: "node",
     globals: true,
-    include: ["tests/**/*.test.{ts,tsx}"],
+    include: ["tests/**/*.test.ts"],
   },
 });
