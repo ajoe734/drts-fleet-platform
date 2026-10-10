@@ -359,7 +359,11 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                         "identity": f"drts-dev-runtime@{assess.PROJECT}.iam.gserviceaccount.com",
                         "providers": {
                             "DOCUMENT_ARTIFACT_GCS_BUCKET": assess.BUCKET,
-                            "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs"
+                            "DOCUMENT_ARTIFACT_STORAGE_PROVIDER": "gcs",
+                            "REMITTANCE_PROOF_STORAGE_PROVIDER": "gcs",
+                            "REMITTANCE_PROOF_GCS_BUCKET": assess.PROJECT + "-remittance-proofs",
+                            "REMITTANCE_PROOF_SCANNER_PROVIDER": "cloud-run-clamd",
+                            "REMITTANCE_PROOF_SCANNER_TIMEOUT_MS": "60000"
                         },
                         "MALICIOUS_RAW_FIELD": "some_extra_data"
                     },
@@ -377,12 +381,18 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             cmd_str = " ".join(cmd)
             if "/runs/37906298090/jobs" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"name": "Owned fixture assessment (Read-only GCS / DB)"}]}))
+            if "/runs/37906298090/approvals" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "approved"}]))
             if "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=json.dumps({"id": 37906298090, "head_branch": "dev", "event": "workflow_dispatch", "head_sha": "bb78535193b712f80f2a989cbd03b800ec44c46c", "path": ".github/workflows/dev-owned-operational-fixture-assessment.yml"}))
             if "check-suites" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"check_suites": [{"status": "completed", "conclusion": "success"}]}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "check_suites": [{"status": "completed", "conclusion": "success"}]}))
+            if "/pulls/123/reviews" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"state": "APPROVED"}]))
+            if "/pulls" in cmd_str:
+                return MagicMock(returncode=0, stdout=json.dumps([{"number": 123, "merged_at": "2026-10-09T00:00:00Z"}]))
             if "actions/runs?status=in_progress" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"workflow_runs": []}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
             return MagicMock(returncode=0, stdout="{}")
             
         with patch("sys.argv", ["script.py", "--mock-db", "--cloud-metadata", path, "--current-runtime-sha", "testsha", "--current-run-id", "37906298090", "--tooling-run-sha", "bb78535193b712f80f2a989cbd03b800ec44c46c"]):
