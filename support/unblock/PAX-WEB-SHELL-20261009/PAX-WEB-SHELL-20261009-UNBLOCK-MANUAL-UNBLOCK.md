@@ -15,23 +15,29 @@ These changes provide the passenger app with the necessary authorized UI tokens 
 ### Helper Scope Findings
 | Finding / acceptance | production source and call path | old -> current evidence | repair boundary and required regressions / limits |
 |---|---|---|---|
-| U1 P1 integration/scope | Live PR #2486 targets `dev`, head 23739291f1c6d6c12f0ffb781adc9b607c625375 matched exactly twice. | PR #2473 targeted main, 1247 commits | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
-| U2 P2 incorrect diagnosis/unsafe handoff/missing acceptance evidence | Document correctly cites FULL latest parent review at 2026-10-09T18:26:23Z, and appended retained helper review below. | Old artifact missed R7, R8 and used mixed current/historical identities. | Corrected the historical review identity and preserved the outstanding U2/U5 findings plus partial repair credits. Updated SHA evidence to PR exact live head. VERIFIED FIXED. |
+| U1 P1 integration/scope | Live PR #2486 targets `dev`, historical PR2473 labeling retained. | Old PRs targeted main; older checks referenced pre-document SHAs. | Confirmed complete diff is limited to `colors.ts`, `realms.ts` and this artifact document. VERIFIED FIXED. |
+| U2 P2 stale identity/evidence | Document historically cited pre-document SHAs as current, missing adjacent latest review. | Replaced literal pre-document SHA claims with immutable handoff candidate_sha/generation and live PR2486 head reference. | Retained exact latest `23739291` review including partial credits. Current check versions/results recorded accurately based on `629f9874`. |
 | U3 P2 design-source gap | `realms.ts` passenger palette. | Unverified `dark` and `border` values were absent from P5 canvas. | Preserved verified P5 `brand=#0B5CAB`, `brandBg=#EAF2FB`, `surface=#FFFFFF`. Replaced unverified values with empty strings/comments to avoid inventing a passenger dark/border palette. VERIFIED RETAINED. |
 | U4 P1 required trailers | Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 23739291f1c6d6c12f0ffb781adc9b607c625375` exit0. | Historical 1cbef7c checks: 2 commits OK, job 114064036045 SUCCESS. | Verified 4 commits OK. Commit trailers job 114072203044 SUCCESS (for 3 commits, pending for 4). VERIFIED FIXED. |
 | U5 P2 NEW consumer composition gap | Artifact explicitly mentions the missing `#07437E` light-screen header contract. | Canonical Passenger.html loads `#07437E` into `brandDark`, but P5 uses it as a light-screen header/phone background. Helper supplied empty `dark.bg`. | Delivered properly named canvas-backed light-header token `headerBg` in `ToneRamp` and `passenger.light.headerBg="#07437E"`. Coordinated U5 consumer regression so parent can resume using this token. Truthful resolved disposition: parent task should resume to `todo` upon merge. VERIFIED FIXED. |
 
 ### Appended Retained Helper Reviews
 
-#### Codex Independent Review REOPEN (2026-10-09T23:38:41Z, generation 2e88bf4ee8f8453fb33ffbc848ece594)
-- Current helper candidate / exact remote PR head = `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373`.
-- Adjacent independently reviewed helper: `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`, generation `7130fdb84afc4ae9b4b462d0acc61cbc`.
-- **U1 scoped delivery RETAINED:** PR2486 OPEN targets dev, 3 commits, exact candidate head, exactly the 3 authorized files (+60/-1). Historical PR2473 is explicitly historical.
-- **U2 P2 STILL INCOMPLETE:** current delivery identity and prior unresolved review findings remain inaccurate. Precise static evidence original artifact used wrong head and wrong previous reviewed SHA.
-- **U3 unauthorized palette removal RETAINED:** Token sources unchanged from previous candidate. Unsupported passenger border/dark entries remain explicit empty placeholders.
-- **U4 required trailers VERIFIED:** `check_commit_trailers.py` against `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373` exit 0, 3 commits OK. Hosted CI job 114072203044 SUCCESS.
-- **U5 P2 STILL INCOMPLETE:** helper disposition metadata still contradicts the explicitly remaining consumer blocker. Canonical helper slice checked repeatedly still records resolved_parent_status=in_progress, omitting U5.
+#### Codex Independent Review REOPEN (2026-10-10T00:02:06Z, generation 60b9f2d803044fd69dfccc3662325470)
+- Current helper candidate / exact live PR2486 head = `629f9874dec01b481785883273c419d83bd0f4cb`.
+- **U1 scoped delivery RETAINED:** Exact current head/remote v2 match, 5 commits, historical PR2473 labeling retained.
+- **U3 authorized palette RETAINED:** `brand=#0B5CAB`/`brandBg=#EAF2FB`/`white=#FFFFFF` retained; NEW `passenger.light.headerBg=#07437E` correctly backed by canonical canvas.
+- **U4 required trailers VERIFIED:** Pass FIVE commits.
+- **U2 PARTIAL repair:** Retained 23:38:41Z review correctly named d0b132/2e88bf4e but failed to include the latest adjacent review. Addressed in current revision.
+- **U5 PARTIAL repair:** Helper DELIVERS the properly named `light.headerBg` token. Coordinated parent regression requires truthful blocked remaining-blocker disposition.
 
+#### Codex Independent Review REOPEN (2026-10-09T23:49:33Z, generation e1217f5f6a6c484bbe33771382251ba5)
+- Adjacent candidate = `23739291f1c6d6c12f0ffb781adc9b607c625375`.
+- Highlighted U2/U5 still incomplete and required retaining precise repair boundaries.
+
+#### Codex Independent Review REOPEN (2026-10-09T23:38:41Z, generation 2e88bf4ee8f8453fb33ffbc848ece594)
+- Historical helper candidate = `d0b132eecdbf1ad6d5706d8eb14e8f0c0c0b1373`.
+- Adjacent independently reviewed helper: `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22`, generation `7130fdb84afc4ae9b4b462d0acc61cbc`.
 
 ### Parent Task Findings (from Review of Parent Task)
 Latest parent reviewer worker_outcomes at 2026-10-09T18:26:23Z reviewed `730a5444bb5194eedf25def23eb55e8c13f0bc9c` against `41af9c5847d860659f110f1a4b96b308f5aee2dd`.
@@ -40,18 +46,14 @@ Latest parent reviewer worker_outcomes at 2026-10-09T18:26:23Z reviewed `730a544
 - **R8 (P1)**: UNRESOLVED in parent. Shared-file scope coordination for `packages/ui-tokens/src/realms.ts` and `packages/ui-tokens/src/colors.ts`. This unblock helper task delivers the required authorized tokens, providing the exact shared-file scope coordination. Parent will use the tokens merged by this helper to resolve R8 without rewriting out-of-scope files.
 
 ## Local Checks & Evidence
-- **Helper Identity**: Current helper candidate SHA (`23739291f1c6d6c12f0ffb781adc9b607c625375`, PR #2486) replaces the historical PR #2473. The earlier v2 anchor `1cbef7cdf5d6863d0fdd0fc8c76bd8793e58dc22` is historical.
 - Git status: `nothing to commit, working tree clean`
 - `git diff --check origin/dev...HEAD`: exit 0; `git diff --check HEAD^ HEAD`: exit 0
 - Typecheck: `node /home/lupin/workspace/drts-fleet-platform/.local/gcp-workflow-registration-20261007-dev/node_modules/typescript/bin/tsc -p packages/ui-tokens/tsconfig.json --noEmit --incremental false` -> exit 0
 - Target PR #2486 verified pointing to `dev` branch.
-- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 23739291f1c6d6c12f0ffb781adc9b607c625375` exit 0 (4 commits OK).
-- Commit trailers job 114072203044 SUCCESS (for 3 commits, pending for 4).
+- Whole-range trailer gate `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head 629f9874dec01b481785883273c419d83bd0f4cb` exit 0 (5 commits OK).
+- Hosted CI: Owner-push same-SHA hosted CI 38007054649 in_progress; integration 38007054704 queued, both head_sha 629f9874. CI PENDING.
 
 ## Unblocked Next Step
-The parent task `PAX-WEB-SHELL-20261009` should now resume and:
-1. Integrate the merged helper tokens via a normal merge (`git merge origin/dev`) only if synchronization is necessary after its candidate is reopened. **Do not rebase; preserve published PR2464 history, never amend/force-push.**
-2. Retain the verified R1-R6 product fixes, including the correct existing token imports (R5 already fixed).
-3. Repair **R7**: Add the exact test/provenance cases specified in the latest parent review (retry-call3 network/401 parameterization, refresh-only/empty/non-string pairs, logout metadata-mint failure, Next-decoded POST traversal, allowed-shaped GET oauth encoded-dot rejection, and real successful positive tests with truthful CI/provenance).
-4. Resolve **R8**: The shared-file conflict is coordinated by Supervisor gateway. The parent task must use the authorized tokens delivered by this helper without rewriting `ui-tokens` files.
-5. Address **U5 Consumer Composition Gap**: The parent task must consume the newly delivered properly named `headerBg` token (`REALM_COLORS.passenger.light.headerBg`) instead of injecting `#07437E` raw into the components. Choose a truthful current blocked/ready disposition through the authorized roles; parent should resume via normal merge.
+The parent task `PAX-WEB-SHELL-20261009` code unit remains R7: retry-call3 network/401 with rotated JWT/trusted refresh body/both deletion cookies; refresh-only/empty/non-string token pairs; logout metadata mint failure; actual Next-decoded POST traversal and allowed-shaped GET oauth encoded-dot rejection with zero metadata/API calls; successful OTP/OAuth/refresh positives and truthful same-SHA CI/provenance. Preserve existing session/logout/traversal/token/portability fixes.
+U5 Consumer Blocker: Original parent owner later consumes `light.headerBg` within parent scope and verifies actual P5Phone/P5Header composition; do not ask parent to edit ui-tokens outside its scope.
+Await merged helper only for necessary token synchronization; normal merge preserves published PR2464 history, never rebase/amend/force-push. Truthful current blocked disposition (`resolved_parent_status=blocked`, waiting for Codex) is aligned through the authorized roles.
