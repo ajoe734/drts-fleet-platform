@@ -9,7 +9,9 @@ import { ServiceAreaModule } from "../service-area/service-area.module";
 import { PassengerFareController } from "./fare/passenger-fare.controller";
 import { PassengerFareRepository } from "./fare/passenger-fare.repository";
 import { PassengerFareService } from "./fare/passenger-fare.service";
-
+import { PassengerOAuthController } from "./oauth/passenger-oauth.controller";
+import { PassengerOAuthTransactionRepository } from "./oauth/oauth-transaction.repository";
+import { PassengerOAuthService } from "./oauth/passenger-oauth.service";
 import { DatabaseService } from "../../common/db/database.service";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { PassengerOtpController } from "./otp/passenger-otp.controller";
@@ -29,6 +31,7 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
     PassengerAccountController,
     PassengerOtpController,
     PassengerFareController,
+    PassengerOAuthController,
   ],
   providers: [
     PassengerJwtService,
@@ -36,6 +39,8 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
     PassengerAccountService,
     PassengerFareRepository,
     PassengerFareService,
+    PassengerOAuthTransactionRepository,
+    PassengerOAuthService,
     PassengerOtpRepository,
     PassengerOtpService,
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },
