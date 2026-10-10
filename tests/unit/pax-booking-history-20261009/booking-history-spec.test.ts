@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PassengerBookingService } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.service";
-import { PassengerBookingController } from "../../../apps/api/src/modules/passenger-app/booking/passenger-booking.controller";
-import { HttpStatus } from "@nestjs/common";
 
 describe("Passenger Booking History API - Spec requirements", () => {
   let service: PassengerBookingService;
-  let controller: PassengerBookingController;
   let repoMock: any;
   let multiTaxiMock: any;
   let fareMock: any;
@@ -39,7 +36,6 @@ describe("Passenger Booking History API - Spec requirements", () => {
       fareMock,
       accountMock,
     );
-    controller = new PassengerBookingController(service, multiTaxiMock);
   });
 
   it("pax-booking_trusted_create_and_ownership: ignores body passenger data, respects quote owner", async () => {
@@ -135,8 +131,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     try { await service.getRide("pax-2", "order-1"); } catch (e) { err4 = e; }
     expect(err4.response.error.message).toMatch(/Ride not found/);
     
-    // Paginates properly
-    repoMock.listBookingHistories.mockImplementation(async (paxId, limit, cursorCreatedAt, cursorOrderId) => {
+    repoMock.listBookingHistories.mockImplementation(async (_paxId: any, _limit: any, cursorCreatedAt: any) => {
       if (!cursorCreatedAt) {
         return [
           { orderId: "order-1", createdAt: "2026-10-10T05:00:00Z" },
@@ -146,17 +141,17 @@ describe("Passenger Booking History API - Spec requirements", () => {
       return [];
     });
     
-    multiTaxiMock.getPassengerRideById.mockImplementation(async (orderId) => {
+    multiTaxiMock.getPassengerRideById.mockImplementation(async (orderId: string) => {
       return { order: { orderId, status: "completed" } };
     });
     
     const res = await service.getRideList("pax-1", 1);
     expect(res.rides.length).toBe(1);
-    expect(res.rides[0].order.orderId).toBe("order-1");
+    expect(res.rides[0]?.order.orderId).toBe("order-1");
     expect(res.nextCursor).toBeDefined();
     
     // Check getActiveRides looping
-    repoMock.listBookingHistories.mockImplementation(async (paxId, limit, cursorCreatedAt, cursorOrderId) => {
+    repoMock.listBookingHistories.mockImplementation(async (_paxId: any, _limit: any, cursorCreatedAt: any) => {
       if (!cursorCreatedAt) {
         return [
           { orderId: "order-1", createdAt: "2026-10-10T05:00:00Z" }, // completed
@@ -165,13 +160,13 @@ describe("Passenger Booking History API - Spec requirements", () => {
       }
       return [];
     });
-    multiTaxiMock.getPassengerRideById.mockImplementation(async (orderId) => {
+    multiTaxiMock.getPassengerRideById.mockImplementation(async (orderId: string) => {
       if (orderId === "order-1") return { order: { orderId, status: "completed" } };
       return { order: { orderId, status: "on_trip" } };
     });
     
     const activeRes = await service.getActiveRides("pax-1");
     expect(activeRes.rides.length).toBe(1);
-    expect(activeRes.rides[0].order.orderId).toBe("order-2");
+    expect(activeRes.rides[0]?.order.orderId).toBe("order-2");
   });
 });

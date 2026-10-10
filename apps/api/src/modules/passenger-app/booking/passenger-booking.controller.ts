@@ -21,7 +21,7 @@ import type {
 import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { from, map, Observable, mergeMap } from "rxjs";
 import { ApiRequestError } from "../../../common/api-envelope";
-import {
+import type {
   CreatePassengerRideCommand,
   RatePassengerRideCommand,
 } from "@drts/contracts";
