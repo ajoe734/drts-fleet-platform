@@ -43,12 +43,16 @@
 ### 候選版本 13 (Round 13): 9a7eb7e50b22
 - 拒絕候選 SHA: `9a7eb7e50b2265666f1f6e2de6e5045e0e381e8a` / Generation: `79cf96353f264629894446f19b470ee3`
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現: R13-01 到 R13-03。
+
+### 候選版本 14 (Round 14): 14957c9fe71d
+- 拒絕原因: GitHub Actions CI failure (Unit Tests 失敗)。雖然意圖修復 R13 缺陷，但實際在 `test_owned_operational_fixture_cleanup.py` 發生 5 項 assertions 失敗。
 - 本次修復狀態對應表 (Per-finding Evidence Mapping):
   | 發現編號 | 先前狀態 / 命令結果 | 修復邊界 / 證據 | 限制與保留 |
   | --- | --- | --- | --- |
-  | R13-01 | job ID 與總數未驗證，允許造假相同時間與狀態的其他 job。 | `load_and_validate_authoritative_artifact` 強制綁定 `jobs.json` 必須恰有 9 個 required job IDs，且 `total_count` 為 9，並強制驗證 `started_at` 與 `completed_at` 在真實 run 的邊界內。新增負面測試 `test_wrong_total_count_rejected` 等。 | 保留原有真實 ZIP 測試，並增加防篡改嚴格校驗。 |
-  | R13-02 | inspector 允許 caller 自行設定非擁有的 object target 與 run bounds。 | `inspect_and_validate_gcs_target` 強制由 `logical_key` 查表 `CANONICAL_OWNED_OBJECTS`，不再信任 mock 提供的任意 bucket/key，並新增測試確保 `run_bounds` 不可被覆寫。 | 修復前置單元測試中 mock 參數，確保與真實 canonical mapping 吻合。 |
-  | R13-03 | 歷次修復證據與追蹤地圖不全。 | UAT 更新，包含舊證據對應新防護行為（old->new, exact mapping）。 | 真實雲端驗收、mutation apply 仍在安全機制中被攔截，不執行刪除。 |
+  | R13-01 / CI | job ID 與總數未驗證，允許造假相同時間與狀態的其他 job。 | `load_and_validate_authoritative_artifact` 強制綁定 `jobs.json` 必須恰有 9 個 required job IDs，且 `total_count` 為 9，並強制驗證所有 job 的 `started_at` 與 `completed_at` 在真實 run 的邊界內。新增負面測試 `test_wrong_total_count_rejected` 等已全數通過。 | 保留原有真實 ZIP 測試，並增加防篡改嚴格校驗。 |
+  | R13-02 / CI | inspector 允許 caller 自行設定非擁有的 object target 與 run bounds。 | `inspect_and_validate_gcs_target` 與 `execute_gcs_cleanup` 強制由 `logical_key` 查表 `CANONICAL_OWNED_OBJECTS` 驗證其歸屬，並將 `run_bounds` 在 `validate_provenance` 中設為 mandatory 欄位，不再信任無 archive 或被竄改 bounds 的 untrusted inventory。 | 修復前置單元測試中 mock 參數，確保與真實 canonical mapping 吻合。 |
+  | R13-03 | 歷次修復證據與追蹤地圖不全。 | UAT 更新，誠實記載 14957c9fe71d 因 CI 失敗遭拒絕之歷史，包含舊證據對應新防護行為。 | 真實雲端驗收、mutation apply 仍在安全機制中被攔截，不執行刪除。 |
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
 

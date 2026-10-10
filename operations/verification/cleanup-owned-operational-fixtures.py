@@ -240,17 +240,17 @@ def validate_provenance(
         )
 
     run_bounds = inventory_or_evidence.get("run_bounds")
-    if run_bounds is not None:
-        start_bound = run_bounds.get("start")
-        end_bound = run_bounds.get("end")
-        require(
-            start_bound == EXPECTED_RUN_BOUNDS_START,
-            f"run_bounds start mismatch: expected {EXPECTED_RUN_BOUNDS_START}, got {start_bound}",
-        )
-        require(
-            end_bound == EXPECTED_RUN_BOUNDS_END,
-            f"run_bounds end mismatch: expected {EXPECTED_RUN_BOUNDS_END}, got {end_bound}",
-        )
+    require(run_bounds is not None, "Missing mandatory run_bounds in provenance")
+    start_bound = run_bounds.get("start")
+    end_bound = run_bounds.get("end")
+    require(
+        start_bound == EXPECTED_RUN_BOUNDS_START,
+        f"run_bounds start mismatch: expected {EXPECTED_RUN_BOUNDS_START}, got {start_bound}",
+    )
+    require(
+        end_bound == EXPECTED_RUN_BOUNDS_END,
+        f"run_bounds end mismatch: expected {EXPECTED_RUN_BOUNDS_END}, got {end_bound}",
+    )
 
     if artifact_id is not None:
         require(
@@ -485,6 +485,7 @@ def load_and_validate_authoritative_artifact(
         jobs_meta = json.load(f)
     jobs_list = jobs_meta.get("jobs")
     require(isinstance(jobs_list, list), "Invalid jobs.json: missing jobs list")
+    require(jobs_meta.get("total_count") == 9, f"Expected total_count 9, got {jobs_meta.get('total_count')}")
     
     acceptance_jobs = [job for job in jobs_list if job.get("name") and "acceptance" in job.get("name", "").lower()]
     require(len(acceptance_jobs) == 1, f"Expected exactly 1 acceptance job, found {len(acceptance_jobs)}")
@@ -502,6 +503,29 @@ def load_and_validate_authoritative_artifact(
     require(html_url == f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{expected_run_id}/job/113747921500", f"Acceptance job foreign repository/URL: {html_url}")
     api_url = acceptance_job.get("url", "")
     require(api_url == "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747921500", f"Acceptance job foreign API URL: {api_url}")
+
+    # Establish the actual captured run/job interval from the run and acceptance job
+    run_meta_path = artifact_dir / "run.json"
+    if not run_meta_path.is_file():
+        run_meta_path = artifact_dir.parent / "run.json"
+    with open(run_meta_path, "r", encoding="utf-8") as f:
+        run_meta = json.load(f)
+    run_start_str = run_meta.get("run_started_at")
+    require(run_start_str is not None, "run.json missing run_started_at")
+    
+    acc_started_str = acceptance_job.get("started_at")
+    require(acc_started_str is not None, "acceptance job missing started_at")
+    
+    acc_completed_str = acceptance_job.get("completed_at")
+    require(acc_completed_str is not None, "acceptance job missing completed_at")
+
+    try:
+        r_start = datetime.datetime.fromisoformat(run_start_str.replace("Z", "+00:00"))
+        acc_start = datetime.datetime.fromisoformat(acc_started_str.replace("Z", "+00:00"))
+        acc_end = datetime.datetime.fromisoformat(acc_completed_str.replace("Z", "+00:00"))
+        require(r_start <= acc_start <= acc_end, "Invalid run/job temporal interval bounds")
+    except ValueError as e:
+        require(False, f"Malformed run bounds: {e}")
 
     # Check terminal status and identity for all jobs
     seen_job_ids = set()
@@ -523,6 +547,17 @@ def load_and_validate_authoritative_artifact(
         api_url = job.get("url", "")
         expected_api_prefix = f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/{job_id}"
         require(api_url == expected_api_prefix, f"Job {job_id} foreign API URL: {api_url}")
+        
+        job_started = job.get("started_at")
+        require(job_started is not None, f"Job {job_id} missing started_at")
+        job_completed = job.get("completed_at")
+        require(job_completed is not None, f"Job {job_id} missing completed_at")
+        try:
+            j_start = datetime.datetime.fromisoformat(job_started.replace("Z", "+00:00"))
+            j_end = datetime.datetime.fromisoformat(job_completed.replace("Z", "+00:00"))
+            require(r_start <= j_start <= j_end, f"Job {job_id} temporal interval out of bounds or reversed")
+        except ValueError as e:
+            require(False, f"Malformed job bounds for {job_id}: {e}")
 
     # 2. Locate and parse report.json and operational-browser-evidence.json directly from the hashed ZIP
     report_data = None
@@ -1017,6 +1052,11 @@ def inspect_and_validate_gcs_target(
     simulation_mode: bool = False,
 ) -> Dict[str, Any]:
     """Validate live object identity before delete (bucket, key, generation, metageneration, MIME, size, timestamps, hash)."""
+    logical_key = expected_item.get("logical_key")
+    require(
+        logical_key is not None and logical_key.startswith(KEY_PREFIX) and logical_key in CANONICAL_OWNED_OBJECTS,
+        f"Foreign object key expected to be owned, got: {logical_key}"
+    )
     bucket = expected_item["bucket"]
     key = expected_item["key"]
     expected_size = expected_item["expected_size"]
@@ -1218,6 +1258,11 @@ def execute_gcs_cleanup(
     for item in targets:
         bucket = item["bucket"]
         require(bucket == BUCKET, f"Target specifies foreign bucket: {bucket} (expected {BUCKET})")
+        logical_key = item.get("logical_key")
+        require(
+            logical_key is not None and logical_key.startswith(KEY_PREFIX) and logical_key in CANONICAL_OWNED_OBJECTS,
+            f"Foreign object key expected to be owned, got: {logical_key}"
+        )
         key = item["key"]
         desc = runner("describe", bucket, key)
         val = inspect_and_validate_gcs_target(
