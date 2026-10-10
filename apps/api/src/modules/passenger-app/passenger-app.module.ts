@@ -18,6 +18,8 @@ import {
   PassengerOtpService,
 } from "./otp/passenger-otp.service";
 import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
+import { FacebookDataDeletionController } from "./oauth/facebook-data-deletion.controller";
+import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.service";
 
 @Global()
 @Module({
@@ -26,6 +28,7 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
     PassengerAccountController,
     PassengerOtpController,
     PassengerOAuthController,
+    FacebookDataDeletionController,
   ],
   providers: [
     PassengerJwtService,
@@ -33,6 +36,7 @@ import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
     PassengerAccountService,
     PassengerOAuthTransactionRepository,
     PassengerOAuthService,
+    FacebookDataDeletionService,
     PassengerOtpRepository,
     PassengerOtpService,
     { provide: SMS_PORT, useClass: UnconfiguredSmsPort },

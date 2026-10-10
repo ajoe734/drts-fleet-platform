@@ -7,7 +7,10 @@ import {
   type OidcVerifyOverrides,
 } from "../../auth/oidc-id-token-verifier";
 import type { OAuthProvider } from "./oauth-transaction.port";
-import { FACEBOOK_AUTHORIZATION_ENDPOINT, FACEBOOK_GRAPH_ORIGIN } from "./facebook-oauth";
+import {
+  FACEBOOK_AUTHORIZATION_ENDPOINT,
+  FACEBOOK_GRAPH_ORIGIN,
+} from "./facebook-oauth";
 
 export interface OAuthProviderConfig {
   provider: OAuthProvider;
@@ -76,7 +79,11 @@ export function resolveOAuthProviderConfig(
   provider: OAuthProvider,
 ): OAuthProviderConfig | null {
   if (provider === "facebook")
-    return configured(provider, process.env.FACEBOOK_APP_ID, process.env.FACEBOOK_APP_SECRET);
+    return configured(
+      provider,
+      process.env.FACEBOOK_APP_ID,
+      process.env.FACEBOOK_APP_SECRET,
+    );
   if (provider === "google")
     return configured(
       provider,

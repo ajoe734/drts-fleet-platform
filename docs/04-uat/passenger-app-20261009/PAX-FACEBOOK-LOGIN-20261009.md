@@ -13,10 +13,10 @@ Owner: Codex · Reviewer: Codex2
 
 初始基準 `2bb31e7fd60074773932caa00a1c56711bb9b6ac`：Facebook 尚未啟用，無 data-deletion callback。尚無前輪退修。
 
-| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令／版本／證據 | 未驗項與限制 |
-| --- | --- | --- | --- | --- |
-| pax-facebook_flow_verification_and_data_deletion | facebook-oauth.ts；既有 transaction/account 路徑 | 基準功能不存在 → 實作中 | 待單元驗證 | 真實 Meta App／PG／公開 hosted endpoint 待驗 |
-| staging/prod webhook 與 status 不可達 | internal-key.middleware.ts + bootstrap-auth.guard.ts activatePassenger(open) 強制 WIF | 靜態證據：Meta 不提供 BFF WIF credential | 已用 progress 請 Supervisor scope coordination | 現 scope 不包含上述兩檔；核准前不修改 |
+| Finding／驗收項                                  | 原始碼依據與修改位置                                                                  | 舊版重現 → 修正版結果                    | 命令／版本／證據                               | 未驗項與限制                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------- | -------------------------------------------- |
+| pax-facebook_flow_verification_and_data_deletion | facebook-oauth.ts；既有 transaction/account 路徑                                      | 基準功能不存在 → 實作中                  | 待單元驗證                                     | 真實 Meta App／PG／公開 hosted endpoint 待驗 |
+| staging/prod webhook 與 status 不可達            | internal-key.middleware.ts + bootstrap-auth.guard.ts activatePassenger(open) 強制 WIF | 靜態證據：Meta 不提供 BFF WIF credential | 已用 progress 請 Supervisor scope coordination | 現 scope 不包含上述兩檔；核准前不修改        |
 
 ## Provider 與刪除狀態交付
 

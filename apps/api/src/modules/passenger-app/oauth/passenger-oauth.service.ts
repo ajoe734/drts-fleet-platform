@@ -1,6 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
-import type { OAuthCallbackResponse, OAuthStartResponse } from "@drts/contracts";
+import type {
+  OAuthCallbackResponse,
+  OAuthStartResponse,
+} from "@drts/contracts";
 import { ApiRequestError } from "../../../common/api-envelope";
 import type { RequestIdentity } from "../../../common/auth/auth.types";
 import { OidcIdTokenVerifier } from "../../auth/oidc-id-token-verifier";
@@ -73,7 +76,10 @@ function parseStartCommand(raw: unknown): StartCommand {
     )
   )
     validation("Invalid OAuth start command.");
-  if (typeof body.provider !== "string" || !PROVIDERS.has(body.provider as OAuthProvider))
+  if (
+    typeof body.provider !== "string" ||
+    !PROVIDERS.has(body.provider as OAuthProvider)
+  )
     validation("Unknown OAuth provider.");
   if (typeof body.redirectUri !== "string" || !body.redirectUri.trim())
     validation("redirectUri is required.");
@@ -93,8 +99,7 @@ interface CallbackCommand {
   transactionId: string;
 }
 function parseCallbackCommand(raw: unknown): CallbackCommand {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    invalidGrant();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalidGrant();
   const body = raw as Record<string, unknown>;
   if (
     Object.keys(body).some(
@@ -102,11 +107,17 @@ function parseCallbackCommand(raw: unknown): CallbackCommand {
     )
   )
     invalidGrant();
-  if (typeof body.provider !== "string" || !PROVIDERS.has(body.provider as OAuthProvider))
+  if (
+    typeof body.provider !== "string" ||
+    !PROVIDERS.has(body.provider as OAuthProvider)
+  )
     invalidGrant();
   if (typeof body.code !== "string" || !body.code.trim()) invalidGrant();
   if (typeof body.state !== "string" || !body.state.trim()) invalidGrant();
-  if (typeof body.transactionId !== "string" || !UUID_PATTERN.test(body.transactionId))
+  if (
+    typeof body.transactionId !== "string" ||
+    !UUID_PATTERN.test(body.transactionId)
+  )
     invalidGrant();
   return {
     provider: body.provider as OAuthProvider,
@@ -184,7 +195,10 @@ export class PassengerOAuthService {
     const authUrl = new URL(config.authorizationEndpoint);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("client_id", config.clientId);
-    authUrl.searchParams.set("scope", provider === "facebook" ? "public_profile,email" : "openid profile email");
+    authUrl.searchParams.set(
+      "scope",
+      provider === "facebook" ? "public_profile,email" : "openid profile email",
+    );
     authUrl.searchParams.set("redirect_uri", command.redirectUri);
     authUrl.searchParams.set("state", state);
     if (provider !== "facebook") authUrl.searchParams.set("nonce", nonce);
@@ -210,7 +224,10 @@ export class PassengerOAuthService {
     if (command.provider !== provider) invalidGrant();
 
     const now = new Date().toISOString();
-    const transaction = await this.transactions.claim(command.transactionId, now);
+    const transaction = await this.transactions.claim(
+      command.transactionId,
+      now,
+    );
     if (!transaction) invalidGrant();
     if (
       transaction.provider !== provider ||
@@ -263,8 +280,14 @@ export class PassengerOAuthService {
     config: OAuthProviderConfig,
     code: string,
     transaction: OAuthTransactionRecord,
-  ): Promise<{ sub: string; name?: unknown; email?: unknown; email_verified?: unknown }> {
-    if (config.provider === "facebook") return exchangeFacebookCode(config, code, transaction);
+  ): Promise<{
+    sub: string;
+    name?: unknown;
+    email?: unknown;
+    email_verified?: unknown;
+  }> {
+    if (config.provider === "facebook")
+      return exchangeFacebookCode(config, code, transaction);
     const params = new URLSearchParams();
     params.set("grant_type", "authorization_code");
     params.set("code", code);
@@ -295,6 +318,11 @@ export class PassengerOAuthService {
       .verify(body.id_token, transaction.nonce, false, config.verifyOverrides)
       .catch(() => invalidGrant());
     // OidcIdTokenVerifier.verify already rejects a missing/empty sub claim.
-    return claims as { sub: string; name?: unknown; email?: unknown; email_verified?: unknown };
+    return claims as {
+      sub: string;
+      name?: unknown;
+      email?: unknown;
+      email_verified?: unknown;
+    };
   }
 }
