@@ -34,7 +34,7 @@ Supervisor 2026-10-10 已增補 guard 寫入範圍；F-GEO-01 已修復並完成
   `PassengerFareRepository.publishedTariff(now)` 只讀 published 且生效中的版本；
   無版本／同時存在多版本／壞規則／資料庫不可用都 fail closed。
   `nightSurcharge` 的 wire 值是 **比例 0.2**，不是百分數 20；內部存 2000 bps。
-- `PassengerFareController.quote` → `PassengerFareService.quote`：
+- `PassengerFareController.estimateQuote`（首輪名為 quote）→ `PassengerFareService.quote`：
   `PassengerAccountService.getMe` 驗證正式乘客 JWT 身分與 live session/account；
   不接受 body 的 passenger ID、價格或版本。支援 contract camelCase 與現行
   snake_case wire keys，拒絕別名重複、未知欄位、字串/null 座標、無時區、
@@ -221,6 +221,34 @@ TypeScript 5.9.3。交接時 manifest 與 machine truth 的完整 SHA 必須一�
 擴充矩陣第一次錯把 Nest error 的 status 寫成 statusCode，屬 assertion 錯誤，
 修正為正式 AUTH_REQUIRED 後重跑；不把该次失敗當產品缺陷證據。
 
-没有啟動本機產品 server、DB、Docker Compose、preview 或 browser/E2E。交接前需
+沒有啟動本機產品 server、DB、Docker Compose、preview 或 browser/E2E。交接前需
 讀完本次 lint/prettier/typecheck 與 hosted CI；其 exit codes／同 SHA jobs 寫入上述 manifest。
 review、merge、named acceptance 由既有 lifecycle 收錄，不由 owner 呼叫 done。
+
+### F-CI-01：首輪 hosted CI 的試算路由分類
+
+完整首輪 SHA `f721f6476481634576e758de07e6973047abe335` 的
+[CI run 38013340670](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38013340670)
+與 [integration run 38013340592](https://github.com/ajoe734/drts-fleet-platform/actions/runs/38013340592)
+均已結束且已讀。root unit 的唯一失敗為
+`tests/security/idempotency-regression-guard.test.ts`：`PassengerFareController#quote`
+被 fallback 分類為 `unprotected_mutation`。兩 run 的 lint/typecheck、migrations、
+integration、IAM negative、build 與 hosted E2E 均 pass；unit/smoke 與 aggregate fail。
+原始結果保存在 `old-ci-integ.json`／`old-ci-smoke.json`、
+`ci-unit-failed.log`／`ci-smoke-failed.log` 與 `old-candidate-evidence-f721f6476481.json`。
+
+定位與修正邊界：原 inventory 的 `SEARCH_QUERY_METHOD_OR_PATH_REGEX` 與
+`classifyRouteCommand` 第 4 類明確收納 POST 計算／試算；本功能計算估價並保存
+15 分鐘、owner-bound 的不可变 snapshot，重複試算可以得到不同 snapshot，沒有
+建立訂單／鎖定車資／扣款。將內部 handler 改為與此行為相符的 `estimateQuote`，
+同步 controller 呼叫與正式 metadata 測試，HTTP `/api/passenger-app/quotes`、body、
+回應、snapshot 與 service 行為完全一致。沒有修改 inventory／allowlist，也沒有
+虛設 idempotency header 或宣稱新增冪等性。叫車／扣款仍由後續任務處理交易保護。
+
+| Finding／驗收項                          | 原始碼依據與修改位置                                                                                          | 舊版重現 → 修正版結果                                                                                           | 命令、退出碼、版本與證據                                                                                                                                                                                                                               | 未驗項／限制                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| F-CI-01／pax-fare_quote_and_public_fares | PassengerFareController.estimateQuote；實際 controller 與 metadata callers；既有 classifyRouteCommand 第 4 類 | f721f6476 本機 inventory 1 fail、4 pass → 修正版 inventory 5 pass；含全 fare suites 共 160 pass、0 fail、2 skip | `pnpm exec vitest run tests/security/idempotency-regression-guard.test.ts tests/unit/pax-fare-quote-20261009 --reporter=json --outputFile=...`，修正版 exit 0；idempotency-inventory-before.json／inventory-and-fare-after.json；程式 anchor d1061e0f7 | 新 SHA 必須重新跑完整 hosted CI；舊 SHA 的其他綠燈不能代替新候選結果 |
+
+本輪增加 inventory gate 到交接前檢查。上面的 695 pass 是首輪完整本機回歸；
+F-CI-01 修正版重新驗整個受影響 fare 路徑與 inventory，並重跑 API/root typecheck。
+最終 candidate、PR head、同 SHA CI 全部 jobs 的結果以本次 manifest 與 handoff 為準。
