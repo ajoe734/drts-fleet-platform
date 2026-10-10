@@ -8,6 +8,9 @@
       "@drts/control-plane-auth": [
         "../../packages/control-plane-auth/src/index.ts"
       ],
+      "@drts/passenger-client": [
+        "../../packages/passenger-client/src/index.ts"
+      ],
       "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
       "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"]
     }
