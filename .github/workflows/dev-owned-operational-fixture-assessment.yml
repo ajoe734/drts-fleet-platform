@@ -1,0 +1,104 @@
+name: Dev Owned Operational Fixture Assessment
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - ".github/workflows/dev-owned-operational-fixture-assessment.yml"
+      - "operations/verification/assess-owned-operational-fixtures.py"
+      - "operations/verification/test_assess_owned_operational_fixtures.py"
+      - "docs/04-uat/dev-owned-operational-fixture-assessment-20261010.md"
+  push:
+    branches:
+      - dev
+      - "gemini2/**"
+      - "codex/**"
+    paths:
+      - ".github/workflows/dev-owned-operational-fixture-assessment.yml"
+      - "operations/verification/assess-owned-operational-fixtures.py"
+      - "operations/verification/test_assess_owned_operational_fixtures.py"
+      - "docs/04-uat/dev-owned-operational-fixture-assessment-20261010.md"
+  workflow_dispatch:
+    inputs:
+      product_run_id:
+        description: "Authoritative product run ID"
+        required: true
+        default: "37906298090"
+        type: string
+      artifact_id:
+        description: "Authoritative operational browser evidence artifact ID"
+        required: true
+        default: "11606165993"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-owned-operational-fixture-assessment
+  cancel-in-progress: false
+
+env:
+  DEV_GCP_PROJECT_ID: "drts-dev-devcc-20260825"
+  DEV_GCP_REGION: "us-central1"
+
+jobs:
+  unit-tests:
+    name: Unit tests & safety guards
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout tool definition
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile python sources
+        run: |
+          python3 -m py_compile \
+            operations/verification/assess-owned-operational-fixtures.py \
+            operations/verification/test_assess_owned_operational_fixtures.py
+
+      - name: Execute unit test suite
+        run: |
+          python3 -m unittest operations/verification/test_assess_owned_operational_fixtures.py -v
+
+  assess-fixtures:
+    name: Owned fixture assessment (Read-only GCS / DB)
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: "projects/24645990627/locations/global/workloadIdentityPools/github-actions/providers/github"
+          service_account: "github-actions-deployer@drts-dev-devcc-20260825.iam.gserviceaccount.com"
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Execute read-only assessment
+        run: |
+          python3 operations/verification/assess-owned-operational-fixtures.py
