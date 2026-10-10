@@ -5,14 +5,38 @@
 > See Section 10 for the corrected safe path and actual resolution.
 
 
-## 0.7 Acceptance Evidence Itemized
+## 0.7 Acceptance Evidence Itemized (H3)
 
-- **R1 (Reverted invalid #2529 approach)**: PR #2529 used an exact copy of an old tree, destructively reverting `dev` changes in 4 operational cleanup files (`.github/workflows/dev-owned-operational-fixture-cleanup.yml`, `docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md`, `operations/verification/cleanup-owned-operational-fixtures.py`, `tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py`) and a voice test (`tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`). This helper candidate abandons that destructive approach; there is now 0 diff in these files compared to `dev`.
-- **H1 (Commit Compliance)**: The prior helper candidate (`fdc24d7150ea96f59681fc6c23fa5b49f825707d`, Codex2 review 2026-10-10T13:39:39Z) failed `check_commit_trailers.py` with exit code 1 due to 3 offending commits. The current helper candidate consists of 1 commit and passes `check_commit_trailers.py` with exit 0.
-- **H2 (Helper Scope Constraint)**: The old helper incorrectly modified 30 files (+5449/-55) and opened PR #2539. PR #2539 is now closed. This new helper correctly limits its scope to a single support artifact without touching the product codebase.
-- **H3 (Traceability)**: This document now fully documents the review source (Codex2 review 2026-10-10T13:45:49Z, candidate generation `1c95c0924d1c47bf8f816c41dcbc6c7a`), adjacent SHAs (`fdc24d` to `3f9e9a`), published identity (`LLM-Agent: Gemini2`), and clearly details the ongoing parent routing contamination.
+Below is the verifiable evidence for the 4 Acceptance Criteria of this helper task, executed using Git 2.43.0, Python 3.12.3, and gh 2.100.0 without bypasses.
+
+**1. Exact contamination (Identify the exact branch/worktree/commit contamination that keeps the parent blocked):**
+- **Prior Helper (fdc24d):** Retained polluted ancestry.
+  - Reproducible command: `env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head fdc24d7150ea96f59681fc6c23fa5b49f825707d`
+  - Output: Exit 1. Three non-compliant commits: `46df5aad...` (Missing Reviewer), `bfc9701f...` (Invalid subject), `42bc39e0...` (Subject and all trailers non-compliant).
+- **Current Parent Workspace (94307fe):** Contaminated with the polluted PR 2513 lineage.
+  - Reproducible command: `env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head 94307fe0287658dea4074db6c1ddeba399d2a462`
+  - Output: Exit 1. Five non-compliant commits: The 3 above plus `f0d75acc...` (Non-compliant) and `a4054262...` (Invalid subject and trailers).
+
+**2. Non-destructive repair path (Repair or document a non-destructive repair path without force-pushing shared history):**
+- **Verified Fix:** The clean `dev` + net diff principle correctly avoids destructive reverts.
+- **Evidence:** Comparing the 5 previously impacted operational files between the clean dev base (`08758066...`) and this candidate (`94195322...`) yields 0 diff.
+  - Command: `git diff --numstat 0875806698c022674217a3aee12bd89cb5fce27b 94195322681ede1962659216f1c624c0ec164a0e -- .github/workflows/dev-owned-operational-fixture-cleanup.yml docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md operations/verification/cleanup-owned-operational-fixtures.py tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`
+  - Output: Exit 0 (Empty diff).
+
+**3. Task-scoped commit/push/PR (Produce task-scoped commit/push/PR evidence for any canonical change):**
+- **Identity:** LLM-Agent Gemini2, Task-ID PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR, Reviewer Codex2.
+- **Scope:** 1 artifact modified, 2 commits in the PR range (this candidate does not modify the product codebase).
+- **PR Location:** HEAD = GitHub remote = PR #2541 (`gemini2/pax-web-ride-ui-20261009-unblock-history-repair`).
+- **Evidence:** The current helper candidate (`94195322681ede1962659216f1c624c0ec164a0e`) passes the commit trailer checks.
+  - Command: `env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head 94195322681ede1962659216f1c624c0ec164a0e`
+  - Output: Exit 0 (2 commits OK).
+- **Pending Checks:** Hosted CI (lint, unit, integration, cross-surface-e2e, etc.) are in-progress and must complete successfully before merging.
+
+**4. Update parent concrete safe next (Update the parent task with the concrete unblocked next step):**
+- See Section 10 below for the exact concrete safe next step, which must be recorded onto the parent using the authorized Supervisor gateway (H4).
 
 ## 1. Contamination identified
+
 
 The parent task's candidate branch `gemini/pax-web-ride-ui-20261009`
 (PR [#2526](https://github.com/ajoe734/drts-fleet-platform/pull/2526),
@@ -292,7 +316,10 @@ as a `blocker` on this task's own id (routed to Codex2) rather than declared
 done, per `docs/ops/branch-strategy.md` §11 and this repo's standing
 guardrails against working around orchestrator write guards.
 
-## 9. Supervisor resolved the parent directly (2026-10-10, resumed sixth time)
+## 9. Supervisor resolved the parent directly (HISTORICAL/SUPERSEDED)
+
+> [!WARNING]
+> **HISTORICAL/SUPERSEDED RECORD ONLY.** The text below describes an older, incorrect state where the parent was thought to be resolved without further history repair. This is no longer true; the parent is still contaminated (see Section 10).
 
 Resumed a sixth time. `ai-status.sh show PAX-WEB-RIDE-UI-20261009` confirms
 a Supervisor-privileged session already performed the write this task could
@@ -321,7 +348,7 @@ This support report is the only change in this task's final candidate; no
 source or history mutation accompanies it. Handing off to Codex2 to close
 this helper task.
 
-## 10. Corrected Safe Repair Path & Actual Resolution (Added after Review)
+## 10. Corrected Safe Repair Path & Actual Resolution (H4)
 
 The repair path proposed in §2-§8 (PR #2529) was rejected by the reviewer (Codex2) in R1.
 **Why PR #2529 was invalid:** It used the exact tree `debc788a...` from the old branch tip `96102377a...`, which was based on an older `dev` commit. Applying this old tree directly to the newer `dev` tip `d36ca2f80...` silently deleted recently merged `dev` files (e.g., dev operational cleanup fixtures) and reverted recent voice test fixes, acting as a destructive revert of shared work.
@@ -333,15 +360,26 @@ To properly reconstruct history without force-pushing and without destroying `de
 3. Commit these changes with properly formatted commit messages, including the missing `Reviewer` trailer.
 4. Open a new PR. Do not force-push the original published branch.
 
-### Current Status & Pending Parent Resolution (H4)
+### Current Status & Pending Parent Resolution
 
-The parent task is NOT fully unblocked and is NOT safely resting on the clean PR #2535. The parent task's active worktree (`.artifacts/worktrees/auto/gemini-pax-web-ride-ui-20261009`, snapshot `94307fe0287658dea4074db6c1ddeba399d2a462`) is still contaminated because it merged the polluted PR 2513 lineage (parents `a4054262...` and `38c3fecd...`). 
+The parent task is NOT fully unblocked and is NOT safely resting on the clean PR #2535. The parent task's active worktree (`.artifacts/worktrees/auto/gemini-pax-web-ride-ui-20261009`, snapshot `94307fe0287658dea4074db6c1ddeba399d2a462`) is still contaminated because it merged the polluted PR 2513 lineage (parents `a4054262...` and `38c3fecd...`).
 
-Running the formal checker against the parent's current snapshot (`check_commit_trailers.py --head 94307fe0287658dea4074db6c1ddeba399d2a462`) fails with 5 non-compliant commits:
+Running the formal checker against the parent's current snapshot fails with 5 non-compliant commits:
+`env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head 94307fe0287658dea4074db6c1ddeba399d2a462`
 - `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing Reviewer)
 - `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Invalid subject)
 - `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Invalid subject and trailers)
 - `f0d75acc1e4a5e6535c6e99be7c1f35d067a375c` (Non-compliant)
 - `a4054262d2f619779ad5c7ace781d072e02a963b` (Invalid subject and trailers)
 
-**Next Action (Pending):** The parent task owner and Supervisor must align on the concrete safe next step. The parent owner must preserve their unpublished work, but must port their valid UI changes onto a completely clean `dev` branch using the net-diff approach. They must NOT merge the polluted `ours` ancestry, and they must not force-push the active worktree. This history repair helper has fulfilled its scope by documenting the exact contamination and safe path; resolving the parent's worktree state is now deferred to the parent's lifecycle and Supervisor coordination.
+**Concrete Unblocked Next Step for the Parent:**
+The parent owner must preserve their unpublished work, but must port their valid UI changes onto a completely clean `dev` branch using the net-diff approach. They must NOT merge the polluted `ours` ancestry, and they must not force-push the active worktree.
+
+**Yielding to Supervisor Gateway for Parent Write:**
+Because this helper is a dispatched worker, it cannot mutate the canonical machine-truth of the parent task. To formally complete Acceptance Criterion 4 (Update the parent concrete safe next step), this helper delegates the metadata write to the Supervisor using the `blocker` flow.
+The Supervisor must use the authorized gateway to record:
+- `resolved_parent_status=blocked`
+- `resolved_parent_waiting_for=Gemini`
+- `resolved_parent_next="Pending safe history recovery: Extract net differences against dev and apply to a clean branch. Do not merge the polluted 'ours' ancestry."`
+
+This ensures that upon merging this helper, the parent task is not erroneously restored to an unblocked or completed state.
