@@ -1351,7 +1351,7 @@ export function RatingCard({
                     marginBottom: 8,
                   }}
                 >
-                  做得好
+                  {t.WellDone}
                 </div>
                 <div
                   style={{
@@ -1408,7 +1408,7 @@ export function RatingCard({
                     marginBottom: 8,
                   }}
                 >
-                  待改善
+                  {t.NeedsImprovement}
                 </div>
                 <div
                   style={{
@@ -2156,7 +2156,7 @@ function RideContent({
             color: passengerChrome.muted,
           }}
         >
-          {t.Cancel} (畫面設計待補)
+          {t.Cancel} {t.DesignPending}
         </div>
       </>
     );

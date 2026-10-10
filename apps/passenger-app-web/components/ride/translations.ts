@@ -78,9 +78,13 @@ export const t = {
   LostItemPlaceholder: "遺失物描述",
   AgreeToContact: "同意客服與我聯繫",
   StarLabels: ["很差", "不滿意", "普通", "滿意", "非常滿意"],
-  RatingNotice: "評分送出後不可修改；評分以匿名方式提供駕駛，並用於駕駛服務品質管理",
+  RatingNotice:
+    "評分送出後不可修改；評分以匿名方式提供駕駛，並用於駕駛服務品質管理",
   DownloadPdf: "下載 PDF",
   DownloadHtml: "下載 HTML",
   EReceiptIframeTitle: "Electronic Receipt",
   CannotLoadReceiptDetails: "無法載入完整電子收據明細",
+  WellDone: "做得好",
+  NeedsImprovement: "待改善",
+  DesignPending: "(畫面設計待補)",
 };
