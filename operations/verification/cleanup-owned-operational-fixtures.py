@@ -19,7 +19,7 @@ Safety & Governance Constraints:
   operational report statistics (16 passed / 0 failed / 0 skipped), and evidence records.
 - Physical key mapping: derives physical GCS object keys per the immutable
   GcsDocumentArtifactStoreAdapter contract.
-- External mutations are securely disabled. Local parsing and planning use only stdlib, but inspecting a genuine artifact without --offline delegates to the gcloud CLI to query live object metadata over the network.
+- External mutations are securely disabled. Local parsing and planning use only stdlib. Genuine artifact loading without --offline is safely contained and blocks actual cloud transport unless a synthetic runner is provided.
 """
 from __future__ import annotations
 
@@ -1208,6 +1208,8 @@ def inspect_and_validate_gcs_target(
     live_hash = None
     body_bytes = meta.get("body_bytes")
     is_synthetic = desc.get("synthetic", False)
+    if simulation_mode:
+        is_synthetic = True
     if body_bytes is not None:
         if isinstance(body_bytes, str):
             body_bytes = body_bytes.encode("utf-8")
@@ -1222,6 +1224,8 @@ def inspect_and_validate_gcs_target(
         )
         live_hash = computed_hash
     elif runner is not None:
+        if not simulation_mode:
+            raise ValueError("Unsupported direct inspector live read without simulation_mode=True")
         try:
             body_res = runner("read_body", bucket, key, generation=generation)
             if body_res.get("status") == "ok":
@@ -1304,7 +1308,9 @@ def execute_gcs_cleanup(
             "receipts": [{"status": "explicitunverified/blocked"}] * len(plan.get("gcs_targets", []))
         }
 
-    runner = gcs_runner or default_gcs_runner
+    if gcs_runner is None:
+        raise ValueError("Explicit synthetic gcs_runner is required in simulation_mode; default cloud transport is blocked.")
+    runner = gcs_runner
     targets = plan["gcs_targets"]
 
     # PHASE 1: PREFLIGHT ALL TARGETS BEFORE ANY MUTATION OR I/O

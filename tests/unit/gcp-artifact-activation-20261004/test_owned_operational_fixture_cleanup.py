@@ -994,14 +994,14 @@ class TestR18Regressions(unittest.TestCase):
         inv_valid["authority_established"] = cleanup._VALID_PROOF
         plan = cleanup.build_cleanup_plan(inv_valid, mode="dry-run")
         mock_gcs = MagicMock()
-        def good_db(sql, params):
-            return {"status": "ok", "rows_affected": 8 if "supply_documents" in sql else 4}
+        mock_db = MagicMock()
         
         # simulation_mode = False (which is default for CLI without --offline)
-        res = cleanup.run_cleanup_pipeline(inv_valid, mode="dry-run", gcs_runner=mock_gcs, db_runner=good_db, simulation_mode=False)
+        res = cleanup.run_cleanup_pipeline(inv_valid, mode="dry-run", gcs_runner=mock_gcs, db_runner=mock_db, simulation_mode=False)
         
         self.assertEqual(res["status"], "dry_run_blocked")
         mock_gcs.assert_not_called()
+        self.assertEqual(mock_db.call_count, 0)
         
         gcs_res = cleanup.execute_gcs_cleanup(plan, gcs_runner=mock_gcs, simulation_mode=False)
         self.assertEqual(gcs_res["status"], "blocked")
@@ -1049,3 +1049,79 @@ class TestR18Regressions(unittest.TestCase):
         for rec in result["receipts"]:
             self.assertEqual(rec["status"], "planned")
             self.assertTrue(rec.get("synthetic"))
+
+
+class TestR21Regressions(unittest.TestCase):
+    def setUp(self):
+        self.inv = create_authentic_inventory()
+
+    def _create_valid_target(self):
+        logical = list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0]
+        canonical = cleanup.CANONICAL_OWNED_OBJECTS[logical]
+        return {
+            "bucket": cleanup.BUCKET,
+            "key": cleanup.logical_to_physical_gcs_key(logical),
+            "logical_key": logical,
+            "documentId": canonical["documentId"],
+            "confirmSubmissionId": canonical["confirmSubmissionId"],
+            "expected_size": 327,
+            "expected_content_type": "application/pdf",
+            "authority_established": cleanup._VALID_PROOF,
+            "expected_sha256": cleanup.EXPECTED_SHA256,
+            "run_bounds": {"start": cleanup.EXPECTED_RUN_BOUNDS_START, "end": cleanup.EXPECTED_RUN_BOUNDS_END},
+        }
+
+    def test_direct_inspector_loader_token_cannot_authorize_live_read(self):
+        target = self._create_valid_target()
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": cleanup.EXPECTED_MIME,
+                "timeCreated": "2026-10-09T09:03:18.572Z",
+            }
+        }
+        mock_runner = MagicMock(return_value={"status": "ok", "size": 327, "sha256": cleanup.EXPECTED_SHA256})
+        
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.inspect_and_validate_gcs_target(
+                desc, target, runner=mock_runner, simulation_mode=False
+            )
+        self.assertIn("Unsupported direct inspector live read without simulation_mode=True", str(ctx.exception))
+        self.assertEqual(mock_runner.call_count, 0)
+
+    def test_simulation_without_runner_blocks_default_cloud_transport(self):
+        inv_valid = copy.deepcopy(self.inv)
+        inv_valid["authority_established"] = cleanup._VALID_PROOF
+        plan = cleanup.build_cleanup_plan(inv_valid, mode="dry-run")
+        plan["authority_established"] = cleanup._VALID_PROOF
+        
+        with self.assertRaises(ValueError) as ctx:
+            cleanup.execute_gcs_cleanup(plan, gcs_runner=None, simulation_mode=True)
+        self.assertIn("Explicit synthetic gcs_runner is required", str(ctx.exception))
+
+    def test_simulation_receipts_always_synthetic(self):
+        target = self._create_valid_target()
+        desc = {
+            "status": "ok",
+            "metadata": {
+                "bucket": cleanup.BUCKET,
+                "name": target["key"],
+                "generation": "1728464600123456",
+                "metageneration": "1",
+                "size": 327,
+                "contentType": cleanup.EXPECTED_MIME,
+                "timeCreated": "2026-10-09T09:03:18.572Z",
+            }
+        }
+        mock_runner = MagicMock(return_value={"status": "ok", "size": 327, "sha256": cleanup.EXPECTED_SHA256})
+        
+        result = cleanup.inspect_and_validate_gcs_target(
+            desc, target, runner=mock_runner, simulation_mode=True
+        )
+        self.assertTrue(result["synthetic"])
+
