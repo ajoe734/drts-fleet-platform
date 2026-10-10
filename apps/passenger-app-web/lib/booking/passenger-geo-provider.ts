@@ -23,8 +23,8 @@ export function createPassengerGeoProvider(): AddressMapPickerProvider {
     if (!res.ok) {
       throw new Error(`Geo API error: ${res.status}`);
     }
-    const data = await res.json();
-    return data;
+    const envelope = await res.json();
+    return envelope.data;
   };
 
   return {
@@ -52,13 +52,13 @@ export function createPassengerGeoProvider(): AddressMapPickerProvider {
     async evaluateServiceArea(
       command: ServiceAreaPreviewCommand,
     ): Promise<ServiceAreaEvaluationResult> {
-      return fetchBFF("route", {
+      return fetchBFF("evaluate", {
         method: "POST",
         body: JSON.stringify(command),
       });
     },
     async getHealth(): Promise<AddressProviderHealth> {
-      return { provider: "passenger-app", mode: "external", status: "healthy" };
+      return fetchBFF("health");
     },
   };
 }

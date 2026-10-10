@@ -212,7 +212,13 @@ describe("Passenger BFF Route", () => {
       },
       {
         method: "POST",
-        path: ["geo", "route"],
+        path: ["geo", "evaluate"],
+        expectedStatus: 200,
+        mockResponse: new Response("ok", { status: 200 }),
+      },
+      {
+        method: "GET",
+        path: ["geo", "health"],
         expectedStatus: 200,
         mockResponse: new Response("ok", { status: 200 }),
       },

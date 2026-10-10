@@ -38,40 +38,47 @@ export default function BookingPage() {
     quote: FareQuoteResponse;
   } | null>(null);
 
+  const [draft, setDraft] = useState<{
+    origin: AddressPayload | null;
+    destination: AddressPayload | null;
+    scheduledAt: string | null;
+  }>({ origin: null, destination: null, scheduledAt: null });
+
   const [e19bChecked, setE19bChecked] = useState(false);
 
   // Expiration handling
   const quoteTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    async function init() {
-      try {
-        const session = await client.getSessionStatus();
-        if (!session.isActive) {
-          router.push("/login");
-          return;
-        }
-
-        const [acc, currentFares, currentSettings] = await Promise.all([
-          client.getAccount(),
-          client.getFares(),
-          client.getSettings().catch(() => null), // fall back to null if endpoint missing
-        ]);
-
-        setFares(currentFares);
-        setSettings(currentSettings);
-
-        if (
-          acc.feeAcknowledgementVersion !== currentFares.currentVersion.version
-        ) {
-          setStatus("e19a");
-        } else {
-          setStatus("form");
-        }
-      } catch (err: any) {
-        setError(err.message || "Failed to initialize");
+  const init = async () => {
+    try {
+      const session = await client.getSessionStatus();
+      if (!session.isActive) {
+        router.push("/login");
+        return;
       }
+
+      const [acc, currentFares, currentSettings] = await Promise.all([
+        client.getAccount(),
+        client.getFares(),
+        client.getSettings(),
+      ]);
+
+      setFares(currentFares);
+      setSettings(currentSettings);
+
+      if (
+        acc.feeAcknowledgementVersion !== currentFares.currentVersion.version
+      ) {
+        setStatus("e19a");
+      } else {
+        setStatus("form");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to initialize");
     }
+  };
+
+  useEffect(() => {
     init();
 
     return () => {
@@ -93,7 +100,11 @@ export default function BookingPage() {
         let domainCode = undefined;
         try {
           const body = await res.json();
-          domainCode = body?.error || body?.domainCode || body?.code;
+          if (body?.error && typeof body.error === 'object') {
+            domainCode = body.error.code;
+          } else {
+            domainCode = body?.error || body?.domainCode || body?.code;
+          }
         } catch {
           // ignore json parse error
         }
@@ -115,11 +126,11 @@ export default function BookingPage() {
     scheduledAt: string;
   }) => {
     setError(null);
+    setDraft(data);
     const selectedTime = new Date(data.scheduledAt).getTime();
     const minTime =
       Date.now() + (settings?.booking?.minLeadTimeMinutes ?? 15) * 60000;
-    if (selectedTime < minTime - 60000) {
-      // Add 1 minute buffer for user thinking time
+    if (selectedTime < minTime) {
       setError("預約時間不符合最短前置時間規定");
       return;
     }
@@ -155,6 +166,10 @@ export default function BookingPage() {
         setStatus("form");
       }
     } catch (err: any) {
+      if (err.status === 401) {
+        router.push("/login");
+        return;
+      }
       // Handle P5-A04 case (Quote failed)
       if (err.status === 404 || err.status === 503) {
         setStatus("p5a04");
@@ -171,6 +186,15 @@ export default function BookingPage() {
     // Check expiration on submit (R6 fix part 1)
     if (new Date(quoteData.quote.expiresAt).getTime() <= Date.now()) {
       setError(t.error.quoteExpired);
+      setStatus("form");
+      return;
+    }
+
+    const selectedTime = new Date(quoteData.scheduledAt).getTime();
+    const minTime =
+      Date.now() + (settings?.booking?.minLeadTimeMinutes ?? 15) * 60000;
+    if (selectedTime < minTime) {
+      setError("預約時間不符合最短前置時間規定");
       setStatus("form");
       return;
     }
@@ -203,7 +227,11 @@ export default function BookingPage() {
         let domainCode = undefined;
         try {
           const body = await res.json();
-          domainCode = body?.error || body?.domainCode || body?.code;
+          if (body?.error && typeof body.error === 'object') {
+            domainCode = body.error.code;
+          } else {
+            domainCode = body?.error || body?.domainCode || body?.code;
+          }
         } catch {
           // ignore json parse error
         }
@@ -219,14 +247,19 @@ export default function BookingPage() {
       // 送出後進入行程頁
       router.push("/ride");
     } catch (err: any) {
+      if (err.status === 401) {
+        router.push("/login");
+        return;
+      }
       if (err.status === 409 && err.domainCode === "quote_expired") {
         setError(t.error.quoteExpired);
+        setStatus("form");
       } else if (err.status === 404 || err.status === 503) {
         setStatus("p5a04");
       } else {
         setError(t.error.orderFailed + err.message);
+        setStatus("form");
       }
-      setStatus(status === "p5a04" ? "p5a04" : "form");
     }
   };
 
@@ -236,7 +269,12 @@ export default function BookingPage() {
         <P5Header status={t.fares.loading} />
         <div style={{ padding: 14 }}>
           {error ? (
-            <div style={{ color: P5.danger }}>{error}</div>
+            <P5Card title={t.error.systemError}>
+              <div style={{ color: P5.danger, marginBottom: 12 }}>{error}</div>
+              <div onClick={() => { setError(null); init(); }}>
+                <P5Btn kind="primary" icon="refresh">重試</P5Btn>
+              </div>
+            </P5Card>
           ) : (
             <P5Card title={t.systemInit.title}>
               <div style={{ color: P5.mut, fontSize: 12 }}>
@@ -255,6 +293,7 @@ export default function BookingPage() {
         fareVersion={fares.currentVersion.version}
         effectiveAt={fares.currentVersion.effectiveAt}
         onAgree={handleAgreeE19a}
+        error={error}
       />
     );
   }
@@ -305,7 +344,14 @@ export default function BookingPage() {
       <P5Phone>
         <P5Header status="正在確認預約" />
         <div style={{ flex: 1, padding: "14px" }}>
-          {/* Missing map & route fare anomaly mock representation */}
+          <P5Card>
+            <div style={{ color: P5.danger, fontWeight: 700, marginBottom: 8, fontSize: 14 }}>
+              目前無法取得正式報價
+            </div>
+            <div style={{ color: P5.dim, fontSize: 12 }}>
+              請稍後重試或聯絡客服
+            </div>
+          </P5Card>
         </div>
         <div
           style={{
@@ -315,14 +361,22 @@ export default function BookingPage() {
             gap: 8,
           }}
         >
-          <div onClick={() => setStatus("form")}>
+          <div onClick={() => {
+            if (draft.origin && draft.destination && draft.scheduledAt) {
+              handleQuoteReady(draft as any);
+            } else {
+              setStatus("form");
+            }
+          }}>
             <P5Btn kind="primary" icon="refresh" disabled={false}>
               重新取得報價
             </P5Btn>
           </div>
-          <P5Btn icon="phone" disabled={false}>
-            聯絡客服
-          </P5Btn>
+          <a href="tel:+886800000000" style={{ textDecoration: 'none' }}>
+            <P5Btn icon="phone" disabled={false}>
+              聯絡客服
+            </P5Btn>
+          </a>
         </div>
         <div
           style={{
@@ -345,6 +399,7 @@ export default function BookingPage() {
       error={error}
       onClearError={() => setError(null)}
       minLeadTimeMinutes={settings?.booking?.minLeadTimeMinutes ?? 15}
+      initialDraft={draft}
     />
   );
 }

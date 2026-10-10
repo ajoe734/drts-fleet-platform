@@ -87,9 +87,10 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (method === "POST" && fullPath === "rides") return true;
 
   if (method === "GET" && fullPath === "geo/search") return true;
+  if (method === "GET" && fullPath === "geo/health") return true;
   if (method === "POST" && fullPath === "geo/resolve") return true;
   if (method === "POST" && fullPath === "geo/reverse") return true;
-  if (method === "POST" && fullPath === "geo/route") return true;
+  if (method === "POST" && fullPath === "geo/evaluate") return true;
   if (method === "GET" && fullPath === "settings") return true;
   if (method === "PATCH" && fullPath === "me") return true;
 

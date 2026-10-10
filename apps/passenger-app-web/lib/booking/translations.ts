@@ -99,5 +99,6 @@ export const bookingTranslations = {
     quoteFailedGeneric: "取得報價失敗：",
     orderFailed: "建立訂單失敗：",
     updateFeeFailed: "無法更新費用確認紀錄：",
+    systemError: "系統錯誤",
   },
 };

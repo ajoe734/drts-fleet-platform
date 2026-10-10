@@ -87,8 +87,12 @@ export class PassengerClient implements PassengerViewModel {
       } catch {
         // ignore
       }
-      const domainCode =
-        errorData?.error || errorData?.domainCode || errorData?.code;
+      let domainCode = undefined;
+      if (errorData?.error && typeof errorData.error === 'object') {
+        domainCode = errorData.error.code;
+      } else {
+        domainCode = errorData?.error || errorData?.domainCode || errorData?.code;
+      }
       const errorMsg = domainCode
         ? `API error: ${response.status} (${domainCode})`
         : `API error: ${response.status}`;

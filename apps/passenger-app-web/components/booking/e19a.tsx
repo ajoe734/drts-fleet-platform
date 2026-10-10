@@ -6,9 +6,10 @@ interface P5E19aProps {
   onAgree: () => void;
   fareVersion: string;
   effectiveAt: string;
+  error?: string | null;
 }
 
-export function P5E19a({ onAgree, fareVersion, effectiveAt }: P5E19aProps) {
+export function P5E19a({ onAgree, fareVersion, effectiveAt, error }: P5E19aProps) {
   const E_FEES = [
     [t.e19a.fees.fareTitle, t.e19a.fees.fareDesc],
     [t.e19a.fees.bookingFeeTitle, t.e19a.fees.bookingFeeDesc],
@@ -26,6 +27,11 @@ export function P5E19a({ onAgree, fareVersion, effectiveAt }: P5E19aProps) {
       <div style={{ margin: "12px 14px 10px", fontSize: 12.5, color: P5.mut }}>
         {t.e19a.subtitle}
       </div>
+      {error && (
+        <div style={{ margin: "0 14px 10px", color: P5.danger, fontSize: 12.5 }}>
+          {error}
+        </div>
+      )}
       <P5Card>
         {E_FEES.map(([k, v], i) => (
           <div

@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { P5Phone, P5Header, P5Card, P5Btn, P5Notice, P5 } from "../p5-ui";
-import { AddressMapPicker, type AddressPayload } from "@drts/ui-web";
+import { AddressMapPicker, type AddressPayload, buildCanvasTheme } from "@drts/ui-web";
 import { createPassengerGeoProvider } from "../../lib/booking/passenger-geo-provider";
 import { bookingTranslations as t } from "../../lib/booking/translations";
+
+const baseTheme = buildCanvasTheme({ surface: "platform" });
+const passengerTheme = {
+  ...baseTheme,
+  accent: "#0B5CAB",
+  accentHi: "#07437E",
+  accentBg: "#EAF2FB",
+  surfaceName: "Passenger",
+};
 
 interface BookingFormProps {
   onQuoteReady: (data: {
@@ -13,6 +22,11 @@ interface BookingFormProps {
   error?: string | null;
   onClearError?: () => void;
   minLeadTimeMinutes?: number;
+  initialDraft?: {
+    origin: AddressPayload | null;
+    destination: AddressPayload | null;
+    scheduledAt: string | null;
+  };
 }
 
 const geoProvider = createPassengerGeoProvider();
@@ -22,10 +36,17 @@ export function BookingForm({
   error,
   onClearError,
   minLeadTimeMinutes = 15,
+  initialDraft,
 }: BookingFormProps) {
-  const [origin, setOrigin] = useState<AddressPayload | null>(null);
-  const [destination, setDestination] = useState<AddressPayload | null>(null);
-  const [scheduledAt, setScheduledAt] = useState<string>("");
+  const [origin, setOrigin] = useState<AddressPayload | null>(
+    initialDraft?.origin ?? null,
+  );
+  const [destination, setDestination] = useState<AddressPayload | null>(
+    initialDraft?.destination ?? null,
+  );
+  const [scheduledAt, setScheduledAt] = useState<string>(
+    initialDraft?.scheduledAt ?? "",
+  );
   const [minLocalTime, setMinLocalTime] = useState<string>("");
 
   const [pickerMode, setPickerMode] = useState<"origin" | "destination" | null>(
@@ -39,9 +60,11 @@ export function BookingForm({
     const localISOTime = new Date(d.getTime() - tzOffset)
       .toISOString()
       .slice(0, 16);
-    setScheduledAt(localISOTime);
+    if (!initialDraft?.scheduledAt) {
+      setScheduledAt(localISOTime);
+    }
     setMinLocalTime(localISOTime);
-  }, [minLeadTimeMinutes]);
+  }, [minLeadTimeMinutes, initialDraft?.scheduledAt]);
 
   if (pickerMode) {
     return (
@@ -85,6 +108,16 @@ export function BookingForm({
           <AddressMapPicker
             provider={geoProvider}
             surface="passenger_entry"
+            theme={passengerTheme}
+            labels={{
+              searchPlaceholder: "請輸入地址或地標",
+              searchLabel: pickerMode === "origin" ? "上車地點" : "下車地點",
+              searching: "搜尋中...",
+              noMatchTitle: "找不到相符的地址",
+              noMatchBody: "請嘗試使用不同的關鍵字",
+              providerOutageTitle: "無法連線至地圖服務",
+              providerOutageBody: "請稍後重試"
+            }}
             value={pickerMode === "origin" ? origin : destination}
             onChange={(change) => {
               if (change.status === "selected" && change.address) {
