@@ -50,7 +50,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dev-owned-operational-fixture-assessment
+  group: deploy-dev
   cancel-in-progress: false
 
 env:
@@ -122,28 +122,9 @@ jobs:
             --definition-sha "$INPUT_WORKFLOW_DEF_SHA" \
             --output .local-cloud-metadata.json
             
-          # Paginated cross-workflow reservation check
-          ACTIVE_JOBS=""
-          for STATUS in queued waiting pending in_progress; do
-            PAGE=1
-            HAS_NEXT=true
-            while [ "$HAS_NEXT" = "true" ]; do
-              RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
-              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("Deploy|Restore|Provision|Provider|Scanner")) | .id')
-              if [ -n "$MATCHES" ]; then
-                ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
-              fi
-              COUNT=$(echo "$RES" | jq '.workflow_runs | length')
-              if [ "$COUNT" -lt 100 ]; then
-                HAS_NEXT=false
-              else
-                PAGE=$((PAGE+1))
-              fi
-            done
-          done
-          
-          if [ -n "$ACTIVE_JOBS" ]; then
-            echo "Overlap detected: $ACTIVE_JOBS"
+          MERGE_BASE=$(gh api "/repos/${{ github.repository }}/compare/dev...${{ github.sha }}" --jq '.status' || echo "unknown")
+          if [ "$MERGE_BASE" != "identical" ] && [ "$MERGE_BASE" != "behind" ]; then
+            echo "::error::Commit is not on the protected dev branch (status: $MERGE_BASE)"
             exit 1
           fi
 
@@ -170,8 +151,38 @@ jobs:
           INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          ACTIVE_JOBS=""
+          for STATUS in requested queued waiting pending in_progress; do
+            PAGE=1
+            HAS_NEXT=true
+            while [ "$HAS_NEXT" = "true" ]; do
+              RES=$(gh api "/repos/${{ github.repository }}/actions/runs?status=$STATUS&per_page=100&page=$PAGE")
+              MATCHES=$(echo "$RES" | jq -r '.workflow_runs[] | select(.name | test("deploy|restore|provision|provider|scanner"; "i")) | .id')
+              if [ -n "$MATCHES" ]; then
+                ACTIVE_JOBS="$ACTIVE_JOBS $MATCHES"
+              fi
+              COUNT=$(echo "$RES" | jq '.workflow_runs | length')
+              if [ "$COUNT" -lt 100 ]; then
+                HAS_NEXT=false
+              else
+                PAGE=$((PAGE+1))
+              fi
+            done
+          done
+          if [ -n "$ACTIVE_JOBS" ]; then
+            echo "::error::Overlap detected: $ACTIVE_JOBS"
+            exit 1
+          fi
+
           python3 operations/verification/assess-owned-operational-fixtures.py \
             --product-run-id "$INPUT_PRODUCT_RUN_ID" \
             --artifact-id "$INPUT_ARTIFACT_ID" \
             --source-sha "$INPUT_SOURCE_REF" \
-            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA"
+            --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" > assessment-report.json
+
+      - name: Upload assessment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assessment-report
+          path: assessment-report.json

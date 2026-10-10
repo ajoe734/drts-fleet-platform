@@ -49,12 +49,17 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return {
                     "status": "ok",
                     "metadata": {
+                        "bucket": assess.BUCKET,
+                        "name": key,
                         "size": str(self.expected_size),
                         "contentType": self.expected_mime,
                         "generation": "1234567890",
                         "metageneration": "1",
                         "timeCreated": "2026-10-09T09:03:18.572Z",
-                        "updated": "2026-10-09T09:03:18.572Z"
+                        "updated": "2026-10-09T09:03:18.572Z",
+                        "metadata": {
+                            "stored-at": "2026-10-09T09:03:18.572Z"
+                        }
                     }
                 }
             elif action == "cat":
@@ -74,12 +79,17 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return {
                     "status": "ok",
                     "metadata": {
+                        "bucket": assess.BUCKET,
+                        "name": key,
                         "size": str(self.expected_size),
                         "contentType": self.expected_mime,
                         "generation": gen,
                         "metageneration": "1",
                         "timeCreated": "2026-10-09T09:03:18.572Z",
-                        "updated": "2026-10-09T09:03:18.572Z"
+                        "updated": "2026-10-09T09:03:18.572Z",
+                        "metadata": {
+                            "stored-at": "2026-10-09T09:03:18.572Z"
+                        }
                     }
                 }
             elif action == "cat":
@@ -103,12 +113,14 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def test_assess_database_success(self):
         def mock_db_runner(query, params):
             counts = {
-                'subs': [{"id": u} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
-                'docs': [{"id": v["documentId"]} for v in assess.CANONICAL_OWNED_OBJECTS.values()],
+                'subs': [{"id": u, "status": "approved", "fleet_partner_id": "fleet-demo-001", "revision": 1, "created_at": "2026"} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
+                'docs': [{"id": expected["documentId"], "submission_id": expected["confirmSubmissionId"], "file_object_key": logical_key, "checksum": assess.EXPECTED_SHA256, "document_type": expected["document_type"]} for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items()],
                 'revs': 0,
                 'affs': 0,
                 'discs': 0,
-                'creds': 0
+                'creds': 0,
+                'tx_ro': 'on',
+                'tx_iso': 'repeatable read'
             }
             return {"rows": [[json.dumps(counts)]]}
 
@@ -120,12 +132,14 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def test_assess_database_missing_subs(self):
         def mock_db_runner(query, params):
             counts = {
-                'subs': [{"id": assess.CANONICAL_OWNED_SUBMISSIONS[0]}],
-                'docs': [{"id": v["documentId"]} for v in assess.CANONICAL_OWNED_OBJECTS.values()],
+                'subs': [{"id": assess.CANONICAL_OWNED_SUBMISSIONS[0], "status": "approved", "fleet_partner_id": "fleet-demo-001", "revision": 1, "created_at": "2026"}],
+                'docs': [{"id": expected["documentId"], "submission_id": expected["confirmSubmissionId"], "file_object_key": logical_key, "checksum": assess.EXPECTED_SHA256, "document_type": expected["document_type"]} for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items()],
                 'revs': 0,
                 'affs': 0,
                 'discs': 0,
-                'creds': 0
+                'creds': 0,
+                'tx_ro': 'on',
+                'tx_iso': 'repeatable read'
             }
             return {"rows": [[json.dumps(counts)]]}
 
@@ -136,18 +150,20 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
     def test_assess_database_has_refs(self):
         def mock_db_runner(query, params):
             counts = {
-                'subs': [{"id": u} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
-                'docs': [{"id": v["documentId"]} for v in assess.CANONICAL_OWNED_OBJECTS.values()],
+                'subs': [{"id": u, "status": "approved", "fleet_partner_id": "fleet-demo-001", "revision": 1, "created_at": "2026"} for u in assess.CANONICAL_OWNED_SUBMISSIONS],
+                'docs': [{"id": expected["documentId"], "submission_id": expected["confirmSubmissionId"], "file_object_key": logical_key, "checksum": assess.EXPECTED_SHA256, "document_type": expected["document_type"]} for logical_key, expected in assess.CANONICAL_OWNED_OBJECTS.items()],
                 'revs': 2,
                 'affs': 0,
                 'discs': 0,
-                'creds': 0
+                'creds': 0,
+                'tx_ro': 'on',
+                'tx_iso': 'repeatable read'
             }
             return {"rows": [[json.dumps(counts)]]}
 
         res = assess.assess_database(mock_db_runner)
         self.assertEqual(res["status"], "rejected")
-        self.assertIn("inbound foreign keys exist", res["concrete_blocker"])
+        self.assertIn("2 review_events exist", res["concrete_blocker"])
         
     def test_provenance_validation(self):
         args = argparse.Namespace(
@@ -169,7 +185,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                                 "objectKey": logical_key,
                                 "documentId": expected["documentId"],
                                 "confirmSubmissionId": expected["confirmSubmissionId"],
-                                "documentType": expected["document_type"],
+                                "confirmDocumentType": expected["document_type"],
+                                "confirmFleetPartnerId": "fleet-demo-001",
                                 "candidateSha": assess.AUTHORIZED_PROVENANCE["source_sha"],
                                 "intentStatus": 201,
                                 "confirmStatus": 201,
@@ -178,13 +195,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                                 "readbackSha256": "wrong_hash", # mismatch to trigger Exception
                             })
                         zf.writestr("operational-browser-evidence.json", json.dumps(evidence))
-                    h = hashlib.sha256(open(zip_path, 'rb').read()).hexdigest()
+                    with open(zip_path, 'rb') as zf_read:
+                        h = hashlib.sha256(zf_read.read()).hexdigest()
                     assess.AUTHORIZED_PROVENANCE["archive_sha256"] = h
                     return MagicMock(returncode=0)
                 elif len(cmd) > 2 and cmd[2].endswith(args.product_run_id):
-                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.source_sha, "status": "completed"}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.workflow_def_sha, "conclusion": "success", "workflow_id": "123"}))
+                elif len(cmd) > 2 and cmd[2].endswith("jobs"):
+                    return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"id": 1, "status": "completed", "conclusion": "success"}]}))
                 elif len(cmd) > 2 and "artifacts" in cmd[2]:
-                    return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id}]}))
+                    if "page=1" in cmd[2]:
+                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id, "name": "operational-browser-evidence", "expired": False}]}))
+                    else:
+                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": []}))
             return MagicMock(returncode=1)
             
         with patch("subprocess.run", side_effect=mock_subprocess_run):
@@ -211,7 +234,8 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                                 "objectKey": logical_key,
                                 "documentId": expected["documentId"],
                                 "confirmSubmissionId": expected["confirmSubmissionId"],
-                                "documentType": expected["document_type"],
+                                "confirmDocumentType": expected["document_type"],
+                                "confirmFleetPartnerId": "fleet-demo-001",
                                 "candidateSha": assess.AUTHORIZED_PROVENANCE["source_sha"],
                                 "intentStatus": 201,
                                 "confirmStatus": 201,
@@ -220,13 +244,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                                 "readbackSha256": assess.EXPECTED_SHA256,
                             })
                         zf.writestr("operational-browser-evidence.json", json.dumps(evidence))
-                    h = hashlib.sha256(open(zip_path, 'rb').read()).hexdigest()
+                    with open(zip_path, 'rb') as zf_read:
+                        h = hashlib.sha256(zf_read.read()).hexdigest()
                     assess.AUTHORIZED_PROVENANCE["archive_sha256"] = h
                     return MagicMock(returncode=0)
                 elif len(cmd) > 2 and cmd[2].endswith(args.product_run_id):
-                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.source_sha, "status": "completed"}))
+                    return MagicMock(returncode=0, stdout=json.dumps({"head_sha": args.workflow_def_sha, "conclusion": "success", "workflow_id": "123"}))
+                elif len(cmd) > 2 and cmd[2].endswith("jobs"):
+                    return MagicMock(returncode=0, stdout=json.dumps({"jobs": [{"id": 1, "status": "completed", "conclusion": "success"}]}))
                 elif len(cmd) > 2 and "artifacts" in cmd[2]:
-                    return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id}]}))
+                    if "page=1" in cmd[2]:
+                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [{"id": args.artifact_id, "name": "operational-browser-evidence", "expired": False}]}))
+                    else:
+                        return MagicMock(returncode=0, stdout=json.dumps({"artifacts": []}))
             return MagicMock(returncode=1)
             
         with patch("subprocess.run", side_effect=mock_subprocess_run):
