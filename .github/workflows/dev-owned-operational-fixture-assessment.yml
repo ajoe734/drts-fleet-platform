@@ -163,6 +163,7 @@ jobs:
           INPUT_ARTIFACT_ID: ${{ github.event.inputs.artifact_id }}
           INPUT_SOURCE_REF: ${{ github.event.inputs.source_ref }}
           INPUT_WORKFLOW_DEF_SHA: ${{ github.event.inputs.workflow_def_sha }}
+          INPUT_CURRENT_RUNTIME_SHA: ${{ github.event.inputs.current_runtime_sha || github.sha }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ACTIVE_JOBS=""
@@ -194,7 +195,8 @@ jobs:
             --source-sha "$INPUT_SOURCE_REF" \
             --workflow-def-sha "$INPUT_WORKFLOW_DEF_SHA" \
             --cloud-metadata .local-cloud-metadata.json \
-            --current-run-id "${{ github.run_id }}" > assessment-report.json
+            --current-run-id "${{ github.run_id }}" \
+            --current-runtime-sha "$INPUT_CURRENT_RUNTIME_SHA" > assessment-report.json
 
       - name: Upload assessment report
         if: always()
