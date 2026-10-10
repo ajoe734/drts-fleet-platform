@@ -30,7 +30,7 @@ This assessment does **not** perform any mutation or cleanup. It is strictly a r
 The workflow restricts secrets, body, and non-fixture rows. It produces a bounded JSON report uploaded as a durable artifact.
 - **Provider & IAM validation**: The script validates providers for `drts-dev-api` and strictly typed IAM bindings.
 - **Scanner hash and metadata**: Enforces caller-supplied metadata presence of `scanner_url` on `drts-dev-api`, and validates that `default_environment` on `drts-dev-scanner` strictly matches the `SCANNER_ENV` dictionary contract.
-- **Cloud Metadata Bounds**: Replaced the uncapped frozen python helper with an inline `run_bounded` wrapper inside `assess-owned-operational-fixtures.py`, successfully retaining containment against memory bloat.
+- **Cloud Metadata Bounds**: Restored standard `subprocess.run(..., capture_output=True, timeout=...)` across the script to maintain bounded execution while preserving compatibility with test environment mocks.
 - **Active-run Inventory Check**: Completely enumerates paginated active jobs for restricted workflow paths across non-terminal states.
 - **Required Check-runs Check**: Strictly requires independent `APPROVED` review on the PR HEAD by checking the correct GitHub API array schema, and verifies exact names of required GitHub checks.
 
