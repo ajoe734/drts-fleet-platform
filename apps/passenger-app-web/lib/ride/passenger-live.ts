@@ -263,18 +263,22 @@ export function mapPassengerRideAuthorityToFixture(
       : {
           routeDurationMinutes: `約 ${Math.ceil(durationSeconds / 60)} 分鐘`,
         }),
-    routeFareMode: "range",
+    routeFareMode: screenId === "A04" ? "anomaly" : "range",
     routeFareText:
-      payableFareMinor !== null
-        ? `應付 ${formatMoney(payableFareMinor)}`
-        : fareMinor === null
-          ? "依計費表實際金額收費"
-          : `預估 ${formatMoney(fareMinor)}`,
-    ...(assignment?.routeFare?.fareChangeRuleDisplayText
-      ? {
-          routeFareHint: assignment.routeFare.fareChangeRuleDisplayText,
-        }
-      : {}),
+      screenId === "A04"
+        ? "目前無法取得正式報價"
+        : payableFareMinor !== null
+          ? `應付 ${formatMoney(payableFareMinor)}`
+          : fareMinor === null
+            ? "依計費表實際金額收費"
+            : `預估 ${formatMoney(fareMinor)}`,
+    ...(screenId === "A04"
+      ? { routeFareHint: "正式報價完成前不會為您確認訂單" }
+      : assignment?.routeFare?.fareChangeRuleDisplayText
+        ? {
+            routeFareHint: assignment.routeFare.fareChangeRuleDisplayText,
+          }
+        : {}),
     pickupLabel:
       assignment?.routeFare?.pickup?.address ||
       view.order.pickup?.address ||
@@ -292,6 +296,20 @@ export function mapPassengerRideAuthorityToFixture(
     actionMode: view.actions.canContact
       ? "driver_contact_ready"
       : "support_only",
+    ...(screenId === "A04"
+      ? {
+          banner: {
+            tone: "warning" as const,
+            title: "請稍後重試或聯絡客服",
+            detail: "quote_provider_unavailable",
+          },
+        }
+      : {}),
+    ...(screenId === "P5-12" || view.actions.canContact === false
+      ? {
+          contactSafetyNote: "目前無法直接聯絡司機，請改聯絡客服協助轉達。",
+        }
+      : {}),
     canCancel: view.actions.canCancel,
     canRate: view.actions.canRate,
     canContact: view.actions.canContact,
@@ -422,6 +440,24 @@ export function mapPassengerCertificate(
       if ("pdfUrl" in receipt && typeof receipt.pdfUrl === "string") {
         result.pdfUrl = receipt.pdfUrl;
       }
+      
+      if (receipt.plateNo) {
+        result.rows = [
+          { label: "乘車證明編號", value: receipt.receiptNo || "", mono: true },
+          { label: "開立時間", value: receipt.issuedAt || "", mono: true },
+          { label: "車牌", value: receipt.plateNo, mono: true },
+          { label: "上車時間", value: receipt.pickupAt || "", mono: true },
+          { label: "下車時間", value: receipt.dropoffAt || "", mono: true },
+          { label: "行駛時間", value: receipt.duration || "" },
+          { label: "路線", value: receipt.route || "" },
+          { label: "行駛里程", value: receipt.distance || "", mono: true },
+          { label: "車資", value: receipt.fare || "", mono: true },
+          { label: "通行費", value: receipt.toll || "NT$ 0", mono: true },
+          { label: "客服電話", value: receipt.customerServicePhone || "", mono: true },
+          { label: "主管機關申訴電話", value: receipt.authorityComplaintPhone || "", mono: true },
+        ].filter(r => r.value !== "");
+      }
+      
       return result;
     }
     return { state: "pending" };
@@ -540,12 +576,14 @@ function resolveScreenId(
   view: PassengerRideAuthorityView,
   kind: "ride" | "fares" | "receipt",
 ): PassengerScreenId {
+  if (kind === "fares") return "A03";
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
     // R6: Supervisor note: Missing cancelled terminal screen in canvas. Needs screen requirements.
     // STOP: Cannot use P5-12 as it implies an active assignment. Cannot use A04 as it implies a quote.
     return "CANCELLED_TODO" as any;
   }
+  if (view.order.status === "exception_hold") return "A04";
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";
   if (view.order.status === "on_trip") return "P5-07";
@@ -560,6 +598,9 @@ function resolveScreenId(
       return "P5-11";
     return "P5-01";
   }
+  
+  if (view.actions?.canContact === false) return "P5-12";
+  
   if (view.assignment.assignmentVersion > 1) return "P5-05";
   return view.assignment.rating?.displayState === "new_driver"
     ? "P5-03"
@@ -578,6 +619,8 @@ function screenTitle(screenId: PassengerScreenId) {
     "P5-09": "Rating Submitted",
     "P5-10": "Electronic Ride Certificate",
     "P5-11": "Disclosure Unavailable",
+    "P5-12": "Driver Contact Not Provisioned",
+    "A04": "Fare Quote Anomaly",
   };
   return titles[screenId] ?? "Passenger Ride";
 }

@@ -206,6 +206,7 @@ export function getPassengerRideFixture(
     },
     actionMode: "driver_contact_ready" as const,
     mapState: "fresh" as const,
+    canReadReceipt: true,
     assignment: cloneAssignment(),
     timeline: timelineBase,
   };

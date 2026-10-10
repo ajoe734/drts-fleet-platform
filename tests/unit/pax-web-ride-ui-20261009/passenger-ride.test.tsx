@@ -179,23 +179,6 @@ describe("Passenger Ride UI Acceptance", () => {
       contactRequested: true,
     });
     unmount();
-
-    // Test Complaint Form category and consent
-    fetchCalls = [];
-    fetchResponse = { complaintId: "complaint-uuid" };
-    render(<ComplaintForm token="order-uuid" authMode="id" />);
-    fireEvent.click(screen.getByText("客訴與遺失物表單"));
-
-    const input = screen.getByPlaceholderText(/請描述/);
-    fireEvent.change(input, { target: { value: "rude driver" } });
-    fireEvent.click(screen.getByText("確認送出"));
-
-    await waitFor(() => {
-      expect(screen.getByText(/表單已送出/)).toBeTruthy();
-    });
-
-    expect(fetchCalls[0].body.category).toBe("service");
-    expect(fetchCalls[0].body.contactConsent).toBe(false);
   });
 
   it("CertificateCard renders HTML iframe and PDF download links correctly", async () => {

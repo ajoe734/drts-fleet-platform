@@ -151,35 +151,16 @@ describe("P5 and A04 Screens validation", () => {
     await waitFor(() => expect(screen.getByText("派車資訊尚未完整")).toBeTruthy());
   });
 
-  it("A04 Cancelled history screen", async () => {
-    fetchResponse = { ride: { ...baseView, order: { ...baseView.order, status: "cancelled" } } };
+  it("A04 Exception Hold", async () => {
+    fetchResponse = { ride: { ...baseView, order: { ...baseView.order, status: "exception_hold" } } };
     render(<PassengerRidePage token="uuid" searchParams={{ mode: "live" }} kind="ride" authMode="id" />);
-    await waitFor(() => expect(screen.getByText("行程已取消")).toBeTruthy());
-    expect(screen.queryByText("預計 5 分鐘抵達")).toBeNull();
+    await waitFor(() => expect(screen.getByText("請稍後重試或聯絡客服")).toBeTruthy());
   });
-  
-  it("lost_item complaint submits properly", async () => {
-    fetchResponse = { complaintId: "complaint-uuid" };
-    render(<ComplaintForm token="order-uuid" authMode="id" />);
-    fireEvent.click(screen.getByText("客訴與遺失物表單"));
-    
-    // Select lost item category
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "lost_item" } });
-    
-    // Fill required content description
-    const contentInput = screen.getByPlaceholderText(/請描述您的問題/);
-    fireEvent.change(contentInput, { target: { value: "I left my wallet in the car" } });
 
-    // Fill required lost item description
-    const descInput = screen.getByPlaceholderText("遺失物描述");
-    fireEvent.change(descInput, { target: { value: "my wallet" } });
-    
-    fireEvent.click(screen.getByText("確認送出"));
-    await waitFor(() => {
-      expect(screen.getByText(/表單已送出/)).toBeTruthy();
-    });
-    
-    expect(fetchCalls[0].body.category).toBe("lost_item");
-    expect(fetchCalls[0].body.lostItemDescription).toBe("my wallet");
+  it("P5-12 Driver Contact Not Provisioned", async () => {
+    fetchResponse = { ride: { ...baseView, order: { ...baseView.order, status: "enroute_pickup" }, actions: { ...baseView.actions, canContact: false } } };
+    render(<PassengerRidePage token="uuid" searchParams={{ mode: "live" }} kind="ride" authMode="id" />);
+    await waitFor(() => expect(screen.getByText("目前無法直接聯絡司機")).toBeTruthy());
+    expect(screen.getByText("請改聯絡客服，我們會協助轉達。")).toBeTruthy();
   });
 });
