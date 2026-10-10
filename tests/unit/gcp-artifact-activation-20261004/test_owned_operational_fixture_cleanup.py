@@ -145,6 +145,7 @@ def create_authentic_inventory() -> Dict[str, Any]:
         "artifact_id": cleanup.EXPECTED_ARTIFACT_ID,
         "artifact_digest": cleanup.EXPECTED_ARTIFACT_DIGEST,
         "run_bounds": {"start": cleanup.EXPECTED_RUN_BOUNDS_START, "end": cleanup.EXPECTED_RUN_BOUNDS_END},
+        "authority_established": True,
         "storage_documents": docs,
         "mutation_records": [
             {
@@ -618,10 +619,13 @@ class TestGcsErrorClassificationAndValidation(unittest.TestCase):
 
     def _create_valid_target(self):
         logical = list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0]
+        canonical = cleanup.CANONICAL_OWNED_OBJECTS[logical]
         return {
             "bucket": cleanup.BUCKET,
             "key": cleanup.logical_to_physical_gcs_key(logical),
             "logical_key": logical,
+            "documentId": canonical["documentId"],
+            "confirmSubmissionId": canonical["confirmSubmissionId"],
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "authority_established": True,
@@ -866,10 +870,13 @@ class TestRound3SecurityInvariantsAndRegressions(unittest.TestCase):
 
     def _create_valid_target(self):
         logical = list(cleanup.CANONICAL_OWNED_OBJECTS.keys())[0]
+        canonical = cleanup.CANONICAL_OWNED_OBJECTS[logical]
         return {
             "bucket": cleanup.BUCKET,
             "key": cleanup.logical_to_physical_gcs_key(logical),
             "logical_key": logical,
+            "documentId": canonical["documentId"],
+            "confirmSubmissionId": canonical["confirmSubmissionId"],
             "expected_size": 327,
             "expected_content_type": "application/pdf",
             "authority_established": True,

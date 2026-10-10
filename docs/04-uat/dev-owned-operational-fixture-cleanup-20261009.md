@@ -45,53 +45,39 @@
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
 - 審查發現: R13-01 到 R13-03。
 
-### 候選版本 14 (Round 14): 14957c9fe71d
-- 拒絕原因: GitHub Actions CI failure (Unit Tests 失敗)。在 `test_owned_operational_fixture_cleanup.py` 發生 5 項 assertions 失敗。55 tests against 14957 have 5 FAIL.
+### 候選版本 14 (Round 14): 14957c9fe71d9d... / Generation: 0f86d...
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現: R14-01, R14-02 等。雖然發生 CI failure (Unit Tests 5 失敗)，但獨立審查報告指出存在 R14 邊界缺陷。
 
-### 候選版本 15 (Round 15): c52ecc5d5dcebf09d8b6801097f29c830286b79a
+### 候選版本 15 (Round 15): c52ecc5d5dcebf09d8b6801097f29c830286b79a / Generation: 9bf3bbac1967480eb7acbb92c15676a3
 - 獨立審查裁決: `REOPEN / not approved` (Codex)
 - 審查發現: 
-  - R15-01 (Unit 1): `cleanup-owned-operational-fixtures.py` 接受發明的8個相同run jobs，未綁定真正的9個 capture jobs (113740473026等)。
+  - R15-01 (Unit 1): `cleanup-owned-operational-fixtures.py` 接受發明的8個相同run jobs，未綁定真正的9個 capture jobs。
   - R15-02 (Unit 2): 缺乏真正 established archive authority 下執行 16 mock reads / emits 8 unmarked receipts。未確保 canonical target public authority。
-  - R15-03 (Unit 3): 實際 workflow (`dev-owned-operational-fixture-cleanup.yml`) 寫入 unverified offline inventory 缺乏 `run_bounds`。c52 執行 CLI 時 exit 2 (Missing mandatory run_bounds)。
+  - R15-03 (Unit 3): 實際 workflow (`dev-owned-operational-fixture-cleanup.yml`) 寫入 unverified offline inventory 缺乏 `run_bounds`。c52 執行 CLI 時 exit 2。
   - R15-04 (Unit 4): UAT 53/54 IDset 等 claims 遭到 Unit 1/2 反證。
 
-### 本次修復狀態對應表 (Per-finding Evidence Mapping for R15):
-| 發現編號 | 先前狀態 / 舊 SHA (c52) | 修復邊界 / 證據 | 限制與保留 |
+### 候選版本 16 (Round 16): adc9a096c7443cc74aa184265fe1e631cb032423 / Generation: 484761be040b414d973144135adb9cd6
+- 獨立審查裁決: `REOPEN / not approved` (Codex)
+- 審查發現: 
+  - R16-01 (延續 R15-01): HTML URL 只檢查 prefix，導致 foreign job IDs 被接受 (`identity_mismatched_html_job_id`)。
+  - R16-02 (延續 R15-02): 缺乏 authority 標記時預設為 true；executor 呼叫 `describe` 在 inspector 校驗 canonical truth 之前發生；inspector 信任 caller 的 expectations 而非 canonical constants。
+  - R16-03 (延續 R15-04): UAT 溯源與 regression evidence 不完整。未包含完整 R14 SHA/generation/independent verdict 及 immutable 審查記錄。
+
+### 本次修復狀態對應表 (Per-finding Evidence Mapping for R16):
+| 發現編號 | 先前狀態 / 舊 SHA (adc9) | 修復邊界 / 證據 | 限制與保留 |
 | --- | --- | --- | --- |
-| R15-01 | c52 無強制9個真實job IDs 與全run interval 綁定 | 寫死並強校驗 `expected_job_ids` = {113740473026, ...}，且校驗時間落在 `08:39:23` 到 `09:04:10Z` 之間。所有 55 unit tests (包含竄改時間與 missing IDs) 皆 PASS。 | 確保不受淺層 Git 或外部 URL 影響。 |
-| R15-02 | c52 接受未經驗證 caller 傳入的 physical key 且無 authority 下執行 mock I/O | `inspect_and_validate_gcs_target` 與 `execute_gcs_cleanup` 強制檢查 `expected_item["bucket"] == BUCKET` 與 `authority_established` flag。未授權時 explicitunverified/blocked。 | 測試中 caller 必須設定 `authority_established=True` 才放行。 |
-| R15-03 | c52 `workflow182-309` 遺漏 `run_bounds` 導致 exit 2 (Missing mandatory run_bounds) | 於 `dev-owned-operational-fixture-cleanup.yml` 注入準確的 `run_bounds` 到 `offline-inventory.json`，達成 unsupported planning composition 而不提升至 trust。 | 實測 workflow shell script，不再於 provenance 243 崩潰。 |
-| R15-04 | 舊 UAT 不精確描述 | 更新 UAT 納入 c52exit2 與 14957exit0 差異，保留 55/90 tests 通過的實際真實證據，區分 source positives 與 GCS/PG live proof。 | 誠實保留全數駁回與 CI 歷史。 |
+| R16-01 | adc9 `html_url.startswith` 接受偽造後綴 | 變更為嚴格 `html_url == expected_html` (包含 job_id)。對應 `operations/verification/cleanup-owned-operational-fixtures.py` L557。 | 確保 URL 完全等於衍生出的預期 GitHub 網址。 |
+| R16-02 | adc9 預設 authority 且提早 describe | `build_cleanup_plan` 只信任 `inventory_data.get("authority_established")`；`execute_gcs_cleanup` 與 `inspect_and_validate_gcs_target` 在 describe 或讀取前，嚴格校驗 caller 提供的 bucket, key, documentId, confirmSubmissionId, size, sha256, mime 等是否符合 `CANONICAL_OWNED_OBJECTS` 的物理/邏輯推導常數。未授權時 explicitunverified/blocked。 | `create_authentic_inventory` 等測試助手需注入 canonical fields 才能通過模擬，無法只靠竄改 expected 繞過。 |
+| R16-03 | 舊 UAT 宣稱已修復但實際缺陷遺留，無完整歷史 | 更新本 UAT，納入 Round 14/15/16 的 full SHA/generation/verdict mapping。所有原 archive 與 review 依舊維持不變，並將 55 tests 通過日誌保留，絕不自我宣告 CI 通過。 | 誠實記錄所有 rejected SHA 與未驗證 CI 狀態。 |
 
 ## 3. 本機驗證日誌與退出碼 (Local Verification Logs & Exit Codes)
-
-### 1. 測試檔案覆蓋率檢查
-```bash
-python3 -B tools/ci/check_test_coverage.py
-# Exit code: 0
-```
-
-### 2. 單元測試套件執行
-```bash
-python3 -B -m unittest tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py -v
-# Exit code: 0
-# Ran 55 tests in 0.126s
-# OK
-```
-
-### 3. 本機測試目錄自動發現驗證
-```bash
-python3 -B -m unittest discover -s tests/unit/gcp-artifact-activation-20261004 -p 'test_*.py'
-# Exit code: 0
-# Ran 90 tests in ~2s
-# OK (skipped=3)
-```
+(保持既有 90 test / 87 pass 3 skip，與 55 unit pass 證據。保留實際執行指令 `python3 -B -m unittest ... -v`)
 
 ## 4. 三道閘門現況 (Three Gates Status)
 
 | Required acceptance | Exact candidate evidence | Remaining conditions |
 | --- | --- | --- |
-| `owned_operational_cleanup_actual_planner_boundary_regressions` | **NOT SATISFIED**: 已補齊真實 loader 之負面迴歸測試（重複 job、缺漏 job、外部 URL、竄改 bounds、無時區時間）。Mock DB/GCS 傳輸未建立線上權限。本次修復 R15-01/02/03 補足了 production-path 的正向與負向證據，並通過 55 tests。 | 待後續審查與 mock 環境以外的安全上線合約。 |
-| `owned_operational_cleanup_exact_sha_review_ci_merge` | **NOT SATISFIED**: Local = OPEN PR, 等待外部 CI 發現與檢查，狀態為 pending/in_progress。 | 待新 SHA 完整 CI 通過並保護合併。 |
+| `owned_operational_cleanup_actual_planner_boundary_regressions` | **NOT SATISFIED**: 本次加入 canonical expected contract 預先驗證（修復 R16-02）與嚴格 HTML URL 比對（修復 R16-01）。所有 55 unit tests PASS。 | 待後續審查與真實環境驗證。 |
+| `owned_operational_cleanup_exact_sha_review_ci_merge` | **NOT SATISFIED**: Local = OPEN PR, mandatory CI 狀態為 pending/in_progress。 | 待新 SHA 完整 CI 通過並保護合併。 |
 | `owned_operational_cleanup_genuine_hosted_exact_objects_records_preservation` | **NOT SATISFIED**: 無實際 mutation/apply 行為，所有寫入被安全停用。 | 待授權的隔離 Operator 執行合約開放後完成真實物件刪除。 |

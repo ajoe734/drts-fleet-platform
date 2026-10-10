@@ -554,8 +554,8 @@ def load_and_validate_authoritative_artifact(
         require(job.get("head_sha") == expected_workflow_def_sha, f"Job {job_id} head_sha mismatch")
         
         html_url = job.get("html_url", "")
-        expected_html_prefix = f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{expected_run_id}/job/"
-        require(html_url.startswith(expected_html_prefix), f"Job {job_id} foreign html_url: {html_url}")
+        expected_html = f"https://github.com/ajoe734/drts-fleet-platform/actions/runs/{expected_run_id}/job/{job_id}"
+        require(html_url == expected_html, f"Job {job_id} foreign html_url: {html_url}")
         
         api_url = job.get("url", "")
         expected_api_prefix = f"https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/{job_id}"
@@ -710,6 +710,7 @@ def load_and_validate_authoritative_artifact(
         "run_bounds": {"start": job_started_str, "end": job_completed_str},
         "cleanup_not_performed": True,
         "preserve_failed_8d_03a_and_user_data": True,
+        "authority_established": True,
     }
 
     validate_provenance(
@@ -751,7 +752,7 @@ def build_cleanup_plan(
             "expected_content_type": doc["content_type"],
             "documentId": doc["documentId"],
             "confirmSubmissionId": doc["confirmSubmissionId"],
-            "authority_established": not inventory_data.get("unverified_planning_only", False),
+            "authority_established": inventory_data.get("authority_established", False),
         }
         if run_bounds:
             target_dict["run_bounds"] = run_bounds
@@ -911,7 +912,7 @@ def build_cleanup_plan(
         "db_targets": db_targets,
         "preservation_plan": preservation_plan,
         "db_blocker": DB_CONCRETE_BLOCKER,
-        "authority_established": not inventory_data.get("unverified_planning_only", False),
+        "authority_established": inventory_data.get("authority_established", False),
     }
 
 
@@ -1082,9 +1083,17 @@ def inspect_and_validate_gcs_target(
     require(key is not None, "Missing target key")
     require(key == logical_to_physical_gcs_key(logical_key), f"Key does not match authoritative derivation: {key}")
 
-    expected_size = expected_item["expected_size"]
-    expected_content_type = expected_item["expected_content_type"]
-    expected_sha256 = expected_item["expected_sha256"]
+    canonical = CANONICAL_OWNED_OBJECTS[logical_key]
+    require(expected_item.get("documentId") == canonical["documentId"], f"documentId mismatch for {logical_key}")
+    require(expected_item.get("confirmSubmissionId") == canonical["confirmSubmissionId"], f"confirmSubmissionId mismatch for {logical_key}")
+
+    expected_size = expected_item.get("expected_size")
+    expected_content_type = expected_item.get("expected_content_type")
+    expected_sha256 = expected_item.get("expected_sha256")
+    
+    require(expected_size == EXPECTED_FILE_SIZE, f"expected_size mismatch for {logical_key}")
+    require(expected_content_type == EXPECTED_MIME, f"expected_content_type mismatch for {logical_key}")
+    require(expected_sha256 == EXPECTED_SHA256, f"expected_sha256 mismatch for {logical_key}")
 
     status = desc.get("status")
     if status == "error":
@@ -1287,6 +1296,7 @@ def execute_gcs_cleanup(
     # PHASE 1: PREFLIGHT ALL TARGETS BEFORE ANY MUTATION
     validated_targets = []
     for item in targets:
+        require(item.get("authority_established") is True, "explicitunverified/blocked: truly established archive/runtime authority required")
         bucket = item["bucket"]
         require(bucket == BUCKET, f"Target specifies foreign bucket: {bucket} (expected {BUCKET})")
         logical_key = item.get("logical_key")
@@ -1294,7 +1304,17 @@ def execute_gcs_cleanup(
             logical_key is not None and logical_key.startswith(KEY_PREFIX) and logical_key in CANONICAL_OWNED_OBJECTS,
             f"Foreign object key expected to be owned, got: {logical_key}"
         )
+        canonical = CANONICAL_OWNED_OBJECTS[logical_key]
         key = item["key"]
+        require(key == logical_to_physical_gcs_key(logical_key), f"Key does not match authoritative derivation: {key}")
+        
+        # Validate caller's expected contract against canonical truth BEFORE I/O
+        require(item.get("documentId") == canonical["documentId"], f"documentId mismatch for {logical_key}")
+        require(item.get("confirmSubmissionId") == canonical["confirmSubmissionId"], f"confirmSubmissionId mismatch for {logical_key}")
+        require(item.get("expected_size") == EXPECTED_FILE_SIZE, f"expected_size mismatch for {logical_key}")
+        require(item.get("expected_sha256") == EXPECTED_SHA256, f"expected_sha256 mismatch for {logical_key}")
+        require(item.get("expected_content_type") == EXPECTED_MIME, f"expected_content_type mismatch for {logical_key}")
+        
         desc = runner("describe", bucket, key)
         val = inspect_and_validate_gcs_target(
             desc, item, prior_receipts=prior_receipts, runner=runner, simulation_mode=simulation_mode
