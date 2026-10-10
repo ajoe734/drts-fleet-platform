@@ -16,9 +16,21 @@ export default defineConfig({
         __dirname,
         "packages/ui-tokens/src/index.ts",
       ),
+      "@drts/ui-web/canvas-tokens": path.resolve(
+        __dirname,
+        "packages/ui-web/src/canvas-tokens.ts",
+      ),
+      "@drts/ui-web": path.resolve(
+        __dirname,
+        "packages/ui-web/src/index.tsx",
+      ),
       "@drts/api-client": path.resolve(
         __dirname,
         "packages/api-client/src/index.ts",
+      ),
+      "@drts/passenger-client": path.resolve(
+        __dirname,
+        "packages/passenger-client/src/index.ts",
       ),
       "@/lib/admin-client": path.resolve(
         __dirname,
