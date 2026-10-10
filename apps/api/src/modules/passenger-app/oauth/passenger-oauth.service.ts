@@ -21,6 +21,10 @@ import { PassengerOAuthTransactionRepository } from "./oauth-transaction.reposit
 // Matches the tenant/partner OIDC state TTL (oidc-pkce.service.ts).
 const TRANSACTION_TTL_MS = 10 * 60 * 1000;
 const PROVIDERS = new Set<OAuthProvider>(["google", "facebook", "line"]);
+// transaction_id is a uuid PRIMARY KEY (V0111); reject malformed values here
+// as invalid_grant, never let them reach the repository's SQL as a raw string.
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function base64url(input: Buffer): string {
   return input.toString("base64url");
@@ -101,7 +105,7 @@ function parseCallbackCommand(raw: unknown): CallbackCommand {
     invalidGrant();
   if (typeof body.code !== "string" || !body.code.trim()) invalidGrant();
   if (typeof body.state !== "string" || !body.state.trim()) invalidGrant();
-  if (typeof body.transactionId !== "string" || !body.transactionId.trim())
+  if (typeof body.transactionId !== "string" || !UUID_PATTERN.test(body.transactionId))
     invalidGrant();
   return {
     provider: body.provider as OAuthProvider,

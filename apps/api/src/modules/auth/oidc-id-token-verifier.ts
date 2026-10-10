@@ -113,9 +113,12 @@ export class OidcIdTokenVerifier {
             ? GOOGLE_OIDC_ENDPOINTS.jwks
             : `${issuer}/.well-known/jwks.json`);
         let keys: SigningKey[];
-        // Offline keys remain a non-Google provider fixture only. Google always
-        // uses its rotating endpoint, even if historical static env vars remain.
-        if (!google && process.env.OIDC_JWKS_JSON) {
+        // Offline keys remain a non-Google provider fixture only, and only for
+        // callers that didn't supply their own jwksUri: a caller with an
+        // explicit override (e.g. passenger OAuth) must never be redirected to
+        // an unrelated tenant/partner offline fixture. Google always uses its
+        // rotating endpoint, even if historical static env vars remain.
+        if (!google && !overrides?.jwksUri?.trim() && process.env.OIDC_JWKS_JSON) {
           keys = JSON.parse(process.env.OIDC_JWKS_JSON).keys;
         } else {
           const cached = await this.loadKeys(uri);

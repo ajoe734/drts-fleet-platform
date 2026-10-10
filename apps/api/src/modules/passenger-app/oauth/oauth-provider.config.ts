@@ -34,7 +34,13 @@ function configured(
       clientSecret: secret,
       authorizationEndpoint: GOOGLE_OIDC_ENDPOINTS.authorization,
       tokenEndpoint: GOOGLE_OIDC_ENDPOINTS.token,
-      verifyOverrides: { issuer: GOOGLE_OIDC_ISSUER, audience: id },
+      // Explicit jwksUri, not just issuer/audience: without it the verifier's
+      // legacy OIDC_JWKS_URI fallback would outrank Google's own endpoint.
+      verifyOverrides: {
+        issuer: GOOGLE_OIDC_ISSUER,
+        audience: id,
+        jwksUri: GOOGLE_OIDC_ENDPOINTS.jwks,
+      },
     };
   if (provider === "line")
     return {
