@@ -4,7 +4,7 @@ import { MultiTaxiService } from "../../multi-taxi/multi-taxi.service";
 import { PassengerFareRepository } from "../fare/passenger-fare.repository";
 import { PassengerAccountRepository } from "../account/passenger-account.repository";
 import { ApiRequestError } from "../../../common/api-envelope";
-import { CreateMultiTaxiRideCommand } from "../../multi-taxi/multi-taxi.types";
+import type { CreateMultiTaxiRideCommand } from "@drts/contracts";
 import {
   CreatePassengerRideCommand,
   PassengerRideListResponse,
@@ -151,7 +151,7 @@ export class PassengerBookingService {
         req.fareSnapshotId,
         new Date(req.passengerConfirmedAt).toISOString(),
       );
-    } catch (e) {
+    } catch {
       await this.multiTaxiService.cancelTrustedPassengerRide(
         result.ride.orderId,
         passengerId,
@@ -183,7 +183,7 @@ export class PassengerBookingService {
         );
         currentCursorCreatedAt = decoded.createdAt;
         currentCursorOrderId = decoded.orderId;
-      } catch (e) {
+      } catch {
         throw new ApiRequestError(
           HttpStatus.BAD_REQUEST,
           "INVALID_CURSOR",
@@ -198,7 +198,9 @@ export class PassengerBookingService {
     let hasMore = true;
 
     while (rides.length < maxItems && hasMore) {
-      const fetchLimit = status ? Math.max(maxItems - rides.length, 50) : maxItems - rides.length;
+      const fetchLimit = status
+        ? Math.max(maxItems - rides.length, 50)
+        : maxItems - rides.length;
       const historyBatch = await this.repository.listBookingHistories(
         passengerId,
         fetchLimit,
@@ -253,7 +255,7 @@ export class PassengerBookingService {
       }
     }
 
-    return { rides, nextCursor };
+    return { rides, ...(nextCursor ? { nextCursor } : {}) };
   }
 
   async getActiveRides(passengerId: string) {

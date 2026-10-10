@@ -77,12 +77,7 @@ export class PassengerBookingController {
     }
 
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
-    return this.service.getRideList(
-      passengerId,
-      parsedLimit,
-      cursor,
-      status,
-    );
+    return this.service.getRideList(passengerId, parsedLimit, cursor, status);
   }
 
   @Get("active")
@@ -143,7 +138,6 @@ export class PassengerBookingController {
     @CurrentIdentity() identity: RequestIdentity,
     @Param("id") orderId: string,
     @Headers("x-request-id") idempotencyKey: string,
-    @Body() body: any,
   ) {
     if (identity.realm !== "passenger")
       throw new ApiRequestError(
@@ -211,11 +205,11 @@ export class PassengerBookingController {
       );
     const passengerId = (identity as PassengerRequestIdentity).drtsPassengerId;
     await this.service.getRide(passengerId, orderId);
-    
+
     const receipt = await this.multiTaxiService.getTrustedPassengerReceipt(
       orderId,
       passengerId,
     );
-    return { receiptUrl: receipt.htmlUrl };
+    return { receiptUrl: receipt.record.htmlUrl };
   }
 }
