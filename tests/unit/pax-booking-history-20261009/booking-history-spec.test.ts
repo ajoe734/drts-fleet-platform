@@ -13,6 +13,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
       createBookingHistory: vi.fn(),
       listBookingHistories: vi.fn(),
       getBookingHistoryOwner: vi.fn(),
+      rollbackFailedOrder: vi.fn(),
     };
     multiTaxiMock = {
       createTrustedPassengerRide: vi.fn(),
@@ -60,6 +61,10 @@ describe("Passenger Booking History API - Spec requirements", () => {
       ride: { orderId: "order-1" },
     });
 
+    multiTaxiMock.getPassengerRideById.mockResolvedValue({
+      order: { orderId: "order-1" }
+    });
+
     const command = {
       scheduledAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
       origin: { lat: 25.04, lng: 121.51, address: "Origin Address" },
@@ -71,7 +76,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
 
     // Call service to test body data ignored (it uses account info)
     const result = await service.createRide("pax-1", command, "req-1");
-    expect(result.ride.orderId).toBe("order-1");
+    expect(result.ride.order.orderId).toBe("order-1");
 
     expect(multiTaxiMock.createTrustedPassengerRide).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -121,7 +126,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     let err3: any;
     try { await service.createRide("pax-1", command, "req-1"); } catch (e) { err3 = e; }
     expect(err3.response.error.message).toMatch(/Failed to save booking history/);
-    expect(multiTaxiMock.cancelTrustedPassengerRide).toHaveBeenCalledWith("order-1", "pax-1", "req-1");
+    expect(repoMock.rollbackFailedOrder).toHaveBeenCalledWith("order-1");
   });
 
   it("pax-booking_history_and_ride_actions: prevents cross-account viewing, paginates properly", async () => {

@@ -38,16 +38,16 @@ export class PassengerBookingService {
     const requireSms = process.env.REQUIRE_SMS_VERIFICATION === "true";
     let phone = "";
     if (requireSms) {
-      if (!account.verifiedPhone) {
+      if (!account.contactPhoneVerified || !account.contactPhone) {
         throw new ApiRequestError(
           HttpStatus.BAD_REQUEST,
           "PASSENGER_PHONE_REQUIRED",
-          "Verified phone is required",
+          "Verified contact phone is required",
         );
       }
-      phone = account.verifiedPhone;
+      phone = account.contactPhone;
     } else {
-      phone = account.verifiedPhone || account.contactPhone || "";
+      phone = account.contactPhone || account.verifiedPhone || "";
       if (!phone) {
         throw new ApiRequestError(
           HttpStatus.BAD_REQUEST,
@@ -87,7 +87,7 @@ export class PassengerBookingService {
 
     const now = Date.now();
     const confirmedTime = new Date(req.passengerConfirmedAt).getTime();
-    if (isNaN(confirmedTime) || confirmedTime > now + 60000) {
+    if (isNaN(confirmedTime) || confirmedTime > now) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "PASSENGER_NOT_CONFIRMED",
@@ -104,7 +104,8 @@ export class PassengerBookingService {
     }
 
     if (
-      req.scheduledAt !== snapshot.scheduledAt ||
+      !req.scheduledAt ||
+      new Date(req.scheduledAt).getTime() !== new Date(snapshot.scheduledAt).getTime() ||
       req.origin.lat !== snapshot.origin.lat ||
       req.origin.lng !== snapshot.origin.lng ||
       req.destination.lat !== snapshot.destination.lat ||
@@ -152,11 +153,7 @@ export class PassengerBookingService {
         new Date(req.passengerConfirmedAt).toISOString(),
       );
     } catch {
-      await this.multiTaxiService.cancelTrustedPassengerRide(
-        result.ride.orderId,
-        passengerId,
-        requestId,
-      );
+      await this.repository.rollbackFailedOrder(result.ride.orderId);
       throw new ApiRequestError(
         HttpStatus.INTERNAL_SERVER_ERROR,
         "PASSENGER_BOOKING_HISTORY_FAILED",
@@ -164,7 +161,11 @@ export class PassengerBookingService {
       );
     }
 
-    return { ride: result.ride };
+    const view = await this.multiTaxiService.getPassengerRideById(
+      result.ride.orderId,
+      passengerId,
+    );
+    return { ride: view };
   }
 
   async getRideList(
@@ -181,6 +182,15 @@ export class PassengerBookingService {
         const decoded = JSON.parse(
           Buffer.from(cursor, "base64").toString("utf-8"),
         );
+        if (!decoded || typeof decoded !== 'object' || !decoded.createdAt || !decoded.orderId) {
+          throw new Error("Missing fields");
+        }
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(decoded.orderId)) {
+          throw new Error("Invalid UUID");
+        }
+        if (isNaN(new Date(decoded.createdAt).getTime())) {
+          throw new Error("Invalid date");
+        }
         currentCursorCreatedAt = decoded.createdAt;
         currentCursorOrderId = decoded.orderId;
       } catch {

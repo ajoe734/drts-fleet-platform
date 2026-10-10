@@ -60,6 +60,10 @@ export class PassengerBookingController {
     @Query("cursor") cursor?: string,
     @Query("status") status?: "active" | "completed" | "cancelled",
   ) {
+    if (status && !["active", "completed", "cancelled"].includes(status)) {
+      throw new ApiRequestError(HttpStatus.BAD_REQUEST, "INVALID_STATUS", "Invalid status");
+    }
+
     if (identity.realm !== "passenger")
       throw new ApiRequestError(
         HttpStatus.UNAUTHORIZED,
@@ -68,7 +72,7 @@ export class PassengerBookingController {
       );
 
     const parsedLimit = parseInt(limit, 10);
-    if (isNaN(parsedLimit) || parsedLimit <= 0 || parsedLimit > 100) {
+    if (isNaN(parsedLimit) || parsedLimit <= 0 || parsedLimit > 100 || !/^\d+$/.test(limit)) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "INVALID_PAGINATION",

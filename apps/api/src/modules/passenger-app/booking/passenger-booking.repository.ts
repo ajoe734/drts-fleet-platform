@@ -29,14 +29,14 @@ export class PassengerBookingRepository {
     cursorOrderId?: string,
   ): Promise<{ orderId: string; createdAt: string }[]> {
     let query = `
-      SELECT order_id, created_at
+      SELECT order_id, created_at::text as created_at_str
       FROM passenger.booking_histories
       WHERE drts_passenger_id = $1
     `;
     const params: any[] = [passengerId, limit];
     
     if (cursorCreatedAt && cursorOrderId) {
-      query += ` AND (created_at < $3 OR (created_at = $3 AND order_id < $4)) `;
+      query += ` AND (created_at < $3::timestamptz OR (created_at = $3::timestamptz AND order_id < $4)) `;
       params.push(cursorCreatedAt, cursorOrderId);
     }
     
@@ -48,7 +48,7 @@ export class PassengerBookingRepository {
     const result = await this.db.query(query, params);
     return result.rows.map((r) => ({
       orderId: r.order_id,
-      createdAt: r.created_at.toISOString(),
+      createdAt: r.created_at_str,
     }));
   }
 
@@ -62,5 +62,16 @@ export class PassengerBookingRepository {
       [orderId],
     );
     return result.rows[0]?.drts_passenger_id ?? null;
+  }
+
+  async rollbackFailedOrder(orderId: string) {
+    await this.db.query(
+      `
+      UPDATE ops.phase1_owned_orders
+      SET status = 'cancelled', cancel_reason = 'passenger_booking_history_failed', cancelled_at = now(), updated_at = now()
+      WHERE order_id = $1 AND status IN ('created', 'ready_for_dispatch')
+      `,
+      [orderId],
+    );
   }
 }
