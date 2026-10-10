@@ -1273,8 +1273,6 @@ export function RatingCard({
             score: selectedScore,
             tags: selectedTags.length > 0 ? selectedTags : undefined,
             comment: comment || undefined,
-            contactRequested:
-              selectedScore <= 3 ? Boolean(contactRequested) : false,
           }
         : {
             rideId: token,
@@ -1282,7 +1280,7 @@ export function RatingCard({
             tags: selectedTags,
             comments: comment,
             contactRequested:
-              selectedScore <= 3 ? Boolean(contactRequested) : false,
+              selectedScore <= 2 ? Boolean(contactRequested) : false,
           };
 
     requestPassengerRideAction<{ score: number }>(
@@ -1330,50 +1328,68 @@ export function RatingCard({
           {selectedScore} {t.Star} · {t.StarLabels[selectedScore - 1]}
         </div>
       </div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 7,
-          justifyContent: "center",
-          marginTop: 8,
-        }}
-      >
-        {fixture.ratingSummary.chips?.filter(chip => {
-          const positive = ["車內整潔","駕駛親切","路線順暢","準時到達"];
-          if (selectedScore >= 4) return positive.includes(chip);
-          return !positive.includes(chip);
-        }).map((chip) => {
-          const selected = selectedTags.includes(chip);
-          return (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => {
-                setSelectedTags((prev) =>
-                  prev.includes(chip)
-                    ? prev.filter((t) => t !== chip)
-                    : [...prev, chip],
-                );
-              }}
-              style={{
-                fontSize: 12,
-                fontWeight: 600,
-                padding: "7px 13px",
-                borderRadius: 999,
-                border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
-                color: selected ? passengerChrome.shell : passengerChrome.muted,
-                background: selected
-                  ? passengerChrome.info.bg
-                  : passengerChrome.card,
-                cursor: "pointer",
-              }}
-            >
-              {chip}
-            </button>
-          );
-        })}
-      </div>
+      {(() => {
+        if (!fixture.ratingSummary.chips) return null;
+        const positive = ["車內整潔", "駕駛親切", "路線順暢", "準時到達"];
+        const positiveChips = fixture.ratingSummary.chips.filter((c) => positive.includes(c));
+        const negativeChips = fixture.ratingSummary.chips.filter((c) => !positive.includes(c));
+        return (
+          <>
+            {positiveChips.length > 0 && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: passengerChrome.muted, textAlign: "center", marginTop: 12, marginBottom: 8 }}>做得好</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, justifyContent: "center" }}>
+                  {positiveChips.map((chip) => {
+                    const selected = selectedTags.includes(chip);
+                    return (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => setSelectedTags((prev) => prev.includes(chip) ? prev.filter((t) => t !== chip) : [...prev, chip])}
+                        style={{
+                          fontSize: 12, fontWeight: 600, padding: "7px 13px", borderRadius: 999,
+                          border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
+                          color: selected ? passengerChrome.shell : passengerChrome.muted,
+                          background: selected ? passengerChrome.info.bg : passengerChrome.card,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {chip}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            {negativeChips.length > 0 && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: passengerChrome.muted, textAlign: "center", marginTop: 12, marginBottom: 8 }}>待改善</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, justifyContent: "center" }}>
+                  {negativeChips.map((chip) => {
+                    const selected = selectedTags.includes(chip);
+                    return (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => setSelectedTags((prev) => prev.includes(chip) ? prev.filter((t) => t !== chip) : [...prev, chip])}
+                        style={{
+                          fontSize: 12, fontWeight: 600, padding: "7px 13px", borderRadius: 999,
+                          border: `1px solid ${selected ? passengerChrome.shell : passengerChrome.border}`,
+                          color: selected ? passengerChrome.shell : passengerChrome.muted,
+                          background: selected ? passengerChrome.info.bg : passengerChrome.card,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {chip}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        );
+      })()}
       <div style={{ marginTop: 16 }}>
         <textarea
           placeholder={t.LeaveComment}
@@ -1390,7 +1406,7 @@ export function RatingCard({
             fontSize: 14,
           }}
         />
-        {selectedScore <= 2 && (
+        {selectedScore <= 2 && authMode !== "token" && (
           <label
             style={{
               display: "flex",
@@ -2061,6 +2077,19 @@ function RideContent({
     );
   }
 
+  if (fixture.screenId === "CANCELLED_TODO" as any) {
+    return (
+      <>
+        <MapCard fixture={fixture} />
+        {fixture.assignment && <VehicleCard fixture={fixture} />}
+        {fixture.fare && <FareCard fixture={fixture} />}
+        <div style={{ padding: 16, textAlign: "center", color: passengerChrome.muted }}>
+          {t.Cancelled} (畫面設計待補)
+        </div>
+      </>
+    );
+  }
+
   if (fixture.screenId === "P5-08") {
     return (
       <>
@@ -2277,13 +2306,12 @@ export function PassengerRidePage({
               setLiveFixture(
                 mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
               );
-              if (
-                nextView.eventType === "driver_location_updated" &&
-                nextView.data.assignment?.eta?.calculatedAt
-              ) {
-                setLastEventTime(
-                  new Date(nextView.data.assignment.eta.calculatedAt).getTime()
-                );
+              const newCalculatedAt = nextView.data.assignment?.eta?.calculatedAt;
+              if (newCalculatedAt) {
+                const ts = new Date(newCalculatedAt).getTime();
+                if (!Number.isNaN(ts)) {
+                  setLastEventTime(ts);
+                }
               }
             });
           },

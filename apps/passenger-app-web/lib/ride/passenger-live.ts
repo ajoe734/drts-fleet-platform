@@ -421,8 +421,6 @@ export function mapPassengerCertificate(
       };
       if ("pdfUrl" in receipt && typeof receipt.pdfUrl === "string") {
         result.pdfUrl = receipt.pdfUrl;
-      } else {
-        result.pdfUrl = receipt.receiptUrl.replace(/\.html$/, ".pdf");
       }
       return result;
     }
@@ -545,8 +543,8 @@ function resolveScreenId(
   if (kind === "receipt") return "P5-10";
   if (view.order.status === "cancelled") {
     // R6: Supervisor note: Missing cancelled terminal screen in canvas. Needs screen requirements.
-    // STOP: Cannot use P5-12 as it implies an active assignment.
-    return "A04";
+    // STOP: Cannot use P5-12 as it implies an active assignment. Cannot use A04 as it implies a quote.
+    return "CANCELLED_TODO" as any;
   }
   if (view.order.status === "completed") return view.rating ? "P5-09" : "P5-08";
   if (view.receipt) return "P5-10";

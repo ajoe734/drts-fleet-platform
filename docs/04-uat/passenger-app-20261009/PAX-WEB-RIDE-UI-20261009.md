@@ -7,69 +7,76 @@
 
 ## R1-R10 Fix Evidence
 
-1. **R1**: Re-enabled named SSE listeners in `passenger-live.ts`. Added watermark and explicit mode handling.
-2. **R2**: Fixed `/api/passenger-rides/:token` path for shared token rides.
-3. **R3**: Fixed payload mapping for RatingCard, max length 200, contact requested toggle.
-4. **R4**: Split contact logic and complaint form with accurate backend payload mappings.
-5. **R5**: Removed mock 13 fields claim. Real API returns `{ receiptUrl }`. `CertificateCard` uses `PassengerReceiptResponse` and passes state correctly to `Actions`.
-6. **R6**: Handled P5-04 and P5-12 in resolver properly.
-7. **R7**: Handled `orderId` in history navigation correctly and fixed cursor paginations.
-8. **R8**: Replaced hardcoded `#` colors with tokens instead of falsely switching surface.
-9. **R9**: Added tests for UI components.
-10. **R10**: DOM removed from passenger-client.
+### Unresolved findings with precise triggers and correction boundaries:
 
-## Known Gaps (Backend Contract Missing)
+**R1 [P1, new regression in actual SSE call path, not recurrence of fixed nullable variant]**
+`components/ride/passenger-ride-page.tsx:2280-2287` now updates position time ONLY for `eventType=driver_location_updated`.
+Actual token `/events` producer `apps/api/src/modules/multi-taxi/multi-taxi.service.ts:1590-1619` -> `resolvePassengerEventType:2593-2617` NEVER emits that event: active assignment/ETA changes emit `assignment_disclosure_ready` or `assignment_replaced`; `passengerViewVersionKey` includes `eta`. `subscribePassengerRideAuthority` accepts these named envelopes, mapper applies the fresh view, but `lastEventTime` stays old.
+Boundary: use valid authority position timestamp changes/assignment authority across actual producer event types; preserve nullable/invalid/non-position old-timestamp protection and version replay rejection. Regress token/account, initial no assignment -> assignment, replacement and real event envelopes.
 
-Supervisor note: The `MultiTaxiElectronicReceiptRecord` currently lacks:
+**R3 [P1 token low-score complaint still unimplemented; P2 UI/consent regression]**
+`RatingCard:1270-1285` now sends `contactRequested` at <=3 in both modes, while checkbox is only shown at <=2 (1393). Actual three-star click has no checkbox, yet posts `contactRequested=true` (default state true). Expected false.
+Formal `SubmitPassengerTripRatingCommand` (`contracts/phase1-p5-s3-multi-taxi.ts:554-558`) has only score/tags/comment. Real token route controller:119-128 -> `MultiTaxiService.submitPassengerRating:567-648` reads/persists only those fields; it never reads `contactRequested` or creates a complaint.
+`RatingCard:1342-1347` filters formal nine tags into only positive for >=4 and only negative for <=3. Canonical `p5-e-screens:P5_E18:32-35` displays BOTH "做得好" and "待改善" groups at all star levels. Actual 5-star UI cannot select 駕駛態度; 1/2-star UI cannot select 車內整潔. `translations.ts:80` uses 極差 instead of exact 很差.
+Boundary: implement actual canonical two-group interaction/five labels, not just a mapper list; source tokens/copy appropriately and regress real sent tags after score changes. Fix exact <=2, retain explicit checked/unchecked state, regress 1/2/3 stars and changes between stars. Owner must use a supported operation or an explicitly approved product boundary, never add unsupported fields and call it delivered. Retain account contract.
 
-- 遮罩執登號 (`driverRegistrationNo`)
-- 起程/續程/延滯/夜間明細 (`fareBaseMinor`, `fareDistanceMinor`, etc.)
-- 支付方式 (`paymentMethod`)
-- `driverName`, `fleetName`
+**R5 [P1, unresolved usable PDF/full E04; new guessed URL failure]**
+`lib/ride/passenger-live.ts:415-425` `mapPassengerCertificate` accepts HTML-only `PassengerReceiptResponse` and invents `pdfUrl` by replacing a terminal `.html`.
+Boundary: preserve explicit authoritative HTML/PDF URLs; never derive a PDF endpoint from HTML. Supervisor coordinate formal PAX-RECEIPT-COMPLAINT data/URL contract and scopes. Full E04 remains unverified. Use formally typed responses, pending/error/retry and actual two-mode HTML/PDF destinations plus positive/negative full-field tests.
 
-As per instructions, we did not fake these fields nor changed the contract. UI mapper handles their absence.
+**R6 [P1, cancelled terminal requirements still missing; ETA symptom fixed]**
+`lib/ride/passenger-live.ts:546-549` changes `cancelled->P5-12` into `cancelled->A04`. Canonical `p5-screens:P5_A04:77` is quote-unavailable/pre-confirmation, not cancellation.
+Actual cancelled page with retained assignment snapshot -> `RideContent A04:2054` -> `MapCard/FareCard/Actions A04:1850-1881` still shows "重新取得報價" and "正式報價完成前不會為您確認訂單". Expected neither on a terminated ride. Header/absence of ETA alone is not terminal correctness.
+Boundary: Supervisor must supply the formal cancelled screen/data requirements. UI contract explicitly says missing canvas -> requirements note + STOP; swapping a fallback screen is not permission to invent the design. Regress cancelled reload/SSE/history detail with retained assignment and no quote-confirmation actions.
 
-## Latest Review Fixes (2026-10-10)
+**R8 [P2, same design contract missing in adjacent candidates]**
+Original UAT still says no history/complaint/cancelled canvas yet implements those screens. No formal design or exception exists in this candidate.
+`lib/passenger-presentation.ts:11` still `buildCanvasTheme({surface:"tenant"})`; body text/muted/border use shared Canvas `#0B1220/#475569/#E5E8EE` versus canonical P5 `#16212C/#5A6A7B/#E3E8EE`. `globals.css` still sans-serif rather than canvas typography.
+Boundary: match canonical canvas body text/muted/border `#16212C/#5A6A7B/#E3E8EE`. Supervisor coordinate missing screen designs/realm typography-body tokens and shared-file scopes.
 
-- **SHA**: `73bd914f5fa39d974425716cc31bc16a62d237b1` (Previous HEAD: 51e2d4e2c6adcddd1f3de2bc19eb54e0d4bba3c8)
-- **Validation Commands**:
-  - `pnpm --filter @drts/passenger-app-web exec tsc --noEmit --incremental false` (Exit 0)
-  - `pnpm vitest -c apps/passenger-app-web/vitest.config.ts run tests/unit/pax-web-ride-ui-20261009/passenger-ride.test.tsx` (Exit 0, 2 required acceptance tests passed)
+**R9/R12 [P1, acceptance coverage still missing despite 49 green tests]**
+New `screens.test.tsx` covers P5-01..11, one cancelled test MISNAMED A04, and lost_item. It does not test formal P5-12 or quote-failure P5-A04. `resolveScreenId:541-569` has no P5-12 return; `enroute_pickup + canContact=false` maps P5-02. Canonical degraded contact card is unreachable by live authority mapping.
+`passenger-ride.test.tsx:256` still emits `{type,version}` instead of `eventType/eventVersion`, so subscriber rejects it; no meaningful freshness/replay/reconnect assertions in that test. PDF-named test only checks iframe; new P5-10 checks heading while retry stub does not follow formal receipt response.
+Boundary: real reachable screens and formal data/envelopes; operated RatingCard/both modes, consent denial/3stars, full E04 URLs/negative cases and actual backend event freshness/replay tests.
 
-### Fix Validation Table
+**R10 [P1 published candidate/evidence gate; recurring artifact/scope deficiencies]**
+Local SHA equals locked a4054262..., but remote branch gemini/pax-web-ride-ui-20261009 and open PR https://github.com/ajoe734/drts-fleet-platform/pull/2538 BOTH head=96102377ac86e71887e63f82df695183796834ab.
+Candidate HEAD subject "fix(passenger): ..." and empty body lacks required Task-ID/LLM-Agent/Reviewer trailers. Fix under original owner lifecycle; reviewer does not amend/push.
 
-| Finding | Before                                                   | After                                                                                                                                     |
-| ------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **R1**  | `MapCard` hardcoded 5 seconds; SSE events unversioned    | Added dynamic freshness timer via `ConnectionContext.lastEventTime`. SSE logic properly versions events.                                  |
-| **R2**  | Shared token API forced to use account endpoints (404)   | Added explicit proxy BFF at `/api/passenger-rides/[...path]/route.ts` specifically handling `/receipt` and token rides                    |
-| **R3**  | Hardcoded `{ comment, score }` for ratings               | Corrected payload mapped to `{ comments, rating, contactRequested, rideId, tags }` in `RatingCard`                                        |
-| **R4**  | `ComplaintForm` forced `lost_item` and hardcoded consent | Split form with accurate payload mappings mapping category, consent, and description separately                                           |
-| **R5**  | Certificate mapped incorrectly, claimed 13 fields        | Removed mock 13 fields claim. Real API returns `{ receiptUrl }`. `CertificateCard` passes state correctly to `Actions` for HTML download. |
-| **R6**  | Misclassified unassigned scheduled rides as A04          | Resolved states correctly per explicit `SCREEN_REQUIREMENTS`                                                                              |
-| **R7**  | `orderId` pagination failure                             | Navigation uses `orderId`, properly uses cursors                                                                                          |
-| **R8**  | Hardcoded colors, false `surface: "passenger"` claim     | Removed `surface: "passenger"` claim. Replaced `#` hex colors with `passengerChrome` definitions from tokens.                             |
-| **R9**  | UI components untested                                   | Added unit tests covering E-18b, E-04 receipt download, and ride status matching acceptance criteria                                      |
-| **R10** | DOM elements coupled in passenger-client                 | DOM dependencies removed from the client library completely.                                                                              |
-| **R12** | `live.ts` mocked internally                              | Deleted fake tests. Wrote new test utilizing `vitest` over component boundaries mimicking actual fetch/SSE payloads                       |
+### Adjacent-candidate evidence / acceptance:
+| Finding/acceptance | Previous 461aac6 -> locked a4054262 | Evidence/limits |
+| R1 | nullable false freshness FAIL -> PASS; actual producer assignment events now FAIL | old UI22 plus targeted16, genuine source/authority timestamps, stub EventSource/clock; native browser reconnect untested |
+| R2 | B17 9pass/8fail -> 17pass | actual GET/POST handlers/NextRequest, metadata/HTTP stub, exit0 |
+| R3 | tags/two-star/privacy/wire assertions FAIL -> PASS; token consumption still unsupported, 3-star/group/one-label FAIL | real RatingCard click/payload; real token service static read; no PG runtime |
+| R4 | PASS retained | old UI22 and suite49; real provider call/navigation not run |
+| R5 | HTML PASS retained; PDF button now visible but signed URL points to HTML; missing fares rejected | targeted URL/anchor FAIL; explicit pdfUrl positive PASS; full E04/backend gap persists |
+| R6 | cancelled arrival ETA FAIL -> PASS; cancelled quote UI FAIL | production page/mapper, design missing |
+| R7 | 4 history tests PASS retained | pagination/dedupe/rating gate, not real backend integration |
+| R8 | passenger header PASS retained; missing designs/body default unresolved | exact canvas/realm/source read; no visual run |
+| R9/R12 | 36pass -> 49pass; P5-12/true A04/formal SSE coverage still missing | programmatic Vitest4.1.4 exit0; defaults cannot resolve deps here |
+| R10 | prior published SHA/artifact issues -> current unpublished SHA + unchanged artifact/scope | remote/PR/read-only GitHub calls; exact candidate CI unavailable |
+| R11 | prior extracted copy retained | default local i18n guard cannot resolve TS; no claim of same-SHA hosted i18n success |
+| pax-web-ride_p5_live_page | NOT SATISFIED | R1/R6/R8/R9/R10 |
+| pax-web-ride_rating_receipt_history_complaint | NOT SATISFIED | R3/R5/R8/R9/R10; lost_item positive now covered |
 
 ## Screen and Data Requirements (For Supervisor)
 
 **Missing Designs:**
-1. **Cancelled Terminal Screen**: Missing design for when `order.status === "cancelled"`. Currently mapped to P5-12 as a fallback, but needs formal screen.
-2. **History List Screen**: No formal design provided for `RidesListPage` (History/Active rides list). Implemented using base realm tokens, requires formal screen design.
-3. **Complaint Form Screen**: Missing formal canvas screen for complaint & lost item form. Implemented using base realm tokens, requires formal screen design.
+1. **Cancelled Terminal Screen**: Missing design for when `order.status === "cancelled"`. (R6)
+2. **History List Screen**: No formal design provided for `RidesListPage` (History/Active rides list).
+3. **Complaint Form Screen**: Missing formal canvas screen for complaint & lost item form.
 
 **Missing Data (Backend Contract Gap):**
-1. `MultiTaxiElectronicReceiptRecord` lacks fields required for a full E-04 presentation (driverRegistrationNo masked, fare breakdowns, paymentMethod, driverName, fleetName). Currently mapping what is available and falling back to HTML/PDF URL. Needs formal update via PAX-RECEIPT-COMPLAINT.
+1. `MultiTaxiElectronicReceiptRecord` lacks fields required for a full E-04 presentation (driverRegistrationNo masked, fare breakdowns, paymentMethod, driverName, fleetName). Needs formal update via PAX-RECEIPT-COMPLAINT.
 
 ## Handoff Evidence Table (2026-10-10)
 
 | Finding / 驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
 | --- | --- | --- | --- | --- |
-| R1 P2 非位置事件假刷新 | `components/ride/passenger-ride-page.tsx:2243,2253` | 收到任何事件皆以 Date.now() 更新 → 現提取 `assignment.eta.calculatedAt` 或保持舊值 | pnpm vitest run tests/unit/pax-web-ride-ui-20261009/passenger-ride.test.tsx | 環境限制無法跑完整 E2E |
-| R2 P1 分享 BFF namespace | `app/api/passenger-rides/[...path]/route.ts` | Cookie / Actor ID 原樣傳遞、允許 `..` → 修正以阻擋黑名單標頭並驗證路徑 | unit test probe pass (see reviewer's script) | 無法在本機執行真實網頁後端 |
-| R4 P1 客服 fallback、token 取消 | `lib/ride/passenger-live.ts`, `passenger-ride-page.tsx` | contactUri 未 unwrap 且 cancel 缺少 body → 修正取得 `data.contactUri` 並傳入 `{ rideId }`；修正 disabled 邏輯 | unit tests (passenger-ride) | 同上 |
-| R5 P1 E04 檢視 | `components/ride/passenger-ride-page.tsx:1110` | 缺 iframe / PDF 連結 → 加入 htmlUrl 的 iframe 檢視與 PDF 連結 | unit test rendering test pass | E04 欄位缺失問題待 backend 補齊 |
-| R6 P1 取消終態 | `lib/ride/passenger-live.ts:534` | 拋出異常 → 修正回傳 fallback 畫面 (P5-12) 並註記 UAT 缺漏 | N/A | 等待 Supervisor 確認正式設計 |
-| R8 P2 header / canvas | `components/ride/passenger-ride-page.tsx:93,112` | 誤用 shellDark → 更正為 passengerChrome.headerBg | N/A | 無 |
-| R9 P1 測試 coverage | `tests/unit/pax-web-ride-ui-20261009/*.test.tsx` | 缺少 E-04 與 pagination 測試 → 補齊相關測試情境 | pnpm vitest run --cache=false | Workspace resolution 在沙盒有環境限制 |
+| R1 P1 事件 freshness | | | | |
+| R3 P1 評價 | | | | |
+| R5 P1 PDF / E04 | | | | |
+| R6 P1 終態 UI | | | | |
+| R8 P2 主題設定 | | | | |
+| R9 P1 測試覆蓋 | | | | |
+| R10 P1 | | | | |

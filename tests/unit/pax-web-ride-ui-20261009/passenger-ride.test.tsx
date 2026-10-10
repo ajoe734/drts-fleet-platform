@@ -6,6 +6,7 @@ import {
   fireEvent,
   waitFor,
   cleanup,
+  act,
 } from "@testing-library/react";
 import React from "react";
 import {
@@ -230,7 +231,7 @@ describe("Passenger Ride UI Acceptance", () => {
       assignment: {
         driver: { displayName: "Driver", fleetName: "Fleet" },
         vehicle: { plateNo: "A-1", model: "Car", color: "W" },
-        eta: { minutes: 5, calculatedAt: staleTime },
+        eta: { minutes: 5, calculatedAt: staleTime, locationFreshness: "fresh" },
         location: { lat: 0, lng: 0 },
       },
       actions: {},
@@ -250,17 +251,36 @@ describe("Passenger Ride UI Acceptance", () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
+    const now = Date.now();
+    await act(async () => {
+      vi.advanceTimersByTime(2000); // Trigger useEffect intervals
+    });
+    // Should be stale since calculatedAt was 62s ago
+    expect(screen.queryByText(/司機位置更新稍有延遲/)).toBeTruthy();
+
     const es = MockEventSource.instances[0];
 
-    // Simulate a reconnect or irrelevant SSE event
-    es.emit("receipt_ready", { type: "receipt_ready", version: 2, data: view });
+    // Simulate a reconnect or relevant SSE event to update freshness
+    // The mapper uses eventType and eventVersion.
+    const newView = {
+      ...view,
+      assignment: {
+        ...view.assignment,
+        eta: { ...view.assignment!.eta, calculatedAt: new Date(now).toISOString() }
+      }
+    };
+    await act(async () => {
+      es.emit("assignment_disclosure_ready", { eventType: "assignment_disclosure_ready", eventVersion: 2, assignmentVersion: 1, data: newView });
+    });
 
-    // The MapCard should still be stale because calculatedAt is > 60s ago
     // Advance timers so useEffect triggers setNow
-    vi.advanceTimersByTime(2000);
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
 
-    // Test logic ensures we don't crash, the UI updates its state properly
-    // We can't directly check 'stale' visually unless we query specific classes, but we can verify it doesn't throw.
+    // Verify it says it is fresh
+    expect(screen.queryByText(/司機位置更新稍有延遲/)).toBeNull();
+    
     vi.useRealTimers();
   });
 });

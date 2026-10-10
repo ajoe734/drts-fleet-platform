@@ -77,7 +77,7 @@ export const t = {
   ComplaintOther: "其他",
   LostItemPlaceholder: "遺失物描述",
   AgreeToContact: "同意客服與我聯繫",
-  StarLabels: ["極差", "不滿意", "普通", "滿意", "非常滿意"],
+  StarLabels: ["很差", "不滿意", "普通", "滿意", "非常滿意"],
   RatingNotice: "評分送出後不可修改；評分以匿名方式提供駕駛，並用於駕駛服務品質管理",
   DownloadPdf: "下載 PDF",
   DownloadHtml: "下載 HTML",
