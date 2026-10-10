@@ -26,6 +26,7 @@ apps/tenant-console-web/                                @ajoe734
 apps/driver-app/                                        @ajoe734
 apps/partner-booking/                                   @ajoe734
 apps/passenger-*/                                       @ajoe734
+packages/passenger-client/                              @ajoe734
 packages/ui-*/                                          @ajoe734
 packages/design-system/                                 @ajoe734
 docs/05-ui/drts-design-canvas/                          @ajoe734

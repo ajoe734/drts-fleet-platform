@@ -35,6 +35,10 @@ def role_specs():
         # uses instances.get above; no invented cloudsql.operations permission.
         {"id": "drtsOpsDrillInventory", "permissions": ["cloudsql.instances.list", "logging.logEntries.list"],
          "expression": None},
+        # User-approved 2026-10-10: clone checks create on the project resource.
+        # This also permits new SQL instances; it cannot constrain their names.
+        {"id": "drtsOpsDrillCloneCreate", "permissions": ["cloudsql.instances.create"],
+         "expression": sql + f"resource.name == 'projects/{PROJECT}'"},
     ]
 
 
@@ -63,7 +67,7 @@ def plan():
         "roles": role_specs(), "project_bindings": [binding(s) for s in role_specs()],
         "secret_binding": {"secret": SECRET, "role": "roles/secretmanager.secretAccessor"},
         "readiness_variable": READY_VAR,
-        "residual_risk": "Clone destination is NOT IAM-enforceable. A misused token can create extra clones costing money and copying dev data in this project. No SQL Admin API overwrite/update/restore or non-drill delete is granted. Existing DB credentials retain their database privileges; read-only SQL is a runner control, not a database authorization boundary.",
+        "residual_risk": "Clone destination is NOT IAM-enforceable. The drill SA can now create new Cloud SQL instances in this dev project, as well as extra clones copying dev data, with cost risk and no IAM-enforced destination name or size limit. Impersonation is reachable only through the repository-only WIF trust, which is repository-wide, not workflow-specific. No SQL Admin API overwrite/update/restore or non-drill delete is granted. Existing DB credentials retain their database privileges; read-only SQL is a runner control, not a database authorization boundary.",
         "source_condition": "Source-only clone condition retained. If Cloud SQL rejects it, stop for operator/Supervisor evidence; no automatic unconditional fallback.",
     }
 

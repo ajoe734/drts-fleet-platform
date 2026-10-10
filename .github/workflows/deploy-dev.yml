@@ -29,7 +29,7 @@ on:
         options:
           - "current"
       retired_service_cleanup:
-        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."
+        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."
         required: false
         default: "none"
         type: choice
@@ -77,6 +77,7 @@ env:
   DEV_REFERRAL_EMBED_ENTRY_SLUG: ${{ vars.DEV_REFERRAL_EMBED_ENTRY_SLUG }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
+  DEV_GCP_PASSENGER_APP_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
   DEV_API_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_API_ALLOW_UNAUTHENTICATED }}
   DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
@@ -86,6 +87,7 @@ env:
   DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED }}
   DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
   DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
+  DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
   DEV_WORKLOAD_IDENTITY_ISSUER: ${{ vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
   DEV_WORKLOAD_IDENTITY_AUDIENCE: ${{ vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
@@ -142,6 +144,7 @@ jobs:
       referral_embed_entry_slug: ${{ steps.resolve.outputs.referral_embed_entry_slug }}
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
+      passenger_app_service: ${{ steps.resolve.outputs.passenger_app_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
       api_exposure_flag: ${{ steps.resolve.outputs.api_exposure_flag }}
       platform_admin_exposure_flag: ${{ steps.resolve.outputs.platform_admin_exposure_flag }}
@@ -151,6 +154,7 @@ jobs:
       bank_console_exposure_flag: ${{ steps.resolve.outputs.bank_console_exposure_flag }}
       enterprise_dispatch_exposure_flag: ${{ steps.resolve.outputs.enterprise_dispatch_exposure_flag }}
       channel_partner_portal_exposure_flag: ${{ steps.resolve.outputs.channel_partner_portal_exposure_flag }}
+      passenger_app_exposure_flag: ${{ steps.resolve.outputs.passenger_app_exposure_flag }}
       api_origin: ${{ steps.resolve.outputs.api_origin }}
       platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
@@ -235,6 +239,7 @@ jobs:
           referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "yuhe-residence")"
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
+          passenger_app_service="$(pick "${DEV_GCP_PASSENGER_APP_SERVICE:-}" "" "drts-dev-passenger-app-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
 
           assert_exact_active_service() {
@@ -256,6 +261,7 @@ jobs:
           assert_exact_active_service referral-embed-web "$referral_embed_service" "drts-dev-referral-embed-web"
           assert_exact_active_service enterprise-dispatch-web "$enterprise_dispatch_service" "drts-dev-enterprise-dispatch-web"
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
+          assert_exact_active_service passenger-app-web "$passenger_app_service" "drts-dev-passenger-app-web"
 
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
           platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
@@ -265,6 +271,7 @@ jobs:
           bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
           enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" false)"
           channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
+          passenger_app_exposure_flag="$(exposure_flag "${DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED:-}" false)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
@@ -353,6 +360,7 @@ jobs:
           emit referral_embed_entry_slug "$referral_embed_entry_slug"
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
+          emit passenger_app_service "$passenger_app_service"
           emit migration_job "$migration_job"
           emit api_exposure_flag "$api_exposure_flag"
           emit platform_admin_exposure_flag "$platform_admin_exposure_flag"
@@ -362,6 +370,7 @@ jobs:
           emit bank_console_exposure_flag "$bank_console_exposure_flag"
           emit enterprise_dispatch_exposure_flag "$enterprise_dispatch_exposure_flag"
           emit channel_partner_portal_exposure_flag "$channel_partner_portal_exposure_flag"
+          emit passenger_app_exposure_flag "$passenger_app_exposure_flag"
           emit api_origin "$api_origin"
           emit platform_admin_origin "$platform_admin_origin"
           emit ops_console_origin "$ops_console_origin"
@@ -421,7 +430,7 @@ jobs:
           # tag is the source SHA, so an image that is already there was built
           # from exactly this commit and is the image we would have produced.
           # Skip those and build only what is genuinely missing.
-          for image in api migrate platform-admin-web ops-console-web fleet-partner-portal-web tenant-console-web bank-console-web referral-embed-web enterprise-dispatch-web channel-partner-portal-web;
+          for image in api migrate platform-admin-web ops-console-web fleet-partner-portal-web tenant-console-web bank-console-web referral-embed-web enterprise-dispatch-web channel-partner-portal-web passenger-app-web;
           do
             reference="${{ needs.prepare.outputs.registry }}/${image}:${{ steps.tag.outputs.tag }}"
             if gcloud container images describe "$reference" >/dev/null 2>&1; then
@@ -561,6 +570,19 @@ jobs:
           cache-from: type=gha,scope=channel-partner-portal-web
           cache-to: type=gha,scope=channel-partner-portal-web,mode=min
 
+      - name: Build & push — passenger-app-web
+        if: steps.existing.outputs.passenger-app-web != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/passenger-app-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=passenger-app-web
+          cache-to: type=gha,scope=passenger-app-web,mode=min
+
   migrate:
     name: DB migration
     runs-on: ubuntu-latest
@@ -626,6 +648,8 @@ jobs:
     needs: [prepare, build-push, migrate]
     if: ${{ always() && needs.build-push.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
     environment: dev
+    outputs:
+      candidate_sha: ${{ needs.build-push.outputs.candidate_sha }}
 
     steps:
       - name: Checkout deploy source
@@ -897,6 +921,54 @@ jobs:
           echo "openclaw_auth_provider=${openclaw_auth_provider}" >> "$GITHUB_OUTPUT"
           echo "openclaw_home=${openclaw_home}" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve passenger app optional secret mounts
+        id: passenger_secrets
+        env:
+          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          api_mounts=""
+
+          # Probe metadata only. Do not access values or create secrets. Each
+          # group either mounts all references or none, including partial sets.
+          # --set-secrets replaces old references, so removing one credential
+          # also disables an already-configured provider on the next rollout.
+          optional_group() {
+            local group="$1"
+            shift
+            local setting suffix secret mounts="" complete=true
+            for setting in "$@"; do
+              suffix="$(printf '%s' "$setting" | tr '[:upper:]_' '[:lower:]-')"
+              secret="${SECRET_PREFIX}-${suffix}"
+              if gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+                mounts="${mounts:+${mounts},}${setting}=${secret}:latest"
+              else
+                complete=false
+              fi
+            done
+            if [[ "$complete" == true ]]; then
+              api_mounts="${api_mounts:+${api_mounts},}${mounts}"
+            else
+              echo "::notice::Passenger ${group} configuration is absent or partial; no credentials from this group are mounted."
+            fi
+            # Metadata completeness is not provider availability. SMS/PSP
+            # adapters remain external gates even when references are complete.
+            echo "${group}_mounts_complete=${complete}" >> "$GITHUB_OUTPUT"
+          }
+
+          optional_group google GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
+          optional_group line LINE_CHANNEL_ID LINE_CHANNEL_SECRET
+          optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
+          optional_group otp PASSENGER_OTP_PEPPER
+          optional_group sms SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
+          optional_group payment PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
+          # The current BFF does not consume a cookie encryption/signing key.
+          # Do not declare a secret until its reader and contract exist.
+          # OTP pepper is shared by email and SMS. Keep one reference per slot.
+          api_mounts="$(printf '%s' "$api_mounts" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          echo "api=${api_mounts}" >> "$GITHUB_OUTPUT"
+
       - name: Verify live Google Maps provider
         if: ${{ steps.api_secrets.outputs.map_provider_mode == 'external' }}
         run: |
@@ -935,6 +1007,22 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)' 2>/dev/null || true)"
+          passenger_app_cloud_run_origin="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_app_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)' 2>/dev/null || true)"
+          oauth_redirect_allowlist=""
+          for origin in https://ride.smarttransport.tw "$passenger_app_cloud_run_origin"; do
+            [[ -n "$origin" ]] || continue
+            if [[ ! "$origin" =~ ^https://[a-z0-9.-]+$ ]]; then
+              echo "::error::Passenger callback origin must be a bare HTTPS origin."
+              exit 1
+            fi
+            for provider in google facebook line; do
+              callback="${origin}/auth/callback/${provider}"
+              oauth_redirect_allowlist="${oauth_redirect_allowlist:+${oauth_redirect_allowlist},}${callback}"
+            done
+          done
           auth_allowed_origins=""
           for origin in "${{ needs.prepare.outputs.tenant_console_origin }}" "$tenant_console_cloud_run_origin" "${{ needs.prepare.outputs.enterprise_dispatch_origin }}" "$enterprise_dispatch_cloud_run_origin"; do
             [[ -n "$origin" ]] || continue
@@ -961,6 +1049,7 @@ jobs:
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
+          env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
             tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
             tenant_login_origin="${tenant_login_origin:-$tenant_console_cloud_run_origin}"
@@ -1009,6 +1098,11 @@ jobs:
       - name: Deploy — api
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
+          api_secrets="${{ steps.api_secrets.outputs.api }}"
+          passenger_secrets="${{ steps.passenger_secrets.outputs.api }}"
+          if [[ -n "$passenger_secrets" ]]; then
+            api_secrets="${api_secrets},${passenger_secrets}"
+          fi
 
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
@@ -1017,7 +1111,7 @@ jobs:
             --ingress all \
             --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
+            --set-secrets "$api_secrets" \
             --set-env-vars "${{ steps.api_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
@@ -1292,6 +1386,37 @@ jobs:
             "${{ needs.prepare.outputs.region }}" \
             "${{ needs.prepare.outputs.project_id }}"
 
+      - name: Deploy — passenger-app-web
+        run: |
+          set -euo pipefail
+          IMAGE="${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ needs.build-push.outputs.image_tag }}"
+          # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3009 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --clear-secrets \
+            --set-env-vars "$env_vars" \
+            ${{ needs.prepare.outputs.passenger_app_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
+            --min-instances 0 \
+            --max-instances 1 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Enforce no public access — passenger-app-web
+        if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.passenger_app_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
   paused-partner-booking-cleanup:
     name: Enforce Partner Booking paused state
     runs-on: ubuntu-latest
@@ -1338,6 +1463,7 @@ jobs:
       enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
+      passenger_app: ${{ steps.urls.outputs.passenger_app }}
 
     steps:
       - name: Authenticate to GCP
@@ -1365,7 +1491,8 @@ jobs:
             "${{ needs.prepare.outputs.bank_console_service }}" \
             "${{ needs.prepare.outputs.referral_embed_service }}" \
             "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
-            "${{ needs.prepare.outputs.channel_partner_portal_service }}"; do
+            "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+            "${{ needs.prepare.outputs.passenger_app_service }}"; do
             echo "Waiting for ${svc} ..."
             service_ready=false
             for i in $(seq 1 24); do
@@ -1429,6 +1556,10 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
+          passenger_app_url="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_app_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
 
           echo "api=${api_url}" >> "$GITHUB_OUTPUT"
           echo "platform_admin=${platform_admin_url}" >> "$GITHUB_OUTPUT"
@@ -1439,6 +1570,7 @@ jobs:
           echo "referral_embed=${referral_embed_url}" >> "$GITHUB_OUTPUT"
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
+          echo "passenger_app=${passenger_app_url}" >> "$GITHUB_OUTPUT"
 
       # gcloud auth print-identity-token, and IAM credentials API generateIdToken
       # called with an *already-impersonated* SA access token (self-impersonation),
@@ -1525,6 +1657,40 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ steps.urls.outputs.channel_partner_portal }}
           id_token_include_email: true
+
+      - name: Mint identity token — passenger app
+        id: id_token_passenger_app
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.passenger_app }}
+          id_token_include_email: true
+
+      - name: Verify passenger app endpoints
+        env:
+          PASSENGER_APP_ID_TOKEN: ${{ steps.id_token_passenger_app.outputs.id_token }}
+          PASSENGER_APP_URL: ${{ steps.urls.outputs.passenger_app }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PASSENGER_APP_ID_TOKEN" ]]
+          echo "::add-mask::${PASSENGER_APP_ID_TOKEN}"
+          # PAX-QA adds /fares after PAX-WEB-BOOKING-UI provides that page.
+          for path in / /login; do
+            headers="$(mktemp)"
+            status="$(curl --silent --show-error --fail \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+              --header "Authorization: Bearer ${PASSENGER_APP_ID_TOKEN}" \
+              --dump-header "$headers" --output /dev/null --write-out '%{http_code}' \
+              "${PASSENGER_APP_URL}${path}")"
+            [[ "$status" == 200 ]]
+            served_sha="$(awk 'tolower($1) == "x-drts-candidate-sha:" {gsub("\\r", "", $2); print $2}' "$headers")"
+            rm -f "$headers"
+            [[ "$served_sha" == "$CANDIDATE_SHA" ]]
+          done
 
       - name: Verify dev endpoints
         env:
@@ -1776,6 +1942,10 @@ jobs:
           echo "  partner-booking: PAUSED (service removed; code preserved)"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
+          echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /login; candidate SHA checked)"
+          for provider in google facebook line; do
+            echo "  passenger default callback: ${{ steps.urls.outputs.passenger_app }}/auth/callback/${provider}"
+          done
 
   retired-service-cleanup:
     name: Fail-closed retired service cleanup
