@@ -2538,10 +2538,15 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
             .cancelOwnedOrder(orderId!, { reason: "passenger_requested" })
             .catch((error: unknown) => error);
         }
+        if (scenario === "token_failure") {
+          release();
+        }
         await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
         expect(writes.length).toBeGreaterThan(0);
         expect(readSpy).not.toHaveBeenCalled();
-        release();
+        if (scenario !== "token_failure") {
+          release();
+        }
         const outcome = await result;
         if (scenario === "token_failure") {
           expect(getErrorCode(outcome)).toBe(
