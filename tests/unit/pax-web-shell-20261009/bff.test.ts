@@ -65,15 +65,14 @@ describe("Passenger BFF Route", () => {
   it("allows legitimate explicit paths and asserts forwarding", async () => {
     const valid = [
       { method: "GET", path: ["auth", "providers"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
-      { method: "POST", path: ["auth", "login"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) }, // partial tokens -> 503
+      { method: "POST", path: ["auth", "otp", "verify"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) },
       { method: "POST", path: ["auth", "otp", "request"], expectedStatus: 200, mockResponse: new Response(JSON.stringify({ challengeId: "123" }), { status: 200, headers: { "Content-Type": "application/json" } }) },
-      { method: "POST", path: ["auth", "otp", "verify"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) }, // partial tokens -> 503
-      { method: "GET", path: ["auth", "oauth", "google"], expectedStatus: 200, mockResponse: new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }) },
-      { method: "POST", path: ["auth", "mfa", "verify"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) }, // partial tokens -> 503
-      { method: "GET", path: ["fares", "quote"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
-      { method: "POST", path: ["auth", "refresh"], expectedStatus: 401, mockResponse: new Response("ok", { status: 200 }) }, // fails because no refresh token in cookie
+      { method: "POST", path: ["auth", "oauth", "google", "start"], expectedStatus: 200, mockResponse: new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }) },
+      { method: "POST", path: ["auth", "mfa", "verify"], expectedStatus: 503, mockResponse: new Response(JSON.stringify({ accessToken: "a" }), { status: 200, headers: { "Content-Type": "application/json" } }) },
+      { method: "POST", path: ["quotes"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
+      { method: "POST", path: ["auth", "refresh"], expectedStatus: 401, mockResponse: new Response("ok", { status: 200 }) },
       { method: "POST", path: ["auth", "logout"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
-      { method: "GET", path: ["account"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
+      { method: "GET", path: ["me"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
       { method: "POST", path: ["rides"], expectedStatus: 200, mockResponse: new Response("ok", { status: 200 }) },
     ];
     for (const v of valid) {
@@ -99,10 +98,11 @@ describe("Passenger BFF Route", () => {
       return Response.json({ success: true }, { status: 200 });
     });
     const req = new NextRequest(
-      "http://localhost/api/passenger-app/fares/quote",
+      "http://localhost/api/passenger-app/quotes",
+      { method: "POST", headers: { Origin: "http://localhost" } }
     );
-    const res = await GET(req, {
-      params: Promise.resolve({ path: ["fares", "quote"] }),
+    const res = await POST(req, {
+      params: Promise.resolve({ path: ["quotes"] }),
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
@@ -113,14 +113,17 @@ describe("Passenger BFF Route", () => {
   it("handles login and redacts tokens while setting cookies (Secure/SameSite)", async () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("metadata")) return new Response("trusted-identity");
-      return Response.json({ accessToken: "sec-acc", refreshToken: "sec-ref", user: "abc" }, { status: 200 });
+      return Response.json({
+        data: { access_token: "sec-acc", refresh_token: "sec-ref", user: "abc" },
+        meta: {}
+      }, { status: 200 });
     });
-    const req = new NextRequest("http://localhost/api/passenger-app/auth/login", {
+    const req = new NextRequest("http://localhost/api/passenger-app/auth/otp/verify", {
       method: "POST",
       headers: { Origin: "http://localhost" },
       body: JSON.stringify({})
     });
-    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "login"] }) });
+    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "otp", "verify"] }) });
     expect(res.status).toBe(200);
     
     const accCookie = res.cookies.get("pax_session");
@@ -135,10 +138,10 @@ describe("Passenger BFF Route", () => {
     expect(refCookie?.secure).toBe(true);
     expect(refCookie?.sameSite).toBe("lax");
 
-    const data = await res.json();
-    expect(data.accessToken).toBeUndefined();
-    expect(data.refreshToken).toBeUndefined();
-    expect(data.user).toBe("abc");
+    const responseJson = await res.json();
+    expect(responseJson.data.access_token).toBeUndefined();
+    expect(responseJson.data.refresh_token).toBeUndefined();
+    expect(responseJson.data.user).toBe("abc");
   });
 
   it("fails closed on partial/invalid tokens during login", async () => {
@@ -147,6 +150,8 @@ describe("Passenger BFF Route", () => {
       { refreshToken: "sec-ref" }, // refresh-only
       { accessToken: 123, refreshToken: "sec-ref" }, // non-string (number)
       { accessToken: "", refreshToken: "" }, // empty string pair
+      { data: { access_token: "sec-acc" } }, // snake_case access-only
+      { data: { refresh_token: "sec-ref" } }, // snake_case refresh-only
     ];
 
     for (const payload of invalidPayloads) {
@@ -154,12 +159,12 @@ describe("Passenger BFF Route", () => {
         if (url.includes("metadata")) return new Response("trusted-identity");
         return Response.json(payload, { status: 200 });
       });
-      const req = new NextRequest("http://localhost/api/passenger-app/auth/login", {
+      const req = new NextRequest("http://localhost/api/passenger-app/auth/otp/verify", {
         method: "POST",
         headers: { Origin: "http://localhost" },
         body: JSON.stringify({})
       });
-      const res = await POST(req, { params: Promise.resolve({ path: ["auth", "login"] }) });
+      const res = await POST(req, { params: Promise.resolve({ path: ["auth", "otp", "verify"] }) });
       expect(res.status).toBe(503);
       const data = await res.json();
       expect(data.error).toBe("INVALID_TOKEN_PAYLOAD");
@@ -213,10 +218,10 @@ describe("Passenger BFF Route", () => {
       }
     });
 
-    const req = new NextRequest("http://localhost/api/passenger-app/account", {
+    const req = new NextRequest("http://localhost/api/passenger-app/me", {
       headers: { Cookie: "pax_session=expired-access; pax_refresh=stored-ref", "X-Serverless-Authorization": "spoofed-header", "X-Actor-Id": "spoofed" }
     });
-    const res = await GET(req, { params: Promise.resolve({ path: ["account"] }) });
+    const res = await GET(req, { params: Promise.resolve({ path: ["me"] }) });
     expect(res.status).toBe(200);
 
     const accCookie = res.cookies.get("pax_session");
@@ -248,15 +253,16 @@ describe("Passenger BFF Route", () => {
           return Response.json({ accessToken: "rotated-acc", refreshToken: "rotated-ref" }, { status: 200 });
         }
         if (callCount === 3) { // Retry request
+          expect(init.headers.get("authorization")).toBe("Bearer rotated-acc");
           if (sc.networkError) throw new Error("Network exception");
           return new Response("Unauthorized", { status: 401 });
         }
       });
 
-      const req = new NextRequest("http://localhost/api/passenger-app/account", {
+      const req = new NextRequest("http://localhost/api/passenger-app/me", {
         headers: { Cookie: "pax_session=expired-access; pax_refresh=stored-ref" }
       });
-      const res = await GET(req, { params: Promise.resolve({ path: ["account"] }) });
+      const res = await GET(req, { params: Promise.resolve({ path: ["me"] }) });
       
       expect(callCount).toBe(3);
       expect(res.status).toBe(sc.status);
@@ -270,7 +276,10 @@ describe("Passenger BFF Route", () => {
   it("handles explicit refresh success and sets cookies (Secure/SameSite)", async () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("metadata")) return new Response("trusted-identity");
-      return Response.json({ accessToken: "fresh-acc", refreshToken: "fresh-ref", user: "def" }, { status: 200 });
+      return Response.json({
+        data: { access_token: "fresh-acc", refresh_token: "fresh-ref", user: "def" },
+        meta: {}
+      }, { status: 200 });
     });
     const req = new NextRequest("http://localhost/api/passenger-app/auth/refresh", {
       method: "POST",
@@ -291,9 +300,10 @@ describe("Passenger BFF Route", () => {
     expect(refCookie?.secure).toBe(true);
     expect(refCookie?.sameSite).toBe("lax");
 
-    const data = await res.json();
-    expect(data.accessToken).toBeUndefined();
-    expect(data.refreshToken).toBeUndefined();
+    const responseJson = await res.json();
+    expect(responseJson.data.access_token).toBeUndefined();
+    expect(responseJson.data.refresh_token).toBeUndefined();
+    expect(responseJson.data.user).toBe("def");
   });
 
   it("clears both cookies on explicit refresh failure (network, parsing, invalid tokens)", async () => {
@@ -442,11 +452,11 @@ describe("Passenger BFF Route", () => {
   });
   
   it("rejects CSRF if origin doesn't match", async () => {
-    const req = new NextRequest("http://localhost/api/passenger-app/auth/login", {
+    const req = new NextRequest("http://localhost/api/passenger-app/auth/otp/verify", {
       method: "POST",
       headers: { Origin: "http://evil.com" }
     });
-    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "login"] }) });
+    const res = await POST(req, { params: Promise.resolve({ path: ["auth", "otp", "verify"] }) });
     expect(res.status).toBe(403);
     const data = await res.json();
     expect(data.error).toBe("CSRF_CHECK_FAILED");

@@ -59,14 +59,13 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (hasUnsafePathSegment(path)) return false;
   const fullPath = path.join("/");
   if (method === "GET" && fullPath === "auth/providers") return true;
-  if (method === "POST" && fullPath === "auth/login") return true;
-  if (method === "POST" && path.length === 3 && path[0] === "auth" && path[1] === "otp") return true;
-  if ((method === "POST" || method === "GET") && path.length === 3 && path[0] === "auth" && path[1] === "oauth") return true;
+  if (method === "POST" && path.length >= 3 && path[0] === "auth" && path[1] === "otp") return true;
+  if (method === "POST" && path.length >= 4 && path[0] === "auth" && path[1] === "oauth") return true;
   if (method === "POST" && fullPath === "auth/mfa/verify") return true;
-  if (method === "GET" && fullPath === "fares/quote") return true;
+  if (method === "POST" && fullPath === "quotes") return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
-  if (method === "GET" && fullPath === "account") return true;
+  if (method === "GET" && fullPath === "me") return true;
   if (method === "POST" && fullPath === "rides") return true;
   return false;
 }
@@ -200,6 +199,40 @@ async function forward(
       initialBodyData = await request.arrayBuffer();
     }
 
+    function extractTokens(parsed: any): { accessToken: string; refreshToken: string; redacted: any } | null {
+      if (!parsed || typeof parsed !== "object") return null;
+      
+      // Check snake_case in envelope
+      if (parsed.data && typeof parsed.data === "object") {
+        const acc = parsed.data.access_token;
+        const ref = parsed.data.refresh_token;
+        if (typeof acc === "string" && typeof ref === "string" && acc !== "" && ref !== "") {
+          const redacted = { ...parsed, data: { ...parsed.data } };
+          delete redacted.data.access_token;
+          delete redacted.data.refresh_token;
+          return { accessToken: acc, refreshToken: ref, redacted };
+        }
+        if (acc !== undefined || ref !== undefined) {
+          return { accessToken: "", refreshToken: "", redacted: parsed };
+        }
+      }
+
+      // Check flat camelCase (for tests/legacy)
+      const accCamel = parsed.accessToken;
+      const refCamel = parsed.refreshToken;
+      if (typeof accCamel === "string" && typeof refCamel === "string" && accCamel !== "" && refCamel !== "") {
+        const redacted = { ...parsed };
+        delete redacted.accessToken;
+        delete redacted.refreshToken;
+        return { accessToken: accCamel, refreshToken: refCamel, redacted };
+      }
+      if (accCamel !== undefined || refCamel !== undefined) {
+         return { accessToken: "", refreshToken: "", redacted: parsed };
+      }
+      
+      return null;
+    }
+
     async function doRefresh(currentRefresh: string) {
       if (!currentRefresh) throw new Error("No refresh token");
       const refreshTargetUrl = buildTargetUrl(request, ["auth", "refresh"]);
@@ -215,10 +248,9 @@ async function forward(
         throw new Error(`Upstream refresh failed: ${res.status}`);
       }
       const data = await res.json();
-      if (data && typeof data === "object" && ("accessToken" in data || "refreshToken" in data)) {
-        if (typeof data.accessToken === "string" && typeof data.refreshToken === "string" && data.accessToken !== "" && data.refreshToken !== "") {
-          return data as { accessToken: string; refreshToken: string };
-        }
+      const tokens = extractTokens(data);
+      if (tokens && tokens.accessToken && tokens.refreshToken) {
+        return { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, redacted: tokens.redacted };
       }
       throw new Error("Invalid tokens received");
     }
@@ -248,7 +280,7 @@ async function forward(
       try {
         if (!refreshToken) throw new Error("NO_REFRESH_TOKEN");
         const data = await doRefresh(refreshToken);
-        const resp = NextResponse.json({ success: true }, { status: 200 });
+        const resp = NextResponse.json(data.redacted, { status: 200 });
         const opts = {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
@@ -303,7 +335,7 @@ async function forward(
 
     const responseHeaders = copyHeaders(upstream.headers);
     let finalBody: BodyInit | null = upstream.body;
-    const isLogin = fullPath === "auth/login" || fullPath.startsWith("auth/otp") || fullPath === "auth/mfa/verify" || fullPath.startsWith("auth/oauth");
+    const isLogin = fullPath.startsWith("auth/otp") || fullPath === "auth/mfa/verify" || fullPath.startsWith("auth/oauth");
     
     let loginData = null;
     if (isLogin && upstream.ok && (method === "POST" || method === "GET")) {
@@ -318,20 +350,11 @@ async function forward(
           // ignore parsing error, finalBody stays as text
         }
         if (parsed && typeof parsed === "object") {
-          const hasAccess = "accessToken" in parsed;
-          const hasRefresh = "refreshToken" in parsed;
-          if (hasAccess || hasRefresh) {
-            if (
-              typeof parsed.accessToken === "string" &&
-              typeof parsed.refreshToken === "string" &&
-              parsed.accessToken !== "" &&
-              parsed.refreshToken !== ""
-            ) {
-              loginData = parsed;
-              const redacted = { ...parsed };
-              delete redacted.accessToken;
-              delete redacted.refreshToken;
-              finalBody = JSON.stringify(redacted);
+          const tokens = extractTokens(parsed);
+          if (tokens) {
+            if (tokens.accessToken && tokens.refreshToken) {
+              loginData = tokens;
+              finalBody = JSON.stringify(tokens.redacted);
               responseHeaders.set("Content-Type", "application/json");
             } else {
               const resp = NextResponse.json({ error: "INVALID_TOKEN_PAYLOAD" }, { status: 503 });

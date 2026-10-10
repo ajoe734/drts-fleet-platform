@@ -1,15 +1,26 @@
-export interface PassengerAccount {
-  id: string;
-  displayName: string;
-  verifiedPhone: string | null;
-  verifiedEmail: string | null;
-  status: "active" | "suspended" | "deleted";
-}
+import type {
+  PassengerAccount,
+  PassengerSession,
+  AuthProvider,
+  FareQuoteCommand,
+  FareQuoteResponse,
+  VerifyOtpCommand,
+  VerifyOtpResponse,
+  AuthProvidersResponse,
+  PassengerMeResponse
+} from "@drts/contracts/passenger-app";
 
-export interface PassengerSession {
-  accessToken: string;
-  expiresAt: string;
-}
+export type {
+  PassengerAccount,
+  PassengerSession,
+  AuthProvider,
+  FareQuoteCommand,
+  FareQuoteResponse,
+  VerifyOtpCommand,
+  VerifyOtpResponse,
+  AuthProvidersResponse,
+  PassengerMeResponse
+};
 
 export interface SessionStatus {
   isActive: boolean;
@@ -22,32 +33,3 @@ export interface PassengerViewModel {
   getSessionStatus(): Promise<SessionStatus>;
 }
 
-export interface AuthProviders {
-  phone: boolean;
-  email: boolean;
-  google: boolean;
-  facebook: boolean;
-  line: boolean;
-}
-
-export interface FareQuote {
-  version: string;
-  estimatedTotal: number;
-  currency: string;
-  breakdown: {
-    baseFare: number;
-    distanceFare: number;
-    timeFare: number;
-    surcharges: number;
-  };
-}
-
-export interface LoginRequest {
-  challengeId: string;
-  otp: string;
-}
-
-export interface LoginResponse {
-  success: boolean;
-  account?: PassengerAccount;
-}

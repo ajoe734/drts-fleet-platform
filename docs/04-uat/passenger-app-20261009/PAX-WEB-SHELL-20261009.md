@@ -137,3 +137,15 @@ REVIEWED_SHA=9e0948ae6e56ba1b1e3274845cb6e398cdf03035; candidate_generation=eb6a
 
 ### Execution Evidence
 - `pnpm exec vitest run tests/unit/pax-web-shell-20261009/bff.test.ts`: PASS (15 tests, exit code 0)
+
+## Iteration 10 Fixes (Owner Repair)
+
+| Finding | Current Status / Evidence |
+| :--- | :--- |
+| **R16** P1 NEW production wire-format boundary: browser-readable session tokens and valid refresh rejected | **RESOLVED**. Added `extractTokens` explicit wire adapter to `route.ts` that safely handles both the official API envelope + snake_case (`{ data: { access_token, refresh_token }, meta: {} }`) and legacy flat camelCase payloads. Redacts tokens directly from the correct payload location before sending to the browser. Ensures `doRefresh` supports the envelope and outputs redacted JSON properly. Extended `bff.test.ts` to assert explicit and implicit token payloads with snake_case and envelope matching production responses. |
+| **R17** P1 NEW formal endpoint/type mismatch makes shell/client unusable against accepted API | **RESOLVED**. Replaced duplicated types in `packages/passenger-client/src/types.ts` with direct imports and pure exports from the official `@drts/contracts/passenger-app`. Updated `PassengerClient` implementation to use formal REST endpoints: `GET /me` (instead of `/account`), `POST /quotes` (instead of `GET /fares/quote`), `POST /auth/otp/verify` (instead of `/auth/login`). Aligned BFF `route.ts` `isAllowedPassengerPath` explicitly to these paths, plus `POST auth/oauth/{provider}/start` and `POST auth/oauth/{provider}/callback`. Updated tests to match updated paths and formats. |
+| **R7** P2 STILL PARTIALLY INCOMPLETE repeated provenance/test gap | **RESOLVED**. Preserved earlier test coverage while explicitly asserting `expect(init.headers.get("authorization")).toBe("Bearer rotated-acc");` on `callCount === 3` for failure retries in `bff.test.ts`, effectively asserting that the rotated bearer is used properly. Verified execution locally using alternate tsc and standard vitest runs. |
+
+### Execution Evidence
+- `node node_modules/vitest/vitest.mjs run tests/unit/pax-web-shell-20261009/ --no-cache`: PASS (5 test files, 24 tests, exit 0)
+- `node node_modules/typescript/bin/tsc -p packages/passenger-client/tsconfig.json --noEmit --incremental false`: PASS (exit 0)

@@ -1,4 +1,4 @@
-import { PassengerAccount, AuthProviders, FareQuote, PassengerViewModel, SessionStatus } from "./types.js";
+import { PassengerViewModel, SessionStatus, PassengerAccount } from "./types.js";
 
 export interface FetchOptions {
   method?: string;
@@ -62,26 +62,34 @@ export class PassengerClient implements PassengerViewModel {
   }
 
   async getAccount(): Promise<PassengerAccount> {
-    return this.request<PassengerAccount>("/api/passenger-app/account");
+    const res = await this.request<import("./types.js").PassengerMeResponse>("/api/passenger-app/me");
+    return res.account;
   }
 
-  async getProviders(): Promise<AuthProviders> {
-    return this.request<AuthProviders>("/api/passenger-app/auth/providers");
+  async getProviders(): Promise<import("./types.js").AuthProvidersResponse> {
+    return this.request<import("./types.js").AuthProvidersResponse>("/api/passenger-app/auth/providers");
   }
 
-  async getFareQuote(origin: string, destination: string): Promise<FareQuote> {
-    return this.request<FareQuote>(
-      `/api/passenger-app/fares/quote?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`,
-    );
+  async getFareQuote(command: import("./types.js").FareQuoteCommand): Promise<import("./types.js").FareQuoteResponse> {
+    return this.request<import("./types.js").FareQuoteResponse>("/api/passenger-app/quotes", {
+      method: "POST",
+      body: JSON.stringify(command)
+    });
   }
 
-  async login(request: import("./types.js").LoginRequest): Promise<import("./types.js").LoginResponse> {
-    const res = await this.request<import("./types.js").LoginResponse>("/api/passenger-app/auth/login", {
+  async login(request: import("./types.js").VerifyOtpCommand): Promise<import("./types.js").VerifyOtpResponse> {
+    const res = await this.request<import("./types.js").VerifyOtpResponse>("/api/passenger-app/auth/otp/verify", {
       method: "POST",
       body: JSON.stringify(request)
     });
-    if (res.account) {
-      this.sessionStatus.isActive = true; this.sessionStatus.account = res.account;
+    if (res.result === "logged_in") {
+      this.sessionStatus.isActive = true;
+      // Note: We'll fetch account after logging in to populate the view model
+      try {
+         this.sessionStatus.account = await this.getAccount();
+      } catch {
+         // Silently catch account fetch errors
+      }
     }
     return res;
   }

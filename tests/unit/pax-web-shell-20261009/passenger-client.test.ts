@@ -7,11 +7,12 @@ describe("PassengerClient", () => {
       ok: true,
       status: 200,
       json: async () => ({
-        id: "123",
-        displayName: "Test",
-        verifiedPhone: null,
-        verifiedEmail: null,
-        status: "active",
+        account: {
+          drtsPassengerId: "123",
+          contactPhoneVerified: true,
+          status: "active",
+          createdAt: "2026-01-01T00:00:00Z"
+        }
       }),
     });
     const client = new PassengerClient({
@@ -20,9 +21,9 @@ describe("PassengerClient", () => {
     });
     const account = await client.getAccount();
 
-    expect(account.id).toBe("123");
+    expect(account.drtsPassengerId).toBe("123");
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost/api/passenger-app/account",
+      "http://localhost/api/passenger-app/me",
       expect.any(Object),
     );
   });
@@ -31,18 +32,19 @@ describe("PassengerClient", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ success: true }),
+      json: async () => ({ result: "logged_in", accessToken: "a", refreshToken: "b" }),
     });
     const client = new PassengerClient({
       baseUrl: "http://localhost",
       fetchFn: mockFetch,
     });
-    const res = await client.login({ challengeId: "c1", otp: "123456" });
+    const reqBody = { target: "+123", code: "123456", provider: "phone" as const, challenge: "c1" };
+    const res = await client.login(reqBody);
 
-    expect(res.success).toBe(true);
+    expect(res.result).toBe("logged_in");
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost/api/passenger-app/auth/login",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ challengeId: "c1", otp: "123456" }) }),
+      "http://localhost/api/passenger-app/auth/otp/verify",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(reqBody) }),
     );
   });
 
@@ -65,13 +67,14 @@ describe("PassengerClient", () => {
   });
 });
 
+describe("PassengerClient SessionStatus", () => {
   it("should update and clear sessionStatus properly", async () => {
     const mockFetch = vi.fn().mockImplementation(async (url) => {
       if (url.includes("logout")) return { ok: true, status: 200, json: async () => ({}) };
       return {
         ok: true,
         status: 200,
-        json: async () => ({ id: "123", displayName: "Test", verifiedPhone: null, verifiedEmail: null, status: "active" })
+        json: async () => ({ account: { drtsPassengerId: "123", contactPhoneVerified: true, status: "active", createdAt: "2026-01-01T00:00:00Z" } })
       };
     });
     const client = new PassengerClient({ baseUrl: "http://localhost", fetchFn: mockFetch });
@@ -82,10 +85,11 @@ describe("PassengerClient", () => {
     // Login or getSessionStatus populates it
     await client.getSessionStatus();
     expect(client.sessionStatus.isActive).toBe(true);
-    expect(client.sessionStatus.account?.id).toBe("123");
+    expect(client.sessionStatus.account?.drtsPassengerId).toBe("123");
     
     // Logout clears it
     await client.logout();
     expect(client.sessionStatus.isActive).toBe(false);
     expect(client.sessionStatus.account).toBeUndefined();
   });
+});
