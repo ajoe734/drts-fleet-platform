@@ -1,16 +1,17 @@
 import { PassengerRidePage } from "../../../../components/ride/passenger-ride-page";
 
-export default function TokenReceiptRoute({
+export default async function TokenReceiptRoute({
   params,
   searchParams,
 }: {
-  params: { token: string };
-  searchParams: { mode?: string; screen?: string };
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  const { token } = await params;
   return (
     <PassengerRidePage
-      token={params.token}
-      searchParams={searchParams}
+      token={token}
+      searchParams={await searchParams}
       kind="receipt"
       authMode="token"
     />
