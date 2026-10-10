@@ -225,9 +225,16 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
         self.assertEqual(res["status"], "rejected")
         self.assertIn("2 review_events exist", res["concrete_blocker"])
         
-    def test_provenance_validation(self):
-        # Placeholder for negative tests
-        pass
+    def test_provenance_validation_negative(self):
+        args = MagicMock()
+        args.mock_db = False
+        args.product_run_id = assess.AUTHORIZED_PROVENANCE["run_id"]
+        args.artifact_id = assess.AUTHORIZED_PROVENANCE["artifact_id"]
+        args.source_sha = "wrong-sha"
+        args.workflow_def_sha = assess.AUTHORIZED_PROVENANCE["workflow_sha"]
+        
+        with self.assertRaisesRegex(Exception, "Unauthorized source_sha"):
+            assess.fetch_and_validate_provenance(args)
 
     def test_provenance_validation_success(self):
         # Use genuine local fixture for transport-only mocks
@@ -263,7 +270,25 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 return MagicMock(returncode=0, stdout=zip_bytes)
             return MagicMock(returncode=1)
             
-        with patch("subprocess.run", side_effect=mock_run):
+        def mock_popen(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "artifacts/11606165993/zip" in cmd_str:
+                import tempfile, os
+                m = MagicMock()
+                m.returncode = 0
+                fd, path = tempfile.mkstemp()
+                os.write(fd, zip_bytes)
+                os.lseek(fd, 0, os.SEEK_SET)
+                f = open(path, "rb")
+                m.stdout = f
+                # keep track of fd to avoid closing issues
+                m.poll = lambda: 0
+                m.__enter__ = lambda self: self
+                m.__exit__ = lambda self, a, b, c: f.close()
+                return m
+            return MagicMock(returncode=1)
+
+        with patch("subprocess.run", side_effect=mock_run), patch("subprocess.Popen", side_effect=mock_popen):
             assess.fetch_and_validate_provenance(args)
 
 if __name__ == '__main__':

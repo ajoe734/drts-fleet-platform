@@ -419,12 +419,12 @@ def assess_database(db_runner: Callable[[str, List[Any]], Dict[str, Any]]) -> Di
     ), ccont AS (
         SELECT count(*) as c FROM reg.phase1_registry_contracts WHERE contract_id IN (SELECT canonical_contract_id FROM fleet.supply_submissions WHERE submission_id IN ({safe_subs}) AND canonical_contract_id IS NOT NULL)
     ), ddrafts AS (
-        SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR preferred_vehicle_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
+        SELECT count(*) as c FROM fleet.driver_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
     ), vdrafts AS (
-        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE preferred_vehicle_submission_id IN ({safe_subs}) OR current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
+        SELECT count(*) as c FROM fleet.vehicle_supply_drafts WHERE current_driver_submission_id IN ({safe_subs}) OR submission_id IN ({safe_subs})
     ), fks_meta AS (
         SELECT json_agg(json_build_object('rel', conrelid::regclass, 'confrel', confrelid::regclass, 'name', conname, 'contype', contype, 'confdeltype', confdeltype, 'confupdtype', confupdtype)) as data 
-        FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass)
+        FROM pg_constraint WHERE confrelid IN ('fleet.supply_submissions'::regclass, 'fleet.supply_documents'::regclass, 'fleet.supply_review_events'::regclass, 'fleet.vehicle_fleet_affiliations'::regclass, 'reg.vehicle_passenger_disclosure_profiles'::regclass, 'reg.driver_public_registration_credentials'::regclass, 'reg.phase1_registry_drivers'::regclass, 'reg.phase1_registry_vehicles'::regclass, 'reg.phase1_registry_policies'::regclass, 'reg.phase1_registry_contracts'::regclass, 'fleet.driver_supply_drafts'::regclass, 'fleet.vehicle_supply_drafts'::regclass)
     ), 
     pres_subs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.supply_submissions ORDER BY 1) t),
     pres_docs AS (SELECT json_build_object('c', count(*), 'digest', md5(string_agg(t::text, ''))) as data FROM (SELECT * FROM fleet.supply_documents ORDER BY 1) t),
