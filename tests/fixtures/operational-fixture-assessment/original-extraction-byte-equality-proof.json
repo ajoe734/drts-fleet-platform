@@ -1,0 +1,10 @@
+{
+  "report.json": {
+    "byte_identical_to_original_verified_extraction": true,
+    "sha256": "05682011b8e3a2816ffcf0b5a785818f4886cfb07159586b6d38321ea614fa8f"
+  },
+  "operational-browser-evidence.json": {
+    "byte_identical_to_original_verified_extraction": true,
+    "sha256": "a7c9bfa79b2d17740f41f9ec2fbf687f82c8f0fb07c69c54ab0b5e3c959bfe20"
+  }
+}

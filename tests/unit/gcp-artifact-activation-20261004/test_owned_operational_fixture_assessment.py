@@ -128,17 +128,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
-                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c"}],
-                'pres_subs': {"c": 4, "digest": "hash"},
-                'pres_docs': {"c": 8, "digest": "hash"},
-                'pres_revs': {"c": 0, "digest": "hash"},
-                'pres_affs': {"c": 0, "digest": "hash"},
-                'pres_discs': {"c": 0, "digest": "hash"},
-                'pres_creds': {"c": 0, "digest": "hash"},
-                'pres_cdriv': {"c": 0, "digest": "hash"},
-                'pres_cveh': {"c": 0, "digest": "hash"},
-                'pres_cpol': {"c": 0, "digest": "hash"},
-                'pres_ccont': {"c": 0, "digest": "hash"},
+                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c", "contype": "f", "confdeltype": "a"}],
+                'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
+                'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
+                'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_affs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_discs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_creds': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cdriv': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cveh': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cpol': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_ccont': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_ddrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_vdrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -164,17 +166,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
-                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c"}],
-                'pres_subs': {"c": 4, "digest": "hash"},
-                'pres_docs': {"c": 8, "digest": "hash"},
-                'pres_revs': {"c": 0, "digest": "hash"},
-                'pres_affs': {"c": 0, "digest": "hash"},
-                'pres_discs': {"c": 0, "digest": "hash"},
-                'pres_creds': {"c": 0, "digest": "hash"},
-                'pres_cdriv': {"c": 0, "digest": "hash"},
-                'pres_cveh': {"c": 0, "digest": "hash"},
-                'pres_cpol': {"c": 0, "digest": "hash"},
-                'pres_ccont': {"c": 0, "digest": "hash"},
+                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c", "contype": "f", "confdeltype": "a"}],
+                'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
+                'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
+                'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_affs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_discs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_creds': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cdriv': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cveh': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cpol': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_ccont': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_ddrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_vdrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -199,17 +203,19 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
                 'ccont': 0,
                 'ddrafts': 0,
                 'vdrafts': 0,
-                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c"}],
-                'pres_subs': {"c": 4, "digest": "hash"},
-                'pres_docs': {"c": 8, "digest": "hash"},
-                'pres_revs': {"c": 0, "digest": "hash"},
-                'pres_affs': {"c": 0, "digest": "hash"},
-                'pres_discs': {"c": 0, "digest": "hash"},
-                'pres_creds': {"c": 0, "digest": "hash"},
-                'pres_cdriv': {"c": 0, "digest": "hash"},
-                'pres_cveh': {"c": 0, "digest": "hash"},
-                'pres_cpol': {"c": 0, "digest": "hash"},
-                'pres_ccont': {"c": 0, "digest": "hash"},
+                'fks_meta': [{"rel": "a", "confrel": "b", "name": "c", "contype": "f", "confdeltype": "a"}],
+                'pres_subs': {"c": 4, "digest": "12345678901234567890123456789012"},
+                'pres_docs': {"c": 8, "digest": "12345678901234567890123456789012"},
+                'pres_revs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_affs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_discs': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_creds': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cdriv': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cveh': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_cpol': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_ccont': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_ddrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
+                'pres_vdrafts': {"c": 0, "digest": "12345678901234567890123456789012"},
                 'tx_ro': 'on',
                 'tx_iso': 'repeatable read'
             }
@@ -225,7 +231,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
 
     def test_provenance_validation_success(self):
         # Use genuine local fixture for transport-only mocks
-        local_fixture_dir = Path("/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/original-37906298090-authoritative-archive-20261009")
+        local_fixture_dir = Path(__file__).resolve().parent.parent.parent / "fixtures" / "operational-fixture-assessment"
         if not local_fixture_dir.exists():
             self.skipTest("Local test fixture not found")
             
@@ -250,7 +256,7 @@ class TestAssessOwnedOperationalFixtures(unittest.TestCase):
             if "/runs/37906298090/jobs" in cmd_str:
                 return MagicMock(returncode=0, stdout=jobs_data)
             elif "/runs/37906298090/artifacts" in cmd_str:
-                return MagicMock(returncode=0, stdout=json.dumps({"artifacts": [json.loads(art_data)]}))
+                return MagicMock(returncode=0, stdout=json.dumps({"total_count": 1, "artifacts": [json.loads(art_data)]}))
             elif "/runs/37906298090" in cmd_str:
                 return MagicMock(returncode=0, stdout=run_data)
             elif "artifacts/11606165993/zip" in cmd_str:

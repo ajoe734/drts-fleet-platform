@@ -1,0 +1,1457 @@
+{
+  "total_count": 9,
+  "jobs": [
+    {
+      "id": 113740473026,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae3Xiwg",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113740473026",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113740473026",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T08:39:25Z",
+      "started_at": "2026-10-09T08:39:28Z",
+      "completed_at": "2026-10-09T08:39:33Z",
+      "name": "Prepare dev deploy",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T08:39:29Z",
+          "completed_at": "2026-10-09T08:39:29Z"
+        },
+        {
+          "name": "Resolve dev config",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T08:39:30Z",
+          "completed_at": "2026-10-09T08:39:30Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T08:39:30Z",
+          "completed_at": "2026-10-09T08:39:30Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113740473026",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311941,
+      "runner_name": "GitHub Actions 1000311941",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113740518866,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae3aV0g",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113740518866",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113740518866",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T08:39:33Z",
+      "started_at": "2026-10-09T08:39:36Z",
+      "completed_at": "2026-10-09T08:50:42Z",
+      "name": "Build & push images",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T08:39:37Z",
+          "completed_at": "2026-10-09T08:39:39Z"
+        },
+        {
+          "name": "Checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T08:39:39Z",
+          "completed_at": "2026-10-09T08:39:43Z"
+        },
+        {
+          "name": "Derive image tag",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T08:39:43Z",
+          "completed_at": "2026-10-09T08:39:43Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T08:39:43Z",
+          "completed_at": "2026-10-09T08:39:43Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T08:39:43Z",
+          "completed_at": "2026-10-09T08:40:02Z"
+        },
+        {
+          "name": "Configure Docker for Artifact Registry",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-09T08:40:02Z",
+          "completed_at": "2026-10-09T08:40:04Z"
+        },
+        {
+          "name": "Set up Docker Buildx",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-09T08:40:04Z",
+          "completed_at": "2026-10-09T08:40:12Z"
+        },
+        {
+          "name": "Check which images the registry already has",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-09T08:40:12Z",
+          "completed_at": "2026-10-09T08:40:25Z"
+        },
+        {
+          "name": "Build & push — api",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-09T08:40:25Z",
+          "completed_at": "2026-10-09T08:40:30Z"
+        },
+        {
+          "name": "Build & push — migrate",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-09T08:40:30Z",
+          "completed_at": "2026-10-09T08:40:33Z"
+        },
+        {
+          "name": "Build & push — platform-admin-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-09T08:40:33Z",
+          "completed_at": "2026-10-09T08:42:04Z"
+        },
+        {
+          "name": "Build & push — ops-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-09T08:42:04Z",
+          "completed_at": "2026-10-09T08:43:21Z"
+        },
+        {
+          "name": "Build & push — fleet-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-09T08:43:21Z",
+          "completed_at": "2026-10-09T08:44:35Z"
+        },
+        {
+          "name": "Build & push — tenant-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-09T08:44:35Z",
+          "completed_at": "2026-10-09T08:45:49Z"
+        },
+        {
+          "name": "Build & push — bank-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-09T08:45:49Z",
+          "completed_at": "2026-10-09T08:46:51Z"
+        },
+        {
+          "name": "Build & push — referral-embed-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-09T08:46:51Z",
+          "completed_at": "2026-10-09T08:47:47Z"
+        },
+        {
+          "name": "Build & push — enterprise-dispatch-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-09T08:47:47Z",
+          "completed_at": "2026-10-09T08:49:01Z"
+        },
+        {
+          "name": "Build & push — channel-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-09T08:49:01Z",
+          "completed_at": "2026-10-09T08:50:06Z"
+        },
+        {
+          "name": "Post Build & push — channel-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 24,
+          "started_at": "2026-10-09T08:50:06Z",
+          "completed_at": "2026-10-09T08:50:06Z"
+        },
+        {
+          "name": "Post Build & push — enterprise-dispatch-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 25,
+          "started_at": "2026-10-09T08:50:06Z",
+          "completed_at": "2026-10-09T08:50:07Z"
+        },
+        {
+          "name": "Post Build & push — referral-embed-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 26,
+          "started_at": "2026-10-09T08:50:07Z",
+          "completed_at": "2026-10-09T08:50:07Z"
+        },
+        {
+          "name": "Post Build & push — bank-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-10-09T08:50:07Z",
+          "completed_at": "2026-10-09T08:50:07Z"
+        },
+        {
+          "name": "Post Build & push — tenant-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-10-09T08:50:07Z",
+          "completed_at": "2026-10-09T08:50:07Z"
+        },
+        {
+          "name": "Post Build & push — fleet-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-10-09T08:50:07Z",
+          "completed_at": "2026-10-09T08:50:08Z"
+        },
+        {
+          "name": "Post Build & push — ops-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 30,
+          "started_at": "2026-10-09T08:50:08Z",
+          "completed_at": "2026-10-09T08:50:08Z"
+        },
+        {
+          "name": "Post Build & push — platform-admin-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 31,
+          "started_at": "2026-10-09T08:50:08Z",
+          "completed_at": "2026-10-09T08:50:08Z"
+        },
+        {
+          "name": "Post Build & push — migrate",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 32,
+          "started_at": "2026-10-09T08:50:08Z",
+          "completed_at": "2026-10-09T08:50:08Z"
+        },
+        {
+          "name": "Post Build & push — api",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 33,
+          "started_at": "2026-10-09T08:50:08Z",
+          "completed_at": "2026-10-09T08:50:09Z"
+        },
+        {
+          "name": "Post Set up Docker Buildx",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 34,
+          "started_at": "2026-10-09T08:50:09Z",
+          "completed_at": "2026-10-09T08:50:39Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 35,
+          "started_at": "2026-10-09T08:50:39Z",
+          "completed_at": "2026-10-09T08:50:39Z"
+        },
+        {
+          "name": "Post Checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 36,
+          "started_at": "2026-10-09T08:50:39Z",
+          "completed_at": "2026-10-09T08:50:39Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 37,
+          "started_at": "2026-10-09T08:50:39Z",
+          "completed_at": "2026-10-09T08:50:39Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113740518866",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311942,
+      "runner_name": "GitHub Actions 1000311942",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113744327840,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae7C0oA",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113744327840",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113744327840",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T08:50:42Z",
+      "started_at": "2026-10-09T08:50:45Z",
+      "completed_at": "2026-10-09T08:54:39Z",
+      "name": "DB migration",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T08:51:55Z",
+          "completed_at": "2026-10-09T08:51:56Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T08:51:56Z",
+          "completed_at": "2026-10-09T08:51:56Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T08:51:56Z",
+          "completed_at": "2026-10-09T08:52:17Z"
+        },
+        {
+          "name": "Validate runtime identity split",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T08:52:17Z",
+          "completed_at": "2026-10-09T08:52:17Z"
+        },
+        {
+          "name": "Create / update migration job definition",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T08:52:17Z",
+          "completed_at": "2026-10-09T08:52:21Z"
+        },
+        {
+          "name": "Execute migration job and wait for completion",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-09T08:52:21Z",
+          "completed_at": "2026-10-09T08:54:36Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-09T08:54:36Z",
+          "completed_at": "2026-10-09T08:54:36Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-09T08:54:36Z",
+          "completed_at": "2026-10-09T08:54:36Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113744327840",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311945,
+      "runner_name": "GitHub Actions 1000311945",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113745681997,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae8VeTQ",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113745681997",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113745681997",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T08:54:40Z",
+      "started_at": "2026-10-09T08:54:43Z",
+      "completed_at": "2026-10-09T08:57:59Z",
+      "name": "Deploy services",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T08:54:44Z",
+          "completed_at": "2026-10-09T08:54:45Z"
+        },
+        {
+          "name": "Checkout deploy source",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T08:54:45Z",
+          "completed_at": "2026-10-09T08:54:49Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T08:54:49Z",
+          "completed_at": "2026-10-09T08:54:50Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T08:54:50Z",
+          "completed_at": "2026-10-09T08:55:11Z"
+        },
+        {
+          "name": "Resolve configured artifact providers",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T08:55:11Z",
+          "completed_at": "2026-10-09T08:55:11Z"
+        },
+        {
+          "name": "Resolve API secret mounts",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-09T08:55:11Z",
+          "completed_at": "2026-10-09T08:55:26Z"
+        },
+        {
+          "name": "Verify live Google Maps provider",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-09T08:55:26Z",
+          "completed_at": "2026-10-09T08:55:29Z"
+        },
+        {
+          "name": "Build API env vars",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-09T08:55:29Z",
+          "completed_at": "2026-10-09T08:55:32Z"
+        },
+        {
+          "name": "Deploy — api",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-09T08:55:32Z",
+          "completed_at": "2026-10-09T08:55:50Z"
+        },
+        {
+          "name": "Resolve API URL",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-09T08:55:50Z",
+          "completed_at": "2026-10-09T08:55:51Z"
+        },
+        {
+          "name": "Build shared web env vars",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-09T08:55:51Z",
+          "completed_at": "2026-10-09T08:55:51Z"
+        },
+        {
+          "name": "Deploy — platform-admin-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-09T08:55:51Z",
+          "completed_at": "2026-10-09T08:56:11Z"
+        },
+        {
+          "name": "Enforce no public access — platform-admin-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-09T08:56:11Z",
+          "completed_at": "2026-10-09T08:56:12Z"
+        },
+        {
+          "name": "Deploy — ops-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-09T08:56:12Z",
+          "completed_at": "2026-10-09T08:56:32Z"
+        },
+        {
+          "name": "Enforce no public access — ops-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-09T08:56:32Z",
+          "completed_at": "2026-10-09T08:56:33Z"
+        },
+        {
+          "name": "Deploy — fleet-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-09T08:56:33Z",
+          "completed_at": "2026-10-09T08:56:49Z"
+        },
+        {
+          "name": "Enforce no public access — fleet-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-09T08:56:49Z",
+          "completed_at": "2026-10-09T08:56:50Z"
+        },
+        {
+          "name": "Deploy — tenant-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-09T08:56:50Z",
+          "completed_at": "2026-10-09T08:57:02Z"
+        },
+        {
+          "name": "Deploy — bank-console-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19,
+          "started_at": "2026-10-09T08:57:02Z",
+          "completed_at": "2026-10-09T08:57:14Z"
+        },
+        {
+          "name": "Deploy — referral-embed-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 20,
+          "started_at": "2026-10-09T08:57:14Z",
+          "completed_at": "2026-10-09T08:57:25Z"
+        },
+        {
+          "name": "Deploy — enterprise-dispatch-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 21,
+          "started_at": "2026-10-09T08:57:25Z",
+          "completed_at": "2026-10-09T08:57:39Z"
+        },
+        {
+          "name": "Deploy — channel-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 22,
+          "started_at": "2026-10-09T08:57:39Z",
+          "completed_at": "2026-10-09T08:57:54Z"
+        },
+        {
+          "name": "Enforce no public access — channel-partner-portal-web",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 23,
+          "started_at": "2026-10-09T08:57:54Z",
+          "completed_at": "2026-10-09T08:57:55Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 45,
+          "started_at": "2026-10-09T08:57:55Z",
+          "completed_at": "2026-10-09T08:57:55Z"
+        },
+        {
+          "name": "Post Checkout deploy source",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 46,
+          "started_at": "2026-10-09T08:57:55Z",
+          "completed_at": "2026-10-09T08:57:56Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 47,
+          "started_at": "2026-10-09T08:57:56Z",
+          "completed_at": "2026-10-09T08:57:56Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113745681997",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311946,
+      "runner_name": "GitHub Actions 1000311946",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113746824327,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae9bMhw",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113746824327",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113746824327",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T08:57:59Z",
+      "started_at": "2026-10-09T08:58:03Z",
+      "completed_at": "2026-10-09T08:58:45Z",
+      "name": "Enforce Partner Booking paused state",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T08:58:04Z",
+          "completed_at": "2026-10-09T08:58:05Z"
+        },
+        {
+          "name": "Checkout deployment controls",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T08:58:05Z",
+          "completed_at": "2026-10-09T08:58:10Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T08:58:10Z",
+          "completed_at": "2026-10-09T08:58:11Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T08:58:11Z",
+          "completed_at": "2026-10-09T08:58:40Z"
+        },
+        {
+          "name": "Remove paused Partner Booking Cloud Run service",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T08:58:40Z",
+          "completed_at": "2026-10-09T08:58:41Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-09T08:58:41Z",
+          "completed_at": "2026-10-09T08:58:41Z"
+        },
+        {
+          "name": "Post Checkout deployment controls",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-09T08:58:41Z",
+          "completed_at": "2026-10-09T08:58:41Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-09T08:58:41Z",
+          "completed_at": "2026-10-09T08:58:41Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113746824327",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311947,
+      "runner_name": "GitHub Actions 1000311947",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113747086904,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae9rOOA",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747086904",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113747086904",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T08:58:46Z",
+      "started_at": "2026-10-09T08:58:48Z",
+      "completed_at": "2026-10-09T09:00:00Z",
+      "name": "Dev health check",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T08:58:49Z",
+          "completed_at": "2026-10-09T08:58:50Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T08:58:50Z",
+          "completed_at": "2026-10-09T08:58:50Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T08:58:50Z",
+          "completed_at": "2026-10-09T08:59:13Z"
+        },
+        {
+          "name": "Wait for services to be Ready",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T08:59:13Z",
+          "completed_at": "2026-10-09T08:59:23Z"
+        },
+        {
+          "name": "Resolve service URLs",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T08:59:23Z",
+          "completed_at": "2026-10-09T08:59:32Z"
+        },
+        {
+          "name": "Mint identity token — tenant console",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-09T08:59:32Z",
+          "completed_at": "2026-10-09T08:59:32Z"
+        },
+        {
+          "name": "Mint identity token — bank console",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-09T08:59:33Z",
+          "completed_at": "2026-10-09T08:59:33Z"
+        },
+        {
+          "name": "Mint identity token — enterprise dispatch",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-09T08:59:33Z",
+          "completed_at": "2026-10-09T08:59:33Z"
+        },
+        {
+          "name": "Mint identity token — platform admin",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-09T08:59:33Z",
+          "completed_at": "2026-10-09T08:59:34Z"
+        },
+        {
+          "name": "Mint identity token — ops console",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-09T08:59:34Z",
+          "completed_at": "2026-10-09T08:59:34Z"
+        },
+        {
+          "name": "Mint identity token — fleet partner portal",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-09T08:59:34Z",
+          "completed_at": "2026-10-09T08:59:34Z"
+        },
+        {
+          "name": "Mint identity token — channel partner portal",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-09T08:59:34Z",
+          "completed_at": "2026-10-09T08:59:35Z"
+        },
+        {
+          "name": "Verify dev endpoints",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-09T08:59:35Z",
+          "completed_at": "2026-10-09T08:59:54Z"
+        },
+        {
+          "name": "Re-authenticate to GCP (restore access-token credentials)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-09T08:59:54Z",
+          "completed_at": "2026-10-09T08:59:54Z"
+        },
+        {
+          "name": "Check referral embed handoff WIF registry rollout state",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-09T08:59:54Z",
+          "completed_at": "2026-10-09T08:59:55Z"
+        },
+        {
+          "name": "Mint identity token — referral embed handoff (API)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-09T08:59:55Z",
+          "completed_at": "2026-10-09T08:59:56Z"
+        },
+        {
+          "name": "Verify referral handoff session lifecycle",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-09T08:59:56Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Print dev URLs",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — referral embed handoff (API)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 27,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Re-authenticate to GCP (restore access-token credentials)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 28,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — channel partner portal",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — fleet partner portal",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 30,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — ops console",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 31,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — platform admin",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 32,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — enterprise dispatch",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 33,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:57Z"
+        },
+        {
+          "name": "Post Mint identity token — bank console",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 34,
+          "started_at": "2026-10-09T08:59:57Z",
+          "completed_at": "2026-10-09T08:59:58Z"
+        },
+        {
+          "name": "Post Mint identity token — tenant console",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 35,
+          "started_at": "2026-10-09T08:59:58Z",
+          "completed_at": "2026-10-09T08:59:58Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 36,
+          "started_at": "2026-10-09T08:59:58Z",
+          "completed_at": "2026-10-09T08:59:58Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 37,
+          "started_at": "2026-10-09T08:59:58Z",
+          "completed_at": "2026-10-09T08:59:58Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113747086904",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311950,
+      "runner_name": "GitHub Actions 1000311950",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113747511276,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae-FH7A",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747511276",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113747511276",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T09:00:01Z",
+      "started_at": "2026-10-09T09:00:04Z",
+      "completed_at": "2026-10-09T09:01:09Z",
+      "name": "Fail-closed retired service cleanup",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T09:00:05Z",
+          "completed_at": "2026-10-09T09:00:05Z"
+        },
+        {
+          "name": "Checkout deploy source",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T09:00:05Z",
+          "completed_at": "2026-10-09T09:00:09Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T09:00:09Z",
+          "completed_at": "2026-10-09T09:00:45Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T09:00:45Z",
+          "completed_at": "2026-10-09T09:01:06Z"
+        },
+        {
+          "name": "Enforce retired service cleanup contract",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T09:01:06Z",
+          "completed_at": "2026-10-09T09:01:06Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-09T09:01:06Z",
+          "completed_at": "2026-10-09T09:01:06Z"
+        },
+        {
+          "name": "Post Checkout deploy source",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-09T09:01:06Z",
+          "completed_at": "2026-10-09T09:01:06Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-09T09:01:06Z",
+          "completed_at": "2026-10-09T09:01:06Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113747511276",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311951,
+      "runner_name": "GitHub Actions 1000311951",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113747921500,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae-eKXA",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113747921500",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113747921500",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T09:01:09Z",
+      "started_at": "2026-10-09T09:01:12Z",
+      "completed_at": "2026-10-09T09:04:01Z",
+      "name": "Candidate SHA operational acceptance",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T09:01:12Z",
+          "completed_at": "2026-10-09T09:01:14Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T09:01:14Z",
+          "completed_at": "2026-10-09T09:01:17Z"
+        },
+        {
+          "name": "Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T09:01:17Z",
+          "completed_at": "2026-10-09T09:01:17Z"
+        },
+        {
+          "name": "Set up Cloud SDK",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-09T09:01:17Z",
+          "completed_at": "2026-10-09T09:01:38Z"
+        },
+        {
+          "name": "Mint identity token — API operational acceptance (Tenant Admin)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-09T09:01:38Z",
+          "completed_at": "2026-10-09T09:01:39Z"
+        },
+        {
+          "name": "Mint identity token — API operational acceptance (Tenant Ops)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-09T09:01:39Z",
+          "completed_at": "2026-10-09T09:01:40Z"
+        },
+        {
+          "name": "Issue deployment-machine Tenant acceptance session",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-09T09:01:40Z",
+          "completed_at": "2026-10-09T09:01:40Z"
+        },
+        {
+          "name": "Mint identity token — tenant console (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-09T09:01:40Z",
+          "completed_at": "2026-10-09T09:01:41Z"
+        },
+        {
+          "name": "Mint identity token — bank console (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-09T09:01:41Z",
+          "completed_at": "2026-10-09T09:01:41Z"
+        },
+        {
+          "name": "Mint identity token — enterprise dispatch (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-09T09:01:41Z",
+          "completed_at": "2026-10-09T09:01:41Z"
+        },
+        {
+          "name": "Mint identity token — platform admin (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-09T09:01:41Z",
+          "completed_at": "2026-10-09T09:01:41Z"
+        },
+        {
+          "name": "Mint identity token — ops console (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-10-09T09:01:41Z",
+          "completed_at": "2026-10-09T09:01:42Z"
+        },
+        {
+          "name": "Mint identity token — fleet partner portal (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-10-09T09:01:42Z",
+          "completed_at": "2026-10-09T09:01:42Z"
+        },
+        {
+          "name": "Mint identity token — channel partner portal (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 14,
+          "started_at": "2026-10-09T09:01:42Z",
+          "completed_at": "2026-10-09T09:01:42Z"
+        },
+        {
+          "name": "Run pnpm/action-setup@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-10-09T09:01:42Z",
+          "completed_at": "2026-10-09T09:01:44Z"
+        },
+        {
+          "name": "Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 16,
+          "started_at": "2026-10-09T09:01:44Z",
+          "completed_at": "2026-10-09T09:01:45Z"
+        },
+        {
+          "name": "Run pnpm install --frozen-lockfile",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 17,
+          "started_at": "2026-10-09T09:01:45Z",
+          "completed_at": "2026-10-09T09:02:01Z"
+        },
+        {
+          "name": "Install Playwright Chromium",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 18,
+          "started_at": "2026-10-09T09:02:01Z",
+          "completed_at": "2026-10-09T09:02:21Z"
+        },
+        {
+          "name": "Execute candidate-bound operational journeys",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 19,
+          "started_at": "2026-10-09T09:02:21Z",
+          "completed_at": "2026-10-09T09:03:49Z"
+        },
+        {
+          "name": "Upload operational evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 20,
+          "started_at": "2026-10-09T09:03:49Z",
+          "completed_at": "2026-10-09T09:03:49Z"
+        },
+        {
+          "name": "Post Run actions/setup-node@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 29,
+          "started_at": "2026-10-09T09:03:49Z",
+          "completed_at": "2026-10-09T09:03:56Z"
+        },
+        {
+          "name": "Post Run pnpm/action-setup@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 30,
+          "started_at": "2026-10-09T09:03:56Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — channel partner portal (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 31,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — fleet partner portal (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 32,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — ops console (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 33,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — platform admin (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 34,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — enterprise dispatch (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 35,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — bank console (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 36,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — tenant console (operational candidate)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 37,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:57Z"
+        },
+        {
+          "name": "Post Mint identity token — API operational acceptance (Tenant Admin)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 38,
+          "started_at": "2026-10-09T09:03:57Z",
+          "completed_at": "2026-10-09T09:03:58Z"
+        },
+        {
+          "name": "Post Authenticate to GCP",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 39,
+          "started_at": "2026-10-09T09:03:58Z",
+          "completed_at": "2026-10-09T09:03:58Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 40,
+          "started_at": "2026-10-09T09:03:58Z",
+          "completed_at": "2026-10-09T09:03:58Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 41,
+          "started_at": "2026-10-09T09:03:58Z",
+          "completed_at": "2026-10-09T09:03:58Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113747921500",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311952,
+      "runner_name": "GitHub Actions 1000311952",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    },
+    {
+      "id": 113748909497,
+      "run_id": 37906298090,
+      "workflow_name": "Deploy — Dev",
+      "head_branch": "publish/v2026.10.08.0",
+      "run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/runs/37906298090",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSAWuXc8AAAAae_aduQ",
+      "head_sha": "9a1b6466a8b15d7d328e9ceba33ba5dc92f7fa9c",
+      "url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/actions/jobs/113748909497",
+      "html_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/37906298090/job/113748909497",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-09T09:04:01Z",
+      "started_at": "2026-10-09T09:04:04Z",
+      "completed_at": "2026-10-09T09:04:09Z",
+      "name": "Deploy outcome",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-09T09:04:05Z",
+          "completed_at": "2026-10-09T09:04:05Z"
+        },
+        {
+          "name": "Summarise what actually reached Cloud Run",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-09T09:04:06Z",
+          "completed_at": "2026-10-09T09:04:06Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-09T09:04:06Z",
+          "completed_at": "2026-10-09T09:04:06Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ajoe734/drts-fleet-platform/check-runs/113748909497",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000311953,
+      "runner_name": "GitHub Actions 1000311953",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}
